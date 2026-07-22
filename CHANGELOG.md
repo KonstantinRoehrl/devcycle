@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.0
+
+- chore: ignore local execution artifacts and Finder metadata
+- docs: finalize README and design appendix
+- test: full scenario regression pass
+- fix(scoping-interview): pin fallback batch shape and handoff stage naming
+- docs: add coordinator-added binding checks to plan task 12
+- feat: add review-panel and mechanical-sweep workflow scripts
+- feat: add executing-waves skill with scenarios and upstream comparison
+- feat: add reviewing-the-branch skill with scenarios and upstream comparison
+- feat: add scoping-interview skill and cycle/continue commands
+- feat: add verifying-on-device skill with scenarios and upstream comparison
+- feat: add planning-waves skill with scenarios and upstream comparison
+- docs: amend plan interfaces P6/P7/P9 per platform findings
+- docs: record platform verification findings
+- ci: add validation workflow, redaction guard, and dependabot
+- feat: add implementer and read-only reviewer agents
+- ci: add release automation (version bump, changelog, tag, GitHub release)
+- feat: scaffold plugin and marketplace manifests
+- fix: keep plan text clear of the redaction guard's own patterns
+- docs: add v1 implementation plan (16 tasks, 8 waves, pinned interfaces)
+- docs: add founding design docs and approved implementation spec
+
 ## 0.1.0
 - Initial scaffold
 - Skills: `scoping-interview`, `planning-waves`, `executing-waves`, `reviewing-the-branch`,
