@@ -6,40 +6,55 @@
   "license": "MIT",
   "homepage": "https://github.com/KonstantinRoehrl/devcycle",
   "repository": "https://github.com/KonstantinRoehrl/devcycle",
-  "dependencies": ["superpowers"],
+  "dependencies": [{ "name": "superpowers", "marketplace": "superpowers-marketplace" }],
   "userConfig": {
     "gitPolicy": {
       "type": "string",
-      "enum": ["local-commits-only", "push-allowed", "open-pr"],
+      "title": "Git policy",
       "default": "local-commits-only",
-      "description": "What the finish stage may do with the branch: hand it back, push it, or push and open a PR."
+      "description": "What the finish stage may do with the branch. One of: local-commits-only, push-allowed, open-pr."
     },
-    "modelLineup": {
-      "type": "object",
-      "default": {
-        "implementer": "claude-opus-4-8",
-        "taskReviewer": "claude-sonnet-5",
-        "walkthrough": "claude-sonnet-5",
-        "branchReview": "claude-opus-4-8"
-      },
-      "description": "Model per pipeline role; every dispatch passes its model explicitly."
+    "implementerModel": {
+      "type": "string",
+      "title": "Implementer model",
+      "default": "claude-opus-4-8",
+      "description": "Model for implementer subagents; every dispatch passes its model explicitly."
+    },
+    "taskReviewerModel": {
+      "type": "string",
+      "title": "Task reviewer model",
+      "default": "claude-sonnet-5",
+      "description": "Model for per-task reviewer subagents."
+    },
+    "walkthroughModel": {
+      "type": "string",
+      "title": "Walkthrough model",
+      "default": "claude-sonnet-5",
+      "description": "Model for on-device walkthrough sessions."
+    },
+    "branchReviewModel": {
+      "type": "string",
+      "title": "Branch review model",
+      "default": "claude-opus-4-8",
+      "description": "Model for the whole-branch review gate."
     },
     "reviewDepth": {
       "type": "string",
-      "enum": ["single", "panel"],
+      "title": "Review depth",
       "default": "single",
-      "description": "Branch review engine: single code-review pass plus spec-compliance layer, or the multi-lens review panel workflow."
+      "description": "Branch review engine. One of: single (code-review pass plus spec-compliance layer), panel (multi-lens review panel workflow)."
     },
     "crossModelReview": {
       "type": "boolean",
+      "title": "Cross-model review",
       "default": false,
       "description": "Add a cross-model lens to the review panel when available."
     },
     "onDeviceGate": {
       "type": "string",
-      "enum": ["human-required", "auto-ok"],
+      "title": "On-device gate",
       "default": "human-required",
-      "description": "Whether a human must walk the on-device checklist or honestly-tagged auto verdicts may close it."
+      "description": "Whether the on-device checklist closes only via a human walkthrough. One of: human-required, auto-ok."
     }
   }
 }
