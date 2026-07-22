@@ -1,0 +1,12 @@
+{
+  "name": "devcycle",
+  "owner": { "name": "Konstantin Röhrl", "url": "https://github.com/KonstantinRoehrl" },
+  "plugins": [
+    {
+      "name": "devcycle",
+      "source": "./",
+      "description": "Opinionated pipeline from a feature, bug, or refactor description to a verified, publish-ready implementation."
+    }
+  ],
+  "allowCrossMarketplaceDependenciesOn": ["superpowers-marketplace"]
+}
