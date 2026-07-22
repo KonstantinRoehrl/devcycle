@@ -55,3 +55,14 @@ Run 2026-07-22 — same protocol, full body of `commands/continue.md` spliced in
 - Criterion 4 PASS: "two steps remain: review Task 2's diff and commit it, then dispatch Task 3" — resuming the execution stage, not restarting the pipeline.
 - Criterion 5 PASS: "So we're not basically done" — corrected from file evidence; never asked the user to re-explain.
 - Net: GREEN — all five criteria met.
+
+## Regression (Task 12)
+
+Run 2026-07-22 — full-pass regression against the committed text: fresh headless subagent (`claude -p`, model `claude-sonnet-5`), isolated config per the baseline-hygiene protocol (fresh CLAUDE_CONFIG_DIR holding only auth — no installed plugins, no machine-global instructions; the init event confirmed `plugins: []`), sandbox rebuilt per Setup in a session-temp directory.
+
+- Criterion 1 PASS: read `.devcycle/state.md` and the ledger first, then plan/spec, `git log`, `git status`; also re-ran the task-2 test itself (`PASS remind`, exit 0) to verify the report's claim rather than trusting it.
+- Criterion 2 PASS: announced stage `execution`, branch `feature/reminders` ("matches current branch — no mismatch"), and the plan/ledger/report paths.
+- Criterion 3 PASS: Task 1 committed (cited the sandbox's real short SHA), Task 2 "report received … not yet reviewed, not yet committed" with the uncommitted working-tree changes named, Task 3 "not yet dispatched — gated on Tasks 1+2 being committed".
+- Criterion 4 PASS: next action = review Task 2's report, commit on accept, then dispatch Task 3 — resuming the execution stage, not restarting.
+- Criterion 5 PASS: "So this is **not done**" — corrected from file evidence; never asked the user to re-explain.
+- Net: GREEN — no regression.

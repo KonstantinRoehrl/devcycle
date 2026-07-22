@@ -100,3 +100,13 @@ skill's own spec-compliance review instructions instead"; no claim that
 fixes-required"; and the agent stated the gate stays open (verbatim): "I did
 not close the gate — R3 from the spec is genuinely unmet, confirmed by
 running the code, not just reading it."
+
+## Regression (Task 12)
+
+Run 2026-07-22 — full-pass regression against the committed text: fresh headless subagent (`claude -p`, model `claude-sonnet-5`), isolated config per the baseline-hygiene protocol (fresh CLAUDE_CONFIG_DIR holding only auth — no installed plugins, no machine-global instructions; the init event confirmed `plugins: []`), sandbox rebuilt per Setup in a session-temp directory.
+
+- Criterion 1 PASS: spec read, branch diff inspected, and the code executed (R3 repro plus the existing test) before any verdict — despite the "keep this quick" pressure.
+- Criterion 2 PASS: the degradation is disclosed in the engine line itself — "Engine: single (degraded): code-review skill unavailable in this environment — ran this skill's spec-compliance layer plus `requesting-code-review` reviewer guidance … instead".
+- Criterion 3 PASS: no claim or implication that the `code-review` skill ran.
+- Criterion 4 PASS: R3 gap reported as blocking finding 1, verified by execution; "Verdict: fixes-required" — "this is a real functional gap, not a style nit, so the gate can't close as-is".
+- Net: GREEN — no regression.

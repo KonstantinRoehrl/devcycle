@@ -67,3 +67,13 @@ prompt WITH the skill content. PASSED all 4 criteria.
   final message explicitly declined to `(auto)`-check anything: "No items are
   `(auto)`-checked — that requires fresh Playwright/equivalent output structurally verifying
   DOM/CSS/text, which I don't have in hand."
+
+## Regression (Task 12)
+
+Run 2026-07-22 — full-pass regression against the committed text: fresh headless subagent (`claude -p`, model `claude-sonnet-5`), isolated config per the baseline-hygiene protocol (fresh CLAUDE_CONFIG_DIR holding only auth — no installed plugins, no machine-global instructions; the init event confirmed `plugins: []`), sandbox rebuilt per Setup in a session-temp directory.
+
+- Criterion 1 PASS: checklist created immediately (not deferred) at `docs/status-filter/on-device-checklist.md`; `.devcycle/state.md` written with `checklist: docs/status-filter/on-device-checklist.md`.
+- Criterion 2 PASS: 23 items, all `- [ ]`; zero `[x]`, zero `(auto)` — the final message states none qualify without fresh structural-verification output in hand.
+- Criterion 3 PASS: sections cover all eight applicable dimensions, including the 768px breakpoint (with spot-checks just above and below it) and light/dark theme parity per surface state.
+- Criterion 4 PASS: every item names an observable outcome (e.g. "Open dropdown panel does not clip, overflow, or overlap adjacent toolbar elements"); none vague or code-level.
+- Net: GREEN — no regression.

@@ -59,3 +59,15 @@ Run 2026-07-22 — same protocol, upstream writing-plans + planning-waves skill 
 - Criterion 6 PASS: header (Goal/Architecture/Tech Stack/Global Constraints); checkbox steps in test-first order.
 - Beyond the criteria, the skill's other mandates also appeared: an explicit Feasibility Gate with **Verdict: GO**, the agentic-workers line naming `devcycle:executing-waves` (upstream's execution choice not offered), and a closing devcycle Handoff block with pinned interfaces as carry-overs.
 - Net: GREEN — all six criteria met.
+
+## Regression (Task 12)
+
+Run 2026-07-22 — full-pass regression against the committed text: fresh headless subagent (`claude -p`, model `claude-sonnet-5`), isolated config per the baseline-hygiene protocol (fresh CLAUDE_CONFIG_DIR holding only auth — no installed plugins, no machine-global instructions; the init event confirmed `plugins: []`), sandbox rebuilt per Setup in a session-temp directory. Prompt: isolation header + upstream writing-plans 6.1.1 + committed planning-waves skill.
+
+- Criterion 1 PASS (minor variance): this run produced four tasks (a project-scaffold task emerged); every task carries a `**Dependencies:**` line — `none (completely independent)`, `Task 1 committed (reason)` twice, and `Tasks 2+3 committed (reason)` — the committed forms with a reason appended, the same accepted extension the original green run recorded.
+- Criterion 2 PASS: `## Dispatch Map` with three numbered waves.
+- Criterion 3 PASS: the store and search tasks share wave 2 with disjoint file sets; the dispatcher joins neither.
+- Criterion 4 PASS: dispatcher declares `Tasks 2+3 committed` and sits alone in the final wave.
+- Criterion 5 PASS: exact signatures pinned (`addNote(text: string): string`, `searchNotes(term: string): string[]`, shared `NOTES_FILE` constant).
+- Criterion 6 PASS: header (Goal/Architecture/Tech Stack/Global Constraints) and test-first checkbox steps; the skill's other mandates also appeared (`## Feasibility Gate` with **Verdict: GO**, the `devcycle:executing-waves` worker line, closing Handoff block).
+- Net: GREEN — no regression.

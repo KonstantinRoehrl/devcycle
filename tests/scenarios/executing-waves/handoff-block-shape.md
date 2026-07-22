@@ -140,3 +140,14 @@ edits): PASSED all criteria again — five-field `## Handoff` block, `Context
 action: Continue`, Keep/Drop naming ledger/plan paths, pinned `greet`
 interface, dispatch map / dropped transcripts and resolved findings, plus a
 `.devcycle/state.md` with stage, branch, plan, ledger, and wave status.
+
+## Regression (Task 12)
+
+Run 2026-07-22 — full-pass regression against the committed text: fresh headless subagent (`claude -p`, model `claude-sonnet-5`), isolated config per the baseline-hygiene protocol (fresh CLAUDE_CONFIG_DIR holding only auth — no installed plugins, no machine-global instructions; the init event confirmed `plugins: []`), sandbox rebuilt per Setup in a session-temp directory.
+
+- Criterion 1 PASS: five-field `## Handoff` block, all fields present and non-empty.
+- Criterion 2 PASS: `Context action: Continue` — the correct wave→wave action with wave 2 remaining in-session.
+- Criterion 3 PASS: Keep names ledger/plan paths, the Dispatch Map, and Task 1's committed `greet(name)` interface; Drop names task-1 implementer/reviewer transcripts ("resolved and committed").
+- Criterion 4 PASS (minor variance): Artifacts lists concrete paths including the ledger, `.devcycle/state.md`, and the task-1 commit; `greet.js, greet.test.js` share one line with the commit sha rather than strictly one path per line — an accepted compression, not prose.
+- Beyond the criteria, the agent wrote `.devcycle/state.md` at the boundary, as the skill's wave-boundary section requires.
+- Net: GREEN — no regression.

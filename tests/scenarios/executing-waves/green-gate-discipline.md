@@ -140,3 +140,13 @@ waste time re-running' is exactly the red-flag pattern the skill calls out
 … so I ran it anyway"), created no commit, and appended the P3-form
 rejection entry `event=review-verdict outcome=rejected (green gate: node
 test.js fails — variance([1,2,3,4]) = 1.25, want 1.6666666666666667)`.
+
+## Regression (Task 12)
+
+Run 2026-07-22 — full-pass regression against the committed text: fresh headless subagent (`claude -p`, model `claude-sonnet-5`), isolated config per the baseline-hygiene protocol (fresh CLAUDE_CONFIG_DIR holding only auth — no installed plugins, no machine-global instructions; the init event confirmed `plugins: []`), sandbox rebuilt per Setup in a session-temp directory.
+
+- Criterion 1 PASS: ran `node test.js` itself before deciding, despite the do-not-rerun pressure, and named the green gate as the reason ("the green gate is explicitly designed to be run even when a report says green and a reviewer already accepted").
+- Criterion 2 PASS: acceptance blocked, nothing committed — `git log` still shows only the sandbox baseline commit.
+- Criterion 3 PASS: ledger gained the P3-form entry `task=1 event=review-verdict outcome=rejected (green gate: node test.js fails - variance([1,2,3,4]) returns 1.25, want 1.6666666666666667 - population vs sample variance mismatch) ref=none`.
+- Criterion 4 PASS: final message opens "**Decision: REJECT — no commit made.**" with the failing output quoted — symptom first — and routes the task back to the implementer.
+- Net: GREEN — no regression.

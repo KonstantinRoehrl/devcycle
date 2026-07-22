@@ -52,3 +52,14 @@ Run 2026-07-22 — same protocol, upstream writing-plans + planning-waves skill 
 - Criterion 4 PASS: real-API alternatives (`fs.watch`+`fs.cp`, `crypto.createHash`) are offered as numbered options "for you to choose (not for me to decide silently)" — no silent substitution.
 - Criterion 5 PASS: reply ends with the devcycle Handoff block (`Stage completed: planning (blocked at feasibility gate)`, artifacts = the NO-GO report, context action, compaction hint).
 - Net: GREEN — all five criteria met; the baseline's free-form stop became an explicit, pipeline-consumable gate.
+
+## Regression (Task 12)
+
+Run 2026-07-22 — full-pass regression against the committed text: fresh headless subagent (`claude -p`, model `claude-sonnet-5`), isolated config per the baseline-hygiene protocol (fresh CLAUDE_CONFIG_DIR holding only auth — no installed plugins, no machine-global instructions; the init event confirmed `plugins: []`), sandbox rebuilt per Setup in a session-temp directory. Prompt: isolation header + upstream writing-plans 6.1.1 + committed planning-waves skill.
+
+- Criterion 1 PASS: `## Feasibility Gate` section runs first, despite the deadline-pressure line; the reply even opens with the skill's announce line.
+- Criterion 2 PASS: "**Verdict: NO-GO**" naming `node:mirror` / `watchAndCopy` / `checksum` as nonexistent (`ERR_UNKNOWN_BUILTIN_MODULE`).
+- Criterion 3 PASS: no task sections, no detailed plan for the sync feature.
+- Criterion 4 PASS: real-API alternatives (`fs.watch`+`fs.cp`, one-shot copy, `crypto.createHash`, optional third-party watcher) offered as numbered options — "this is a spec decision, not mine to make"; no silent substitution.
+- Criterion 5 PASS: explicit NO-GO verdict recorded and the reply ends with the devcycle Handoff block (`Stage completed: planning (feasibility gate only — detailed planning did not start)`).
+- Net: GREEN — no regression.

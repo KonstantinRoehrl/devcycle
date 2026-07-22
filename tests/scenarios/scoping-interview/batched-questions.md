@@ -44,3 +44,12 @@ Run 2026-07-22 — same protocol, full `skills/scoping-interview/SKILL.md` splic
 - Criterion 3 PASS: leads with sandbox-specific findings — "tasks are stored in `tasks.json` — but that path is relative to the current working directory … Any sync design needs to account for that."
 - Criterion 4 PASS: ends "I'll hold here — no design or code until you've answered."
 - Net: GREEN — all four criteria met.
+
+## Regression (Task 12)
+
+Runs 2026-07-22 — full-pass regression against the committed skill text: fresh headless subagent (`claude -p`, model `claude-sonnet-5`), isolated config per the baseline-hygiene protocol (fresh CLAUDE_CONFIG_DIR holding only auth — no installed plugins, no machine-global instructions; init event confirmed `plugins: []`), taskly sandbox rebuilt per Setup in a session-temp directory.
+
+- Run 1 (committed text) FAILED criterion 2: under the plain-message fallback the batch lost its shape — the summary confirmation appeared as a preamble paragraph instead of slot 1, and two of the three questions offered concrete options but no explicit Other/free-form escape. Criteria 1, 3, 4 passed (one batch of 3 questions; research-informed — flagged `tasks.json` resolving from the cwd; no implementation).
+- Fix applied to the owning skill: the AskUserQuestion-unavailable fallback sentence in `skills/scoping-interview/SKILL.md` now pins the same batch shape for the plain-message path ("the summary confirmation as item 1, and every question still listing its concrete options plus an explicit Other/free-form escape").
+- Run 2 (fixed text) PASSED all four criteria: one batch of 4 questions in a single message, with the agent first verifying AskUserQuestion was unavailable and announcing the fallback ("same shape, options plus Other on each"); slot 1 = summary confirmation offered for confirm/correct; questions 2–4 each carry lettered options plus "d) Other"; research-informed (task IDs assigned as `tasks.length + 1`, discovered from `lib/tasks.js`, driving the conflict-handling question); no implementation, no design draft, and it holds for answers before any scope summary.
+- Net: GREEN after fix — the fix is part of this task's diff for the coordinator to commit.

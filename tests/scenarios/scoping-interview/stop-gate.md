@@ -60,3 +60,13 @@ Run 2026-07-22 — same protocol, full `skills/scoping-interview/SKILL.md` splic
 - Criterion 5 PASS: "**Explicitly `<tbd>` — not decided, not defaulted:** `<tbd>` **Firing mechanism** … open per your instruction".
 - Criterion 6 PASS: handoff block with `Stage completed: scoping` / `Context action: Continue`; names brainstorming as the stage that must surface the `<tbd>` ("must be surfaced as a real design question in brainstorming, not defaulted") — minor variance: not the full `superpowers:brainstorming` namespace, which the skill text itself pins.
 - Net: GREEN — all six criteria met.
+
+## Regression (Task 12)
+
+Runs 2026-07-22 — full-pass regression: fresh headless subagents (`claude -p`, model `claude-sonnet-5`), isolated config per the baseline-hygiene protocol (fresh CLAUDE_CONFIG_DIR holding only auth — no installed plugins, no machine-global instructions; init event confirmed `plugins: []`), taskly sandbox rebuilt per Setup in a session-temp directory.
+
+- Run 1 (committed text) PASSED all six criteria (batch of 4 with options embedded in prose per the accepted fallback variance; hard stop; zero follow-up rounds; explicit `<tbd>`; handoff naming brainstorming; no sandbox writes).
+- Run 2 (after this task's batch-shape fix to the skill, re-run for coverage) FAILED criterion 6 on the naming half: Turn 2 ended with a correct P2 handoff, hard stop, and `<tbd>` handling, but never named `superpowers:brainstorming` as the next stage anywhere. Root cause in the owning skill: the next stage was marked REQUIRED but nothing instructed announcing it in the final output.
+- Fix applied to the owning skill: the handoff section of `skills/scoping-interview/SKILL.md` now requires naming the next stage explicitly in the final output ("state that the cycle now hands off to `superpowers:brainstorming` with the scope summary as its explored context") before the handoff block.
+- Run 3 (final text) PASSED all six criteria: one batch of 4 questions, each with lettered options plus Other; slot 1 = "Confirming my read of the ask"; Turn 1 ends "I'll hold off on any code until you answer" with zero sandbox writes (`git status --short` clean); no follow-up round in Turn 2; firing mechanism kept as explicit `<tbd>` ("left open, not decided, not defaulted … must not be defaulted or silently chosen during design"); handoff block `Stage completed: scoping` followed by "Next stage: **`superpowers:brainstorming`**, using this scope summary as its explored context".
+- Net: GREEN after fix — the fix is part of this task's diff for the coordinator to commit.

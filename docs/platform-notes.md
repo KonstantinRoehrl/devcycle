@@ -107,6 +107,16 @@ per-description constraint). Note that the binding constraint in practice is ≤
 200k-model's shared 8,000-char listing would crowd out other plugins' descriptions — keep
 descriptions lean.
 
+**Confirmed at the full-scenario regression pass (v1 complete, all skills/commands committed).**
+Measured description totals: executing-waves 164 + planning-waves 131 + reviewing-the-branch 126
++ scoping-interview 143 + verifying-on-device 173 + cycle 140 + continue 92 = **969 chars**
+consumed of the 6,000-char `DESCRIPTION_BUDGET_TOTAL` (16%). Combined with the upstream
+superpowers plugin (6.1.1: 14 skill/command descriptions, 1,962 chars), the shared listing
+holds **2,931 chars ≈ 733 tokens at 4 chars/token** — 37% of the worst-case 8,000-char
+whole-listing budget on a 200k-token model. Derived arithmetically from the frontmatter
+strings (an interactive `/context` readout is not available in the headless environment the
+check ran in); `node scripts/validate.mjs` independently sums the same budget and passes.
+
 ## (c) `workflows/*.js` invocation from the plugin cache path
 
 **What was tried.** A temporary probe `workflows/probe.js` (Node script echoing its own path,

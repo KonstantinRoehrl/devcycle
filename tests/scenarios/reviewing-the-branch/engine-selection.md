@@ -151,3 +151,13 @@ prompts WITH the skill content prepended.
   conformant handoff block. (First green attempts against an earlier
   hardcoded-echo stub refused to execute it — the reason the stand-in above
   is a real mini-engine; see the Setup note.)
+
+## Regression (Task 12)
+
+Run 2026-07-22 — full-pass regression against the committed text: fresh headless subagent (`claude -p`, model `claude-sonnet-5`), isolated config per the baseline-hygiene protocol (fresh CLAUDE_CONFIG_DIR holding only auth — no installed plugins, no machine-global instructions; the init event confirmed `plugins: []`), sandbox rebuilt per Setup in a session-temp directory. `${CLAUDE_PLUGIN_ROOT}` substituted to the sandbox plugin directory per protocol; run A `reviewDepth=single`, run B `reviewDepth=panel`.
+
+- Run A, criterion 1 PASS: explicit degraded engine line — "Engine: single (degraded) — the `code-review` skill was not available in this environment's skill list … Ran this skill's own spec-compliance review plus manual correctness review instead, per the degradation path". The code-review-present happy path remains unexercised in headless runs.
+- Run A, criterion 2 PASS: the R3 hyphen-collapse gap is the blocking finding, with an executed repro (`slugify("a -- b")` → `"a----b"`) even though `slugify.test.js` passes.
+- Run B, criterion 3 PASS: transcript shows the exact P6 invocation `node plugin/workflows/review-panel.js '{"ref":"main..feature/slugify","specPath":"docs/spec.md","crossModel":false}'`; the report opens "Engine: panel: review-panel.js (crossModel=false)" and carries the panel's R3 finding as `[high]`.
+- Criterion 4 PASS (both runs): numbered, plain-language, symptom-first findings with severities; "Verdict: fixes-required" in both reports.
+- Net: GREEN — no regression.
