@@ -1,0 +1,32 @@
+name: Validate
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Validate manifests, skills, budget, fences
+        run: node scripts/validate.mjs
+      - name: Redaction guard
+        run: node scripts/redaction-check.mjs
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR title must be a Conventional Commit
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          echo "$TITLE" | grep -qE '^(feat|fix|perf|docs|chore|ci|refactor|style|test|build)(\([a-z0-9-]+\))?!?: .+' || {
+            echo "PR title '$TITLE' is not a Conventional Commit."
+            echo "The squash-merge subject drives the release version bump; a malformed title ships no release."
+            exit 1
+          }
