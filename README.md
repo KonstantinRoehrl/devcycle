@@ -1,24 +1,39 @@
 # devcycle
 
-An opinionated Claude Code pipeline: from a feature, bug, or refactor description to a
-verified, publish-ready implementation. Thin overlay on [superpowers]; policy is config.
+An opinionated idea-to-verified-implementation pipeline for Claude Code: hand it a feature,
+bug, or refactor description and it turns out a verified, publish-ready implementation. It's a
+thin overlay on [superpowers] — no forking — and repo-agnostic; anything policy-related (git
+behavior, model choice, review depth) is config, not baked-in prose.
 
 ## Install
-    /plugin marketplace add KonstantinRoehrl/devcycle
-    /plugin install devcycle
+
+```
+claude plugin marketplace add KonstantinRoehrl/devcycle
+claude plugin install devcycle@devcycle
+```
 
 ## Quickstart
-    /devcycle:cycle add CSV export to the report page
+
+```
+/devcycle:cycle add CSV export to the report page
+```
 
 ## Configuration
+
 | Knob | Values | Default |
 | --- | --- | --- |
-| gitPolicy | local-commits-only / push-allowed / open-pr | local-commits-only |
-| modelLineup | model per role | opus/sonnet mix |
-| reviewDepth | single / panel | single |
-| crossModelReview | true / false | false |
-| onDeviceGate | human-required / auto-ok | human-required |
+| `gitPolicy` | `local-commits-only` / `push-allowed` / `open-pr` | `local-commits-only` |
+| `implementerModel` | model id | `claude-opus-4-8` |
+| `taskReviewerModel` | model id | `claude-sonnet-5` |
+| `walkthroughModel` | model id | `claude-sonnet-5` |
+| `branchReviewModel` | model id | `claude-opus-4-8` |
+| `reviewDepth` | `single` / `panel` | `single` |
+| `crossModelReview` | `true` / `false` | `false` |
+| `onDeviceGate` | `human-required` / `auto-ok` | `human-required` |
 
-Details: [DESIGN.md](DESIGN.md) · [CHANGELOG.md](CHANGELOG.md)
+## Learn more
+
+Pipeline rationale, architecture, and upstream-comparison notes: [DESIGN.md](DESIGN.md).
+Release history: [CHANGELOG.md](CHANGELOG.md).
 
 [superpowers]: https://github.com/obra/superpowers

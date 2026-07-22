@@ -296,3 +296,37 @@ Version handling on GitHub is enforced by CI, not discipline alone:
 - Description char budget exact numbers (verify via /context during release checks).
 - Whether `verifying-on-device`'s Playwright pre-pass needs repo-specific target config in tier 2
   (likely: an `accesslint.config.json`-style target file).
+
+## Appendix: upstream comparison summaries
+
+Full memos live in `docs/comparisons/`; each one compares a planned devcycle skill against its
+nearest superpowers upstream skill(s) before the skill was built, per the §11 comparison
+mandate. Summaries below are 2–3 lines each — read the linked memo for the complete (a)/(b)/(c)
+breakdown and conflict resolutions.
+
+- **[executing-waves](docs/comparisons/executing-waves.md)** — vs `subagent-driven-development` +
+  `executing-plans`. Upstream covers fresh-subagent dispatch, the per-task review loop, the
+  progress ledger, and model-selection guidance. devcycle adds wave-by-readiness dispatch, a
+  coordinator-side deterministic green gate, richer ledger events, handoff blocks with
+  wave-boundary compaction, userConfig-driven model routing, and TDD-content preloading into
+  briefs.
+- **[planning-waves](docs/comparisons/planning-waves.md)** — vs `writing-plans`. Upstream covers
+  plan file location, task sizing, the interfaces block, and the self-review checklist. devcycle
+  adds concurrency as a first-class goal: file-disjoint task boundaries, per-task `Dependencies:`
+  declarations, a `Dispatch Map` of waves, a reuse-before-rebuild rule, and a pre-planning
+  feasibility gate.
+- **[reviewing-the-branch](docs/comparisons/reviewing-the-branch.md)** — vs
+  `requesting-code-review`. Upstream supplies the single-reviewer dispatch template and check
+  catalogue. devcycle turns it into a mandatory whole-branch gate keyed to
+  `userConfig.reviewDepth` (single vs multi-lens panel), adds a spec-compliance layer read
+  against the spec file, a findings-fix-and-re-review loop, and disclosed graceful degradation.
+- **[scoping-interview](docs/comparisons/scoping-interview.md)** — vs `brainstorming`. Upstream
+  owns design exploration and spec writing untouched. devcycle adds a pre-stage that batches
+  clarifying questions (resolving an explicit conflict with upstream's one-question-at-a-time
+  style), confirms a summary first, hard-stops after asking, and hands off a bounded scope into
+  brainstorming.
+- **[verifying-on-device](docs/comparisons/verifying-on-device.md)** — vs
+  `verification-before-completion`, the nearest (only-in-spirit) equivalent. Upstream supplies
+  the general claim-verification discipline. devcycle adds the on-device checklist artifact, a
+  verification-dimension catalogue, the `(auto)` script/human boundary, and a fresh-session
+  one-question-per-item walkthrough.
