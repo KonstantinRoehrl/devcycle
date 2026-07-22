@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- docs: fold unreleased 0.1.0 section into the 0.2.0 release notes (#2)
+
 ## 0.2.0
 
 - chore: ignore local execution artifacts and Finder metadata
