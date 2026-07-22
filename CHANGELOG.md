@@ -23,8 +23,8 @@
 - docs: add v1 implementation plan (16 tasks, 8 waves, pinned interfaces)
 - docs: add founding design docs and approved implementation spec
 
-## 0.1.0
-- Initial scaffold
+### Shipped components
+
 - Skills: `scoping-interview`, `planning-waves`, `executing-waves`, `reviewing-the-branch`,
   `verifying-on-device` (each shipped with a superpowers upstream-comparison memo and a
   scenario-test suite under `tests/scenarios/`)
