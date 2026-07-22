@@ -19,7 +19,9 @@ Whenever scope, intent, architecture, data, or user preference is uncertain:
    answer.
 2. **Batch, don't trickle.** Ask via AskUserQuestion: 1–4 questions per call, each
    with concrete options plus Other — never one question per message. If
-   AskUserQuestion is unavailable, send the whole batch as one plain message.
+   AskUserQuestion is unavailable, send the whole batch as one plain message with
+   the SAME shape: the summary confirmation as item 1, and every question still
+   listing its concrete options plus an explicit Other/free-form escape.
 3. **Summary confirmation occupies slot 1** of the first batch: your one-paragraph
    reading of what the user wants, offered to confirm or correct.
 4. **Hard STOP after asking.** No drafting, no assuming answers, no continuing
@@ -52,8 +54,11 @@ REQUIRED next stage: `superpowers:brainstorming`, with the scope summary as its
 explored context — its questioning then targets design refinement, not
 re-establishing scope. Do not restate or replace its process here.
 
-End the stage with the devcycle handoff block as your final output (scoping →
-brainstorm continues in the same conversation, per the pipeline lifecycle):
+End the stage by naming the next stage explicitly in your final output — state
+that the cycle now hands off to `superpowers:brainstorming` with the scope
+summary as its explored context — followed by the devcycle handoff block
+(scoping → brainstorm continues in the same conversation, per the pipeline
+lifecycle):
 
 ```markdown
 ## Handoff
