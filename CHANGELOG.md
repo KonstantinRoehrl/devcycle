@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- fix: gitPolicy respects permission and branch push restrictions
+
 ## 0.4.0
 
 - feat: auto model selection, first-run config walkthrough, and pipeline composition fixes (#7)
