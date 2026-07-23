@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- ci: push branch before tag in release job and guard existing tags (#6)
+- docs: rewrite README for comprehension (#5)
+- feat: harden pipeline guardrails and pin execution strategy (#4)
+
 ## 0.2.3
 
 - chore(deps): bump actions/checkout (#1)
