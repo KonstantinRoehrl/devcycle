@@ -196,3 +196,14 @@ their configured marketplaces; otherwise install reports it — README (Task 4 s
 tell users to add the superpowers marketplace first. `claude plugin validate <repo-root>`
 passes (one cosmetic warning: the marketplace manifest has no `description` field — worth
 adding when `marketplace.json` is next touched, outside Task 2's file set).
+
+[Superseded 2026-07-23: superpowers install mechanics are deliberately linked, not
+documented — see the decision log, `docs/DECISIONS.md`.]
+
+[Superseded 2026-07-23, second correction: the pin above moved to
+`claude-plugins-official`. superpowers is published in both marketplaces, and dependency
+satisfaction is keyed on `name@marketplace` — a user with `superpowers@claude-plugins-official`
+enabled still hit `dependency-unsatisfied` under the `superpowers-marketplace` pin
+(reproduced in an isolated config; a bare `"superpowers"` entry resolves as
+`superpowers@devcycle` and also fails). The marketplace `description` was added in the
+same change. See `docs/DECISIONS.md`.]

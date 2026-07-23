@@ -12,16 +12,25 @@ pipeline moves on to on-device verification or finishing.
 **Inputs** (from the execution handoff / `.devcycle/state.md`): the branch,
 the spec file path, the ledger path (`.superpowers/sdd/progress.md`). These
 three are ALL the review needs — deliberately (see fresh context below).
+One further read serves the handoff, not the review: the `checklist:` line
+of `.devcycle/state.md`, which this stage's own handoff carries forward.
 
 ## Configuration
 
 - reviewDepth: `${user_config.reviewDepth}` (allowed `single` | `panel`; default `single`)
 - crossModelReview: `${user_config.crossModelReview}` (default `false`)
-- branchReviewModel: `${user_config.branchReviewModel}` (default `claude-opus-4-8`)
+- branchReviewModel: `${user_config.branchReviewModel}` (a model id, or `auto`; default `auto`)
 
 A value that still reads as a literal `${user_config...}` placeholder is
 unset — use its default. A value outside its allowed set is invalid — use
 its default.
+
+branchReviewModel resolves three ways: an explicit model id is binding —
+use it verbatim, no second-guessing; the value `auto` OR a literal
+placeholder means derive the model here. The derived branch-review model is
+the first available of: `claude-opus-4-8`, then `claude-sonnet-5`. The
+resolved model (explicit or derived) is what every rule below means by
+"the branch-review model".
 
 ## Fresh context (bias control — non-negotiable)
 
@@ -33,8 +42,8 @@ MUST run in fresh context:
   never the implementation conversation, task reports, or implementer
   reasoning.
 - If you carry implementation context yourself, do not review the branch
-  directly: dispatch fresh reviewer subagents (model: the branchReviewModel
-  option) and act on their findings.
+  directly: dispatch fresh reviewer subagents (model: the resolved
+  branch-review model) and act on their findings.
 
 ## Engine selection (keyed to reviewDepth)
 
@@ -56,10 +65,10 @@ unavailability (degrade, below), never as a review verdict. The panel runs
 2–3 read-only lens reviewers (spec compliance, correctness + security,
 simplification) with per-finding adversarial verification; it never mutates
 files or git. Pass `"crossModel": true` only when the crossModelReview
-option is true. If the branchReviewModel option is set (not a literal
-placeholder), export it as the panel's model before invoking:
-`DEVCYCLE_PANEL_MODEL=<branchReviewModel> node ...`; when unset, do not
-export it — the CLI default applies.
+option is true. Always export the resolved branch-review model before
+invoking — explicit id and derived id alike, never omit the export:
+`DEVCYCLE_PANEL_MODEL=<resolved model> node ...`. Omitting it would
+silently replace the derived model with the CLI's default.
 
 **Graceful degradation — a first-class path, not an apology.** The built-in
 `code-review` skill is user-invocation-only in some environments, so a
@@ -116,19 +125,31 @@ adds precision.
 
 ## Handoff
 
-When the gate passes, end with the P2 handoff block:
+When the gate passes, update `.devcycle/state.md` — set `stage: on-device`
+(the stage the next session resumes at) — then end with the pipeline
+handoff block:
 
 ```markdown
 ## Handoff
 - Stage completed: branch-review
 - Artifacts: <review report location, branch>
-- Carry-overs: <accepted non-blocking findings, or "none">
+- Carry-overs: <accepted non-blocking findings, or "none">. Start the fresh session on <model>.
 - Context action: Fresh session
 - Compaction hint: Keep checklist path and branch. Drop all review and implementation context.
 ```
 
+The `Start the fresh session on <model>` line is this stage's job because
+the on-device session's model is chosen by whoever launches it — an
+instruction inside that session would arrive too late. `<model>` is the
+walkthroughModel option when it names an explicit model id (binding);
+otherwise (value `auto` or a literal placeholder) `claude-sonnet-5`.
+
+When the state file records `checklist: none` (no rendered surface produced
+a checklist), the compaction hint becomes: Keep `checklist: none — on-device
+stage will judge applicability` and the branch.
+
 Per the pipeline's context table, review → on-device runs in a fresh
-session carrying only the checklist path and the branch.
+session carrying only the checklist line and the branch.
 
 This stage's block is emitted at this stage's end even when the pipeline
 continues past it in the same response or session (on-device and finish

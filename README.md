@@ -18,9 +18,11 @@ claude plugin marketplace add KonstantinRoehrl/devcycle
 claude plugin install devcycle@devcycle
 ```
 
-devcycle depends on the [superpowers] plugin — install it per its own instructions.
-Until superpowers is present, `claude plugin list` shows devcycle as failed to load; once
-both are installed, it shows `devcycle` and `superpowers` as enabled.
+devcycle depends on the [superpowers] plugin. Installing devcycle installs it
+automatically from the official Claude Code plugin directory; afterwards
+`claude plugin list` shows both `devcycle` and `superpowers` as enabled.
+
+Requires a recent Claude Code CLI — verified on 2.1.217 and later.
 
 For the on-device verification stage's automatic checks, also set up the [Playwright] MCP
 server (see below — without it, every checklist item falls to you).
@@ -63,8 +65,9 @@ Resume any time with:
    approve the plan.
 4. **Execution** — each task goes to a fresh implementer subagent carrying only that task's
    brief, working test-first (failing test before code). A reviewer checks every task, the
-   coordinator re-runs the tests itself before accepting (the *green gate*), and only
-   accepted work is committed.
+   coordinator re-runs the tests itself before accepting (the *green gate*: the task's test
+   command must pass in the coordinator's own re-run, not just in the implementer's
+   report), and only accepted work is committed.
 5. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole
    branch against the spec: everything the spec asked for is there, nothing it didn't ask
    for crept in.
@@ -90,15 +93,18 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | Skill `reviewing-the-branch` | The whole-branch review gate, single-reviewer or panel. |
 | Skill `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes. |
 | Agent `implementer` | Implements one task from a brief; never commits. |
-| Agents `task-reviewer`, `red-team-reviewer` | Read-only reviewers used by execution and the panel. |
+| Agent `task-reviewer` | Read-only reviewer for each task during execution. |
+| Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
 | Workflow `review-panel.js` | Multi-lens branch review engine for `reviewDepth: panel`. |
-| Workflow `mechanical-sweep.js` | Pilot-first bulk edit helper for repetitive changes. |
+| Workflow `mechanical-sweep.js` | Pilot-first bulk edit helper — manual utility, not invoked by the pipeline. |
 
 ## Configuration
 
 Set options with `/plugin configure devcycle@devcycle` (or
 `claude plugin install devcycle@devcycle --config KEY=VALUE`). Everything has a working
-default; configure nothing and the pipeline still runs.
+default; configure nothing and the pipeline still runs. The first time `/devcycle:cycle`
+runs with nothing configured, it offers a short batched walkthrough of the four behavioral
+options — answer once (or accept the defaults) and it never asks again.
 
 | Option | What it controls | Values | Default |
 | --- | --- | --- | --- |
@@ -106,10 +112,10 @@ default; configure nothing and the pipeline still runs.
 | `reviewDepth` | How the branch review runs | `single` / `panel` | `single` |
 | `crossModelReview` | Adds a second-model lens to the panel | `true` / `false` | `false` |
 | `onDeviceGate` | Whether a human must finish the on-device checklist | `human-required` / `auto-ok` | `human-required` |
-| `implementerModel` | Model for implementer subagents | model id | `claude-opus-4-8` |
-| `taskReviewerModel` | Model for per-task reviewers | model id | `claude-sonnet-5` |
-| `branchReviewModel` | Model for the whole-branch review | model id | `claude-opus-4-8` |
-| `walkthroughModel` | Model for the on-device walkthrough session | model id | `claude-sonnet-5` |
+| `implementerModel` | Model for implementer subagents | `auto` / model id | `auto` (derived per task; set a model id to pin) |
+| `taskReviewerModel` | Model for per-task reviewers | `auto` / model id | `auto` (derived per task; set a model id to pin) |
+| `branchReviewModel` | Model for the whole-branch review | `auto` / model id | `auto` (most capable available; set a model id to pin) |
+| `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id | `auto` (a fast model; set a model id to pin) |
 
 **`gitPolicy`** is the pipeline's blast radius: `local-commits-only` means it only ever
 commits on a local branch and hands it to you (never pushes); `push-allowed` lets it push
@@ -132,9 +138,30 @@ the rest need a human. `human-required` (default) blocks the pipeline until you'
 every human item; `auto-ok` lets it finish once the auto-checkable items pass, explicitly
 listing what remains unverified — it skips the human, it never fakes the checkmarks.
 
-The four **model options** trade cost against capability per role. Defaults put the
-strongest model where judgment matters (implementation, final review) and a faster one
-where the task is narrower (per-task review, walkthrough).
+The four **model options** trade cost against capability per role. They default to
+`auto`: for implementers and task reviewers the coordinator derives the model per task
+from what the plan makes observable (task size, dependency count, diff size) and records
+each derivation in the ledger — stronger models where judgment matters, faster ones where
+the task is narrow and fully specified; the branch review takes the most capable model
+available and the walkthrough a fast one. Set an explicit model id to pin a role; an
+explicit id is binding and never second-guessed.
+
+## Troubleshooting
+
+- **devcycle shows "failed to load"** in `claude plugin list` — the [superpowers]
+  dependency is missing or disabled. It normally installs automatically from the
+  official plugin directory (`claude plugin install superpowers@claude-plugins-official`
+  re-resolves it); once present and enabled, both plugins load.
+- **Two copies of superpowers listed** — you had superpowers installed from its own
+  marketplace before installing devcycle, and the dependency pulled in the official-directory
+  copy as well. Both work; keep one, e.g.
+  `claude plugin uninstall superpowers@superpowers-marketplace`.
+- **A literal `${user_config.KEY}` string appears in output** — that option is simply
+  unset; this is expected, and the pipeline falls back to the documented default. Set the
+  option to make the value substitute.
+- **Source edits don't show up after reinstalling** — the plugin cache is keyed by
+  version, and reinstalling the same version does not refresh it. Bump the version or
+  uninstall and reinstall.
 
 ## See a real run
 
@@ -145,7 +172,11 @@ edges it exposed.
 ## Learn more
 
 Design rationale and architecture: [DESIGN.md](DESIGN.md) ·
-Release history: [CHANGELOG.md](CHANGELOG.md)
+Release history: [CHANGELOG.md](CHANGELOG.md) ·
+Decision log: [docs/DECISIONS.md](docs/DECISIONS.md)
+
+Contributing — including how the scenario test harness in `tests/scenarios/` works:
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 [superpowers]: https://github.com/obra/superpowers
-[Playwright]: https://github.com/microsoft/playwright
+[Playwright]: https://github.com/microsoft/playwright-mcp

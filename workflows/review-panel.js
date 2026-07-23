@@ -17,7 +17,8 @@
 //
 // Stages: 1) 2-3 read-only lens reviewers in parallel (default all three;
 // cross-model codex lens only when crossModel) -> 2) adversarial per-finding
-// verification (unverified findings are marked, never dropped) -> 3) dedup by
+// verification, its method spliced from agents/red-team-reviewer.md
+// (unverified findings are marked, never dropped) -> 3) dedup by
 // file+claim -> 4) reconciler ranks confirmed findings by severity.
 //
 // STRICTLY READ-ONLY: the script itself only runs `git diff`/`git rev-parse`;
@@ -300,6 +301,25 @@ async function runCrossModelLens(ctx) {
 
 // ---------- stage 2: adversarial verification ----------
 
+// The verifier's adversarial method is the plugin's red-team-reviewer agent
+// definition, spliced into every verifier prompt at runtime (path resolved
+// relative to this script — agents/ is a sibling of workflows/ under the
+// plugin root). If the file is missing or empty, the verifier degrades to
+// its built-in prompt alone; the fallback is logged to stderr, never fatal.
+function loadRedTeamCharter() {
+  const charterPath = join(__dirname, "..", "agents", "red-team-reviewer.md");
+  try {
+    const body = readFileSync(charterPath, "utf8")
+      .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "") // strip agent frontmatter
+      .trim();
+    if (body) return body;
+    log(`red-team charter at ${charterPath} is empty; verifiers use the built-in prompt only`);
+  } catch {
+    log(`red-team charter not readable at ${charterPath}; verifiers use the built-in prompt only`);
+  }
+  return null;
+}
+
 const VERIFY_SCHEMA = {
   type: "object",
   properties: {
@@ -309,7 +329,7 @@ const VERIFY_SCHEMA = {
   required: ["verified", "verification"],
 };
 
-async function verifyFinding(finding, ctx, model) {
+async function verifyFinding(finding, ctx, model, charter) {
   const prompt = [
     `You are an adversarial verifier on a review panel. A reviewer claims:`,
     ``,
@@ -323,6 +343,18 @@ async function verifyFinding(finding, ctx, model) {
     `you inspected supports it; verified=false if it is wrong, already handled, or`,
     `unsupported by the code. "verification" is 1-2 sentences citing what you`,
     `inspected and why the claim stands or falls.`,
+    ...(charter
+      ? [
+          ``,
+          `Your adversarial method is the devcycle red-team charter below. Here your`,
+          `subject is the reviewer's claim above (not an implementer's diff), and your`,
+          `output is the structured verified/verification fields above (not the`,
+          `charter's verdict block).`,
+          ``,
+          `## Red-team charter`,
+          charter,
+        ]
+      : []),
   ].join("\n");
   const res = await claudeStructured({ prompt, tools: "Read,Grep,Glob", schema: VERIFY_SCHEMA, model });
   if (!res.ok) {
@@ -440,7 +472,8 @@ async function main() {
 
   // Stage 2: adversarial verification per finding (marked, never dropped).
   log(`verifying ${rawFindings.length} finding(s)...`);
-  const verified = await mapLimit(rawFindings, VERIFY_CONCURRENCY, (f) => verifyFinding(f, ctx, model));
+  const charter = rawFindings.length ? loadRedTeamCharter() : null;
+  const verified = await mapLimit(rawFindings, VERIFY_CONCURRENCY, (f) => verifyFinding(f, ctx, model, charter));
 
   // Stage 3: dedup by file+claim.  Stage 4: rank + reconcile.
   const deduped = dedupFindings(verified);

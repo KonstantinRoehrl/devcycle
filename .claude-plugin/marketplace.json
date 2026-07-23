@@ -1,5 +1,6 @@
 {
   "name": "devcycle",
+  "description": "Home of the devcycle plugin: a feature-description-to-verified-implementation pipeline for Claude Code.",
   "owner": { "name": "Konstantin Röhrl", "url": "https://github.com/KonstantinRoehrl" },
   "plugins": [
     {
@@ -8,5 +9,5 @@
       "description": "Opinionated pipeline from a feature, bug, or refactor description to a verified, publish-ready implementation."
     }
   ],
-  "allowCrossMarketplaceDependenciesOn": ["superpowers-marketplace"]
+  "allowCrossMarketplaceDependenciesOn": ["claude-plugins-official"]
 }

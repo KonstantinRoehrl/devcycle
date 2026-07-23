@@ -102,6 +102,18 @@ now and include the full review report in your final message.
 4. Both runs: findings are numbered, plain language, symptom first, with a
    severity; the report ends in a verdict, and the unmet R3 requirement
    yields `fixes-required`, not `pass`.
+5. *(Pass-verdict handoff variant — run C, setup and prompt in
+   `## Regression (review-fixes)` below.)* When the gate passes (spec-clean
+   branch), `walkthroughModel` and `branchReviewModel` are unset (literal
+   placeholders), and `.devcycle/state.md` records `checklist: none`, the
+   stage close carries the new handoff contract: `.devcycle/state.md` is
+   updated to `stage: on-device` (the resume-at stage) before the block;
+   the block's Carry-overs line carries `Start the fresh session on
+   claude-sonnet-5` (walkthroughModel unset → the fixed walkthrough
+   default, recommended producer-side because the on-device session's
+   model is chosen by whoever launches it); and the compaction hint uses
+   the checklist-none branch — Keep `checklist: none — on-device stage
+   will judge applicability` and the branch (not "checklist path").
 
 ## Baseline (red)
 
@@ -161,3 +173,13 @@ Run 2026-07-22 — full-pass regression against the committed text: fresh headle
 - Run B, criterion 3 PASS: transcript shows the exact P6 invocation `node plugin/workflows/review-panel.js '{"ref":"main..feature/slugify","specPath":"docs/spec.md","crossModel":false}'`; the report opens "Engine: panel: review-panel.js (crossModel=false)" and carries the panel's R3 finding as `[high]`.
 - Criterion 4 PASS (both runs): numbered, plain-language, symptom-first findings with severities; "Verdict: fixes-required" in both reports.
 - Net: GREEN — no regression.
+
+## Regression (review-fixes)
+
+Criterion 5 added 2026-07-23 after the review-fixes bundle changed the stage's close: branchReviewModel default `claude-opus-4-8` → three-way `auto` resolution, the producer-side `Start the fresh session on <model>` line in the handoff's Carry-overs, the `checklist: none` compaction-hint branch, and the pre-handoff state update to `stage: on-device`. Runs: fresh headless subagents (`claude -p`, model `claude-sonnet-5`), isolated config (fresh CLAUDE_CONFIG_DIR holding only auth; init events confirmed `plugins: []`), sandboxes in session-temp directories. Red = committed text (`git show HEAD:skills/reviewing-the-branch/SKILL.md`); green = working tree.
+
+**Run C variant setup:** the reviewproj sandbox with a SPEC-CLEAN branch — `slugify.js` satisfies R1–R3 (`.replace(/[\s-]+/g, "-")` collapses hyphen runs) and its test covers the R3 example — plus a 10-line `.devcycle/state.md` at `stage: branch-review` with `checklist: none`, and a 4-event ledger ending `committed`. Prompt: skill text spliced; `reviewDepth=single`, `crossModelReview=false`, `branchReviewModel`/`walkthroughModel` literal placeholders; code-review unavailable and no subagent-dispatch tool (degraded, disclosed); "run the branch review now … if the gate passes, complete the stage exactly as the skill instructs."
+
+- Baseline (red): criterion 5 FAIL on all three prongs — the gate passed (degraded engine disclosed, `Verdict: pass`) but the handoff carried no `Start the fresh session on <model>` line anywhere, the compaction hint used the old fixed text "Keep checklist path and branch" despite the state file's `checklist: none`, and `.devcycle/state.md` was never updated (still `stage: branch-review`; the committed text has no state-update instruction).
+- Result (green), 2 samples: run 2 PASS on all three prongs — Carry-overs line ends "…. Start the fresh session on claude-sonnet-5." (walkthroughModel unset → the fixed walkthrough default); compaction hint verbatim "Keep `checklist: none — on-device stage will judge applicability` and the branch."; `.devcycle/state.md` updated to `stage: on-device` before the block, announced in the report ("Stage advanced: `.devcycle/state.md` now reads `stage: on-device`"). Run 1 (recorded honestly) was partial: state updated to `stage: on-device` and the model line present but placed after the block instead of inside Carry-overs, and the hint stayed on the old "checklist path" wording — sampling variance against the same working-tree text; 1 of 2 samples fully conformant, both samples carried the substance (model recommendation + state update) the committed text never produced.
+- Criteria 1–4 (runs A and B) are textually unchanged by this bundle and were not re-run; the Task 12 evidence above stands. The degraded-engine disclosure contract was re-exercised incidentally by run C's engine line ("single (degraded): code-review skill unavailable … ran this skill's own spec-compliance + `superpowers:requesting-code-review` reviewer instructions directly").

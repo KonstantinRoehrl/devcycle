@@ -13,7 +13,14 @@ The general claim discipline of `superpowers:verification-before-completion` (RE
 background) applies unchanged: claiming a visual outcome from a script, screenshot, or code
 reading is an unverified completion claim.
 
-## Generating the checklist
+This skill has two consumers, split into two parts: **Part A** is a mid-wave duty of the
+executing coordinator (via `devcycle:executing-waves`); **Part B** is the on-device stage
+proper, run in a fresh session after the branch review. Read the part that matches your
+role.
+
+## Part A — during execution (consumed by executing-waves): checklist generation + `(auto)` boundary
+
+### Generating the checklist
 
 **Trigger: the moment a task produces rendered changes** — generate or update the checklist
 in that same wave. Never defer it to the end of the wave or the branch.
@@ -33,7 +40,7 @@ in that same wave. Never defer it to the end of the wave or the branch.
   - empty / loading / error states
   - animation timing
 
-## The `(auto)` boundary
+### The `(auto)` boundary
 
 ```
 A SCRIPT OR SCREENSHOT NEVER CHECKS OFF A CHECKLIST ITEM.
@@ -53,12 +60,19 @@ auto-checked: every item stays a human item. Everything a script cannot structur
 | "We're behind schedule" | Pressure does not convert human items into script items |
 | "The code clearly implements it" | Rendered outcome and code intent diverge exactly often enough to need this checklist |
 
-## The walkthrough
+## Part B — the on-device stage (fresh session): walkthrough + gate + handoff
+
+### The walkthrough
 
 Runs in a **fresh session** — it needs only the checklist path and the branch, nothing from
-the implementation conversation. Route it to the model in `${user_config.walkthroughModel}`;
-if that value still reads as a literal `${user_config...}` placeholder, the option is unset —
-use the default `claude-sonnet-5`.
+the implementation conversation. Its model cannot be routed from inside it (the session and
+its model already exist by the time this text is read), so the recommendation travels
+producer-side: the branch-review handoff carries a `Start the fresh session on <model>`
+line. That model is `${user_config.walkthroughModel}` when it names an explicit model id
+(binding); otherwise — the value `auto`, or a value that still reads as a literal
+`${user_config...}` placeholder, which means the option is unset — it is fixed
+`claude-sonnet-5`, since a walkthrough is interview mechanics and per-task derivation buys
+nothing here.
 
 Interview rule: **ONE question per checklist item, never batched.** This is a deliberate
 exception to devcycle's batched-interview standard — findings quality drops when items are
@@ -74,10 +88,10 @@ language, symptom first:
 - <item>: FAILED — <what the user sees instead> — severity: <high|medium|low>
 ```
 
-## The gate
+### The gate
 
-Read `${user_config.onDeviceGate}`; if it still reads as a literal `${user_config...}`
-placeholder, the option is unset — use the default `human-required`.
+Read `${user_config.onDeviceGate}`; a literal placeholder means unset (the walkthrough's
+placeholder rule above) — use the default `human-required`.
 
 - Predicate `onDeviceGate == "human-required"` (default): the stage is complete ONLY when
   every non-`(auto)` item has a human verdict from the walkthrough.
@@ -86,9 +100,10 @@ placeholder, the option is unset — use the default `human-required`.
   in the handoff as unverified residue — `auto-ok` skips the human gate, it never fakes the
   checkmarks.
 
-## Handoff
+### Handoff
 
-End the stage with the P2 handoff block:
+End the stage by updating `.devcycle/state.md` — set `stage: finish` (the stage the next
+session resumes at) — then emit the pipeline handoff block:
 
 ```markdown
 ## Handoff

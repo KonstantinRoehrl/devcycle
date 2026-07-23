@@ -107,6 +107,10 @@ State file after the spec:
 - checklist: none
 ```
 
+*(Historical shape — do not use as a template. The shipped template in `commands/cycle.md`
+Step 0 has since gained `updated:`, `scope:`, and `configured:` lines; see also rough edge
+#6 below.)*
+
 ### Stage 3 — planning (`devcycle:planning-waves`)
 
 Announced itself, ran the feasibility gate (verdict GO — Node built-ins only), and produced
@@ -223,6 +227,9 @@ ahead of `main`, no push, no PR. Final state file:
 - checklist: none (no rendered/on-device surface — pure Node helper + tests)
 ```
 
+*(Same historical shape as above — the shipped template now also carries `updated:`,
+`scope:`, and `configured:` lines.)*
+
 Final sandbox history (all commits Conventional):
 
 ```
@@ -235,6 +242,13 @@ Final sandbox history (all commits Conventional):
 ```
 
 ## Rough edges found
+
+> **Status update (2026-07-23):** #1 is superseded by decision — superpowers install
+> mechanics are deliberately linked rather than documented (see `docs/DECISIONS.md`).
+> #2 and #4 are fixed in the current version, each verified by a dated scenario
+> regression (`tests/scenarios/commands/state-file-resume.md`,
+> `tests/scenarios/executing-waves/handoff-block-shape.md`). The report below is left as
+> written — it documents the v0.2.1 run as it happened.
 
 1. **README install gap** — the superpowers marketplace add is a required third command; the
    intermediate error message's first suggestion doesn't work verbatim (see above).
@@ -251,6 +265,11 @@ Final sandbox history (all commits Conventional):
 5. **Transient API drop mid-execution** — one session died with "Connection closed
    mid-response"; because files are the state, `--resume` continued cleanly with zero loss.
    Not a plugin bug; worth knowing that the files-are-state design absorbed it.
+6. **State files omitted the `updated:` line** *(logged 2026-07-23, after the fact)* — the
+   run's state files, quoted verbatim above, carry no `updated:` line even though v0.2.1's
+   own template in `commands/cycle.md` already required one. The run deviated from its own
+   version's template, and this report originally presented the files as conforming
+   evidence without flagging it.
 
 ## Verdict
 
