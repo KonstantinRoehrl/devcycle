@@ -124,7 +124,35 @@ Run the stages in order, each via the named skill:
 5. **branch-review** — `devcycle:reviewing-the-branch`.
 6. **on-device** — `devcycle:verifying-on-device` (skip only when the change has no
    rendered/on-device surface; record the skip in the handoff).
-7. **finish** — per the git policy resolved above:
+7. **finish** — resolve the effective git policy, then act on it. Call the value
+   resolved above (Configuration section) the **configured policy**.
+
+   **Resolve effective policy.** If the configured policy is `local-commits-only`, it is
+   already the floor — skip straight to "Act on the effective policy" below, effective
+   equals configured, no signal checks needed. Otherwise (`push-allowed` or `open-pr`),
+   check two signals before pushing anything:
+
+   - **Permission-settings signal:** read the effective Claude Code permission settings —
+     project `.claude/settings.local.json`, project `.claude/settings.json`, user
+     `~/.claude/settings.json`, and any managed/enterprise policy file present on this
+     platform (read whichever exist; a missing file has no rules). Look for a `deny` rule
+     whose pattern would match the literal `git push` command — e.g. `Bash(git push:*)`,
+     `Bash(git:*)`, or a bare `Bash` deny. If any such deny rule exists in any of those
+     files, this signal fires. An `ask`-only rule (no matching `deny`) does NOT fire this
+     signal — leave the configured policy alone; the normal permission prompt at push time
+     communicates the restriction.
+   - **Protected-branch signal:** resolve the repo's release/default branch — try, in
+     order, `git symbolic-ref refs/remotes/origin/HEAD`, then `gh repo view --json
+     defaultBranchRef`, then fall back to `main` or `master` if one of those branches
+     exists and neither command is available. If the branch recorded in
+     `.devcycle/state.md` (this cycle's branch) IS that default branch, this signal
+     fires — devcycle never pushes directly to the repo's default branch.
+
+   If either signal fires, the **effective policy** for this run is `local-commits-only`
+   regardless of the configured value. Otherwise effective equals configured. This clamp
+   is silent (no pause, no question) but always narrated — see the Handoff line below.
+
+   **Act on the effective policy:**
    - `local-commits-only`: hand the branch back — report branch name and commits;
      do not push, do not open a PR.
    - `push-allowed`: push the branch; NEVER merge it.
@@ -157,6 +185,14 @@ At a wave → wave boundary within execution the first field is instead
 `Wave completed: <n> of <m> (stage: execution)` — `Stage completed:` is
 reserved for true stage ends. These are the only two sanctioned first-field
 labels.
+
+At the finish stage specifically, the block carries one additional line, directly after
+`Artifacts:` — the resolved git policy. When the effective policy was not clamped:
+`Git policy: <value> (no override)`. When it was clamped (Step 7 above): `Git policy:
+configured <value> → effective local-commits-only (<reason>)`, where `<reason>` is `a
+permission rule denies git push`, `current branch is the repo's default branch; direct
+pushes to it are not allowed`, or both joined with `; ` if both signals fired. No other
+stage's block carries this line.
 
 Pick the context action from this table and recommend it to the user explicitly:
 
