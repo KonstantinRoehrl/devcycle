@@ -40,10 +40,11 @@ A SCRIPT OR SCREENSHOT NEVER CHECKS OFF A CHECKLIST ITEM.
 ```
 
 One exception, keyed to an observable predicate: an item asserting DOM structure, CSS
-values, or exact text that a Playwright (or equivalent) run has structurally verified —
-fresh output in hand — may be checked off with the tag `(auto)`. Everything a script cannot
-structurally see (feel, smoothness, visual alignment, contrast, legibility) stays unchecked
-for the human.
+values, or exact text that a Playwright run — via the Playwright MCP server (the intended
+engine) or an equivalent structural check — has verified, fresh output in hand, may be
+checked off with the tag `(auto)`. When no Playwright MCP is available, nothing is
+auto-checked: every item stays a human item. Everything a script cannot structurally see
+(feel, smoothness, visual alignment, contrast, legibility) stays unchecked for the human.
 
 | Rationalization | Reality |
 |---|---|
@@ -97,3 +98,10 @@ End the stage with the P2 handoff block:
 - Context action: <Continue | Compact with hint | Clear + /devcycle:continue | Fresh session>
 - Compaction hint: Keep checklist path, branch, failed items. Drop walkthrough transcript.
 ```
+
+The block is REQUIRED even when this stage judges itself not applicable (no
+rendered surface, nothing to walk): the skip IS the stage outcome — emit the
+block with the skip recorded in it (`Artifacts: none (no rendered surface)`,
+Carry-overs naming the skip reason), not prose or the state file alone. And
+when finish runs in the same response, this stage's block still appears
+separately, before the finish stage's output.

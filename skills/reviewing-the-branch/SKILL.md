@@ -129,3 +129,8 @@ When the gate passes, end with the P2 handoff block:
 
 Per the pipeline's context table, review → on-device runs in a fresh
 session carrying only the checklist path and the branch.
+
+This stage's block is emitted at this stage's end even when the pipeline
+continues past it in the same response or session (on-device and finish
+completing in one go): every stage emits its own `## Handoff` block —
+never merged into, or replaced by, a later stage's block.

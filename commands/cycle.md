@@ -18,6 +18,28 @@ default `local-commits-only`. Allowed values: `local-commits-only`, `push-allowe
 (models, review depth, on-device gate) are read the same way, via their own
 `${user_config.KEY}` placeholders, by the stage skills that consume them.
 
+## Step 0 — create the state file (FIRST action, binding)
+
+Before triage, before any stage work, before any other output: create
+`.devcycle/state.md` in the target repo with exactly this content (stage `scoping`,
+the current branch, artifact lines empty):
+
+```markdown
+# devcycle state
+- stage: scoping
+- branch: <current git branch>
+- spec: none
+- plan: none
+- ledger: .superpowers/sdd/progress.md
+- checklist: none
+- updated: <ISO-8601 UTC>
+```
+
+Creating this file is the pipeline's first action, not a side effect of the first
+stage transition — a cycle interrupted mid-scoping must still leave a state file
+for `/devcycle:continue` to resume from. If triage (below) picks a later entry
+stage, that is a stage transition: rewrite the file then.
+
 ## Triage the input
 
 Judge the maturity of `$ARGUMENTS`:
@@ -33,8 +55,8 @@ Announce the triage verdict and the entry stage before proceeding.
 
 ## State file
 
-Maintain `.devcycle/state.md` in the target repo. Create it when the pipeline starts
-and rewrite it at EVERY stage transition, exactly this shape:
+Maintain `.devcycle/state.md` (created in Step 0) and rewrite it at EVERY stage
+transition, exactly this shape:
 
 ```markdown
 # devcycle state
@@ -73,7 +95,12 @@ Run the stages in order, each via the named skill:
 ## Stage boundaries
 
 At every boundary: update `.devcycle/state.md`, then emit the handoff block as the
-stage's final output:
+stage's final output. **One block per completed stage, no batching:** when several
+stages complete in a single response or session, each stage still emits its own
+`## Handoff` block, in order, at that stage's end — never one merged or summary
+block for the run. A stage that is skipped or judged not applicable (e.g.
+on-device with no rendered surface) still emits its block: the skip IS the stage
+outcome. The finish stage emits the pipeline's final block. The block shape:
 
 ```markdown
 ## Handoff

@@ -9,6 +9,31 @@ Turn a rough request into an established scope before any design work starts. Th
 the devcycle pre-stage in front of `superpowers:brainstorming`: it settles *what is
 being asked*; design exploration, approach trade-offs, and spec writing stay upstream.
 
+## The target
+
+The stage ends with the most precise description of the desired end state the
+available answers allow, shaped as a well-structured goal — not a tidied-up
+restatement of the request. A one-line request leaves many open questions; this
+stage exists to resolve them or pin them as explicit `<tbd>`s, so every later
+stage is tailored to what the user actually needs.
+
+Division of labor: **the user knows the problem; the repo knows the code.**
+Questions ask for intent, desired outcomes, behavior at the edges, and
+priorities — things only the user can settle. What the change touches —
+components, affected files, other occurrences of the same pattern, whether the
+request is really a small fix or drags a larger change behind it — is the
+stage's own research job, established from the repo and *presented* to the user
+for confirmation, never requested from them. A user who happens to know
+internals may volunteer them; the interview must not depend on it.
+
+## Stage entry
+
+Verify `.devcycle/state.md` exists before any research or questions. If it is
+missing (the pipeline creates it as its first action; this check is the backstop),
+create it now — stage `scoping`, the current git branch, `none` for the
+spec/plan/checklist lines — so a cycle interrupted mid-interview still leaves a
+state file for `/devcycle:continue` to resume from.
+
 ## The discipline
 
 Whenever scope, intent, architecture, data, or user preference is uncertain:
@@ -48,7 +73,14 @@ that is uncertain.
 ## Output and handoff
 
 When the interview resolves (answers in, remaining unknowns marked `<tbd>`), present
-the scope summary: confirmed intent, constraints, in/out of scope, open `<tbd>` items.
+the scope summary as a well-structured goal:
+
+- **End state** — what is observably true when the work is done, in the user's terms.
+- **In scope / out of scope** — explicit on both sides.
+- **Affected areas** — components, files, and other occurrences of the pattern, as
+  established by this stage's research (confirmed, not sourced, with the user).
+- **Constraints** — what must not change, compatibility requirements, priorities.
+- **Open `<tbd>` items** — every unresolved unknown, none silently defaulted.
 
 REQUIRED next stage: `superpowers:brainstorming`, with the scope summary as its
 explored context — its questioning then targets design refinement, not
