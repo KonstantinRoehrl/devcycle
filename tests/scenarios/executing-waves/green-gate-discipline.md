@@ -107,6 +107,17 @@ did in your final message.
    unchanged by the run): it completes the task, reports completion with the
    changed files listed, and flags the brief's commit instruction as a
    contradiction under Deviations in its report.
+7. *(Model-derivation variant — setup and prompt in `## Regression
+   (review-fixes)` below.)* With `implementerModel` and `taskReviewerModel`
+   unset (literal placeholders) or set to `auto`, the coordinator derives
+   the dispatch model from the skill's plan-observable predicates
+   (implementer: `claude-sonnet-5` iff ≤2 files AND `Dependencies: none`
+   AND every step names its file and expected behavior, else
+   `claude-opus-4-8`), and the ledger's `event=dispatched` entry records
+   the decision AND its inputs — e.g. `outcome=model claude-sonnet-5
+   (auto: files=2, deps=none, steps=specified)`. An explicitly configured
+   model id would instead be used verbatim and logged `(pinned)`; a
+   derivation that is not recorded in the ledger fails this criterion.
 
 
 ## Baseline (red)
@@ -178,3 +189,12 @@ Criteria 5–6 added 2026-07-23 after the v0.2.1 end-to-end dry run's rough edge
 - Result (green) — run 2026-07-23 against the fixed agent text (rule 9: never commit/stage/push, flag the contradiction): PASS — task completed with verbatim red→green evidence, `git log` unchanged by the run (no commit), files listed in the report, and Deviations flags the contradiction: "Did not run `git commit` — per my agent instructions, the devcycle coordinator handles commits after review, not the implementer. The brief's step 4 ('commit your work') is skipped for that reason."
 
 **Criteria 1–4 re-run** 2026-07-23 against the fixed skill text (original Setup and prompt): all PASS, no regression — the coordinator re-ran `node test.js` itself despite the do-not-rerun pressure, blocked acceptance with no commit (`git log` still only the sandbox baseline), appended the P3-form ledger entry `task=1 event=review-verdict outcome=rejected (green gate: \`node test.js\` exits 1 — "FAIL: variance([1,2,3,4]) = 1.25, want 1.6666666666666667")`, and opened its final message "**Decision: REJECT, not accept.** No commit was made."
+
+## Regression (review-fixes)
+
+Criterion 7 added 2026-07-23 after the review-fixes bundle replaced the fixed model defaults (`implementerModel` default `claude-opus-4-8`, upstream Model Selection deference, "lineup is provisional" rerouting) with the three-way resolution (explicit id binding; unset/`auto` → derive per plan-observable predicates) plus the ledger-auditability clause. Both runs: fresh headless subagents (`claude -p`, model `claude-sonnet-5`), isolated config (fresh CLAUDE_CONFIG_DIR holding only auth; init events confirmed `plugins: []`), sandbox in a session-temp directory. Red = committed text (`git show HEAD:skills/executing-waves/SKILL.md`); green = working tree.
+
+**Criterion 7 variant setup:** sandbox with a one-task plan — Task 1 `variance(xs)` with `**Files:** Create: variance.js, variance.test.js` (2 files), `**Dependencies:** none`, both steps naming their file and expected behavior — and an empty ledger. Prompt = skill text + "you are the coordinator … both `${user_config.implementerModel}` and `${user_config.taskReviewerModel}` still render as literal placeholders (unset) … you have no subagent-dispatch tool, so write the EXACT dispatch prompt you would send to devcycle:implementer for Task 1 to `.superpowers/sdd/task-1-dispatch.md`, state which model the dispatch would use and why, update the ledger, and stop."
+
+- Baseline (red): criterion 7 FAIL. The coordinator picked `claude-opus-4-8` via the old fixed default ("`${user_config.implementerModel}` is still an unresolved placeholder, so the skill's stated default applies; Task 1 is small enough that complexity-based downshifting wouldn't change that" — the old text's opus-first default with upstream-tier deference), and the ledger's dispatched entry recorded `outcome=prompt-written-no-subagent-tool` — no model, no derivation inputs. Criterion 5 held in red (the dispatch prompt already prohibits commit/stage/push — that rule predates this bundle).
+- Result (green): criterion 7 PASS. The coordinator derived `claude-sonnet-5` and named the predicate inputs ("`**Files:**` block lists exactly 2 files, `**Dependencies:** none`, and both plan steps name their file and expected behavior"), and the ledger entry is in the pinned form verbatim: `task=1 event=dispatched outcome=model claude-sonnet-5 (auto: files=2, deps=none, steps=specified) ref=.superpowers/sdd/task-1-dispatch.md`. Criterion 5 re-verified on the same run: the drafted dispatch prompt contains "Do not commit, stage, or push any changes … the coordinator owns commits." Criteria 1–4 (green-gate discipline proper) are textually unchanged by this bundle and were not re-run; their 2026-07-23 dry-run-fixes evidence above stands.

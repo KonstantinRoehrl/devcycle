@@ -75,7 +75,9 @@ The finished plan satisfies this contract, consumed by `devcycle:executing-waves
 
 ## Handoff — required final output
 
-After saving the plan (or issuing a NO-GO report), end the stage with:
+After saving the plan (or issuing a NO-GO report), update `.devcycle/state.md`
+(`stage: execution` — the stage to resume at — and the `plan:` path; after a
+NO-GO, keep `stage: planning`) before emitting:
 
 ```markdown
 ## Handoff

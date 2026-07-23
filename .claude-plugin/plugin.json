@@ -12,7 +12,7 @@
   "dependencies": [
     {
       "name": "superpowers",
-      "marketplace": "superpowers-marketplace"
+      "marketplace": "claude-plugins-official"
     }
   ],
   "userConfig": {
@@ -25,26 +25,26 @@
     "implementerModel": {
       "type": "string",
       "title": "Implementer model",
-      "default": "claude-opus-4-8",
-      "description": "Model for implementer subagents; every dispatch passes its model explicitly."
+      "default": "auto",
+      "description": "Model id, or 'auto' (default) to let the coordinator derive per task; an explicit id is binding."
     },
     "taskReviewerModel": {
       "type": "string",
       "title": "Task reviewer model",
-      "default": "claude-sonnet-5",
-      "description": "Model for per-task reviewer subagents."
+      "default": "auto",
+      "description": "Model id, or 'auto' (default) to let the coordinator derive per task; an explicit id is binding."
     },
     "walkthroughModel": {
       "type": "string",
       "title": "Walkthrough model",
-      "default": "claude-sonnet-5",
-      "description": "Model for on-device walkthrough sessions."
+      "default": "auto",
+      "description": "Model id, or 'auto' (default) to let the coordinator derive per task; an explicit id is binding."
     },
     "branchReviewModel": {
       "type": "string",
       "title": "Branch review model",
-      "default": "claude-opus-4-8",
-      "description": "Model for the whole-branch review gate."
+      "default": "auto",
+      "description": "Model id, or 'auto' (default) to let the coordinator derive per task; an explicit id is binding."
     },
     "reviewDepth": {
       "type": "string",

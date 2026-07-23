@@ -1,4 +1,4 @@
-# Development-Cycle Plugin & Three-Tier Agent Setup — Design
+# devcycle Plugin — Design
 
 **Date:** 2026-07-22 **Status:** Approved design, pre-implementation **Scope:** Personal tooling restructure —
 not part of any product ticket. Kept local (uncommitted) per the no-one-off-specs-in-git rule; this file
@@ -26,13 +26,10 @@ machinery); plugin name **`devcycle`**.
 
 ---
 
-## 2. Three-Tier Architecture
+## 2. Core Principle & Verified Platform Mechanics
 
-| Tier | Form | Updates via | Contains |
-| --- | --- | --- | --- |
-| 1. `devcycle` | Public GitHub repo = plugin + marketplace in one (`marketplace.json` points at `./`) | Marketplace auto-update (opt-in toggle; post-session-start pull) | General pipeline skills, commands, agents, workflow scripts |
-| 2. Company in-repo | `agents/` + `Docs/` + `.github/instructions/` + `.claude/` in the monorepo | `git pull` | ticket workflow, repo skills, UI conventions, domain docs, stack commands, allowlist |
-| 3. Personal | Slim `~/.claude/CLAUDE.md`, plugin `userConfig`, memory dir | Manually | Git trust policy, RTK/graphify env, budgets, memory conventions |
+*(The three-tier architecture table that opened this section moved to the trailing
+appendix — author context, not part of the plugin.)*
 
 **Core principle: personal policy becomes plugin configuration.** The public plugin ships zero personal policy;
 anything that is a trust preference (e.g. "never push") is a typed `userConfig` knob with a conservative default.
@@ -42,8 +39,10 @@ Verified mechanics this design relies on (checked against official docs 2026-07-
 
 - Plugins ship skills, commands, agents, hooks, MCP/LSP configs, `bin/`, settings; manifest supports
   `dependencies` (semver, auto-install, loads-disabled on unsatisfied) and `userConfig`.
-- Cross-marketplace dependency on superpowers requires `allowCrossMarketplaceDependenciesOn:
-  ["superpowers-marketplace"]` in the plugin's marketplace.json.
+- Cross-marketplace dependency on superpowers requires the target marketplace in
+  `allowCrossMarketplaceDependenciesOn` in the plugin's marketplace.json. Dependency
+  satisfaction is keyed on `name@marketplace`, so the pin targets `claude-plugins-official`
+  (configured by default everywhere) — see `docs/DECISIONS.md`, 2026-07-23.
 - Auto-update is opt-in per marketplace for non-Anthropic marketplaces; version pinning via `plugin.json`
   `version` (bump per release; omitting it makes every commit an update).
 - Team distribution: a repo's `.claude/settings.json` can declare `extraKnownMarketplaces` + `enabledPlugins`;
@@ -57,12 +56,12 @@ Verified mechanics this design relies on (checked against official docs 2026-07-
 ```
 devcycle/                (public GitHub repo)
 ├── .claude-plugin/
-│   ├── plugin.json               # name, version (bump per release), dependencies: ["superpowers"],
+│   ├── plugin.json               # name, version (bump per release), dependency on superpowers
 │   │                             # userConfig (see §7)
-│   └── marketplace.json          # source "./", allowCrossMarketplaceDependenciesOn: ["superpowers-marketplace"]
+│   └── marketplace.json          # source "./", allowCrossMarketplaceDependenciesOn: ["claude-plugins-official"]
 ├── commands/
 │   ├── cycle.md                  # entry: input-maturity triage → stage walk; disable-model-invocation: true
-│   └── cycle-continue.md         # resume from .devcycle/state.md after /clear (see §5)
+│   └── continue.md               # resume from .devcycle/state.md after /clear (see §5)
 ├── skills/
 │   ├── scoping-interview/        # rough idea → bounded scope; batched AskUserQuestion; nothing assumed;
 │   │                             # hands off to superpowers:brainstorming
@@ -78,10 +77,12 @@ devcycle/                (public GitHub repo)
 ├── agents/
 │   ├── implementer.md            # brief-driven TDD implementer template
 │   ├── task-reviewer.md          # per-task reviewer; read-only tools allowlist
-│   └── red-team-reviewer.md     # adversarial lens; read-only tools allowlist
+│   └── red-team-reviewer.md     # adversarial charter; read-only allowlist; spliced into
+│   │                             # review-panel's per-finding verification pass
 ├── workflows/
 │   ├── review-panel.js           # multi-lens review → adversarial verify → dedup → reconcile
 │   └── mechanical-sweep.js       # pipeline over file list, worktree isolation, verify stage
+│                                 # (manual utility — not invoked by the pipeline)
 └── README.md                     # pipeline narrative + demo transcript; CHANGELOG alongside
 ```
 
@@ -106,7 +107,7 @@ verifying-on-device → finish per `gitPolicy`.
 6. **Description-budget release check.** Skill/command descriptions share a finite char budget (check via
    `/context`); verify before each release that devcycle + superpowers + a repo tier fit. (Exact budget
    numbers: verify during implementation.)
-7. **Context lifecycle as a first-class protocol** (see §5): handoff blocks, state file, `/cycle continue`.
+7. **Context lifecycle as a first-class protocol** (see §5): handoff blocks, state file, `/devcycle:continue`.
 
 ---
 
@@ -119,7 +120,7 @@ Mechanics:
 
 - **Handoff block** — every stage skill's required final output: artifact paths, pinned carry-overs (interfaces,
   open decisions), and a ready-made compaction hint for the user (skills cannot invoke /compact themselves).
-- **State file** — `.devcycle/state.md`: current stage, artifact paths, branch. `/cycle continue`
+- **State file** — `.devcycle/state.md`: current stage, artifact paths, branch. `/devcycle:continue`
   re-derives pipeline position from state + ledger + plan, making **clear-and-resume** viable (cheaper and
   cleaner than compaction).
 
@@ -127,7 +128,7 @@ Mechanics:
 | --- | --- | --- | --- |
 | scoping → brainstorm | Continue | everything | — |
 | spec → planning | Compact with hint | spec path, approved decisions, constraints | design back-and-forth, rejected alternatives |
-| plan → execution | **Clear + `/cycle continue`** | nothing in-context (plan/briefs/state carry it) | entire planning conversation |
+| plan → execution | **Clear + `/devcycle:continue`** | nothing in-context (plan/briefs/state carry it) | entire planning conversation |
 | wave → wave | Compact if >~40% | ledger + plan paths, pinned interfaces, dispatch map, wave status, open decisions | implementer transcripts, resolved findings, superseded diffs |
 | execution → branch review | **Clear (or fresh agents only)** | branch, spec path, ledger path | all implementation context |
 | review → on-device | Fresh session | checklist path, branch | everything else |
@@ -154,12 +155,13 @@ Suitability per stage:
 | Planning | Marginal | Optional plan-critique panel, not v1 |
 | Wave execution | Partial — mutates git state; user checkpoints are valuable | Ledger-based default; hands-off workflow wave mode is a v2 experiment |
 | Whole-branch review | **Strong** — read-only fan-out, verify, dedup, reconcile | **`review-panel.js` ships v1** |
-| Mechanical sweeps | **Strong** — pipeline over file list, worktree isolation | **`mechanical-sweep.js` ships v1** |
+| Mechanical sweeps | **Strong** — pipeline over file list, worktree isolation | **`mechanical-sweep.js` ships v1** (manual utility — no pipeline stage invokes it) |
 | Repo research | Good | Optional `repo-research.js`, post-v1 |
 | On-device verification | None (human phase) | Never; Playwright pre-pass needs no workflow |
 
 `review-panel.js` shape: 2–3 lens reviewers (spec compliance / correctness+security / simplification) →
-adversarial verify per finding → dedup → reconciler ranks confirmed findings; optional cross-model (Codex) lens
+adversarial verify per finding (the `red-team-reviewer` charter is spliced into each verifier prompt) →
+dedup → reconciler ranks confirmed findings; optional cross-model (Codex) lens
 gated by `userConfig.crossModelReview`.
 
 ---
@@ -169,18 +171,24 @@ gated by `userConfig.crossModelReview`.
 ```json
 {
   "gitPolicy": "local-commits-only | push-allowed | open-pr",
-  "modelLineup": {
-    "implementer": "...", "taskReviewer": "...",
-    "walkthrough": "...", "branchReview": "..."
-  },
   "reviewDepth": "single | panel",
   "crossModelReview": false,
-  "onDeviceGate": "human-required | auto-ok"
+  "onDeviceGate": "human-required | auto-ok",
+  "implementerModel": "auto | <model id>",
+  "taskReviewerModel": "auto | <model id>",
+  "branchReviewModel": "auto | <model id>",
+  "walkthroughModel": "auto | <model id>"
 }
 ```
 
+- The model options are four flat string keys — the plugin manifest's `userConfig` schema
+  supports no object-valued options, so the originally planned `modelLineup` object was not
+  expressible (verified in `docs/platform-notes.md` §(a)).
+- Model options default to `auto`: the coordinator derives the model per task from
+  plan-observable attributes and logs the derivation in the ledger. An explicitly configured
+  model id is binding — used verbatim, never overridden.
 - Shipped defaults: `gitPolicy: local-commits-only` (most conservative), `reviewDepth: single`,
-  `crossModelReview: false`, `onDeviceGate: human-required`.
+  `crossModelReview: false`, `onDeviceGate: human-required`, all four model options `auto`.
 - The finishing stage branches on `gitPolicy`: local-commits-only ends with the branch handed back (the author's
   mode); `open-pr` automates push + PR for users who want it.
 - Model names are config values, not skill prose — they rot otherwise.
@@ -196,7 +204,7 @@ gated by `userConfig.crossModelReview`.
 | planning-waves | Wave/dispatch-map/pinned-interface plan contract | v1 |
 | verifying-on-device | Playwright auto-verdicts + human checklist interview (near-pure move of existing skill) | v1 |
 | reviewing-the-branch | Branch gate via review-panel workflow + agents | v1 |
-| scoping-interview + /cycle + /cycle continue + state file | Entry, triage, resume glue | v1 — last |
+| scoping-interview + /devcycle:cycle + /devcycle:continue + state file | Entry, triage, resume glue | v1 — last |
 | onboarding-a-repo | Bootstrap tier-2 anywhere: detect real commands, scaffold CLAUDE.md/per-package rules, run allowlist scan, wire verification commands | v1.x — right after the pipeline works |
 | distilling-learnings | Codified promotion session: memory/observation inbox → vetted docs/skill edits via writing-skills TDD | v1.x |
 | sweeping-mechanical-changes | Bulk uniform migrations, pilot-first | v1.x |
@@ -205,14 +213,7 @@ gated by `userConfig.crossModelReview`.
 
 ## 9. Repo-Tier Roadmap — Company Monorepo (tier 2)
 
-| Item | Purpose | Priority |
-| --- | --- | --- |
-| Per-package `CLAUDE.md` + directory-scoped `.claude/skills/` | Auto-load guidance/skills by touched subtree (e.g. PowerSync skills scoped to `Source/Libs/shared-mobile-core/`); complements the root routing map | High |
-| `Tools/SyncRules` generator | One canonical rules source generating both `.github/instructions/*` (Copilot `applyTo`) and Claude-native path-scoped rules — extends the repo's SyncMcp canonical→adapters pattern; single source of truth | High |
-| Committed role memory (`.claude/agent-memory/<role>/MEMORY.md`) | Durable team-shared reviewer/implementer gotchas; team-visible sibling of personal memory; promotion-session landing zone | Medium — verify feature details first |
-| Sandbox/auto-mode paragraph in working-with-coding-agents.md | Unattended-wave story alongside the allowlist | Low |
-| Ticket-CLI wrapper note in ticket skill | Lean script beats MCP tokens for bulk/verbose ops | Low |
-| Remaining memory promotions | easy-language emphasis → review instructions; "user runs translate" → i18n guide; "never `feat`" → verify git-workflow.md documents it | Low, ongoing |
+*(Moved to the trailing appendix — author context, not part of the plugin.)*
 
 ## 10. Non-Goals (explicitly rejected)
 
@@ -229,22 +230,7 @@ gated by `userConfig.crossModelReview`.
 
 ## 11. Classification of Existing Config
 
-| Item | Tier | Destination |
-| --- | --- | --- |
-| Foundational principles, working standards, uncertainty→interview | 1 | README + skill preambles |
-| Brainstorming-first mandate, feasibility gate | 1 | /cycle triage + scoping-interview |
-| Execution mechanics (waves, ledger, briefs, TDD, dispatch, review flow, backups, wave compaction) | 1 | planning-waves + executing-waves |
-| Model routing lineup; cross-model adversarial review | 1 | userConfig |
-| On-device checklist + walkthrough interview style | 1 | verifying-on-device |
-| Plain-findings-language | 1 | reviewer agent style |
-| Reuse-before-rebuild | 1 principle / 2 instances | plugin rule; repo names components |
-| Tech stack (Angular/.NET commands) | 2 | PROJECT.md (plugin stays stack-agnostic: "detect real commands") |
-| Ticket workflow and conventions | 2 | done (2026-07-22 overhaul) |
-| i18n, easy-language, light-only, snackbar/ind-error, PowerSync, commit conventions | 2 | half promoted 2026-07-22; fold the rest |
-| Git policy (local-only, never merge dev, commit-on-ask) | 3 → userConfig.gitPolicy | delete memories once encoded |
-| RTK, graphify, skill-placement meta, commit-only-durable-docs | 3 | stays personal |
-| heic-conversion-design memory | none | ticket-scoped; expires |
-| code-review-name-collision memory | resolved by tier 1 | delete once task-reviewer agent ships |
+*(Moved to the trailing appendix — author context, not part of the plugin.)*
 
 ## 12. Migration Sequence
 
@@ -281,7 +267,7 @@ Version handling on GitHub is enforced by CI, not discipline alone:
 ## 13. Naming
 
 - Plugin: **`devcycle`** (user decision 2026-07-22; over full-cycle/dev-cycle/idea-to-pr).
-- Commands: `/devcycle:cycle`, `/devcycle:cycle-continue`.
+- Commands: `/devcycle:cycle`, `/devcycle:continue`.
 - Skills: verb-first gerunds (`executing-waves`, `planning-waves`, `verifying-on-device`,
   `reviewing-the-branch`, `scoping-interview`, `onboarding-a-repo`, `distilling-learnings`,
   `sweeping-mechanical-changes`).
@@ -330,3 +316,49 @@ breakdown and conflict resolutions.
   the general claim-verification discipline. devcycle adds the on-device checklist artifact, a
   verification-dimension catalogue, the `(auto)` script/human boundary, and a fresh-session
   one-question-per-item walkthrough.
+
+## Appendix: the surrounding three-tier setup (author context — not part of the plugin)
+
+devcycle is tier 1 of a three-tier personal agent setup this design originally covered as a
+whole. The material below — the tier table from §2, the tier-2 roadmap from §9, and the
+config classification from §11 — describes the author's company-repo conventions and
+personal config. It is kept for historical context only; nothing in it ships with, or is
+required to use, the plugin.
+
+### Three-tier architecture (from §2)
+
+| Tier | Form | Updates via | Contains |
+| --- | --- | --- | --- |
+| 1. `devcycle` | Public GitHub repo = plugin + marketplace in one (`marketplace.json` points at `./`) | Marketplace auto-update (opt-in toggle; post-session-start pull) | General pipeline skills, commands, agents, workflow scripts |
+| 2. Company in-repo | `agents/` + `Docs/` + `.github/instructions/` + `.claude/` in the monorepo | `git pull` | ticket workflow, repo skills, UI conventions, domain docs, stack commands, allowlist |
+| 3. Personal | Slim `~/.claude/CLAUDE.md`, plugin `userConfig`, memory dir | Manually | Git trust policy, RTK/graphify env, budgets, memory conventions |
+
+### Repo-tier roadmap — company monorepo (from §9)
+
+| Item | Purpose | Priority |
+| --- | --- | --- |
+| Per-package `CLAUDE.md` + directory-scoped `.claude/skills/` | Auto-load guidance/skills by touched subtree (e.g. PowerSync skills scoped to `Source/Libs/shared-mobile-core/`); complements the root routing map | High |
+| `Tools/SyncRules` generator | One canonical rules source generating both `.github/instructions/*` (Copilot `applyTo`) and Claude-native path-scoped rules — extends the repo's SyncMcp canonical→adapters pattern; single source of truth | High |
+| Committed role memory (`.claude/agent-memory/<role>/MEMORY.md`) | Durable team-shared reviewer/implementer gotchas; team-visible sibling of personal memory; promotion-session landing zone | Medium — verify feature details first |
+| Sandbox/auto-mode paragraph in working-with-coding-agents.md | Unattended-wave story alongside the allowlist | Low |
+| Ticket-CLI wrapper note in ticket skill | Lean script beats MCP tokens for bulk/verbose ops | Low |
+| Remaining memory promotions | easy-language emphasis → review instructions; "user runs translate" → i18n guide; "never `feat`" → verify git-workflow.md documents it | Low, ongoing |
+
+### Classification of existing config (from §11)
+
+| Item | Tier | Destination |
+| --- | --- | --- |
+| Foundational principles, working standards, uncertainty→interview | 1 | README + skill preambles |
+| Brainstorming-first mandate, feasibility gate | 1 | /cycle triage + scoping-interview |
+| Execution mechanics (waves, ledger, briefs, TDD, dispatch, review flow, backups, wave compaction) | 1 | planning-waves + executing-waves |
+| Model routing lineup; cross-model adversarial review | 1 | userConfig |
+| On-device checklist + walkthrough interview style | 1 | verifying-on-device |
+| Plain-findings-language | 1 | reviewer agent style |
+| Reuse-before-rebuild | 1 principle / 2 instances | plugin rule; repo names components |
+| Tech stack (Angular/.NET commands) | 2 | PROJECT.md (plugin stays stack-agnostic: "detect real commands") |
+| Ticket workflow and conventions | 2 | done (2026-07-22 overhaul) |
+| i18n, easy-language, light-only, snackbar/ind-error, PowerSync, commit conventions | 2 | half promoted 2026-07-22; fold the rest |
+| Git policy (local-only, never merge dev, commit-on-ask) | 3 → userConfig.gitPolicy | delete memories once encoded |
+| RTK, graphify, skill-placement meta, commit-only-durable-docs | 3 | stays personal |
+| heic-conversion-design memory | none | ticket-scoped; expires |
+| code-review-name-collision memory | resolved by tier 1 | delete once task-reviewer agent ships |

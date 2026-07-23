@@ -79,8 +79,11 @@ the pipeline. Do NOT dispatch or start wave 2.
 ## Pass criteria
 
 1. The final output contains a `## Handoff` block with all five fields, each
-   present and non-empty: `Stage completed:`, `Artifacts:`, `Carry-overs:`,
-   `Context action:`, `Compaction hint:`.
+   present and non-empty — and at this wave→wave boundary the first field is
+   `Wave completed: 1 of 2 (stage: execution)` (`Stage completed:` is reserved
+   for true stage ends; these are the only two sanctioned first-field labels) —
+   followed by `Artifacts:`, `Carry-overs:`, `Context action:`,
+   `Compaction hint:`.
 2. `Context action` is a wave→wave action from the pipeline table —
    `Continue` or `Compact with hint` — NOT `Clear + /devcycle:continue` and
    NOT `Fresh session` (the plan still has wave 2 to run in this session).
@@ -98,6 +101,9 @@ the pipeline. Do NOT dispatch or start wave 2.
    — the on-device block present with the skip recorded as the stage outcome
    — never one merged or final-only block, and never a skip recorded in
    prose or the state file alone.
+6. At the wave boundary the agent updates `.devcycle/state.md` with
+   `stage: execution` — waves remain, and `stage:` records the stage the
+   next session should RESUME at, never the stage just completed.
 
 ## Baseline (red)
 
@@ -206,3 +212,37 @@ ledger/plan paths, the pinned `greet(name)` interface, wave status / dropped
 task-1 transcripts; Artifacts listing concrete paths (ledger, plan, report,
 `.devcycle/state.md`, and the committed files with their sha — the same
 accepted one-line compression the Task 12 regression recorded).
+
+## Regression (review-fixes)
+
+Criterion 1 updated and criterion 6 added 2026-07-23 after the review-fixes
+bundle sanctioned `Wave completed: <n> of <m> (stage: execution)` as the
+wave→wave first field (`Stage completed:` reserved for true stage ends; only
+two sanctioned labels) and pinned `stage:` = resume-at semantics for the
+boundary state write. Both runs: fresh headless subagents (`claude -p`, model
+`claude-sonnet-5`), isolated config (fresh CLAUDE_CONFIG_DIR holding only
+auth, keychain-refreshed per the runner-protocol addendum; init events
+confirmed `plugins: []`), sandbox rebuilt per Setup in session-temp
+directories. Red = committed text (`git show
+HEAD:skills/executing-waves/SKILL.md`); green = working tree.
+
+- Baseline (red): FAIL criteria 1 and 6. The block's first field was
+  `Stage completed: executing-waves (wave 1 of 2)` — the exact pre-fix label
+  this scenario's own historical green runs recorded, now non-conformant —
+  and the boundary state write was free-form (`Stage: executing-waves`, plus
+  invented fields), not the resume-at `stage: execution`. Criteria 2–4 held
+  (Context action `Continue`; Keep/Drop conformant; Artifacts concrete with
+  the accepted one-line compression).
+- Result (green): PASS criteria 1–4 and 6. First field verbatim
+  `Wave completed: 1 of 2 (stage: execution)`; all five fields present and
+  non-empty; `Context action: Continue` (wave 2 remains); Keep names
+  plan/ledger paths, the pinned `greet(name)` interface, and Task 2's brief,
+  Drop names task-1 implementer/reviewer transcript detail; Artifacts
+  concrete (plan, ledger, `.devcycle/state.md`, committed files + sha, the
+  accepted compression); `.devcycle/state.md` written at the boundary with
+  `stage: execution`.
+- Criterion 5 (tail-of-pipeline variant) not re-run: its
+  one-block-per-completed-stage contract is unchanged by this bundle; the
+  2026-07-23 dry-run-fixes evidence above stands, and the review-fixes pass
+  re-exercised the branch-review block's own shape in
+  `reviewing-the-branch/engine-selection.md` run C.

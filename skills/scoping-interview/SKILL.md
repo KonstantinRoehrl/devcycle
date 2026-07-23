@@ -31,8 +31,8 @@ internals may volunteer them; the interview must not depend on it.
 Verify `.devcycle/state.md` exists before any research or questions. If it is
 missing (the pipeline creates it as its first action; this check is the backstop),
 create it now — stage `scoping`, the current git branch, `none` for the
-spec/plan/checklist lines — so a cycle interrupted mid-interview still leaves a
-state file for `/devcycle:continue` to resume from.
+scope/spec/plan/checklist lines, `configured: no` — so a cycle interrupted
+mid-interview still leaves a state file for `/devcycle:continue` to resume from.
 
 ## The discipline
 
@@ -72,8 +72,9 @@ that is uncertain.
 
 ## Output and handoff
 
-When the interview resolves (answers in, remaining unknowns marked `<tbd>`), present
-the scope summary as a well-structured goal:
+When the interview resolves (answers in, remaining unknowns marked `<tbd>`), write
+the scope summary to `.devcycle/scope.md` — and present it to the user — as a
+well-structured goal:
 
 - **End state** — what is observably true when the work is done, in the user's terms.
 - **In scope / out of scope** — explicit on both sides.
@@ -88,14 +89,15 @@ re-establishing scope. Do not restate or replace its process here.
 
 End the stage by naming the next stage explicitly in your final output — state
 that the cycle now hands off to `superpowers:brainstorming` with the scope
-summary as its explored context — followed by the devcycle handoff block
-(scoping → brainstorm continues in the same conversation, per the pipeline
-lifecycle):
+summary as its explored context. Update `.devcycle/state.md` (`stage:
+brainstorm` — the stage to resume at — and `scope: .devcycle/scope.md`) before
+emitting the devcycle handoff block (scoping → brainstorm continues in the
+same conversation, per the pipeline lifecycle):
 
 ```markdown
 ## Handoff
 - Stage completed: scoping
-- Artifacts: <paths, one per line, or "none (scope summary above)">
+- Artifacts: .devcycle/scope.md
 - Carry-overs: <confirmed scope, constraints, open `<tbd>` items>
 - Context action: Continue
 - Compaction hint: Keep everything. Drop nothing.

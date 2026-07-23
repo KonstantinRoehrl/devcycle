@@ -17,28 +17,76 @@ default `local-commits-only`. Allowed values: `local-commits-only`, `push-allowe
 `open-pr`; treat anything else as invalid and fall back to the default. Other knobs
 (models, review depth, on-device gate) are read the same way, via their own
 `${user_config.KEY}` placeholders, by the stage skills that consume them.
+When a knob's own placeholder is literal but the state file's `configured:`
+line records a value for it (first-run walkthrough below), that recorded value
+governs this run — same-session substitution cannot refresh, so `--config`
+writes only reach future sessions.
 
 ## Step 0 — create the state file (FIRST action, binding)
 
-Before triage, before any stage work, before any other output: create
-`.devcycle/state.md` in the target repo with exactly this content (stage `scoping`,
-the current branch, artifact lines empty):
+Before triage, before any stage work, before any other output: ensure
+`.devcycle/state.md` exists in the target repo. If it is absent, create it with
+`stage: scoping`, the current branch, `configured: no`, and `none` for every
+artifact line. If a state file already exists with `stage: done` (a prior
+completed cycle in this repo), carry its `configured:` line forward unchanged
+and reset every other line the same way. If it exists with any OTHER stage, an
+in-flight cycle exists: do NOT reset it — tell the user, naming its stage and
+branch, and offer to resume it via `/devcycle:continue` or to start over; only
+on explicit confirmation of starting over reset the file (carrying
+`configured:` forward as above). This shape is the single source of truth —
+every later rewrite uses exactly it:
 
 ```markdown
 # devcycle state
-- stage: scoping
-- branch: <current git branch>
-- spec: none
-- plan: none
+- stage: <scoping|brainstorm|planning|execution|branch-review|on-device|finish|done>  (the stage to RESUME at)
+- branch: <git branch>
+- scope: <path or none>
+- spec: <path or none>
+- plan: <path or none>
 - ledger: .superpowers/sdd/progress.md
-- checklist: none
+- checklist: <path or none>
+- configured: <no | defaults | date + KEY=VALUE list>
 - updated: <ISO-8601 UTC>
 ```
+
+`stage:` records the stage the NEXT session should resume at, never the stage
+just completed: at every transition, write the upcoming stage's name.
 
 Creating this file is the pipeline's first action, not a side effect of the first
 stage transition — a cycle interrupted mid-scoping must still leave a state file
 for `/devcycle:continue` to resume from. If triage (below) picks a later entry
 stage, that is a stage transition: rewrite the file then.
+
+## First-run configuration (after Step 0, before triage)
+
+Offer a one-time configuration walkthrough if and only if BOTH hold:
+`${user_config.gitPolicy}`, `${user_config.reviewDepth}`,
+`${user_config.crossModelReview}`, and `${user_config.onDeviceGate}` all still
+render as literal `${user_config` placeholders, AND the state file's
+`configured:` line reads `no`. Otherwise skip straight to triage.
+
+The walkthrough is ONE AskUserQuestion batch over those four knobs — one line
+of meaning each, the default marked "(recommended)" — plus a first-class
+option **"use defaults, don't ask again"**:
+
+- `gitPolicy` — what the finish stage may do with the branch
+  (`local-commits-only` recommended · `push-allowed` · `open-pr`).
+- `reviewDepth` — branch review engine (`single` recommended · `panel`).
+- `crossModelReview` — add a cross-model lens to the review panel
+  (`false` recommended · `true`).
+- `onDeviceGate` — whether the on-device checklist closes only via a human
+  walkthrough (`human-required` recommended · `auto-ok`).
+
+Model knobs are excluded: models are chosen automatically per task unless you
+pin one in `/plugin configure`.
+
+Apply the answers via `claude plugin install devcycle@devcycle --config
+KEY=VALUE` (one `--config` per knob) — including on "use defaults": write the
+explicit default values, so the placeholders substitute in future sessions and
+this offer never fires again. Record the answers in the state file's
+`configured:` line — `defaults`, or the date plus the KEY=VALUE list. Because
+same-session substitution cannot refresh, stage skills read THIS run's values
+from that line (see Configuration above).
 
 ## Triage the input
 
@@ -56,18 +104,9 @@ Announce the triage verdict and the entry stage before proceeding.
 ## State file
 
 Maintain `.devcycle/state.md` (created in Step 0) and rewrite it at EVERY stage
-transition, exactly this shape:
-
-```markdown
-# devcycle state
-- stage: <scoping|brainstorm|planning|execution|branch-review|on-device|finish>
-- branch: <git branch>
-- spec: <path or none>
-- plan: <path or none>
-- ledger: .superpowers/sdd/progress.md
-- checklist: <path or none>
-- updated: <ISO-8601 UTC>
-```
+transition, in exactly Step 0's shape with current values: `stage:` names the
+stage to resume at (the upcoming stage), and the `configured:` line is always
+preserved.
 
 ## Stage walk
 
@@ -92,6 +131,9 @@ Run the stages in order, each via the named skill:
    - `open-pr`: push the branch and open a PR whose title parses as a Conventional
      Commit; do not merge it.
 
+   As the finish stage's final state-file write, set `stage: done` and a fresh
+   `updated:` timestamp — nothing remains to resume.
+
 ## Stage boundaries
 
 At every boundary: update `.devcycle/state.md`, then emit the handoff block as the
@@ -111,6 +153,11 @@ outcome. The finish stage emits the pipeline's final block. The block shape:
 - Compaction hint: Keep <X>. Drop <Y>.
 ```
 
+At a wave → wave boundary within execution the first field is instead
+`Wave completed: <n> of <m> (stage: execution)` — `Stage completed:` is
+reserved for true stage ends. These are the only two sanctioned first-field
+labels.
+
 Pick the context action from this table and recommend it to the user explicitly:
 
 | Boundary | Action | Keep | Drop |
@@ -119,5 +166,5 @@ Pick the context action from this table and recommend it to the user explicitly:
 | brainstorm → planning (spec approved) | Compact with hint | spec path, decisions, constraints | design back-and-forth |
 | planning → execution (plan approved) | Clear + `/devcycle:continue` | nothing (files carry it) | planning conversation |
 | wave → wave (within execution) | Compact if over ~40% context | ledger/plan paths, pinned interfaces, dispatch map, wave status | implementer transcripts, resolved findings |
-| execution → branch-review | Clear or fresh agents (a reviewer that watched the code being written inherits the implementer's assumptions) | branch, spec path, ledger path | all implementation context |
+| execution → branch-review | Clear + `/devcycle:continue` or Fresh session (a reviewer that watched the code being written inherits the implementer's assumptions) | branch, spec path, ledger path | all implementation context |
 | branch-review → on-device | Fresh session | checklist path, branch | everything else |

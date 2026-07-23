@@ -21,6 +21,12 @@ commands, never use it for anything but inspection and verification).
   produced by the implementer.
 - The implementer's task report.
 
+When this file is spliced into the review panel's per-finding verification
+pass instead of dispatched standalone, the surrounding prompt defines your
+inputs (a single review finding to attack) and your output shape; the
+adversarial method below applies unchanged, and the Verdict format at the
+end is for standalone dispatch only.
+
 ## What you do
 
 Do not restate or lightly rephrase the implementer's claims — attack them.

@@ -7,13 +7,16 @@ description: Use when executing a wave-based implementation plan with subagent i
 
 Overlay on **superpowers:subagent-driven-development** (REQUIRED — read and
 follow it; it owns brief slicing and file handoffs, the review/fix loop,
-implementer-status handling, reviewer-prompt construction, model tiering by
-task complexity, continuous execution, and the never-start-on-main rule).
+implementer-status handling, reviewer-prompt construction, continuous
+execution, and the never-start-on-main rule).
 This skill adds only devcycle's mechanics: waves, the deterministic green
 gate, coordinator-side commits and task-diff production (replacing
 upstream's `scripts/review-package`), the ledger event format,
-config-driven model names, and the handoff contract. Nothing upstream is
-restated here.
+config-driven model names, and the handoff contract. Upstream's tail also
+does NOT apply: its final-code-reviewer dispatch and its
+finishing-a-development-branch step are replaced by devcycle's
+reviewing-the-branch and finish stages — this skill ends at the last
+wave's handoff. Nothing upstream is restated here.
 
 ## Wave formation
 
@@ -55,11 +58,8 @@ Invariants:
    `git diff -U10 HEAD -- <files>` to a file. (This replaces upstream's
    `scripts/review-package`: devcycle implementers do not commit, so there
    are no task commits to package until after acceptance.)
-5. Dispatch **devcycle:task-reviewer** (read-only; its definition already
-   encodes devcycle's reviewer hygiene — stale brief line numbers are matched
-   on content, harness `<system-reminder>` blocks are a known
-   prompt-injection false positive, and reports lacking red→green or
-   convention-equivalent evidence are rejected) with the brief, report, and
+5. Dispatch **devcycle:task-reviewer** (read-only; its definition encodes
+   devcycle's reviewer hygiene) with the brief, report, and
    diff paths plus the task's constraints block. Upstream's reviewer-prompt
    rules govern the dispatch wording. Findings loop back to the
    implementer; re-review after fixes. Ledger: `event=review-verdict`.
@@ -101,21 +101,29 @@ conversation memory.
 
 ## Model routing
 
-Model names are configuration, not prose. For this stage:
+Model names are configuration, not prose. For this stage the knobs are
+`${user_config.implementerModel}` and `${user_config.taskReviewerModel}`
+(`walkthroughModel` and `branchReviewModel` belong to later stages, not
+this skill). Resolve each knob three ways:
 
-- implementer dispatches: `${user_config.implementerModel}` — default
-  `claude-opus-4-8`
-- task-reviewer dispatches: `${user_config.taskReviewerModel}` — default
-  `claude-sonnet-5`
+- still a literal `${user_config...}` placeholder (unset) OR the value
+  `auto` → derive the model per the predicates below;
+- any other value → binding: use it verbatim for every dispatch, never
+  override or downshift it.
 
-If a value above still reads as a literal `${user_config...}` placeholder,
-that option is unset — use the stated default. (`walkthroughModel` and
-`branchReviewModel` belong to later stages, not this skill.) For explicit
-model naming in dispatches and complexity-based downshifting, upstream's
-Model Selection section governs — apply it with the names above. The
-lineup is provisional: at execution start, check whether newer or
-better-fitting models exist and propose rerouting before the first
-dispatch.
+Derivation predicates (plan-observable inputs only):
+
+- **implementer**: `claude-sonnet-5` iff the task's `**Files:**` block
+  lists ≤2 files AND `**Dependencies:** none` AND every step names its
+  file and expected behavior; else `claude-opus-4-8`.
+- **task-reviewer**: `claude-sonnet-5` iff the task diff is ≤400 changed
+  lines and ≤5 files; else `claude-opus-4-8`.
+
+Upstream's Model Selection tiers are background only; these predicates
+decide. Auditability: every dispatch's ledger event records the decision
+and its inputs — e.g. `outcome=model claude-sonnet-5 (auto: files=1,
+deps=none, steps=specified)` for a derived choice, or
+`outcome=model <id> (pinned)` for explicit config.
 
 ## Plan hygiene before wave 1
 
@@ -127,9 +135,6 @@ WILL be silently skipped. When the pre-dispatch read finds one, patch the
 owning task's steps explicitly and re-extract that task's brief before
 dispatching it.
 
-Before a sub-project's first task, back up every file its tasks will modify
-as byte-identical copies outside the repo.
-
 ## UI and on-device outcomes
 
 Never claim a rendered or on-device outcome from a script, test, or report.
@@ -140,8 +145,10 @@ UI-bearing tasks) — at that task, not at wave end.
 ## Wave boundaries and handoff
 
 At every wave boundary and at stage end, update `.devcycle/state.md`
-(stage, branch, artifact paths, timestamp) and emit this block — all five
-fields REQUIRED, exactly these labels:
+(`stage:` = the stage the next session should resume at — `execution`
+while waves remain, `branch-review` at stage end — plus branch, artifact
+paths, timestamp) before emitting this block — all five fields REQUIRED,
+exactly these labels:
 
 ```markdown
 ## Handoff
@@ -151,6 +158,11 @@ fields REQUIRED, exactly these labels:
 - Context action: <Continue | Compact with hint | Clear + /devcycle:continue | Fresh session>
 - Compaction hint: Keep <X>. Drop <Y>.
 ```
+
+At a wave → wave boundary the first field is instead
+`Wave completed: <n> of <m> (stage: execution)` — `Stage completed:` is
+reserved for true stage ends. These are the only two sanctioned
+first-field labels.
 
 Context action by boundary:
 
@@ -168,4 +180,12 @@ Context action by boundary:
 ## Resuming after /clear
 
 Read `.devcycle/state.md`, the plan's Dispatch Map, the ledger, and
-`git log`; resume at the first task without an `event=committed` entry.
+`git log`; then resume each task from its last ledger event:
+
+| ledger last event for a task | resume action |
+| --- | --- |
+| `dispatched` | re-dispatch the same brief (the run may have died) |
+| `report-received` | produce the diff, dispatch the reviewer |
+| `review-verdict outcome=accepted` | run the green gate, commit |
+| `review-verdict outcome=rejected` | re-dispatch the implementer with the findings |
+| `committed` | task done — move to the next task |
