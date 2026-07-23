@@ -25,10 +25,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           V: ${{ steps.bump.outputs.version }}
         run: |
+          if git rev-parse -q --verify "refs/tags/devcycle--v$V" >/dev/null; then
+            echo "tag devcycle--v$V already exists — nothing to release"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .claude-plugin/plugin.json CHANGELOG.md
           git commit -m "chore(release): v$V [skip ci]"
+          # Branch first, tag only after the branch push lands: a tag pushed before a
+          # failed branch push leaves an orphan tag that blocks every later release.
+          n=0
+          until git push origin main; do
+            n=$((n+1))
+            if [ "$n" -ge 3 ]; then
+              echo "branch push failed after $n rebase retries — manual release repair needed"
+              exit 1
+            fi
+            git pull --rebase origin main
+          done
           git tag "devcycle--v$V"
-          git push origin main --tags
+          git push origin "devcycle--v$V"
           gh release create "devcycle--v$V" --title "devcycle v$V" --notes-file .release-notes.md
