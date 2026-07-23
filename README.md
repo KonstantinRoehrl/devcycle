@@ -10,7 +10,12 @@ behavior, model choice, review depth) is config, not baked-in prose.
 ```
 claude plugin marketplace add KonstantinRoehrl/devcycle
 claude plugin install devcycle@devcycle
+claude plugin marketplace add obra/superpowers-marketplace
 ```
+
+The third command satisfies devcycle's [superpowers] dependency (adding its marketplace
+auto-installs it). Until then `claude plugin list` shows devcycle as failed to load — that
+resolves itself once the marketplace is added.
 
 ## Quickstart
 
