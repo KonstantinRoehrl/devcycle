@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- chore(deps): bump actions/checkout (#1)
+
 ## 0.2.2
 
 - docs: add e2e dry-run report and complete install instructions (#3)
