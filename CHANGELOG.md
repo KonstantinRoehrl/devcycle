@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+- feat: auto model selection, first-run config walkthrough, and pipeline composition fixes (#7)
+
 ## 0.3.0
 
 - ci: push branch before tag in release job and guard existing tags (#6)
