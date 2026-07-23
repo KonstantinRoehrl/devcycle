@@ -58,7 +58,8 @@ Otherwise (`push-allowed` or `open-pr`), check two signals: (1) a `deny` rule ma
 the literal `git push` command (e.g. `Bash(git push:*)`, `Bash(git:*)`, or a bare `Bash`
 deny) in any of project `.claude/settings.local.json`, project `.claude/settings.json`,
 user `~/.claude/settings.json`, or a managed/enterprise policy file present on this
-platform (an `ask`-only rule does not count); (2) the branch recorded in
+platform — read whichever exist; a missing file has no rules (an `ask`-only rule does not
+count); (2) the branch recorded in
 `.devcycle/state.md` for this cycle IS the repo's release/default branch, resolved via,
 in order, `git symbolic-ref refs/remotes/origin/HEAD`, then `gh repo view --json
 defaultBranchRef`, then a `main`/`master` fallback if one of those branches exists and neither command is available. If either signal fires, the
@@ -72,11 +73,12 @@ branch and commits; no push, no PR); `push-allowed` = push the branch, NEVER mer
 offer the first-run configuration walkthrough here — it belongs to `/devcycle:cycle`
 only.
 
-The Handoff block always includes a `Git policy:` line stating the effective policy.
+The Handoff block always includes a `Git policy:` line, directly after `Artifacts:`,
+stating the effective policy.
 When it was not clamped: `Git policy: <value> (no override)`. When it was clamped:
 `Git policy: configured <value> → effective local-commits-only (<reason>)`, where
 `<reason>` is `a permission rule denies git push`, `current branch is the repo's default
-branch; direct pushes to it are not allowed`, or both joined with `; ` if both signals
+branch — direct pushes to it are not allowed`, or both joined with `; ` if both signals
 fired.
 
 From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file

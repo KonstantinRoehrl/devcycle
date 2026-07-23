@@ -190,7 +190,7 @@ At the finish stage specifically, the block carries one additional line, directl
 `Artifacts:` — the resolved git policy. When the effective policy was not clamped:
 `Git policy: <value> (no override)`. When it was clamped (Step 7 above): `Git policy:
 configured <value> → effective local-commits-only (<reason>)`, where `<reason>` is `a
-permission rule denies git push`, `current branch is the repo's default branch; direct
+permission rule denies git push`, `current branch is the repo's default branch — direct
 pushes to it are not allowed`, or both joined with `; ` if both signals fired. No other
 stage's block carries this line.
 
