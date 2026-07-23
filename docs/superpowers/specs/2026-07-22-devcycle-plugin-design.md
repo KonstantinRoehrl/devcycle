@@ -40,6 +40,11 @@ Where this spec resolves an open decision or amends the dossier, this spec wins.
 6. **bump-version.yml logic is hand-rolled** (in-repo script, no third-party bump action).
 7. **README framing: general-audience** — "opinionated idea-to-verified-implementation pipeline;
    policy is config." Length stays short per the binding dossier §3 requirement.
+   *(Amended 2026-07-23, owner decision: comprehension outranks brevity — the README now uses
+   progressive disclosure: skimmable top, then pipeline overview, component inventory, and
+   config semantics. The dossier §3 brevity bound and its no-pipeline-narrative rule are
+   superseded. Superpowers install mechanics are deliberately not documented — the README
+   links the superpowers repo instead, since another project's install commands may change.)*
 8. **Interview batching:** plugin skills batch via AskUserQuestion (1–4 questions + options + Other);
    upstream `superpowers:brainstorming` is not modified; `/devcycle:cycle` notes that the batching
    preference carries into the brainstorm stage.
