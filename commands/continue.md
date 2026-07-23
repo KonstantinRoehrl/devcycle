@@ -61,7 +61,7 @@ user `~/.claude/settings.json`, or a managed/enterprise policy file present on t
 platform (an `ask`-only rule does not count); (2) the branch recorded in
 `.devcycle/state.md` for this cycle IS the repo's release/default branch, resolved via,
 in order, `git symbolic-ref refs/remotes/origin/HEAD`, then `gh repo view --json
-defaultBranchRef`, then a `main`/`master` fallback. If either signal fires, the
+defaultBranchRef`, then a `main`/`master` fallback if one of those branches exists and neither command is available. If either signal fires, the
 **effective policy** is `local-commits-only` regardless of the configured value;
 otherwise effective equals configured. This clamp is silent (no pause, no question) but
 always narrated in the Handoff block below.
