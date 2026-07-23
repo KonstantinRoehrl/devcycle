@@ -49,12 +49,35 @@ Continue at the recorded stage via its skill:
 the literal text `${user_config`, the option is unset; use the default
 `local-commits-only`. If the placeholder is literal but the state file's
 `configured:` line records a `gitPolicy=` value, that recorded value governs
-this run (same-session substitution cannot refresh). Then: `local-commits-only`
-= hand the branch back (report branch and commits; no push, no PR);
-`push-allowed` = push the branch, NEVER merge; `open-pr` = push and open a PR
-with a Conventional-Commit title, do not merge. Treat any other value as
-invalid and fall back to the default. Never offer the first-run configuration
-walkthrough here — it belongs to `/devcycle:cycle` only.
+this run (same-session substitution cannot refresh). Treat any other value as
+invalid and fall back to the default. Call this the **configured policy**.
+
+**Resolve effective policy** before acting. If the configured policy is
+`local-commits-only`, it is already the floor — use it as-is, no signal checks needed.
+Otherwise (`push-allowed` or `open-pr`), check two signals: (1) a `deny` rule matching
+the literal `git push` command (e.g. `Bash(git push:*)`, `Bash(git:*)`, or a bare `Bash`
+deny) in any of project `.claude/settings.local.json`, project `.claude/settings.json`,
+user `~/.claude/settings.json`, or a managed/enterprise policy file present on this
+platform (an `ask`-only rule does not count); (2) the branch recorded in
+`.devcycle/state.md` for this cycle IS the repo's release/default branch, resolved via,
+in order, `git symbolic-ref refs/remotes/origin/HEAD`, then `gh repo view --json
+defaultBranchRef`, then a `main`/`master` fallback. If either signal fires, the
+**effective policy** is `local-commits-only` regardless of the configured value;
+otherwise effective equals configured. This clamp is silent (no pause, no question) but
+always narrated in the Handoff block below.
+
+Then, act on the effective policy: `local-commits-only` = hand the branch back (report
+branch and commits; no push, no PR); `push-allowed` = push the branch, NEVER merge;
+`open-pr` = push and open a PR with a Conventional-Commit title, do not merge. Never
+offer the first-run configuration walkthrough here — it belongs to `/devcycle:cycle`
+only.
+
+The Handoff block always includes a `Git policy:` line stating the effective policy.
+When it was not clamped: `Git policy: <value> (no override)`. When it was clamped:
+`Git policy: configured <value> → effective local-commits-only (<reason>)`, where
+`<reason>` is `a permission rule denies git push`, `current branch is the repo's default
+branch; direct pushes to it are not allowed`, or both joined with `; ` if both signals
+fired.
 
 From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file
 updates and a handoff block at every stage boundary.
