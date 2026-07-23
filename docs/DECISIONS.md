@@ -21,8 +21,7 @@ stopped `push-allowed` from pushing straight to the repo's default branch if a c
 happened to start there — violating the user's own "never push a release branch
 directly" rule with no devcycle-side guard.
 **Supersedes:** Nothing reversed — this adds a resolution step in front of the existing
-`gitPolicy` branch in `/devcycle:cycle` Step 7 and `/devcycle:continue`, documented in
-`docs/superpowers/specs/2026-07-23-git-policy-reconciliation-design.md`.
+`gitPolicy` branch in `/devcycle:cycle` Step 7 and `/devcycle:continue`.
 
 ## 2026-07-23 — superpowers dependency re-pinned to the official plugin directory
 
