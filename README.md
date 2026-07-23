@@ -122,6 +122,13 @@ commits on a local branch and hands it to you (never pushes); `push-allowed` let
 the branch (never merge); `open-pr` lets it push and open a pull request (never merge that
 either). Merging is always yours.
 
+Configuring `push-allowed` or `open-pr` doesn't guarantee a push happens: the finish
+stage also checks two things outside this config before it pushes anything — whether
+your Claude Code permission settings deny `git push`, and whether the cycle ran on the
+repo's default branch (direct pushes there are never allowed) — and falls back to
+`local-commits-only` behavior for that run if either is true, stating why in the finish
+stage's output. `local-commits-only` is unaffected either way; it never pushes.
+
 **`reviewDepth`** picks the branch-review engine. `single` is one reviewer running Claude
 Code's built-in `code-review` skill plus devcycle's spec-compliance checks. `panel` runs
 `review-panel.js` instead: two to three read-only reviewers, each with a different lens

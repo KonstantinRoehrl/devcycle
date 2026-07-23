@@ -191,6 +191,12 @@ gated by `userConfig.crossModelReview`.
   `crossModelReview: false`, `onDeviceGate: human-required`, all four model options `auto`.
 - The finishing stage branches on `gitPolicy`: local-commits-only ends with the branch handed back (the author's
   mode); `open-pr` automates push + PR for users who want it.
+- Before acting on `push-allowed`/`open-pr`, the finishing stage resolves an **effective**
+  policy against two external signals — a Claude Code permission `deny` rule on `git
+  push`, and the cycle's branch being the repo's default branch — clamping to
+  `local-commits-only` for that run if either fires (see
+  `docs/superpowers/specs/2026-07-23-git-policy-reconciliation-design.md`).
+  `local-commits-only` needs no check; it is already the floor.
 - Model names are config values, not skill prose — they rot otherwise.
 - Once encoded, corresponding personal memories (e.g. never-local-merge-to-dev) are deleted.
 

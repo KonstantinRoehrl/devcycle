@@ -5,6 +5,25 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-07-23 — finish stage resolves gitPolicy against external push signals
+
+**Decision:** Before acting on `push-allowed`/`open-pr`, the finish stage
+(`/devcycle:cycle` Step 7 and `/devcycle:continue`'s mirrored section) resolves an
+**effective** git policy: if a Claude Code permission `deny` rule matches `git push`, or
+the cycle's branch is the repo's release/default branch, the effective policy clamps to
+`local-commits-only` for that run regardless of the configured value. The finish stage's
+Handoff block always states the effective policy, naming the configured value and reason
+when they differ. `local-commits-only` needs no check — it was already the floor.
+**Why:** `gitPolicy` was evaluated in isolation from anything outside devcycle's own
+config. Two gaps followed directly: a Claude Code permission deny on `git push` would
+only surface as a failed tool call mid-finish rather than a clean downgrade, and nothing
+stopped `push-allowed` from pushing straight to the repo's default branch if a cycle
+happened to start there — violating the user's own "never push a release branch
+directly" rule with no devcycle-side guard.
+**Supersedes:** Nothing reversed — this adds a resolution step in front of the existing
+`gitPolicy` branch in `/devcycle:cycle` Step 7 and `/devcycle:continue`, documented in
+`docs/superpowers/specs/2026-07-23-git-policy-reconciliation-design.md`.
+
 ## 2026-07-23 — superpowers dependency re-pinned to the official plugin directory
 
 **Decision:** `plugin.json` declares `{ "name": "superpowers", "marketplace":
