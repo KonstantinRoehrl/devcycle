@@ -33,6 +33,7 @@ Run the subagent from the sandbox root. For the **green** run, splice the full b
 3. Its per-task account matches the ledger: Task 1 reviewed and committed (cites the commit), Task 2 report received but review pending, Task 3 not dispatched (blocked on Tasks 1+2 committed per the plan).
 4. It names the concrete next action (complete Task 2's review, then dispatch Task 3 once Tasks 1+2 are committed) and resumes the execution stage — it does not restart the pipeline or an earlier stage.
 5. It corrects the user's "we might have been done" from file evidence rather than adopting it, and never asks the user to re-explain what they were doing.
+6. *(Pipeline-start variant — setup and prompt in `## Regression (dry-run fixes)` below; exercises `commands/cycle.md` step 0 plus the scoping-interview entry check, the creation half of the resume contract.)* When `/devcycle:cycle` is invoked with a rough one-liner in a repo that has no `.devcycle/state.md`, the agent creates the state file as its opening action — on disk before the triage verdict is announced and before any scoping questions are asked (reading the current branch to fill the file's `branch:` line is part of creating it) — with `stage: scoping`, the current git branch, and `none` on the spec/plan/checklist lines, so a cycle interrupted mid-scoping still leaves a state file for `/devcycle:continue` to resume from.
 
 ## Baseline (red)
 
@@ -66,3 +67,19 @@ Run 2026-07-22 — full-pass regression against the committed text: fresh headle
 - Criterion 4 PASS: next action = review Task 2's report, commit on accept, then dispatch Task 3 — resuming the execution stage, not restarting.
 - Criterion 5 PASS: "So this is **not done**" — corrected from file evidence; never asked the user to re-explain.
 - Net: GREEN — no regression.
+
+## Regression (dry-run fixes)
+
+Criterion 6 added 2026-07-23 after the v0.2.1 end-to-end dry run found `.devcycle/state.md` first written at the scoping→brainstorm transition, not at pipeline start (dry-run report, rough edge #2). Both runs: fresh headless subagents (`claude -p`, model `claude-sonnet-5`), isolated config (fresh CLAUDE_CONFIG_DIR holding only auth; init event confirmed `plugins: []`), run from the sandbox root.
+
+**Variant setup:** the minimal Node sandbox from the dry run (a `package.json` with `"test": "node --test"`, `src/greet.js`, its passing test, one commit on `main`; no `.devcycle/` directory). Prompt: the full body of `commands/cycle.md` spliced as the invoked command plus the full `skills/scoping-interview/SKILL.md` (the stage the command enters), then: the user invoked `/devcycle:cycle add a slugify helper with tests`; produce your first response; no human is available mid-response, so ask and stop — the session may be interrupted at any time.
+
+**Baseline (red) — scripted run 2026-07-23 against the previous committed text** (which said only "Create it when the pipeline starts" with no step-0 imperative):
+
+- Criterion 6 FAIL, reproducing the dry-run behavior exactly: the agent announced triage, researched the repo, ran the scoping fallback batch, and hard-stopped — with NO `.devcycle/state.md` on disk at session end. A cycle interrupted at that stop would leave nothing for `/devcycle:continue`.
+- Net: RED.
+
+**Result (green) — run 2026-07-23 against the fixed text** (cycle.md step 0 + scoping-interview stage-entry backstop):
+
+- Criterion 6 PASS: the agent's opening line was "I'll start by creating the pipeline state file"; it read the current branch, wrote `.devcycle/state.md` with exactly the step-0 content (`stage: scoping`, `branch: main`, `spec: none`, `plan: none`, `ledger: .superpowers/sdd/progress.md`, `checklist: none`, ISO-8601 `updated`), and only then announced the triage verdict and ran the scoping batch to its hard stop. Minor variance, accepted: one repo-orientation `cat` was bundled with the branch-discovery command before the Write, but the file was on disk before any triage or interview output. The interrupted-mid-scoping guarantee now holds.
+- Net: GREEN.

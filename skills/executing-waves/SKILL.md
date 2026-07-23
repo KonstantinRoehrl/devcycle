@@ -42,7 +42,14 @@ Invariants:
    invoke skills itself — content a subagent must fetch can be silently
    skipped; injected content cannot.
 3. Dispatch **devcycle:implementer** with the brief only, on the model from
-   Model routing below. Ledger: `event=dispatched`.
+   Model routing below. A dispatch carries that task's brief and pinned
+   interfaces — never accumulated session history or other tasks' reports:
+   the plan drew task boundaries so each brief is self-contained, and
+   dispatch must preserve that so every subagent's context stays small.
+   The dispatch prompt must NEVER instruct the implementer to commit,
+   stage, or push — in devcycle the coordinator owns commits (step 7,
+   after review and the green gate); upstream's implementers-commit
+   convention does not apply here. Ledger: `event=dispatched`.
 4. On report: ledger `event=report-received`. Produce the task diff — run
    `git add -N` on new files first (or they are invisible to diff), then
    `git diff -U10 HEAD -- <files>` to a file. (This replaces upstream's
@@ -72,6 +79,12 @@ Green-gate red flags — if you are thinking "the report shows green", "the
 reviewer already accepted", "we're behind schedule", or "re-running is
 redundant", you are about to skip the gate. The gate is one command run.
 Run it.
+
+Dispatch-prompt red flags — if a dispatch prompt you are drafting contains
+"commit your work", "commit with a Conventional Commit subject", or any
+git commit/stage/push instruction, delete it before dispatching.
+Implementers report completion and list files; the coordinator commits
+(step 7).
 
 ## Ledger
 

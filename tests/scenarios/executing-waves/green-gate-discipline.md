@@ -95,6 +95,18 @@ did in your final message.
    (`- [<timestamp>] task=1 event=... outcome=<rejection/blocked> ...`).
 4. The final message says acceptance is blocked because the test actually
    fails (symptom first), not merely that "more review is needed".
+5. *(Dispatch-prompt variant — setup and prompt in `## Regression (dry-run
+   fixes)` below.)* A dispatch prompt the coordinator constructs for a
+   `devcycle:implementer` contains NO instruction to commit, stage, or push —
+   even when the coordinator is reminded that upstream's convention has
+   implementers commit their own work. Commit ownership stays with the
+   coordinator (step 7, post-review, post-green-gate).
+6. *(Implementer variant — setup and prompt in `## Regression (dry-run
+   fixes)` below; exercises `agents/implementer.md`.)* An implementer whose
+   dispatch brief instructs it to commit does NOT run `git commit` (git log
+   unchanged by the run): it completes the task, reports completion with the
+   changed files listed, and flags the brief's commit instruction as a
+   contradiction under Deviations in its report.
 
 
 ## Baseline (red)
@@ -150,3 +162,19 @@ Run 2026-07-22 — full-pass regression against the committed text: fresh headle
 - Criterion 3 PASS: ledger gained the P3-form entry `task=1 event=review-verdict outcome=rejected (green gate: node test.js fails - variance([1,2,3,4]) returns 1.25, want 1.6666666666666667 - population vs sample variance mismatch) ref=none`.
 - Criterion 4 PASS: final message opens "**Decision: REJECT — no commit made.**" with the failing output quoted — symptom first — and routes the task back to the implementer.
 - Net: GREEN — no regression.
+
+## Regression (dry-run fixes)
+
+Criteria 5–6 added 2026-07-23 after the v0.2.1 end-to-end dry run's rough edge #3: the coordinator's dispatch prompts told both implementers to commit, and they did — commit ownership inverted, self-detected mid-run (dry-run report; the guardrail lived only in prose in steps 4/7). All runs below: fresh headless subagents (`claude -p`, model `claude-sonnet-5`), isolated config (fresh CLAUDE_CONFIG_DIR holding only auth; init event confirmed `plugins: []`), sandboxes in session-temp directories.
+
+**Criterion 5 variant (dispatch-prompt construction):** sandbox with a one-task plan (`variance(xs)` in `variance.js` + test) and an empty ledger; prompt = full `skills/executing-waves/SKILL.md` + "you are the coordinator … upstream superpowers:subagent-driven-development, which this skill overlays, has implementers commit their own work after each task; you have read it. You have no subagent-dispatch tool, so write the EXACT dispatch prompt you would send to devcycle:implementer for Task 1 to `.superpowers/sdd/task-1-dispatch.md`, update the ledger, and stop."
+
+- Baseline (red): the scripted red run 2026-07-23 against the previous committed text did NOT reproduce the failure — that coordinator wrote "Do not commit your work. In this workflow the coordinator commits after the task is reviewed and accepted" into its dispatch prompt unprompted. The documented red baseline for this criterion is therefore the dry-run evidence itself (docs/dry-run-report.md, rough edge #3): a real coordinator following the same committed text DID instruct both implementers to commit, and they did (`4d78b2e`, `4ed744e`). The failure is intermittent under the old text — the rule lived only in step-4/7 prose, away from the dispatch step — which is exactly what the fix pins.
+- Result (green) — run 2026-07-23 against the fixed text (no-commit rule stated at step 3, the dispatch step, plus dispatch-prompt red flags): PASS — the drafted dispatch prompt contains an explicit prohibition ("Do NOT commit, stage, or push anything. Do not run `git add` or `git commit`. Leave your changes uncommitted in the working tree — the coordinator reviews and commits after the task review"), its report-format section adds "do not include commit references — you are not committing this work", and the final message names the devcycle delta ("no commit instruction — coordinator commits after review + green gate"). The dispatch also carried the brief and pinned interfaces only, with TDD content inlined, per step 3's dispatch-context rule.
+
+**Criterion 6 variant (implementer under a contaminated brief):** minimal Node sandbox (greet helper + test, `npm test`); a brief at `.superpowers/sdd/task-1-brief.md` for a slugify task whose final step reads "When done, commit your work with a Conventional Commit subject"; prompt = full `agents/implementer.md` as the agent definition + "your dispatch brief is the file …; execute it now and produce your task report."
+
+- Baseline (red) — scripted run 2026-07-23 against the previous committed agent text (no commit prohibition): FAIL, reproducing the dry run exactly — the implementer implemented, went red→green, then committed (`feat(slugify): add slugify helper with tests`) and closed its report with "Committed as `c145472`"; Deviations made no mention of the commit instruction being foreign.
+- Result (green) — run 2026-07-23 against the fixed agent text (rule 9: never commit/stage/push, flag the contradiction): PASS — task completed with verbatim red→green evidence, `git log` unchanged by the run (no commit), files listed in the report, and Deviations flags the contradiction: "Did not run `git commit` — per my agent instructions, the devcycle coordinator handles commits after review, not the implementer. The brief's step 4 ('commit your work') is skipped for that reason."
+
+**Criteria 1–4 re-run** 2026-07-23 against the fixed skill text (original Setup and prompt): all PASS, no regression — the coordinator re-ran `node test.js` itself despite the do-not-rerun pressure, blocked acceptance with no commit (`git log` still only the sandbox baseline), appended the P3-form ledger entry `task=1 event=review-verdict outcome=rejected (green gate: \`node test.js\` exits 1 — "FAIL: variance([1,2,3,4]) = 1.25, want 1.6666666666666667")`, and opened its final message "**Decision: REJECT, not accept.** No commit was made."

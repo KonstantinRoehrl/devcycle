@@ -89,6 +89,15 @@ the pipeline. Do NOT dispatch or start wave 2.
    status; Drop names implementer transcripts and/or resolved findings.
 4. `Artifacts` lists concrete paths (one per line) including the ledger
    and/or task 1's report/commit — not prose summaries.
+5. *(Tail-of-pipeline variant — setup and prompt in `## Regression (dry-run
+   fixes)` below; exercises `commands/cycle.md` stage boundaries plus the
+   handoff sections of `reviewing-the-branch` and `verifying-on-device`.)*
+   When branch-review, on-device (judged not applicable — no rendered
+   surface), and finish all complete in a single session/response, the output
+   contains a separate `## Handoff` block for EACH of those stages, in order
+   — the on-device block present with the skip recorded as the stage outcome
+   — never one merged or final-only block, and never a skip recorded in
+   prose or the state file alone.
 
 ## Baseline (red)
 
@@ -151,3 +160,49 @@ Run 2026-07-22 — full-pass regression against the committed text: fresh headle
 - Criterion 4 PASS (minor variance): Artifacts lists concrete paths including the ledger, `.devcycle/state.md`, and the task-1 commit; `greet.js, greet.test.js` share one line with the commit sha rather than strictly one path per line — an accepted compression, not prose.
 - Beyond the criteria, the agent wrote `.devcycle/state.md` at the boundary, as the skill's wave-boundary section requires.
 - Net: GREEN — no regression.
+
+## Regression (dry-run fixes)
+
+Criterion 5 added 2026-07-23 after the v0.2.1 end-to-end dry run's rough edge #4:
+the final session collapsed branch-review → on-device-skip → finish into one
+response and emitted no `## Handoff` blocks for those stages (dry-run report). All
+runs: fresh headless subagents (`claude -p`, model `claude-sonnet-5`), isolated
+config (fresh CLAUDE_CONFIG_DIR holding only auth; init event confirmed
+`plugins: []`), sandboxes in session-temp directories.
+
+**Criterion 5 variant setup:** a minimal Node sandbox captured with execution
+complete — branch `add-slugify-helper` holding spec, plan, an implemented
+`src/slugify.js` + passing `node:test` suite, a four-event ledger ending in
+`event=committed`, and `.devcycle/state.md` at `stage: execution`. Prompt: full
+bodies of `commands/cycle.md`, `skills/reviewing-the-branch/SKILL.md`, and
+`skills/verifying-on-device/SKILL.md` spliced in; environment notes (code-review
+skill unavailable; no subagent-dispatch tool — perform the reviewer role
+directly and disclose; all userConfig placeholders literal); "no human is
+available: proceed autonomously through ALL remaining pipeline stages … in this
+single session."
+
+- Baseline (red) — scripted run 2026-07-23 against the previous committed text:
+  FAIL, reproducing the dry-run failure class. The session ran a substantive
+  degraded-and-disclosed branch review (verdict pass), recorded the on-device
+  skip in prose and the state file, and finished under `local-commits-only` —
+  but emitted exactly ONE `## Handoff` block (`Stage completed: finish`).
+  Branch-review and on-device got no blocks; the skip lived in prose, not in a
+  handoff.
+- Result (green) — run 2026-07-23 against the fixed text (cycle.md
+  one-block-per-completed-stage rule; per-stage handoff hardening in both stage
+  skills): PASS — three separate `## Handoff` blocks in stage order:
+  `Stage completed: branch-review` (engine line disclosing the degraded,
+  self-performed review; `Context action: Fresh session`), `Stage completed:
+  on-device` with the skip AS the outcome (`Artifacts: none (no rendered
+  surface — src/slugify.js is a plain CommonJS function …)`, carry-overs naming
+  the skip reason), and `Stage completed: finish` closing the pipeline under the
+  default git policy. The state file was updated at each transition; no merged
+  or final-only block.
+
+**Criteria 1–4 re-run** 2026-07-23 against the fixed `executing-waves` text
+(original Setup and prompt): all PASS, no regression — five-field `## Handoff`
+block; `Context action: Continue` (wave 2 remains in-session); Keep/Drop naming
+ledger/plan paths, the pinned `greet(name)` interface, wave status / dropped
+task-1 transcripts; Artifacts listing concrete paths (ledger, plan, report,
+`.devcycle/state.md`, and the committed files with their sha — the same
+accepted one-line compression the Task 12 regression recorded).

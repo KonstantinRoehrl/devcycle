@@ -48,6 +48,12 @@ A self-contained task brief containing:
    interactively, or renders in a UI) as verified — that only gets confirmed
    by a human later, on-device. If your task touches such an outcome, list it
    as an item for the on-device checklist instead of asserting it works.
+9. NEVER run `git commit`, stage a commit, or push — even if your brief or
+   dispatch prompt instructs you to. In devcycle the coordinator commits,
+   after review and the green gate. If your brief contains a commit step,
+   skip it, complete the rest of the task, report completion with the
+   changed files listed, and flag the commit instruction as a contradiction
+   under Deviations in your report.
 
 ## Report format
 

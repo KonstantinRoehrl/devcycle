@@ -32,6 +32,8 @@ For the **green** run, splice the full text of `skills/planning-waves/SKILL.md` 
 4. The dispatcher task declares its dependency on the store and search tasks and sits in a later wave than both.
 5. Each task's `**Interfaces:**` block pins exact names and signatures (e.g. `addNote(text)` returning the written line), not vague descriptions.
 6. The plan header includes Goal, Architecture, and a Global Constraints section, and steps are checkboxes in test-first order (P5 contract complete).
+7. Every declared dependency names WHAT is consumed — the specific interface or file (e.g. `Task 1 (consumes its addNote(text) interface)`) — or states its real ordering reason; no bare `Task N` / `Tasks N+M committed` with no reason attached. (`none (completely independent)` declares no dependency and is exempt.)
+8. The plan states why the tasks sharing a wave are file-disjoint: the Dispatch Map entry (or the task bodies) names the same-wave tasks' disjoint file sets — e.g. `Wave 2: Task 1, Task 2 (file-disjoint — lib/store.js + its test vs lib/search.js + its test)` or a task-body clause like `file-disjoint from Task 1`. A bare `(file-disjoint)` tag with no identification of the sets fails.
 
 ## Baseline (red)
 
@@ -71,3 +73,20 @@ Run 2026-07-22 — full-pass regression against the committed text: fresh headle
 - Criterion 5 PASS: exact signatures pinned (`addNote(text: string): string`, `searchNotes(term: string): string[]`, shared `NOTES_FILE` constant).
 - Criterion 6 PASS: header (Goal/Architecture/Tech Stack/Global Constraints) and test-first checkbox steps; the skill's other mandates also appeared (`## Feasibility Gate` with **Verdict: GO**, the `devcycle:executing-waves` worker line, closing Handoff block).
 - Net: GREEN — no regression.
+
+## Regression (dry-run fixes)
+
+Criteria 7–8 added 2026-07-23 for the skill's "Execution strategy — twin goals" contract (derived dependencies name what is consumed; same-wave file-disjointness stated explicitly). Both runs: fresh headless subagents (`claude -p`, model `claude-sonnet-5`), isolated config per the baseline-hygiene protocol (fresh CLAUDE_CONFIG_DIR holding only auth; init event confirmed `plugins: []`), empty sandbox, prompt per Setup with upstream writing-plans 6.1.1 spliced in.
+
+**Baseline (red) — scripted run 2026-07-23 against the PREVIOUS committed planning-waves text** (pre-twin-goals, via `git show HEAD:skills/planning-waves/SKILL.md`):
+
+- Criterion 7 PASS in red — an honest partial red: the run's one real dependency read `Tasks 1+2 committed (requires lib/store.js and lib/search.js to exist and export addNote/searchNotes)`; the old text's `Task 2 (consumes its X interface)` example already models a reason, so the model appended one unforced. The criterion pins as contract what was previously habit.
+- Criterion 8 FAIL in red: the Dispatch Map read `Wave 1: Task 1, Task 2 (file-disjoint, no dependencies)` — the bare template tag, with the disjoint file sets named nowhere (no task-body disjointness clause either).
+- Net: RED on criterion 8.
+
+**Result (green) — run 2026-07-23 against the twin-goals text (working tree):**
+
+- Criterion 7 PASS: four tasks; every declared dependency names its consumption — `Task 0 (needs lib/ directory and package.json test script)` (twice), `Tasks 1+2 committed (dispatcher calls addNote and searchNotes directly)`; the scaffold task declares `none (completely independent)`.
+- Criterion 8 PASS: `Wave 2: Task 1, Task 2 (both depend only on Task 0; file-disjoint — lib/store.js + test/store.test.js vs. lib/search.js + test/search.test.js)` — the disjoint file sets named in the Dispatch Map entry itself.
+- Criteria 1–6 re-checked on the same run, all PASS: three declaration forms only (with the accepted reason-appended extension); `## Dispatch Map` with three numbered waves; wave-2 file sets disjoint and the dispatcher waving alone after `Tasks 1+2 committed`; exact signatures pinned (`addNote(text, notesFile = path.join(process.cwd(), 'notes.txt'))`, `searchNotes(term, notesFile = ...)`, `main(argv)` returning an exit code); header (Goal/Architecture/Tech Stack/Global Constraints) with test-first checkbox steps, plus Feasibility Gate **Verdict: GO** and the closing Handoff block.
+- Net: GREEN — all eight criteria met.

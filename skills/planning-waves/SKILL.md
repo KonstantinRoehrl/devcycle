@@ -29,9 +29,16 @@ Never plan in detail on an unvalidated assumption. Never silently substitute a d
 
 Red flags: you are writing Task 1 and have not verified the spec's named APIs; you caught yourself writing "assuming X exists".
 
-## Concurrency is a first-class goal
+## Execution strategy — twin goals
 
-Draw task boundaries so parallel tracks are file-disjoint and interface-decoupled. Pin exact interfaces — signatures, names, values — in each task's `**Interfaces:**` block so concurrent implementers never need each other's context and every task brief is self-contained.
+The plan IS the execution strategy: while drawing task boundaries, decide how the tasks will run, not just what they contain. Two goals govern every boundary decision, together:
+
+- **Maximize parallelism.** Draw boundaries so parallel tracks are file-disjoint and interface-decoupled — the more dependency-free, file-disjoint tasks, the wider each wave.
+- **Minimize each implementer's context.** Every task must be implementable from its own brief alone. Pin exact interfaces — signatures, names, values — in each task's `**Interfaces:**` block so concurrent implementers never need each other's context, the planning conversation, or the spec's history. A task whose brief cannot be made self-contained is drawn wrong: split it, or move the boundary until it can.
+
+The goals reinforce each other — a task small enough to hold a self-contained brief is also small enough to schedule flexibly — but when they pull apart, prefer the smaller context: a slightly longer wave sequence beats a subagent working from an overstuffed brief.
+
+Dependencies are then **derived, not decreed**: a task depends on exactly the tasks whose produced interfaces or files it consumes — nothing more, unless a real ordering constraint exists that consumption doesn't capture (a migration before schema users, a destructive step last), in which case declare it with its reason like any other dependency. The declarations below and the Dispatch Map turn those derived dependencies into the execution order; anything not forced into sequence by a real dependency stays parallel.
 
 ## Dependencies — one declaration per task
 
