@@ -17,7 +17,7 @@
 - Text lives inline, independently worded per skill — no new shared snippet file, no new skill (spec §3; duplication is accepted).
 - No `CHANGELOG.md` edit — the changelog and version bump come from the squash-merge PR title (a `feat:` for this change), per `CONTRIBUTING.md`.
 - Every behavior change ships with scenario evidence per `CONTRIBUTING.md`'s harness: fresh headless `claude -p` runs, isolated `CLAUDE_CONFIG_DIR` (auth only — no installed plugins, no machine-global instructions — confirm `plugins: []` on the init event), matching the "baseline-hygiene protocol" already used throughout `tests/scenarios/`.
-- Before considering any task done: `node scripts/validate.mjs` and `node scripts/redaction-check.mjs` both exit clean (no absolute `/Users/...` paths in any new file, balanced code fences, frontmatter untouched).
+- Before considering any task done: `node scripts/validate.mjs` and `node scripts/redaction-check.mjs` both exit clean (no absolute machine home-directory paths in any new file, balanced code fences, frontmatter untouched).
 
 ---
 
