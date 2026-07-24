@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- fix(cycle): make the command model-invocable and halt for compact/clear at boundaries (#11)
+
 ## 0.6.0
 
 - feat(verifying-on-device): drive on-device structural checks with claude-in-chrome (#10)
