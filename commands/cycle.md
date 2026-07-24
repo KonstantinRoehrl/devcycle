@@ -207,3 +207,15 @@ Pick the context action from this table and recommend it to the user explicitly:
 | wave → wave (within execution) | Compact if over ~40% context | ledger/plan paths, pinned interfaces, dispatch map, wave status | implementer transcripts, resolved findings |
 | execution → branch-review | Clear + `/devcycle:continue` or Fresh session (a reviewer that watched the code being written inherits the implementer's assumptions) | branch, spec path, ledger path | all implementation context |
 | branch-review → on-device | Fresh session | checklist path, branch | everything else |
+
+### Await the context action — never run past a recommended compact or clear
+
+Emitting the handoff block is NOT permission to continue. **Only a `Continue` action lets the
+pipeline proceed to the next stage in the same turn.** For every other action — `Compact with
+hint`, `Clear + /devcycle:continue`, `Fresh session`, or a `wave → wave` boundary where the
+~40% condition to compact is met — STOP after the block and wait: the user must run `/compact`
+or `/clear` (or explicitly tell you to continue anyway) before any next-stage work begins. Never
+begin the next stage in the same response that recommended a compact or clear — a user who looks
+away would otherwise sail past the boundary with an un-cleared context, exactly what this gate
+prevents. `/clear` ends the session by design; state the `/devcycle:continue` resume path in the
+same message you halt on.
