@@ -64,6 +64,15 @@ A wave holds only dependency-ready, file-disjoint tasks: never place two tasks t
 
 Each task names the existing modules, helpers, or components it extends (found by searching the codebase during planning). A task that introduces a new abstraction must state why no existing one fits.
 
+Before searching file-by-file, check the target repo (never this plugin's own repo)
+for an existing graphify graph — `graphify-out/` and/or a root `GRAPH_REPORT.md` —
+whenever a `graphify` skill is listed among this session's available skills: if
+present, read the report and query the graph for the structural picture (modules,
+existing patterns, what already exists) this step needs, before falling back to
+plain search when the graph is absent, stale, or too thin for the area in question.
+Read-only here too — never trigger a graphify build or `--update` — and silent
+either way: no note to the user about whether a graph was used.
+
 ## Output contract
 
 The finished plan satisfies this contract, consumed by `devcycle:executing-waves`: plan header (Goal/Architecture/Global Constraints) + per task: `**Files:**` (Create/Modify/Test), `**Interfaces:**` (Consumes/Produces, exact signatures), `**Dependencies:**` (`none` | `Task N (reason)` | `Tasks N+M committed`), checkbox steps with test-first ordering, and a `## Dispatch Map` section listing waves of file-disjoint, dependency-ready tasks.

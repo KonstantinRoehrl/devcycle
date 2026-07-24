@@ -42,6 +42,14 @@ Whenever scope, intent, architecture, data, or user preference is uncertain:
 1. **Research BEFORE questions.** Read the relevant code and docs first, so every
    question is informed by what the repo already shows. Never ask what the repo can
    answer.
+   If a `graphify` skill is listed among this session's available skills, check the
+   target repo (never this plugin's own repo) for `graphify-out/` and/or a root
+   `GRAPH_REPORT.md` before falling back to file-by-file reading: when present, read
+   the report and query the graph for the research this step needs; when absent, or
+   too stale/thin for the area in question, research exactly as before. This is
+   read-only — never trigger a graphify build or `--update` as a side effect of
+   scoping — and silent either way: no note to the user about whether a graph was
+   used.
 2. **Batch, don't trickle.** Ask via AskUserQuestion: 1–4 questions per call, each
    with concrete options plus Other — never one question per message. If
    AskUserQuestion is unavailable, send the whole batch as one plain message with
