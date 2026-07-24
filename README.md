@@ -54,8 +54,8 @@ Resume any time with:
 1. **Scoping** — batched interview that turns your request into a precise, well-structured
    goal: you answer questions about intent and desired outcomes; devcycle researches the
    repo itself to establish what the change touches and confirms that picture with you —
-   research draws on an existing graphify graph when one is available. Skipped when your
-   input is already concrete.
+   research draws on an existing graphify graph when one is available, and also looks for repo
+   orientation docs the same way. Skipped when your input is already concrete.
 2. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
    spec you approve.
 3. **Planning** — a feasibility check, then an implementation plan that doubles as the
@@ -63,7 +63,8 @@ Resume any time with:
    from its own brief alone, so every subagent works with a small context — dependencies are
    derived from what each task consumes, and everything not forced into sequence by a real
    dependency is grouped into *waves* of file-disjoint tasks that run in parallel — research
-   draws on an existing graphify graph when one is available. You approve the plan.
+   draws on an existing graphify graph when one is available, and also looks for
+   implementation-scoped docs the same way. You approve the plan.
 4. **Execution** — each task goes to a fresh implementer subagent carrying only that task's
    brief, working test-first (failing test before code). A reviewer checks every task, the
    coordinator re-runs the tests itself before accepting (the *green gate*: the task's test
