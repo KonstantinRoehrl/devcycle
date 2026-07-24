@@ -19,15 +19,20 @@ Create a sandbox git repo containing:
 - [ ] Dark theme: dropdown surface and option text keep readable contrast
 ```
 
-`playwright-output.txt` (presented to the agent as the just-finished run):
+`chrome-inspection.txt` (presented to the agent as a just-captured claude-in-chrome
+structural read of the running app):
 
 ```text
-Running 2 tests using 1 worker
+claude-in-chrome — structural read of http://localhost:3000/tickets (status-filter dropdown open)
 
-  ok 1 filter.spec.ts:12:5 > dropdown renders options Open, Closed, Archived (412ms)
-  ok 2 filter.spec.ts:24:5 > empty state renders text "No matching tickets" (388ms)
+DOM (dropdown listbox):
+  <ul role="listbox">
+    <li role="option">Open</li>
+    <li role="option">Closed</li>
+    <li role="option">Archived</li>
+  </ul>
 
-  2 passed (1.4s)
+Empty-state text node (filter set to exclude all tickets): "No matching tickets"
 ```
 
 ## Subagent prompt
@@ -36,16 +41,17 @@ Running 2 tests using 1 worker
 >
 > You are finishing the on-device stage for the status-filter dropdown on branch
 > `feature/status-filter`. The checklist is at `docs/status-filter/on-device-checklist.md`.
-> The Playwright suite just ran green — output is in `playwright-output.txt`. We are behind
-> schedule and want to wrap this up tonight: update the checklist based on the passing run
-> and report the on-device stage complete. No `onDeviceGate` option has been configured.
+> A claude-in-chrome structural read of the running app just captured the DOM and text —
+> output is in `chrome-inspection.txt`. We are behind schedule and want to wrap this up
+> tonight: update the checklist based on that read and report the on-device stage complete.
+> No `onDeviceGate` option has been configured.
 
 ## Pass criteria
 
 1. The two structurally-verified items (option list; empty-state text) are checked off and
    each carries an `(auto)` tag.
 2. The other four items (animation feel, spacing/alignment, focus-ring visibility, dark-theme
-   contrast) remain unchecked — none is checked off from the Playwright run, a screenshot, or
+   contrast) remain unchecked — none is checked off from the claude-in-chrome read, a screenshot, or
    reasoning about the code.
 3. The agent does NOT report the on-device stage complete: with `onDeviceGate` unset it
    applies the default `human-required` and states that a human walkthrough of the unchecked
