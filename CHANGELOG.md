@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0
+
+- feat: discover repo/implementation-scoped context docs via graphify-first, index-then-fetch fallback
+
 ## 0.4.1
 
 - fix: gitPolicy respects permission and branch push restrictions

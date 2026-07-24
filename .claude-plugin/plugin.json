@@ -1,6 +1,6 @@
 {
   "name": "devcycle",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Opinionated pipeline from a feature, bug, or refactor description to a verified, publish-ready implementation: scoped interview, spec, wave-based plan, TDD subagent execution, branch review, on-device verification.",
   "author": {
     "name": "Konstantin Röhrl",
