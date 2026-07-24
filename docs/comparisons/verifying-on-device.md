@@ -31,9 +31,9 @@ rationalization table.
 - **The verification-dimension catalogue**: visual rendering vs intent, layout/alignment/
   spacing, interaction feel, responsive behavior at real breakpoints, theme parity, keyboard/
   accessibility, empty/loading/error states, animation timing.
-- **The `(auto)` boundary**: scripts (e.g. Playwright) may check off ONLY structurally
-  verifiable items (DOM/CSS/text assertions), honestly tagged `(auto)`; everything a script
-  cannot structurally see stays unchecked for the human. Upstream has no notion of a
+- **The `(auto)` boundary**: a structural browser check (e.g. via claude-in-chrome) may check
+  off ONLY structurally verifiable items (DOM/CSS/text assertions), honestly tagged `(auto)`;
+  everything such a check cannot structurally see stays unchecked for the human. Upstream has no notion of a
   human-only verification residue.
 - **The fresh-session walkthrough**: runs with only the checklist path + branch as context,
   interviews the human at ONE question per checklist item, produces an agent-actionable

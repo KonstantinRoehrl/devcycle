@@ -14,7 +14,7 @@ memory) into:
 1. **`devcycle`** — a public, auto-updating Claude Code plugin implementing the general pipeline:
    rough idea or detailed ticket → interviewed scope → brainstormed spec → wave-based file-disjoint plan →
    subagent execution with TDD and model routing → per-task review → whole-branch multi-lens review →
-   on-device/Playwright verification → PR-ready branch. Repo-agnostic; adapts to any repository.
+   on-device verification (structural checks via claude-in-chrome) → PR-ready branch. Repo-agnostic; adapts to any repository.
 2. **company in-repo tier** — the existing `agents/` + `Docs/` + `.github/instructions/` structure, formalized
    (NOT packaged as a plugin). Versions with branches, updates via git pull, teammates get it by cloning.
 3. **Personal tier** — a slimmed `~/.claude/CLAUDE.md` (~½ page) + plugin `userConfig` values + the memory
@@ -157,7 +157,7 @@ Suitability per stage:
 | Whole-branch review | **Strong** — read-only fan-out, verify, dedup, reconcile | **`review-panel.js` ships v1** |
 | Mechanical sweeps | **Strong** — pipeline over file list, worktree isolation | **`mechanical-sweep.js` ships v1** (manual utility — no pipeline stage invokes it) |
 | Repo research | Good | Optional `repo-research.js`, post-v1 |
-| On-device verification | None (human phase) | Never; Playwright pre-pass needs no workflow |
+| On-device verification | None (human phase) | Never; the claude-in-chrome pre-pass needs no workflow |
 
 `review-panel.js` shape: 2–3 lens reviewers (spec compliance / correctness+security / simplification) →
 adversarial verify per finding (the `red-team-reviewer` charter is spliced into each verifier prompt) →
@@ -207,7 +207,7 @@ gated by `userConfig.crossModelReview`.
 | --- | --- | --- |
 | executing-waves | Ledger, briefs, TDD green gate, model routing, wave compaction, handoff blocks | v1 — first port |
 | planning-waves | Wave/dispatch-map/pinned-interface plan contract | v1 |
-| verifying-on-device | Playwright auto-verdicts + human checklist interview (near-pure move of existing skill) | v1 |
+| verifying-on-device | claude-in-chrome auto-verdicts + human checklist interview (near-pure move of existing skill) | v1 |
 | reviewing-the-branch | Branch gate via review-panel workflow + agents | v1 |
 | scoping-interview + /devcycle:cycle + /devcycle:continue + state file | Entry, triage, resume glue | v1 — last |
 | onboarding-a-repo | Bootstrap tier-2 anywhere: detect real commands, scaffold CLAUDE.md/per-package rules, run allowlist scan, wire verification commands | v1.x — right after the pipeline works |
@@ -285,8 +285,8 @@ Version handling on GitHub is enforced by CI, not discipline alone:
   executing-waves port; coordinator re-run is the fallback if subagent Stop hooks prove awkward).
 - `.claude/agent-memory/` feature details (verify against docs before the repo-tier item).
 - Description char budget exact numbers (verify via /context during release checks).
-- Whether `verifying-on-device`'s Playwright pre-pass needs repo-specific target config in tier 2
-  (likely: an `accesslint.config.json`-style target file).
+- Whether `verifying-on-device`'s claude-in-chrome pre-pass needs repo-specific target config in tier 2
+  (likely not: the user drives their own authenticated Chrome, so there is no separate target/URL config to pin).
 
 ## Appendix: upstream comparison summaries
 

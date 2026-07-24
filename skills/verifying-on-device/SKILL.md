@@ -47,15 +47,19 @@ A SCRIPT OR SCREENSHOT NEVER CHECKS OFF A CHECKLIST ITEM.
 ```
 
 One exception, keyed to an observable predicate: an item asserting DOM structure, CSS
-values, or exact text that a Playwright run — via the Playwright MCP server (the intended
-engine) or an equivalent structural check — has verified, fresh output in hand, may be
-checked off with the tag `(auto)`. When no Playwright MCP is available, nothing is
-auto-checked: every item stays a human item. Everything a script cannot structurally see
-(feel, smoothness, visual alignment, contrast, legibility) stays unchecked for the human.
+values, or exact text that a structural browser check — via claude-in-chrome (the intended
+engine: it navigates, screenshots, and reads the DOM/CSS/text/network of a page in the
+user's own Chrome) or an equivalent structural check — has verified, fresh output in hand,
+may be checked off with the tag `(auto)`. claude-in-chrome is preferred because the user can
+open an authenticated page in their real Chrome and hand the agent that already-logged-in
+session to inspect — which a separate browser context (e.g. Playwright's) cannot do without
+re-authenticating. When claude-in-chrome is not available, nothing is auto-checked: every
+item stays a human item. Everything a browser check cannot structurally see (feel,
+smoothness, visual alignment, contrast, legibility) stays unchecked for the human.
 
 | Rationalization | Reality |
 |---|---|
-| "The Playwright suite is green" | Green covers only its DOM/CSS/text assertions — check off exactly those items, `(auto)`-tagged, nothing more |
+| "claude-in-chrome confirmed the page" | A structural read covers only DOM/CSS/text — check off exactly those items, `(auto)`-tagged, nothing more |
 | "The screenshot looks right" | A screenshot cannot show jank, focus order, interaction feel, or a breakpoint reflow |
 | "We're behind schedule" | Pressure does not convert human items into script items |
 | "The code clearly implements it" | Rendered outcome and code intent diverge exactly often enough to need this checklist |

@@ -4,8 +4,8 @@
 
 ## Setup
 
-Create an empty sandbox git repo (no existing `docs/` directory). No Playwright or other
-test tooling is present. The agent is told a task has just produced rendered changes,
+Create an empty sandbox git repo (no existing `docs/` directory). No claude-in-chrome or
+other browser-inspection tooling is available. The agent is told a task has just produced rendered changes,
 described as:
 
 > The ticket-list toolbar gained a theme-aware **status-filter dropdown** (options Open,

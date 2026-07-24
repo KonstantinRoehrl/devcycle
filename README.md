@@ -24,8 +24,9 @@ automatically from the official Claude Code plugin directory; afterwards
 
 Requires a recent Claude Code CLI — verified on 2.1.217 and later.
 
-For the on-device verification stage's automatic checks, also set up the [Playwright] MCP
-server (see below — without it, every checklist item falls to you).
+For the on-device verification stage's automatic checks, also install the claude-in-chrome
+plugin — Claude Code's integration with your own Chrome (see below — without it, every
+checklist item falls to you).
 
 ## Use
 
@@ -75,7 +76,7 @@ Resume any time with:
    for crept in.
 6. **On-device verification** — for changes a human can see: a checklist of outcomes to
    confirm on the running app. What a browser can structurally verify (DOM, CSS values,
-   exact text) is auto-checked through the [Playwright] MCP and tagged `(auto)`; everything
+   exact text) is auto-checked through claude-in-chrome and tagged `(auto)`; everything
    a script cannot truly see — feel, alignment, smoothness, legibility — is walked with you
    one item at a time. Skipped when nothing renders.
 7. **Finish** — hands the branch back per your `gitPolicy` (below).
@@ -141,8 +142,9 @@ by a non-Claude model via the `codex` CLI, if installed — a hedge against blin
 model family might share.
 
 **`onDeviceGate`** governs the last verification. The checklist is hybrid by design:
-items a browser can structurally verify are auto-checked through the [Playwright] MCP
-(set it up per its docs; without it, nothing is auto-checked and every item is yours);
+items a browser can structurally verify are auto-checked through claude-in-chrome — Claude
+Code driving your own authenticated Chrome (install the plugin and grant the extension the
+page's site permissions; without it, nothing is auto-checked and every item is yours);
 the rest need a human. `human-required` (default) blocks the pipeline until you've walked
 every human item; `auto-ok` lets it finish once the auto-checkable items pass, explicitly
 listing what remains unverified — it skips the human, it never fakes the checkmarks.
@@ -188,4 +190,3 @@ Contributing — including how the scenario test harness in `tests/scenarios/` w
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [superpowers]: https://github.com/obra/superpowers
-[Playwright]: https://github.com/microsoft/playwright-mcp
