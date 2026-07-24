@@ -73,6 +73,16 @@ plain search when the graph is absent, stale, or too thin for the area in questi
 Read-only here too — never trigger a graphify build or `--update` — and silent
 either way: no note to the user about whether a graph was used.
 
+Also look for implementation-scoped docs (a `frontend.md`, `backend.md`, or equivalent) —
+filtered against the confirmed scope and affected areas recorded in `.devcycle/scope.md`, the
+first point in the pipeline scope is concretely known. When the graph above is being used,
+query it for `document`-type nodes and judge relevance against that confirmed scope. When no
+graph is used (absent, or too stale/thin for these docs), fall back to the same two-phase
+index-then-fetch as scoping-interview: list `*.md` files repo-wide — excluding
+`node_modules/`, `vendor/`, `dist/`, `build/`, `.git/`, and equivalents — then read just each
+file's title/first heading into a lightweight index, and read in full only the entries judged
+scope-relevant. No docs found is silent; this step never triggers a graphify build.
+
 ## Output contract
 
 The finished plan satisfies this contract, consumed by `devcycle:executing-waves`: plan header (Goal/Architecture/Global Constraints) + per task: `**Files:**` (Create/Modify/Test), `**Interfaces:**` (Consumes/Produces, exact signatures), `**Dependencies:**` (`none` | `Task N (reason)` | `Tasks N+M committed`), checkbox steps with test-first ordering, and a `## Dispatch Map` section listing waves of file-disjoint, dependency-ready tasks.
