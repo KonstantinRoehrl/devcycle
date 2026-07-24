@@ -113,11 +113,15 @@ preserved.
 Run the stages in order, each via the named skill:
 
 1. **scoping** — `devcycle:scoping-interview` (skipped for mature input per triage).
-2. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified), with one
-   note layered on top: the user's batching preference carries into this stage —
-   where the upstream skill says to ask questions one at a time, ask via
+2. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified), with two
+   notes layered on top. First: the user's batching preference carries into this
+   stage — where the upstream skill says to ask questions one at a time, ask via
    AskUserQuestion in batches of 1–4 with concrete options plus Other instead.
-   Everything else upstream stands. When the spec is approved, transition to
+   Second: before upstream's "commit the design document to git" step, check
+   whether the spec's path is covered by the target repo's own `.gitignore`
+   (`git check-ignore`); if so, write the file but skip the commit — respect the
+   repo's own ignore rules rather than force-adding past them. Everything else
+   upstream stands. When the spec is approved, transition to
    `devcycle:planning-waves` (not directly to upstream writing-plans).
 3. **planning** — `devcycle:planning-waves`.
 4. **execution** — `devcycle:executing-waves`.
