@@ -1,6 +1,5 @@
 ---
 description: "Run the devcycle pipeline: triage a feature/bug/refactor description, then walk scoping → spec → plan → execution → review → verification."
-disable-model-invocation: true
 ---
 
 # /devcycle:cycle
