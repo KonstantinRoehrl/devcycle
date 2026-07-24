@@ -60,7 +60,7 @@ devcycle/                (public GitHub repo)
 │   │                             # userConfig (see §7)
 │   └── marketplace.json          # source "./", allowCrossMarketplaceDependenciesOn: ["claude-plugins-official"]
 ├── commands/
-│   ├── cycle.md                  # entry: input-maturity triage → stage walk; disable-model-invocation: true
+│   ├── cycle.md                  # entry: input-maturity triage → stage walk; model-invocable (wrappers can call it)
 │   └── continue.md               # resume from .devcycle/state.md after /clear (see §5)
 ├── skills/
 │   ├── scoping-interview/        # rough idea → bounded scope; batched AskUserQuestion; nothing assumed;
@@ -101,8 +101,10 @@ verifying-on-device → finish per `gitPolicy`.
    (Read/Grep/Glob/Bash) — Edit/Write are structurally absent, not merely forbidden by prose.
 3. **Skill preloading in briefs.** Implementer dispatches inject TDD + relevant repo-convention skill content at
    dispatch time instead of instructing the subagent to invoke skills itself.
-4. **Entry points cannot auto-fire.** `/cycle` and any side-effectful skill carry
-   `disable-model-invocation: true`; commands are the only entry points that cannot be silently substituted.
+4. **Entry points cannot auto-fire — except `/cycle`, intentionally.** Side-effectful skills and
+   `/devcycle:continue` carry `disable-model-invocation: true` so they cannot be silently substituted.
+   `/cycle` is a deliberate exception (reversed 2026-07-24): it is model-invocable so a wrapper skill —
+   e.g. one that loads/saves tickets around a run — can call the pipeline programmatically.
 5. **Review panel as saved workflow** (see §6) — resumable, concurrency-capped, deterministic lens assignment.
 6. **Description-budget release check.** Skill/command descriptions share a finite char budget (check via
    `/context`); verify before each release that devcycle + superpowers + a repo tier fit. (Exact budget
