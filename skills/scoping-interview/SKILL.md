@@ -50,6 +50,17 @@ Whenever scope, intent, architecture, data, or user preference is uncertain:
    read-only — never trigger a graphify build or `--update` as a side effect of
    scoping — and silent either way: no note to the user about whether a graph was
    used.
+   Separately, also look for root repo-orientation docs (a `project.md`,
+   `architecture.md`, or equivalent) — relevant to any request, since scope isn't
+   confirmed yet at this point in the interview. When the graph above is being used,
+   query it for `document`-type nodes (graphify tags markdown separately from code)
+   and judge relevance by reading their content against the request. When no graph is
+   used (absent, or too stale/thin for these docs), fall back to a two-phase
+   index-then-fetch: list `*.md` files repo-wide — excluding `node_modules/`,
+   `vendor/`, `dist/`, `build/`, `.git/`, and equivalents — then read just each file's
+   title/first heading into a lightweight index, and read in full only the entries
+   judged relevant. Same rules as above: no docs found is silent (nothing to read, no
+   note to the user), and this step never triggers a graphify build.
 2. **Batch, don't trickle.** Ask via AskUserQuestion: 1–4 questions per call, each
    with concrete options plus Other — never one question per message. If
    AskUserQuestion is unavailable, send the whole batch as one plain message with
