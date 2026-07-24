@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0
+
+- feat(verifying-on-device): drive on-device structural checks with claude-in-chrome (#10)
+
 ## 0.5.0
 
 - feat: discover repo/implementation-scoped context docs via graphify-first, index-then-fetch fallback
