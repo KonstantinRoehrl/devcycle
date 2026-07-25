@@ -78,7 +78,11 @@ session, unlike the full pipeline's stage boundaries.
 
 ## Resume (`/devcycle:continue`)
 
-On re-entry at `stage: fast-path`, re-derive position from git evidence rather
+On re-entry at `stage: fast-path`, first re-run step 1 (branch discipline)
+unconditionally, before any edit: `commands/cycle.md` records `stage: fast-path`
+before this skill runs, so an interrupted run may still have the checkout on the
+default or integration branch with no topic branch created — create or switch to
+the topic branch if so. Only then re-derive position from git evidence rather
 than trusting conversation memory:
 
 | git evidence | resume action |
