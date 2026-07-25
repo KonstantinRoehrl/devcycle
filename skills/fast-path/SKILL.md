@@ -22,6 +22,10 @@ around them (subagents, plan file, ledger events) is dropped.
 1. **Branch discipline.** If the current branch is the repo's default branch or an
    integration branch (e.g. `dev`), create a topic branch first. Never implement
    directly on either — this holds here exactly as it holds for every plan task.
+   In the same breath as creating the topic branch (or on finding the checkout
+   already on a suitable one), update the `branch:` line of `.devcycle/state.md`
+   to that topic branch — the state file is the durable record of where the
+   fast-path work lives, and resume (below) keys off it.
 2. **Implement in-session.** No subagents, no plan file, no ledger entries — just
    make the change. It still carries an evidence class exactly as a plan task
    would, determined already at the triage gate, with verbatim before/after
@@ -78,11 +82,21 @@ session, unlike the full pipeline's stage boundaries.
 
 ## Resume (`/devcycle:continue`)
 
-On re-entry at `stage: fast-path`, first re-run step 1 (branch discipline)
-unconditionally, before any edit: `commands/cycle.md` records `stage: fast-path`
-before this skill runs, so an interrupted run may still have the checkout on the
-default or integration branch with no topic branch created — create or switch to
-the topic branch if so. Only then re-derive position from git evidence rather
+On re-entry at `stage: fast-path`, first settle the branch, before any edit —
+keyed off the `branch:` line RECORDED in `.devcycle/state.md`, not off whatever
+the checkout currently happens to be on (parallel sessions share the checkout
+and may have switched it back to the integration branch):
+
+- If the state file records a topic branch, resume means getting the checkout
+  onto that branch — `commands/continue.md`'s recorded-vs-current mismatch rule
+  already covers asking the user before switching. Never create a fresh topic
+  branch when one is recorded: the recorded branch is where any committed work
+  lives.
+- Only if the recorded branch is still the default or integration branch does
+  step 1 apply — an interrupted run may have stopped before the topic branch was
+  ever created. Create it and record it in the state file as step 1 requires.
+
+Only then re-derive position from git evidence on the recorded branch rather
 than trusting conversation memory:
 
 | git evidence | resume action |
