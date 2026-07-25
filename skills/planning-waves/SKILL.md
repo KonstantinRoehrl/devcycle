@@ -48,6 +48,25 @@ Every task carries a `**Dependencies:**` line in exactly one of these forms:
 - `**Dependencies:** Task 2 (consumes its X interface)`
 - `**Dependencies:** Tasks 1+4 committed`
 
+## Evidence class — one declaration per task
+
+Every task carries an `**Evidence:**` line naming the proof its implementation must
+produce, in exactly one of these forms:
+
+- `**Evidence:** red-green` — the task adds or changes behavior: verbatim failing (red)
+  test output before the code, verbatim passing (green) output after. The default; use it
+  whenever a failing test can express the task's outcome.
+- `**Evidence:** green-green (behavior-preserving)` — refactors and other
+  behavior-preserving changes, where no honest red state exists: the same suite command
+  run green before the change and green after, both captured verbatim.
+- `**Evidence:** convention (<command or procedure>)` — non-code tasks (docs, config) and
+  repos with no test suite: the repo's own documented verification convention, its
+  before/after output captured the same way.
+
+The class is planning's call, not the implementer's: derive it from what the task actually
+changes, and never declare `red-green` where no failing test can exist — that forces the
+implementer to fake a red or the reviewer to reject correct work.
+
 ## Dispatch Map — required section
 
 The plan ends with a `## Dispatch Map` grouping tasks into waves:
@@ -85,7 +104,7 @@ scope-relevant. No docs found is silent; this step never triggers a graphify bui
 
 ## Output contract
 
-The finished plan satisfies this contract, consumed by `devcycle:executing-waves`: plan header (Goal/Architecture/Global Constraints) + per task: `**Files:**` (Create/Modify/Test), `**Interfaces:**` (Consumes/Produces, exact signatures), `**Dependencies:**` (`none` | `Task N (reason)` | `Tasks N+M committed`), checkbox steps with test-first ordering, and a `## Dispatch Map` section listing waves of file-disjoint, dependency-ready tasks.
+The finished plan satisfies this contract, consumed by `devcycle:executing-waves`: plan header (Goal/Architecture/Global Constraints) + per task: `**Files:**` (Create/Modify/Test), `**Interfaces:**` (Consumes/Produces, exact signatures), `**Dependencies:**` (`none` | `Task N (reason)` | `Tasks N+M committed`), `**Evidence:**` (`red-green` | `green-green` | `convention`), checkbox steps ordered per the task's evidence class (test-first for `red-green`; baseline suite run first for `green-green`), and a `## Dispatch Map` section listing waves of file-disjoint, dependency-ready tasks.
 
 ## Overrides of upstream writing-plans
 

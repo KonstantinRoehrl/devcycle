@@ -38,12 +38,15 @@ Invariants:
 
 1. Read the ledger before dispatching anything. A task with an
    `event=committed` entry is done — never re-dispatch it.
-2. Slice the task's brief per upstream's file-handoff mechanics, then
-   **preload** into the brief the relevant
-   **superpowers:test-driven-development** content (REQUIRED) and any
-   convention-skill content the task needs. Never instruct the subagent to
-   invoke skills itself — content a subagent must fetch can be silently
-   skipped; injected content cannot.
+2. Slice the task's brief per upstream's file-handoff mechanics — the brief
+   carries the task's `**Evidence:**` class from the plan — then **preload**
+   into the brief the content that class needs: for `red-green` tasks the
+   relevant **superpowers:test-driven-development** content (REQUIRED), plus
+   any convention-skill content the task needs. `green-green` and
+   `convention` tasks skip the TDD splice; their brief instead names the
+   exact suite or convention command their before/after evidence must run.
+   Never instruct the subagent to invoke skills itself — content a subagent
+   must fetch can be silently skipped; injected content cannot.
 3. Dispatch **devcycle:implementer** with the brief only, on the model from
    Model routing below. A dispatch carries that task's brief and pinned
    interfaces — never accumulated session history or other tasks' reports:
