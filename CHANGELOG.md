@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- feat(cycle): triage gains a size axis — a confirmed-trivial request (after an AskUserQuestion gate) takes the fast path instead of the full pipeline
+- feat(fast-path): new mini-cycle skill — in-session implementation with evidence, one task-reviewer pass, then the normal finish stage
+
 ## 0.6.1
 
 - fix(cycle): make the command model-invocable and halt for compact/clear at boundaries (#11)

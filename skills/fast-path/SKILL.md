@@ -84,8 +84,16 @@ than trusting conversation memory:
 | git evidence | resume action |
 | --- | --- |
 | change absent, or present but uncommitted | (re)implement (step 2) |
-| committed but not yet reviewed | dispatch the task reviewer (step 5) |
-| review accepted | hand to `devcycle:finishing-the-cycle` (step 6) |
+| change committed | dispatch the task reviewer (step 5) |
+
+Review acceptance is never inferable from git — a reviewed commit and an
+unreviewed one look identical. Acceptance is recorded only by step 6 advancing
+`stage:` to `finish`, at which point `/devcycle:continue` routes to
+`devcycle:finishing-the-cycle` and never re-enters this skill. So on resume at
+`stage: fast-path`, an existing commit is always treated as committed but not
+yet accepted: dispatch the task reviewer. A redundant re-review after an
+interruption is the safe failure mode; skipping the reviewer because a commit
+exists is not.
 
 ## Guardrails preserved vs. dropped
 
