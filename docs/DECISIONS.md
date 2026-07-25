@@ -41,6 +41,25 @@ is the cause, which only diagnosis can settle.
 **Supersedes:** The maturity-only triage in `/devcycle:cycle` and scoping-interview's
 single unconditional handoff to `superpowers:brainstorming`.
 
+## 2026-07-25 — `auto` model derivation names capability tiers, not model ids
+
+**Decision:** The `auto` derivation paths resolve to one of two tiers: **session tier**
+(dispatch with no model override — the subagent inherits the coordinator session's own
+model, the strongest the user has already sanctioned) and **fast tier** (the newest
+fast/small Claude model available, currently the Sonnet-class generation; when in doubt,
+fall back to the session tier). The derivation predicates (task size, dependency count,
+diff size) are unchanged; only what they select changed. Explicit configured ids stay
+binding. The panel's `DEVCYCLE_PANEL_MODEL` export is now sent only for explicit ids;
+session-tier runs omit it and take the CLI's configured default.
+**Why:** The 2026-07-23 `auto` decision removed rotting ids from *config defaults* but
+left them in the derivation prose — `claude-sonnet-5` vs `claude-opus-4-8` predicates,
+and a branch-review chain of "first available of claude-opus-4-8, then claude-sonnet-5"
+(with no defined way to probe availability). Newer model generations shipped and the
+skills would never select them; the same rot the decision named had just moved.
+**Supersedes:** The hardcoded model ids in `executing-waves` Model routing,
+`reviewing-the-branch`'s derived-model chain and unconditional `DEVCYCLE_PANEL_MODEL`
+export, and `verifying-on-device`'s fixed walkthrough model id.
+
 ## 2026-07-23 — finish stage resolves gitPolicy against external push signals
 
 **Decision:** Before acting on `push-allowed`/`open-pr`, the finish stage

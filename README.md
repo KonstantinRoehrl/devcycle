@@ -126,7 +126,7 @@ options — answer once (or accept the defaults) and it never asks again.
 | `onDeviceGate` | Whether a human must finish the on-device checklist | `human-required` / `auto-ok` | `human-required` |
 | `implementerModel` | Model for implementer subagents | `auto` / model id | `auto` (derived per task; set a model id to pin) |
 | `taskReviewerModel` | Model for per-task reviewers | `auto` / model id | `auto` (derived per task; set a model id to pin) |
-| `branchReviewModel` | Model for the whole-branch review | `auto` / model id | `auto` (most capable available; set a model id to pin) |
+| `branchReviewModel` | Model for the whole-branch review | `auto` / model id | `auto` (inherits your session's model; set a model id to pin) |
 | `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id | `auto` (a fast model; set a model id to pin) |
 
 **`gitPolicy`** is the pipeline's blast radius: `local-commits-only` means it only ever
@@ -161,10 +161,12 @@ listing what remains unverified — it skips the human, it never fakes the check
 The four **model options** trade cost against capability per role. They default to
 `auto`: for implementers and task reviewers the coordinator derives the model per task
 from what the plan makes observable (task size, dependency count, diff size) and records
-each derivation in the ledger — stronger models where judgment matters, faster ones where
-the task is narrow and fully specified; the branch review takes the most capable model
-available and the walkthrough a fast one. Set an explicit model id to pin a role; an
-explicit id is binding and never second-guessed.
+each derivation in the ledger — the session's own model where judgment matters, a fast
+one where the task is narrow and fully specified; the branch review inherits the
+session's model and the walkthrough takes a fast one. Deriving by tier rather than by
+model ids written into the plugin means new model generations are picked up without a
+plugin update. Set an explicit model id to pin a role; an explicit id is binding and
+never second-guessed.
 
 ## Troubleshooting
 

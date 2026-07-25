@@ -114,19 +114,32 @@ this skill). Resolve each knob three ways:
 - any other value → binding: use it verbatim for every dispatch, never
   override or downshift it.
 
-Derivation predicates (plan-observable inputs only):
+Derivation picks between two tiers — defined by capability, never by a
+model id written here, because ids in skill prose rot as models change:
 
-- **implementer**: `claude-sonnet-5` iff the task's `**Files:**` block
-  lists ≤2 files AND `**Dependencies:** none` AND every step names its
-  file and expected behavior; else `claude-opus-4-8`.
-- **task-reviewer**: `claude-sonnet-5` iff the task diff is ≤400 changed
-  lines and ≤5 files; else `claude-opus-4-8`.
+- **session tier** — dispatch with NO model override, so the subagent
+  inherits this coordinator session's own model: the strongest model the
+  user has already sanctioned, tracking model generations without this
+  skill naming any.
+- **fast tier** — the newest fast/small Claude model available to this
+  session (the current Sonnet-class generation). If no such id can be
+  resolved with confidence, fall back to the session tier — a stronger
+  model is never the wrong direction.
+
+Derivation predicates (dispatch-time-observable inputs only):
+
+- **implementer**: fast tier iff the task's `**Files:**` block lists ≤2
+  files AND `**Dependencies:** none` AND every step names its file and
+  expected behavior; else session tier.
+- **task-reviewer**: fast tier iff the task diff is ≤400 changed lines
+  and ≤5 files; else session tier.
 
 Upstream's Model Selection tiers are background only; these predicates
 decide. Auditability: every dispatch's ledger event records the decision
-and its inputs — e.g. `outcome=model claude-sonnet-5 (auto: files=1,
-deps=none, steps=specified)` for a derived choice, or
-`outcome=model <id> (pinned)` for explicit config.
+and its inputs — e.g. `outcome=model fast:<resolved id> (auto: files=1,
+deps=none, steps=specified)` or `outcome=model session (auto: files=4)`
+for derived choices, or `outcome=model <id> (pinned)` for explicit
+config.
 
 ## Plan hygiene before wave 1
 
