@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0
+
+- feat: add trivial-change fast path plus audit-round triage and review improvements (#18)
+
 ## Unreleased
 
 - feat(cycle): triage gains a size axis — a confirmed-trivial request (after an AskUserQuestion gate) takes the fast path instead of the full pipeline
