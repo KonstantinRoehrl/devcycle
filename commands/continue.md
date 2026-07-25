@@ -12,12 +12,22 @@ recollection, including the user's.
 
 ## Re-derive position from files
 
-1. Read `.devcycle/state.md`. If it does not exist, say so plainly ("no devcycle
+1. Read the state file at exactly `<repo root>/.devcycle/state.md`, where repo
+   root is `git rev-parse --show-toplevel` of the current working directory —
+   never a state file found anywhere else (a parent directory, a sibling
+   checkout, a search hit). If it does not exist, say so plainly ("no devcycle
    state file found in this repo — there is no in-flight cycle to resume") and offer
    `/devcycle:cycle <description>` to start one. Stop there.
-2. Read the ledger it names (`.superpowers/sdd/progress.md`) and the plan/spec/
+2. **Ownership check before trusting anything in it:** if the file's `root:`
+   line differs from the current repo root, it belongs to another checkout or
+   leaked from another project — STOP. Report what its `root:` and `request:`
+   say versus where you are, and do not resume; the user chooses between
+   adopting it (the repo genuinely moved — rewrite `root:`, then proceed) and
+   leaving it alone. A file with no `root:` line predates this format: adopt it
+   by writing `root:` and `request:` at the next rewrite.
+3. Read the ledger it names (`.superpowers/sdd/progress.md`) and the plan/spec/
    checklist paths it records, where present.
-3. Cross-check git: current branch vs the recorded branch — on a mismatch, tell
+4. Cross-check git: current branch vs the recorded branch — on a mismatch, tell
    the user and ask before switching; never switch branches silently. Check
    `git log` for commits the ledger references. During execution, never
    re-dispatch a task the ledger records as committed.
@@ -25,10 +35,10 @@ recollection, including the user's.
 ## Announce the derived position
 
 Before doing anything else, tell the user where the cycle stands, from file evidence
-only: current stage and branch, artifact paths, and — during execution — per-task
-status from the ledger (committed / in review / not yet dispatched) plus the concrete
-next action. If the user's recollection contradicts the files, follow the files and
-say so.
+only: the recorded `request:` (so a wrong-project state is spotted instantly), current
+stage and branch, artifact paths, and — during execution — per-task status from the
+ledger (committed / in review / not yet dispatched) plus the concrete next action. If
+the user's recollection contradicts the files, follow the files and say so.
 
 ## Resume
 

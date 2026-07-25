@@ -40,11 +40,14 @@ internals may volunteer them; the interview must not depend on it.
 
 ## Stage entry
 
-Verify `.devcycle/state.md` exists before any research or questions. If it is
+Verify `.devcycle/state.md` exists at the target repo's toplevel
+(`git rev-parse --show-toplevel`) before any research or questions. If it is
 missing (the pipeline creates it as its first action; this check is the backstop),
-create it now — stage `scoping`, the current git branch, `none` for the
+create it now — stage `scoping`, the repo root in `root:`, the current git
+branch, a one-line `request:` distilled from the user's ask, `none` for the
 scope/spec/plan/checklist lines, `configured: no` — so a cycle interrupted
-mid-interview still leaves a state file for `/devcycle:continue` to resume from.
+mid-interview still leaves a state file, pinned to this repo and goal, for
+`/devcycle:continue` to resume from.
 
 ## The discipline
 

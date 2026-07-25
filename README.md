@@ -44,6 +44,8 @@ plan; implementation, testing, and review then run without you; at the end you g
 
 The pipeline saves its position to files (`.devcycle/state.md` plus its spec/plan/ledger
 artifacts) at every stage boundary, so it survives `/clear`, compaction, and new sessions.
+The state file names the repo root and the request it belongs to, and every reader
+verifies that binding first — a state file can never be mistaken for another project's.
 Resume any time with:
 
 ```

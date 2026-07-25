@@ -80,6 +80,25 @@ copies drift; the 2026-07-23 clamp decision already had to be applied twice.
 `/devcycle:continue`, and the near-identical research-procedure copies in
 scoping-interview and planning-waves.
 
+## 2026-07-25 — the state file self-identifies: root + request lines, verified by every reader
+
+**Decision:** `.devcycle/state.md` carries two identity lines — `root:` (the absolute
+repo toplevel the cycle belongs to) and `request:` (one line naming the cycle's goal).
+The file is only ever read or written at `<git rev-parse --show-toplevel>/.devcycle/state.md`
+— never a state file discovered anywhere else — and every reader (`/devcycle:cycle`
+Step 0, `/devcycle:continue`, scoping-interview's backstop) verifies `root:` against its
+own toplevel before trusting anything else in the file. On a mismatch: stop and report
+(the user chooses adopt-after-move or leave it); never resume or silently reset a
+foreign state file. `/devcycle:continue` announces the recorded `request:` so a
+wrong-project state is spotted instantly. Files without `root:` predate the format and
+are adopted at the next rewrite.
+**Why:** A real incident: another repo's state file was picked up and resumed, driving
+a cycle with the wrong project's stage and artifacts. The state file recorded a branch
+but nothing that bound it to a repository or a goal, so nothing forced the mismatch to
+surface.
+**Supersedes:** The previous state-file shape (no identity lines) and readers that
+trusted whatever `.devcycle/state.md` they found.
+
 ## 2026-07-23 — finish stage resolves gitPolicy against external push signals
 
 **Decision:** Before acting on `push-allowed`/`open-pr`, the finish stage
