@@ -73,6 +73,8 @@ devcycle/                (public GitHub repo)
 │   ├── verifying-on-device/      # generalized from the existing on-device-verification skill
 │   ├── finishing-the-cycle/      # finish stage: gitPolicy resolution + push-signal clamp (extracted
 │   │                             # 2026-07-25 from the duplicated cycle/continue command prose)
+│   ├── fast-path/                # confirmed-trivial mini-cycle: in-session implementation, one
+│   │                             # reviewer pass, then the normal finish (added 2026-07-25)
 │   ├── onboarding-a-repo/        # bootstrap tier-2 in any repo (see §8)
 │   ├── distilling-learnings/     # memory→docs/skills promotion session, codified (see §8)
 │   └── sweeping-mechanical-changes/  # bulk uniform edits via workflow/`claude -p` fan-out (see §8)
@@ -88,9 +90,9 @@ devcycle/                (public GitHub repo)
 └── README.md                     # pipeline narrative + demo transcript; CHANGELOG alongside
 ```
 
-Pipeline stages: intake triage (`/cycle`) → scoping-interview (rough input only) → superpowers:brainstorming →
-spec → planning-waves → executing-waves (per-wave: dispatch → TDD → review → commit) → reviewing-the-branch →
-verifying-on-device → finish per `gitPolicy`.
+Pipeline stages: intake triage (`/cycle`; a confirmed-trivial request short-circuits to fast-path → finish) →
+scoping-interview (rough input only) → superpowers:brainstorming → spec → planning-waves → executing-waves
+(per-wave: dispatch → TDD → review → commit) → reviewing-the-branch → verifying-on-device → finish per `gitPolicy`.
 
 ---
 

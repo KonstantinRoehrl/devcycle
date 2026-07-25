@@ -5,6 +5,34 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-07-25 — triage gains a size axis; trivial requests take a fast path
+
+**Decision:** `/devcycle:cycle` triage makes a third judgment alongside maturity and kind:
+size. A request counts as **trivial** only when every criterion of a conjunctive checklist
+holds — fully specified by the request itself, nothing left to design; no design decisions
+and no new interfaces; blast radius ≤ ~2 files / a few lines; the evidence class
+(`red-green` | `green-green` | `convention`) already determinable from the request; and,
+for a bug, a root cause already evident (an undiagnosed bug is never trivial). Any doubt
+on any criterion → not trivial. The verdict never auto-fires: triage announces it and asks
+(fast path vs. full pipeline). Confirmed → the state file is rewritten with
+`stage: fast-path` and the new `devcycle:fast-path` skill runs a mini-cycle that keeps all
+four guardrails — the state file and handoff blocks, evidence classes, the `gitPolicy`
+clamps, and topic-branch discipline. The mini-cycle itself is short: implement in-session
+with verbatim before/after evidence, commit, one `task-reviewer` pass, then the normal
+finish stage — with an escalation valve back into the full pipeline the moment the change
+stops looking trivial.
+Declined → the verdict is discarded, the normal walk proceeds, nothing extra recorded.
+**Why:** Every input walked the full pipeline, so a typo or a rename cost a scoping
+interview, a spec, a plan, a wave dispatch, and a whole-branch review — enough overhead
+that the practical workaround was to fix such things out of band, by hand, outside
+devcycle. That workaround lost every guardrail at once: no state file or handoff trail, no
+evidence class, no `gitPolicy` clamp, no topic-branch discipline — and no review either. A
+size axis keeps the small change inside the system and pays only for the parts that still
+earn their keep at that size.
+**Supersedes:** The two-axis (maturity + kind) triage recorded in the 2026-07-25
+"triage gains a kind axis" entry below — this extends that triage with a third axis; the
+kind axis and the diagnosis stage it introduced are unchanged.
+
 ## 2026-07-25 — per-task evidence classes replace unconditional red→green
 
 **Decision:** Every plan task declares an `**Evidence:**` class — `red-green` (new or

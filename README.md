@@ -92,6 +92,13 @@ Resume any time with:
    one item at a time. Skipped when nothing renders.
 8. **Finish** — hands the branch back per your `gitPolicy` (below).
 
+Triage judges size, too. A request at typo, rename, or few-line-fix scale — measured against a
+strict checklist, where any doubt on any criterion means not trivial — gets called out before
+the walk begins. devcycle announces that verdict and asks; only if you confirm does the run take
+the **fast path** instead: the change is implemented in the session you're already in, under the
+same evidence discipline a planned task gets, checked by one task-reviewer pass, then handed to
+the normal finish stage. Decline, and the full pipeline runs as if the question had never come up.
+
 Why the stages are shaped this way — fresh-context reviews, files-as-state, wave
 parallelism — is covered in [DESIGN.md](DESIGN.md).
 
@@ -107,6 +114,7 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | Skill `reviewing-the-branch` | The whole-branch review gate, single-reviewer or panel. |
 | Skill `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes. |
 | Skill `finishing-the-cycle` | Resolves the effective git policy and hands back, pushes, or opens the PR. |
+| Skill `fast-path` | Mini-cycle for confirmed-trivial requests: in-session implementation, one reviewer pass, normal finish. |
 | Agent `implementer` | Implements one task from a brief; never commits. |
 | Agent `task-reviewer` | Read-only reviewer for each task during execution. |
 | Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
