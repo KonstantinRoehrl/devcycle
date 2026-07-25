@@ -36,13 +36,22 @@ whoever is making the change, when it's practical to do so. Skipping them for a 
 change is fine — verify behavior by whatever local means fits, note in the PR that formal
 scenario evidence wasn't produced, and move on.
 
+## Deterministic tests for the workflow scripts
+
+The two Node scripts under `workflows/` are ordinary deterministic code, and unlike the
+scenario harness they have real automated tests: `tests/unit/` runs them end to end with
+fake `claude`/`codex` executables placed first on `PATH` — no model call, no API key —
+so CI runs them on every PR. If you change `review-panel.js` or `mechanical-sweep.js`,
+extend these tests with the behavior you changed.
+
 ## Before opening a PR
 
-Run both validators locally; CI runs the same checks:
+Run the validators and the workflow-script tests locally; CI runs the same checks:
 
 ```
 node scripts/validate.mjs          # manifests, frontmatter, description budget, fences
 node scripts/redaction-check.mjs   # no machine paths or deny-listed terms
+node --test tests/unit/*.test.mjs  # workflow-script tests (stubbed CLIs, keyless)
 ```
 
 **PR titles must be Conventional Commits** (`type(scope)?!: subject`). PRs are

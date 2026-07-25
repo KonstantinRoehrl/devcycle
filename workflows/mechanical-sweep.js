@@ -323,4 +323,6 @@ async function main() {
   }
 }
 
-main().catch((e) => fatal(String(e?.stack ?? e)));
+if (require.main === module) {
+  main().catch((e) => fatal(String(e?.stack ?? e)));
+}
