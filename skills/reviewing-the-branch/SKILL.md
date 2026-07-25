@@ -25,12 +25,14 @@ A value that still reads as a literal `${user_config...}` placeholder is
 unset — use its default. A value outside its allowed set is invalid — use
 its default.
 
-branchReviewModel resolves three ways: an explicit model id is binding —
+branchReviewModel resolves two ways: an explicit model id is binding —
 use it verbatim, no second-guessing; the value `auto` OR a literal
-placeholder means derive the model here. The derived branch-review model is
-the first available of: `claude-opus-4-8`, then `claude-sonnet-5`. The
-resolved model (explicit or derived) is what every rule below means by
-"the branch-review model".
+placeholder means the **session tier** — dispatch reviewer subagents with
+NO model override, so they inherit this session's own model: the
+strongest model the user has already sanctioned, tracking model
+generations without this skill naming any id. The resolved model
+(explicit id, or session tier) is what every rule below means by "the
+branch-review model".
 
 ## Fresh context (bias control — non-negotiable)
 
@@ -65,10 +67,11 @@ unavailability (degrade, below), never as a review verdict. The panel runs
 2–3 read-only lens reviewers (spec compliance, correctness + security,
 simplification) with per-finding adversarial verification; it never mutates
 files or git. Pass `"crossModel": true` only when the crossModelReview
-option is true. Always export the resolved branch-review model before
-invoking — explicit id and derived id alike, never omit the export:
-`DEVCYCLE_PANEL_MODEL=<resolved model> node ...`. Omitting it would
-silently replace the derived model with the CLI's default.
+option is true. When branchReviewModel is an explicit id, export it
+before invoking: `DEVCYCLE_PANEL_MODEL=<id> node ...` — omitting it
+would silently replace the user's binding choice with the CLI's default.
+When it resolved to the session tier, omit the export: the panel's
+subagents then run on the claude CLI's configured default model.
 
 **Graceful degradation — a first-class path, not an apology.** The built-in
 `code-review` skill is user-invocation-only in some environments, so a
@@ -142,7 +145,8 @@ The `Start the fresh session on <model>` line is this stage's job because
 the on-device session's model is chosen by whoever launches it — an
 instruction inside that session would arrive too late. `<model>` is the
 walkthroughModel option when it names an explicit model id (binding);
-otherwise (value `auto` or a literal placeholder) `claude-sonnet-5`.
+otherwise (value `auto` or a literal placeholder) recommend the current
+fast Sonnet-class Claude model, by its present id.
 
 When the state file records `checklist: none` (no rendered surface produced
 a checklist), the compaction hint becomes: Keep `checklist: none — on-device
