@@ -53,6 +53,7 @@ Continue at the recorded stage via its skill:
 | execution | `devcycle:executing-waves` (its resume table maps each task's last ledger event to the resume action) |
 | branch-review | `devcycle:reviewing-the-branch` |
 | on-device | `devcycle:verifying-on-device` |
+| fast-path | `devcycle:fast-path` — re-derives position from git evidence: change absent/uncommitted → (re)implement; committed but unreviewed → dispatch the task reviewer; review accepted → hand to finish |
 | finish | `devcycle:finishing-the-cycle` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
 
 From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file

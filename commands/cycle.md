@@ -49,7 +49,7 @@ truth — every later rewrite uses exactly it:
 
 ```markdown
 # devcycle state
-- stage: <scoping|diagnosis|brainstorm|planning|execution|branch-review|on-device|finish|done>  (the stage to RESUME at)
+- stage: <scoping|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|finish|done>  (the stage to RESUME at)
 - root: <absolute repo toplevel this cycle belongs to>
 - branch: <git branch>
 - request: <one line: what this cycle is building/fixing>
@@ -108,7 +108,7 @@ from that line (see Configuration above).
 
 ## Triage the input
 
-Judge `$ARGUMENTS` on two axes and announce both verdicts with the entry stage
+Judge `$ARGUMENTS` on three axes and announce all verdicts with the entry stage
 before proceeding.
 
 **Maturity** picks the entry stage:
@@ -131,6 +131,24 @@ before proceeding.
 - **Feature / refactor** → diagnosis is skipped (its handoff block still records
   the skip only when the stage was entered and judged inapplicable; a kind that
   never routes there emits nothing).
+
+**Size** judges whether the request is trivial enough to skip the full pipeline.
+Trivial requires ALL of the following — any doubt on any one of them means the
+request is not trivial:
+
+- fully specified by the request itself, nothing left to design;
+- no design decisions and no new interfaces;
+- blast radius of roughly two files or fewer, a few lines;
+- the evidence class (`red-green` | `green-green` | `convention`) is already
+  determinable from the request;
+- for bugs, the root cause is already evident — an undiagnosed bug is never
+  trivial.
+
+A trivial verdict is never acted on automatically: announce it and ask via
+AskUserQuestion, offering the fast path against the full pipeline. Confirmed →
+rewrite the state file with `stage: fast-path` and invoke `devcycle:fast-path`.
+Declined → the trivial verdict is discarded, the normal maturity/kind walk
+below applies, and nothing extra is recorded.
 
 ## State file
 
@@ -214,6 +232,7 @@ Pick the context action from this table and recommend it to the user explicitly:
 | wave → wave (within execution) | Compact if over ~40% context | ledger/plan paths, pinned interfaces, dispatch map, wave status | implementer transcripts, resolved findings |
 | execution → branch-review | Clear + `/devcycle:continue` or Fresh session (a reviewer that watched the code being written inherits the implementer's assumptions) | branch, spec path, ledger path | all implementation context |
 | branch-review → on-device | Fresh session | checklist path, branch | everything else |
+| fast-path → finish | Continue | everything | — |
 
 ### Await the context action — never run past a recommended compact or clear
 
