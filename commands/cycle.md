@@ -22,22 +22,37 @@ so `--config` writes only reach future sessions.
 
 ## Step 0 — create the state file (FIRST action, binding)
 
-Before triage, before any stage work, before any other output: ensure
-`.devcycle/state.md` exists in the target repo. If it is absent, create it with
-`stage: scoping`, the current branch, `configured: no`, and `none` for every
-artifact line. If a state file already exists with `stage: done` (a prior
-completed cycle in this repo), carry its `configured:` line forward unchanged
-and reset every other line the same way. If it exists with any OTHER stage, an
-in-flight cycle exists: do NOT reset it — tell the user, naming its stage and
-branch, and offer to resume it via `/devcycle:continue` or to start over; only
-on explicit confirmation of starting over reset the file (carrying
-`configured:` forward as above). This shape is the single source of truth —
-every later rewrite uses exactly it:
+Before triage, before any stage work, before any other output: ensure the state
+file exists at exactly `<repo root>/.devcycle/state.md`, where repo root is
+`git rev-parse --show-toplevel` of the current working directory — never a state
+file found anywhere else (a parent directory, a sibling checkout, a search hit).
+If it is absent, create it with `stage: scoping`, the current repo root and
+branch, a one-line `request:` distilled from `$ARGUMENTS`, `configured: no`, and
+`none` for every artifact line.
+
+**Ownership check first, on any existing file:** if its `root:` line differs
+from the current repo root, the file belongs to another checkout or leaked from
+another project — never resume or silently reset it. Tell the user what its
+`root:` and `request:` say, and let them choose: adopt it (the repo genuinely
+moved — rewrite `root:` to the current toplevel, keep everything else) or start
+fresh. A file with no `root:` line predates this format and is not foreign:
+adopt it by writing `root:` and `request:` at the next rewrite.
+
+Then: if the file has `stage: done` (a prior completed cycle in this repo),
+carry its `configured:` line forward unchanged and reset every other line for
+the new cycle (fresh `request:` included). If it has any OTHER stage, an
+in-flight cycle exists: do NOT reset it — tell the user, naming its stage,
+branch, and `request:`, and offer to resume it via `/devcycle:continue` or to
+start over; only on explicit confirmation of starting over reset the file
+(carrying `configured:` forward as above). This shape is the single source of
+truth — every later rewrite uses exactly it:
 
 ```markdown
 # devcycle state
 - stage: <scoping|diagnosis|brainstorm|planning|execution|branch-review|on-device|finish|done>  (the stage to RESUME at)
+- root: <absolute repo toplevel this cycle belongs to>
 - branch: <git branch>
+- request: <one line: what this cycle is building/fixing>
 - scope: <path or none>
 - diagnosis: <path or none>
 - spec: <path or none>
@@ -47,6 +62,10 @@ every later rewrite uses exactly it:
 - configured: <no | defaults | date + KEY=VALUE list>
 - updated: <ISO-8601 UTC>
 ```
+
+`root:` and `request:` pin the file to one project and one goal: every reader
+verifies `root:` against its own `git rev-parse --show-toplevel` before trusting
+anything else in the file.
 
 `stage:` records the stage the NEXT session should resume at, never the stage
 just completed: at every transition, write the upcoming stage's name.
