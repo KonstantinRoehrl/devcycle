@@ -37,6 +37,7 @@ Continue at the recorded stage via its skill:
 | stage | resume via |
 | --- | --- |
 | scoping | `devcycle:scoping-interview` |
+| diagnosis | `superpowers:systematic-debugging` — bugs only (restated here because this session may never load `/devcycle:cycle`): reproduce first, isolate the root cause, and end the stage by writing the root-cause report (reproduction steps, established cause with evidence, surfaces involved) to `.devcycle/diagnosis.md`, recording it in the state file's `diagnosis:` line; the fix's design belongs to brainstorm, which takes that report as explored context |
 | brainstorm | `superpowers:brainstorming` — with devcycle's batching note (restated here because this session may never load `/devcycle:cycle`): where upstream asks questions one at a time, ask via AskUserQuestion in batches of 1–4 with concrete options plus Other |
 | planning | `devcycle:planning-waves` |
 | execution | `devcycle:executing-waves` (its resume table maps each task's last ledger event to the resume action) |

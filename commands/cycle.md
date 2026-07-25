@@ -37,9 +37,10 @@ every later rewrite uses exactly it:
 
 ```markdown
 # devcycle state
-- stage: <scoping|brainstorm|planning|execution|branch-review|on-device|finish|done>  (the stage to RESUME at)
+- stage: <scoping|diagnosis|brainstorm|planning|execution|branch-review|on-device|finish|done>  (the stage to RESUME at)
 - branch: <git branch>
 - scope: <path or none>
+- diagnosis: <path or none>
 - spec: <path or none>
 - plan: <path or none>
 - ledger: .superpowers/sdd/progress.md
@@ -89,7 +90,10 @@ from that line (see Configuration above).
 
 ## Triage the input
 
-Judge the maturity of `$ARGUMENTS`:
+Judge `$ARGUMENTS` on two axes and announce both verdicts with the entry stage
+before proceeding.
+
+**Maturity** picks the entry stage:
 
 - **Rough idea, vague ticket, or one-liner** (scope, intent, or constraints not yet
   established) → start at the **scoping** stage.
@@ -98,7 +102,17 @@ Judge the maturity of `$ARGUMENTS`:
   validation pass of the provided material. If an approved spec document already
   exists on disk, start at **planning**.
 
-Announce the triage verdict and the entry stage before proceeding.
+**Kind** (feature | bug | refactor) shapes the walk:
+
+- **Bug** → the **diagnosis** stage runs between scoping and brainstorm unless the
+  input already names the root cause with evidence (not a hunch — a stated cause
+  plus how it was established). You cannot spec a fix for an undiagnosed problem:
+  scoping for a bug collects the symptom and reproduction, diagnosis establishes
+  the cause, and only then is a fix designed. A mature bug ticket with
+  reproduction but unknown cause enters at **diagnosis**, not brainstorm.
+- **Feature / refactor** → diagnosis is skipped (its handoff block still records
+  the skip only when the stage was entered and judged inapplicable; a kind that
+  never routes there emits nothing).
 
 ## State file
 
@@ -112,7 +126,18 @@ preserved.
 Run the stages in order, each via the named skill:
 
 1. **scoping** — `devcycle:scoping-interview` (skipped for mature input per triage).
-2. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified), with two
+2. **diagnosis** (bugs only, per triage) — `superpowers:systematic-debugging`
+   (upstream, unmodified): reproduce the failure first, then isolate the root
+   cause. The stage ends with a root-cause report written to
+   `.devcycle/diagnosis.md` — reproduction steps, the established cause with its
+   evidence, and the surfaces involved — recorded in the state file's
+   `diagnosis:` line. The report pins the reproduction precisely enough for
+   planning to turn it into the fix task's failing test. Design questions
+   (how to fix it) stay out: they belong to brainstorm, which takes this report
+   as its explored context. If diagnosis overturns the confirmed scope (the bug
+   lives somewhere else entirely), say so and return to scoping rather than
+   designing a fix for the wrong problem.
+3. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified), with two
    notes layered on top. First: the user's batching preference carries into this
    stage — where the upstream skill says to ask questions one at a time, ask via
    AskUserQuestion in batches of 1–4 with concrete options plus Other instead.
@@ -122,12 +147,12 @@ Run the stages in order, each via the named skill:
    repo's own ignore rules rather than force-adding past them. Everything else
    upstream stands. When the spec is approved, transition to
    `devcycle:planning-waves` (not directly to upstream writing-plans).
-3. **planning** — `devcycle:planning-waves`.
-4. **execution** — `devcycle:executing-waves`.
-5. **branch-review** — `devcycle:reviewing-the-branch`.
-6. **on-device** — `devcycle:verifying-on-device` (skip only when the change has no
+4. **planning** — `devcycle:planning-waves`.
+5. **execution** — `devcycle:executing-waves`.
+6. **branch-review** — `devcycle:reviewing-the-branch`.
+7. **on-device** — `devcycle:verifying-on-device` (skip only when the change has no
    rendered/on-device surface; record the skip in the handoff).
-7. **finish** — resolve the effective git policy, then act on it. Call the value
+8. **finish** — resolve the effective git policy, then act on it. Call the value
    resolved above (Configuration section) the **configured policy**.
 
    **Resolve effective policy.** If the configured policy is `local-commits-only`, it is
@@ -191,7 +216,7 @@ labels.
 
 At the finish stage specifically, the block carries one additional line, directly after
 `Artifacts:` — the resolved git policy. When the effective policy was not clamped:
-`Git policy: <value> (no override)`. When it was clamped (Step 7 above): `Git policy:
+`Git policy: <value> (no override)`. When it was clamped (Step 8 above): `Git policy:
 configured <value> → effective local-commits-only (<reason>)`, where `<reason>` is `a
 permission rule denies git push`, `current branch is the repo's default branch — direct
 pushes to it are not allowed`, or both joined with `; ` if both signals fired. No other
@@ -202,6 +227,8 @@ Pick the context action from this table and recommend it to the user explicitly:
 | Boundary | Action | Keep | Drop |
 | --- | --- | --- | --- |
 | scoping → brainstorm | Continue | everything | — |
+| scoping → diagnosis (bugs) | Continue | everything | — |
+| diagnosis → brainstorm (root cause established) | Compact with hint | diagnosis report path, reproduction steps, root cause | debugging transcripts, ruled-out hypotheses |
 | brainstorm → planning (spec approved) | Compact with hint | spec path, decisions, constraints | design back-and-forth |
 | planning → execution (plan approved) | Clear + `/devcycle:continue` | nothing (files carry it) | planning conversation |
 | wave → wave (within execution) | Compact if over ~40% context | ledger/plan paths, pinned interfaces, dispatch map, wave status | implementer transcripts, resolved findings |

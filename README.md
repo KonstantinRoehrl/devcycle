@@ -56,32 +56,39 @@ Resume any time with:
    goal: you answer questions about intent and desired outcomes; devcycle researches the
    repo itself to establish what the change touches and confirms that picture with you —
    research draws on an existing graphify graph when one is available, and also looks for repo
-   orientation docs the same way. Skipped when your input is already concrete.
-2. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
+   orientation docs the same way. Skipped when your input is already concrete. For a bug,
+   the interview collects the symptom and reproduction (steps, expected vs. actual,
+   evidence) instead of design intent.
+2. **Diagnosis** — for bugs whose root cause isn't established yet: reproduce the failure,
+   then isolate the cause (upstream `superpowers:systematic-debugging`), ending in a
+   root-cause report that the fix's design builds on. A fix is never designed for an
+   undiagnosed problem. Skipped for features, refactors, and bugs whose cause is already
+   known with evidence.
+3. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
    spec you approve.
-3. **Planning** — a feasibility check, then an implementation plan that doubles as the
+4. **Planning** — a feasibility check, then an implementation plan that doubles as the
    execution strategy: the work is cut into small, self-contained tasks — each implementable
    from its own brief alone, so every subagent works with a small context — dependencies are
    derived from what each task consumes, and everything not forced into sequence by a real
    dependency is grouped into *waves* of file-disjoint tasks that run in parallel — research
    draws on an existing graphify graph when one is available, and also looks for
    implementation-scoped docs the same way. You approve the plan.
-4. **Execution** — each task goes to a fresh implementer subagent carrying only that task's
+5. **Execution** — each task goes to a fresh implementer subagent carrying only that task's
    brief, working test-first (failing test before code) when the task adds behavior — a
    behavior-preserving task instead proves the suite green before and after the change, per
    the evidence class its plan task declares. A reviewer checks every task, the
    coordinator re-runs the tests itself before accepting (the *green gate*: the task's test
    command must pass in the coordinator's own re-run, not just in the implementer's
    report), and only accepted work is committed.
-5. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole
+6. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole
    branch against the spec: everything the spec asked for is there, nothing it didn't ask
    for crept in.
-6. **On-device verification** — for changes a human can see: a checklist of outcomes to
+7. **On-device verification** — for changes a human can see: a checklist of outcomes to
    confirm on the running app. What a browser can structurally verify (DOM, CSS values,
    exact text) is auto-checked through claude-in-chrome and tagged `(auto)`; everything
    a script cannot truly see — feel, alignment, smoothness, legibility — is walked with you
    one item at a time. Skipped when nothing renders.
-7. **Finish** — hands the branch back per your `gitPolicy` (below).
+8. **Finish** — hands the branch back per your `gitPolicy` (below).
 
 Why the stages are shaped this way — fresh-context reviews, files-as-state, wave
 parallelism — is covered in [DESIGN.md](DESIGN.md).
