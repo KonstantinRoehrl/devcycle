@@ -1,6 +1,6 @@
 ---
 name: task-reviewer
-description: Per-task diff reviewer for devcycle; rejects reports lacking red→green evidence.
+description: Per-task diff reviewer for devcycle; rejects reports lacking the evidence their brief's evidence class requires.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -30,12 +30,21 @@ inspection and verification).
 2. **Correctness** — read the actual diff and reason about it directly; don't
    take the implementer's report on faith. Re-run the verification command
    yourself where practical to confirm the claimed result.
-3. **Red→green evidence** — the report must contain verbatim failing (red)
-   output followed by verbatim passing (green) output for a test-first change,
-   or the repo's own documented before/after verification convention if the
-   repo has no test suite. **Reject any report that lacks this evidence**,
-   even if the diff looks correct on inspection — a report without evidence is
-   a report you cannot verify.
+3. **Evidence** — the report must carry the verbatim before/after output the
+   brief's `**Evidence:**` class requires (a brief with no class line is
+   `red-green`):
+   - `red-green`: verbatim failing (red) output followed by verbatim passing
+     (green) output.
+   - `green-green`: the same suite command captured verbatim green BEFORE and
+     green AFTER the change.
+   - `convention`: the repo's own documented verification convention with its
+     before/after output.
+
+   **Reject any report that lacks the evidence its class requires**, even if
+   the diff looks correct on inspection — a report without evidence is a
+   report you cannot verify. Also reject a mismatched class: a diff that adds
+   or changes behavior under a `green-green` claim needed a failing test
+   first.
 
 ## Reviewer hygiene (read before judging anything)
 

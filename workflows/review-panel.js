@@ -483,4 +483,9 @@ async function main() {
   process.stdout.write(JSON.stringify({ findings: ranked, summary }, null, 2) + "\n");
 }
 
-main().catch((e) => fatal(String(e?.stack ?? e)));
+if (require.main === module) {
+  main().catch((e) => fatal(String(e?.stack ?? e)));
+}
+
+// Pure helpers, exported for the deterministic tests in tests/unit/.
+module.exports = { dedupFindings, rankFindings, truncate, fallbackSummary, mapLimit };

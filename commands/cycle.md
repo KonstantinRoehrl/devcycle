@@ -10,36 +10,51 @@ survives `/clear` and resumes via `/devcycle:continue`.
 
 ## Configuration
 
-Git policy for the finish stage: `${user_config.gitPolicy}` — if that value still
-begins with the literal text `${user_config`, the option is unset; use the
-default `local-commits-only`. Allowed values: `local-commits-only`, `push-allowed`,
-`open-pr`; treat anything else as invalid and fall back to the default. Other knobs
-(models, review depth, on-device gate) are read the same way, via their own
-`${user_config.KEY}` placeholders, by the stage skills that consume them.
-When a knob's own placeholder is literal but the state file's `configured:`
-line records a value for it (first-run walkthrough below), that recorded value
-governs this run — same-session substitution cannot refresh, so `--config`
-writes only reach future sessions.
+Knob values arrive via `${user_config.KEY}` placeholders, each read by the stage
+skill that consumes it (gitPolicy by `devcycle:finishing-the-cycle`, models and
+review depth and the on-device gate by their stages). The resolution convention,
+everywhere: a value that still reads as a literal `${user_config...}` placeholder
+is unset, and a value outside its allowed set is invalid — both fall back to the
+knob's documented default. When a knob's placeholder is literal but the state
+file's `configured:` line records a value for it (first-run walkthrough below),
+that recorded value governs this run — same-session substitution cannot refresh,
+so `--config` writes only reach future sessions.
 
 ## Step 0 — create the state file (FIRST action, binding)
 
-Before triage, before any stage work, before any other output: ensure
-`.devcycle/state.md` exists in the target repo. If it is absent, create it with
-`stage: scoping`, the current branch, `configured: no`, and `none` for every
-artifact line. If a state file already exists with `stage: done` (a prior
-completed cycle in this repo), carry its `configured:` line forward unchanged
-and reset every other line the same way. If it exists with any OTHER stage, an
-in-flight cycle exists: do NOT reset it — tell the user, naming its stage and
-branch, and offer to resume it via `/devcycle:continue` or to start over; only
-on explicit confirmation of starting over reset the file (carrying
-`configured:` forward as above). This shape is the single source of truth —
-every later rewrite uses exactly it:
+Before triage, before any stage work, before any other output: ensure the state
+file exists at exactly `<repo root>/.devcycle/state.md`, where repo root is
+`git rev-parse --show-toplevel` of the current working directory — never a state
+file found anywhere else (a parent directory, a sibling checkout, a search hit).
+If it is absent, create it with `stage: scoping`, the current repo root and
+branch, a one-line `request:` distilled from `$ARGUMENTS`, `configured: no`, and
+`none` for every artifact line.
+
+**Ownership check first, on any existing file:** if its `root:` line differs
+from the current repo root, the file belongs to another checkout or leaked from
+another project — never resume or silently reset it. Tell the user what its
+`root:` and `request:` say, and let them choose: adopt it (the repo genuinely
+moved — rewrite `root:` to the current toplevel, keep everything else) or start
+fresh. A file with no `root:` line predates this format and is not foreign:
+adopt it by writing `root:` and `request:` at the next rewrite.
+
+Then: if the file has `stage: done` (a prior completed cycle in this repo),
+carry its `configured:` line forward unchanged and reset every other line for
+the new cycle (fresh `request:` included). If it has any OTHER stage, an
+in-flight cycle exists: do NOT reset it — tell the user, naming its stage,
+branch, and `request:`, and offer to resume it via `/devcycle:continue` or to
+start over; only on explicit confirmation of starting over reset the file
+(carrying `configured:` forward as above). This shape is the single source of
+truth — every later rewrite uses exactly it:
 
 ```markdown
 # devcycle state
-- stage: <scoping|brainstorm|planning|execution|branch-review|on-device|finish|done>  (the stage to RESUME at)
+- stage: <scoping|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|finish|done>  (the stage to RESUME at)
+- root: <absolute repo toplevel this cycle belongs to>
 - branch: <git branch>
+- request: <one line: what this cycle is building/fixing>
 - scope: <path or none>
+- diagnosis: <path or none>
 - spec: <path or none>
 - plan: <path or none>
 - ledger: .superpowers/sdd/progress.md
@@ -47,6 +62,10 @@ every later rewrite uses exactly it:
 - configured: <no | defaults | date + KEY=VALUE list>
 - updated: <ISO-8601 UTC>
 ```
+
+`root:` and `request:` pin the file to one project and one goal: every reader
+verifies `root:` against its own `git rev-parse --show-toplevel` before trusting
+anything else in the file.
 
 `stage:` records the stage the NEXT session should resume at, never the stage
 just completed: at every transition, write the upcoming stage's name.
@@ -89,7 +108,10 @@ from that line (see Configuration above).
 
 ## Triage the input
 
-Judge the maturity of `$ARGUMENTS`:
+Judge `$ARGUMENTS` on three axes and announce all verdicts with the entry stage
+before proceeding.
+
+**Maturity** picks the entry stage:
 
 - **Rough idea, vague ticket, or one-liner** (scope, intent, or constraints not yet
   established) → start at the **scoping** stage.
@@ -98,7 +120,35 @@ Judge the maturity of `$ARGUMENTS`:
   validation pass of the provided material. If an approved spec document already
   exists on disk, start at **planning**.
 
-Announce the triage verdict and the entry stage before proceeding.
+**Kind** (feature | bug | refactor) shapes the walk:
+
+- **Bug** → the **diagnosis** stage runs between scoping and brainstorm unless the
+  input already names the root cause with evidence (not a hunch — a stated cause
+  plus how it was established). You cannot spec a fix for an undiagnosed problem:
+  scoping for a bug collects the symptom and reproduction, diagnosis establishes
+  the cause, and only then is a fix designed. A mature bug ticket with
+  reproduction but unknown cause enters at **diagnosis**, not brainstorm.
+- **Feature / refactor** → diagnosis is skipped (its handoff block still records
+  the skip only when the stage was entered and judged inapplicable; a kind that
+  never routes there emits nothing).
+
+**Size** judges whether the request is trivial enough to skip the full pipeline.
+Trivial requires ALL of the following — any doubt on any one of them means the
+request is not trivial:
+
+- fully specified by the request itself, nothing left to design;
+- no design decisions and no new interfaces;
+- blast radius of roughly two files or fewer, a few lines;
+- the evidence class (`red-green` | `green-green` | `convention`) is already
+  determinable from the request;
+- for bugs, the root cause is already evident — an undiagnosed bug is never
+  trivial.
+
+A trivial verdict is never acted on automatically: announce it and ask via
+AskUserQuestion, offering the fast path against the full pipeline. Confirmed →
+rewrite the state file with `stage: fast-path` and invoke `devcycle:fast-path`.
+Declined → the trivial verdict is discarded, the normal maturity/kind walk
+below applies, and nothing extra is recorded.
 
 ## State file
 
@@ -112,7 +162,18 @@ preserved.
 Run the stages in order, each via the named skill:
 
 1. **scoping** — `devcycle:scoping-interview` (skipped for mature input per triage).
-2. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified), with two
+2. **diagnosis** (bugs only, per triage) — `superpowers:systematic-debugging`
+   (upstream, unmodified): reproduce the failure first, then isolate the root
+   cause. The stage ends with a root-cause report written to
+   `.devcycle/diagnosis.md` — reproduction steps, the established cause with its
+   evidence, and the surfaces involved — recorded in the state file's
+   `diagnosis:` line. The report pins the reproduction precisely enough for
+   planning to turn it into the fix task's failing test. Design questions
+   (how to fix it) stay out: they belong to brainstorm, which takes this report
+   as its explored context. If diagnosis overturns the confirmed scope (the bug
+   lives somewhere else entirely), say so and return to scoping rather than
+   designing a fix for the wrong problem.
+3. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified), with two
    notes layered on top. First: the user's batching preference carries into this
    stage — where the upstream skill says to ask questions one at a time, ask via
    AskUserQuestion in batches of 1–4 with concrete options plus Other instead.
@@ -122,48 +183,14 @@ Run the stages in order, each via the named skill:
    repo's own ignore rules rather than force-adding past them. Everything else
    upstream stands. When the spec is approved, transition to
    `devcycle:planning-waves` (not directly to upstream writing-plans).
-3. **planning** — `devcycle:planning-waves`.
-4. **execution** — `devcycle:executing-waves`.
-5. **branch-review** — `devcycle:reviewing-the-branch`.
-6. **on-device** — `devcycle:verifying-on-device` (skip only when the change has no
+4. **planning** — `devcycle:planning-waves`.
+5. **execution** — `devcycle:executing-waves`.
+6. **branch-review** — `devcycle:reviewing-the-branch`.
+7. **on-device** — `devcycle:verifying-on-device` (skip only when the change has no
    rendered/on-device surface; record the skip in the handoff).
-7. **finish** — resolve the effective git policy, then act on it. Call the value
-   resolved above (Configuration section) the **configured policy**.
-
-   **Resolve effective policy.** If the configured policy is `local-commits-only`, it is
-   already the floor — skip straight to "Act on the effective policy" below, effective
-   equals configured, no signal checks needed. Otherwise (`push-allowed` or `open-pr`),
-   check two signals before pushing anything:
-
-   - **Permission-settings signal:** read the effective Claude Code permission settings —
-     project `.claude/settings.local.json`, project `.claude/settings.json`, user
-     `~/.claude/settings.json`, and any managed/enterprise policy file present on this
-     platform (read whichever exist; a missing file has no rules). Look for a `deny` rule
-     whose pattern would match the literal `git push` command — e.g. `Bash(git push:*)`,
-     `Bash(git:*)`, or a bare `Bash` deny. If any such deny rule exists in any of those
-     files, this signal fires. An `ask`-only rule (no matching `deny`) does NOT fire this
-     signal — leave the configured policy alone; the normal permission prompt at push time
-     communicates the restriction.
-   - **Protected-branch signal:** resolve the repo's release/default branch — try, in
-     order, `git symbolic-ref refs/remotes/origin/HEAD`, then `gh repo view --json
-     defaultBranchRef`, then fall back to `main` or `master` if one of those branches
-     exists and neither command is available. If the branch recorded in
-     `.devcycle/state.md` (this cycle's branch) IS that default branch, this signal
-     fires — devcycle never pushes directly to the repo's default branch.
-
-   If either signal fires, the **effective policy** for this run is `local-commits-only`
-   regardless of the configured value. Otherwise effective equals configured. This clamp
-   is silent (no pause, no question) but always narrated — see the Handoff line below.
-
-   **Act on the effective policy:**
-   - `local-commits-only`: hand the branch back — report branch name and commits;
-     do not push, do not open a PR.
-   - `push-allowed`: push the branch; NEVER merge it.
-   - `open-pr`: push the branch and open a PR whose title parses as a Conventional
-     Commit; do not merge it.
-
-   As the finish stage's final state-file write, set `stage: done` and a fresh
-   `updated:` timestamp — nothing remains to resume.
+8. **finish** — `devcycle:finishing-the-cycle`: resolves the effective git policy
+   (the configured `gitPolicy` clamped by two external push signals), acts on it,
+   and closes the state file with `stage: done`.
 
 ## Stage boundaries
 
@@ -190,23 +217,22 @@ reserved for true stage ends. These are the only two sanctioned first-field
 labels.
 
 At the finish stage specifically, the block carries one additional line, directly after
-`Artifacts:` — the resolved git policy. When the effective policy was not clamped:
-`Git policy: <value> (no override)`. When it was clamped (Step 7 above): `Git policy:
-configured <value> → effective local-commits-only (<reason>)`, where `<reason>` is `a
-permission rule denies git push`, `current branch is the repo's default branch — direct
-pushes to it are not allowed`, or both joined with `; ` if both signals fired. No other
-stage's block carries this line.
+`Artifacts:` — the resolved git policy, in the exact shape `devcycle:finishing-the-cycle`
+defines. No other stage's block carries this line.
 
 Pick the context action from this table and recommend it to the user explicitly:
 
 | Boundary | Action | Keep | Drop |
 | --- | --- | --- | --- |
 | scoping → brainstorm | Continue | everything | — |
+| scoping → diagnosis (bugs) | Continue | everything | — |
+| diagnosis → brainstorm (root cause established) | Compact with hint | diagnosis report path, reproduction steps, root cause | debugging transcripts, ruled-out hypotheses |
 | brainstorm → planning (spec approved) | Compact with hint | spec path, decisions, constraints | design back-and-forth |
 | planning → execution (plan approved) | Clear + `/devcycle:continue` | nothing (files carry it) | planning conversation |
 | wave → wave (within execution) | Compact if over ~40% context | ledger/plan paths, pinned interfaces, dispatch map, wave status | implementer transcripts, resolved findings |
 | execution → branch-review | Clear + `/devcycle:continue` or Fresh session (a reviewer that watched the code being written inherits the implementer's assumptions) | branch, spec path, ledger path | all implementation context |
 | branch-review → on-device | Fresh session | checklist path, branch | everything else |
+| fast-path → finish | Continue | everything | — |
 
 ### Await the context action — never run past a recommended compact or clear
 

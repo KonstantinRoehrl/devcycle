@@ -6,8 +6,10 @@ description: Use when a development request arrives as a rough idea, vague ticke
 # Scoping Interview
 
 Turn a rough request into an established scope before any design work starts. This is
-the devcycle pre-stage in front of `superpowers:brainstorming`: it settles *what is
-being asked*; design exploration, approach trade-offs, and spec writing stay upstream.
+the devcycle pre-stage in front of `superpowers:brainstorming` — or, for bugs whose
+root cause is not yet established, in front of the diagnosis stage
+(`superpowers:systematic-debugging`): it settles *what is being asked*; root-cause
+hunting, design exploration, approach trade-offs, and spec writing stay downstream.
 
 ## The target
 
@@ -16,6 +18,16 @@ available answers allow, shaped as a well-structured goal — not a tidied-up
 restatement of the request. A one-line request leaves many open questions; this
 stage exists to resolve them or pin them as explicit `<tbd>`s, so every later
 stage is tailored to what the user actually needs.
+
+**Bug requests interview differently.** When the request reports broken behavior,
+the questions target the symptom, not design intent: exact reproduction steps,
+expected vs. actual behavior, how often and since when it occurs, environment,
+and any logs or error output the user has. Asking a bug reporter what the fix
+should look like wastes the interview — "it should not lose data" was already
+implied. Never ask the user for the root cause either: establishing it is the
+diagnosis stage's job, not theirs. The scope summary for a bug carries a
+**Reproduction** section (steps, expected vs. actual, evidence) in place of
+design-oriented detail.
 
 Division of labor: **the user knows the problem; the repo knows the code.**
 Questions ask for intent, desired outcomes, behavior at the edges, and
@@ -28,11 +40,14 @@ internals may volunteer them; the interview must not depend on it.
 
 ## Stage entry
 
-Verify `.devcycle/state.md` exists before any research or questions. If it is
+Verify `.devcycle/state.md` exists at the target repo's toplevel
+(`git rev-parse --show-toplevel`) before any research or questions. If it is
 missing (the pipeline creates it as its first action; this check is the backstop),
-create it now — stage `scoping`, the current git branch, `none` for the
+create it now — stage `scoping`, the repo root in `root:`, the current git
+branch, a one-line `request:` distilled from the user's ask, `none` for the
 scope/spec/plan/checklist lines, `configured: no` — so a cycle interrupted
-mid-interview still leaves a state file for `/devcycle:continue` to resume from.
+mid-interview still leaves a state file, pinned to this repo and goal, for
+`/devcycle:continue` to resume from.
 
 ## The discipline
 
@@ -42,25 +57,22 @@ Whenever scope, intent, architecture, data, or user preference is uncertain:
 1. **Research BEFORE questions.** Read the relevant code and docs first, so every
    question is informed by what the repo already shows. Never ask what the repo can
    answer.
-   If a `graphify` skill is listed among this session's available skills, check the
-   target repo (never this plugin's own repo) for `graphify-out/` and/or a root
-   `GRAPH_REPORT.md` before falling back to file-by-file reading: when present, read
-   the report and query the graph for the research this step needs; when absent, or
-   too stale/thin for the area in question, research exactly as before. This is
-   read-only — never trigger a graphify build or `--update` as a side effect of
-   scoping — and silent either way: no note to the user about whether a graph was
-   used.
-   Separately, also look for root repo-orientation docs (a `project.md`,
-   `architecture.md`, or equivalent) — relevant to any request, since scope isn't
-   confirmed yet at this point in the interview. When the graph above is being used,
-   query it for `document`-type nodes (graphify tags markdown separately from code)
-   and judge relevance by reading their content against the request. When no graph is
-   used (absent, or too stale/thin for these docs), fall back to a two-phase
-   index-then-fetch: list `*.md` files repo-wide — excluding `node_modules/`,
-   `vendor/`, `dist/`, `build/`, `.git/`, and equivalents — then read just each file's
-   title/first heading into a lightweight index, and read in full only the entries
-   judged relevant. Same rules as above: no docs found is silent (nothing to read, no
-   note to the user), and this step never triggers a graphify build.
+   **Repo-research procedure** (canonical — planning-waves runs this same procedure
+   with its own relevance filter): when a `graphify` skill is listed among this
+   session's available skills, check the target repo (never this plugin's own repo)
+   for `graphify-out/` and/or a root `GRAPH_REPORT.md`. If present, read the report
+   and query the graph for what this step needs — including `document`-type nodes
+   for relevant docs (graphify tags markdown separately from code). If absent, or
+   too stale/thin for the area in question: research the code by plain reading and
+   search, and find docs two-phase — list `*.md` files repo-wide (excluding
+   `node_modules/`, `vendor/`, `dist/`, `build/`, `.git/`, and equivalents), index
+   only each file's title/first heading, and read in full only entries judged
+   relevant. Always read-only (never trigger a graphify build or `--update`) and
+   silent either way: no note about whether a graph was used, and no docs found is
+   nothing to report.
+   Relevance here is judged against the request itself — scope is not yet
+   confirmed — starting from root repo-orientation docs (a `project.md`,
+   `architecture.md`, or equivalent).
 2. **Batch, don't trickle.** Ask via AskUserQuestion: 1–4 questions per call, each
    with concrete options plus Other — never one question per message. If
    AskUserQuestion is unavailable, send the whole batch as one plain message with
@@ -102,16 +114,21 @@ well-structured goal:
 - **Constraints** — what must not change, compatibility requirements, priorities.
 - **Open `<tbd>` items** — every unresolved unknown, none silently defaulted.
 
-REQUIRED next stage: `superpowers:brainstorming`, with the scope summary as its
-explored context — its questioning then targets design refinement, not
-re-establishing scope. Do not restate or replace its process here.
+REQUIRED next stage — two cases:
 
-End the stage by naming the next stage explicitly in your final output — state
-that the cycle now hands off to `superpowers:brainstorming` with the scope
-summary as its explored context. Update `.devcycle/state.md` (`stage:
-brainstorm` — the stage to resume at — and `scope: .devcycle/scope.md`) before
-emitting the devcycle handoff block (scoping → brainstorm continues in the
-same conversation, per the pipeline lifecycle):
+- **Bug with the root cause not yet established:** `superpowers:systematic-debugging`
+  (the pipeline's diagnosis stage), with the scope summary's Reproduction section as
+  its starting evidence. Design comes after the cause is known.
+- **Everything else** (features, refactors, bugs whose cause is already established
+  with evidence): `superpowers:brainstorming`, with the scope summary as its explored
+  context — its questioning then targets design refinement, not re-establishing
+  scope. Do not restate or replace its process here.
+
+End the stage by naming the next stage explicitly in your final output. Update
+`.devcycle/state.md` (`stage: diagnosis` or `stage: brainstorm` — the stage to
+resume at — and `scope: .devcycle/scope.md`) before emitting the devcycle
+handoff block (both boundaries continue in the same conversation, per the
+pipeline lifecycle):
 
 ```markdown
 ## Handoff

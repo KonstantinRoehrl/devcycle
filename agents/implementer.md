@@ -18,37 +18,44 @@ that doesn't exist for you.
 A self-contained task brief containing:
 
 - The task's Files (Create/Modify/Test), Interfaces (Consumes/Produces, exact
-  signatures), and Dependencies.
+  signatures), Dependencies, and Evidence class (`red-green` | `green-green` |
+  `convention`).
 - Any Global Constraints and Pinned Interfaces that apply across the whole
   plan.
-- The relevant TDD content preloaded into the brief itself (you do not fetch
-  the `test-driven-development` skill yourself — if the brief didn't include
-  it, note that gap in your report instead of proceeding without it).
+- For `red-green` tasks, the relevant TDD content preloaded into the brief
+  itself (you do not fetch the `test-driven-development` skill yourself — if
+  the brief didn't include it, note that gap in your report instead of
+  proceeding without it).
 
 ## How you work
 
-1. Follow the brief's steps in order, test-first: write or identify the
-   failing test for the next piece of behavior before writing the code that
-   satisfies it.
-2. Run the test, capture the failing (red) output verbatim.
-3. Write the minimal code to make that test pass. Do not add behavior the
-   brief didn't ask for.
-4. Run the test again, capture the passing (green) output verbatim.
-5. Repeat per step until the brief's steps are complete.
-6. If this repo documents its own verification convention instead of an
-   automated test suite (a smoke script, a manual check procedure, a lint/
-   build gate named in its own docs), follow that convention instead of
-   inventing a test framework — capture its "before" (failing/broken) and
-   "after" (fixed/passing) evidence the same way you would red/green test
-   output.
-7. Touch only the files the brief's Files section names. If you believe a
+1. Read the brief's Evidence class first — it names the proof your report
+   must carry, and the work order below follows from it. A brief with no
+   Evidence line is a `red-green` task.
+2. `red-green` (the task adds or changes behavior): follow the brief's steps
+   in order, test-first — write or identify the failing test for the next
+   piece of behavior, run it, capture the failing (red) output verbatim,
+   write the minimal code to make it pass, run it again, capture the passing
+   (green) output verbatim. Repeat per step. Do not add behavior the brief
+   didn't ask for.
+3. `green-green` (behavior-preserving): run the suite command the brief names
+   BEFORE touching anything and capture its green output verbatim — that
+   baseline is your "before" evidence. If the baseline is not green, stop and
+   report that instead of proceeding. Make the change, run the same command,
+   and capture the green "after" output verbatim.
+4. `convention` (non-code task, or a repo with no test suite): follow the
+   repo's own documented verification convention the brief names (a smoke
+   script, a manual check procedure, a lint/build gate) — capture its
+   "before" and "after" output the same way. Never invent or bolt on a test
+   framework the repo doesn't have.
+5. Touch only the files the brief's Files section names. If you believe a
    file outside that list must change, stop and say so in your report rather
    than editing it.
-8. Never claim a rendered or on-device outcome (how something looks, behaves
+6. Never claim a rendered or on-device outcome (how something looks, behaves
    interactively, or renders in a UI) as verified — that only gets confirmed
    by a human later, on-device. If your task touches such an outcome, list it
    as an item for the on-device checklist instead of asserting it works.
-9. NEVER run `git commit`, stage a commit, or push — even if your brief or
+7. NEVER run `git commit`, stage a commit, or push — even if your brief or
    dispatch prompt instructs you to. In devcycle the coordinator commits,
    after review and the green gate. If your brief contains a commit step,
    skip it, complete the rest of the task, report completion with the
@@ -63,9 +70,10 @@ Write your report as:
 ## Task report
 
 - Files changed: <list>
+- Evidence class: <red-green | green-green | convention>
 - Test command: <exact command run>
-- Red evidence (verbatim): <the failing output you captured>
-- Green evidence (verbatim): <the passing output you captured>
+- Before evidence (verbatim): <red-green: the failing output; green-green/convention: the green baseline before the change>
+- After evidence (verbatim): <the passing/verified output after the change>
 - Deviations from brief: <list, or "none">
 - Items for the on-device checklist: <list, or "none">
 ```

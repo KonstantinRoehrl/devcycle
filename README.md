@@ -44,6 +44,8 @@ plan; implementation, testing, and review then run without you; at the end you g
 
 The pipeline saves its position to files (`.devcycle/state.md` plus its spec/plan/ledger
 artifacts) at every stage boundary, so it survives `/clear`, compaction, and new sessions.
+The state file names the repo root and the request it belongs to, and every reader
+verifies that binding first — a state file can never be mistaken for another project's.
 Resume any time with:
 
 ```
@@ -56,30 +58,46 @@ Resume any time with:
    goal: you answer questions about intent and desired outcomes; devcycle researches the
    repo itself to establish what the change touches and confirms that picture with you —
    research draws on an existing graphify graph when one is available, and also looks for repo
-   orientation docs the same way. Skipped when your input is already concrete.
-2. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
+   orientation docs the same way. Skipped when your input is already concrete. For a bug,
+   the interview collects the symptom and reproduction (steps, expected vs. actual,
+   evidence) instead of design intent.
+2. **Diagnosis** — for bugs whose root cause isn't established yet: reproduce the failure,
+   then isolate the cause (upstream `superpowers:systematic-debugging`), ending in a
+   root-cause report that the fix's design builds on. A fix is never designed for an
+   undiagnosed problem. Skipped for features, refactors, and bugs whose cause is already
+   known with evidence.
+3. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
    spec you approve.
-3. **Planning** — a feasibility check, then an implementation plan that doubles as the
+4. **Planning** — a feasibility check, then an implementation plan that doubles as the
    execution strategy: the work is cut into small, self-contained tasks — each implementable
    from its own brief alone, so every subagent works with a small context — dependencies are
    derived from what each task consumes, and everything not forced into sequence by a real
    dependency is grouped into *waves* of file-disjoint tasks that run in parallel — research
    draws on an existing graphify graph when one is available, and also looks for
    implementation-scoped docs the same way. You approve the plan.
-4. **Execution** — each task goes to a fresh implementer subagent carrying only that task's
-   brief, working test-first (failing test before code). A reviewer checks every task, the
+5. **Execution** — each task goes to a fresh implementer subagent carrying only that task's
+   brief, working test-first (failing test before code) when the task adds behavior — a
+   behavior-preserving task instead proves the suite green before and after the change, per
+   the evidence class its plan task declares. A reviewer checks every task, the
    coordinator re-runs the tests itself before accepting (the *green gate*: the task's test
    command must pass in the coordinator's own re-run, not just in the implementer's
    report), and only accepted work is committed.
-5. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole
+6. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole
    branch against the spec: everything the spec asked for is there, nothing it didn't ask
    for crept in.
-6. **On-device verification** — for changes a human can see: a checklist of outcomes to
+7. **On-device verification** — for changes a human can see: a checklist of outcomes to
    confirm on the running app. What a browser can structurally verify (DOM, CSS values,
    exact text) is auto-checked through claude-in-chrome and tagged `(auto)`; everything
    a script cannot truly see — feel, alignment, smoothness, legibility — is walked with you
    one item at a time. Skipped when nothing renders.
-7. **Finish** — hands the branch back per your `gitPolicy` (below).
+8. **Finish** — hands the branch back per your `gitPolicy` (below).
+
+Triage judges size, too. A request at typo, rename, or few-line-fix scale — measured against a
+strict checklist, where any doubt on any criterion means not trivial — gets called out before
+the walk begins. devcycle announces that verdict and asks; only if you confirm does the run take
+the **fast path** instead: the change is implemented in the session you're already in, under the
+same evidence discipline a planned task gets, checked by one task-reviewer pass, then handed to
+the normal finish stage. Decline, and the full pipeline runs as if the question had never come up.
 
 Why the stages are shaped this way — fresh-context reviews, files-as-state, wave
 parallelism — is covered in [DESIGN.md](DESIGN.md).
@@ -95,6 +113,8 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | Skill `executing-waves` | Parallel subagent execution with green gate, ledger, and commit discipline. |
 | Skill `reviewing-the-branch` | The whole-branch review gate, single-reviewer or panel. |
 | Skill `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes. |
+| Skill `finishing-the-cycle` | Resolves the effective git policy and hands back, pushes, or opens the PR. |
+| Skill `fast-path` | Mini-cycle for confirmed-trivial requests: in-session implementation, one reviewer pass, normal finish. |
 | Agent `implementer` | Implements one task from a brief; never commits. |
 | Agent `task-reviewer` | Read-only reviewer for each task during execution. |
 | Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
@@ -117,7 +137,7 @@ options — answer once (or accept the defaults) and it never asks again.
 | `onDeviceGate` | Whether a human must finish the on-device checklist | `human-required` / `auto-ok` | `human-required` |
 | `implementerModel` | Model for implementer subagents | `auto` / model id | `auto` (derived per task; set a model id to pin) |
 | `taskReviewerModel` | Model for per-task reviewers | `auto` / model id | `auto` (derived per task; set a model id to pin) |
-| `branchReviewModel` | Model for the whole-branch review | `auto` / model id | `auto` (most capable available; set a model id to pin) |
+| `branchReviewModel` | Model for the whole-branch review | `auto` / model id | `auto` (inherits your session's model; set a model id to pin) |
 | `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id | `auto` (a fast model; set a model id to pin) |
 
 **`gitPolicy`** is the pipeline's blast radius: `local-commits-only` means it only ever
@@ -152,10 +172,12 @@ listing what remains unverified — it skips the human, it never fakes the check
 The four **model options** trade cost against capability per role. They default to
 `auto`: for implementers and task reviewers the coordinator derives the model per task
 from what the plan makes observable (task size, dependency count, diff size) and records
-each derivation in the ledger — stronger models where judgment matters, faster ones where
-the task is narrow and fully specified; the branch review takes the most capable model
-available and the walkthrough a fast one. Set an explicit model id to pin a role; an
-explicit id is binding and never second-guessed.
+each derivation in the ledger — the session's own model where judgment matters, a fast
+one where the task is narrow and fully specified; the branch review inherits the
+session's model and the walkthrough takes a fast one. Deriving by tier rather than by
+model ids written into the plugin means new model generations are picked up without a
+plugin update. Set an explicit model id to pin a role; an explicit id is binding and
+never second-guessed.
 
 ## Troubleshooting
 

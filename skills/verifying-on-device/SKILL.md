@@ -74,9 +74,9 @@ its model already exist by the time this text is read), so the recommendation tr
 producer-side: the branch-review handoff carries a `Start the fresh session on <model>`
 line. That model is `${user_config.walkthroughModel}` when it names an explicit model id
 (binding); otherwise — the value `auto`, or a value that still reads as a literal
-`${user_config...}` placeholder, which means the option is unset — it is fixed
-`claude-sonnet-5`, since a walkthrough is interview mechanics and per-task derivation buys
-nothing here.
+`${user_config...}` placeholder, which means the option is unset — it is the current fast
+Sonnet-class Claude model, since a walkthrough is interview mechanics and per-task
+derivation buys nothing here.
 
 Interview rule: **ONE question per checklist item, never batched.** This is a deliberate
 exception to devcycle's batched-interview standard — findings quality drops when items are
