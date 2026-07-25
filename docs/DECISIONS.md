@@ -23,6 +23,24 @@ unaffected: it re-runs the task's command either way.
 **Supersedes:** The unconditional red→green requirement in `agents/task-reviewer.md` and
 `agents/implementer.md`, and planning-waves' unconditional test-first step ordering.
 
+## 2026-07-25 — triage gains a kind axis; bugs get a diagnosis stage
+
+**Decision:** `/devcycle:cycle` triage judges the input on two axes: maturity (as before,
+picking the entry stage) and kind (feature | bug | refactor). For bugs whose root cause is
+not yet established with evidence, a **diagnosis** stage — upstream
+`superpowers:systematic-debugging`, unmodified — runs between scoping and brainstorm,
+ending in a root-cause report at `.devcycle/diagnosis.md` (new state-file line
+`diagnosis:`; new stage enum value). Scoping interviews bugs for symptom and reproduction
+instead of design intent.
+**Why:** Triage previously sorted by maturity only, and no stage of the pipeline
+referenced debugging at all. A vague bug report went straight from a design-intent
+interview into `superpowers:brainstorming` — designing a fix for an undiagnosed problem —
+and planning's feasibility gate had no established cause to validate the plan against.
+The user's answer to "what should happen" is trivially "it should work"; the real unknown
+is the cause, which only diagnosis can settle.
+**Supersedes:** The maturity-only triage in `/devcycle:cycle` and scoping-interview's
+single unconditional handoff to `superpowers:brainstorming`.
+
 ## 2026-07-23 — finish stage resolves gitPolicy against external push signals
 
 **Decision:** Before acting on `push-allowed`/`open-pr`, the finish stage

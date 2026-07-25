@@ -6,8 +6,10 @@ description: Use when a development request arrives as a rough idea, vague ticke
 # Scoping Interview
 
 Turn a rough request into an established scope before any design work starts. This is
-the devcycle pre-stage in front of `superpowers:brainstorming`: it settles *what is
-being asked*; design exploration, approach trade-offs, and spec writing stay upstream.
+the devcycle pre-stage in front of `superpowers:brainstorming` — or, for bugs whose
+root cause is not yet established, in front of the diagnosis stage
+(`superpowers:systematic-debugging`): it settles *what is being asked*; root-cause
+hunting, design exploration, approach trade-offs, and spec writing stay downstream.
 
 ## The target
 
@@ -16,6 +18,16 @@ available answers allow, shaped as a well-structured goal — not a tidied-up
 restatement of the request. A one-line request leaves many open questions; this
 stage exists to resolve them or pin them as explicit `<tbd>`s, so every later
 stage is tailored to what the user actually needs.
+
+**Bug requests interview differently.** When the request reports broken behavior,
+the questions target the symptom, not design intent: exact reproduction steps,
+expected vs. actual behavior, how often and since when it occurs, environment,
+and any logs or error output the user has. Asking a bug reporter what the fix
+should look like wastes the interview — "it should not lose data" was already
+implied. Never ask the user for the root cause either: establishing it is the
+diagnosis stage's job, not theirs. The scope summary for a bug carries a
+**Reproduction** section (steps, expected vs. actual, evidence) in place of
+design-oriented detail.
 
 Division of labor: **the user knows the problem; the repo knows the code.**
 Questions ask for intent, desired outcomes, behavior at the edges, and
@@ -102,16 +114,21 @@ well-structured goal:
 - **Constraints** — what must not change, compatibility requirements, priorities.
 - **Open `<tbd>` items** — every unresolved unknown, none silently defaulted.
 
-REQUIRED next stage: `superpowers:brainstorming`, with the scope summary as its
-explored context — its questioning then targets design refinement, not
-re-establishing scope. Do not restate or replace its process here.
+REQUIRED next stage — two cases:
 
-End the stage by naming the next stage explicitly in your final output — state
-that the cycle now hands off to `superpowers:brainstorming` with the scope
-summary as its explored context. Update `.devcycle/state.md` (`stage:
-brainstorm` — the stage to resume at — and `scope: .devcycle/scope.md`) before
-emitting the devcycle handoff block (scoping → brainstorm continues in the
-same conversation, per the pipeline lifecycle):
+- **Bug with the root cause not yet established:** `superpowers:systematic-debugging`
+  (the pipeline's diagnosis stage), with the scope summary's Reproduction section as
+  its starting evidence. Design comes after the cause is known.
+- **Everything else** (features, refactors, bugs whose cause is already established
+  with evidence): `superpowers:brainstorming`, with the scope summary as its explored
+  context — its questioning then targets design refinement, not re-establishing
+  scope. Do not restate or replace its process here.
+
+End the stage by naming the next stage explicitly in your final output. Update
+`.devcycle/state.md` (`stage: diagnosis` or `stage: brainstorm` — the stage to
+resume at — and `scope: .devcycle/scope.md`) before emitting the devcycle
+handoff block (both boundaries continue in the same conversation, per the
+pipeline lifecycle):
 
 ```markdown
 ## Handoff
