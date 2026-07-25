@@ -104,6 +104,7 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | Skill `executing-waves` | Parallel subagent execution with green gate, ledger, and commit discipline. |
 | Skill `reviewing-the-branch` | The whole-branch review gate, single-reviewer or panel. |
 | Skill `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes. |
+| Skill `finishing-the-cycle` | Resolves the effective git policy and hands back, pushes, or opens the PR. |
 | Agent `implementer` | Implements one task from a brief; never commits. |
 | Agent `task-reviewer` | Read-only reviewer for each task during execution. |
 | Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |

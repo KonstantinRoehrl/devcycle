@@ -60,6 +60,26 @@ skills would never select them; the same rot the decision named had just moved.
 `reviewing-the-branch`'s derived-model chain and unconditional `DEVCYCLE_PANEL_MODEL`
 export, and `verifying-on-device`'s fixed walkthrough model id.
 
+## 2026-07-25 — finish stage extracted into the finishing-the-cycle skill
+
+**Decision:** The finish stage's logic — configured-policy resolution, the two-signal
+effective-policy clamp, acting on the policy, the `Git policy:` handoff line, the
+`stage: done` close — lives once, in the new `devcycle:finishing-the-cycle` skill. Both
+`/devcycle:cycle` and `/devcycle:continue` invoke it, like every other stage runs
+through its skill. In the same consolidation pass: the knob-resolution convention
+(literal placeholder = unset, out-of-range = invalid, both → documented default) is
+stated canonically in `/devcycle:cycle`'s Configuration section, and the
+graphify-first/index-then-fetch repo-research procedure is stated canonically in
+scoping-interview, with planning-waves referencing it and adding only its own relevance
+filter.
+**Why:** The finish logic was duplicated nearly verbatim (~40 lines) across both
+commands — the original rationale, "read here because this session may never load
+`/devcycle:cycle`", is exactly the argument for a skill both can invoke. Hand-synced
+copies drift; the 2026-07-23 clamp decision already had to be applied twice.
+**Supersedes:** The inline finish-stage prose in `/devcycle:cycle` Step 7 and
+`/devcycle:continue`, and the near-identical research-procedure copies in
+scoping-interview and planning-waves.
+
 ## 2026-07-23 — finish stage resolves gitPolicy against external push signals
 
 **Decision:** Before acting on `push-allowed`/`open-pr`, the finish stage
