@@ -67,7 +67,9 @@ Resume any time with:
    draws on an existing graphify graph when one is available, and also looks for
    implementation-scoped docs the same way. You approve the plan.
 4. **Execution** — each task goes to a fresh implementer subagent carrying only that task's
-   brief, working test-first (failing test before code). A reviewer checks every task, the
+   brief, working test-first (failing test before code) when the task adds behavior — a
+   behavior-preserving task instead proves the suite green before and after the change, per
+   the evidence class its plan task declares. A reviewer checks every task, the
    coordinator re-runs the tests itself before accepting (the *green gate*: the task's test
    command must pass in the coordinator's own re-run, not just in the implementer's
    report), and only accepted work is committed.

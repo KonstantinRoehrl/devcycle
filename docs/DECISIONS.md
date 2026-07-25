@@ -5,6 +5,24 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-07-25 — per-task evidence classes replace unconditional red→green
+
+**Decision:** Every plan task declares an `**Evidence:**` class — `red-green` (new or
+changed behavior; verbatim failing-then-passing test output), `green-green`
+(behavior-preserving; the same suite command verbatim green before and after the change),
+or `convention` (non-code tasks and repos without a suite; the repo's own documented
+verification convention with before/after output). Planning picks the class; the
+implementer works to it; the task reviewer rejects reports lacking the evidence their
+class requires — including a `green-green` claim on a diff that adds behavior.
+**Why:** The reviewer's old rule — reject any report lacking red→green evidence, its only
+carve-out keyed to the repo having no test suite — was unsatisfiable for
+behavior-preserving refactors and docs tasks in tested repos: no honest red state exists
+there, so the rule forced either rejecting correct work forever or manufacturing a fake
+red (break the code, watch tests fail, restore it). The coordinator's green gate is
+unaffected: it re-runs the task's command either way.
+**Supersedes:** The unconditional red→green requirement in `agents/task-reviewer.md` and
+`agents/implementer.md`, and planning-waves' unconditional test-first step ordering.
+
 ## 2026-07-23 — finish stage resolves gitPolicy against external push signals
 
 **Decision:** Before acting on `push-allowed`/`open-pr`, the finish stage
