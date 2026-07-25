@@ -83,24 +83,17 @@ A wave holds only dependency-ready, file-disjoint tasks: never place two tasks t
 
 Each task names the existing modules, helpers, or components it extends (found by searching the codebase during planning). A task that introduces a new abstraction must state why no existing one fits.
 
-Before searching file-by-file, check the target repo (never this plugin's own repo)
-for an existing graphify graph — `graphify-out/` and/or a root `GRAPH_REPORT.md` —
-whenever a `graphify` skill is listed among this session's available skills: if
-present, read the report and query the graph for the structural picture (modules,
-existing patterns, what already exists) this step needs, before falling back to
-plain search when the graph is absent, stale, or too thin for the area in question.
-Read-only here too — never trigger a graphify build or `--update` — and silent
-either way: no note to the user about whether a graph was used.
-
-Also look for implementation-scoped docs (a `frontend.md`, `backend.md`, or equivalent) —
-filtered against the confirmed scope and affected areas recorded in `.devcycle/scope.md`, the
-first point in the pipeline scope is concretely known. When the graph above is being used,
-query it for `document`-type nodes and judge relevance against that confirmed scope. When no
-graph is used (absent, or too stale/thin for these docs), fall back to the same two-phase
-index-then-fetch as scoping-interview: list `*.md` files repo-wide — excluding
-`node_modules/`, `vendor/`, `dist/`, `build/`, `.git/`, and equivalents — then read just each
-file's title/first heading into a lightweight index, and read in full only the entries judged
-scope-relevant. No docs found is silent; this step never triggers a graphify build.
+Before searching file-by-file, run the **repo-research procedure** exactly as
+scoping-interview defines it (canonical there): an existing graphify graph in the target
+repo first — `graphify-out/` / root `GRAPH_REPORT.md`, queried read-only for the
+structural picture (modules, existing patterns, what already exists) and for
+`document`-type doc nodes — falling back, when the graph is absent or too stale/thin,
+to plain search plus the two-phase `*.md` index-then-fetch for docs; never trigger a
+graphify build or `--update`, and stay silent about which path was used. The one
+difference is the relevance filter: here it is the confirmed scope and affected areas
+recorded in `.devcycle/scope.md` — the first point in the pipeline where scope is
+concretely known — starting from implementation-scoped docs (a `frontend.md`,
+`backend.md`, or equivalent).
 
 ## Output contract
 

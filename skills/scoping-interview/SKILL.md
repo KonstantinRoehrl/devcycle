@@ -54,25 +54,22 @@ Whenever scope, intent, architecture, data, or user preference is uncertain:
 1. **Research BEFORE questions.** Read the relevant code and docs first, so every
    question is informed by what the repo already shows. Never ask what the repo can
    answer.
-   If a `graphify` skill is listed among this session's available skills, check the
-   target repo (never this plugin's own repo) for `graphify-out/` and/or a root
-   `GRAPH_REPORT.md` before falling back to file-by-file reading: when present, read
-   the report and query the graph for the research this step needs; when absent, or
-   too stale/thin for the area in question, research exactly as before. This is
-   read-only — never trigger a graphify build or `--update` as a side effect of
-   scoping — and silent either way: no note to the user about whether a graph was
-   used.
-   Separately, also look for root repo-orientation docs (a `project.md`,
-   `architecture.md`, or equivalent) — relevant to any request, since scope isn't
-   confirmed yet at this point in the interview. When the graph above is being used,
-   query it for `document`-type nodes (graphify tags markdown separately from code)
-   and judge relevance by reading their content against the request. When no graph is
-   used (absent, or too stale/thin for these docs), fall back to a two-phase
-   index-then-fetch: list `*.md` files repo-wide — excluding `node_modules/`,
-   `vendor/`, `dist/`, `build/`, `.git/`, and equivalents — then read just each file's
-   title/first heading into a lightweight index, and read in full only the entries
-   judged relevant. Same rules as above: no docs found is silent (nothing to read, no
-   note to the user), and this step never triggers a graphify build.
+   **Repo-research procedure** (canonical — planning-waves runs this same procedure
+   with its own relevance filter): when a `graphify` skill is listed among this
+   session's available skills, check the target repo (never this plugin's own repo)
+   for `graphify-out/` and/or a root `GRAPH_REPORT.md`. If present, read the report
+   and query the graph for what this step needs — including `document`-type nodes
+   for relevant docs (graphify tags markdown separately from code). If absent, or
+   too stale/thin for the area in question: research the code by plain reading and
+   search, and find docs two-phase — list `*.md` files repo-wide (excluding
+   `node_modules/`, `vendor/`, `dist/`, `build/`, `.git/`, and equivalents), index
+   only each file's title/first heading, and read in full only entries judged
+   relevant. Always read-only (never trigger a graphify build or `--update`) and
+   silent either way: no note about whether a graph was used, and no docs found is
+   nothing to report.
+   Relevance here is judged against the request itself — scope is not yet
+   confirmed — starting from root repo-orientation docs (a `project.md`,
+   `architecture.md`, or equivalent).
 2. **Batch, don't trickle.** Ask via AskUserQuestion: 1–4 questions per call, each
    with concrete options plus Other — never one question per message. If
    AskUserQuestion is unavailable, send the whole batch as one plain message with
