@@ -7,18 +7,16 @@ description: Use when a devcycle cycle's gates have all passed and the branch mu
 
 The pipeline's last stage: resolve the effective git policy, act on it, close the
 state file. Both `/devcycle:cycle` and `/devcycle:continue` run the finish stage
-through this skill — the policy logic lives here and only here.
+through this skill — the policy logic lives here and only here. It reports per
+`${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
 ## Configured policy
 
-`${user_config.gitPolicy}` — a value that still reads as a literal
-`${user_config...}` placeholder is unset, and a value outside `local-commits-only` |
-`push-allowed` | `open-pr` is invalid; both fall back to the default
-`local-commits-only`. If the placeholder is literal but the state file's
-`configured:` line records a `gitPolicy=` value, that recorded value governs this
-run (same-session substitution cannot refresh). Call the result the **configured
-policy**. Never offer the first-run configuration walkthrough here — it belongs to
-`/devcycle:cycle` only.
+Resolve `${user_config.gitPolicy}` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`:
+its allowed values are `local-commits-only` | `push-allowed` | `open-pr`, and its
+default is `local-commits-only`. Call the result the **configured policy**. Never
+offer the first-run configuration walkthrough here — it belongs to `/devcycle:cycle`
+only.
 
 ## Resolve the effective policy
 
@@ -60,20 +58,16 @@ timestamp — nothing remains to resume.
 
 ## Handoff — the pipeline's final block
 
-This stage's block carries one line no other stage's block has, directly after
-`Artifacts:` — the resolved git policy. When the effective policy was not clamped:
-`Git policy: <value> (no override)`. When it was clamped: `Git policy: configured
-<value> → effective local-commits-only (<reason>)`, where `<reason>` is `a
-permission rule denies git push`, `current branch is the repo's default branch —
-direct pushes to it are not allowed`, or both joined with `; ` if both signals
-fired.
+Emit the block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with:
 
-```markdown
-## Handoff
-- Stage completed: finish
-- Artifacts: <branch; PR URL if one was opened>
-- Git policy: <as above>
-- Carry-overs: <or "none">
-- Context action: Continue
-- Compaction hint: Keep nothing. The cycle is done.
-```
+- `Stage completed:` finish.
+- `Artifacts:` the branch, plus the PR URL if one was opened.
+- `Git policy:` the one line no other stage's block carries, directly after
+  `Artifacts:` — the resolved git policy. Not clamped: `Git policy: <value> (no
+  override)`. Clamped: `Git policy: configured <value> → effective
+  local-commits-only (<reason>)`, where `<reason>` is `a permission rule denies git
+  push`, `current branch is the repo's default branch — direct pushes to it are not
+  allowed`, or both joined with `; ` if both signals fired.
+- `Carry-overs:` whatever is genuinely left open, or `none`.
+- `Context action:` Continue — the cycle is over, nothing follows.
+- `Compaction hint:` Keep nothing. The cycle is done.
