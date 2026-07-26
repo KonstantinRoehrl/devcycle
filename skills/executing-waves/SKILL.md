@@ -89,6 +89,54 @@ git commit/stage/push instruction, delete it before dispatching.
 Implementers report completion and list files; the coordinator commits
 (step 7).
 
+### Sweep-executed tasks
+
+A task whose plan entry carries `**Execution:** sweep` replaces steps 2–3
+(brief slicing, implementer dispatch) with one run of the mechanical-sweep
+workflow; steps 4–7 then apply with the deltas below. The invocation
+contract — args-JSON shape, the `$(cat …)` invocation, `DEVCYCLE_SWEEP_MODEL`
+resolution, the clean-targets precondition, the exit-code taxonomy, and the
+re-run rule — is owned by **devcycle:sweeping-mechanical-changes**
+(REQUIRED, its steps 2–4). Only the task-level deltas live here:
+
+- **Run it.** Take files, instruction, and verifyCommand verbatim from the
+  task body (the plan declared the marker only because it pinned them) into
+  `.devcycle/sweep-args-<task-id>.json`, and save the stdout report to
+  `.devcycle/sweep-report-<task-id>.json` — per task, since the triage
+  path's single names would collide across concurrent sweeps. Ledger
+  IMMEDIATELY before the invocation: `event=dispatched outcome=sweep model
+  <decision>` in Model routing's audit shape, logged pre-run so a crash
+  mid-sweep still shows the task dispatched and resume routes its leftover
+  edits to the re-run rule rather than the clean-targets ban.
+- **Clean targets** apply before a task's FIRST invocation. There is no
+  gate 2 to stop at here, so a dirty target means the sweep does not run for
+  that task: ledger `event=user-decision outcome=sweep dirty-targets` naming
+  the files, then the fallback below. On a re-run of a task already logged
+  `dispatched outcome=sweep`, dirty targets are the interrupted run's own
+  edits and take the sweep skill's Resume confirmation instead.
+- **Exit 0, `applied` non-empty.** The saved report IS the implementer
+  report: ledger `event=report-received` with it as `ref=`, then diff
+  production, the task-reviewer dispatch (report included, skips and all),
+  the green gate, and the acceptance commit exactly as steps 4–7 define —
+  scoped by pathspec, `git commit -- <the task's file list>`, never
+  `git add -A` or a bare `git commit`, since concurrent implementers may
+  have in-flight edits and staged work elsewhere in the tree.
+- **Exit 0, `applied` empty.** Nothing was swept: no diff to review, nothing
+  to commit, steps 4–7 do not apply. Ledger `event=report-received
+  outcome=sweep applied-none` with the report as `ref=`, relay its per-file
+  reasons verbatim, then the fallback below — that line already marks the
+  pending decision, so log nothing further.
+- **Hard stop** (exit 1 with a stdout report): ledger `event=review-verdict
+  outcome=rejected (sweep hard stop: <reason>)`, then the fallback. A fatal
+  exit 1 without a report logs no verdict — there is nothing to review.
+- **The fallback**, in each case above, is a user decision: corrected
+  parameters and a re-run, or a normal `devcycle:implementer` dispatch for
+  the task. A **rejection** of a swept diff (reviewer findings or green
+  gate) goes straight to that implementer dispatch — there is no implementer
+  to send back to, and re-running would re-apply the very instruction that
+  was rejected. Any such brief must disclose the files the sweep already
+  applied, or instruct reverting them first; it never assumes a clean slate.
+
 ## Ledger
 
 Single source of truth for progress, at upstream's path
@@ -196,12 +244,18 @@ Context action by boundary:
 ## Resuming after /clear
 
 Read `.devcycle/state.md`, the plan's Dispatch Map, the ledger, and
-`git log`; then resume each task from its last ledger event:
+`git log`; then resume each task from its last ledger event — most specific
+row wins. Sweep rows key on the event's logged `outcome=` (a `sweep` token
+in it), never on the task's `**Execution:** sweep` marker: a bare
+`dispatched` on a sweep-marked task is a post-rejection implementer fix and
+takes the generic rows.
 
 | ledger last event for a task | resume action |
 | --- | --- |
 | `dispatched` | re-dispatch the same brief (the run may have died) |
 | `report-received` | produce the diff, dispatch the reviewer |
 | `review-verdict outcome=accepted` | run the green gate, commit |
-| `review-verdict outcome=rejected` | re-dispatch the implementer with the findings |
+| `review-verdict outcome=rejected` | re-dispatch the implementer with the findings — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet (findings, task body, applied-edits disclosure), never a sweep re-run |
 | `committed` | task done — move to the next task |
+| `dispatched outcome=sweep …` | no brief to re-dispatch: re-run the sweep bullets from the clean-targets check |
+| any other sweep-token outcome (`applied-none`, `dirty-targets`, `sweep hard stop: …`) | a decision was pending when the run died: re-present the fallback, never an automatic dispatch. Reasons come from the saved report, or for `dirty-targets` from the files the event names (no sweep ran, so no report exists); a hard stop also carries its applied-files disclosure |
