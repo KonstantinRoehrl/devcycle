@@ -67,6 +67,22 @@ The class is planning's call, not the implementer's: derive it from what the tas
 changes, and never declare `red-green` where no failing test can exist — that forces the
 implementer to fake a red or the reviewer to reject correct work.
 
+## Execution route — optional, one declaration per task
+
+A task MAY carry an `**Execution:** sweep` line beside `**Dependencies:**`
+and `**Evidence:**` — declared only when the task is one uniform edit rule
+applied identically across its whole file list, and only when the task body
+pins all three sweep parameters verbatim: the instruction, the concrete
+file list, and the verifyCommand. Executing-waves then runs the task
+through `workflows/mechanical-sweep.js` (pilot-first, per-file verify)
+instead of dispatching an implementer. The evidence class stays orthogonal
+and is typically `green-green (behavior-preserving)` — the script's
+baseline and per-file verify runs supply the before/after. Any per-file
+judgment in the rule disqualifies the marker: leave the line off and let a
+normal implementer take the task. Wave placement rules are unchanged — the
+file-disjointness invariant already isolates a sweep task from its wave
+neighbors.
+
 ## Dispatch Map — required section
 
 The plan ends with a `## Dispatch Map` grouping tasks into waves:
@@ -97,7 +113,7 @@ concretely known — starting from implementation-scoped docs (a `frontend.md`,
 
 ## Output contract
 
-The finished plan satisfies this contract, consumed by `devcycle:executing-waves`: plan header (Goal/Architecture/Global Constraints) + per task: `**Files:**` (Create/Modify/Test), `**Interfaces:**` (Consumes/Produces, exact signatures), `**Dependencies:**` (`none` | `Task N (reason)` | `Tasks N+M committed`), `**Evidence:**` (`red-green` | `green-green` | `convention`), checkbox steps ordered per the task's evidence class (test-first for `red-green`; baseline suite run first for `green-green`), and a `## Dispatch Map` section listing waves of file-disjoint, dependency-ready tasks.
+The finished plan satisfies this contract, consumed by `devcycle:executing-waves`: plan header (Goal/Architecture/Global Constraints) + per task: `**Files:**` (Create/Modify/Test), `**Interfaces:**` (Consumes/Produces, exact signatures), `**Dependencies:**` (`none` | `Task N (reason)` | `Tasks N+M committed`), `**Evidence:**` (`red-green` | `green-green` | `convention`), optionally **Execution:** (`sweep`, with the instruction, file list, and verifyCommand pinned in the task body), checkbox steps ordered per the task's evidence class (test-first for `red-green`; baseline suite run first for `green-green`), and a `## Dispatch Map` section listing waves of file-disjoint, dependency-ready tasks.
 
 ## Overrides of upstream writing-plans
 

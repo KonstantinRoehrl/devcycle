@@ -77,7 +77,7 @@ devcycle/                (public GitHub repo)
 │   │                             # reviewer pass, then the normal finish (added 2026-07-25)
 │   ├── onboarding-a-repo/        # bootstrap tier-2 in any repo (see §8)
 │   ├── distilling-learnings/     # memory→docs/skills promotion session, codified (see §8)
-│   └── sweeping-mechanical-changes/  # bulk uniform edits via workflow/`claude -p` fan-out (see §8)
+│   └── sweeping-mechanical-changes/  # bulk uniform edits via the sweep path + **Execution:** sweep tasks
 ├── agents/
 │   ├── implementer.md            # brief-driven TDD implementer template
 │   ├── task-reviewer.md          # per-task reviewer; read-only tools allowlist
@@ -86,7 +86,7 @@ devcycle/                (public GitHub repo)
 ├── workflows/
 │   ├── review-panel.js           # multi-lens review → adversarial verify → dedup → reconcile
 │   └── mechanical-sweep.js       # pipeline over file list, worktree isolation, verify stage
-│                                 # (manual utility — not invoked by the pipeline)
+│                                 # (invoked by the sweep stage and **Execution:** sweep tasks)
 └── README.md                     # pipeline narrative + demo transcript; CHANGELOG alongside
 ```
 
@@ -161,7 +161,7 @@ Suitability per stage:
 | Planning | Marginal | Optional plan-critique panel, not v1 |
 | Wave execution | Partial — mutates git state; user checkpoints are valuable | Ledger-based default; hands-off workflow wave mode is a v2 experiment |
 | Whole-branch review | **Strong** — read-only fan-out, verify, dedup, reconcile | **`review-panel.js` ships v1** |
-| Mechanical sweeps | **Strong** — pipeline over file list, worktree isolation | **`mechanical-sweep.js` ships v1** (manual utility — no pipeline stage invokes it) |
+| Mechanical sweeps | **Strong** — pipeline over file list, worktree isolation | **`mechanical-sweep.js` ships v1** (routed from triage's bulk-mechanical verdict and task-level **Execution:** sweep) |
 | Repo research | Good | Optional `repo-research.js`, post-v1 |
 | On-device verification | None (human phase) | Never; the claude-in-chrome pre-pass needs no workflow |
 
@@ -218,7 +218,7 @@ gated by `userConfig.crossModelReview`.
 | scoping-interview + /devcycle:cycle + /devcycle:continue + state file | Entry, triage, resume glue | v1 — last |
 | onboarding-a-repo | Bootstrap tier-2 anywhere: detect real commands, scaffold CLAUDE.md/per-package rules, run allowlist scan, wire verification commands | v1.x — right after the pipeline works |
 | distilling-learnings | Codified promotion session: memory/observation inbox → vetted docs/skill edits via writing-skills TDD | v1.x |
-| sweeping-mechanical-changes | Bulk uniform migrations, pilot-first | v1.x |
+| sweeping-mechanical-changes | Bulk uniform migrations, pilot-first | shipped |
 | running-headless-ci | `-p --output-format stream-json` CI stage | Later — when a CI use case exists |
 | Agent-teams review backend | Native shared-task-list adversarial review | Later — token-heavy; workflow panel covers it |
 
@@ -256,7 +256,7 @@ no phase is ever double-defined.
    a prior skill overhaul) before it replaces the prose it supersedes; description-budget check per
    release; version bump per release.
 4. Slim `~/.claude/CLAUDE.md` to tier 3; set userConfig values; delete superseded memories.
-5. v1.x skills (onboarding-a-repo, distilling-learnings, sweeping-mechanical-changes); repo-tier roadmap items
+5. v1.x skills (onboarding-a-repo, distilling-learnings); repo-tier roadmap items
    in parallel via promotion sessions.
 6. Later, one team decision: repo `.claude/settings.json` provisions superpowers + devcycle for
    teammates.

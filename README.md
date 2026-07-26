@@ -98,6 +98,9 @@ the walk begins. devcycle announces that verdict and asks; only if you confirm d
 the **fast path** instead: the change is implemented in the session you're already in, under the
 same evidence discipline a planned task gets, checked by one task-reviewer pass, then handed to
 the normal finish stage. Decline, and the full pipeline runs as if the question had never come up.
+Bulk-mechanical requests — one uniform edit rule across many files — take an analogous sweep
+path: after two confirmation gates the change runs through the pilot-first mechanical-sweep
+workflow instead of implementer waves.
 
 Why the stages are shaped this way — fresh-context reviews, files-as-state, wave
 parallelism — is covered in [DESIGN.md](DESIGN.md).
@@ -115,11 +118,12 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | Skill `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes. |
 | Skill `finishing-the-cycle` | Resolves the effective git policy and hands back, pushes, or opens the PR. |
 | Skill `fast-path` | Mini-cycle for confirmed-trivial requests: in-session implementation, one reviewer pass, normal finish. |
+| Skill `sweeping-mechanical-changes` | Triage-confirmed bulk sweep: blast-radius gate, one sweep run, one commit, one reviewer pass, then finish. |
 | Agent `implementer` | Implements one task from a brief; never commits. |
 | Agent `task-reviewer` | Read-only reviewer for each task during execution. |
 | Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
 | Workflow `review-panel.js` | Multi-lens branch review engine for `reviewDepth: panel`. |
-| Workflow `mechanical-sweep.js` | Pilot-first bulk edit helper — manual utility, not invoked by the pipeline. |
+| Workflow `mechanical-sweep.js` | Pilot-first bulk edit engine behind the sweep path and `**Execution:** sweep` plan tasks. |
 
 ## Configuration
 

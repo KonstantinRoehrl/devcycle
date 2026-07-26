@@ -5,6 +5,20 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-07-25 — sweep routing wired in at both levels
+
+Triage gains a bulk-mechanical Size verdict (gate 1: sweep path vs. full
+pipeline), backed by the new `sweeping-mechanical-changes` skill — parameter
+derivation, a blast-radius confirm gate (gate 2), one
+`workflows/mechanical-sweep.js` run, one commit, one task-reviewer pass, then
+the normal finish stage. Plans may mark a task `**Execution:** sweep` (all
+three sweep parameters pinned in the task body) and executing-waves runs it
+through the same workflow instead of an implementer dispatch, keeping the
+per-task review cycle and green gate. This supersedes the 2026-07-23 entry
+demoting `mechanical-sweep.js` to a manual utility: the script's contract is
+unchanged, but the pipeline now invokes it — routing is judged by triage or
+planning and always user-confirmed, never automatic.
+
 ## 2026-07-25 — triage gains a size axis; trivial requests take a fast path
 
 **Decision:** `/devcycle:cycle` triage makes a third judgment alongside maturity and kind:
@@ -214,6 +228,7 @@ reality instead of promising an integration that doesn't exist.
 **Supersedes:** The README/DESIGN claim that `red-team-reviewer` is "used by execution and
 the panel" (it is used by the panel only, and via charter splice rather than agent
 dispatch) and any reading of `mechanical-sweep.js` as a pipeline component.
+(The demotion half of this entry is superseded by the 2026-07-25 sweep-routing entry.)
 
 ## 2026-07-22 — README: comprehension outranks brevity
 

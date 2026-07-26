@@ -54,6 +54,7 @@ Continue at the recorded stage via its skill:
 | branch-review | `devcycle:reviewing-the-branch` |
 | on-device | `devcycle:verifying-on-device` |
 | fast-path | `devcycle:fast-path` — re-runs its branch-discipline check unconditionally, then re-derives position from git evidence: change absent/uncommitted → (re)implement; change committed → dispatch the task reviewer |
+| sweep | `devcycle:sweeping-mechanical-changes` (its Resume section settles the branch off the state file's recorded `branch:` line first, then maps the git evidence to the resume action) |
 | finish | `devcycle:finishing-the-cycle` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
 
 From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file
