@@ -25,12 +25,15 @@ recollection, including the user's.
    adopting it (the repo genuinely moved — rewrite `root:`, then proceed) and
    leaving it alone. A file with no `root:` line predates this format: adopt it
    by writing `root:` and `request:` at the next rewrite.
-3. Read the ledger it names (`.superpowers/sdd/progress.md`) and the plan/spec/
+3. Read the ledger it names (`.devcycle/ledger.md`) and the plan/spec/
    checklist paths it records, where present.
-4. Cross-check git: current branch vs the recorded branch — on a mismatch, tell
-   the user and ask before switching; never switch branches silently. Check
-   `git log` for commits the ledger references. During execution, never
-   re-dispatch a task the ledger records as committed.
+4. Settle the branch and derive position from git evidence per
+   `${CLAUDE_PLUGIN_ROOT}/references/resume.md` — falling back to
+   `${CLAUDE_PLUGIN_ROOT}/references/branch.md` only when no topic branch was
+   ever recorded. **The mismatch rule that file defers to is this command's
+   own:** when the current branch differs from the recorded one, tell the user
+   and ask before switching; never switch branches silently. During execution,
+   never re-dispatch a task the ledger records as committed.
 
 ## Announce the derived position
 
@@ -47,15 +50,17 @@ Continue at the recorded stage via its skill:
 | stage | resume via |
 | --- | --- |
 | scoping | `devcycle:scoping-interview` |
+| audit | `devcycle:auditing-a-repo` — re-reads the confirmed criteria from the state file's `audit:` artifact if one was written, otherwise re-runs the criteria interview; never assumes criteria a previous session did not record |
 | diagnosis | `superpowers:systematic-debugging` — bugs only (restated here because this session may never load `/devcycle:cycle`): reproduce first, isolate the root cause, and end the stage by writing the root-cause report (reproduction steps, established cause with evidence, surfaces involved) to `.devcycle/diagnosis.md`, recording it in the state file's `diagnosis:` line; the fix's design belongs to brainstorm, which takes that report as explored context |
 | brainstorm | `superpowers:brainstorming` — with devcycle's batching note (restated here because this session may never load `/devcycle:cycle`): where upstream asks questions one at a time, ask via AskUserQuestion in batches of 1–4 with concrete options plus Other |
 | planning | `devcycle:planning-waves` |
 | execution | `devcycle:executing-waves` (its resume table maps each task's last ledger event to the resume action) |
 | branch-review | `devcycle:reviewing-the-branch` |
 | on-device | `devcycle:verifying-on-device` |
-| fast-path | `devcycle:fast-path` — re-runs its branch-discipline check unconditionally, then re-derives position from git evidence: change absent/uncommitted → (re)implement; change committed → dispatch the task reviewer |
-| sweep | `devcycle:sweeping-mechanical-changes` (its Resume section settles the branch off the state file's recorded `branch:` line first, then maps the git evidence to the resume action) |
+| fast-path | `devcycle:fast-path` — re-runs its branch-discipline check unconditionally, then resumes per `${CLAUDE_PLUGIN_ROOT}/references/resume.md` |
+| sweep | `devcycle:sweeping-mechanical-changes` (its Resume section, which follows `${CLAUDE_PLUGIN_ROOT}/references/resume.md`) |
 | finish | `devcycle:finishing-the-cycle` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
 
 From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file
-updates and a handoff block at every stage boundary.
+updates and a handoff block at every stage boundary, per
+`${CLAUDE_PLUGIN_ROOT}/references/handoff.md`.
