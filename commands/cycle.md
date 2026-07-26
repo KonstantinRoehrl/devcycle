@@ -49,7 +49,7 @@ truth — every later rewrite uses exactly it:
 
 ```markdown
 # devcycle state
-- stage: <scoping|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|finish|done>  (the stage to RESUME at)
+- stage: <scoping|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|finish|done>  (the stage to RESUME at)
 - root: <absolute repo toplevel this cycle belongs to>
 - branch: <git branch>
 - request: <one line: what this cycle is building/fixing>
@@ -132,23 +132,37 @@ before proceeding.
   the skip only when the stage was entered and judged inapplicable; a kind that
   never routes there emits nothing).
 
-**Size** judges whether the request is trivial enough to skip the full pipeline.
-Trivial requires ALL of the following — any doubt on any one of them means the
-request is not trivial:
+**Size** judges whether the request can skip the full pipeline, via two special
+verdicts. **Trivial** requires ALL of:
 
 - fully specified by the request itself, nothing left to design;
 - no design decisions and no new interfaces;
 - blast radius of roughly two files or fewer, a few lines;
 - the evidence class (`red-green` | `green-green` | `convention`) is already
   determinable from the request;
-- for bugs, the root cause is already evident — an undiagnosed bug is never
-  trivial.
+- for bugs, the root cause is already evident.
 
-A trivial verdict is never acted on automatically: announce it and ask via
-AskUserQuestion, offering the fast path against the full pipeline. Confirmed →
-rewrite the state file with `stage: fast-path` and invoke `devcycle:fast-path`.
-Declined → the trivial verdict is discarded, the normal maturity/kind walk
-below applies, and nothing extra is recorded.
+**Bulk-mechanical** — one uniform edit rule applied identically across many
+files — requires ALL of:
+
+- one uniform edit rule, identical for every affected file, no per-file
+  judgment;
+- the rule fully specified by the request itself, nothing left to design;
+- many affected files (beyond fast-path scale, roughly more than three), and
+  discoverable by search;
+- success checkable by one command.
+
+Any doubt on any one criterion disqualifies that verdict. Trivial beats
+bulk-mechanical; an undiagnosed bug is never either.
+
+Neither verdict is ever acted on automatically: announce it and ask via
+AskUserQuestion, offering the short path against the full pipeline. Confirmed →
+rewrite the state file with `stage: fast-path` or `stage: sweep` and invoke
+`devcycle:fast-path` or `devcycle:sweeping-mechanical-changes` accordingly —
+for the sweep that is gate 1 of a two-step confirm, the second gate being the
+concrete file list and verify command, which belong to the sweep skill and run
+before any agent edits. Declined → the verdict is discarded, the normal
+maturity/kind walk below applies, and nothing extra is recorded.
 
 ## State file
 
@@ -233,6 +247,7 @@ Pick the context action from this table and recommend it to the user explicitly:
 | execution → branch-review | Clear + `/devcycle:continue` or Fresh session (a reviewer that watched the code being written inherits the implementer's assumptions) | branch, spec path, ledger path | all implementation context |
 | branch-review → on-device | Fresh session | checklist path, branch | everything else |
 | fast-path → finish | Continue | everything | — |
+| sweep → finish | Continue | everything | — |
 
 ### Await the context action — never run past a recommended compact or clear
 
