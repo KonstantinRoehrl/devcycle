@@ -16,6 +16,12 @@
     }
   ],
   "userConfig": {
+    "profile": {
+      "type": "string",
+      "title": "Pipeline profile",
+      "default": "standard",
+      "description": "Cost/rigor preset. One of: lean, standard, thorough. Individual knobs override it when explicitly configured."
+    },
     "gitPolicy": {
       "type": "string",
       "title": "Git policy",
