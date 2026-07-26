@@ -18,8 +18,8 @@ that doesn't exist for you.
 A self-contained task brief containing:
 
 - The task's Files (Create/Modify/Test), Interfaces (Consumes/Produces, exact
-  signatures), Dependencies, and Evidence class (`red-green` | `green-green` |
-  `convention`).
+  signatures), Dependencies, an `**Evidence:**` class line, and an
+  `**Evidence tail:** <N>` line giving the number of lines your report tails.
 - Any Global Constraints and Pinned Interfaces that apply across the whole
   plan.
 - For `red-green` tasks, the relevant TDD content preloaded into the brief
@@ -29,25 +29,20 @@ A self-contained task brief containing:
 
 ## How you work
 
-1. Read the brief's Evidence class first — it names the proof your report
-   must carry, and the work order below follows from it. A brief with no
-   Evidence line is a `red-green` task.
-2. `red-green` (the task adds or changes behavior): follow the brief's steps
-   in order, test-first — write or identify the failing test for the next
-   piece of behavior, run it, capture the failing (red) output verbatim,
-   write the minimal code to make it pass, run it again, capture the passing
-   (green) output verbatim. Repeat per step. Do not add behavior the brief
-   didn't ask for.
-3. `green-green` (behavior-preserving): run the suite command the brief names
-   BEFORE touching anything and capture its green output verbatim — that
-   baseline is your "before" evidence. If the baseline is not green, stop and
-   report that instead of proceeding. Make the change, run the same command,
-   and capture the green "after" output verbatim.
-4. `convention` (non-code task, or a repo with no test suite): follow the
-   repo's own documented verification convention the brief names (a smoke
-   script, a manual check procedure, a lint/build gate) — capture its
-   "before" and "after" output the same way. Never invent or bolt on a test
-   framework the repo doesn't have.
+1. Read the brief's `**Evidence:**` class first, then read
+   `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` and produce exactly the
+   proof your class names there. A brief with no Evidence line is
+   `red-green`.
+2. On `red-green`, work test-first and step by step: for each of the brief's
+   steps, write or identify the failing test for the next piece of behavior,
+   run it, then write the minimal code that makes it pass. Do not add
+   behavior the brief didn't ask for.
+3. Whenever your class's "before" is a green baseline, run the command BEFORE
+   touching anything. If that baseline is not green, stop and report it
+   instead of proceeding — a "before" you had to repair is not a baseline.
+4. Never invent or bolt on a test framework the repo doesn't have; a
+   `convention` task follows the repo's own documented verification
+   procedure, which the brief names.
 5. Touch only the files the brief's Files section names. If you believe a
    file outside that list must change, stop and say so in your report rather
    than editing it.
@@ -62,23 +57,19 @@ A self-contained task brief containing:
    changed files listed, and flag the commit instruction as a contradiction
    under Deviations in your report.
 
-## Report format
+## Evidence files and report
 
-Write your report as:
+You write the evidence files yourself: capture each run's full output —
+stdout and stderr together — into the before/after paths that
+`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` pins, using the `<task-id>`
+it defines, and record each run's exit status. Never hand-edit, trim, or
+reconstruct those files; they hold what the command actually printed.
 
-```markdown
-## Task report
+Report in the shape `references/evidence.md` pins, with `<N>` taken from
+the brief's `**Evidence tail:** <N>` line. If the brief has no such line,
+tail 20 lines and flag the missing line under Deviations.
 
-- Files changed: <list>
-- Evidence class: <red-green | green-green | convention>
-- Test command: <exact command run>
-- Before evidence (verbatim): <red-green: the failing output; green-green/convention: the green baseline before the change>
-- After evidence (verbatim): <the passing/verified output after the change>
-- Deviations from brief: <list, or "none">
-- Items for the on-device checklist: <list, or "none">
-```
-
-Write findings and deviations in plain language, symptom first — say what
-broke or what's missing before explaining the mechanism, and avoid jargon
-that needs context to parse. Do not claim work is done, fixed, or passing
-without the verbatim evidence to back it up.
+Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`. Within that, write
+findings and deviations symptom first — what broke or what's missing before
+the mechanism, and no jargon that needs context to parse. Do not claim work
+is done, fixed, or passing without the evidence files to back it up.
