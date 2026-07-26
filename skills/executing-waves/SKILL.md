@@ -5,18 +5,44 @@ description: Use when executing a wave-based implementation plan with subagent i
 
 # Executing Waves
 
-Overlay on **superpowers:subagent-driven-development** (REQUIRED — read and
-follow it; it owns brief slicing and file handoffs, the review/fix loop,
-implementer-status handling, reviewer-prompt construction, continuous
-execution, and the never-start-on-main rule).
-This skill adds only devcycle's mechanics: waves, the deterministic green
-gate, coordinator-side commits and task-diff production (replacing
-upstream's `scripts/review-package`), the ledger event format,
-config-driven model names, and the handoff contract. Upstream's tail also
-does NOT apply: its final-code-reviewer dispatch and its
-finishing-a-development-branch step are replaced by devcycle's
-reviewing-the-branch and finish stages — this skill ends at the last
-wave's handoff. Nothing upstream is restated here.
+## Engine
+
+Resolve `profile` first — read `${CLAUDE_PLUGIN_ROOT}/references/config.md` and
+follow it.
+
+- **`thorough`** — load **superpowers:subagent-driven-development** (REQUIRED)
+  and overlay it exactly as before: it owns brief slicing and file handoffs, the
+  review/fix loop, implementer-status handling, reviewer-prompt construction, and
+  continuous execution. Upstream's tail does NOT apply: its final-code-reviewer
+  dispatch and its finishing-a-development-branch step are replaced by devcycle's
+  reviewing-the-branch and finish stages. Nothing upstream is restated here.
+- **`lean` / `standard`** — do not load it. The mechanics below are
+  self-contained.
+
+**One behavioral contract across both engines:** the same wave-formation
+invariants, the same ledger events, the same green gate, the same review cycle.
+Only the *source* of the brief-slicing and review-loop mechanics differs.
+
+Model routing for this stage's two knobs — `${user_config.implementerModel}` and
+`${user_config.taskReviewerModel}` (`walkthroughModel` and `branchReviewModel`
+belong to later stages, not this skill) — and every other knob or profile
+question: read `${CLAUDE_PLUGIN_ROOT}/references/config.md` and follow it. Every
+agent this skill dispatches reports per
+`${CLAUDE_PLUGIN_ROOT}/references/output.md`.
+
+## Pre-flight, before wave 1
+
+1. **Branch discipline.** Read `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and
+   follow it before dispatching anything — the coordinator commits from wave 1
+   onward, so the topic branch must exist and be recorded first. At `thorough`
+   this replaces upstream's never-start-on-main rule, which covers only
+   `main`/`master`; devcycle's rule also forbids `dev`, `develop`, `integration`,
+   and any branch the user names as an integration branch.
+2. **Plan hygiene.** A requirements block at the top of a plan that no task's
+   steps implement WILL be silently skipped. When the pre-dispatch read finds
+   one, patch the owning task's steps explicitly and re-extract that task's brief
+   before dispatching it. At `thorough`, upstream's Pre-Flight Plan Review (the
+   conflict scan before Task 1) runs first and this rule is an addition to it.
 
 ## Wave formation
 
@@ -38,42 +64,63 @@ Invariants:
 
 1. Read the ledger before dispatching anything. A task with an
    `event=committed` entry is done — never re-dispatch it.
-2. Slice the task's brief per upstream's file-handoff mechanics — the brief
-   carries the task's `**Evidence:**` class from the plan — then **preload**
-   into the brief the content that class needs: for `red-green` tasks the
-   relevant **superpowers:test-driven-development** content (REQUIRED), plus
-   any convention-skill content the task needs. `green-green` and
-   `convention` tasks skip the TDD splice; their brief instead names the
-   exact suite or convention command their before/after evidence must run.
-   Never instruct the subagent to invoke skills itself — content a subagent
-   must fetch can be silently skipped; injected content cannot.
-3. Dispatch **devcycle:implementer** with the brief only, on the model from
-   Model routing below. A dispatch carries that task's brief and pinned
-   interfaces — never accumulated session history or other tasks' reports:
-   the plan drew task boundaries so each brief is self-contained, and
-   dispatch must preserve that so every subagent's context stays small.
-   The dispatch prompt must NEVER instruct the implementer to commit,
-   stage, or push — in devcycle the coordinator owns commits (step 7,
-   after review and the green gate); upstream's implementers-commit
-   convention does not apply here. Ledger: `event=dispatched`.
+2. **Slice the brief.** At `thorough`, per upstream's file-handoff mechanics. At
+   `lean`/`standard`, the brief is assembled here and carries exactly: the task's
+   `**Files:**` (create/modify/test), `**Interfaces:**` (consumes/produces, with
+   exact signatures), `**Dependencies:**`, the task's `**Evidence:**` class from
+   the plan, the task's steps, and the global constraints and pinned interfaces
+   that apply — nothing else.
+
+   **Every brief, at every profile, carries an `**Evidence tail:** <N>` line**
+   with `<N>` from the profile — upstream's file-handoff mechanics know nothing
+   of it, so at `thorough` add it to the sliced brief. Evidence is never
+   profile-conditional; only the value of `<N>` varies.
+
+   Then **preload** into the brief the content the evidence class needs:
+   - `red-green` at `thorough`: the relevant
+     **superpowers:test-driven-development** content (REQUIRED).
+   - `red-green` at `lean`/`standard`: an excerpt carrying exactly three things —
+     write the failing test first; run it and capture the red output before
+     writing implementation code; then write only enough code to pass and capture
+     the green output. Splice nothing beyond those three.
+   - `green-green` and `convention`: no TDD splice; the brief instead names the
+     exact suite or convention command their before/after evidence must run.
+
+   Plus any convention-skill content the task needs. Never instruct the subagent
+   to invoke skills itself — content a subagent must fetch can be silently
+   skipped; injected content cannot. Evidence classes, evidence file paths, and
+   the report shape the implementer must produce are owned by
+   `${CLAUDE_PLUGIN_ROOT}/references/evidence.md`; name it in the brief rather
+   than restating it.
+3. Dispatch **devcycle:implementer** with the brief only, on the model
+   `references/config.md` resolves. A dispatch carries that task's brief and
+   pinned interfaces — never accumulated session history or other tasks' reports:
+   the plan drew task boundaries so each brief is self-contained, and dispatch
+   must preserve that so every subagent's context stays small. The dispatch
+   prompt must NEVER instruct the implementer to commit, stage, or push — in
+   devcycle the coordinator owns commits (step 7, after review and the green
+   gate); upstream's implementers-commit convention does not apply here. Ledger:
+   `event=dispatched`.
 4. On report: ledger `event=report-received`. Produce the task diff — run
    `git add -N` on new files first (or they are invisible to diff), then
    `git diff -U10 HEAD -- <files>` to a file. (This replaces upstream's
    `scripts/review-package`: devcycle implementers do not commit, so there
    are no task commits to package until after acceptance.)
 5. Dispatch **devcycle:task-reviewer** (read-only; its definition encodes
-   devcycle's reviewer hygiene) with the brief, report, and
-   diff paths plus the task's constraints block. Upstream's reviewer-prompt
-   rules govern the dispatch wording. Findings loop back to the
-   implementer; re-review after fixes. Ledger: `event=review-verdict`.
+   devcycle's reviewer hygiene) with the brief, the report, the diff path, the
+   two evidence-file paths the report names, and the task's constraints block.
+   At `thorough`, upstream's reviewer-prompt rules govern the dispatch wording.
+   Ledger one `event=review-round` per reviewer dispatch (round n), and
+   `event=review-verdict` for its outcome. Findings loop back to the implementer;
+   re-review after fixes, logging the next `review-round`.
 6. **Green gate (REQUIRED, deterministic):** before accepting, re-run the
    task's test command yourself and read the exit status. The implementer's
-   claimed output is never sufficient, and neither is a reviewer's accept
-   verdict — both judge a report, not the repo. If the command fails:
-   acceptance is blocked — no commit; ledger `event=review-verdict
-   outcome=rejected (green gate: <symptom>)`; send it back to the
-   implementer. If the repo has no test suite but documents its own
-   verification convention, run that convention's command as the gate;
+   claimed output — including the evidence files and the tail in its report — is
+   never sufficient, and neither is a reviewer's accept verdict: both judge a
+   report, not the repo. If the command fails: acceptance is blocked — no commit;
+   ledger `event=review-verdict outcome=rejected (green gate: <symptom>)`; send
+   it back to the implementer. If the repo has no test suite but documents its
+   own verification convention, run that convention's command as the gate;
    never bolt a new test framework onto the repo to create one.
 7. On acceptance: local commit with a Conventional Commit subject; ledger
    `event=committed` with the sha.
@@ -105,7 +152,7 @@ re-run rule — is owned by **devcycle:sweeping-mechanical-changes**
   `.devcycle/sweep-report-<task-id>.json` — per task, since the triage
   path's single names would collide across concurrent sweeps. Ledger
   IMMEDIATELY before the invocation: `event=dispatched outcome=sweep model
-  <decision>` in Model routing's audit shape, logged pre-run so a crash
+  <decision>` in `references/config.md`'s audit shape, logged pre-run so a crash
   mid-sweep still shows the task dispatched and resume routes its leftover
   edits to the re-run rule rather than the clean-targets ban.
 - **Clean targets** apply before a task's FIRST invocation. There is no
@@ -120,7 +167,15 @@ re-run rule — is owned by **devcycle:sweeping-mechanical-changes**
   the green gate, and the acceptance commit exactly as steps 4–7 define —
   scoped by pathspec, `git commit -- <the task's file list>`, never
   `git add -A` or a bare `git commit`, since concurrent implementers may
-  have in-flight edits and staged work elsewhere in the tree.
+  have in-flight edits and staged work elsewhere in the tree. There is no
+  implementer to write the evidence files, so the coordinator writes them itself
+  per the file-backed contract in `references/evidence.md` — with one binding
+  substitution: a sweep-executed task is a plan task inside a wave, so its
+  `<task-id>` is the plan's task number, giving
+  `.devcycle/evidence/<task-id>-before.txt` and `-after.txt`. The literal
+  `sweep` id that reference names belongs to the standalone triage route, where
+  exactly one sweep runs; here it would collide across concurrent sweeps for the
+  same reason the per-task report name does.
 - **Exit 0, `applied` empty.** Nothing was swept: no diff to review, nothing
   to commit, steps 4–7 do not apply. Ledger `event=report-received
   outcome=sweep applied-none` with the report as `ref=`, relay its per-file
@@ -139,121 +194,96 @@ re-run rule — is owned by **devcycle:sweeping-mechanical-changes**
 
 ## Ledger
 
-Single source of truth for progress, at upstream's path
-`.superpowers/sdd/progress.md` (one ledger — do not create a second). One
-appended line per event — all four fields REQUIRED, exactly this shape:
+Single source of truth for progress, at `.devcycle/ledger.md` (one ledger — do
+not create a second). At `thorough`, where upstream is loaded, this path
+overrides upstream's own progress-file path: devcycle writes only
+`.devcycle/ledger.md`, never both. One appended line per event — all four fields
+REQUIRED, exactly this shape:
 
 ```
-- [<ISO-8601 UTC>] task=<id> event=<dispatched|report-received|review-verdict|committed|user-decision> outcome=<short> ref=<commit-sha|file|none>
+- [<ISO-8601 UTC>] task=<id> event=<dispatched|report-received|review-round|review-verdict|committed|user-decision> outcome=<short> ref=<commit-sha|file|none>
 ```
 
 After any compaction or resume, trust the ledger and `git log` over
 conversation memory.
 
-## Model routing
-
-Model names are configuration, not prose. For this stage the knobs are
-`${user_config.implementerModel}` and `${user_config.taskReviewerModel}`
-(`walkthroughModel` and `branchReviewModel` belong to later stages, not
-this skill). Resolve each knob three ways:
-
-- still a literal `${user_config...}` placeholder (unset) OR the value
-  `auto` → derive the model per the predicates below;
-- any other value → binding: use it verbatim for every dispatch, never
-  override or downshift it.
-
-Derivation picks between two tiers — defined by capability, never by a
-model id written here, because ids in skill prose rot as models change:
-
-- **session tier** — dispatch with NO model override, so the subagent
-  inherits this coordinator session's own model: the strongest model the
-  user has already sanctioned, tracking model generations without this
-  skill naming any.
-- **fast tier** — the newest fast/small Claude model available to this
-  session (the current Sonnet-class generation). If no such id can be
-  resolved with confidence, fall back to the session tier — a stronger
-  model is never the wrong direction.
-
-Derivation predicates (dispatch-time-observable inputs only):
-
-- **implementer**: fast tier iff the task's `**Files:**` block lists ≤2
-  files AND `**Dependencies:** none` AND every step names its file and
-  expected behavior; else session tier.
-- **task-reviewer**: fast tier iff the task diff is ≤400 changed lines
-  and ≤5 files; else session tier.
-
-Upstream's Model Selection tiers are background only; these predicates
-decide. Auditability: every dispatch's ledger event records the decision
-and its inputs — e.g. `outcome=model fast:<resolved id> (auto: files=1,
-deps=none, steps=specified)` or `outcome=model session (auto: files=4)`
-for derived choices, or `outcome=model <id> (pinned)` for explicit
-config.
-
-## Plan hygiene before wave 1
-
-Upstream's Pre-Flight Plan Review (the conflict scan before Task 1) runs
-first; these two rules are devcycle additions to it.
-
-A requirements block at the top of a plan that no task's steps implement
-WILL be silently skipped. When the pre-dispatch read finds one, patch the
-owning task's steps explicitly and re-extract that task's brief before
-dispatching it.
-
 ## UI and on-device outcomes
 
 Never claim a rendered or on-device outcome from a script, test, or report.
-The moment a task produces rendered changes, add its outcomes to the
-on-device checklist per **devcycle:verifying-on-device** (REQUIRED for
-UI-bearing tasks) — at that task, not at wave end.
+Generating the on-device checklist is a mid-wave coordinator duty and lives here;
+the later walkthrough of that checklist is **devcycle:verifying-on-device**'s
+stage.
+
+### Generating the checklist
+
+**Trigger: the moment a task produces rendered changes** — generate or update the checklist
+in that same wave. Never defer it to the end of the wave or the branch.
+
+- Path (pinned; consumed by reviewing-the-branch handoffs): `docs/<feature>/on-device-checklist.md`
+  in the target repo.
+- Record the path in the `checklist:` field of `.devcycle/state.md`.
+- Every item is an UNCHECKED box naming one concrete outcome a human can observe on the
+  running app. No item is pre-checked and no item carries `(auto)` at generation time.
+- Cover every dimension applicable to the change:
+  - visual rendering vs intent
+  - layout / alignment / spacing
+  - interaction feel (drag, hover, focus)
+  - responsive behavior at real breakpoints
+  - theme parity, where the surface supports themes
+  - keyboard / accessibility
+  - empty / loading / error states
+  - animation timing
+
+### The `(auto)` boundary
+
+```
+A SCRIPT OR SCREENSHOT NEVER CHECKS OFF A CHECKLIST ITEM.
+```
+
+One exception, keyed to an observable predicate: an item asserting DOM structure, CSS
+values, or exact text that a structural browser check — via claude-in-chrome (the intended
+engine: it navigates, screenshots, and reads the DOM/CSS/text/network of a page in the
+user's own Chrome) or an equivalent structural check — has verified, fresh output in hand,
+may be checked off with the tag `(auto)`. claude-in-chrome is preferred because the user can
+open an authenticated page in their real Chrome and hand the agent that already-logged-in
+session to inspect — which a separate browser context (e.g. Playwright's) cannot do without
+re-authenticating. When claude-in-chrome is not available, nothing is auto-checked: every
+item stays a human item. Everything a browser check cannot structurally see (feel,
+smoothness, visual alignment, contrast, legibility) stays unchecked for the human.
+
+| Rationalization | Reality |
+|---|---|
+| "claude-in-chrome confirmed the page" | A structural read covers only DOM/CSS/text — check off exactly those items, `(auto)`-tagged, nothing more |
+| "The screenshot looks right" | A screenshot cannot show jank, focus order, interaction feel, or a breakpoint reflow |
+| "We're behind schedule" | Pressure does not convert human items into script items |
+| "The code clearly implements it" | Rendered outcome and code intent diverge exactly often enough to need this checklist |
 
 ## Wave boundaries and handoff
 
-At every wave boundary and at stage end, update `.devcycle/state.md`
-(`stage:` = the stage the next session should resume at — `execution`
-while waves remain, `branch-review` at stage end — plus branch, artifact
-paths, timestamp) before emitting this block — all five fields REQUIRED,
-exactly these labels:
-
-```markdown
-## Handoff
-- Stage completed: <stage>
-- Artifacts: <paths, one per line>
-- Carry-overs: <pinned interfaces / open decisions, or "none">
-- Context action: <Continue | Compact with hint | Clear + /devcycle:continue | Fresh session>
-- Compaction hint: Keep <X>. Drop <Y>.
-```
-
-At a wave → wave boundary the first field is instead
-`Wave completed: <n> of <m> (stage: execution)` — `Stage completed:` is
-reserved for true stage ends. These are the only two sanctioned
-first-field labels.
-
-Context action by boundary:
-
-- **wave → wave** (more waves remain): `Continue` while context is under
-  ~40% capacity; `Compact with hint` at or above it. Keep: ledger/plan
-  paths, pinned interfaces, dispatch map, wave status. Drop: implementer
-  transcripts, resolved findings.
-- **last wave → branch review**: `Clear + /devcycle:continue` (or fresh
-  reviewer agents) — a reviewer that watched the code being written inherits
-  the implementer's assumptions. Keep: branch, spec path, ledger path.
-  Drop: all implementation context. The next stage is
-  **devcycle:reviewing-the-branch** (REQUIRED — the branch gate before
-  finishing).
+At every wave boundary and at stage end, update `.devcycle/state.md` (`stage:` =
+the stage the next session should resume at — `execution` while waves remain,
+`branch-review` at stage end — plus branch, artifact paths, timestamp), then emit
+the handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`: read it and
+follow it, including which first-field label the boundary takes, the context
+action, and the gate that stops the run until the user acts. After the last
+wave's handoff this skill ends; the next stage is
+**devcycle:reviewing-the-branch** (REQUIRED — the branch gate before finishing).
 
 ## Resuming after /clear
 
-Read `.devcycle/state.md`, the plan's Dispatch Map, the ledger, and
-`git log`; then resume each task from its last ledger event — most specific
-row wins. Sweep rows key on the event's logged `outcome=` (a `sweep` token
-in it), never on the task's `**Execution:** sweep` marker: a bare
-`dispatched` on a sweep-marked task is a post-rejection implementer fix and
-takes the generic rows.
+Read `${CLAUDE_PLUGIN_ROOT}/references/resume.md` and follow it — it settles the
+branch and re-derives position from git evidence. Then read `.devcycle/state.md`,
+the plan's Dispatch Map, and the ledger, and resume each task from its last
+ledger event — most specific row wins. Sweep rows key on the event's logged
+`outcome=` (a `sweep` token in it), never on the task's `**Execution:** sweep`
+marker: a bare `dispatched` on a sweep-marked task is a post-rejection
+implementer fix and takes the generic rows.
 
 | ledger last event for a task | resume action |
 | --- | --- |
 | `dispatched` | re-dispatch the same brief (the run may have died) |
 | `report-received` | produce the diff, dispatch the reviewer |
+| `review-round` (no verdict after it) | the reviewer's run may have died: re-dispatch the reviewer for that round |
 | `review-verdict outcome=accepted` | run the green gate, commit |
 | `review-verdict outcome=rejected` | re-dispatch the implementer with the findings — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet (findings, task body, applied-edits disclosure), never a sweep re-run |
 | `committed` | task done — move to the next task |
