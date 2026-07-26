@@ -4,6 +4,10 @@
 
 - feat(cycle): triage gains a size axis — a confirmed-trivial request (after an AskUserQuestion gate) takes the fast path instead of the full pipeline
 - feat(fast-path): new mini-cycle skill — in-session implementation with evidence, one task-reviewer pass, then the normal finish stage
+- feat(cycle): triage size axis gains a bulk-mechanical verdict — a confirmed request routes to the new sweep stage instead of the full pipeline
+- feat(sweeping-mechanical-changes): new skill — blast-radius-gated bulk sweep via workflows/mechanical-sweep.js, one commit, one task-reviewer pass, then the normal finish stage
+- feat(planning-waves): tasks may declare `**Execution:** sweep` when the instruction, file list, and verifyCommand are pinned in the task body
+- feat(executing-waves): `**Execution:** sweep` tasks run via the mechanical-sweep workflow instead of an implementer dispatch; review cycle, green gate, and ledger semantics unchanged
 
 ## 0.6.1
 
