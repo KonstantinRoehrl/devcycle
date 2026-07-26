@@ -9,11 +9,21 @@ Knob values arrive via `${user_config.KEY}` placeholders, each read by the stage
 skill that consumes it (gitPolicy by `devcycle:finishing-the-cycle`, models and
 review depth and the on-device gate by their stages). The resolution convention,
 everywhere: a value that still reads as a literal `${user_config...}` placeholder
-is unset, and a value outside its allowed set is invalid — both fall back to the
-knob's documented default. When a knob's placeholder is literal but the state
-file's `configured:` line records a value for it, that recorded value governs
-this run — same-session substitution cannot refresh, so `--config` writes only
-reach future sessions.
+is unset, and a value outside its allowed set is invalid. What an unset or
+invalid value falls back to depends on whether the profile matrix (below)
+covers the knob:
+
+- Profile-covered — the branch review engine (`reviewDepth`), the on-device
+  gate (`onDeviceGate`), the evidence tail, the branch-review round cap, the
+  audit depth, and the planning/execution engine choice: falls back to the
+  profile's column value, per the resolution order in "## The profile" below.
+- Not profile-covered — `gitPolicy`, `crossModelReview`, and the `*Model`
+  knobs (whose unset value is `auto`, derived per the model-tier rules
+  below): falls back to that knob's own documented default.
+
+When a knob's placeholder is literal but the state file's `configured:` line
+records a value for it, that recorded value governs this run — same-session
+substitution cannot refresh, so `--config` writes only reach future sessions.
 
 ## The profile
 
