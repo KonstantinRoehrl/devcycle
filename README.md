@@ -7,9 +7,12 @@ implements them test-first with subagents, reviews the finished branch against t
 when changes are visible on screen — walks you through checking them on the running app.
 
 Policy — what it may do with git, which models it runs, how deep reviews go — is
-configuration, not something you re-explain each session. It builds on the [superpowers]
-plugin (a required dependency) instead of replacing it: where superpowers already does
-something well, devcycle invokes it; devcycle adds the stages, gates, and mechanics around it.
+configuration, not something you re-explain each session, and a single `profile` preset sets
+the cost-versus-rigor level for all of it at once. It builds on the [superpowers]
+plugin (a required dependency) instead of replacing it: brainstorming and debugging are
+upstream's, unmodified, and devcycle adds the stages, gates, and mechanics around them.
+Planning and execution ship as compact devcycle-native engines that overlay their upstream
+counterparts only at the `thorough` profile.
 
 ## Install
 
@@ -52,6 +55,14 @@ Resume any time with:
 /devcycle:continue
 ```
 
+**Add `.devcycle/` to the target repo's `.gitignore`.** Everything devcycle writes there —
+the state file, the ledger, per-task evidence files, sweep reports — is scratch for the run
+in progress, not project history. The artifacts worth keeping land outside it: the spec and
+plan under `docs/`, an audit under `docs/audits/`, the on-device checklist next to the
+feature. Before committing any artifact it writes, devcycle asks `git check-ignore` first
+and skips the commit if your repo ignores that path — your ignore rules decide what enters
+history, not the plugin.
+
 ## The pipeline
 
 1. **Scoping** — batched interview that turns your request into a precise, well-structured
@@ -61,36 +72,44 @@ Resume any time with:
    orientation docs the same way. Skipped when your input is already concrete. For a bug,
    the interview collects the symptom and reproduction (steps, expected vs. actual,
    evidence) instead of design intent.
-2. **Diagnosis** — for bugs whose root cause isn't established yet: reproduce the failure,
+2. **Audit** — for audit-shaped requests ("audit X", "review the repo for Y" — an
+   assessment of existing code rather than a change to it): runs **in place of** scoping.
+   devcycle interviews you for the criteria to measure the repo against — never assuming
+   them — then sweeps the repo and writes a ranked findings document to
+   `docs/audits/YYYY-MM-DD-<topic>.md`, every finding carrying `file:line` evidence and a
+   concrete fix. You pick which findings to act on; those become the cycle's scope and the
+   walk continues at brainstorm. Pick nothing and the cycle closes at the report. The same
+   audit is available on its own as `/devcycle:audit` (below), outside any cycle.
+3. **Diagnosis** — for bugs whose root cause isn't established yet: reproduce the failure,
    then isolate the cause (upstream `superpowers:systematic-debugging`), ending in a
    root-cause report that the fix's design builds on. A fix is never designed for an
    undiagnosed problem. Skipped for features, refactors, and bugs whose cause is already
    known with evidence.
-3. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
+4. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
    spec you approve.
-4. **Planning** — a feasibility check, then an implementation plan that doubles as the
+5. **Planning** — a feasibility check, then an implementation plan that doubles as the
    execution strategy: the work is cut into small, self-contained tasks — each implementable
    from its own brief alone, so every subagent works with a small context — dependencies are
    derived from what each task consumes, and everything not forced into sequence by a real
    dependency is grouped into *waves* of file-disjoint tasks that run in parallel — research
    draws on an existing graphify graph when one is available, and also looks for
    implementation-scoped docs the same way. You approve the plan.
-5. **Execution** — each task goes to a fresh implementer subagent carrying only that task's
+6. **Execution** — each task goes to a fresh implementer subagent carrying only that task's
    brief, working test-first (failing test before code) when the task adds behavior — a
    behavior-preserving task instead proves the suite green before and after the change, per
    the evidence class its plan task declares. A reviewer checks every task, the
    coordinator re-runs the tests itself before accepting (the *green gate*: the task's test
    command must pass in the coordinator's own re-run, not just in the implementer's
    report), and only accepted work is committed.
-6. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole
+7. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole
    branch against the spec: everything the spec asked for is there, nothing it didn't ask
    for crept in.
-7. **On-device verification** — for changes a human can see: a checklist of outcomes to
+8. **On-device verification** — for changes a human can see: a checklist of outcomes to
    confirm on the running app. What a browser can structurally verify (DOM, CSS values,
    exact text) is auto-checked through claude-in-chrome and tagged `(auto)`; everything
    a script cannot truly see — feel, alignment, smoothness, legibility — is walked with you
    one item at a time. Skipped when nothing renders.
-8. **Finish** — hands the branch back per your `gitPolicy` (below).
+9. **Finish** — hands the branch back per your `gitPolicy` (below).
 
 Triage judges size, too. A request at typo, rename, or few-line-fix scale — measured against a
 strict checklist, where any doubt on any criterion means not trivial — gets called out before
@@ -111,8 +130,10 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | --- | --- |
 | `/devcycle:cycle` | Runs the pipeline for a request. |
 | `/devcycle:continue` | Resumes an interrupted pipeline from the state file. |
+| `/devcycle:audit` | Audits this repo against criteria you confirm and writes a ranked findings document. Standalone — starts no cycle. |
 | Skill `scoping-interview` | The batched scope interview with a hard stop before design begins. |
-| Skill `planning-waves` | Feasibility gate + wave-structured planning (extends `superpowers:writing-plans`). |
+| Skill `auditing-a-repo` | The criteria interview, repo sweep, and ranked evidence-backed findings document behind `/devcycle:audit` and the audit stage. |
+| Skill `planning-waves` | Feasibility gate + wave-structured planning (overlays `superpowers:writing-plans` at `thorough`). |
 | Skill `executing-waves` | Parallel subagent execution with green gate, ledger, and commit discipline. |
 | Skill `reviewing-the-branch` | The whole-branch review gate, single-reviewer or panel. |
 | Skill `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes. |
@@ -130,11 +151,12 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 Set options with `/plugin configure devcycle@devcycle` (or
 `claude plugin install devcycle@devcycle --config KEY=VALUE`). Everything has a working
 default; configure nothing and the pipeline still runs. The first time `/devcycle:cycle`
-runs with nothing configured, it offers a short batched walkthrough of the four behavioral
-options — answer once (or accept the defaults) and it never asks again.
+runs with nothing configured, it asks one question — which `profile` to run — and never asks
+again; answer *customize* instead and it asks the four behavioral options in one batch.
 
 | Option | What it controls | Values | Default |
 | --- | --- | --- | --- |
+| `profile` | Cost against rigor, across every stage at once | `lean` / `standard` / `thorough` | `standard` |
 | `gitPolicy` | What the finish stage may do with git | `local-commits-only` / `push-allowed` / `open-pr` | `local-commits-only` |
 | `reviewDepth` | How the branch review runs | `single` / `panel` | `single` |
 | `crossModelReview` | Adds a second-model lens to the panel | `true` / `false` | `false` |
@@ -143,6 +165,32 @@ options — answer once (or accept the defaults) and it never asks again.
 | `taskReviewerModel` | Model for per-task reviewers | `auto` / model id | `auto` (derived per task; set a model id to pin) |
 | `branchReviewModel` | Model for the whole-branch review | `auto` / model id | `auto` (inherits your session's model; set a model id to pin) |
 | `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id | `auto` (a fast model; set a model id to pin) |
+
+**`profile`** is the one knob most people need. It is a preset that sizes the whole run —
+which engines the stages use, how deep the review goes, how much evidence reports carry —
+so you don't tune six options to say "cheaper" or "be thorough":
+
+| | `lean` | `standard` | `thorough` |
+| --- | --- | --- | --- |
+| planning / execution engine | devcycle-native compact | devcycle-native compact | upstream overlays |
+| branch review engine | `single` | `single` | `panel` |
+| on-device gate | `auto-ok` | `human-required` | `human-required` |
+| evidence tail in reports | 10 lines | 20 lines | 50 lines |
+| branch-review round cap | 2 | 3 | 5 |
+| audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
+
+Resolution order, in one rule: **an option you configured explicitly wins verbatim, always;
+anything left at its default takes the profile's column value.** So the `Default` column in
+the table above is really the `standard` column — switch to `thorough` and the branch review
+becomes `panel` on its own, unless you pinned `reviewDepth: single` yourself, in which case
+your value stands and the profile never moves it. A `profile` that is unset or set to
+anything outside the three reads as `standard`.
+
+What the profile never touches: the state file, handoff blocks, evidence classes, the
+coordinator's green gate re-run, the `gitPolicy` clamps, branch discipline, the
+one-reviewer floor on the short paths, and the rule that nothing is assumed instead of
+interviewed for. A `lean` run may skip a stage; it never fakes one, and never reports a
+gate as passed that did not run.
 
 **`gitPolicy`** is the pipeline's blast radius: `local-commits-only` means it only ever
 commits on a local branch and hands it to you (never pushes); `push-allowed` lets it push
@@ -156,7 +204,8 @@ repo's default branch (direct pushes there are never allowed) — and falls back
 `local-commits-only` behavior for that run if either is true, stating why in the finish
 stage's output. `local-commits-only` is unaffected either way; it never pushes.
 
-**`reviewDepth`** picks the branch-review engine. `single` is one reviewer running Claude
+**`reviewDepth`** picks the branch-review engine — `single` at `lean` and `standard`,
+`panel` at `thorough`, unless you set it yourself. `single` is one reviewer running Claude
 Code's built-in `code-review` skill plus devcycle's spec-compliance checks. `panel` runs
 `review-panel.js` instead: two to three read-only reviewers, each with a different lens
 (spec compliance; correctness and security; simplification), whose findings are
@@ -169,8 +218,9 @@ model family might share.
 items a browser can structurally verify are auto-checked through claude-in-chrome — Claude
 Code driving your own authenticated Chrome (install the plugin and grant the extension the
 page's site permissions; without it, nothing is auto-checked and every item is yours);
-the rest need a human. `human-required` (default) blocks the pipeline until you've walked
-every human item; `auto-ok` lets it finish once the auto-checkable items pass, explicitly
+the rest need a human. `human-required` (what `standard` and `thorough` take) blocks the
+pipeline until you've walked every human item; `auto-ok` — `lean`'s value — lets it finish
+once the auto-checkable items pass, explicitly
 listing what remains unverified — it skips the human, it never fakes the checkmarks.
 
 The four **model options** trade cost against capability per role. They default to
