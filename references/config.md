@@ -21,7 +21,7 @@ reach future sessions.
 
 | | `lean` | `standard` | `thorough` |
 | --- | --- | --- | --- |
-| brainstorm / planning / execution engine | devcycle-native compact | devcycle-native compact | upstream overlays |
+| planning / execution engine | devcycle-native compact | devcycle-native compact | upstream overlays |
 | branch review engine | `single` | `single` | `panel` |
 | on-device gate | `auto-ok` | `human-required` | `human-required` |
 | evidence tail in reports | 10 lines | 20 lines | 50 lines |
