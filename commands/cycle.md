@@ -8,17 +8,15 @@ Run the devcycle pipeline for the request in `$ARGUMENTS`. Files are the state; 
 conversation is a cache — every stage writes its artifacts to disk so the pipeline
 survives `/clear` and resumes via `/devcycle:continue`.
 
-## Configuration
+## Conventions this command does not restate
 
-Knob values arrive via `${user_config.KEY}` placeholders, each read by the stage
-skill that consumes it (gitPolicy by `devcycle:finishing-the-cycle`, models and
-review depth and the on-device gate by their stages). The resolution convention,
-everywhere: a value that still reads as a literal `${user_config...}` placeholder
-is unset, and a value outside its allowed set is invalid — both fall back to the
-knob's documented default. When a knob's placeholder is literal but the state
-file's `configured:` line records a value for it (first-run walkthrough below),
-that recorded value governs this run — same-session substitution cannot refresh,
-so `--config` writes only reach future sessions.
+- Knobs, the `profile`, and model tiers: `${CLAUDE_PLUGIN_ROOT}/references/config.md`.
+- Stage boundaries — handoff block shape, context actions, the await gate:
+  `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`.
+- Branch discipline before any stage that commits:
+  `${CLAUDE_PLUGIN_ROOT}/references/branch.md`.
+- How this command and every agent it dispatches reports:
+  `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
 ## Step 0 — create the state file (FIRST action, binding)
 
@@ -49,15 +47,16 @@ truth — every later rewrite uses exactly it:
 
 ```markdown
 # devcycle state
-- stage: <scoping|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|finish|done>  (the stage to RESUME at)
+- stage: <scoping|audit|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|finish|done>  (the stage to RESUME at)
 - root: <absolute repo toplevel this cycle belongs to>
 - branch: <git branch>
 - request: <one line: what this cycle is building/fixing>
 - scope: <path or none>
+- audit: <path or none>
 - diagnosis: <path or none>
 - spec: <path or none>
 - plan: <path or none>
-- ledger: .superpowers/sdd/progress.md
+- ledger: .devcycle/ledger.md
 - checklist: <path or none>
 - configured: <no | defaults | date + KEY=VALUE list>
 - updated: <ISO-8601 UTC>
@@ -77,15 +76,36 @@ stage, that is a stage transition: rewrite the file then.
 
 ## First-run configuration (after Step 0, before triage)
 
-Offer a one-time configuration walkthrough if and only if BOTH hold:
-`${user_config.gitPolicy}`, `${user_config.reviewDepth}`,
-`${user_config.crossModelReview}`, and `${user_config.onDeviceGate}` all still
-render as literal `${user_config` placeholders, AND the state file's
-`configured:` line reads `no`. Otherwise skip straight to triage.
+Offer the one-time configuration walkthrough if and only if BOTH hold:
+`${user_config.profile}` still renders as a literal `${user_config` placeholder,
+AND the state file's `configured:` line reads `no`. Otherwise skip straight to
+triage.
 
-The walkthrough is ONE AskUserQuestion batch over those four knobs — one line
-of meaning each, the default marked "(recommended)" — plus a first-class
-option **"use defaults, don't ask again"**:
+The walkthrough is ONE AskUserQuestion over `profile` — the preset that sizes
+cost against rigor across every stage:
+
+- **`standard` (recommended)** — the default; picking it is also "use defaults,
+  don't ask again". Devcycle-native engines, single-reviewer branch review,
+  human-required on-device gate.
+- **`lean`** — fewer review rounds, shorter evidence tails, `auto-ok` on-device
+  gate.
+- **`thorough`** — upstream overlays, review panel, deepest audits.
+- **customize individual knobs** — take the four-knob path below instead.
+
+On a profile answer, write **only** the profile:
+
+```
+claude plugin install devcycle@devcycle --config profile=<value>
+```
+
+Nothing else, deliberately: an explicitly configured knob wins over the profile
+verbatim and forever (resolution order in `references/config.md`), so writing
+the individual knobs here would freeze this moment's values and the profile
+would never move them again.
+
+The **customize** path asks the existing four knobs in one AskUserQuestion batch
+— one line of meaning each, the default marked "(recommended)" — and writes
+those, one `--config` per knob:
 
 - `gitPolicy` — what the finish stage may do with the branch
   (`local-commits-only` recommended · `push-allowed` · `open-pr`).
@@ -95,21 +115,18 @@ option **"use defaults, don't ask again"**:
 - `onDeviceGate` — whether the on-device checklist closes only via a human
   walkthrough (`human-required` recommended · `auto-ok`).
 
-Model knobs are excluded: models are chosen automatically per task unless you
-pin one in `/plugin configure`.
+Model knobs are excluded either way: models are chosen automatically per task
+unless you pin one in `/plugin configure`.
 
-Apply the answers via `claude plugin install devcycle@devcycle --config
-KEY=VALUE` (one `--config` per knob) — including on "use defaults": write the
-explicit default values, so the placeholders substitute in future sessions and
-this offer never fires again. Record the answers in the state file's
-`configured:` line — `defaults`, or the date plus the KEY=VALUE list. Because
-same-session substitution cannot refresh, stage skills read THIS run's values
-from that line (see Configuration above).
+Record what was written in the state file's `configured:` line — the date plus
+the KEY=VALUE list. Because same-session substitution cannot refresh, stage
+skills read THIS run's values from that line.
 
 ## Triage the input
 
-Judge `$ARGUMENTS` on three axes and announce all verdicts with the entry stage
-before proceeding.
+Judge `$ARGUMENTS` on three axes, then confirm every verdict with the user in
+ONE AskUserQuestion **before any stage runs**. Nothing below is
+profile-conditional.
 
 **Maturity** picks the entry stage:
 
@@ -119,6 +136,10 @@ before proceeding.
   criteria already established) → skip scoping; start at **brainstorm** as a
   validation pass of the provided material. If an approved spec document already
   exists on disk, start at **planning**.
+- **Audit-shaped** ("audit X", "review the repo for Y" — an assessment of
+  existing code, not a change to it) → the **audit** stage runs **in place of**
+  scoping: `devcycle:auditing-a-repo` establishes what is wrong before anything
+  is designed, and its selected findings feed brainstorm.
 
 **Kind** (feature | bug | refactor) shapes the walk:
 
@@ -155,14 +176,27 @@ files — requires ALL of:
 Any doubt on any one criterion disqualifies that verdict. Trivial beats
 bulk-mechanical; an undiagnosed bug is never either.
 
-Neither verdict is ever acted on automatically: announce it and ask via
-AskUserQuestion, offering the short path against the full pipeline. Confirmed →
-rewrite the state file with `stage: fast-path` or `stage: sweep` and invoke
-`devcycle:fast-path` or `devcycle:sweeping-mechanical-changes` accordingly —
-for the sweep that is gate 1 of a two-step confirm, the second gate being the
-concrete file list and verify command, which belong to the sweep skill and run
-before any agent edits. Declined → the verdict is discarded, the normal
-maturity/kind walk below applies, and nothing extra is recorded.
+### The confirmation (one question, always)
+
+No verdict is ever acted on automatically. State, in the question itself: the
+entry stage the maturity verdict picked **and why**, the kind verdict, and the
+size verdict when one fired. Offer:
+
+- **Confirm** — start at the announced stage.
+- **Start at scoping instead** — the input is less settled than it reads.
+- **Take the offered short path** — present only when a short path is on the
+  table: `fast-path` (trivial), `sweep` (bulk-mechanical), or `audit` (an
+  audit-shaped request, replacing scoping).
+- **Run the full pipeline** — discard the short-path verdict and walk the
+  stages.
+
+On a confirmed short path, rewrite the state file with `stage: fast-path`,
+`stage: sweep`, or `stage: audit` and invoke `devcycle:fast-path`,
+`devcycle:sweeping-mechanical-changes`, or `devcycle:auditing-a-repo`
+accordingly — for the sweep that is gate 1 of a two-step confirm, the second
+gate being the concrete file list and verify command, which belong to the sweep
+skill and run before any agent edits. Declined → the verdict is discarded, the
+normal maturity/kind walk applies, and nothing extra is recorded.
 
 ## State file
 
@@ -176,7 +210,12 @@ preserved.
 Run the stages in order, each via the named skill:
 
 1. **scoping** — `devcycle:scoping-interview` (skipped for mature input per triage).
-2. **diagnosis** (bugs only, per triage) — `superpowers:systematic-debugging`
+2. **audit** (audit-shaped input only, per triage) — `devcycle:auditing-a-repo`,
+   in place of scoping. It writes `docs/audits/YYYY-MM-DD-<topic>.md`, recorded
+   in the state file's `audit:` line; the findings the user selects for action
+   become brainstorm's explored context. A cycle that ends at the report (no
+   change selected) closes there.
+3. **diagnosis** (bugs only, per triage) — `superpowers:systematic-debugging`
    (upstream, unmodified): reproduce the failure first, then isolate the root
    cause. The stage ends with a root-cause report written to
    `.devcycle/diagnosis.md` — reproduction steps, the established cause with its
@@ -187,7 +226,7 @@ Run the stages in order, each via the named skill:
    as its explored context. If diagnosis overturns the confirmed scope (the bug
    lives somewhere else entirely), say so and return to scoping rather than
    designing a fix for the wrong problem.
-3. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified), with two
+4. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified), with two
    notes layered on top. First: the user's batching preference carries into this
    stage — where the upstream skill says to ask questions one at a time, ask via
    AskUserQuestion in batches of 1–4 with concrete options plus Other instead.
@@ -197,66 +236,16 @@ Run the stages in order, each via the named skill:
    repo's own ignore rules rather than force-adding past them. Everything else
    upstream stands. When the spec is approved, transition to
    `devcycle:planning-waves` (not directly to upstream writing-plans).
-4. **planning** — `devcycle:planning-waves`.
-5. **execution** — `devcycle:executing-waves`.
-6. **branch-review** — `devcycle:reviewing-the-branch`.
-7. **on-device** — `devcycle:verifying-on-device` (skip only when the change has no
+5. **planning** — `devcycle:planning-waves`.
+6. **execution** — `devcycle:executing-waves`.
+7. **branch-review** — `devcycle:reviewing-the-branch`.
+8. **on-device** — `devcycle:verifying-on-device` (skip only when the change has no
    rendered/on-device surface; record the skip in the handoff).
-8. **finish** — `devcycle:finishing-the-cycle`: resolves the effective git policy
+9. **finish** — `devcycle:finishing-the-cycle`: resolves the effective git policy
    (the configured `gitPolicy` clamped by two external push signals), acts on it,
    and closes the state file with `stage: done`.
 
-## Stage boundaries
-
-At every boundary: update `.devcycle/state.md`, then emit the handoff block as the
-stage's final output. **One block per completed stage, no batching:** when several
-stages complete in a single response or session, each stage still emits its own
-`## Handoff` block, in order, at that stage's end — never one merged or summary
-block for the run. A stage that is skipped or judged not applicable (e.g.
-on-device with no rendered surface) still emits its block: the skip IS the stage
-outcome. The finish stage emits the pipeline's final block. The block shape:
-
-```markdown
-## Handoff
-- Stage completed: <stage>
-- Artifacts: <paths, one per line>
-- Carry-overs: <pinned interfaces / open decisions, or "none">
-- Context action: <Continue | Compact with hint | Clear + /devcycle:continue | Fresh session>
-- Compaction hint: Keep <X>. Drop <Y>.
-```
-
-At a wave → wave boundary within execution the first field is instead
-`Wave completed: <n> of <m> (stage: execution)` — `Stage completed:` is
-reserved for true stage ends. These are the only two sanctioned first-field
-labels.
-
-At the finish stage specifically, the block carries one additional line, directly after
-`Artifacts:` — the resolved git policy, in the exact shape `devcycle:finishing-the-cycle`
-defines. No other stage's block carries this line.
-
-Pick the context action from this table and recommend it to the user explicitly:
-
-| Boundary | Action | Keep | Drop |
-| --- | --- | --- | --- |
-| scoping → brainstorm | Continue | everything | — |
-| scoping → diagnosis (bugs) | Continue | everything | — |
-| diagnosis → brainstorm (root cause established) | Compact with hint | diagnosis report path, reproduction steps, root cause | debugging transcripts, ruled-out hypotheses |
-| brainstorm → planning (spec approved) | Compact with hint | spec path, decisions, constraints | design back-and-forth |
-| planning → execution (plan approved) | Clear + `/devcycle:continue` | nothing (files carry it) | planning conversation |
-| wave → wave (within execution) | Compact if over ~40% context | ledger/plan paths, pinned interfaces, dispatch map, wave status | implementer transcripts, resolved findings |
-| execution → branch-review | Clear + `/devcycle:continue` or Fresh session (a reviewer that watched the code being written inherits the implementer's assumptions) | branch, spec path, ledger path | all implementation context |
-| branch-review → on-device | Fresh session | checklist path, branch | everything else |
-| fast-path → finish | Continue | everything | — |
-| sweep → finish | Continue | everything | — |
-
-### Await the context action — never run past a recommended compact or clear
-
-Emitting the handoff block is NOT permission to continue. **Only a `Continue` action lets the
-pipeline proceed to the next stage in the same turn.** For every other action — `Compact with
-hint`, `Clear + /devcycle:continue`, `Fresh session`, or a `wave → wave` boundary where the
-~40% condition to compact is met — STOP after the block and wait: the user must run `/compact`
-or `/clear` (or explicitly tell you to continue anyway) before any next-stage work begins. Never
-begin the next stage in the same response that recommended a compact or clear — a user who looks
-away would otherwise sail past the boundary with an un-cleared context, exactly what this gate
-prevents. `/clear` ends the session by design; state the `/devcycle:continue` resume path in the
-same message you halt on.
+At `lean` and `standard`, planning and execution run devcycle-native — the two
+skills above are the whole engine. At `thorough` they overlay their upstream
+counterparts. Each skill owns that switch and resolves the profile per
+`${CLAUDE_PLUGIN_ROOT}/references/config.md`; do not second-guess it from here.
