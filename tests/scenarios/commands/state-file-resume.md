@@ -9,8 +9,16 @@ Create a temporary sandbox directory with the "taskly" Node.js CLI app (as in `t
 1. `git init`, commit the base app on `main`, create and check out branch `feature/reminders`.
 2. Commit a first implementation slice on the branch (e.g. a new `lib/reminders.js` with `addReminder(taskId, when)` plus its test) with subject `feat: add reminder storage`; note its short SHA.
 3. `docs/superpowers/plans/2026-07-22-reminders.md` — a P5-shaped plan with three tasks: Task 1 `lib/reminders.js` (storage), Task 2 `bin/taskly.js` `remind` command, Task 3 reminder display in `list` output; Task 3 declares `Dependencies: Tasks 1+2 committed`; Dispatch Map: Wave 1 = Tasks 1+2, Wave 2 = Task 3.
-4. `.superpowers/sdd/progress.md` — ledger entries (P3 format): task=1 dispatched → report-received → review-verdict accept → committed (ref = the short SHA from step 2); task=2 dispatched → report-received (`outcome=awaiting review`). No entries for task 3.
-5. `.devcycle/state.md` — state file in the Step-0 template shape (10 lines): `stage: execution`, `branch: feature/reminders`, `scope: none`, `spec: docs/superpowers/specs/2026-07-22-reminders-design.md`, `plan: docs/superpowers/plans/2026-07-22-reminders.md`, `ledger: .superpowers/sdd/progress.md`, `checklist: none`, `configured: no`, a recent ISO-8601 `updated` value. (Create the spec file with a few plausible lines so the path resolves.)
+4. `.devcycle/ledger.md` — ledger entries in the four-field event shape: task=1 dispatched → report-received → review-round → review-verdict accept → committed (ref = the short SHA from step 2); task=2 dispatched → report-received (`outcome=awaiting review`). No entries for task 3.
+5. `.devcycle/state.md` — state file in the Step-0 template shape (13 lines): `stage: execution`, `root:` = the sandbox's `git rev-parse --show-toplevel`, `branch: feature/reminders`, a one-line `request:`, `scope: none`, `audit: none`, `diagnosis: none`, `spec: docs/superpowers/specs/2026-07-22-reminders-design.md`, `plan: docs/superpowers/plans/2026-07-22-reminders.md`, `ledger: .devcycle/ledger.md`, `checklist: none`, `configured: 2026-07-26 profile=standard`, a recent ISO-8601 `updated` value. (Create the spec file with a few plausible lines so the path resolves.)
+
+**Reference layer (required for every green run).** `commands/continue.md` no longer
+restates the resume rules: it points at `${CLAUDE_PLUGIN_ROOT}/references/resume.md`,
+`branch.md`, and `handoff.md`. A spliced agent therefore sees those rules only if it
+opens the files, so the run must make the pointers resolvable — check out (or copy) the
+devcycle plugin somewhere readable from the sandbox and tell the agent, in the prompt's
+environment notes, which path to substitute for `${CLAUDE_PLUGIN_ROOT}`. Splicing the
+command body with dangling pointers grades a broken setup, not the text.
 
 Run the subagent from the sandbox root. For the **green** run, splice the full body of `commands/continue.md` into the prompt at the marked slot. For the **baseline (red)** run, omit the command block entirely.
 
@@ -21,6 +29,8 @@ Run the subagent from the sandbox root. For the **green** run, splice the full b
 > === COMMAND (the user invoked /devcycle:continue; follow this exactly; green run only) ===
 > [Splice here: full body of commands/continue.md.]
 > === END COMMAND ===
+>
+> Environment notes: the devcycle plugin's files are checked out at <absolute path of the devcycle checkout>; where guidance references `${CLAUDE_PLUGIN_ROOT}`, substitute that path.
 >
 > The user says: "Continue where we left off. Honestly I don't remember where we were — I think we might have been basically done?"
 >
@@ -33,8 +43,10 @@ Run the subagent from the sandbox root. For the **green** run, splice the full b
 3. Its per-task account matches the ledger: Task 1 reviewed and committed (cites the commit), Task 2 report received but review pending, Task 3 not dispatched (blocked on Tasks 1+2 committed per the plan).
 4. It names the concrete next action (complete Task 2's review, then dispatch Task 3 once Tasks 1+2 are committed) and resumes the execution stage — it does not restart the pipeline or an earlier stage.
 5. It corrects the user's "we might have been done" from file evidence rather than adopting it, and never asks the user to re-explain what they were doing.
-6. *(Pipeline-start variant — setup and prompt in `## Regression (dry-run fixes)` below; exercises `commands/cycle.md` step 0 plus the scoping-interview entry check, the creation half of the resume contract.)* When `/devcycle:cycle` is invoked with a rough one-liner in a repo that has no `.devcycle/state.md`, the agent creates the state file as its opening action — on disk before the triage verdict is announced and before any scoping questions are asked (reading the current branch to fill the file's `branch:` line is part of creating it) — in the Step-0 template shape: `stage: scoping`, the current git branch, `none` on the scope/spec/plan/checklist lines, and `configured: no`, so a cycle interrupted mid-scoping still leaves a state file for `/devcycle:continue` to resume from.
+6. *(Pipeline-start variant — setup and prompt in `## Regression (dry-run fixes)` below; exercises `commands/cycle.md` step 0 plus the scoping-interview entry check, the creation half of the resume contract.)* When `/devcycle:cycle` is invoked with a rough one-liner in a repo that has no `.devcycle/state.md`, the agent creates the state file as its opening action — on disk before the triage verdict is announced and before any scoping questions are asked (reading the current branch and the repo toplevel to fill the file's `branch:` and `root:` lines is part of creating it) — in the Step-0 template shape (13 lines: stage, root, branch, request, scope, audit, diagnosis, spec, plan, ledger, checklist, configured, updated) with `stage: scoping`, the current git branch, `none` on the scope/audit/diagnosis/spec/plan/checklist lines, `ledger: .devcycle/ledger.md`, and `configured: no`, so a cycle interrupted mid-scoping still leaves a state file for `/devcycle:continue` to resume from.
 7. *(In-flight-guard variant — setup and prompt in `## Regression (review-fixes)` below; exercises Step 0's in-flight branch.)* When `/devcycle:cycle` is invoked in a repo whose `.devcycle/state.md` records any stage other than `done` (an in-flight cycle), the agent does NOT reset the file: it tells the user an in-flight cycle exists, naming the recorded stage and branch, offers `/devcycle:continue` or an explicit confirmation of starting over, and stops — the state file on disk is byte-unchanged after the response. (Only a `stage: done` file may be reset without asking, `configured:` carried forward.)
+8. *(Reference layer, added 2026-07-26.)* The resume rules the command now delegates are actually picked up, not guessed: the transcript shows the agent opening `references/resume.md` at the substituted plugin path, and it settles the branch off the state file's RECORDED `branch:` line before deriving position — announcing that the checkout's branch matches the record (or, if it did not, asking before switching rather than switching silently). An answer that happens to be right without the reference read is recorded as a partial: the criterion pins that the pointer resolves, because the rule no longer travels in the spliced command text.
+9. *(Stage vocabulary, added 2026-07-26.)* Nothing in the response contradicts the current stage enum — `scoping | audit | diagnosis | brainstorm | planning | execution | branch-review | on-device | fast-path | sweep | finish | done` — and the ledger it names and reads is `.devcycle/ledger.md`, the single path the state file records. A response that invents a stage name, or that looks for the ledger under the retired `.superpowers/sdd/progress.md` path, fails this criterion.
 
 ## Baseline (red)
 
@@ -100,3 +112,22 @@ Runs 2026-07-23, after the review-fixes bundle changed the state-file contract (
 - Result (green) vs working tree: PASS, now rule-attributed — "per the pipeline rules I can't silently reset the state file out from under it"; named stage `execution` and branch `feature/reminders`, offered exactly the two sanctioned paths (resume via `/devcycle:continue`, or explicit start-over confirmation with the reset described as `configured:`-preserving), and stopped; `.devcycle/state.md` byte-unchanged (sha-verified).
 
 **Criteria 1–5 re-run (green)** against the working-tree `commands/continue.md` with the updated 10-line-template sandbox (task 2's uncommitted working-tree changes and report present, per Setup): all PASS — read state/ledger/plan/report and re-ran `node test-remind.js` itself; announced stage `execution` + branch (`matches current branch — no mismatch`) + artifact paths; Task 1 "committed as `7bb9f7d`" (the sandbox's real short SHA), Task 2 "reported done, not yet reviewed/committed" with the uncommitted diff named, Task 3 "not dispatched (blocked on 1+2 being committed)"; next action review task 2 → commit → dispatch task 3, resuming execution; "So we're **not** done" from file evidence. Criteria 1–5 are textually unchanged by this pass, so the 2026-07-22 baseline remains their red evidence. (First green attempt used a rebuilt sandbox that omitted task 2's working-tree changes; the agent correctly derived "re-dispatch task 2" from that evidence — a sandbox-fidelity gap, not a text failure — and the sandbox was corrected to Setup before the recorded run.)
+
+## Regression (compact profile-driven devcycle)
+
+**Not yet run (2026-07-26).** This pass rewrote Setup and criteria 6, 8, and 9 for the
+landed behavior — ledger at `.devcycle/ledger.md`, the 13-line state template with
+`root:`/`request:`/`audit:`/`diagnosis:`, the profile-shaped `configured:` line, the
+current stage enum, and the reference layer `commands/continue.md` now points at
+instead of restating. No headless run was made for it, so nothing below is claimed as
+observed; the sections above stand as the evidence for the criteria they graded, on the
+text that was current on their dates.
+
+What would prove it: rebuild the sandbox per the updated Setup (ledger at
+`.devcycle/ledger.md`, 13-line state file), check out the plugin somewhere readable and
+put its path in the prompt's `${CLAUDE_PLUGIN_ROOT}` environment note, then run the
+main prompt as a fresh headless subagent (`claude -p`, isolated `CLAUDE_CONFIG_DIR`
+holding only auth, init event confirming `plugins: []`) against the working-tree
+`commands/continue.md`, and grade criteria 1–5, 8, and 9. Criterion 8 is the one at
+risk: it fails if the agent answers from the spliced command text alone without ever
+opening `references/resume.md`.
