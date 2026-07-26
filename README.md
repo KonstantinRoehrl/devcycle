@@ -205,8 +205,12 @@ repo's default branch (direct pushes there are never allowed) — and falls back
 stage's output. `local-commits-only` is unaffected either way; it never pushes.
 
 **`reviewDepth`** picks the branch-review engine — `single` at `lean` and `standard`,
-`panel` at `thorough`, unless you set it yourself. `single` is one reviewer running Claude
-Code's built-in `code-review` skill plus devcycle's spec-compliance checks. `panel` runs
+`panel` at `thorough`, unless you set it yourself. `single` is one reviewer running
+devcycle's spec-compliance checks plus the reviewer guidance of
+`superpowers:requesting-code-review` — severity-calibrated, read-only, structured
+findings. Claude Code's built-in `code-review` skill is user-invocation-only, so an agent
+cannot launch it; if you have run it on the branch yourself, its findings are folded in
+and the engine line says `single + user-run code-review`. `panel` runs
 `review-panel.js` instead: two to three read-only reviewers, each with a different lens
 (spec compliance; correctness and security; simplification), whose findings are
 adversarially re-verified against the code and merged into one report — slower and more
@@ -244,8 +248,9 @@ never second-guessed.
   copy as well. Both work; keep one, e.g.
   `claude plugin uninstall superpowers@superpowers-marketplace`.
 - **A literal `${user_config.KEY}` string appears in output** — that option is simply
-  unset; this is expected, and the pipeline falls back to the documented default. Set the
-  option to make the value substitute.
+  unset; this is expected. What the pipeline uses instead follows the resolution order
+  under [Configuration](#configuration) above. Set the option to make the value
+  substitute.
 - **Source edits don't show up after reinstalling** — the plugin cache is keyed by
   version, and reinstalling the same version does not refresh it. Bump the version or
   uninstall and reinstall.

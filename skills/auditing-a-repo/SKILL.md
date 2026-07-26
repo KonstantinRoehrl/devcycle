@@ -66,10 +66,22 @@ how far steps 2–3 go (see Depth below). Report as
    one that does not is misleading.
 
 5. **Output.** Write `docs/audits/YYYY-MM-DD-<topic>.md` (today's date, a short topic
-   slug), then commit it — a committing path, so read
-   `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and follow it first. If
-   `git check-ignore` covers the path, write the file and skip the commit: the repo's
-   own ignore rules decide what lands in history, not this skill.
+   slug), then commit it. If `git check-ignore` covers the path, write the file and
+   skip the commit: the repo's own ignore rules decide what lands in history, not this
+   skill.
+
+   The document is a commit, so branch discipline applies either way — but whether the
+   branch is recorded depends on whether this run owns a state file:
+   - **In-cycle** (the audit is running as a cycle stage, a `.devcycle/state.md` exists
+     and this cycle owns it): read `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and
+     follow it in full, including writing the topic branch to the state file's
+     `branch:` line.
+   - **Standalone** (`/devcycle:audit`, no cycle): create the topic branch per
+     `${CLAUDE_PLUGIN_ROOT}/references/branch.md` when the checkout is on a default or
+     integration branch, and do NOT create, read-modify, or write `.devcycle/state.md`
+     — a standalone audit is not a cycle and owns no state file, so an existing one
+     belongs to somebody else's in-flight cycle and its `branch:` line is not yours to
+     rewrite.
 
 6. **End.** Present the ranked list and **stop**. The user picks what to act on; each
    pick starts its own `/devcycle:cycle` naming that finding. Never auto-chain into
@@ -78,18 +90,13 @@ how far steps 2–3 go (see Depth below). Report as
 
 ## Depth by profile
 
-Per `references/config.md`'s `audit depth` row:
+How far steps 2–3 sweep is the `audit depth` row of
+`${CLAUDE_PLUGIN_ROOT}/references/config.md` — read it there; it is not repeated here.
 
-| profile | depth |
-| --- | --- |
-| `lean` | the named criteria only, findings ranked, no verification pass |
-| `standard` | the full criteria sweep |
-| `thorough` | the full sweep plus an adversarial verification pass |
-
-The `thorough` verification pass: before a finding is reported, a second reader tries
-to refute it against the repo — to show the evidence does not say what the finding
-claims, or that the code already handles the case. Refuted findings are dropped, not
-softened. Depth never touches step 1 or step 3's evidence rule: a `lean` audit
+What that row's deepest value means here — the `thorough` verification pass: before a
+finding is reported, a second reader tries to refute it against the repo, to show the
+evidence does not say what the finding claims or that the code already handles the case.
+Refuted findings are dropped, not softened. Depth never touches step 1 or step 3's evidence rule: a `lean` audit
 interviews for its criteria and drops evidence-free findings exactly as a `thorough`
 one does.
 

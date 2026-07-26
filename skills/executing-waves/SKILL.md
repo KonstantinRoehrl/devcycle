@@ -122,8 +122,13 @@ Invariants:
    it back to the implementer. If the repo has no test suite but documents its
    own verification convention, run that convention's command as the gate;
    never bolt a new test framework onto the repo to create one.
-7. On acceptance: local commit with a Conventional Commit subject; ledger
-   `event=committed` with the sha.
+7. On acceptance: local commit with a Conventional Commit subject, scoped by an
+   explicit pathspec covering the task's own files (its evidence files under
+   `.devcycle/evidence/` included) — `git commit -- <the task's file list>`,
+   never `git add -A` and never a bare `git commit`. Concurrent implementers
+   have in-flight edits elsewhere in the tree and the index picks up entries
+   from their `git add -N` calls, so an unscoped commit sweeps another task's
+   work into this one's. Ledger `event=committed` with the sha.
 
 Green-gate red flags — if you are thinking "the report shows green", "the
 reviewer already accepted", "we're behind schedule", or "re-running is
@@ -164,10 +169,8 @@ re-run rule — is owned by **devcycle:sweeping-mechanical-changes**
 - **Exit 0, `applied` non-empty.** The saved report IS the implementer
   report: ledger `event=report-received` with it as `ref=`, then diff
   production, the task-reviewer dispatch (report included, skips and all),
-  the green gate, and the acceptance commit exactly as steps 4–7 define —
-  scoped by pathspec, `git commit -- <the task's file list>`, never
-  `git add -A` or a bare `git commit`, since concurrent implementers may
-  have in-flight edits and staged work elsewhere in the tree. There is no
+  the green gate, and the acceptance commit exactly as steps 4–7 define,
+  step 7's pathspec included. There is no
   implementer to write the evidence files, so the coordinator writes them itself
   per the file-backed contract in `references/evidence.md` — with one binding
   substitution: a sweep-executed task is a plan task inside a wave, so its

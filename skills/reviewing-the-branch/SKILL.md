@@ -22,16 +22,14 @@ This stage, and every agent it dispatches, reports per
 
 Resolve every knob and the profile per `${CLAUDE_PLUGIN_ROOT}/references/config.md`:
 
-- `reviewDepth` — `${user_config.reviewDepth}`, allowed `single` | `panel`. An
-  explicitly configured value wins verbatim; otherwise the profile's branch
-  review engine applies: `single` at `lean` and `standard`, `panel` at
-  `thorough`.
+- `reviewDepth` — `${user_config.reviewDepth}`, allowed `single` | `panel`.
+  Whatever it resolves to picks the engine in "Engine selection" below.
 - `crossModelReview` — `${user_config.crossModelReview}`, default `false`.
 - `branchReviewModel` — `${user_config.branchReviewModel}`. What it resolves to
   (an explicit model id, binding; or the session tier) is what every rule below
   means by "the branch-review model".
 - The **round cap** for the findings loop is the profile's branch-review round
-  cap: 2 at `lean`, 3 at `standard`, 5 at `thorough`.
+  cap, read from that file's matrix.
 
 ## Fresh context (bias control — non-negotiable)
 
@@ -107,8 +105,26 @@ the spec says.
 ## Findings loop (bounded by the round cap)
 
 1. **Round 1 reviews the whole branch.** Log one `review-round` ledger event
-   per round to `.devcycle/ledger.md`, in the shape the ledger defines, plus a
-   `review-verdict` event for the round's outcome.
+   per round to `.devcycle/ledger.md`, in the shape the ledger defines
+   (`task=branch`, `outcome=round <n> (<engine>)`), plus a `review-verdict`
+   event for the round's outcome. Log the `review-round` event BEFORE the
+   round's reviewers are dispatched, so a round that dies mid-flight still
+   counts as spent.
+
+   **The ledger is the round counter — the count is never restarted.** On entry,
+   including every re-entry via `/devcycle:continue` after a `fixes-required`
+   stop or a `/clear`, derive the round number by counting the
+   `task=branch event=review-round` lines already in `.devcycle/ledger.md` for
+   this cycle: the round about to run is that count plus one. A session that
+   finds the count already at the cap opens no further round — it re-presents
+   the outstanding blocking findings for a user decision, per 5's second
+   terminal state. Without this the cap would bind only within one session, and
+   a stage that deliberately keeps `stage: branch-review` would hand the next
+   session a fresh full cap.
+
+   Only the user may grant rounds beyond the cap, and only explicitly. Record
+   that as `task=branch event=user-decision outcome=review-cap extended to <n>`
+   and treat `<n>` as the cap from then on; the report's `Rounds:` line names it.
 2. **Only blocking findings re-open the loop.** Each goes to a fresh
    `devcycle:implementer` dispatch (brief = the finding plus the spec path;
    never the review conversation). Non-blocking findings are recorded as
@@ -182,4 +198,5 @@ branch-review ran and stopped. Keep `stage: branch-review` in
 emit `Stage completed: branch-review` with the review report as its artifact,
 the outstanding blocking findings as its carry-overs, and the stop-for-a-
 user-decision outcome stated in the block. The block reports a stop; it never
-reports a pass.
+reports a pass. The resuming session re-derives the round count from the ledger
+per the findings loop's step 1 — it re-enters at the cap, not at round 1.

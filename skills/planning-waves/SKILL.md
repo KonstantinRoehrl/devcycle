@@ -170,10 +170,6 @@ Every task carries an `**Evidence:**` line. Read
 `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` for the three classes and their exact
 declaration forms, and use those forms verbatim.
 
-The class is planning's call, not the implementer's: derive it from what the task actually
-changes, and never declare `red-green` where no failing test can exist — that forces the
-implementer to fake a red or the reviewer to reject correct work.
-
 ## Execution route — optional, one declaration per task
 
 A task MAY carry an `**Execution:** sweep` line beside `**Dependencies:**`

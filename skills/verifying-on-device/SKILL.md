@@ -48,9 +48,8 @@ language, symptom first:
 
 ## The gate
 
-Resolve `onDeviceGate` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`: an explicitly
-configured knob wins, otherwise the profile decides — `auto-ok` at `lean`,
-`human-required` at `standard` and `thorough`.
+Resolve `onDeviceGate` per `${CLAUDE_PLUGIN_ROOT}/references/config.md` — read it and
+follow it. What each resolved value means for this stage:
 
 - `human-required`: the stage is complete ONLY when every non-`(auto)` item has a human
   verdict from the walkthrough.

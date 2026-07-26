@@ -20,8 +20,12 @@ skill, which owns the criteria interview, the sweep, and the findings document a
   explicit call, via `/devcycle:cycle <request>`; never chain into a cycle, a
   brainstorm, or a fix from here.
 
-The audit reads and writes only its own findings document, so no branch is required.
-If any repo change is ever proposed out of an audit, it belongs to the cycle that the
-user starts afterwards, under `${CLAUDE_PLUGIN_ROOT}/references/branch.md`.
+The only repo change this command makes is its own findings document — but that
+document gets committed, and a commit is a commit: if the checkout sits on the default
+or an integration branch, the skill cuts a topic branch for it per
+`${CLAUDE_PLUGIN_ROOT}/references/branch.md`. What it does not do is record that branch
+anywhere: with no cycle and no state file of its own, there is nothing to write to.
+Any repo change proposed out of an audit belongs to the cycle the user starts
+afterwards, under the same rule.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

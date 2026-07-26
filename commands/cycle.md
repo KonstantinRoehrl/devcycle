@@ -104,8 +104,13 @@ the individual knobs here would freeze this moment's values and the profile
 would never move them again.
 
 The **customize** path asks the existing four knobs in one AskUserQuestion batch
-— one line of meaning each, the default marked "(recommended)" — and writes
-those, one `--config` per knob:
+— one line of meaning each, the default marked "(recommended)" — and then writes
+ONLY the knobs whose answer differs from the offered default, one `--config` per
+changed knob. A knob the user simply accepted at its "(recommended)" value is
+left unwritten, for the same reason the profile branch writes nothing but the
+profile: writing it would make that knob explicitly configured, and an explicit
+knob wins over the profile forever, so a later `profile: thorough` would never
+move it. If every answer matches its default, nothing is written. The four:
 
 - `gitPolicy` — what the finish stage may do with the branch
   (`local-commits-only` recommended · `push-allowed` · `open-pr`).
@@ -119,8 +124,10 @@ Model knobs are excluded either way: models are chosen automatically per task
 unless you pin one in `/plugin configure`.
 
 Record what was written in the state file's `configured:` line — the date plus
-the KEY=VALUE list. Because same-session substitution cannot refresh, stage
-skills read THIS run's values from that line.
+the KEY=VALUE list, or `defaults` when the walkthrough ran and wrote nothing (a
+customize pass that accepted every default). Either way the line stops reading
+`no`, so the walkthrough is offered once and not again. Because same-session
+substitution cannot refresh, stage skills read THIS run's values from that line.
 
 ## Triage the input
 
