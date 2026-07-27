@@ -188,9 +188,9 @@ gated by `userConfig.crossModelReview`.
 {
   "profile": "lean | standard | thorough",
   "gitPolicy": "local-commits-only | push-allowed | open-pr",
-  "reviewDepth": "single | panel",
+  "reviewDepth": "single | panel | auto",
   "crossModelReview": false,
-  "onDeviceGate": "human-required | auto-ok",
+  "onDeviceGate": "human-required | auto-ok | auto",
   "implementerModel": "auto | <model id>",
   "taskReviewerModel": "auto | <model id>",
   "branchReviewModel": "auto | <model id>",
@@ -209,6 +209,10 @@ gated by `userConfig.crossModelReview`.
 - Model options default to `auto`: the coordinator derives the model per task from
   plan-observable attributes and logs the derivation in the ledger. An explicitly configured
   model id is binding — used verbatim, never overridden.
+- `reviewDepth` and `onDeviceGate` also accept `auto` (added 2026-07-26): it hands the knob
+  back to the profile's column, the same route an unset knob takes — the escape hatch for a
+  user upgrading from an older config whose explicit value would otherwise shadow the profile
+  forever (resolution order in `references/config.md`).
 - Shipped defaults: `gitPolicy: local-commits-only` (most conservative), `reviewDepth: single`,
   `crossModelReview: false`, `onDeviceGate: human-required`, all four model options `auto`.
 - The finishing stage branches on `gitPolicy`: local-commits-only ends with the branch handed back (the author's

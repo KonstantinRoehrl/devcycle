@@ -58,13 +58,23 @@ truth — every later rewrite uses exactly it:
 - plan: <path or none>
 - ledger: .devcycle/ledger.md
 - checklist: <path or none>
-- configured: <no | defaults | date + KEY=VALUE list>
+- configured: <no | defaults | date + KEY=VALUE list (possibly empty)>[ · profile-asked]
 - updated: <ISO-8601 UTC>
 ```
 
 `root:` and `request:` pin the file to one project and one goal: every reader
 verifies `root:` against its own `git rev-parse --show-toplevel` before trusting
 anything else in the file.
+
+`configured:` has one form per outcome, and this is the list that decides between
+them: `no` — never offered. `defaults` — an offer ran and wrote nothing because
+every answer matched its recommended default, so nothing is explicitly configured.
+`<date> + KEY=VALUE list` — an offer ran and wrote those. `<date>` with an empty
+list — an offer ran and wrote nothing, but explicit knobs remain from before it
+(the upgrade offer's *keep* answer); this is not `defaults`, which asserts the
+opposite. The `· profile-asked` marker rides on any of the last three: it records
+that this release's configuration question has already been put to the user in
+this repo, whichever offer put it there and whatever the answer wrote.
 
 `stage:` records the stage the NEXT session should resume at, never the stage
 just completed: at every transition, write the upcoming stage's name.
@@ -76,10 +86,97 @@ stage, that is a stage transition: rewrite the file then.
 
 ## First-run configuration (after Step 0, before triage)
 
-Offer the one-time configuration walkthrough if and only if BOTH hold:
-`${user_config.profile}` still renders as a literal `${user_config` placeholder,
-AND the state file's `configured:` line reads `no`. Otherwise skip straight to
-triage.
+Read five knobs as they render in THIS text — `${user_config.profile}`,
+`${user_config.gitPolicy}`, `${user_config.reviewDepth}`,
+`${user_config.crossModelReview}`, `${user_config.onDeviceGate}` — each either
+substituted to a real value (explicitly configured) or still a literal
+`${user_config` placeholder (never configured). That reading picks exactly one
+path, checked in order:
+
+1. `profile` substituted → it is already configured; skip to triage.
+2. `profile` literal AND at least one of the four behavioral knobs substituted
+   AND the `configured:` line does NOT carry `· profile-asked` → **the upgrade
+   offer** below.
+3. `profile` literal, all four behavioral knobs literal, AND the `configured:`
+   line reads `no` → **the first-run walkthrough** below.
+
+Anything else skips to triage. None of this is profile-conditional.
+
+### The upgrade offer (explicit knobs shadow the profile)
+
+Two different users render path 2's knob combination, and the marker is the only
+thing that tells them apart:
+
+- someone configured **before** `profile` existed — most likely through the
+  pre-0.8.0 walkthrough, which wrote all four knobs explicitly, including on its
+  "use defaults" answer. They have never been asked about `profile`, and their
+  knobs will silently make any profile they pick do nothing. This offer is for
+  them;
+- someone already asked on **this** release, whose answer wrote a knob without
+  writing `profile` — the customize path does exactly that. They pinned that knob
+  deliberately, days ago, and must never be asked to undo it.
+
+The `· profile-asked` marker separates the two, which is why every completion of
+either offer writes it. Reaching this offer therefore means the profile question
+has not been put to this user in this repo. It is a per-repo record: see the
+caveat at the end of this section.
+
+The reason any of this matters is the resolution order in
+`references/config.md` — an explicitly configured knob wins over the profile
+verbatim and forever.
+
+Only profile-covered knobs can shadow a profile. The **shadowing set** is
+whichever of `reviewDepth` and `onDeviceGate` render substituted here.
+`gitPolicy` and `crossModelReview` are outside the profile matrix — an explicit
+value there shadows nothing and is never rewritten. If the shadowing set is
+empty there is nothing to migrate: run the first-run walkthrough below instead
+and record its outcome exactly as that section says, marker included.
+
+Otherwise ask ONE AskUserQuestion, before any stage runs — a batch of two:
+
+- **What should govern these settings?** State first, in plain language, which
+  knobs are explicitly set and to what, that those values override whatever
+  profile is picked so switching profiles would otherwise change nothing, and
+  that `auto` means "let the profile govern this" rather than deleting the key.
+  Offer: **adopt a profile and let it govern** (recommended) · **keep my current
+  knobs, skip the profile** · **customize individual knobs**.
+- **Which profile, if you adopt one?** `lean` · `standard` (recommended, its
+  column reproduces the pre-0.8.0 defaults) · `thorough`. Ignored unless the
+  first answer is *adopt*.
+
+What each answer writes, and nothing more:
+
+- **Adopt** — the profile plus `auto` for each knob in the shadowing set:
+
+  ```
+  claude plugin install devcycle@devcycle --config profile=<value> --config reviewDepth=auto --config onDeviceGate=auto
+  ```
+
+  Drop the `--config <knob>=auto` for any knob not in the shadowing set.
+  `gitPolicy` and `crossModelReview` are not written.
+- **Keep my current knobs** — nothing is written at all, not even `profile`
+  (unset, it reads as `standard`). The state file is what stops the re-ask.
+- **Customize** — the four-knob path below, with one change: the comparison
+  baseline is each knob's currently configured value shown in the question, not
+  the offered default, so a knob is written only when the answer moves it.
+
+Then record the outcome on the `configured:` line per Step 0's form list: the
+date, the KEY=VALUE list of what was written (empty on *keep* — not `defaults`,
+which would assert the opposite), and the `· profile-asked` marker. So
+`configured: 2026-07-27 profile=thorough, reviewDepth=auto · profile-asked` on
+*adopt*, `configured: 2026-07-27 · profile-asked` on *keep*.
+
+**The marker is per-repo; only *adopt* closes the question globally.** *Adopt*
+writes `profile`, so `${user_config.profile}` substitutes in every later session
+everywhere and path 1 takes over. *Keep* and *customize* leave `profile`
+unwritten, so the state file is the only record that the question was asked — and
+`.devcycle/state.md` lives in one repo. Those two answers therefore hold for this
+repo, and the same user starting a cycle in a different repo will be asked once
+there too. That is the honest limit of a per-repo record, and it is why the offer
+never acts on its own: being asked twice across two repos is recoverable, having
+a knob silently rewritten is not.
+
+### The first-run walkthrough
 
 The walkthrough is ONE AskUserQuestion over `profile` — the preset that sizes
 cost against rigor across every stage:
@@ -114,20 +211,33 @@ move it. If every answer matches its default, nothing is written. The four:
 
 - `gitPolicy` — what the finish stage may do with the branch
   (`local-commits-only` recommended · `push-allowed` · `open-pr`).
-- `reviewDepth` — branch review engine (`single` recommended · `panel`).
+- `reviewDepth` — branch review engine (`single` recommended · `panel` · `auto`).
 - `crossModelReview` — add a cross-model lens to the review panel
   (`false` recommended · `true`).
 - `onDeviceGate` — whether the on-device checklist closes only via a human
-  walkthrough (`human-required` recommended · `auto-ok`).
+  walkthrough (`human-required` recommended · `auto-ok` · `auto`).
+
+`auto` on the two profile-covered knobs means "let the profile govern this". It
+is worth offering only when the knob is already explicitly configured — reaching
+this path from the upgrade offer — since leaving a knob unwritten has the same
+effect and is what a first run does anyway.
 
 Model knobs are excluded either way: models are chosen automatically per task
 unless you pin one in `/plugin configure`.
 
 Record what was written in the state file's `configured:` line — the date plus
 the KEY=VALUE list, or `defaults` when the walkthrough ran and wrote nothing (a
-customize pass that accepted every default). Either way the line stops reading
-`no`, so the walkthrough is offered once and not again. Because same-session
-substitution cannot refresh, stage skills read THIS run's values from that line.
+customize pass that accepted every default) — **and always the `· profile-asked`
+marker**, on every completion of this walkthrough, whether it was reached
+directly or from the upgrade offer above. Always, because the customize path
+writes a moved knob without writing `profile`: without the marker that user
+renders the upgrade offer's exact signature on their next cycle, and would be
+invited to convert to `auto` the knob they had just deliberately pinned. The
+marker is the record that this release has already asked; nothing else on the
+line distinguishes a knob pinned by choice from one inherited from an older
+version. Either way the line stops reading `no`, so the walkthrough is offered
+once and not again. Because same-session substitution cannot refresh, stage
+skills read THIS run's values from that line.
 
 ## Triage the input
 

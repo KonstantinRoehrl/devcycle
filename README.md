@@ -158,9 +158,9 @@ again; answer *customize* instead and it asks the four behavioral options in one
 | --- | --- | --- | --- |
 | `profile` | Cost against rigor, across every stage at once | `lean` / `standard` / `thorough` | `standard` |
 | `gitPolicy` | What the finish stage may do with git | `local-commits-only` / `push-allowed` / `open-pr` | `local-commits-only` |
-| `reviewDepth` | How the branch review runs | `single` / `panel` | `single` |
+| `reviewDepth` | How the branch review runs | `single` / `panel` / `auto` | `single` |
 | `crossModelReview` | Adds a second-model lens to the panel | `true` / `false` | `false` |
-| `onDeviceGate` | Whether a human must finish the on-device checklist | `human-required` / `auto-ok` | `human-required` |
+| `onDeviceGate` | Whether a human must finish the on-device checklist | `human-required` / `auto-ok` / `auto` | `human-required` |
 | `implementerModel` | Model for implementer subagents | `auto` / model id | `auto` (derived per task; set a model id to pin) |
 | `taskReviewerModel` | Model for per-task reviewers | `auto` / model id | `auto` (derived per task; set a model id to pin) |
 | `branchReviewModel` | Model for the whole-branch review | `auto` / model id | `auto` (inherits your session's model; set a model id to pin) |
@@ -192,6 +192,36 @@ one-reviewer floor on the short paths, and the rule that nothing is assumed inst
 interviewed for. A `lean` run may skip a stage; it never fakes one, and never reports a
 gate as passed that did not run.
 
+### Upgrading from a version before `profile`
+
+If you configured devcycle before the profile existed, your options may quietly outrank it.
+The old first-run walkthrough wrote all four behavioral options explicitly — including when
+you answered "use defaults, don't ask again" — and an explicit option wins verbatim and
+forever. Set `profile: thorough` on top of that and the branch review stays `single`, with
+nothing to tell you why.
+
+Two of the four can shadow a profile, because only they appear in the table above:
+`reviewDepth` and `onDeviceGate`. (`gitPolicy` and `crossModelReview` are outside the
+profile, so an explicit value there shadows nothing and needs no change.) Hand a shadowing
+option back to the profile by setting it to `auto`:
+
+```
+claude plugin install devcycle@devcycle --config reviewDepth=auto --config onDeviceGate=auto
+```
+
+`auto` is a value, not a deletion — it means "let the profile govern this", the same way it
+already does for the four model options — so the option stays visible in
+`/plugin configure` and you can pin it again later.
+
+You don't have to spot this yourself: the first `/devcycle:cycle` after upgrading recognizes
+the combination (a profile you have never set, next to options you have) and asks once,
+before it starts any work — adopt a profile and let it govern, keep your current options as
+they are, or customize. It records the answer, so it asks once and not every cycle, and it
+never rewrites an option without asking. One wrinkle if you decline: adopting a profile
+writes one, which settles the question everywhere, but *keep* and *customize* write no
+profile, so the only record is the `.devcycle/state.md` of the repo you were in — expect the
+question once more the first time you run a cycle in a different repo.
+
 **`gitPolicy`** is the pipeline's blast radius: `local-commits-only` means it only ever
 commits on a local branch and hands it to you (never pushes); `push-allowed` lets it push
 the branch (never merge); `open-pr` lets it push and open a pull request (never merge that
@@ -205,7 +235,8 @@ repo's default branch (direct pushes there are never allowed) — and falls back
 stage's output. `local-commits-only` is unaffected either way; it never pushes.
 
 **`reviewDepth`** picks the branch-review engine — `single` at `lean` and `standard`,
-`panel` at `thorough`, unless you set it yourself. `single` is one reviewer running
+`panel` at `thorough`, unless you set it yourself (or set it to `auto`, which hands it back
+to the profile). `single` is one reviewer running
 devcycle's spec-compliance checks plus the reviewer guidance of
 `superpowers:requesting-code-review` — severity-calibrated, read-only, structured
 findings. Claude Code's built-in `code-review` skill is user-invocation-only, so an agent
@@ -225,7 +256,8 @@ page's site permissions; without it, nothing is auto-checked and every item is y
 the rest need a human. `human-required` (what `standard` and `thorough` take) blocks the
 pipeline until you've walked every human item; `auto-ok` — `lean`'s value — lets it finish
 once the auto-checkable items pass, explicitly
-listing what remains unverified — it skips the human, it never fakes the checkmarks.
+listing what remains unverified — it skips the human, it never fakes the checkmarks. As with
+`reviewDepth`, `auto` hands the choice back to the profile.
 
 The four **model options** trade cost against capability per role. They default to
 `auto`: for implementers and task reviewers the coordinator derives the model per task

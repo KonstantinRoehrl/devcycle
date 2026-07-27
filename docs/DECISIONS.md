@@ -5,6 +5,49 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-07-27 — `auto` releases a knob back to the profile; the upgrade trap is asked about, not fixed silently
+
+**Decision:** `auto` becomes a sanctioned value on the two profile-covered behavioral knobs
+(`reviewDepth`, `onDeviceGate`), meaning "let the profile govern this" — the same convention
+the four `*Model` knobs already use, and one more case in `references/config.md`'s single
+resolution list rather than a second rule. `/devcycle:cycle` detects the upgrade signature
+before any stage runs — `${user_config.profile}` still a literal placeholder (it ships in
+this release, so nobody has set it) while at least one behavioral knob substitutes to a real
+value (only an earlier configuration can have set one) — and asks ONE question: adopt a
+profile and let it govern (writing `profile=<value>` plus `auto` for the shadowing knobs
+only), keep the current explicit knobs and skip the profile, or customize. Every completion
+of either configuration offer records a `· profile-asked` marker on the state file's
+`configured:` line, and the marker — not the signature — is what makes the offer one-time.
+**Why:** The previous entry's fix — write only `profile` at first run — protects future
+users and does nothing for existing ones. The pre-0.8.0 walkthrough wrote all four
+behavioral knobs explicitly, "including on 'use defaults'", so every user who ever completed
+it upgrades into a state where `profile: thorough` changes nothing at all, silently: the
+feature is dead on arrival for exactly the people already running the plugin. Silently
+ignoring an explicit knob when a profile is set would fix the symptom and lose something
+real — the user chose that value, and demoting a stated choice without asking is a worse
+defect than the one it cures, especially for `onDeviceGate`, where the discarded choice is
+"a human must sign off". Hence a value rather than a deletion (`--config <knob>=auto` keeps
+the knob visible and re-pinnable), and a question rather than an action. The signature alone
+is NOT sufficient to identify an upgrader, and an earlier draft of this change wrongly
+assumed it was: this release's own customize path writes a moved knob without writing
+`profile`, so a brand-new user who pins `reviewDepth` reproduces the signature exactly on
+their next cycle and would have been asked to undo a choice they had just made. Hence the
+marker, written on every completion of either offer — the invariant is "never ask a user
+this release has already asked", which no property of the rendered knobs can express. It is
+per-repo, so the two answers that do not write `profile` hold for one repo rather than
+globally; being asked once more in another repo is the accepted cost of never acting
+unasked. Its scope is deliberately narrower than its trigger —
+`gitPolicy` and `crossModelReview` are outside the profile matrix, so an explicit value
+there shadows nothing and is never rewritten, and when the shadowing set is empty there is
+nothing to migrate and the ordinary first-run walkthrough runs instead.
+**Supersedes:** Nothing reversed. It completes the 2026-07-26 `profile` entry below, whose
+resolution order (an explicit knob wins verbatim and forever) is exactly the mechanism that
+makes the trap possible and is left intact — that entry described the trap for the first-run
+path and closed it there, but did not carry the reasoning across the upgrade boundary. It
+also narrows that entry's reading of `auto` as a `*Model`-only convention: `auto` is now
+general, and a stage skill's allowed-value enumeration (`single` | `panel`) names what a
+knob resolves *to*, never a set that makes `auto` invalid.
+
 ## 2026-07-26 — one `profile` knob sizes the pipeline; an unset knob takes the profile's value
 
 **Decision:** A new `profile` option (`lean` | `standard` | `thorough`, default `standard`)

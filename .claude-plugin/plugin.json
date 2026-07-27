@@ -56,7 +56,7 @@
       "type": "string",
       "title": "Review depth",
       "default": "single",
-      "description": "Branch review engine. One of: single (spec-compliance layer plus code-review-style reviewer guidance, opportunistically folding in a user-run code-review pass), panel (multi-lens review panel workflow)."
+      "description": "Branch review engine. One of: single (spec-compliance layer plus code-review-style reviewer guidance, opportunistically folding in a user-run code-review pass), panel (multi-lens review panel workflow), or 'auto' to let the profile govern this knob."
     },
     "crossModelReview": {
       "type": "boolean",
@@ -68,7 +68,7 @@
       "type": "string",
       "title": "On-device gate",
       "default": "human-required",
-      "description": "Whether the on-device checklist closes only via a human walkthrough. One of: human-required, auto-ok."
+      "description": "Whether the on-device checklist closes only via a human walkthrough. One of: human-required, auto-ok, or 'auto' to let the profile govern this knob."
     }
   }
 }

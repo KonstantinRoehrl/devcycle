@@ -17,6 +17,12 @@ review depth and the on-device gate by their stages).
    long as it stays configured.
 2. **Everything else falls back** — a literal placeholder and `auto` are unset, a
    value outside the knob's allowed set is invalid, and both take the same route.
+   `auto` is sanctioned on every knob, not only the `*Model` ones: it is how a user
+   says *let the profile govern this* without deleting the key, so `reviewDepth:
+   auto` and `onDeviceGate: auto` resolve to the profile's column exactly as an
+   unset knob does. Where a stage skill enumerates a knob's allowed values (e.g.
+   `single` | `panel`), that names what the knob resolves *to* — `auto` is settled
+   here, before that enumeration applies, and is never the invalid case.
    Where they land depends on whether the profile matrix (below) covers the knob:
    - Profile-covered — the branch review engine (`reviewDepth`), the on-device
      gate (`onDeviceGate`), the evidence tail, the branch-review round cap, the
