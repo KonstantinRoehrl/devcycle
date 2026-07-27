@@ -221,9 +221,13 @@ behavioral result:
   `- After evidence (verbatim): <the passing/verified output after the change>` —
   a whole suite's output per task per round, which is what criteria 4 and 5 exist to
   stop.
-- `git show ba79dab:agents/task-reviewer.md | grep -ci 'evidence'` returns `0`: the
-  pre-change reviewer was given no evidence rejection conditions at all, and the
-  files criteria 10–12 corrupt did not exist for it to open.
+- `git show ba79dab:agents/task-reviewer.md | grep -ci 'evidence'` returns `5`: the
+  pre-change reviewer already had a numbered **Evidence** check (item 3) with its own
+  rejection rules — "Reject any report that lacks the evidence its class requires"
+  plus a mismatched-class rejection. What it lacked was any notion of a *file*: its
+  rejection rules are keyed to verbatim output inlined in the report, so it has no
+  concept of a named evidence path to open, find missing, or find empty — the files
+  criteria 10–12 corrupt did not exist for it to check.
 
 What would prove it: runs A, B, and C against those pre-change bodies under the
 isolated-config protocol. Expected red — criteria 1–4 unexercisable or failing for
