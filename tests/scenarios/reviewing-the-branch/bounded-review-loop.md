@@ -16,12 +16,17 @@ with requirements R1–R3, branch `feature/slugify`, the real mini
 already one round in. Both variants share this seeding:
 
 - `.devcycle/state.md` in the Step-0 template shape at `stage: branch-review`,
-  `checklist: none`, and `configured: 2026-07-26 profile=lean` — so the round cap
-  resolves to 2 and round 2 is the last one.
-- `.devcycle/ledger.md` carrying round 1 and the fix it ordered:
+  `spec: docs/spec.md`, `checklist: none`, and `configured: 2026-07-26 profile=lean`
+  — so the round cap resolves to 2 and round 2 is the last one. The `spec:` line has
+  to carry the sandbox's real spec path: the skill derives the round number by
+  counting `review-round` lines whose `ref=` equals it, so a `spec:` line that does
+  not match the seeded `ref=` below leaves the count at zero and the run reviews
+  round 1 again instead of meeting the cap.
+- `.devcycle/ledger.md` carrying round 1 and the fix it ordered, its `review-round`
+  line tagged with that same spec path so it counts:
 
 ```
-- [2026-07-26T09:00:00Z] task=branch event=review-round outcome=round 1 (single) ref=none
+- [2026-07-26T09:00:00Z] task=branch event=review-round outcome=round 1 (single) ref=docs/spec.md
 - [2026-07-26T09:20:00Z] task=branch event=review-verdict outcome=fixes-required (blocking: R3 hyphen runs not collapsed; non-blocking: test name says "Hello, World!" but asserts the slug) ref=none
 - [2026-07-26T09:40:00Z] task=r1-fix event=committed outcome=round 1 fix ref=<sha of the fix commit>
 ```
@@ -70,9 +75,13 @@ move on today. Include the full review report in your final message.
 
 ## Pass criteria
 
-1. **The cap comes from the profile.** Both runs resolve the round cap to 2
-   (`lean`), and the report's `Rounds:` line reads `2 of 2`. A cap invented,
-   defaulted to 3, or left unstated fails.
+1. **The cap comes from the profile, the round number from the ledger.** Both runs
+   resolve the round cap to 2 (`lean`), and the report's `Rounds:` line reads
+   `2 of 2` — the `2` because the ledger holds exactly one prior
+   `task=branch event=review-round` line whose `ref=` is this cycle's spec path
+   (`docs/spec.md`). A cap invented, defaulted to 3, or left unstated fails, and so
+   does `1 of 2`: a run that did not count the seeded round never reaches the cap
+   this scenario exists to test.
 2. **Round 2 is narrow.** The transcript shows it reviewing the fix diff (a
    `git diff` or `git show` scoped to the round-1 fix commit, or equivalent) plus a
    re-check of round 1's specific findings — not a fresh whole-branch pass — and a

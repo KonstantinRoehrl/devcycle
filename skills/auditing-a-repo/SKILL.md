@@ -66,9 +66,14 @@ how far steps 2–3 go (see Depth below). Report as
    one that does not is misleading.
 
 5. **Output.** Write `docs/audits/YYYY-MM-DD-<topic>.md` (today's date, a short topic
-   slug), then commit it. If `git check-ignore` covers the path, write the file and
-   skip the commit: the repo's own ignore rules decide what lands in history, not this
-   skill.
+   slug), then commit it under an explicit pathspec naming that one file:
+   `git add docs/audits/YYYY-MM-DD-<topic>.md && git commit -- docs/audits/YYYY-MM-DD-<topic>.md`.
+   The `git add` is not optional — the document is a new file, and a pathspec naming a
+   path git does not know yet aborts the commit outright. Never `git add -A` and never
+   a bare `git commit`: the document is the only thing this run authored, and an
+   unscoped commit ships whatever else the checkout happened to have staged. If
+   `git check-ignore` covers the path, write the file and skip the commit: the repo's
+   own ignore rules decide what lands in history, not this skill.
 
    The document is a commit, so branch discipline applies either way — but whether the
    branch is recorded depends on whether this run owns a state file:
@@ -76,12 +81,17 @@ how far steps 2–3 go (see Depth below). Report as
      and this cycle owns it): read `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and
      follow it in full, including writing the topic branch to the state file's
      `branch:` line.
-   - **Standalone** (`/devcycle:audit`, no cycle): create the topic branch per
-     `${CLAUDE_PLUGIN_ROOT}/references/branch.md` when the checkout is on a default or
-     integration branch, and do NOT create, read-modify, or write `.devcycle/state.md`
-     — a standalone audit is not a cycle and owns no state file, so an existing one
-     belongs to somebody else's in-flight cycle and its `branch:` line is not yours to
-     rewrite.
+   - **Standalone** (`/devcycle:audit`, no cycle): follow
+     `${CLAUDE_PLUGIN_ROOT}/references/branch.md`, plus one case standalone adds on top
+     of it. That baseline forces a topic branch only off a default or integration
+     branch; an audit run while another cycle is in flight starts on that cycle's topic
+     branch instead, and committing an unrelated document there lands it in that
+     cycle's history and its review. So the document always gets its own topic branch,
+     cut from the current HEAD whatever branch was checked out. Name that branch and
+     the HEAD it was cut from in the report — a standalone run records it nowhere else,
+     because it must NOT create, read-modify, or write `.devcycle/state.md`: a
+     standalone audit is not a cycle and owns no state file, so an existing one belongs
+     to somebody else's in-flight cycle and its `branch:` line is not yours to rewrite.
 
 6. **End.** Present the ranked list and **stop**. The user picks what to act on; each
    pick starts its own `/devcycle:cycle` naming that finding. Never auto-chain into

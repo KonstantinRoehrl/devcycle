@@ -73,8 +73,12 @@ and include the full review report in your final message.
 >
 > Scripted user reply (read only AFTER writing Turn 1, and treat it as answering whatever you asked): "standard"
 
-**Run C-customize variant:** identical, with the scripted reply
-`"customize individual knobs"`.
+**Run C-customize variant:** identical but three turns (`TURN 1`, `TURN 2`,
+`TURN 3`). The first scripted reply is `"customize individual knobs"`; a second,
+read only after Turn 2 is written, answers that batch — "gitPolicy: recommended.
+reviewDepth: recommended. crossModelReview: yes, turn it on. onDeviceGate:
+recommended." — one knob moved off its default, three accepted at it. Without that
+extra turn the run never reaches a write, and criterion 9 has nothing to grade.
 
 ## Pass criteria
 
@@ -111,9 +115,18 @@ and include the full review report in your final message.
 8. **Run C — the state file records the same.** `.devcycle/state.md` on disk has a
    `configured:` line carrying the date plus `profile=standard` and no other
    KEY=VALUE pair.
-9. **Run C-customize — the four-knob path still exists.** Answering "customize
-   individual knobs" asks the four behavioral knobs in one batch (models excluded)
-   and writes one `--config` per knob.
+9. **Run C-customize — the four-knob path writes only what changed.** Answering
+   "customize individual knobs" asks the four behavioral knobs in one batch (models
+   excluded), then writes a `--config` only for the knob whose answer differs from
+   the offered default: the command stated is exactly `claude plugin install
+   devcycle@devcycle --config crossModelReview=true`, and `--config gitPolicy=`,
+   `--config reviewDepth=` and `--config onDeviceGate=` appear nowhere in the turn.
+   A knob accepted at its recommended value stays unwritten — writing it would make
+   it explicitly configured, which by rule 1 of the resolution order this scenario
+   exists to test outranks the profile verbatim and forever, exactly as criterion 7
+   forbids for the profile answer. (The all-defaults case — every answer matching,
+   so nothing is written and `configured:` reads `defaults` — is graded by
+   `first-run-config.md`'s run E.)
 
 ## Baseline (red)
 
@@ -133,7 +146,8 @@ behavioral result:
   does not occur in the pre-change command at all.
 - The pre-change first-run walkthrough asks the four behavioral knobs and applies
   the answers as "one `--config` per knob … including on 'use defaults': write the
-  explicit default values" — the exact write pattern criterion 7 now forbids.
+  explicit default values" — the exact write pattern criteria 7 and 9 now forbid, on
+  the profile answer and on the customize path alike.
 - `git show ba79dab:skills/reviewing-the-branch/SKILL.md | grep -ci cap` returns
   `0`: no round cap exists to source from a profile.
 
@@ -148,3 +162,8 @@ profile, no cap), criterion 7 failing because the walkthrough writes four
 config. What would prove it: the three runs above against the working-tree bodies,
 graded criterion by criterion, with `.devcycle/state.md` and the drafted commands
 inspected on disk rather than taken from the transcript.
+
+**Amended 2026-07-27, still not run.** Criterion 9 was re-expressed to grade the
+customize path's actual write rule — only knobs whose answer differs from the offered
+default — and the C-customize variant gained the third turn that rule needs to be
+observable. Nothing here is claimed as observed.

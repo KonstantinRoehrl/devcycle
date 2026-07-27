@@ -7,23 +7,30 @@ that needs any of this names this file and does not restate it.
 
 Knob values arrive via `${user_config.KEY}` placeholders, each read by the stage
 skill that consumes it (gitPolicy by `devcycle:finishing-the-cycle`, models and
-review depth and the on-device gate by their stages). The resolution convention,
-everywhere: a value that still reads as a literal `${user_config...}` placeholder
-is unset, and a value outside its allowed set is invalid. What an unset or
-invalid value falls back to depends on whether the profile matrix (below)
-covers the knob:
+review depth and the on-device gate by their stages).
 
-- Profile-covered — the branch review engine (`reviewDepth`), the on-device
-  gate (`onDeviceGate`), the evidence tail, the branch-review round cap, the
-  audit depth, and the planning/execution engine choice: falls back to the
-  profile's column value, per the resolution order in "## The profile" below.
-- Not profile-covered — `gitPolicy`, `crossModelReview`, and the `*Model`
-  knobs (whose unset value is `auto`, derived per the model-tier rules
-  below): falls back to that knob's own documented default.
+**Resolution order — binding, and stated only here.** For every knob, in order:
 
-When a knob's placeholder is literal but the state file's `configured:` line
-records a value for it, that recorded value governs this run — same-session
-substitution cannot refresh, so `--config` writes only reach future sessions.
+1. **An explicitly configured value wins, verbatim**: one that is neither a
+   literal `${user_config...}` placeholder nor `auto`, and that lies inside the
+   knob's allowed set. It beats the profile and any documented default, for as
+   long as it stays configured.
+2. **Everything else falls back** — a literal placeholder and `auto` are unset, a
+   value outside the knob's allowed set is invalid, and both take the same route.
+   Where they land depends on whether the profile matrix (below) covers the knob:
+   - Profile-covered — the branch review engine (`reviewDepth`), the on-device
+     gate (`onDeviceGate`), the evidence tail, the branch-review round cap, the
+     audit depth, and the planning/execution engine choice: the profile's column
+     value.
+   - Not profile-covered — `gitPolicy`, `crossModelReview`, and the `*Model`
+     knobs (whose unset value is `auto`, derived per the model-tier rules
+     below): that knob's own documented default.
+3. **`profile` itself** takes the same two steps: a literal placeholder or a value
+   outside `lean | standard | thorough` is unset, and falls back to `standard`.
+4. **The state file's `configured:` line supplies the configured value** for steps
+   1–3 whenever a knob's placeholder still renders literally but that line records
+   one for it — same-session substitution cannot refresh, so `--config` writes only
+   reach future sessions.
 
 ## The profile
 
@@ -38,14 +45,8 @@ substitution cannot refresh, so `--config` writes only reach future sessions.
 | branch-review round cap | 2 | 3 | 5 |
 | audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
 
-Resolution order, binding:
-
-1. A knob explicitly configured — neither a literal `${user_config...}` placeholder nor
-   `auto` — wins verbatim.
-2. Otherwise the profile's column value applies.
-3. `profile` itself: a literal placeholder or a value outside the three means unset → use
-   `standard`; the state file's `configured:` line governs the current run when the
-   placeholder is literal but a value was recorded there.
+Which column applies, and when a knob overrides it, is the resolution order above —
+this table supplies the values, not the rule for choosing them.
 
 **Never profile-conditional:** the state file, handoff blocks, evidence classes, the
 coordinator's green gate, the `gitPolicy` clamps, branch discipline, the one-`task-reviewer`

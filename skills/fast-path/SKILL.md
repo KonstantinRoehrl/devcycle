@@ -31,19 +31,37 @@ Report as `${CLAUDE_PLUGIN_ROOT}/references/output.md` requires.
    `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` and produce the class's
    before/after evidence as it specifies, writing this run's files to
    `.devcycle/evidence/fast-before.txt` and `.devcycle/evidence/fast-after.txt`
-   (`fast` is this path's task id).
+   (`fast` is this path's task id). Note each run's exit status as you go — it
+   cannot be recovered from the file afterwards, and step 5 hands it over.
 3. **Escalation valve.** If implementation reveals the change is not trivial after
    all — the blast radius is spreading past what triage saw, or a real design
    choice has surfaced that the request didn't settle — stop, say so, and re-enter
    the normal pipeline at whichever stage the discovery calls for (usually scoping
    or brainstorm), updating `.devcycle/state.md` accordingly. Never push a
    non-trivial change through the fast path just because it is already in flight.
-4. **Commit** with a Conventional Commit subject.
+4. **Commit** with a Conventional Commit subject, scoped by an explicit pathspec
+   over the change's own source files — `git commit -- <the files step 2
+   touched>`, never `git add -A`, never `commit -a`, and never a bare
+   `git commit`, which ships whatever the checkout already had staged when the
+   fast path started. Run `git add -N` on any file the change creates before
+   committing, or the pathspec matches nothing for it and the commit aborts. The
+   pathspec names source files and nothing else: step 2's
+   `.devcycle/evidence/fast-*.txt` stay OUT of it — target repos are told to
+   gitignore `.devcycle/` (README), and naming an ignored, untracked path in a
+   pathspec aborts the whole commit with "pathspec did not match any file known
+   to git". Evidence files are working-tree artifacts step 5's reviewer reads
+   from the checkout, not history.
 5. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent with
-   the diff and the evidence files from step 2. On reject: fix, re-verify the
-   evidence, re-dispatch until accept. No review panel, no cross-model lens, no
-   red-team — those belong to the full branch-review stage, not here. This
-   one-reviewer floor is never profile-conditional: a `lean` run runs it too.
+   the diff, the two evidence-file paths from step 2, and — because the short
+   path produces no implementer report to carry them — the declared evidence
+   class, the exact command, and the before/after exit statuses step 2 noted.
+   `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` makes "an exit status
+   contradicts the declared class" a rejection condition, so a reviewer handed
+   only the paths cannot run the check it is told to run. On reject: fix,
+   re-verify the evidence, re-dispatch until accept. No review panel, no
+   cross-model lens, no red-team — those belong to the full branch-review stage,
+   not here. This one-reviewer floor is never profile-conditional: a `lean` run
+   runs it too.
 6. **Handoff.** Emit this stage's block per
    `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` with
    `Stage completed: fast-path` — its table's `fast-path → finish` row gives the

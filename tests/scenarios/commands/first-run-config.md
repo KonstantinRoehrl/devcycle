@@ -54,15 +54,26 @@ same files from the previous committed text.
 `configured:` line recording a date plus `profile=standard`. Single turn, no
 scripted reply: produce your first response to the same invocation.
 
-**Customize variant (run D):** same sandbox and prompt as the main run, but the
-scripted reply is "Let me customize the individual knobs instead." — exercising
-the four-knob path the profile question offers as its fourth option.
+**Customize variant (run D):** same sandbox and prompt as the main run, extended
+by one turn — label them `TURN 1`, `TURN 2`, `TURN 3`. The first scripted reply
+is "Let me customize the individual knobs instead." (exercising the four-knob
+path the profile question offers as its fourth option); a second scripted reply,
+read only after Turn 2 is written, answers that batch — "gitPolicy: the
+recommended one. reviewDepth: recommended. crossModelReview: yes, turn it on.
+onDeviceGate: recommended." — one knob moved off its default, three accepted at
+it. Turn 3 is the run's response to that answer.
+
+**Customize-all-defaults variant (run E):** identical to run D, except the
+second scripted reply accepts every recommended value: "All four recommended,
+thanks."
 
 ## Pass criteria
 
 *(Criteria 1 and 3 rewritten 2026-07-26: the walkthrough is now one profile
 question, and a profile answer writes only `profile=<value>`. Criterion 5 added
-the same day.)*
+the same day, then re-expressed 2026-07-27 with criterion 6 added: the customize
+path writes only the knobs whose answer differs from the offered default, so a
+pass that accepts every default correctly writes nothing.)*
 
 1. Turn 1 creates `.devcycle/state.md` first (Step 0, `configured: no`), then —
    because `${user_config.profile}` renders literal AND `configured:` is `no` —
@@ -89,10 +100,25 @@ the same day.)*
    `stage: done` file carrying `configured:` forward unchanged, announces the
    triage verdict, and proceeds straight to the entry stage.
 5. *(Customize variant, run D.)* Choosing "customize individual knobs" takes
-   the four-knob path instead: one batch covering exactly `gitPolicy`,
-   `reviewDepth`, `crossModelReview`, and `onDeviceGate`, each with a one-line
-   meaning and its recommended default marked, written as one `--config` per
-   knob — and still no model knobs.
+   the four-knob path instead. Turn 2 asks one batch covering exactly
+   `gitPolicy`, `reviewDepth`, `crossModelReview`, and `onDeviceGate`, each with
+   a one-line meaning and its recommended default marked, no model knobs, then
+   stops for the answer. Turn 3 writes ONLY the knob whose answer differs from
+   the offered default: the command it states is exactly `claude plugin install
+   devcycle@devcycle --config crossModelReview=true`, the strings `--config
+   gitPolicy=`, `--config reviewDepth=` and `--config onDeviceGate=` appear
+   nowhere in the turn, and the state file's `configured:` line records the date
+   plus `crossModelReview=true` and no other pair. Writing back a knob the user
+   accepted at its recommended value fails this criterion: that makes the knob
+   explicitly configured, and an explicit knob outranks the profile verbatim and
+   forever, so a later `profile: thorough` could never move it.
+6. *(Customize-all-defaults variant, run E.)* When every answer matches its
+   offered default, writing nothing is the correct outcome: no `claude plugin
+   install` command appears anywhere in Turn 3, no `--config` pair is stated,
+   and the state file's `configured:` line reads `defaults` — the walkthrough
+   ran and wrote nothing, and the line no longer reads `no`, so the offer never
+   fires again. Emitting the four pairs "to record what was chosen" fails, and
+   so does leaving `configured: no`.
 
 ## Baseline (red)
 
@@ -161,11 +187,18 @@ as the record of what was observed on that date, against the text current then. 
 pass rewrote criteria 1 and 3 and added criterion 5 for the profile question, and no
 headless run was made for them — nothing here is claimed as observed.
 
+**Amended 2026-07-27, still not run.** Criterion 5 was re-expressed and criterion 6
+added so the customize path is graded by the rule the command now states — only the
+knobs whose answer differs from the offered default are written — and runs D and E
+gained the extra turn that rule needs to be observable at all. Nothing here is claimed
+as observed either.
+
 What would prove it: rebuild the sandbox per Setup, substitute a readable plugin
-checkout path for `${CLAUDE_PLUGIN_ROOT}` in the environment note, and run three fresh
+checkout path for `${CLAUDE_PLUGIN_ROOT}` in the environment note, and run four fresh
 headless subagents (`claude -p`, isolated `CLAUDE_CONFIG_DIR` holding only auth, init
 event confirming `plugins: []`) against the working-tree `commands/cycle.md` +
 `skills/scoping-interview/SKILL.md`: run B (two turns, criteria 1–3), run C (no-offer,
-criterion 4), run D (customize, criterion 5). Criterion 3 is the one at risk — a model
-that writes all four knobs "to be explicit" alongside the profile fails it, and that is
-exactly the failure the profile-only rule exists to prevent.
+criterion 4), run D (customize, three turns, criterion 5), run E (customize with every
+default accepted, criterion 6). Criteria 3, 5 and 6 are the ones at risk, and they fail
+the same way — a model writing knobs it was not asked to write "to be explicit", which
+is exactly the failure the write-only-what-changed rule exists to prevent.
