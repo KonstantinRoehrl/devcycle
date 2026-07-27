@@ -20,7 +20,10 @@ This stage, and every agent it dispatches, reports per
 
 ## Configuration
 
-Resolve every knob and the profile per `${CLAUDE_PLUGIN_ROOT}/references/config.md`:
+Resolve every knob and the profile per `${CLAUDE_PLUGIN_ROOT}/references/config.md`,
+including its resolution order — which decides when an explicitly configured knob
+wins over the profile's column and when the profile applies instead. Read it there;
+none of it is repeated here. What this stage consumes:
 
 - `reviewDepth` — `${user_config.reviewDepth}`, allowed `single` | `panel`.
   Whatever it resolves to picks the engine in "Engine selection" below.
@@ -105,22 +108,38 @@ the spec says.
 ## Findings loop (bounded by the round cap)
 
 1. **Round 1 reviews the whole branch.** Log one `review-round` ledger event
-   per round to `.devcycle/ledger.md`, in the shape the ledger defines
-   (`task=branch`, `outcome=round <n> (<engine>)`), plus a `review-verdict`
-   event for the round's outcome. Log the `review-round` event BEFORE the
-   round's reviewers are dispatched, so a round that dies mid-flight still
-   counts as spent.
+   per round to `.devcycle/ledger.md`, in the shape the ledger defines, with
+   `task=branch`, `outcome=round <n> (<engine>)`, and — this stage's binding
+   use of that field — `ref=` set to the spec path recorded on the `spec:` line
+   of `.devcycle/state.md` (a file path, which is what `ref=` takes). Log a
+   `review-verdict` event for the round's outcome too. Log the
+   `review-round` event BEFORE the round's reviewers are dispatched, so a round
+   that dies mid-flight still counts as spent.
 
-   **The ledger is the round counter — the count is never restarted.** On entry,
-   including every re-entry via `/devcycle:continue` after a `fixes-required`
-   stop or a `/clear`, derive the round number by counting the
-   `task=branch event=review-round` lines already in `.devcycle/ledger.md` for
-   this cycle: the round about to run is that count plus one. A session that
-   finds the count already at the cap opens no further round — it re-presents
-   the outstanding blocking findings for a user decision, per 5's second
-   terminal state. Without this the cap would bind only within one session, and
-   a stage that deliberately keeps `stage: branch-review` would hand the next
-   session a fresh full cap.
+   **The ledger is the round counter, and the count is per cycle.** The ledger
+   lives at one fixed path per repo and is never reset between cycles, so the
+   count has to be scoped by something the lines themselves carry — which is
+   what the `ref=` spec path above is for. On entry, including every re-entry
+   via `/devcycle:continue` after a `fixes-required` stop or a `/clear`, derive
+   the round number by counting the `task=branch event=review-round` lines in
+   `.devcycle/ledger.md` whose `ref=` equals THIS cycle's spec path: the round
+   about to run is that count plus one. Rounds an earlier cycle spent carry a
+   different spec path and are not counted, so a fresh cycle in a repo with a
+   long ledger starts at round 1 no matter how many reviews came before it.
+
+   Two things this leans on. The spec path has to be the cycle's own — dated and
+   slugged, as the pipeline writes them; a repo that pointed every cycle at one
+   generic filename would hand its later cycles a count already spent, which is
+   the exact failure the scoping exists to stop. And `spec:` has to be a real
+   path: a state file reading `spec: none` cannot enter this stage at all (see
+   **Inputs**), so on finding one, stop and say so rather than count rounds you
+   cannot attribute.
+
+   Within a cycle the count is never restarted. A session that finds it already
+   at the cap opens no further round — it re-presents the outstanding blocking
+   findings for a user decision, per 5's second terminal state. Without this the
+   cap would bind only within one session, and a stage that deliberately keeps
+   `stage: branch-review` would hand the next session a fresh full cap.
 
    Only the user may grant rounds beyond the cap, and only explicitly. Record
    that as `task=branch event=user-decision outcome=review-cap extended to <n>`

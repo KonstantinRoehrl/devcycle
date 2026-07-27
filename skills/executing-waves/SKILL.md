@@ -65,15 +65,20 @@ Invariants:
 1. Read the ledger before dispatching anything. A task with an
    `event=committed` entry is done — never re-dispatch it.
 2. **Slice the brief.** At `thorough`, per upstream's file-handoff mechanics. At
-   `lean`/`standard`, the brief is assembled here and carries exactly: the task's
-   `**Files:**` (create/modify/test), `**Interfaces:**` (consumes/produces, with
-   exact signatures), `**Dependencies:**`, the task's `**Evidence:**` class from
-   the plan, the task's steps, and the global constraints and pinned interfaces
-   that apply — nothing else.
+   `lean`/`standard`, the brief is assembled here and carries exactly: the
+   task's id (the plan's task number), its `**Files:**` (create/modify/test),
+   `**Interfaces:**` (consumes/produces, with exact signatures),
+   `**Dependencies:**`, the task's `**Evidence:**` class from the plan, the
+   task's steps, and the global constraints and pinned interfaces that apply —
+   nothing else.
 
-   **Every brief, at every profile, carries an `**Evidence tail:** <N>` line**
-   with `<N>` from the profile — upstream's file-handoff mechanics know nothing
-   of it, so at `thorough` add it to the sliced brief. Evidence is never
+   **Every brief, at every profile, carries the task's id and an
+   `**Evidence tail:** <N>` line.** The id because `references/evidence.md` keys
+   the evidence paths on it — `.devcycle/evidence/<task-id>-before.txt` and
+   `-after.txt` — so an implementer never handed it invents one, and the
+   reviewer and the acceptance step cannot predict where to look. `<N>` comes
+   from the profile. Upstream's file-handoff mechanics know of neither, so at
+   `thorough` add both to the sliced brief. Evidence is never
    profile-conditional; only the value of `<N>` varies.
 
    Then **preload** into the brief the content the evidence class needs:
@@ -123,12 +128,17 @@ Invariants:
    own verification convention, run that convention's command as the gate;
    never bolt a new test framework onto the repo to create one.
 7. On acceptance: local commit with a Conventional Commit subject, scoped by an
-   explicit pathspec covering the task's own files (its evidence files under
-   `.devcycle/evidence/` included) — `git commit -- <the task's file list>`,
-   never `git add -A` and never a bare `git commit`. Concurrent implementers
-   have in-flight edits elsewhere in the tree and the index picks up entries
-   from their `git add -N` calls, so an unscoped commit sweeps another task's
-   work into this one's. Ledger `event=committed` with the sha.
+   explicit pathspec covering the task's own source files — `git commit --
+   <the task's file list>`, never `git add -A` and never a bare `git commit`.
+   Concurrent implementers have in-flight edits elsewhere in the tree and the
+   index picks up entries from their `git add -N` calls, so an unscoped commit
+   sweeps another task's work into this one's. The pathspec names the task's
+   files and nothing else: the evidence files under `.devcycle/evidence/` stay
+   out of it — target repos are told to gitignore `.devcycle/` (README), so
+   naming an ignored, untracked path in a pathspec aborts the whole commit with
+   "pathspec did not match any file known to git". Evidence files are
+   working-tree artifacts the reviewer reads from the checkout, not history.
+   Ledger `event=committed` with the sha.
 
 Green-gate red flags — if you are thinking "the report shows green", "the
 reviewer already accepted", "we're behind schedule", or "re-running is

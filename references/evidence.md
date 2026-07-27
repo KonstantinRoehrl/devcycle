@@ -44,8 +44,9 @@ implementer to fake a red or the reviewer to reject correct work.
 - `<N>` is pinned per dispatch in the brief as `**Evidence tail:** <N>`, sourced from the
   profile.
 - On the sweep path no implementer exists: the coordinator writes `sweep-before.txt` from
-  the script's green baseline run and `sweep-after.txt` from step 5's real-tree verify;
-  `.devcycle/sweep-report.json` keeps the per-file detail.
+  its own pre-sweep verify run on the clean tree, captured before the sweep script is
+  invoked, and `sweep-after.txt` from step 5's real-tree verify; `.devcycle/sweep-report.json`
+  keeps the per-file detail.
 
 ## Reviewer verdicts
 

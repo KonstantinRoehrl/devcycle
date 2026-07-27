@@ -17,6 +17,8 @@ that doesn't exist for you.
 
 A self-contained task brief containing:
 
+- The task's id (the plan's task number), used to name your evidence files
+  `.devcycle/evidence/<task-id>-before.txt` and `-after.txt`.
 - The task's Files (Create/Modify/Test), Interfaces (Consumes/Produces, exact
   signatures), Dependencies, an `**Evidence:**` class line, and an
   `**Evidence tail:** <N>` line giving the number of lines your report tails.

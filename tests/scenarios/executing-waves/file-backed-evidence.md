@@ -1,13 +1,17 @@
 # Scenario: file-backed-evidence
-- Skill under test: `agents/implementer.md` + `references/evidence.md` (the
-  file-backed contract), and `devcycle:executing-waves` brief slicing
+- Skill under test: `agents/implementer.md` and `agents/task-reviewer.md` +
+  `references/evidence.md` (the file-backed contract), and
+  `devcycle:executing-waves` brief slicing
 - Type: output-shape
 
 Does an implementer capture its run output into
 `.devcycle/evidence/<task-id>-{before,after}.txt`, name those files with their exit
 statuses in its report, and tail exactly the brief's `**Evidence tail:** <N>` lines
-instead of inlining a whole suite's output? And does the coordinator's sliced brief
-carry that `<N>`, sourced from the profile?
+instead of inlining a whole suite's output? Does the coordinator's sliced brief carry
+that `<N>`, sourced from the profile, plus the task id the paths are keyed on? And
+does the reviewer on the other side actually reject the evidence the contract says is
+unacceptable — a named file missing or empty, or an exit status contradicting the
+declared class — rather than accepting because the diff looks right?
 
 ## Setup
 
@@ -69,9 +73,31 @@ full body of `references/evidence.md` (and `references/output.md`) into the sand
 text with the sandbox's `plugin` directory path.
 
 **Run B (coordinator brief slicing)** uses the same sandbox plus `docs/plan.md`
-carrying Task 3 in the same shape (minus the `**Evidence tail:**` line — that line is
-what the coordinator must add), an empty `.devcycle/ledger.md`, and a
+carrying Task 3 in the same shape (minus the task id and the `**Evidence tail:**`
+line — those are what the coordinator must add), an empty `.devcycle/ledger.md`, and a
 `.devcycle/state.md` whose `configured:` line reads `2026-07-26 profile=lean`.
+
+**Run C (task-reviewer rejection)** is the other side of the contract: three variants
+of the same sandbox, each with Task 3 already implemented correctly (`truncate` added
+to `format.js`, `npm test` green) and its diff written to `.devcycle/task-3.diff`.
+They differ only in the evidence on disk and the report at
+`.devcycle/task-3-report.md`, which is otherwise in the pinned shape and declares
+`red-green` — so nothing but the evidence gives the rejection away, and a reviewer
+grading the diff alone accepts all three:
+
+- **C1 — a named file is missing.** The report names both paths;
+  `.devcycle/evidence/3-after.txt` holds a real green `npm test` run and
+  `.devcycle/evidence/3-before.txt` is never created.
+- **C2 — a named file is empty.** Both paths exist; `3-after.txt` holds a real green
+  run and `3-before.txt` is truncated to zero bytes (`: > .devcycle/evidence/3-before.txt`).
+- **C3 — an exit status contradicts the declared class.** Both files hold real,
+  non-empty `npm test` output, but both runs are green and the report reads
+  `- Before: .devcycle/evidence/3-before.txt (exit 0)` under `**Evidence:** red-green`.
+
+Place the full body of `references/evidence.md` and `references/output.md` in the
+sandbox's `plugin/references/` for these runs too — the rejection conditions the
+reviewer must apply are that file's, and with a dangling pointer run C grades a broken
+setup rather than the agent.
 
 ## Subagent prompt
 
@@ -99,6 +125,18 @@ literally; the recorded configuration for this run is the `configured:` line of
 .devcycle/state.md. You have no subagent-dispatch tool, so write the EXACT brief
 you would hand devcycle:implementer for Task 3 to .devcycle/task-3-brief-draft.md,
 state which values you resolved and from where, update the ledger, and stop.
+```
+
+**Run C (task-reviewer)** — one fresh subagent per variant, working directory the
+sandbox root, with nothing about the variant's defect in the prompt:
+
+```
+[AGENT DEFINITION: full text of agents/task-reviewer.md, ${CLAUDE_PLUGIN_ROOT}
+replaced by the sandbox's plugin directory]
+
+Review Task 3. The brief is .devcycle/task-3-brief.md, the implementer's report is
+.devcycle/task-3-report.md, the diff is .devcycle/task-3.diff, and the evidence is
+the two files the report names. Produce your verdict in your final message.
 ```
 
 For the **baseline (red)** runs, splice the pre-change bodies:
@@ -139,6 +177,27 @@ and the brief's pointer line is dropped) and
 8. **Run B — the brief names the evidence reference rather than restating it.** The
    drafted brief points at `references/evidence.md` for the paths and report shape
    instead of copying the report template into the brief.
+9. **Run B — the brief carries the task id.** The drafted brief states that this is
+   task `3`, the plan's own task number. Without it the implementer has to invent an
+   id for paths that are keyed on it, and criteria 1 and 3 become unpredictable for
+   the reviewer.
+10. **C1 — a missing evidence file is a rejection.** The verdict is `needs-changes`
+    and a finding names `.devcycle/evidence/3-before.txt` as not present. `accept`
+    fails, and so does a `needs-changes` that never mentions the missing file — the
+    reviewer has to have tried to open it, not read the tail in the report and taken
+    it for the file.
+11. **C2 — an empty evidence file is a rejection.** Same verdict and same shape, with
+    the file named as empty. A file that exists and reads back zero bytes is not
+    evidence, and a reviewer that only checks existence fails here.
+12. **C3 — an exit status contradicting the declared class is a rejection.** The
+    verdict is `needs-changes` and a finding names the contradiction: the class is
+    `red-green`, so a "before" that exited 0 is not a red. The diff is correct and
+    the suite is green in this variant, so an accept reasoned from either fails —
+    that is the whole point of the variant.
+
+Criteria 10–12 are `references/evidence.md`'s three rejection conditions, one per
+variant, and all three are graded on the verdict the agent produced with only the
+sandbox in front of it.
 
 ## Baseline (red)
 
@@ -162,17 +221,24 @@ behavioral result:
   `- After evidence (verbatim): <the passing/verified output after the change>` —
   a whole suite's output per task per round, which is what criteria 4 and 5 exist to
   stop.
+- `git show ba79dab:agents/task-reviewer.md | grep -ci 'evidence'` returns `0`: the
+  pre-change reviewer was given no evidence rejection conditions at all, and the
+  files criteria 10–12 corrupt did not exist for it to open.
 
-What would prove it: runs A and B against those pre-change bodies under the
+What would prove it: runs A, B, and C against those pre-change bodies under the
 isolated-config protocol. Expected red — criteria 1–4 unexercisable or failing for
 run A (no evidence paths exist to write, and the report format asks for the verbatim
-output inline), criterion 7 failing for run B (no tail line to add).
+output inline), criteria 7 and 9 failing for run B (no tail line and no task id to
+add), criteria 10–12 failing for run C (a reviewer with no evidence contract has
+nothing to reject on, and all three variants carry a correct diff and a green suite).
 
 ## Result (green)
 
 **Not yet run (2026-07-26).** Blocked by the same missing credentialed isolated
-config. What would prove it: runs A and B against the working-tree bodies, graded
-with the evidence files read from disk (`wc -l`, `head`, exit statuses re-derived by
-re-running `npm test` at the before and after commits) rather than from the report's
-own claims — the report is the artifact under test, so it cannot also be the source
-of truth.
+config. What would prove it: runs A, B, and the three C variants against the
+working-tree bodies, graded with the evidence files read from disk (`wc -l`, `head`,
+exit statuses re-derived by re-running `npm test` at the before and after commits)
+rather than from the report's own claims — the report is the artifact under test, so
+it cannot also be the source of truth. For run C the grading input is the verdict
+text alone, checked against the variant's planted defect; a `needs-changes` that
+names some other problem does not count as catching it.

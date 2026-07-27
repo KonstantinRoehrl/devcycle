@@ -268,8 +268,13 @@ deliberately carry no `!` marker and no body carries a `BREAKING CHANGE:` traile
 `major` — `0.7.0` → `1.0.0` — from either marker; without them a `feat` subject computes the
 intended `0.8.0`. The PR title is likewise `feat(devcycle): compact, profile-driven pipeline
 with an audit skill`, with no `!`. The absent marker is a statement about the version number,
-not an oversight about the breakage; the breakage itself is recorded in this log and in
-`CHANGELOG.md`.
+not an oversight about the breakage; the breakage itself is recorded in this log, and in the
+commit subjects the release turns into the changelog. Nothing is hand-written into
+`CHANGELOG.md` for this cycle, deliberately: `scripts/bump-version.mjs` collects the
+Conventional Commit subjects since the last tag and prepends them as that release's section
+at bump time. The subjects ARE the entry, which is the second reason they all have to parse
+as Conventional Commits — a hand-written entry here would not be a record the tooling honors,
+it would be a duplicate sitting above the generated one saying the same thing.
 
 ## 2026-07-25 — sweep routing wired in at both levels
 

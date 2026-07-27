@@ -68,8 +68,20 @@ this as a supervised sweep."
    path's own `model unset (auto: no fast-tier id resolved; CLI default
    applies)` — in the plan file and the question alike. A bare name hides
    which path chose it.
-4. **Run the sweep:**
+4. **Capture the baseline, then run the sweep.** The baseline is yours to take,
+   and this is the only moment it exists: step 2's clean-targets precondition
+   still holds, and the moment the script starts copying verified files back the
+   clean tree is gone. So BEFORE invoking anything, run the confirmed
+   verifyCommand yourself in the real working tree and write its output verbatim
+   to `.devcycle/evidence/sweep-before.txt` (**Evidence** below). Do not expect
+   the script to hand this back: `mechanical-sweep.js` runs its own baseline
+   inside a worktree and keeps nothing of a green one — its stdout report
+   carries only `applied` and `skipped`. A red baseline is a stop, not a sweep
+   input: report it verbatim and put it to the user, because a sweep judged
+   against an already-broken verify proves nothing. Green → run the sweep:
+
    `node "${CLAUDE_PLUGIN_ROOT}/workflows/mechanical-sweep.js" "$(cat .devcycle/sweep-args.json)"`
+
    with `DEVCYCLE_SWEEP_MODEL` as resolved in step 2. The script reads its JSON
    from `argv[2]` only; the double-quoted command substitution hands the file's
    contents through as one intact argument, so no escaping is needed no matter
@@ -92,10 +104,10 @@ this as a supervised sweep."
      also fire mid-sweep, after files were copied back, with no report listing
      them: check `git status` over the targets first, and treat anything found
      under the re-run rule.
-   - **Exit 0**: save the stdout report to `.devcycle/sweep-report.json`, and
-     the baseline verify run it carries to `.devcycle/evidence/sweep-before.txt`
-     (**Evidence** below); skipped files with their reasons carry into the
-     handoff block. Non-empty `applied` → step 5. Empty `applied` means nothing
+   - **Exit 0**: save the stdout report to `.devcycle/sweep-report.json`; skipped
+     files with their reasons carry into the handoff block. The baseline is
+     already on disk from this step's opening. Non-empty `applied` → step 5.
+     Empty `applied` means nothing
      was swept and there is nothing to commit (normalization can drop every
      file before the baseline verify even runs): skip step 5, relay the
      report's per-file reasons verbatim, and stop for a user decision — close
@@ -107,7 +119,10 @@ this as a supervised sweep."
    (`git checkout -- <the applied or confirmed files>`) and run from clean. A
    non-idempotent instruction applied a second time passes per-file verify and
    rides into the commit doubled; starting clean also keeps the pilot's
-   early-stop working. The revert is safe only for the sweep's own edits: if
+   early-stop working. A retry that changed the verifyCommand also re-captures
+   `.devcycle/evidence/sweep-before.txt` from the reverted tree — a baseline
+   taken with a different command is not this run's baseline. The revert is safe
+   only for the sweep's own edits: if
    the targets may have changed underneath the run (a parallel session on the
    same checkout), show `git diff -- <targets>` and have the user confirm
    before reverting.
@@ -145,16 +160,17 @@ this as a supervised sweep."
    hand to `devcycle:finishing-the-cycle` unchanged — its policy resolution and
    git action apply exactly as at the end of the full pipeline.
 
-**Evidence.** The classes and the file-backed contract live in
-`${CLAUDE_PLUGIN_ROOT}/references/evidence.md`. This path's class is
-`green-green` by construction, and it is the one path with no implementer to
-write the evidence files, so the coordinator writes them itself:
-`.devcycle/evidence/sweep-before.txt` from the script's green baseline run
-(step 4) and `.devcycle/evidence/sweep-after.txt` from step 5's real-tree
-verify, while `.devcycle/sweep-report.json` keeps the per-file detail — the
-script's per-file verify runs included. The one exception is an exit 0 with an
-empty `applied` list: no commit happens on that path, and the evidence is the
-report's per-file skip reasons.
+**Evidence.** The classes, the file-backed contract, and this path's
+coordinator-written evidence files are owned by
+`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` — read it there. Three things are
+route-specific and live only here. First, the class: `green-green` by
+construction, since a sweep preserves behavior by definition. Second, where
+`sweep-before.txt` comes from:
+the coordinator's own pre-sweep verify run in step 4, taken on the clean tree
+before the script is invoked — not from the script, which discards a green
+baseline's output. Third, the one exception:
+an exit 0 with an empty `applied` list commits nothing, and the evidence is then
+the report's per-file skip reasons.
 
 **Escalation valve.** If derivation reveals per-file judgment, an ambiguous
 rule, or an exploding file list — stop, say so, and re-enter the normal

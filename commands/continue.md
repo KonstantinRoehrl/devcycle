@@ -57,7 +57,7 @@ Continue at the recorded stage via its skill:
 | execution | `devcycle:executing-waves` (its resume table maps each task's last ledger event to the resume action) |
 | branch-review | `devcycle:reviewing-the-branch` |
 | on-device | `devcycle:verifying-on-device` |
-| fast-path | `devcycle:fast-path` — re-runs its branch-discipline check unconditionally, then resumes per `${CLAUDE_PLUGIN_ROOT}/references/resume.md` |
+| fast-path | `devcycle:fast-path` (its Resume section, which follows `${CLAUDE_PLUGIN_ROOT}/references/resume.md`) |
 | sweep | `devcycle:sweeping-mechanical-changes` (its Resume section, which follows `${CLAUDE_PLUGIN_ROOT}/references/resume.md`) |
 | finish | `devcycle:finishing-the-cycle` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
 
