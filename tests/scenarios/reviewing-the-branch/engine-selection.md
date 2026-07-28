@@ -3,10 +3,22 @@
 - Type: output-shape
 
 Does an agent following the skill select the review engine that matches
-`reviewDepth` — built-in `code-review` skill + spec-compliance layer for
-`single`, `review-panel.js` for `panel` — review against the spec FILE, and
-name the engine that actually ran in the review report? Two runs: run A with
+`reviewDepth` — this skill's own spec-compliance layer plus
+`superpowers:requesting-code-review`'s reviewer guidance for `single`,
+`review-panel.js` for `panel` — review against the spec FILE, and name the
+engine that actually ran in the review report? Two runs: run A with
 `reviewDepth=single`, run B with `reviewDepth=panel`.
+
+The `single` engine was redefined 2026-07-26. It is no longer "built-in
+`code-review` skill plus spec-compliance layer, degrading when `code-review` is
+absent": `code-review` is user-invocation-only in current Claude Code, so an
+agent cannot launch it and never plans a review around it. `single` is the
+spec-compliance layer plus `requesting-code-review`'s reviewer guidance — a
+complete engine in its own right, never labeled degraded. A user-run
+`code-review` pass folds in opportunistically as `single + user-run
+code-review`. The engine line's allowed values are now exactly five: `single`,
+`single + user-run code-review`, `panel`, `panel [+ cross-model lens]`, and
+`panel→single (panel unavailable: <reason>)`.
 
 ## Setup
 
@@ -14,7 +26,7 @@ In a scratch directory, create a sandbox repo `reviewproj`:
 
 ```bash
 mkdir -p reviewproj && cd reviewproj && git init -b main
-mkdir -p docs plugin/workflows
+mkdir -p docs plugin/workflows plugin/references
 cat > docs/spec.md <<'EOF'
 # Spec: slugify utility
 R1. `slugify(title)` lowercases the title and joins words with single hyphens.
@@ -55,6 +67,22 @@ console.log(JSON.stringify({ findings,
 EOF
 ```
 
+Then populate `plugin/references/` with the real thing — copy the devcycle
+checkout's `references/*.md` into it:
+
+```bash
+cp <absolute path of the devcycle checkout>/references/*.md plugin/references/
+```
+
+**Reference layer (required for every green run).** `skills/reviewing-the-branch/SKILL.md`
+no longer restates knob resolution, the profile's engine and round-cap columns, the
+model tiers, the handoff block, or the reporting discipline: it points at
+`${CLAUDE_PLUGIN_ROOT}/references/config.md`, `handoff.md`, and `output.md`. Because
+this scenario substitutes the sandbox's `plugin` directory for `${CLAUDE_PLUGIN_ROOT}`,
+that directory must carry `references/` as well as `workflows/` — the copy above. With
+`references/` missing, criterion 5 grades a dangling pointer and the profile's round cap
+(3 at `standard`) has no source at all.
+
 Note the trap: the implementation deliberately misses spec R3 (hyphen runs
 are not collapsed) while its own test passes — a diff-only review can look
 clean; only reviewing against the spec file catches it. The panel stand-in
@@ -80,40 +108,60 @@ ${CLAUDE_PLUGIN_ROOT} replaced by the sandbox's plugin directory]
 
 You are at the branch-review stage of a devcycle pipeline in this repo. The
 implementation branch feature/slugify is complete and committed (base:
-main). The spec is docs/spec.md. Resolved configuration:
-reviewDepth=<single|panel>, crossModelReview=false. Run the branch review
+main). The spec is docs/spec.md. Resolved configuration: profile=standard,
+reviewDepth=<single|panel>, crossModelReview=false. The built-in code-review
+skill is not in this session's available-skills list. Run the branch review
 now and include the full review report in your final message.
 ```
 
 ## Pass criteria
 
-1. Run A (`single`): the report contains an explicit engine line naming the
-   single engine — the built-in `code-review` skill plus the spec-compliance
-   layer, or, if `code-review` could not be invoked in the environment, the
-   degraded engine explicitly labeled as such (never an unnamed or implied
-   engine).
+*(Criteria 1 and 5 rewritten 2026-07-26 for the redefined `single` engine and
+the tier-based walkthrough model; criterion 6 added the same day.)*
+
+1. Run A (`single`): the report's engine line reads exactly `single` — the
+   spec-compliance layer plus `superpowers:requesting-code-review`'s reviewer
+   guidance, presented as the complete engine it is. `code-review` is not in
+   the session's skill list and no user-run pass was offered, so `single +
+   user-run code-review` is wrong here too. Labeling the engine "degraded",
+   apologizing for `code-review`'s absence, or treating that absence as a
+   fallback fails this criterion: `single` no longer degrades from anything,
+   and the only sanctioned degradation is `panel→single`.
 2. Run A: the spec-compliance layer ran against `docs/spec.md` as a file —
    the report flags the R3 hyphen-collapsing gap even though
    `slugify.test.js` passes.
 3. Run B (`panel`): the transcript shows the panel invocation
    `node <plugin dir>/workflows/review-panel.js '<json>'` with `ref` and
    `specPath` keys in the JSON argument, and the report names the panel
-   engine and carries the stub's R3 finding.
+   engine and carries the stub's R3 finding. With `branchReviewModel` unset it
+   resolves to the session tier, so no `DEVCYCLE_PANEL_MODEL` export precedes
+   the invocation — an export would silently replace a binding the user never
+   made.
 4. Both runs: findings are numbered, plain language, symptom first, with a
    severity; the report ends in a verdict, and the unmet R3 requirement
-   yields `fixes-required`, not `pass`.
+   yields `fixes-required`, not `pass`. The `Rounds:` line reads `<n> of 3` —
+   the round cap `profile=standard` supplies.
 5. *(Pass-verdict handoff variant — run C, setup and prompt in
    `## Regression (review-fixes)` below.)* When the gate passes (spec-clean
    branch), `walkthroughModel` and `branchReviewModel` are unset (literal
    placeholders), and `.devcycle/state.md` records `checklist: none`, the
-   stage close carries the new handoff contract: `.devcycle/state.md` is
+   stage close carries the handoff contract: `.devcycle/state.md` is
    updated to `stage: on-device` (the resume-at stage) before the block;
    the block's Carry-overs line carries `Start the fresh session on
-   claude-sonnet-5` (walkthroughModel unset → the fixed walkthrough
-   default, recommended producer-side because the on-device session's
-   model is chosen by whoever launches it); and the compaction hint uses
+   <model>.` naming a concrete present-day model id — with `walkthroughModel`
+   unset the walkthrough takes the fast tier, i.e. the newest fast/small
+   Claude model available to the session, named by its id and not by the word
+   "fast" (the line instructs whoever launches that session, and a tier name
+   is not something they can act on); and the compaction hint uses
    the checklist-none branch — Keep `checklist: none — on-device stage
    will judge applicability` and the branch (not "checklist path").
+6. *(Reference layer, added 2026-07-26.)* The rules the skill delegates are
+   picked up, not guessed: the transcript shows the agent opening
+   `plugin/references/config.md` (source of the profile's engine and
+   round-cap columns and of the model tiers) and, on run C,
+   `plugin/references/handoff.md` before emitting the block. A conformant
+   answer produced without either read is recorded as a partial — those
+   rules no longer travel in the spliced skill text.
 
 ## Baseline (red)
 
@@ -183,3 +231,23 @@ Criterion 5 added 2026-07-23 after the review-fixes bundle changed the stage's c
 - Baseline (red): criterion 5 FAIL on all three prongs — the gate passed (degraded engine disclosed, `Verdict: pass`) but the handoff carried no `Start the fresh session on <model>` line anywhere, the compaction hint used the old fixed text "Keep checklist path and branch" despite the state file's `checklist: none`, and `.devcycle/state.md` was never updated (still `stage: branch-review`; the committed text has no state-update instruction).
 - Result (green), 2 samples: run 2 PASS on all three prongs — Carry-overs line ends "…. Start the fresh session on claude-sonnet-5." (walkthroughModel unset → the fixed walkthrough default); compaction hint verbatim "Keep `checklist: none — on-device stage will judge applicability` and the branch."; `.devcycle/state.md` updated to `stage: on-device` before the block, announced in the report ("Stage advanced: `.devcycle/state.md` now reads `stage: on-device`"). Run 1 (recorded honestly) was partial: state updated to `stage: on-device` and the model line present but placed after the block instead of inside Carry-overs, and the hint stayed on the old "checklist path" wording — sampling variance against the same working-tree text; 1 of 2 samples fully conformant, both samples carried the substance (model recommendation + state update) the committed text never produced.
 - Criteria 1–4 (runs A and B) are textually unchanged by this bundle and were not re-run; the Task 12 evidence above stands. The degraded-engine disclosure contract was re-exercised incidentally by run C's engine line ("single (degraded): code-review skill unavailable … ran this skill's own spec-compliance + `superpowers:requesting-code-review` reviewer instructions directly").
+
+## Regression (compact profile-driven devcycle)
+
+**Not yet run (2026-07-26).** Read the evidence above with one thing in mind: every
+green run recorded there passed criterion 1 by producing the engine line `single
+(degraded)`, and that value is no longer legal. It was honest evidence on its date, so
+it stays; it is not evidence for the criterion as it now reads. This pass rewrote
+criteria 1 and 5, added criterion 6, put `references/` into the sandbox plugin
+directory, and pinned the round cap to the profile — none of it exercised by a run,
+and nothing here is claimed as observed.
+
+What would prove it: rebuild the sandbox per the updated Setup (including the
+`plugin/references/` copy), and run three fresh headless subagents (`claude -p`,
+isolated `CLAUDE_CONFIG_DIR` holding only auth, init event confirming `plugins: []`)
+against the working-tree `skills/reviewing-the-branch/SKILL.md` with
+`${CLAUDE_PLUGIN_ROOT}` replaced by the sandbox plugin path: run A (`single`, criteria
+1, 2, 4, 6), run B (`panel`, criteria 3, 4, 6), run C (spec-clean variant, criterion 5).
+Criterion 1 is the one to watch: the pull toward "single (degraded)" is strong — three
+recorded runs took it — and the skill now has to talk an agent out of apologizing for
+a skill it was never able to launch.

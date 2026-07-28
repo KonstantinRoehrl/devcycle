@@ -1,6 +1,6 @@
 ---
 name: verifying-on-device
-description: Use when implemented changes affect rendered UI or on-device behavior that automated tests cannot fully verify, or when a walkthrough of an on-device checklist is requested.
+description: Use when implemented changes affect rendered UI or on-device behavior that automated tests cannot fully verify, when a walkthrough of an on-device checklist is requested, or when a branch must be verified on-device without a plan — including code this session did not write.
 ---
 
 # Verifying On-Device
@@ -13,70 +13,64 @@ The general claim discipline of `superpowers:verification-before-completion` (RE
 background) applies unchanged: claiming a visual outcome from a script, screenshot, or code
 reading is an unverified completion claim.
 
-This skill has two consumers, split into two parts: **Part A** is a mid-wave duty of the
-executing coordinator (via `devcycle:executing-waves`); **Part B** is the on-device stage
-proper, run in a fresh session after the branch review. Read the part that matches your
-role.
+This skill is the on-device stage proper: walkthrough, gate, handoff. It runs in a fresh
+session after the branch review, and it reports per
+`${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
-## Part A — during execution (consumed by executing-waves): checklist generation + `(auto)` boundary
+## Checklist source
 
-### Generating the checklist
+Two sources, one engine. Which one applies is settled before the walkthrough begins;
+everything after — the walkthrough, the gate, the results report — is identical either way.
 
-**Trigger: the moment a task produces rendered changes** — generate or update the checklist
-in that same wave. Never defer it to the end of the wave or the branch.
+**Plan-derived (in-cycle, unchanged).** The checklist was produced during execution by
+`devcycle:executing-waves`; read its path from the `checklist:` field of `.devcycle/state.md`.
 
-- Path (pinned; consumed by reviewing-the-branch handoffs): `docs/<feature>/on-device-checklist.md`
-  in the target repo.
-- Record the path in the `checklist:` field of `.devcycle/state.md`.
-- Every item is an UNCHECKED box naming one concrete outcome a human can observe on the
-  running app. No item is pre-checked and no item carries `(auto)` at generation time.
-- Cover every dimension applicable to the change:
-  - visual rendering vs intent
-  - layout / alignment / spacing
-  - interaction feel (drag, hover, focus)
-  - responsive behavior at real breakpoints
-  - theme parity, where the surface supports themes
-  - keyboard / accessibility
-  - empty / loading / error states
-  - animation timing
+**Diff-derived (standalone, `/devcycle:verify <branch>`).** No checklist exists yet: generate
+one from the branch, **automatically — there is no confirmation step**, because the branch is
+the whole instruction.
 
-### The `(auto)` boundary
+- *Base and changed files*: "Deriving a branch's file set" in
+  `${CLAUDE_PLUGIN_ROOT}/references/branch.md` owns both — read it there and follow it; it is
+  not restated here. Its merge-base guard is what keeps the walkthrough from being handed a
+  file set built from local uncommitted edits.
+- *Affected UI areas*: from the changed files, trace routes, navigation, and component-usage
+  outward — which screens render these components, which routes reach those screens —
+  repeating until an iteration pulls in no new surface. Items are written against those
+  surfaces, not against the changed files: a diff in a shared component is verified wherever
+  it renders.
+- *Generation*: follow `${CLAUDE_PLUGIN_ROOT}/references/checklist.md` — the same contract
+  `devcycle:executing-waves` follows. Its `Where:` and `How to get there:` fields are
+  REQUIRED here: without a plan, nothing else tells the human where to look.
+- *Nothing renders*: if the traced set contains no rendered surface, write no checklist, and
+  report the stage not applicable with that reason — the same outcome the in-cycle skip has.
 
-```
-A SCRIPT OR SCREENSHOT NEVER CHECKS OFF A CHECKLIST ITEM.
-```
+The checklist is generated from git refs, so it does not need the branch checked out — that
+follows from the content source `${CLAUDE_PLUGIN_ROOT}/references/branch.md` pins. The
+walkthrough is the part that does: it is performed against the running app, which needs the
+branch's files on disk.
 
-One exception, keyed to an observable predicate: an item asserting DOM structure, CSS
-values, or exact text that a structural browser check — via claude-in-chrome (the intended
-engine: it navigates, screenshots, and reads the DOM/CSS/text/network of a page in the
-user's own Chrome) or an equivalent structural check — has verified, fresh output in hand,
-may be checked off with the tag `(auto)`. claude-in-chrome is preferred because the user can
-open an authenticated page in their real Chrome and hand the agent that already-logged-in
-session to inspect — which a separate browser context (e.g. Playwright's) cannot do without
-re-authenticating. When claude-in-chrome is not available, nothing is auto-checked: every
-item stays a human item. Everything a browser check cannot structurally see (feel,
-smoothness, visual alignment, contrast, legibility) stays unchecked for the human.
+When `<branch>` is not the current checkout, generate the checklist, say so plainly, and offer
+two ways forward — this stage switches the checkout in neither:
 
-| Rationalization | Reality |
-|---|---|
-| "claude-in-chrome confirmed the page" | A structural read covers only DOM/CSS/text — check off exactly those items, `(auto)`-tagged, nothing more |
-| "The screenshot looks right" | A screenshot cannot show jank, focus order, interaction feel, or a breakpoint reflow |
-| "We're behind schedule" | Pressure does not convert human items into script items |
-| "The code clearly implements it" | Rendered outcome and code intent diverge exactly often enough to need this checklist |
+- **The user checks the branch out** in the current checkout and starts the app there; or
+- **a throwaway worktree**, offered exactly as `${CLAUDE_PLUGIN_ROOT}/references/branch.md`
+  says to offer one. On acceptance, run the rest of the stage from that worktree: the app is
+  started there and the walkthrough observes it. The checklist stays at its scratch path in
+  the **invoking** checkout, not in the worktree, so removing the worktree does not take the
+  run's only artifact with it.
 
-## Part B — the on-device stage (fresh session): walkthrough + gate + handoff
+Either way the human starts the app: this stage does not build, serve, or launch anything.
 
-### The walkthrough
+## The walkthrough
 
 Runs in a **fresh session** — it needs only the checklist path and the branch, nothing from
 the implementation conversation. Its model cannot be routed from inside it (the session and
 its model already exist by the time this text is read), so the recommendation travels
 producer-side: the branch-review handoff carries a `Start the fresh session on <model>`
-line. That model is `${user_config.walkthroughModel}` when it names an explicit model id
-(binding); otherwise — the value `auto`, or a value that still reads as a literal
-`${user_config...}` placeholder, which means the option is unset — it is the current fast
-Sonnet-class Claude model, since a walkthrough is interview mechanics and per-task
-derivation buys nothing here.
+line, resolved from `walkthroughModel` per
+`${CLAUDE_PLUGIN_ROOT}/references/config.md`. When that knob derives rather than pins, the
+walkthrough takes the fast tier — it is interview mechanics, and per-task derivation buys
+nothing here.
 
 Interview rule: **ONE question per checklist item, never batched.** This is a deliberate
 exception to devcycle's batched-interview standard — findings quality drops when items are
@@ -92,35 +86,51 @@ language, symptom first:
 - <item>: FAILED — <what the user sees instead> — severity: <high|medium|low>
 ```
 
-### The gate
+## The gate
 
-Read `${user_config.onDeviceGate}`; a literal placeholder means unset (the walkthrough's
-placeholder rule above) — use the default `human-required`.
+Resolve `onDeviceGate` per `${CLAUDE_PLUGIN_ROOT}/references/config.md` — read it and
+follow it. What each resolved value means for this stage:
 
-- Predicate `onDeviceGate == "human-required"` (default): the stage is complete ONLY when
-  every non-`(auto)` item has a human verdict from the walkthrough.
-- Predicate `onDeviceGate == "auto-ok"`: the stage may complete once all structurally
-  verifiable items are `(auto)`-checked; remaining items still stay unchecked and are listed
-  in the handoff as unverified residue — `auto-ok` skips the human gate, it never fakes the
-  checkmarks.
+- `human-required`: the stage is complete ONLY when every non-`(auto)` item has a human
+  verdict from the walkthrough.
+- `auto-ok`: the checklist may close without a human pass — the stage may complete once all
+  structurally verifiable items are `(auto)`-checked, with the remaining items left
+  unchecked and listed in the handoff as unverified residue.
 
-### Handoff
+`auto-ok` relaxes the closing condition, never the reporting. It never licenses reporting a
+walkthrough that did not run as done, and never fakes a checkmark: the handoff states which
+happened — a human pass, or a close without one and what stayed unverified.
 
-End the stage by updating `.devcycle/state.md` — set `stage: finish` (the stage the next
-session resumes at) — then emit the pipeline handoff block:
+## Standalone runs
 
-```markdown
+`/devcycle:verify <branch>` is not a pipeline stage and owns no cycle. Two consequences, both
+binding:
+
+- **It must not create, read-modify, or write `.devcycle/state.md`.** An existing state file
+  belongs to somebody else's in-flight cycle — exactly as `devcycle:auditing-a-repo`'s
+  standalone rule establishes — and its lines are not this run's to rewrite. The checklist
+  path goes in the handoff instead, and nowhere else.
+- **The checklist is scratch**: it goes to the diff-derived path
+  `${CLAUDE_PLUGIN_ROOT}/references/checklist.md` pins, handled as that file states.
+
+The walkthrough, the interview rule, the gate, and the results report are unchanged: a
+standalone run is a different source for the checklist, not a different standard for verifying
+it.
+
 ## Handoff
-- Stage completed: on-device
-- Artifacts: <checklist path, results report path>
-- Carry-overs: <failed items with severity, unverified residue under auto-ok, or "none">
-- Context action: <Continue | Compact with hint | Clear + /devcycle:continue | Fresh session>
-- Compaction hint: Keep checklist path, branch, failed items. Drop walkthrough transcript.
-```
 
-The block is REQUIRED even when this stage judges itself not applicable (no
-rendered surface, nothing to walk): the skip IS the stage outcome — emit the
-block with the skip recorded in it (`Artifacts: none (no rendered surface)`,
-Carry-overs naming the skip reason), not prose or the state file alone. And
-when finish runs in the same response, this stage's block still appears
-separately, before the finish stage's output.
+The two paths differ in one thing, the state file:
+
+- **In-cycle:** end the stage by updating `.devcycle/state.md` — set `stage: finish`, the
+  stage the next session resumes at.
+- **Standalone:** write no state file and set no stage; the block names the branch, the
+  checklist path, and the results instead.
+
+Both then emit the handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with the
+same contents:
+
+- `Artifacts:` the checklist path and the results report path — or `none (no rendered
+  surface)` when this stage judges itself not applicable.
+- `Carry-overs:` failed items with severity, unverified residue under `auto-ok`, the skip
+  reason when skipped, or `none`.
+- `Compaction hint:` Keep checklist path, branch, failed items. Drop walkthrough transcript.

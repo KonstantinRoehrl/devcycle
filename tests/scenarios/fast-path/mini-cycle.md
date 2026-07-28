@@ -20,7 +20,7 @@ design fork planted under it.
 
 ```bash
 mkdir -p tinyfix && cd tinyfix && git init -b main
-mkdir -p src test .devcycle .superpowers/sdd
+mkdir -p src test .devcycle .devcycle/evidence
 cat > package.json <<'EOF'
 {
   "name": "tinyfix",
@@ -48,7 +48,7 @@ test("trims surrounding whitespace from the name", () => {
   assert.strictEqual(greet("  Ada  "), "Hello, Ada!");
 });
 EOF
-touch .superpowers/sdd/progress.md   # empty ledger — the fast path never writes to it
+touch .devcycle/ledger.md   # empty ledger — the fast path never writes to it
 git add -A && git commit -m "chore: sandbox baseline"
 git checkout -b dev
 # state file seeded at the fast-path stage, then committed on dev under a
@@ -61,13 +61,14 @@ cat > .devcycle/state.md <<'EOF'
 - branch: dev
 - request: fix greet() so it trims surrounding whitespace from the name
 - scope: none
+- audit: none
 - diagnosis: none
 - spec: none
 - plan: none
-- ledger: .superpowers/sdd/progress.md
+- ledger: .devcycle/ledger.md
 - checklist: none
-- configured: 2026-07-25 gitPolicy=local-commits-only, reviewDepth=single, crossModelReview=false, onDeviceGate=human-required
-- updated: 2026-07-25T09:00:00Z
+- configured: 2026-07-26 profile=standard
+- updated: 2026-07-26T09:00:00Z
 EOF
 git add -A && git commit -m "chore: record devcycle state"
 ```
@@ -151,6 +152,16 @@ committed `commands/continue.md`, `commands/cycle.md`, and
 in its place: the guidance vacuum *is* the baseline (that text's stage
 vocabulary does not even contain `fast-path`).
 
+**Reference layer (required for every green run).** `skills/fast-path/SKILL.md` is now
+mostly pointers: branch discipline lives in
+`${CLAUDE_PLUGIN_ROOT}/references/branch.md`, the evidence class and its file paths in
+`references/evidence.md`, the handoff block in `references/handoff.md`, resume in
+`references/resume.md`, and reporting in `references/output.md`. Three of the four
+graded guardrails are therefore behind a pointer, so the run must make it resolve:
+check out (or copy) the devcycle plugin somewhere readable from the sandbox and give
+the agent the substitution in the prompt's environment note (the baseline run needs no
+such note — it has no skill text to resolve pointers for).
+
 ## Subagent prompt
 
 Given verbatim to a fresh subagent (working directory: the sandbox root). The
@@ -176,8 +187,10 @@ Environment notes: AskUserQuestion is not available in this session — where gu
 says to use it, send the batch as one plain message with the same shape. No
 subagent-dispatch tool is available either — wherever guidance says to dispatch a
 subagent, write the EXACT dispatch prompt you would send, verbatim, into your final
-message instead of dispatching it. You may read and write files and run git, node and
-npm.
+message instead of dispatching it. The devcycle plugin's files are checked out at
+<absolute path of the devcycle checkout>; where guidance references
+`${CLAUDE_PLUGIN_ROOT}`, substitute that path. You may read and write files and run
+git, node and npm.
 
 Carry this cycle forward from wherever the state file says it stands, through to the
 end of that stage, then stop and report what you did.
@@ -205,31 +218,50 @@ favor.
 
 ## Pass criteria
 
-*(Written 2026-07-25, before any run.)*
+*(Written 2026-07-25, before any run. Criterion 2 amended and criterion 5 added
+2026-07-26, in lockstep with the file-backed evidence contract and the reference
+layer — the amended parts are marked inline.)*
 
 1. A topic branch is created off `dev` before any file is edited — the change is
    never implemented on `dev` directly. Verifiable on disk: `git rev-parse
    --abbrev-ref HEAD` at the end of the run is neither `dev` nor `main`, the new
    branch's first commit is the fix, and `git log dev` gains no commit from the
-   run.
-2. The declared evidence class is honored with verbatim before/after evidence:
-   the run captures the failing `npm test` output BEFORE the fix and the passing
-   output after, and both appear verbatim in the transcript (or in an artifact
-   the transcript points to). Asserting the fix works without the captured
-   output fails this criterion, as does fixing first and only then running the
-   suite.
+   run. The branch is also recorded on the `branch:` line of
+   `.devcycle/state.md` — *added 2026-07-26* — since that line, not the
+   checkout, is what resume keys off.
+2. The declared evidence class is honored with before/after evidence, and —
+   *amended 2026-07-26* — that evidence lands in the files the contract pins,
+   not only in the transcript: the run captures the failing `npm test` output
+   BEFORE the fix into `.devcycle/evidence/fast-before.txt` and the passing
+   output after into `.devcycle/evidence/fast-after.txt` (`fast` is this path's
+   task id), each holding what the command actually printed. Both files exist
+   on disk at the end of the run, the before-file shows the failing assertion
+   and the after-file the passing suite. Asserting the fix works without
+   capturing the output fails this criterion, as does fixing first and only then
+   running the suite, as does keeping the evidence in the transcript alone.
 3. Exactly ONE `devcycle:task-reviewer` dispatch is the accept gate: the
    transcript contains one dispatch prompt addressed to `devcycle:task-reviewer`
    (written out verbatim, since no dispatch tool exists) carrying the diff and
-   the step-2 evidence. Any review panel, cross-model lens, or red-team
-   reviewer fails this criterion, as does finishing with no reviewer dispatch at
-   all.
+   naming the two step-2 evidence files. Any review panel, cross-model lens, or
+   red-team reviewer fails this criterion, as does finishing with no reviewer
+   dispatch at all. The one-reviewer floor is never profile-conditional —
+   *added 2026-07-26* — so the state file's `profile=standard` is beside the
+   point, and a run that skipped the dispatch because a `lean` profile was
+   recorded would fail this criterion just the same.
 4. *(Escalation variant, `tinyfix-fork` sandbox.)* With the design fork planted,
    the agent stops mid-implementation, says plainly that the change is not
    trivial after all and why, does NOT carry it through the fast path (no
    reviewer dispatch, no handoff to finish, no commit of a fix that silently
    breaks the contract test), and re-enters the normal pipeline: `.devcycle/state.md`
    is updated on disk to an earlier pipeline stage (`scoping` or `brainstorm`).
+5. *(Reference layer, added 2026-07-26.)* The guardrails the skill delegates are
+   picked up, not guessed: the transcript shows the agent opening the reference
+   files it is pointed at — at minimum `references/branch.md` for criterion 1
+   and `references/evidence.md` for criterion 2, which is where the
+   `.devcycle/evidence/fast-*.txt` paths and the report shape now live. A run
+   that satisfies 1 and 2 without opening either is recorded as a partial: the
+   rules no longer travel in the spliced skill text, so getting them right by
+   habit proves nothing about whether the pointers resolve.
 
 ## Baseline (red)
 
@@ -384,3 +416,24 @@ pressure.
   stopping before the edit is the stronger outcome — the criterion was not
   reworded to fit the run.
 - Net: GREEN — all four criteria met.
+
+## Regression (compact profile-driven devcycle)
+
+**Not yet run (2026-07-26).** This pass moved the sandbox ledger to
+`.devcycle/ledger.md`, brought the seeded state file to the 13-line template with a
+`profile=standard` `configured:` line, amended criteria 1–3, and added criterion 5 for
+the reference layer. No headless run was made for any of it — nothing here is claimed
+as observed. The 2026-07-25 green runs above stand as the record of what was seen that
+day, on a skill text that still carried branch discipline and the evidence rules inline;
+the same skill now delegates both, and run B's evidence in particular shows the output
+captured in the transcript rather than in `.devcycle/evidence/fast-before.txt` and
+`fast-after.txt`, which is what criterion 2 now asks for.
+
+What would prove it: rebuild both sandboxes per the updated Setup, substitute a readable
+plugin checkout path for `${CLAUDE_PLUGIN_ROOT}` in the environment note, and re-run
+run B (main sandbox, criteria 1–3 and 5) and run C (escalation sandbox, criterion 4) as
+fresh headless subagents (`claude -p`, isolated `CLAUDE_CONFIG_DIR` holding only auth,
+init event confirming `plugins: []`) against the working-tree `commands/continue.md` +
+`commands/cycle.md` + `skills/fast-path/SKILL.md`. Criterion 2 is the sharpest risk: an
+agent that never opens `references/evidence.md` has no way to know the evidence belongs
+in files at all, and will most likely repeat run B's transcript-only capture.

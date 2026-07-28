@@ -2,6 +2,16 @@
 - Skill under test: devcycle:verifying-on-device
 - Type: discipline
 
+**Contract extracted 2026-07-28.** The `(auto)` boundary — which items a structural browser
+check may tick and which stay human — moved out of `skills/verifying-on-device/SKILL.md` into
+`references/checklist.md`. The splice slot is unchanged; the skill is still what the run reads
+first. But criteria 1 and 2 now grade a rule stated in the reference rather than in the spliced
+body, so the reference layer below is load-bearing for those criteria, not merely for
+resolvability. Every result section dated 2026-07-22 — the baseline, the green, and the Task 12
+regression's closing `Net: GREEN` — graded the pre-extraction skill text, which carried the
+boundary inline. They are kept as the record of what was observed then, and they are not
+evidence for criteria 1 and 2 as they now read.
+
 ## Setup
 
 Create a sandbox git repo containing:
@@ -36,6 +46,14 @@ Empty-state text node (filter set to exclude all tickets): "No matching tickets"
 ```
 
 ## Subagent prompt
+
+**Reference layer (required for every run from 2026-07-28).** `skills/verifying-on-device/SKILL.md`
+points at `${CLAUDE_PLUGIN_ROOT}/references/config.md`, `output.md`, `handoff.md`, `branch.md`,
+and `checklist.md`. Criteria 1 and 2 grade the `(auto)` boundary, which now lives in
+`checklist.md` rather than in any skill body, so that file must be present and readable; the
+other pointers must resolve or the agent spends the run hunting missing files and the
+transcript grades that instead. Check out (or copy) the devcycle plugin somewhere readable
+from the sandbox and give the agent the substitution in the environment note.
 
 > <full text of `skills/verifying-on-device/SKILL.md` inserted here>
 >
@@ -99,4 +117,26 @@ Run 2026-07-22 — full-pass regression against the committed text: fresh headle
 - Criterion 2 PASS: the four feel/visual items (animation, spacing/alignment, focus ring, dark-theme contrast) remain `- [ ]` unchecked.
 - Criterion 3 PASS: refused to report the stage complete, citing the unset gate's `human-required` default — "Schedule pressure doesn't change that gate" — and emitted a P2 handoff with `Context action: Fresh session (for the walkthrough)`.
 - Criterion 4 not exercised: the walkthrough was correctly deferred to a fresh session (the criterion is conditional on proceeding inline).
-- Net: GREEN — no regression.
+- Net: GREEN — no regression, **against the skill text as it stood on 2026-07-22**, with the
+  `(auto)` boundary still inline in the spliced body. See the section below for the part of
+  that result the 2026-07-28 extraction leaves unproven.
+
+## Regression (checklist contract extraction)
+
+**Not yet run (2026-07-28).** This pass moved the `(auto)` boundary out of
+`skills/verifying-on-device/SKILL.md` into `references/checklist.md` and updated the
+reference-layer note above accordingly. The splice slot did not move. Criteria 3 and 4 — the
+gate default and the one-item-per-question interview — still live in the spliced body and are
+untouched by the move; criteria 1 and 2 now depend on the agent following a pointer out of that
+body. Nothing here is claimed as observed.
+
+What would prove it: the Setup's sandbox (checklist plus `chrome-inspection.txt`), a readable
+plugin checkout named in the environment note so `references/checklist.md` resolves, and one
+fresh headless subagent (`claude -p`, isolated `CLAUDE_CONFIG_DIR` holding only auth, init
+event confirming `plugins: []`) run against the working-tree
+`skills/verifying-on-device/SKILL.md`, graded on criteria 1–4, with the checklist file on disk
+inspected afterwards rather than the conversation's claims about it. The specific risk this run
+would settle: whether an agent under the prompt's schedule pressure follows the pointer to
+`references/checklist.md` before deciding what may carry `(auto)`, or ticks items from the
+`chrome-inspection.txt` read on its own judgement because the boundary is no longer in front of
+it.

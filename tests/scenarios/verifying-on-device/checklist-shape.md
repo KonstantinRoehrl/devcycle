@@ -1,12 +1,27 @@
 # Scenario: checklist-shape
-- Skill under test: devcycle:verifying-on-device
+- Skill under test: devcycle:executing-waves (checklist generation)
 - Type: output-shape
+
+**Splice slot moved 2026-07-26.** Checklist generation is a mid-wave coordinator duty and
+now lives in `skills/executing-waves/SKILL.md` ("UI and on-device outcomes" → "Generating
+the checklist" and "The `(auto)` boundary"). `skills/verifying-on-device/SKILL.md` is the
+on-device stage proper — the fresh-session walkthrough, gate, and handoff — and no longer
+carries the generation rules at all, so splicing it here would grade a file that does not
+contain the graded behavior. The sections below dated 2026-07-22 and 2026-07-23 graded the
+old placement (the skill's Part A) and are kept as the record of what was observed then.
+
+**Contract extracted 2026-07-28.** The path, item shape, dimension list and `(auto)` boundary
+now live in `references/checklist.md`; `skills/executing-waves/SKILL.md` keeps the generation
+trigger and cites that file. The splice slot is unchanged — the trigger is still what invokes
+the behavior — but the reference layer below is now load-bearing for the graded criteria, not
+merely for resolvability.
 
 ## Setup
 
 Create an empty sandbox git repo (no existing `docs/` directory). No claude-in-chrome or
-other browser-inspection tooling is available. The agent is told a task has just produced rendered changes,
-described as:
+other browser-inspection tooling is available — which matters: claude-in-chrome is the
+intended structural-check engine for the `(auto)` tag, and with it absent nothing may be
+auto-checked. The agent is told a task has just produced rendered changes, described as:
 
 > The ticket-list toolbar gained a theme-aware **status-filter dropdown** (options Open,
 > Closed, Archived). It has a loading state while options fetch, an empty state
@@ -16,29 +31,53 @@ described as:
 
 ## Subagent prompt
 
-> <full text of `skills/verifying-on-device/SKILL.md` inserted here>
+**Reference layer (required for every green run).** `skills/executing-waves/SKILL.md`
+points at `${CLAUDE_PLUGIN_ROOT}/references/config.md`, `output.md`, `handoff.md`,
+`branch.md`, `evidence.md`, `resume.md`, and `checklist.md`. Criteria 2, 3 and 6 now grade
+rules stated in `references/checklist.md` rather than in the skill body, so that file must be
+present and readable — and the remaining pointers must still
+resolve, or the agent spends the run hunting missing files and the transcript grades that
+instead. Check out (or copy) the devcycle plugin somewhere readable from the sandbox and
+give the agent the substitution in the environment note.
+
+> <full text of `skills/executing-waves/SKILL.md` inserted here>
 >
 > A task in the current wave just landed the following rendered change on branch
 > `feature/status-filter`: [UI change description from Setup]. Automated tests cover the
-> component's logic. Do what the on-device verification stage requires at this moment.
+> component's logic. Do what the coordinator's on-device duty requires at this moment.
+>
+> Environment notes: the devcycle plugin's files are checked out at <absolute path of the
+> devcycle checkout>; where guidance references `${CLAUDE_PLUGIN_ROOT}`, substitute that
+> path. No subagent-dispatch tool is available; do not dispatch anything.
 
 ## Pass criteria
 
+*(Criteria 3 and 5 rewritten 2026-07-26 with the splice slot's move to
+`devcycle:executing-waves`; criterion 6 added the same day.)*
+
 1. A checklist file is created at `docs/<feature>/on-device-checklist.md` (a feature-named
    folder, e.g. `docs/status-filter/on-device-checklist.md`) — created now, not deferred to
-   the end of the wave.
+   the end of the wave — and its path is recorded on the `checklist:` line of
+   `.devcycle/state.md`.
 2. Every item is an unchecked markdown checkbox (`- [ ]`); no item is pre-checked and no
    item carries an `(auto)` tag at generation time.
-3. The items cover all the dimensions of the skill's Part A dimension list applicable to
-   the described change: visual rendering vs intent, layout/alignment/spacing, interaction
-   feel, responsive behavior at the stated 768px breakpoint, light/dark theme parity,
-   keyboard/accessibility, empty and loading states, animation timing.
+3. The items cover all the dimensions of `references/checklist.md`'s dimension list
+   applicable to the described change: visual rendering vs intent, layout/alignment/spacing,
+   interaction feel, responsive behavior at the stated 768px breakpoint, theme parity across
+   light and dark, keyboard/accessibility, empty and loading states, animation timing.
 4. Items are concrete and user-verifiable (each names an observable outcome a human can
    confirm on the running app), not vague ("looks good") and not code-level assertions.
-5. *(Part A/B role split.)* Invoked mid-execution — Part A's consumer — the agent generates
-   the checklist and stops there: it does not begin Part B's walkthrough (no per-item
-   interview questions to the user) and does not evaluate the on-device gate; both belong
-   to the on-device stage's fresh session after branch review.
+5. *(Stage role split.)* Invoked mid-execution, the coordinator generates the checklist and
+   stops there: it does not begin the walkthrough (no per-item interview questions to the
+   user) and does not evaluate the on-device gate. Both belong to
+   `devcycle:verifying-on-device`, which runs in a fresh session after branch review — a
+   separate skill now, not a later part of this one.
+6. *(`(auto)` boundary, added 2026-07-26.)* With no claude-in-chrome and no equivalent
+   structural browser check available, nothing is auto-checked and the run says so: every
+   item stays a human item. If the agent names the engine that would be required, it names
+   claude-in-chrome or an equivalent structural check — the retired Playwright wording is a
+   stale reference, and a run that auto-checks anything on the strength of code reading or
+   a screenshot fails outright.
 
 ## Baseline (red)
 
@@ -88,3 +127,37 @@ Criterion 5 added (and criterion 3's stale "§12.3" reference replaced with the 
 
 - Baseline (red): criterion 5 FAIL — a genuine role-bleed, not a hypothetical: after generating a conformant checklist (13 items, all unchecked, no `(auto)`), the agent immediately began the walkthrough inline: "Now let's walk through it — I'll ask one item at a time. **Item 1/13 — Dropdown trigger rendering:** … Does the status-filter dropdown trigger appear …?" — Part B's interview started mid-execution, in the implementation session the fresh-session rule exists to keep it out of.
 - Result (green): PASS all five criteria. Checklist created immediately at `docs/status-filter/on-device-checklist.md` and recorded in `.devcycle/state.md` (criterion 1); 12 items, all `- [ ]`, zero `[x]`, zero `(auto)` — "no Playwright MCP run occurred, so none are `(auto)`-tagged" (criterion 2); items cover the applicable Part A dimensions — visual rendering vs intent, layout/alignment vs neighboring toolbar controls, light/dark theme parity, loading and empty states, open/close animation smoothness, keyboard operation (Tab focus, arrows, Enter) with focus indicator, and the 768px reflow checked from both sides (criterion 3); every item names an observable outcome (criterion 4); and the run stops at Part A with the split stated in its own words: "This is the mid-wave checklist-generation duty; the actual walkthrough (Part B) happens later in a fresh session against this file" — no interview questions, no gate evaluation (criterion 5).
+
+## Regression (compact profile-driven devcycle)
+
+**Not yet run (2026-07-26).** Every run above spliced
+`skills/verifying-on-device/SKILL.md`, which no longer contains the checklist-generation
+rules this scenario grades — the splice slot is now `skills/executing-waves/SKILL.md`.
+Those runs stand as the record of what was observed on their dates, against the placement
+current then; they are not evidence for the criteria as they now read, because they
+graded a different file. This pass moved the splice slot, rewrote criteria 3 and 5, added
+criterion 6 for the `(auto)` boundary's claude-in-chrome engine, and pinned criterion 1's
+state-file record. Nothing here is claimed as observed.
+
+What would prove it: an empty sandbox repo per Setup, a readable plugin checkout named in
+the environment note, and one fresh headless subagent (`claude -p`, isolated
+`CLAUDE_CONFIG_DIR` holding only auth, init event confirming `plugins: []`) run against
+the working-tree `skills/executing-waves/SKILL.md`, graded on criteria 1–6. A red baseline
+is available by splicing `git show ba79dab:skills/executing-waves/SKILL.md` — the
+pre-cycle text, which carried no checklist-generation section at all, so criterion 1's
+pinned path had no source in it.
+
+## Regression (checklist contract extraction)
+
+**Not yet run (2026-07-28).** This pass moved the path/item-shape/dimension/`(auto)` rules
+out of `skills/executing-waves/SKILL.md` into `references/checklist.md` and updated the
+reference-layer note and criterion 3's pointer accordingly. The splice slot did not move.
+Nothing here is claimed as observed.
+
+What would prove it: the Setup's empty sandbox, a readable plugin checkout named in the
+environment note (now including `references/checklist.md`), and one fresh headless subagent
+(`claude -p`, isolated `CLAUDE_CONFIG_DIR` holding only auth, init event confirming
+`plugins: []`) run against the working-tree `skills/executing-waves/SKILL.md`, graded on
+criteria 1–6. The specific risk this run would settle: whether an agent given the trigger plus
+a pointer follows the pointer, or generates a checklist from its own habits without reading
+the reference.
