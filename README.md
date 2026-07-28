@@ -65,26 +65,118 @@ history, not the plugin.
 
 ## The pipeline
 
+```mermaid
+flowchart TD
+    CYCLE(["/devcycle:cycle request"]):::entry
+    CONT(["/devcycle:continue"]):::entry
+    AUDITCMD(["/devcycle:audit — optional branch"]):::entry
+    VERIFYCMD(["/devcycle:verify branch"]):::entry
+
+    CYCLE --> STATE["Step 0 · state file<br/>root · branch · request · first-run config"]:::orch
+    STATE --> TRIAGE{"Triage<br/>maturity · kind · size"}:::orch
+    CONT -. "re-derives position from .devcycle/state.md<br/>and re-enters at any stage below" .-> TRIAGE
+
+    TRIAGE -->|"rough idea"| SCOPING
+    TRIAGE -. "mature input — scoping skipped" .-> BRAINSTORM
+    TRIAGE -->|"audit-shaped request"| AUDIT
+    TRIAGE -. "trivial, after you confirm" .-> FAST
+    TRIAGE -. "bulk mechanical, after two gates" .-> SWEEP
+
+    SCOPING["Scoping<br/>batched interview · repo research · confirm the picture · hard stop"]:::orch
+    SCOPING --> A_SCOPE[/"confirmed scope"/]:::art
+    A_SCOPE --> ISBUG{"bug with no known cause?"}:::orch
+    ISBUG -->|yes| DIAG
+    ISBUG -. "no — diagnosis skipped" .-> BRAINSTORM
+
+    DIAG["Diagnosis<br/>reproduce · isolate · establish the cause"]:::orch
+    DIAG --> A_DIAG[/"root-cause report"/]:::art --> BRAINSTORM
+
+    AUDIT["Audit<br/>scope + discovery · criteria gate with audit plan · sweep · eleven-field findings"]:::orch
+    AUDIT --> A_AUDIT[/"ranked findings document"/]:::art
+    A_AUDIT -->|"you pick findings to act on"| BRAINSTORM
+    A_AUDIT -. "nothing picked — closes at the report" .-> STOP
+
+    BRAINSTORM["Brainstorm<br/>design dialogue · approaches · spec self-review · your approval"]:::orch
+    BRAINSTORM --> A_SPEC[/"approved spec"/]:::art --> PLANNING
+
+    PLANNING["Planning<br/>feasibility gate · task cut · dependencies · dispatch map"]:::orch
+    PLANNING -. "NO-GO — blocking unknown" .-> STOP
+    PLANNING --> A_PLAN[/"wave plan"/]:::art --> IMPL
+
+    subgraph EXECUTION["Execution — wave by wave"]
+        IMPL["implementer<br/>one task brief · test-first"]:::sub
+        REVIEW["task-reviewer<br/>reads the diff and the evidence files"]:::sub
+        GATE{"green gate<br/>coordinator re-runs the tests itself"}:::orch
+        COMMIT["commit + ledger entry"]:::orch
+        CHK["checklist generated<br/>the moment rendered changes land"]:::orch
+        IMPL --> REVIEW
+        REVIEW -->|rejected| IMPL
+        REVIEW -->|accepted| GATE
+        GATE -->|fails| IMPL
+        GATE -->|passes| COMMIT
+        IMPL -. "rendered change" .-> CHK
+    end
+
+    COMMIT --> A_EXEC[/"committed, reviewed tasks"/]:::art
+    CHK --> A_CHK[/"on-device checklist"/]:::art
+    A_EXEC --> BREVIEW
+
+    BREVIEW["Branch review<br/>fresh reviewer, or panel + red-team verification"]:::sub
+    BREVIEW --> A_BREV[/"review verdict"/]:::art
+    A_BREV -->|"findings — bounded rounds"| IMPL
+    A_BREV -->|accepted| ONDEV
+    A_BREV -. "nothing renders — on-device skipped" .-> FINISH
+
+    ONDEV["On-device verification<br/>checklist source · (auto) structural checks · one item per question"]:::orch
+    A_CHK -.-> ONDEV
+    ONDEV --> A_ONDEV[/"results report"/]:::art --> FINISH
+
+    FAST["Fast path<br/>in-session implementation · one task-reviewer pass"]:::orch --> FINISH
+    SWEEP["Mechanical sweep<br/>blast-radius gate · pilot-first sweep · one reviewer pass"]:::orch --> FINISH
+
+    FINISH["Finish<br/>resolve gitPolicy · apply the external clamps · hand back"]:::orch
+    FINISH --> A_FIN[/"branch, pushed branch, or PR"/]:::art --> STOP(["cycle closed"]):::entry
+
+    AUDITCMD -. "standalone — starts no cycle" .-> AUDIT
+    VERIFYCMD -. "standalone — checklist from the branch diff" .-> ONDEV
+
+    subgraph LEGEND["Legend"]
+        L1["the orchestrator does this itself"]:::orch
+        L2["dispatched to a fresh subagent"]:::sub
+        L3[/"artifact written to disk"/]:::art
+        L4(["entry point or terminal"]):::entry
+        L5["solid arrow = the default walk"]
+        L6["dashed arrow = optional, skipped, or standalone"]
+    end
+
+    classDef orch fill:#e8f0fe,stroke:#3367d6,color:#111
+    classDef sub fill:#fce8e6,stroke:#c5221f,color:#111
+    classDef art fill:#e6f4ea,stroke:#188038,color:#111
+    classDef entry fill:#fef7e0,stroke:#b06000,color:#111
+```
+
 1. **Scoping** — batched interview that turns your request into a precise, well-structured
    goal: you answer questions about intent and desired outcomes; devcycle researches the
    repo itself to establish what the change touches and confirms that picture with you —
    research draws on an existing graphify graph when one is available, and also looks for repo
-   orientation docs the same way. Skipped when your input is already concrete. For a bug,
-   the interview collects the symptom and reproduction (steps, expected vs. actual,
-   evidence) instead of design intent.
+   orientation docs the same way. For a bug, the interview collects the symptom and
+   reproduction (steps, expected vs. actual, evidence) instead of design intent.
 2. **Audit** — for audit-shaped requests ("audit X", "review the repo for Y" — an
-   assessment of existing code rather than a change to it): runs **in place of** scoping.
-   devcycle interviews you for the criteria to measure the repo against — never assuming
-   them — then sweeps the repo and writes a ranked findings document to
-   `docs/audits/YYYY-MM-DD-<topic>.md`, every finding carrying `file:line` evidence and a
-   concrete fix. You pick which findings to act on; those become the cycle's scope and the
-   walk continues at brainstorm. Pick nothing and the cycle closes at the report. The same
-   audit is available on its own as `/devcycle:audit` (below), outside any cycle.
+   assessment of existing code rather than a change to it): devcycle interviews you for the
+   criteria to measure the repo against — never assuming them — then sweeps the repo and
+   writes a ranked findings document to `docs/audits/YYYY-MM-DD-<topic>.md`, every finding
+   carrying `file:line` evidence and a concrete fix. You pick which findings to act on;
+   those become the cycle's scope and the walk continues at brainstorm. The same audit is
+   available on its own as `/devcycle:audit` (below), outside any cycle. The audit derives
+   its criteria proposal from the stacks actually present and from your repo's own
+   convention documents — those outrank generic best practice — and it can be scoped to a
+   branch, in which case it audits that branch's diff expanded to the feature's dependency
+   graph. Every finding carries eleven fields, including how to reproduce it, a confidence
+   tag, and a fix-effort estimate, so you can start work from the finding alone.
 3. **Diagnosis** — for bugs whose root cause isn't established yet: reproduce the failure,
    then isolate the cause (upstream `superpowers:systematic-debugging`), ending in a
    root-cause report that the fix's design builds on. A fix is never designed for an
-   undiagnosed problem. Skipped for features, refactors, and bugs whose cause is already
-   known with evidence.
+   undiagnosed problem.
 4. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
    spec you approve.
 5. **Planning** — a feasibility check, then an implementation plan that doubles as the
@@ -108,7 +200,9 @@ history, not the plugin.
    confirm on the running app. What a browser can structurally verify (DOM, CSS values,
    exact text) is auto-checked through claude-in-chrome and tagged `(auto)`; everything
    a script cannot truly see — feel, alignment, smoothness, legibility — is walked with you
-   one item at a time. Skipped when nothing renders.
+   one item at a time. The checklist comes from the plan during execution — or, for a branch
+   nobody planned in this session, from that branch's diff traced out to the screens it
+   affects.
 9. **Finish** — hands the branch back per your `gitPolicy` (below).
 
 Triage judges size, too. A request at typo, rename, or few-line-fix scale — measured against a
@@ -130,13 +224,14 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | --- | --- |
 | `/devcycle:cycle` | Runs the pipeline for a request. |
 | `/devcycle:continue` | Resumes an interrupted pipeline from the state file. |
-| `/devcycle:audit` | Audits this repo against criteria you confirm and writes a ranked findings document. Standalone — starts no cycle. |
+| `/devcycle:audit` | Audits this repo — or one branch's diff and everything it depends on — against criteria you confirm, and writes a ranked findings document. Standalone — starts no cycle. |
+| `/devcycle:verify` | Walks an on-device checklist derived from a branch's diff — verification for code this session did not write. Standalone — starts no cycle. |
 | Skill `scoping-interview` | The batched scope interview with a hard stop before design begins. |
 | Skill `auditing-a-repo` | The criteria interview, repo sweep, and ranked evidence-backed findings document behind `/devcycle:audit` and the audit stage. |
 | Skill `planning-waves` | Feasibility gate + wave-structured planning (overlays `superpowers:writing-plans` at `thorough`). |
 | Skill `executing-waves` | Parallel subagent execution with green gate, ledger, and commit discipline. |
 | Skill `reviewing-the-branch` | The whole-branch review gate, single-reviewer or panel. |
-| Skill `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes. |
+| Skill `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes, from a plan or from a branch diff. |
 | Skill `finishing-the-cycle` | Resolves the effective git policy and hands back, pushes, or opens the PR. |
 | Skill `fast-path` | Mini-cycle for confirmed-trivial requests: in-session implementation, one reviewer pass, normal finish. |
 | Skill `sweeping-mechanical-changes` | Triage-confirmed bulk sweep: blast-radius gate, one sweep run, one commit, one reviewer pass, then finish. |
@@ -145,6 +240,8 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
 | Workflow `review-panel.js` | Multi-lens branch review engine for `reviewDepth: panel`. |
 | Workflow `mechanical-sweep.js` | Pilot-first bulk edit engine behind the sweep path and `**Execution:** sweep` plan tasks. |
+| Reference `audit-criteria.md` | The criteria catalog, sourcing precedence, and seed best-practice index the audit reads at discovery. |
+| Reference `checklist.md` | The on-device checklist contract — paths, item shape, dimensions, and the `(auto)` boundary — shared by checklist generation and the on-device stage. |
 
 ## Configuration
 
