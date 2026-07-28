@@ -27,11 +27,19 @@ Apply regardless of stack:
 
 - correctness and logic errors, edge cases, off-by-ones, null/undefined handling;
 - dead, unreachable, bloated, or undocumented code;
+- docs-vs-reality drift — documentation that exists and is wrong: a README flag, endpoint,
+  or setup step the code no longer honours (distinct from undocumented code above, which is
+  documentation that is missing);
 - duplication vs. reuse;
+- architecture and separation of concerns — layering violations, leaked responsibilities,
+  and boundaries crossed by code that should not know what is on the other side;
 - error handling and failure modes — swallowed exceptions, missing retries or timeouts
   where warranted, inconsistent error shapes;
 - concurrency and race conditions;
 - resource leaks;
+- performance — algorithmic complexity, avoidable work on hot paths, chatty or repeated
+  I/O, unbounded growth; universal, so a stack the anchors below do not enumerate is still
+  audited for it;
 - security — input validation, the injection classes relevant to the stack, authz/authn
   boundaries, secrets in code or config, unsafe deserialization, vulnerable dependencies;
 - data contracts, including migration and versioning safety;
@@ -40,7 +48,15 @@ Apply regardless of stack:
 - accessibility, for any UI in scope;
 - observability — logging quality, error traceability, adherence to the observability
   stack already in use;
-- dependency health.
+- dependency health;
+- token and context cost, wherever a repo's content is read by an agent — prompts, skills,
+  instruction files: restated content, context loaded wholesale for a narrow decision,
+  duplication across files that then has to be kept in sync;
+- conformance to the project's own stated conventions — the repo measured against its own
+  `CONTRIBUTING.md`, `ARCHITECTURE.md`, `CLAUDE.md` / `AGENTS.md`, ADRs, and
+  linter/formatter config. Precedence rule 1 above governs how every finding is sourced;
+  confirmed as a criterion, that conformance becomes the sweep's subject rather than only
+  its yardstick.
 
 ## Stack-specific anchors
 

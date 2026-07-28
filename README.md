@@ -93,8 +93,10 @@ flowchart TD
 
     AUDIT["Audit<br/>scope + discovery · criteria gate with audit plan · sweep · eleven-field findings"]:::orch
     AUDIT --> A_AUDIT[/"ranked findings document"/]:::art
-    A_AUDIT -->|"you pick findings to act on"| BRAINSTORM
-    A_AUDIT -. "nothing picked — closes at the report" .-> STOP
+    A_AUDIT -->|"in cycle — you pick findings to act on"| BRAINSTORM
+    A_AUDIT -. "in cycle — nothing picked" .-> STOP
+    A_AUDIT -. "standalone — the audit stops here, it starts nothing" .-> AUDITSTOP(["findings document delivered"]):::entry
+    A_AUDIT -. "each finding you act on starts its own new cycle" .-> CYCLE
 
     BRAINSTORM["Brainstorm<br/>design dialogue · approaches · spec self-review · your approval"]:::orch
     BRAINSTORM --> A_SPEC[/"approved spec"/]:::art --> PLANNING
@@ -129,7 +131,9 @@ flowchart TD
 
     ONDEV["On-device verification<br/>checklist source · (auto) structural checks · one item per question"]:::orch
     A_CHK -.-> ONDEV
-    ONDEV --> A_ONDEV[/"results report"/]:::art --> FINISH
+    ONDEV --> A_ONDEV[/"results report"/]:::art
+    A_ONDEV -->|"in cycle"| FINISH
+    A_ONDEV -. "standalone — ends at the report, no cycle to finish" .-> VERIFYSTOP(["results report delivered"]):::entry
 
     FAST["Fast path<br/>in-session implementation · one task-reviewer pass"]:::orch --> FINISH
     SWEEP["Mechanical sweep<br/>blast-radius gate · pilot-first sweep · one reviewer pass"]:::orch --> FINISH
@@ -147,6 +151,7 @@ flowchart TD
         L4(["entry point or terminal"]):::entry
         L5["solid arrow = the default walk"]
         L6["dashed arrow = optional, skipped, or standalone"]
+        L7["arrow back up the flow = a loop"]
     end
 
     classDef orch fill:#e8f0fe,stroke:#3367d6,color:#111
@@ -164,15 +169,15 @@ flowchart TD
 2. **Audit** — for audit-shaped requests ("audit X", "review the repo for Y" — an
    assessment of existing code rather than a change to it): devcycle interviews you for the
    criteria to measure the repo against — never assuming them — then sweeps the repo and
-   writes a ranked findings document to `docs/audits/YYYY-MM-DD-<topic>.md`, every finding
-   carrying `file:line` evidence and a concrete fix. You pick which findings to act on;
-   those become the cycle's scope and the walk continues at brainstorm. The same audit is
-   available on its own as `/devcycle:audit` (below), outside any cycle. The audit derives
-   its criteria proposal from the stacks actually present and from your repo's own
-   convention documents — those outrank generic best practice — and it can be scoped to a
-   branch, in which case it audits that branch's diff expanded to the feature's dependency
-   graph. Every finding carries eleven fields, including how to reproduce it, a confidence
-   tag, and a fix-effort estimate, so you can start work from the finding alone.
+   writes a ranked findings document to `docs/audits/YYYY-MM-DD-<topic>.md`. You pick which
+   findings to act on; those become the cycle's scope and the walk continues at brainstorm.
+   The same audit is available on its own as `/devcycle:audit` (below), outside any cycle.
+   The audit derives its criteria proposal from the stacks actually present and from your
+   repo's own convention documents — those outrank generic best practice — and it can be
+   scoped to a branch, in which case it audits that branch's diff expanded to the feature's
+   dependency graph. Every finding carries eleven fields — among them its `file:line`
+   location, how to reproduce it, the fix direction, a confidence tag, and a fix-effort
+   estimate — so you can start work from the finding alone.
 3. **Diagnosis** — for bugs whose root cause isn't established yet: reproduce the failure,
    then isolate the cause (upstream `superpowers:systematic-debugging`), ending in a
    root-cause report that the fix's design builds on. A fix is never designed for an

@@ -13,7 +13,8 @@ generates one from a branch diff and walks either. Both name this file and neith
 - **Diff-derived (standalone `/devcycle:verify`)** — `.devcycle/on-device-checklist-<branch-slug>.md`,
   where `<branch-slug>` is the branch name with every character outside `[A-Za-z0-9._-]`
   replaced by `-` (`feat/csv export` → `feat-csv-export`). Scratch for the run: never
-  committed, and the run writes no state file at all.
+  committed. Where else a standalone run may record this path is
+  `devcycle:verifying-on-device`'s rule, not this file's.
 
 ## Item shape
 

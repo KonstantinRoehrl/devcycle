@@ -24,8 +24,14 @@ how far steps 2–3 go (see Depth below). Report as
 0. **Scope and discovery.** Runs first, in both modes, and is shallow — enough to propose
    criteria, not the deep sweep step 2 performs.
 
-   **Mode.** A branch supplied by `/devcycle:audit` or by the cycle stage selects
-   **branch-scoped** mode; no branch means **full-codebase** mode (the whole repo or a named
+   **Mode.** A branch selects **branch-scoped** mode, and it is named by an explicit token,
+   never inferred. From `/devcycle:audit` the token is `branch:<name>` anywhere in the
+   arguments, optionally with `base:<name>`; everything else in the argument string is the
+   concern to audit. A bare argument is **always** the concern and is never guessed to be a
+   branch, even when a ref of that name exists. A `branch:` token naming a ref that does not
+   resolve (`git rev-parse --verify <name>`) stops the run with that error rather than
+   degrading into a full-codebase audit of a concern by that name. The cycle stage supplies
+   its branch directly. No branch means **full-codebase** mode (the whole repo or a named
    subsystem). Everything downstream of this step — the gate, sourcing, the sweep, the
    finding format, the coverage statement — is identical in both modes.
 
@@ -34,10 +40,25 @@ how far steps 2–3 go (see Depth below). Report as
      `develop`, or `development`) when one exists locally or on the remote; else the default
      branch, resolved exactly as `skills/finishing-the-cycle/SKILL.md` resolves it — that
      file is the authority, and this one does not re-derive it.
-   - *Changed files*: `git diff --name-only $(git merge-base <base> <branch>) <branch>`. A
-     branch audit audits committed branch content: when `<branch>` is the checked-out branch
-     and the worktree is dirty, the uncommitted files are excluded from the audited set and
-     named in the coverage statement.
+   - *Changed files*: resolve the merge base as its own step, check it, and only then diff —
+     `base_sha=$(git merge-base <base> <branch>)`, then
+     `git diff --name-only "$base_sha" <branch>`. An empty or failed merge base means the two
+     refs do not share history (an unknown ref, unrelated histories, a shallow clone): the run
+     **stops and says so**. It never falls through into `git diff --name-only <branch>`, which
+     diffs the *working tree* against the branch and yields a plausible-looking file set that
+     is not the branch's. A branch audit audits committed branch content: when `<branch>` is
+     the checked-out branch and the worktree is dirty, the uncommitted files are excluded from
+     the audited set and named in the coverage statement.
+   - *Content source*: file **contents** come from the audited branch, not from the checkout —
+     the branch being audited is usually not the one checked out. Read through the ref
+     (`git show <branch>:<path>`), or, when something needs real files on disk, from a
+     throwaway worktree (`git worktree add <path> <branch>`) — offered, never created unasked,
+     with `git worktree remove <path>` offered when the audit ends. **This skill never switches
+     the checkout**, per `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s discipline: the branch a
+     session sits on is not this stage's to change, and another session may be mid-cycle on it.
+     Every `file:line` a finding cites must resolve against the audited branch's content —
+     a line read from the checked-out working tree points at different code, so the finding
+     describes one branch while citing another.
    - *Expansion to the feature dependency graph*: from the changed files, trace outward —
      callers, callees, shared types and DTOs, tests exercising them, and any config or schema
      belonging to the same feature — repeating until an iteration pulls in no new file. The
@@ -71,12 +92,12 @@ how far steps 2–3 go (see Depth below). Report as
      stacks, the repo's own convention documents, layout, test and CI setup, obvious
      pain): a user handed a proposal corrects it in one turn, a user handed an empty
      list has to invent one.
-   - The menu the proposal and the remaining slots draw from: correctness and bugs ·
-     token and context cost · dead or duplicated code · docs-vs-reality drift · test
-     coverage · architecture and separation of concerns · security · performance ·
-     dependency hygiene · conformance to the project's own stated conventions.
+   - What the proposal and the remaining slots draw from is the catalog in
+     `${CLAUDE_PLUGIN_ROOT}/references/audit-criteria.md` — its universal criteria plus the
+     stack-specific criteria for each stack step 0 detected. That file is the single owner of
+     what an audit measures against, and no second menu lives here to drift from it.
    - Settle here too: **audit scope** — the whole repo or a named subsystem — and any
-     criterion the user adds that the menu does not carry.
+     criterion the user adds that the catalog does not carry.
    - **The audit plan, in this same batch**: which areas will be covered, risk-ranked, and
      why. It is a visible artifact presented at this stop, not hidden reasoning — a wrong
      plan is corrected here, before a full pass is spent on it. It names areas, never
@@ -162,10 +183,18 @@ how far steps 2–3 go (see Depth below). Report as
 5. **Output.**
 
    The document opens with a provenance header — each line **omitted rather than guessed**
-   when it cannot be determined: the audited **branch**, the **HEAD sha**, and a **PR link**
-   when one exists (via `gh` when it is available and authenticated). In branch mode it also
-   records the derived base and the merge-base sha. Locations inside findings stay plain
-   `file:line`; the header is the only place provenance appears.
+   when it cannot be determined: the audited **branch**, the **sha of the audited content**,
+   and a **PR link** when one exists (via `gh` when it is available and authenticated). In
+   branch mode it also records the derived base and the merge-base sha. Locations inside
+   findings stay plain `file:line`; the header is the only place provenance appears.
+
+   That sha is defined per mode, because "HEAD" is not the audited content in both: in
+   **branch mode** it is the audited branch's tip (`git rev-parse <branch>`), recorded
+   alongside the branch name; in **full-codebase mode** it is the audited checkout's HEAD as
+   read during the sweep. It is **never** the sha of the topic branch this document is
+   committed on — that branch is cut below, after the audit, and its HEAD need not contain
+   the audited code. A provenance sha that does not contain what was audited is worse than no
+   sha at all, which is what the omitted-rather-than-guessed rule above exists to prevent.
 
    Write `docs/audits/YYYY-MM-DD-<topic>.md` (today's date, a short topic
    slug), then commit it under an explicit pathspec naming that one file:

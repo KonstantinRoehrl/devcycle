@@ -79,10 +79,10 @@ What is planted, and for which criterion:
   is a claim with nothing in the code to pin it to. A performance finding built on
   it would have no `file:line` evidence, which is exactly what criterion 5 forbids.
 
-Place the full bodies of `references/config.md` and `references/output.md` into the
-sandbox's `plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the
-spliced text with the sandbox's `plugin` directory path. The run is standalone, so
-the sandbox has no `.devcycle/` directory.
+Place the full bodies of `references/config.md`, `references/output.md`, and
+`references/audit-criteria.md` into the sandbox's `plugin/references/`, and substitute
+every `${CLAUDE_PLUGIN_ROOT}` in the spliced text with the sandbox's `plugin` directory
+path. The run is standalone, so the sandbox has no `.devcycle/` directory.
 
 Two real turns in one session (`claude -p …`, then `claude -p --resume <session-id>
 "<scripted reply>"`): the turn boundary is what makes criterion 3 checkable, because

@@ -32,7 +32,17 @@ the whole instruction.
 - *Base*, in order: an explicitly supplied base; the repo's integration branch (`dev`,
   `develop`, or `development`) when one exists locally or on the remote; else the default
   branch, resolved exactly as `skills/finishing-the-cycle/SKILL.md` resolves it.
-- *Changed files*: `git diff --name-only $(git merge-base <base> <branch>) <branch>`.
+- *Changed files*: resolve the merge base as its own step, check it, then diff from it:
+
+  ```
+  base_sha=$(git merge-base <base> <branch>) || stop
+  git diff --name-only "$base_sha" <branch>
+  ```
+
+  An empty or failed merge base means the refs do not share history — unknown ref, unrelated
+  histories, shallow clone. The run stops and says so. It never falls through to
+  `git diff --name-only <branch>`, which diffs the working tree instead of the branch and
+  would hand the walkthrough a file set built from local uncommitted edits.
 - *Affected UI areas*: from the changed files, trace routes, navigation, and component-usage
   outward — which screens render these components, which routes reach those screens —
   repeating until an iteration pulls in no new surface. Items are written against those
@@ -111,8 +121,8 @@ binding:
   belongs to somebody else's in-flight cycle — exactly as `devcycle:auditing-a-repo`'s
   standalone rule establishes — and its lines are not this run's to rewrite. The checklist
   path goes in the handoff instead, and nowhere else.
-- **The checklist is scratch**: `.devcycle/on-device-checklist-<branch-slug>.md` per
-  `${CLAUDE_PLUGIN_ROOT}/references/checklist.md`, never committed.
+- **The checklist is scratch**: it goes to the diff-derived path
+  `${CLAUDE_PLUGIN_ROOT}/references/checklist.md` pins, handled as that file states.
 
 The walkthrough, the interview rule, the gate, and the results report are unchanged: a
 standalone run is a different source for the checklist, not a different standard for verifying
@@ -120,12 +130,15 @@ it.
 
 ## Handoff
 
-**In-cycle:** end the stage by updating `.devcycle/state.md` — set `stage: finish` (the stage
-the next session resumes at) — then emit the handoff block per
-`${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with:
+The two paths differ in one thing, the state file:
 
-**Standalone:** write no state file and set no stage — emit the same block per that reference,
-naming the branch, the checklist path, and the results, with:
+- **In-cycle:** end the stage by updating `.devcycle/state.md` — set `stage: finish`, the
+  stage the next session resumes at.
+- **Standalone:** write no state file and set no stage; the block names the branch, the
+  checklist path, and the results instead.
+
+Both then emit the handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with the
+same contents:
 
 - `Artifacts:` the checklist path and the results report path — or `none (no rendered
   surface)` when this stage judges itself not applicable.
