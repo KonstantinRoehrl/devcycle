@@ -17,7 +17,6 @@ together they select the skill's diff-derived, standalone behavior over its in-c
 An empty `$ARGUMENTS` names no branch, so there is nothing to verify: the run stops and asks
 for one rather than guessing the checked-out branch. A branch or base that fails the
 validate-then-quote rule in `${CLAUDE_PLUGIN_ROOT}/references/branch.md`, or that resolves to
-no ref once spelled as that reference spells it, stops the run with that error. That
-reference owns both checks; this command only says which argument carries the value.
+no ref once spelled as that reference spells it, stops the run with that error.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

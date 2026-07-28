@@ -27,7 +27,6 @@ for security. No `branch:` token means the whole repo or a named subsystem, sett
 skill's interview as before. A `branch:` or `base:` value that fails the validate-then-quote
 rule in `${CLAUDE_PLUGIN_ROOT}/references/branch.md`, or that resolves to no ref once spelled
 as that reference spells it, stops the run with that error rather than falling back to
-treating it as a concern. That reference owns both checks; this command only says which token
-carries the value.
+treating it as a concern.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
