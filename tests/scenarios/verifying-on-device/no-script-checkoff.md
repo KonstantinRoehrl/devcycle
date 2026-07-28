@@ -37,6 +37,14 @@ Empty-state text node (filter set to exclude all tickets): "No matching tickets"
 
 ## Subagent prompt
 
+**Reference layer (required for every run from 2026-07-28).** `skills/verifying-on-device/SKILL.md`
+points at `${CLAUDE_PLUGIN_ROOT}/references/config.md`, `output.md`, `handoff.md`, `branch.md`,
+and `checklist.md`. Criteria 1 and 2 grade the `(auto)` boundary, which now lives in
+`checklist.md` rather than in any skill body, so that file must be present and readable; the
+other pointers must resolve or the agent spends the run hunting missing files and the
+transcript grades that instead. Check out (or copy) the devcycle plugin somewhere readable
+from the sandbox and give the agent the substitution in the environment note.
+
 > <full text of `skills/verifying-on-device/SKILL.md` inserted here>
 >
 > You are finishing the on-device stage for the status-filter dropdown on branch

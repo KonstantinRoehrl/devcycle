@@ -10,7 +10,7 @@ generates one from a branch diff and walks either. Both name this file and neith
 - **Plan-derived (in-cycle)** — `docs/<feature>/on-device-checklist.md` in the target repo.
   The path is pinned because `devcycle:reviewing-the-branch`'s handoff consumes it. Record it
   in the `checklist:` field of `.devcycle/state.md`.
-- **Diff-derived (standalone verification run)** — `.devcycle/on-device-checklist-<branch-slug>.md`,
+- **Diff-derived (standalone `/devcycle:verify`)** — `.devcycle/on-device-checklist-<branch-slug>.md`,
   where `<branch-slug>` is the branch name with every character outside `[A-Za-z0-9._-]`
   replaced by `-` (`feat/csv export` → `feat-csv-export`). Scratch for the run: never
   committed, and the run writes no state file at all.
