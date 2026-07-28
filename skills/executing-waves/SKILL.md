@@ -227,49 +227,14 @@ Generating the on-device checklist is a mid-wave coordinator duty and lives here
 the later walkthrough of that checklist is **devcycle:verifying-on-device**'s
 stage.
 
-### Generating the checklist
+**Trigger: the moment a task produces rendered changes** — generate or update the checklist in
+that same wave. Never defer it to the end of the wave or the branch. That trigger is this
+skill's own; everything else about the checklist is not.
 
-**Trigger: the moment a task produces rendered changes** — generate or update the checklist
-in that same wave. Never defer it to the end of the wave or the branch.
-
-- Path (pinned; consumed by reviewing-the-branch handoffs): `docs/<feature>/on-device-checklist.md`
-  in the target repo.
-- Record the path in the `checklist:` field of `.devcycle/state.md`.
-- Every item is an UNCHECKED box naming one concrete outcome a human can observe on the
-  running app. No item is pre-checked and no item carries `(auto)` at generation time.
-- Cover every dimension applicable to the change:
-  - visual rendering vs intent
-  - layout / alignment / spacing
-  - interaction feel (drag, hover, focus)
-  - responsive behavior at real breakpoints
-  - theme parity, where the surface supports themes
-  - keyboard / accessibility
-  - empty / loading / error states
-  - animation timing
-
-### The `(auto)` boundary
-
-```
-A SCRIPT OR SCREENSHOT NEVER CHECKS OFF A CHECKLIST ITEM.
-```
-
-One exception, keyed to an observable predicate: an item asserting DOM structure, CSS
-values, or exact text that a structural browser check — via claude-in-chrome (the intended
-engine: it navigates, screenshots, and reads the DOM/CSS/text/network of a page in the
-user's own Chrome) or an equivalent structural check — has verified, fresh output in hand,
-may be checked off with the tag `(auto)`. claude-in-chrome is preferred because the user can
-open an authenticated page in their real Chrome and hand the agent that already-logged-in
-session to inspect — which a separate browser context (e.g. Playwright's) cannot do without
-re-authenticating. When claude-in-chrome is not available, nothing is auto-checked: every
-item stays a human item. Everything a browser check cannot structurally see (feel,
-smoothness, visual alignment, contrast, legibility) stays unchecked for the human.
-
-| Rationalization | Reality |
-|---|---|
-| "claude-in-chrome confirmed the page" | A structural read covers only DOM/CSS/text — check off exactly those items, `(auto)`-tagged, nothing more |
-| "The screenshot looks right" | A screenshot cannot show jank, focus order, interaction feel, or a breakpoint reflow |
-| "We're behind schedule" | Pressure does not convert human items into script items |
-| "The code clearly implements it" | Rendered outcome and code intent diverge exactly often enough to need this checklist |
+What a checklist is — its path and state-file record, its item shape, the dimensions it
+covers, and the `(auto)` boundary that decides what may ever be checked off without a human —
+is `${CLAUDE_PLUGIN_ROOT}/references/checklist.md`. Read it and follow it; it is not restated
+here, and `devcycle:verifying-on-device` follows the same file.
 
 ## Wave boundaries and handoff
 

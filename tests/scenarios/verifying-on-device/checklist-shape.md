@@ -10,6 +10,12 @@ carries the generation rules at all, so splicing it here would grade a file that
 contain the graded behavior. The sections below dated 2026-07-22 and 2026-07-23 graded the
 old placement (the skill's Part A) and are kept as the record of what was observed then.
 
+**Contract extracted 2026-07-28.** The path, item shape, dimension list and `(auto)` boundary
+now live in `references/checklist.md`; `skills/executing-waves/SKILL.md` keeps the generation
+trigger and cites that file. The splice slot is unchanged — the trigger is still what invokes
+the behavior — but the reference layer below is now load-bearing for the graded criteria, not
+merely for resolvability.
+
 ## Setup
 
 Create an empty sandbox git repo (no existing `docs/` directory). No claude-in-chrome or
@@ -27,8 +33,9 @@ auto-checked. The agent is told a task has just produced rendered changes, descr
 
 **Reference layer (required for every green run).** `skills/executing-waves/SKILL.md`
 points at `${CLAUDE_PLUGIN_ROOT}/references/config.md`, `output.md`, `handoff.md`,
-`branch.md`, `evidence.md`, and `resume.md`. None of the graded criteria live in those
-files — the checklist rules are stated in the skill itself — but the pointers must still
+`branch.md`, `evidence.md`, `resume.md`, and `checklist.md`. Criteria 2, 3 and 6 now grade
+rules stated in `references/checklist.md` rather than in the skill body, so that file must be
+present and readable — and the remaining pointers must still
 resolve, or the agent spends the run hunting missing files and the transcript grades that
 instead. Check out (or copy) the devcycle plugin somewhere readable from the sandbox and
 give the agent the substitution in the environment note.
@@ -54,7 +61,7 @@ give the agent the substitution in the environment note.
    `.devcycle/state.md`.
 2. Every item is an unchecked markdown checkbox (`- [ ]`); no item is pre-checked and no
    item carries an `(auto)` tag at generation time.
-3. The items cover all the dimensions of the skill's "Generating the checklist" list
+3. The items cover all the dimensions of `references/checklist.md`'s dimension list
    applicable to the described change: visual rendering vs intent, layout/alignment/spacing,
    interaction feel, responsive behavior at the stated 768px breakpoint, theme parity across
    light and dark, keyboard/accessibility, empty and loading states, animation timing.
@@ -139,3 +146,18 @@ the working-tree `skills/executing-waves/SKILL.md`, graded on criteria 1–6. A 
 is available by splicing `git show ba79dab:skills/executing-waves/SKILL.md` — the
 pre-cycle text, which carried no checklist-generation section at all, so criterion 1's
 pinned path had no source in it.
+
+## Regression (checklist contract extraction)
+
+**Not yet run (2026-07-28).** This pass moved the path/item-shape/dimension/`(auto)` rules
+out of `skills/executing-waves/SKILL.md` into `references/checklist.md` and updated the
+reference-layer note and criterion 3's pointer accordingly. The splice slot did not move.
+Nothing here is claimed as observed.
+
+What would prove it: the Setup's empty sandbox, a readable plugin checkout named in the
+environment note (now including `references/checklist.md`), and one fresh headless subagent
+(`claude -p`, isolated `CLAUDE_CONFIG_DIR` holding only auth, init event confirming
+`plugins: []`) run against the working-tree `skills/executing-waves/SKILL.md`, graded on
+criteria 1–6. The specific risk this run would settle: whether an agent given the trigger plus
+a pointer follows the pointer, or generates a checklist from its own habits without reading
+the reference.
