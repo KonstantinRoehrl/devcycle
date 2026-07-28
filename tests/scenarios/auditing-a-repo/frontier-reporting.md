@@ -374,13 +374,6 @@ depends on — the base, the merge-base-guarded diff, and reading content throug
 criteria 1 through 3 are graded against, and the standalone topic-branch rule step 5 commits
 the document under, which criterion 5 reaches.
 
-`references/branch.md` in turn names `skills/finishing-the-cycle/SKILL.md` as the authority on
-resolving the default branch, by a bare plugin-relative path the `${CLAUDE_PLUGIN_ROOT}`
-substitution never rewrites. Place that file's full body at the sandbox's
-`plugin/skills/finishing-the-cycle/SKILL.md` and tell the agent in the environment note where
-bare plugin-relative paths resolve; with either pointer left dangling the run grades a broken
-sandbox rather than the text.
-
 The run is standalone, so the sandbox has no `.devcycle/` directory. There is no `dev` branch
 and no remote, so the base must resolve to the default branch `main`.
 
@@ -401,7 +394,7 @@ reach the graded behavior.
 > [Splice here: full body of skills/auditing-a-repo/SKILL.md.]
 > === END SKILL ===
 >
-> Environment notes: AskUserQuestion is not available in this session — where guidance says to use it, send the batch as one plain message with the same shape, then stop for the answer. `profile` resolves to `standard` for this run. The devcycle plugin's files are readable at <absolute path of the sandbox's `plugin` directory>; guidance that names a bare plugin-relative path, such as `skills/finishing-the-cycle/SKILL.md`, resolves under that directory. You may read and write files and run git commands. No web access is available. No human is available mid-response, so ask and stop.
+> Environment notes: AskUserQuestion is not available in this session — where guidance says to use it, send the batch as one plain message with the same shape, then stop for the answer. `profile` resolves to `standard` for this run. You may read and write files and run git commands. No web access is available. No human is available mid-response, so ask and stop.
 
 Turn 2 is the scripted reply, sent by resuming the same session:
 

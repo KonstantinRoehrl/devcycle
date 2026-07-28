@@ -88,14 +88,6 @@ the step-5 commit and grades its appearance as expected rather than a failure, s
 rule producing it has to be readable. Its derivation half is inert here — the invocation
 names no branch, so the run never enters branch mode.
 
-That committing rule resolves the default branch as `skills/finishing-the-cycle/SKILL.md`
-resolves it, naming that file by a bare plugin-relative path the `${CLAUDE_PLUGIN_ROOT}`
-substitution never rewrites. Place its full body at the sandbox's
-`plugin/skills/finishing-the-cycle/SKILL.md`; the environment note below is where the
-agent is told that bare plugin-relative paths resolve under the sandbox's `plugin`
-directory. Left dangling, the pointer makes the run grade a broken sandbox rather than
-the text.
-
 The run is standalone, so the sandbox has no `.devcycle/` directory.
 
 Two real turns in one session (`claude -p …`, then `claude -p --resume <session-id>
@@ -114,7 +106,7 @@ the sandbox is inspected on disk after Turn 1 and before the reply is sent.
 > [Splice here: full body of skills/auditing-a-repo/SKILL.md.]
 > === END SKILL ===
 >
-> Environment notes: AskUserQuestion is not available in this session — where guidance says to use it, send the batch as one plain message with the same shape, then stop for the answer. `profile` resolves to `standard` for this run. The devcycle plugin's files are readable at <absolute path of the sandbox's `plugin` directory>; guidance that names a bare plugin-relative path, such as `skills/finishing-the-cycle/SKILL.md`, resolves under that directory. You may read and write files and run git commands. No human is available mid-response, so ask and stop.
+> Environment notes: AskUserQuestion is not available in this session — where guidance says to use it, send the batch as one plain message with the same shape, then stop for the answer. `profile` resolves to `standard` for this run. You may read and write files and run git commands. No human is available mid-response, so ask and stop.
 
 Turn 2 is the scripted reply, sent by resuming the same session:
 

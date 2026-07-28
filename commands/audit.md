@@ -24,8 +24,10 @@ for security, and `/devcycle:audit branch:feat/csv-export base:dev` audits it ag
 A bare argument is **always** the concern and is never guessed to be a branch, even in a repo
 that happens to have a branch by that name: `/devcycle:audit security` audits the whole repo
 for security. No `branch:` token means the whole repo or a named subsystem, settled at the
-skill's interview as before. A `branch:` token naming a ref that does not resolve
-(`git rev-parse --verify <name>`) stops the run with that error rather than falling back to
-treating it as a concern.
+skill's interview as before. A `branch:` or `base:` value that fails the validate-then-quote
+rule in `${CLAUDE_PLUGIN_ROOT}/references/branch.md`, or that resolves to no ref once spelled
+as that reference spells it, stops the run with that error rather than falling back to
+treating it as a concern. That reference owns both checks; this command only says which token
+carries the value.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

@@ -36,8 +36,8 @@ agent this skill dispatches reports per
    follow it before dispatching anything — the coordinator commits from wave 1
    onward, so the topic branch must exist and be recorded first. At `thorough`
    this replaces upstream's never-start-on-main rule, which covers only
-   `main`/`master`; devcycle's rule also forbids `dev`, `develop`, `integration`,
-   and any branch the user names as an integration branch.
+   `main`/`master`; devcycle's rule also forbids the integration branches that
+   file names, and it is the only place in the repo they are named.
 2. **Plan hygiene.** A requirements block at the top of a plan that no task's
    steps implement WILL be silently skipped. When the pre-dispatch read finds
    one, patch the owning task's steps explicitly and re-extract that task's brief
