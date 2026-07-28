@@ -16,6 +16,12 @@
     }
   ],
   "userConfig": {
+    "profile": {
+      "type": "string",
+      "title": "Pipeline profile",
+      "default": "standard",
+      "description": "Cost/rigor preset. One of: lean, standard, thorough. Individual knobs override it when explicitly configured."
+    },
     "gitPolicy": {
       "type": "string",
       "title": "Git policy",
@@ -50,7 +56,7 @@
       "type": "string",
       "title": "Review depth",
       "default": "single",
-      "description": "Branch review engine. One of: single (code-review pass plus spec-compliance layer), panel (multi-lens review panel workflow)."
+      "description": "Branch review engine. One of: single (spec-compliance layer plus code-review-style reviewer guidance, opportunistically folding in a user-run code-review pass), panel (multi-lens review panel workflow), or 'auto' to let the profile govern this knob."
     },
     "crossModelReview": {
       "type": "boolean",
@@ -62,7 +68,7 @@
       "type": "string",
       "title": "On-device gate",
       "default": "human-required",
-      "description": "Whether the on-device checklist closes only via a human walkthrough. One of: human-required, auto-ok."
+      "description": "Whether the on-device checklist closes only via a human walkthrough. One of: human-required, auto-ok, or 'auto' to let the profile govern this knob."
     }
   }
 }

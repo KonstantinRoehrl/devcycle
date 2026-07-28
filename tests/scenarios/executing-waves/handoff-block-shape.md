@@ -12,7 +12,7 @@ In a scratch directory, create a sandbox repo `handoffproj`:
 
 ```bash
 mkdir -p handoffproj && cd handoffproj && git init -b main
-mkdir -p docs .superpowers/sdd
+mkdir -p docs .superpowers/sdd .devcycle/evidence
 cat > docs/plan.md <<'EOF'
 # Plan: greeting module
 ## Task 1: greet function
@@ -38,20 +38,29 @@ const greet = require("./greet.js");
 if (greet("Ada") !== "Hello, Ada!") { console.error("FAIL"); process.exit(1); }
 console.log("PASS");
 EOF
+cat > .devcycle/evidence/1-before.txt <<'EOF'
+FAIL
+EOF
+cat > .devcycle/evidence/1-after.txt <<'EOF'
+PASS
+EOF
 cat > .superpowers/sdd/task-1-report.md <<'EOF'
 ## Task report
 - Files changed: greet.js, greet.test.js
-- Test command: node greet.test.js
-- Red evidence (verbatim): FAIL
-- Green evidence (verbatim): PASS
-- Deviations from brief: none
-- Items for the on-device checklist: none
+- Evidence: red-green | cmd: node greet.test.js
+- Before: .devcycle/evidence/1-before.txt (exit 1)
+- After: .devcycle/evidence/1-after.txt (exit 0)
+- Tail (after, last 20 lines):
+  PASS
+- Deviations: none
+- On-device items: none
 EOF
 git add -A && git commit -m "chore: sandbox baseline"
 git add -A && git commit -m "feat: add greet function (task 1)" --allow-empty
-cat > .superpowers/sdd/progress.md <<'EOF'
+cat > .devcycle/ledger.md <<'EOF'
 - [2026-07-22T09:00:00Z] task=1 event=dispatched outcome=implementer sent ref=none
 - [2026-07-22T09:05:00Z] task=1 event=report-received outcome=red-green evidence present ref=.superpowers/sdd/task-1-report.md
+- [2026-07-22T09:07:00Z] task=1 event=review-round outcome=round 1 dispatched ref=none
 - [2026-07-22T09:08:00Z] task=1 event=review-verdict outcome=accept ref=none
 - [2026-07-22T09:10:00Z] task=1 event=committed outcome=task 1 committed ref=HEAD
 EOF
@@ -66,14 +75,26 @@ Given verbatim to a fresh subagent (working directory: the `handoffproj`
 sandbox). For the green run, the block marked SKILL CONTENT contains the full
 text of `skills/executing-waves/SKILL.md`; the baseline run omits that block.
 
+**Reference layer (required for every green run).** The handoff block's shape, its two
+sanctioned first-field labels, the context-action table, and the await gate all live in
+`${CLAUDE_PLUGIN_ROOT}/references/handoff.md` now — `skills/executing-waves/SKILL.md`
+points at it and restates none of it. Every criterion here grades that file's contract,
+so the pointer MUST resolve: check out (or copy) the devcycle plugin somewhere readable
+from the sandbox and give the agent the substitution in the prompt's environment note.
+Without it this scenario grades a missing file, and a green run is meaningless.
+
 ```
 [SKILL CONTENT: full text of skills/executing-waves/SKILL.md]
 
 You are the coordinator executing the wave-based plan in docs/plan.md
-(ledger: .superpowers/sdd/progress.md). Wave 1 is complete: task 1 was
+(ledger: .devcycle/ledger.md). Wave 1 is complete: task 1 was
 implemented, reviewed, green-gated, and committed — the ledger records it.
 Close out wave 1 now and produce your wave-boundary output for this point in
 the pipeline. Do NOT dispatch or start wave 2.
+
+Environment notes: the devcycle plugin's files are checked out at <absolute
+path of the devcycle checkout>; where guidance references
+`${CLAUDE_PLUGIN_ROOT}`, substitute that path.
 ```
 
 ## Pass criteria
@@ -103,7 +124,16 @@ the pipeline. Do NOT dispatch or start wave 2.
    prose or the state file alone.
 6. At the wave boundary the agent updates `.devcycle/state.md` with
    `stage: execution` — waves remain, and `stage:` records the stage the
-   next session should RESUME at, never the stage just completed.
+   next session should RESUME at, never the stage just completed. The value
+   is from the current stage enum (`scoping | audit | diagnosis | brainstorm
+   | planning | execution | branch-review | on-device | fast-path | sweep |
+   finish | done`); an invented label fails this criterion.
+7. *(Reference layer, added 2026-07-26.)* Criteria 1–3 are met from the
+   reference, not from memory: the transcript shows the agent opening
+   `references/handoff.md` at the substituted plugin path before emitting the
+   block. A conformant block produced without that read is recorded as a
+   partial — the shape is no longer in the spliced skill text, so a run that
+   guesses it right proves nothing about whether the pointer works.
 
 ## Baseline (red)
 
@@ -246,3 +276,23 @@ HEAD:skills/executing-waves/SKILL.md`); green = working tree.
   2026-07-23 dry-run-fixes evidence above stands, and the review-fixes pass
   re-exercised the branch-review block's own shape in
   `reviewing-the-branch/engine-selection.md` run C.
+
+## Regression (compact profile-driven devcycle)
+
+**Not yet run (2026-07-26).** This pass moved the sandbox ledger to
+`.devcycle/ledger.md`, put task 1's report into the file-backed evidence shape, pinned
+criterion 6 to the current stage enum, and added criterion 7 for the reference layer.
+The handoff contract itself did not change — it moved out of the skill and into
+`references/handoff.md` — so the green runs recorded above still describe the shape
+this scenario grades. What is unproven is whether an agent reaches that shape now that
+it has to open a file to find it. No headless run was made, so nothing here is claimed
+as observed.
+
+What would prove it: rebuild the sandbox per the updated Setup, substitute a readable
+plugin checkout path for `${CLAUDE_PLUGIN_ROOT}` in the environment note, and run the
+prompt as a fresh headless subagent (`claude -p`, isolated `CLAUDE_CONFIG_DIR` holding
+only auth, init event confirming `plugins: []`) against the working-tree
+`skills/executing-waves/SKILL.md`, grading criteria 1–4, 6, and 7. Criterion 7 is the
+new risk and criterion 1 the consequence: an agent that never opens the reference has
+no source for `Wave completed: <n> of <m> (stage: execution)` and will most likely fall
+back to the retired `Stage completed: executing-waves (wave 1 of 2)` label.

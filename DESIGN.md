@@ -61,10 +61,19 @@ devcycle/                (public GitHub repo)
 │   └── marketplace.json          # source "./", allowCrossMarketplaceDependenciesOn: ["claude-plugins-official"]
 ├── commands/
 │   ├── cycle.md                  # entry: input-maturity triage → stage walk; model-invocable (wrappers can call it)
-│   └── continue.md               # resume from .devcycle/state.md after /clear (see §5)
+│   ├── continue.md               # resume from .devcycle/state.md after /clear (see §5)
+│   └── audit.md                  # standalone audit; starts no cycle (see §15.3)
+├── references/                   # the reference layer: one owner per convention (see §15.1)
+│   ├── config.md                 # knob resolution, the profile matrix, model tiers
+│   ├── evidence.md               # evidence classes, file-backed evidence, report/verdict shapes
+│   ├── resume.md                 # re-entry rules for every stage
+│   ├── handoff.md                # handoff block shape and the context-action table
+│   ├── branch.md                 # branch discipline for every committing path
+│   └── output.md                 # output discipline for every agent and skill
 ├── skills/
 │   ├── scoping-interview/        # rough idea → bounded scope; batched AskUserQuestion; nothing assumed;
 │   │                             # hands off to superpowers:brainstorming
+│   ├── auditing-a-repo/          # interviewed criteria → ranked, file-referenced findings (see §15.3)
 │   ├── planning-waves/           # layers on superpowers:writing-plans — file-disjoint tasks, explicit
 │   │                             # dependencies, dispatch map, pinned interfaces
 │   ├── executing-waves/          # layers on superpowers:subagent-driven-development — ledger, brief/diff file
@@ -91,7 +100,8 @@ devcycle/                (public GitHub repo)
 ```
 
 Pipeline stages: intake triage (`/cycle`; a confirmed-trivial request short-circuits to fast-path → finish) →
-scoping-interview (rough input only) → superpowers:brainstorming → spec → planning-waves → executing-waves
+scoping-interview (rough input only) *or* auditing-a-repo (audit-shaped input, in place of scoping — see §15.3) →
+superpowers:brainstorming → spec → planning-waves → executing-waves
 (per-wave: dispatch → TDD → review → commit) → reviewing-the-branch → verifying-on-device → finish per `gitPolicy`.
 
 ---
@@ -176,10 +186,11 @@ gated by `userConfig.crossModelReview`.
 
 ```json
 {
+  "profile": "lean | standard | thorough",
   "gitPolicy": "local-commits-only | push-allowed | open-pr",
-  "reviewDepth": "single | panel",
+  "reviewDepth": "single | panel | auto",
   "crossModelReview": false,
-  "onDeviceGate": "human-required | auto-ok",
+  "onDeviceGate": "human-required | auto-ok | auto",
   "implementerModel": "auto | <model id>",
   "taskReviewerModel": "auto | <model id>",
   "branchReviewModel": "auto | <model id>",
@@ -187,12 +198,21 @@ gated by `userConfig.crossModelReview`.
 }
 ```
 
+- `profile` (added 2026-07-26) is the preset behind the rest: every other option keeps its
+  own shipped default, and any option left at that default takes the profile's column value
+  instead (matrix and resolution order in §15.2 and `references/config.md`). It is what the
+  first-run walkthrough asks about — one question, not the four-knob batch, which stays
+  available behind a *customize* answer.
 - The model options are four flat string keys — the plugin manifest's `userConfig` schema
   supports no object-valued options, so the originally planned `modelLineup` object was not
   expressible (verified in `docs/platform-notes.md` §(a)).
 - Model options default to `auto`: the coordinator derives the model per task from
   plan-observable attributes and logs the derivation in the ledger. An explicitly configured
   model id is binding — used verbatim, never overridden.
+- `reviewDepth` and `onDeviceGate` also accept `auto` (added 2026-07-26): it hands the knob
+  back to the profile's column, the same route an unset knob takes — the escape hatch for a
+  user upgrading from an older config whose explicit value would otherwise shadow the profile
+  forever (resolution order in `references/config.md`).
 - Shipped defaults: `gitPolicy: local-commits-only` (most conservative), `reviewDepth: single`,
   `crossModelReview: false`, `onDeviceGate: human-required`, all four model options `auto`.
 - The finishing stage branches on `gitPolicy`: local-commits-only ends with the branch handed back (the author's
@@ -219,6 +239,7 @@ gated by `userConfig.crossModelReview`.
 | onboarding-a-repo | Bootstrap tier-2 anywhere: detect real commands, scaffold CLAUDE.md/per-package rules, run allowlist scan, wire verification commands | v1.x — right after the pipeline works |
 | distilling-learnings | Codified promotion session: memory/observation inbox → vetted docs/skill edits via writing-skills TDD | v1.x |
 | sweeping-mechanical-changes | Bulk uniform migrations, pilot-first | shipped |
+| auditing-a-repo | Interviewed criteria → ranked, file-referenced findings; standalone `/devcycle:audit` or the in-cycle audit stage | shipped |
 | running-headless-ci | `-p --output-format stream-json` CI stage | Later — when a CI use case exists |
 | Agent-teams review backend | Native shared-task-list adversarial review | Later — token-heavy; workflow panel covers it |
 
@@ -278,10 +299,10 @@ Version handling on GitHub is enforced by CI, not discipline alone:
 ## 13. Naming
 
 - Plugin: **`devcycle`** (user decision 2026-07-22; over full-cycle/dev-cycle/idea-to-pr).
-- Commands: `/devcycle:cycle`, `/devcycle:continue`.
+- Commands: `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:audit`.
 - Skills: verb-first gerunds (`executing-waves`, `planning-waves`, `verifying-on-device`,
-  `reviewing-the-branch`, `scoping-interview`, `onboarding-a-repo`, `distilling-learnings`,
-  `sweeping-mechanical-changes`).
+  `reviewing-the-branch`, `scoping-interview`, `auditing-a-repo`, `onboarding-a-repo`,
+  `distilling-learnings`, `sweeping-mechanical-changes`).
 - Agents: `devcycle:implementer`, `devcycle:task-reviewer`,
   `devcycle:red-team-reviewer`.
 
@@ -293,6 +314,134 @@ Version handling on GitHub is enforced by CI, not discipline alone:
 - Description char budget exact numbers (verify via /context during release checks).
 - Whether `verifying-on-device`'s claude-in-chrome pre-pass needs repo-specific target config in tier 2
   (likely not: the user drives their own authenticated Chrome, so there is no separate target/URL config to pin).
+
+## 15. Compaction — the reference layer, profiles, and the audit stage (added 2026-07-26)
+
+### 15.1 The reference layer: one owner per convention
+
+`references/` holds six plain markdown files, each the sole owner of one cross-cutting
+convention:
+
+| File | Owns |
+| --- | --- |
+| `config.md` | knob resolution, the profile matrix and its resolution order, the model tiers and their derivation predicates |
+| `evidence.md` | the three evidence classes, the file-backed evidence contract, the implementer report and reviewer verdict shapes |
+| `resume.md` | settling the branch from the state file, git-evidence resume rules, "review acceptance is never inferable from git" |
+| `handoff.md` | the handoff block shape, the context-action table, the one-block-per-stage rule, the await gate |
+| `branch.md` | branch discipline for every committing path |
+| `output.md` | output discipline for every agent and skill |
+
+A consumer names one — "Read `${CLAUDE_PLUGIN_ROOT}/references/<name>.md` and follow it" —
+and does not restate its content.
+
+**Why.** These conventions are needed by most stages, so before this each skill carried its
+own copy of them. Copies drift: a fix to branch discipline had to be found and reapplied in
+every skill that mentioned it, and any one that was missed became a second, contradictory
+answer to the same question. The copies also cost context on every load, in a plugin whose
+whole premise is that context is the scarce resource.
+
+The invariant that makes it work is stronger than "add a pointer": **a skill that consumes a
+reference names it and deletes its own prose on the subject.** A pointer added next to a
+retained restatement leaves two owners, which is worse than one bad owner — the reader now
+has to decide which is authoritative. What stays in a skill is only what is unique to that
+stage.
+
+These files are deliberately not skills. They carry no frontmatter, are never invoked by
+name as `devcycle:<something>`, and take no share of the description budget §4.6 tracks —
+they cost nothing until a skill in flight names one and reads it.
+
+### 15.2 Native engines vs upstream overlays, keyed to `profile`
+
+`profile` ∈ `lean | standard | thorough`, default `standard`. It is one preset over the
+knobs that size a run:
+
+| | `lean` | `standard` | `thorough` |
+| --- | --- | --- | --- |
+| planning / execution engine | devcycle-native compact | devcycle-native compact | upstream overlays |
+| branch review engine | `single` | `single` | `panel` |
+| on-device gate | `auto-ok` | `human-required` | `human-required` |
+| evidence tail in reports | 10 lines | 20 lines | 50 lines |
+| branch-review round cap | 2 | 3 | 5 |
+| audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
+
+Resolution order (binding, stated once in `config.md`): an explicitly configured knob wins
+verbatim; otherwise the profile's column value applies; a `profile` that is unset or outside
+the three reads as `standard`.
+
+**The engine split.** Two stages take it, and each owns its own switch rather than being
+told from `/cycle`:
+
+- `planning-waves` — at `lean`/`standard` it does **not** load `superpowers:writing-plans`;
+  the plan location, scope check, right-sizing, step granularity, templates, and self-review
+  are carried inline. At `thorough` it loads upstream and overlays it.
+- `executing-waves` — same shape: at `lean`/`standard` the brief-slicing, file handoffs, and
+  review/fix loop are self-contained; at `thorough` it loads
+  `superpowers:subagent-driven-development` and overlays it, minus upstream's tail (its
+  final-code-reviewer dispatch and finishing-a-development-branch step, which devcycle's own
+  branch-review and finish stages replace).
+
+Brainstorm and diagnosis are **not** part of the split: `superpowers:brainstorming` and
+`superpowers:systematic-debugging` run upstream and unmodified at every profile. The
+dependency on superpowers is therefore real at every profile, not just `thorough`.
+
+§10's no-forking non-goal is about upstream's *files*, and in that sense it holds: nothing
+under superpowers is edited, and the `thorough` path stays a genuine consumer of it. What the
+native engines do is narrower and worth stating plainly — they inline the planning and
+execution mechanics with devcycle's overrides already folded in, so the skill that runs is
+the whole instruction rather than a delta on top of a general one. Some of that inlined text
+tracks upstream's wording closely where devcycle had no quarrel with it (plan location, task
+right-sizing); the goal was never to say those things differently, only to say them once, in
+the place that runs. That carries a real cost: those passages are now a second copy that
+upstream revisions will not reach on their own, so an upstream change has to be diffed in
+deliberately instead of inherited.
+
+**Why not always overlay.** The overlay pays for a general skill's full prose on every run
+to then override most of it. Below `thorough` that trade is bad: the same behavior arrives
+in less context. What keeps it honest is a single behavioral contract across both engines —
+the same wave-formation invariants, ledger events, green gate, and review cycle — so a plan
+and a run have the same shape whichever engine produced them. Only the *source* of the
+mechanics differs.
+
+**What the profile may never touch:** the state file, handoff blocks, evidence classes, the
+coordinator's green-gate re-run, the `gitPolicy` clamps, branch discipline, the
+one-`task-reviewer` floor on the short paths, and the never-assume interview rule. A `lean`
+run may skip a stage; it never fakes one, and never reports a gate as passed that did not
+run. Cost is allowed to buy less depth, never a false claim.
+
+### 15.3 The audit stage
+
+Triage's maturity axis gained a third verdict: **audit-shaped** input ("audit X", "review
+the repo for Y" — an assessment of existing code rather than a change to it) routes to the
+**audit** stage, which runs *in place of* scoping. `devcycle:auditing-a-repo` establishes
+what is wrong before anything is designed; the findings the user selects become brainstorm's
+explored context, and the walk continues normally. This is the same ordering rule §3's
+diagnosis stage follows for bugs — you cannot spec a fix for a problem nobody has
+established. A cycle where the user selects nothing closes at the report.
+
+Two properties carry the stage:
+
+- **Criteria are interviewed for, never chosen.** A sweep against criteria the auditor
+  picked measures the repo against the auditor's taste, not the user's priorities. The
+  interview proposes a criteria set derived from a shallow orientation pass — a user handed
+  a proposal corrects it in one turn, a user handed a blank menu has to invent one — and
+  then hard-stops exactly as `scoping-interview` stops: no research, no draft findings until
+  the user has replied.
+- **No `file:line`, no finding.** The evidence discipline `red-team-reviewer` applies to
+  review claims applies to audit claims. A suspicion that cannot be pointed at in a file
+  does not appear in the document at all, and a coverage statement names what was not read,
+  so a partial audit cannot read as a complete one.
+
+Only depth is profile-conditional (the matrix row above); the interview and the evidence
+rule are not.
+
+`/devcycle:audit` exposes the same skill standalone, and is deliberately **not** a pipeline
+stage: it neither creates nor requires `.devcycle/state.md`, leaves any in-flight cycle's
+state file untouched, emits no handoff block, and ends at the findings document. Turning a
+finding into work is a separate, explicit call — `/devcycle:cycle <request>` naming that
+finding. The reason is the same as §4.4's: an entry point that chains onward takes the
+selection decision away from the user.
+
+---
 
 ## Appendix: upstream comparison summaries
 

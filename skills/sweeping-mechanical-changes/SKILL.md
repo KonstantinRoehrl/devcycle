@@ -23,10 +23,10 @@ this as a supervised sweep."
 
 ## The sweep walk
 
-1. **Branch discipline.** If the current branch is the repo's default branch or
-   an integration branch (e.g. `dev`), create a topic branch first — never
-   sweep directly on either. In the same breath, update the `branch:` line of
-   `.devcycle/state.md` to that topic branch; resume keys off it.
+1. **Branch discipline.** Read `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and
+   follow it before anything else — the sweep commits, so it never runs on the
+   default or an integration branch. Resume keys off the `branch:` line that
+   reference has you record.
 2. **Derive parameters** — from the repo, never from anyone's memory:
    - the **instruction**: the request's edit rule, verbatim;
    - the **file list**: found by search; record the exact derivation command
@@ -35,10 +35,11 @@ this as a supervised sweep."
      (test suite, linter, build). The script hard-requires one; if the repo
      documents none, the user supplies one at gate 2;
    - the **model**: resolve `DEVCYCLE_SWEEP_MODEL` from the `implementerModel`
-     knob — a pinned id → that id verbatim; `auto`/unset → the fast tier (a
-     sweep edit is single-file mechanical, the fast-tier predicate's ideal
-     case); no fast-tier id resolvable with confidence → leave the variable
-     unset so the CLI's default applies, since an environment variable cannot
+     knob per `${CLAUDE_PLUGIN_ROOT}/references/config.md` — a sweep edit is
+     single-file mechanical, the fast tier's ideal case. One route-specific
+     departure from that reference: where it falls back to the session tier
+     (no fast-tier id resolvable with confidence), leave the variable unset
+     instead so the CLI's default applies — an environment variable cannot
      inherit the session model the way a subagent dispatch can;
    - **clean targets**: every target must be tracked AND clean —
      `git ls-files --error-unmatch` matches it and `git status --porcelain`
@@ -61,12 +62,26 @@ this as a supervised sweep."
    `{"files": [...], "instruction": "...", "verifyCommand": "..."}` — to
    `.devcycle/sweep-args.json`.
 
-   State the model in executing-waves' Model routing audit shape — `model <id>
-   (pinned)`, `model fast:<id> (auto: sweep edit, single-file mechanical)`, or
-   `model unset (auto: no fast-tier id resolved; CLI default applies)` — in the
-   plan file and the question alike. A bare name hides which path chose it.
-4. **Run the sweep:**
+   State the model in the model-routing audit shape of
+   `${CLAUDE_PLUGIN_ROOT}/references/config.md` — `model <id> (pinned)`,
+   `model fast:<id> (auto: sweep edit, single-file mechanical)`, or this
+   path's own `model unset (auto: no fast-tier id resolved; CLI default
+   applies)` — in the plan file and the question alike. A bare name hides
+   which path chose it.
+4. **Capture the baseline, then run the sweep.** The baseline is yours to take,
+   and this is the only moment it exists: step 2's clean-targets precondition
+   still holds, and the moment the script starts copying verified files back the
+   clean tree is gone. So BEFORE invoking anything, run the confirmed
+   verifyCommand yourself in the real working tree and write its output verbatim
+   to `.devcycle/evidence/sweep-before.txt` (**Evidence** below). Do not expect
+   the script to hand this back: `mechanical-sweep.js` runs its own baseline
+   inside a worktree and keeps nothing of a green one — its stdout report
+   carries only `applied` and `skipped`. A red baseline is a stop, not a sweep
+   input: report it verbatim and put it to the user, because a sweep judged
+   against an already-broken verify proves nothing. Green → run the sweep:
+
    `node "${CLAUDE_PLUGIN_ROOT}/workflows/mechanical-sweep.js" "$(cat .devcycle/sweep-args.json)"`
+
    with `DEVCYCLE_SWEEP_MODEL` as resolved in step 2. The script reads its JSON
    from `argv[2]` only; the double-quoted command substitution hands the file's
    contents through as one intact argument, so no escaping is needed no matter
@@ -89,13 +104,14 @@ this as a supervised sweep."
      also fire mid-sweep, after files were copied back, with no report listing
      them: check `git status` over the targets first, and treat anything found
      under the re-run rule.
-   - **Exit 0**: save the stdout report to `.devcycle/sweep-report.json`;
-     skipped files with their reasons carry into the handoff block. Non-empty
-     `applied` → step 5. Empty `applied` means nothing was swept and there is
-     nothing to commit (normalization can drop every file before the baseline
-     verify even runs): skip step 5, relay the report's per-file reasons
-     verbatim, and stop for a user decision — close out as-is, or adjust the
-     parameters and re-run.
+   - **Exit 0**: save the stdout report to `.devcycle/sweep-report.json`; skipped
+     files with their reasons carry into the handoff block. The baseline is
+     already on disk from this step's opening. Non-empty `applied` → step 5.
+     Empty `applied` means nothing
+     was swept and there is nothing to commit (normalization can drop every
+     file before the baseline verify even runs): skip step 5, relay the
+     report's per-file reasons verbatim, and stop for a user decision — close
+     out as-is, or adjust the parameters and re-run.
 
    **Re-run rule.** Before ANY re-run over targets already carrying this
    sweep's edits — a retry after a hard stop, a re-run after a fatal exit, or a
@@ -103,26 +119,31 @@ this as a supervised sweep."
    (`git checkout -- <the applied or confirmed files>`) and run from clean. A
    non-idempotent instruction applied a second time passes per-file verify and
    rides into the commit doubled; starting clean also keeps the pilot's
-   early-stop working. The revert is safe only for the sweep's own edits: if
+   early-stop working. A retry that changed the verifyCommand also re-captures
+   `.devcycle/evidence/sweep-before.txt` from the reverted tree — a baseline
+   taken with a different command is not this run's baseline. The revert is safe
+   only for the sweep's own edits: if
    the targets may have changed underneath the run (a parallel session on the
    same checkout), show `git diff -- <targets>` and have the user confirm
    before reverting.
 5. **Verify the real tree, then commit.** Run the confirmed verifyCommand in
-   the real working tree and capture its output verbatim — the script's
-   worktree carries HEAD state for every non-target file, so this is the only
-   green produced against the exact tree being committed. Red → treat it as a
-   hard stop: report verbatim, stop for a user decision, never commit. Green →
-   ONE Conventional Commit for the whole sweep, scoped by pathspec on the
-   commit itself: `git commit -- <the confirmed target files>`. Never
+   the real working tree and write its output verbatim to
+   `.devcycle/evidence/sweep-after.txt` — the script's worktree carries HEAD
+   state for every non-target file, so this is the only green produced against
+   the exact tree being committed. Red → treat it as a hard stop: report
+   verbatim, stop for a user decision, never commit. Green → ONE Conventional
+   Commit for the whole sweep, scoped by pathspec on the commit itself:
+   `git commit -- <the confirmed target files>`. Never
    `git add -A`, `commit -a`, or a bare `git commit` — a bare commit ships
    whatever else the user had staged. Then record the resulting sha on a
    `sweepCommit:` line in `.devcycle/state.md` IMMEDIATELY, before any other
-   action: resume reads that line rather than guessing which entry in `git log`
-   is the sweep's, and a crash inside this window leaves only the resume
-   table's backstop under it.
+   action: resume's commit-marker check keys off that line rather than guessing
+   which entry in `git log` is the sweep's, and a crash inside this window
+   leaves only the resume table's backstop under it.
 6. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent
-   with the diff and the sweep report (skips included). On reject: fix
-   in-session, re-run the verifyCommand, re-dispatch until accept, then fold
+   with the diff, the two evidence files, and the sweep report (skips
+   included). On reject: fix in-session, re-run the verifyCommand (rewriting
+   `.devcycle/evidence/sweep-after.txt`), re-dispatch until accept, then fold
    the accepted fix into the sweep commit. The fix must stay within the
    confirmed target files — a finding whose fix needs any other file exceeds
    the sweep's mechanical scope and stops for a user decision (the escalation
@@ -134,16 +155,22 @@ this as a supervised sweep."
    (the commit is on a remote) → do not amend; commit the fix as a separate
    follow-up. No review panel, no cross-model lens, no red-team — those belong
    to the full branch-review stage, not here.
-7. **Handoff.** Emit this stage's block (`Stage completed: sweep`), set
-   `stage: finish` in `.devcycle/state.md`, and hand to
-   `devcycle:finishing-the-cycle` unchanged — its policy resolution and git
-   action apply exactly as at the end of the full pipeline.
+7. **Handoff.** Emit this stage's block (`Stage completed: sweep`) per
+   **Handoff block** below, set `stage: finish` in `.devcycle/state.md`, and
+   hand to `devcycle:finishing-the-cycle` unchanged — its policy resolution and
+   git action apply exactly as at the end of the full pipeline.
 
-**Evidence class:** `green-green` by construction — the script's green baseline
-run and per-file verify runs (captured in the sweep report) plus step 5's
-real-tree run before the commit, all captured verbatim. The one exception is an
-exit 0 with an empty `applied` list: no commit happens on that path, and the
-evidence is the report's per-file skip reasons.
+**Evidence.** The classes, the file-backed contract, and this path's
+coordinator-written evidence files are owned by
+`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` — read it there. Three things are
+route-specific and live only here. First, the class: `green-green` by
+construction, since a sweep preserves behavior by definition. Second, where
+`sweep-before.txt` comes from:
+the coordinator's own pre-sweep verify run in step 4, taken on the clean tree
+before the script is invoked — not from the script, which discards a green
+baseline's output. Third, the one exception:
+an exit 0 with an empty `applied` list commits nothing, and the evidence is then
+the report's per-file skip reasons.
 
 **Escalation valve.** If derivation reveals per-file judgment, an ambiguous
 rule, or an exploding file list — stop, say so, and re-enter the normal
@@ -159,8 +186,8 @@ Sweep runs still write `.devcycle/state.md` in the standard shape
   them; its artifacts are `.devcycle/sweep-plan.md`, `sweep-args.json`, and
   `sweep-report.json`.
 - `request:` carries the edit rule being swept.
-- `ledger:` stays the standard `.superpowers/sdd/progress.md` line but is
-  unused — the sweep has no wave dispatches to log.
+- `ledger:` stays the standard `.devcycle/ledger.md` line but is unused — the
+  sweep has no wave dispatches to log.
 - `sweepCommit:` is a sweep-only extra line, absent until step 5 commits and
   then carrying that commit's sha (rewritten by step 6's amend).
 - An abort — at gate 2 or at a hard stop — closes the cycle: `stage: done`,
@@ -170,32 +197,20 @@ Sweep runs still write `.devcycle/state.md` in the standard shape
 
 ## Handoff block
 
-```markdown
-## Handoff
-- Stage completed: sweep
-- Artifacts: <branch; commit sha; .devcycle/sweep-plan.md; .devcycle/sweep-report.json>
-- Carry-overs: <skipped files with reasons, or "none">
-- Context action: Continue
-- Compaction hint: Keep the branch name, commit sha, and skipped files. Drop the sweep run output.
-```
-
-`Context action` is always `Continue` here — sweep and finish fit in one
-session.
+Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and follow it — the block's
+shape, the `sweep → finish` context action, and the await gate are all its
+rules. This stage's block reports `Stage completed: sweep`, listing the branch,
+the commit sha, `.devcycle/sweep-plan.md`, and `.devcycle/sweep-report.json`
+as artifacts, and skipped files with their reasons as carry-overs.
 
 ## Resume (`/devcycle:continue`)
 
-On re-entry at `stage: sweep`, first settle the branch, keyed off the `branch:`
-line RECORDED in `.devcycle/state.md`, not off whatever the checkout currently
-happens to be on: get the checkout onto the recorded branch
-(`commands/continue.md`'s recorded-vs-current mismatch rule covers asking
-first), and never create a fresh topic branch when one is recorded — that is
-where any swept work lives. Only if the recorded branch is still the default or
-an integration branch does step 1 apply.
-
-Then derive position from git evidence, checking the sweep commit FIRST: it
-counts as present when `.devcycle/state.md` carries a `sweepCommit:` line and
-`git merge-base --is-ancestor <sha> <branch>` exits 0. Never guess it from the
-log.
+Read `${CLAUDE_PLUGIN_ROOT}/references/resume.md` and follow it: settling the
+checkout onto the recorded branch comes first, then git evidence — led here by
+the `sweepCommit:` marker check, since this path records one — and review
+acceptance is never inferable from git, so a sweep commit found on resume is
+committed but not yet accepted and step 6 runs again. On top of that
+reference's rows, this path reads its own evidence as:
 
 | git evidence | resume action |
 | --- | --- |
@@ -210,11 +225,6 @@ finds uncommitted target edits, show `git diff -- <targets>` and have the user
 confirm they are this sweep's own before anything is reverted, re-run, or
 amended; if they cannot vouch, stop for a decision — revert, commit separately,
 or drop those files.
-
-Review acceptance is never inferable from git; only step 7 advancing `stage:`
-to `finish` records it. So an existing commit on resume is always committed but
-not yet accepted: dispatch the reviewer. A redundant re-review is the safe
-failure mode.
 
 ## Guardrails preserved vs. dropped
 

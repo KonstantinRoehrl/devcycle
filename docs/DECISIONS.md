@@ -5,6 +5,320 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-07-27 — `auto` releases a knob back to the profile; the upgrade trap is asked about, not fixed silently
+
+**Decision:** `auto` becomes a sanctioned value on the two profile-covered behavioral knobs
+(`reviewDepth`, `onDeviceGate`), meaning "let the profile govern this" — the same convention
+the four `*Model` knobs already use, and one more case in `references/config.md`'s single
+resolution list rather than a second rule. `/devcycle:cycle` detects the upgrade signature
+before any stage runs — `${user_config.profile}` still a literal placeholder (it ships in
+this release, so nobody has set it) while at least one behavioral knob substitutes to a real
+value (only an earlier configuration can have set one) — and asks ONE question: adopt a
+profile and let it govern (writing `profile=<value>` plus `auto` for the shadowing knobs
+only), keep the current explicit knobs and skip the profile, or customize. Every completion
+of either configuration offer records a `· profile-asked` marker on the state file's
+`configured:` line, and the marker — not the signature — is what makes the offer one-time.
+**Why:** The previous entry's fix — write only `profile` at first run — protects future
+users and does nothing for existing ones. The pre-0.8.0 walkthrough wrote all four
+behavioral knobs explicitly, "including on 'use defaults'", so every user who ever completed
+it upgrades into a state where `profile: thorough` changes nothing at all, silently: the
+feature is dead on arrival for exactly the people already running the plugin. Silently
+ignoring an explicit knob when a profile is set would fix the symptom and lose something
+real — the user chose that value, and demoting a stated choice without asking is a worse
+defect than the one it cures, especially for `onDeviceGate`, where the discarded choice is
+"a human must sign off". Hence a value rather than a deletion (`--config <knob>=auto` keeps
+the knob visible and re-pinnable), and a question rather than an action. The signature alone
+is NOT sufficient to identify an upgrader, and an earlier draft of this change wrongly
+assumed it was: this release's own customize path writes a moved knob without writing
+`profile`, so a brand-new user who pins `reviewDepth` reproduces the signature exactly on
+their next cycle and would have been asked to undo a choice they had just made. Hence the
+marker, written on every completion of either offer — the invariant is "never ask a user
+this release has already asked", which no property of the rendered knobs can express. It is
+per-repo, so the two answers that do not write `profile` hold for one repo rather than
+globally; being asked once more in another repo is the accepted cost of never acting
+unasked. Its scope is deliberately narrower than its trigger —
+`gitPolicy` and `crossModelReview` are outside the profile matrix, so an explicit value
+there shadows nothing and is never rewritten, and when the shadowing set is empty there is
+nothing to migrate and the ordinary first-run walkthrough runs instead.
+**Supersedes:** Nothing reversed. It completes the 2026-07-26 `profile` entry below, whose
+resolution order (an explicit knob wins verbatim and forever) is exactly the mechanism that
+makes the trap possible and is left intact — that entry described the trap for the first-run
+path and closed it there, but did not carry the reasoning across the upgrade boundary. It
+also narrows that entry's reading of `auto` as a `*Model`-only convention: `auto` is now
+general, and a stage skill's allowed-value enumeration (`single` | `panel`) names what a
+knob resolves *to*, never a set that makes `auto` invalid.
+
+## 2026-07-26 — one `profile` knob sizes the pipeline; an unset knob takes the profile's value
+
+**Decision:** A new `profile` option (`lean` | `standard` | `thorough`, default `standard`)
+picks the cost/rigor of every stage at once: the planning and execution engine, the
+branch review engine, the on-device gate, the evidence tail in subagent reports, the
+branch-review round cap, and audit depth. Resolution order, binding and stated once in
+`references/config.md`: a knob explicitly configured — neither a literal `${user_config...}`
+placeholder nor `auto` — wins verbatim; otherwise the profile's column value applies;
+`profile` itself falls back to `standard` when unset or out of range, with the state file's
+`configured:` line governing the current run. The first-run walkthrough becomes ONE question
+over `profile` and writes only `profile=<value>`; the old four-knob batch survives as its
+"customize individual knobs" branch.
+**Why:** The cost/rigor trade-off was a fixed shape with no dial — a one-file docs change and
+a multi-subsystem feature paid the same overhead — and the only way to move it was to assemble
+it by hand from four unrelated switches. Writing the individual knobs at first run would have
+been worse than not asking: an explicit knob shadows the profile forever, so a walkthrough that
+wrote out that moment's defaults would quietly pin them and the profile could never move them
+again.
+**Supersedes:** The knob-resolution convention recorded in the 2026-07-25 "finish stage
+extracted into the finishing-the-cycle skill" entry — "literal placeholder = unset,
+out-of-range = invalid, both → the knob's documented default" — on both counts. The documented
+default is no longer what an unset knob resolves to; the profile's column is, and the
+per-knob default in `plugin.json` now only describes what `standard` happens to resolve to.
+That entry also placed the convention canonically in `/devcycle:cycle`'s Configuration
+section; it lives in `references/config.md` now, and the command carries a pointer.
+`standard`'s column reproduces the pre-0.8.0 defaults for `reviewDepth` and `onDeviceGate`,
+so the only intentional change of default behavior is the execution engine (next entry).
+Also supersedes the four-knob AskUserQuestion batch and the "use defaults, don't ask again"
+answer of the 2026-07-23 "first-run config walkthrough" entry. That entry's reasoning — make
+the invisible unset-means-default behavior visible exactly once — still holds, and is why the
+offer survives at all; what it got wrong is the mechanism. Its instruction to apply the answers
+by writing the explicit default values, "including on 'use defaults'", is precisely the trap
+above: it would have made all four knobs explicit and permanently un-profileable for every
+user who took the recommended answer.
+
+## 2026-07-26 — `lean` and `standard` run devcycle-native engines; upstream overlays move to `thorough`
+
+**Decision:** At `lean` and `standard`, `devcycle:planning-waves` and
+`devcycle:executing-waves` are self-contained: they do NOT load `superpowers:writing-plans`
+or `superpowers:subagent-driven-development`, and carry the plan template, right-sizing,
+step-granularity, brief-slicing and review-loop mechanics they need inline. At `thorough`
+they overlay upstream exactly as they did through 0.7.0. One behavioral contract spans both
+engines — the same plan output contract, the same wave-formation invariants, the same ledger
+events, the same green gate, the same review cycle — so a finished plan and a finished wave
+have the same shape whichever engine produced them; only the *source* of the mechanics
+differs. The `red-green` TDD splice follows the same rule: the full
+`superpowers:test-driven-development` content at `thorough`, and at `lean`/`standard` an
+excerpt carrying exactly three things (failing test first; run it and capture red before
+writing implementation; then minimal code and capture green). `superpowers:brainstorming` and
+`superpowers:systematic-debugging` are unchanged at every profile — they are interview and
+diagnosis stages whose value is the process itself.
+**Why:** Measured: devcycle's own surface is 100.9k chars and upstream added 70.1k on top, of
+which `subagent-driven-development` alone is 28.1k loaded under a 14.3k overlay. Every run
+paid for the whole upstream skill in order to reach mechanics the overlay had already narrowed
+or replaced — its final-code-reviewer dispatch and its finishing-a-development-branch step
+never applied here, its implementers-commit convention is inverted in devcycle (the
+coordinator commits), and its progress-file path was overridden. The overlay is not wrong;
+it is simply not worth its weight at every size of change, which is what a profile is for.
+**Supersedes:** No earlier entry in this log decided the unconditional overlay — it is a
+founding-spec premise, carried in both skills' `REQUIRED SUB-SKILL` lines since the day each
+skill was created. This
+narrows that premise to `thorough` rather than abandoning it, and it does not touch the
+superpowers dependency itself: `superpowers:brainstorming`,
+`superpowers:systematic-debugging`, `superpowers:requesting-code-review` and `thorough`'s
+overlays still require it, so the 2026-07-23 dependency-pin entry and the 2026-07-23
+"install: linked, not documented" entry stand unchanged.
+
+## 2026-07-26 — the profile's engine row is narrowed to planning and execution; brainstorm stays upstream
+
+**Decision:** The profile matrix row reads `planning / execution engine`, not
+`brainstorm / planning / execution engine`. Only `devcycle:planning-waves` and
+`devcycle:executing-waves` carry a profile-keyed engine-selection block; the brainstorm stage
+runs `superpowers:brainstorming` unmodified at every profile, exactly as the diagnosis stage
+runs `superpowers:systematic-debugging` unmodified at every profile. `references/config.md`'s
+row is narrowed to match what shipped; `README.md` and `DESIGN.md` carry the narrowed row.
+**Why:** The row as pinned promised a devcycle-native brainstorm engine at `lean` and
+`standard`, and none was built — nothing in `/devcycle:cycle` switches the brainstorm stage on
+the profile. Offered the choice between building one and narrowing the claim, the repo owner
+chose to narrow it, and the stage is the reason: brainstorm's value is the interview process
+itself, so a compact reimplementation would be cutting the substance rather than the ceremony
+— the same argument that keeps `systematic-debugging` untouched. Leaving the wide row in place
+was the worse option on its own terms: a matrix that advertises a switch the tree does not make
+is precisely the phantom-default failure this release already corrects once, for
+`reviewDepth: single`, and shipping a second one in the same release would undercut the
+correction.
+**Supersedes:** The `brainstorm / planning / execution engine` row as pinned in this cycle's
+own plan (`docs/superpowers/plans/2026-07-26-compact-profile-driven-devcycle.md`) and its
+design spec, and the first version of that row in `references/config.md`. The plan and the
+shipped tree therefore differ here **by decision, not drift** — the plan records what was
+ordered and is not rewritten, per this log's rule for historical artifacts, and this entry is
+the pointer that accounts for the difference. Nothing in the native-engines entry above changes:
+planning and execution do switch, and their single behavioral contract across both engines
+stands. The narrowing is reversible in the widening direction — a devcycle-native brainstorm
+engine remains buildable later and would re-widen the row rather than contradict this entry.
+
+## 2026-07-26 — `reviewDepth: single` redefined: `code-review` is a fold-in, not the engine
+
+**Decision:** `single` IS this pipeline's own review: `reviewing-the-branch`'s
+spec-compliance layer plus the reviewer guidance of `superpowers:requesting-code-review`
+(severity calibration, read-only review of the work product, structured findings, crafted
+reviewer context rather than session history). The built-in `code-review` skill is
+user-invocation-only in current Claude Code — an agent cannot launch it — so it is demoted to
+an opportunistic fold-in: if the user has run it on the branch independently, its findings are
+folded in and the engine line reads `single + user-run code-review`. The "graceful
+degradation" framing is removed from `single` (nothing is degraded any more) and kept for
+`panel`, which falls back to `single` and says so. The engine line's permitted values are
+pinned to exactly five: `single`, `single + user-run code-review`, `panel`,
+`panel [+ cross-model lens]`, `panel→single (panel unavailable: <reason>)`.
+**Why:** The default branch-review engine named a skill no agent can invoke, so in practice
+every default-configuration review took the "degraded" path and labelled itself degraded in
+its own report — the plugin's default gate describing itself as a failure mode while running
+the exact review it always meant to run. A report shape that can only ever print the
+apology makes the engine line worthless for auditing which engine actually ran.
+**Supersedes:** `reviewing-the-branch`'s engine-selection rule ("run the built-in
+`code-review` skill against the branch, then layer the spec-compliance review on top") and its
+degradation clause. It also finishes the job of the 2026-07-23 "red-team-reviewer wired into
+the panel; mechanical-sweep demoted to manual" entry: that entry's principle — a component
+documented as used must either be wired in or have its docs match reality — was applied to
+`red-team-reviewer` and `mechanical-sweep.js` while `code-review`, an orphan of exactly the
+same kind sitting in the default path, was left promising an integration that could not
+exist.
+
+## 2026-07-26 — the ledger moves into devcycle's own namespace
+
+**Decision:** The ledger lives at `.devcycle/ledger.md`, everywhere and unconditionally, and
+its event enum gains `review-round`:
+`dispatched|report-received|review-round|review-verdict|committed|user-decision`. At
+`thorough`, where upstream `subagent-driven-development` is loaded, devcycle's path overrides
+upstream's progress-file path — stated explicitly in `executing-waves` so the two are never
+both written.
+**Why:** The ledger was the last piece of devcycle's durable state living in another plugin's
+namespace while `state.md`, `diagnosis.md`, the evidence files and `sweep-report.json` all sit
+under `.devcycle/`. Two concrete costs: a user who gitignores or clears `.devcycle/` (which
+the README now recommends for target repos) got a half-cleared cycle with an orphan ledger
+still claiming tasks were committed, and anyone reading `.superpowers/sdd/` found two plugins'
+records interleaved with no owner marked on either.
+**Supersedes:** The pinned upstream path in `executing-waves` — "single source of truth for
+progress, at upstream's path `.superpowers/sdd/progress.md`" — and every restatement of it in
+`/devcycle:cycle`'s state shape, `/devcycle:continue`, both short-path skills, and
+`reviewing-the-branch`. Not retroactive: existing `.superpowers/sdd/progress.md` files are
+records of past runs and are kept where they are, per this log's own rule about historical
+artifacts. Breaking for a cycle in flight at the upgrade — see the release note below.
+
+## 2026-07-26 — evidence lives in files; reports name paths, not transcripts
+
+**Decision:** Verification output is written to `.devcycle/evidence/<task-id>-before.txt` and
+`-after.txt` (`<task-id>` = the plan's task number, or `fast` / `sweep` on the short paths).
+The implementer report names those paths with their exit statuses and quotes only a tail of
+the "after" output, `<N>` lines sized by the profile (10 / 20 / 50) and pinned per dispatch in
+the brief as `**Evidence tail:** <N>`. The task reviewer reads the named files directly rather
+than trusting the tail, and rejects when a named file is missing or empty, when an exit status
+contradicts the declared class (a `red-green` "before" that exited 0, a `green-green` "before"
+that did not exit 0), or when the class mismatches the diff. On the sweep path, where no
+implementer exists, the coordinator writes the two files itself.
+**Why:** The coordinator's green gate re-runs the task's command and reads the exit status, so
+the coordinator already holds ground truth — the inlined copy duplicated it at the price of a
+whole suite's output per task per review round, carried through the implementer's report, the
+reviewer's dispatch prompt, and the coordinator's own context.
+**Supersedes:** The 2026-07-25 "per-task evidence classes replace unconditional red→green"
+entry, in the one respect that each class's proof must be carried as verbatim output inside
+the report — `red-green` as "verbatim failing-then-passing test output", `green-green` as "the
+same suite command verbatim green before and after". That entry's substance is untouched and
+still governs: planning picks the class, the implementer works to it, the reviewer rejects
+reports lacking the evidence their class requires. What it got wrong is where the proof lives,
+and the mistake was not only cost. Making the reviewer's rejection rule depend on text the
+report copies in let a report be internally consistent and still wrong about the run it
+describes; reading the files and their exit statuses checks the artifact instead of the claim,
+which is strictly stronger than what it replaces.
+
+## 2026-07-26 — the branch-review loop is bounded, with both terminal states named
+
+**Decision:** `reviewing-the-branch`'s findings loop gains a termination contract. The round
+cap comes from the profile (2 / 3 / 5), with one `review-round` ledger event per round. Round 1
+reviews the whole branch; rounds 2..N review the fix diff plus a re-check of the specific
+findings the previous round raised, not a fresh whole-branch pass. Only blocking findings
+re-open the loop; non-blocking findings are recorded as carry-overs when first raised and never
+consume a round. At the cap there are exactly two terminal states: no blocking findings
+outstanding → verdict `pass` with the residue listed as carry-overs; blocking findings
+outstanding → verdict `fixes-required`, the stage stops and reports for a user decision,
+keeping `stage: branch-review` in the state file and emitting its handoff block for the stop.
+**Why:** The loop said "loop until a review returns no blocking findings" with no bound, no
+narrowing between rounds, and no defined outcome for a loop that does not converge — so
+non-convergence had no representation in the system at all and could only be ended by hand.
+This repo's own previous cycle is the evidence: `.superpowers/sdd/progress.md:282` records
+`outcome=STOP-loop-user-directed-close-round14-findings-accepted-as-carry-overs` — fourteen
+rounds and thirteen fix commits, terminated by a human because the skill had no way to stop
+itself.
+**Supersedes:** The unbounded findings loop in `reviewing-the-branch`. Its rule "never
+downgrade a finding to close the loop faster" is kept verbatim in force and extended to the cap
+itself: reaching the cap NEVER converts an outstanding blocking finding into a pass, and no
+finding is downgraded in severity to reach it. A cap that could launder a blocking finding into
+a pass would make every `pass` from this gate unreadable — the bound limits effort, never
+truth, and that guardrail is unconditional at every profile.
+
+## 2026-07-26 — branch discipline belongs to every committing path
+
+**Decision:** Branch discipline is stated once, in `references/branch.md`, and invoked by
+every path that commits: `executing-waves`' pre-flight before wave 1, step 1 of both short-path
+skills, and `/devcycle:continue` on resume. The rule: before any stage that commits, if the
+checkout is on the repo's default branch or on an integration branch — `dev`, `develop`,
+`integration`, or one the user names — create a topic branch and record it on the `branch:`
+line of `.devcycle/state.md`; never commit cycle work directly to either.
+**Why:** The full pipeline had no rule of its own — it delegated to upstream
+`subagent-driven-development`'s never-start-on-main rule, which covers `main` and `master`
+only. A cycle started on `dev` therefore had the coordinator committing every accepted task
+straight onto the integration branch, wave after wave, with nothing in the pipeline objecting.
+The gap ran backwards: the two paths with the least ceremony already forbade exactly that. And
+under the native engines above, upstream is not loaded at `lean` or `standard` at all, so
+delegation would have left the full pipeline with no rule whatsoever.
+**Supersedes:** `executing-waves`' reliance on upstream's rule, and the framing of the two
+2026-07-25 short-path entries — "triage gains a size axis; trivial requests take a fast path"
+and "sweep routing wired in at both levels" — both of which counted topic-branch discipline
+among the guardrails the short path *keeps* relative to the full pipeline. That framing was
+the reason the gap survived review: listing branch discipline as something the short paths
+preserve implies the full pipeline is where it came from, when in fact the short paths were
+the only place it was written down. It is not theirs to keep; it belongs to every committing
+path, and those two entries' guardrail lists should be read with that correction.
+
+## 2026-07-26 — triage confirms every verdict, not just the short-path one
+
+**Decision:** Triage judges maturity, kind and size as before, then puts all of them to the
+user in ONE AskUserQuestion **before any stage runs**: the entry stage the maturity verdict
+picked and why, the kind verdict, and the size verdict when one fired. The options are confirm;
+start at scoping instead; take the offered short path (`fast-path`, `sweep`, or the new
+audit-in-place-of-scoping route); or run the full pipeline. Net question count is unchanged —
+this replaces the size-only question rather than adding to it — and it is not
+profile-conditional: a `lean` run asks it too.
+**Why:** The maturity verdict decides whether the scoping interview happens at all, which is
+the highest-blast-radius call triage makes, and it was announced rather than asked. A request
+that merely read as well-specified went straight past the interview, and the user's only
+recourse was to notice the announcement mid-stream and object. Meanwhile the lowest-stakes
+verdict already had a confirm gate. Asking about all three costs one question and puts the
+consequential judgment where the never-assume rule already says judgments of this size belong.
+**Supersedes:** The confirmation rule of the 2026-07-25 "triage gains a size axis" entry —
+"the verdict never auto-fires: triage announces it and asks" — which was scoped to the size
+verdict alone, and the 2026-07-25 "triage gains a kind axis" entry, under which triage judged
+maturity and kind and merely "announced all verdicts with the entry stage before proceeding".
+Both entries treated announcement as sufficient for maturity and kind while treating
+confirmation as necessary for the short path; the ranking was backwards, since choosing the
+short path is recoverable (the escalation valve exists) while a skipped scoping interview is
+only discovered later, in a spec built on assumptions nobody stated.
+
+## 2026-07-26 — release note: these are breaking, nothing was in flight, and the release is `0.8.0`
+
+Three of the entries above break a cycle that is in flight across the upgrade: the ledger move
+(a running cycle's ledger path changes underneath it), the file-backed evidence and report
+shape (an in-flight wave's implementer reports no longer carry what the reviewer now demands),
+and the change in what an unset knob resolves to (a run relying on a documented default now
+takes the profile's column value — for the execution engine, a different engine). No cycle was
+in flight: the only run in progress was this one, which introduced them. Nothing is migrated
+and nothing is rewritten backwards; artifacts of past runs stay where they are.
+
+The release is **`0.8.0`, not `1.0.0`, by explicit choice.** devcycle is pre-1.0 with no
+external consumer pinned to the 0.7.0 shapes, and 0.x minor bumps are exactly where breaking
+rearrangement is meant to happen; spending the 1.0 signal on an internal restructure would say
+something about stability that is not yet true.
+
+The consequence, recorded here so it is not later "fixed": **this cycle's commit subjects
+deliberately carry no `!` marker and no body carries a `BREAKING CHANGE:` trailer.**
+`scripts/bump-version.mjs` reads Conventional Commit subjects since the last tag and computes
+`major` — `0.7.0` → `1.0.0` — from either marker; without them a `feat` subject computes the
+intended `0.8.0`. The PR title is likewise `feat(devcycle): compact, profile-driven pipeline
+with an audit skill`, with no `!`. The absent marker is a statement about the version number,
+not an oversight about the breakage; the breakage itself is recorded in this log, and in the
+commit subjects the release turns into the changelog. Nothing is hand-written into
+`CHANGELOG.md` for this cycle, deliberately: `scripts/bump-version.mjs` collects the
+Conventional Commit subjects since the last tag and prepends them as that release's section
+at bump time. The subjects ARE the entry, which is the second reason they all have to parse
+as Conventional Commits — a hand-written entry here would not be a record the tooling honors,
+it would be a duplicate sitting above the generated one saying the same thing.
+
 ## 2026-07-25 — sweep routing wired in at both levels
 
 Triage gains a bulk-mechanical Size verdict (gate 1: sweep path vs. full

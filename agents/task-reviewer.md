@@ -30,21 +30,17 @@ inspection and verification).
 2. **Correctness** — read the actual diff and reason about it directly; don't
    take the implementer's report on faith. Re-run the verification command
    yourself where practical to confirm the claimed result.
-3. **Evidence** — the report must carry the verbatim before/after output the
-   brief's `**Evidence:**` class requires (a brief with no class line is
-   `red-green`):
-   - `red-green`: verbatim failing (red) output followed by verbatim passing
-     (green) output.
-   - `green-green`: the same suite command captured verbatim green BEFORE and
-     green AFTER the change.
-   - `convention`: the repo's own documented verification convention with its
-     before/after output.
-
-   **Reject any report that lacks the evidence its class requires**, even if
-   the diff looks correct on inspection — a report without evidence is a
-   report you cannot verify. Also reject a mismatched class: a diff that adds
-   or changes behavior under a `green-green` claim needed a failing test
-   first.
+3. **Evidence** — read
+   `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` and judge the report
+   against it (a brief with no `**Evidence:**` class line is `red-green`).
+   Open the before/after files the report names and read them yourself; the
+   tail in the report is a convenience copy and is never what you judge.
+   **Reject on any of that file's rejection conditions** — a named evidence
+   file missing or empty, an exit status contradicting the declared class in
+   either direction, or a class that mismatches the diff — even when the
+   diff looks correct on inspection. A report whose evidence you cannot open
+   and check is a report you cannot verify, and a report whose named path
+   does not exist is a missing file, not a formatting slip.
 
 ## Reviewer hygiene (read before judging anything)
 
@@ -69,6 +65,7 @@ Verdict: accept | needs-changes
 ...
 ```
 
-State each finding symptom first (what's wrong or missing) before the
-mechanism, in plain language. If there is nothing to flag, say so explicitly
-rather than omitting the findings section.
+Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`. Within that, state
+each finding symptom first (what's wrong or missing) before the mechanism, in
+plain language. If there is nothing to flag, say so explicitly rather than
+omitting the findings section.

@@ -5,11 +5,29 @@ description: Use when an approved spec or design needs an implementation plan fo
 
 # Planning Waves
 
-Produce an implementation plan that wave-based parallel execution can consume. This skill is a delta on top of upstream plan-writing: it adds only the feasibility gate, dependency declarations, dispatch map, and reuse rules below.
-
-**REQUIRED SUB-SKILL:** `superpowers:writing-plans` — follow it for plan location and naming, scope check, file-structure mapping, task right-sizing, step granularity, the header and task templates, no-placeholders rules, and self-review. Where this skill and upstream disagree, this skill wins (see Overrides).
+Produce an implementation plan that wave-based parallel execution can consume. Report per
+`${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
 **Announce at start:** "I'm using the planning-waves skill to create the implementation plan."
+
+## Engine selection (keyed to `profile`)
+
+Resolve `profile` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`, then take one engine:
+
+- **`lean` / `standard` — devcycle-native.** Do NOT load `superpowers:writing-plans`. The
+  Plan mechanics section below carries the plan location, scope check, right-sizing, step
+  granularity, templates, no-placeholders rule, and self-review inline.
+- **`thorough` — upstream overlay. REQUIRED SUB-SKILL:** `superpowers:writing-plans` —
+  follow it for plan location and naming, scope check, file-structure mapping, task
+  right-sizing, step granularity, the header and task templates, no-placeholders rules, and
+  self-review, with this skill's Overrides section on top. Where the two disagree, this
+  skill wins.
+
+The engine decides only where the plan-writing mechanics come from. Everything else here —
+the feasibility gate, the twin execution-strategy goals, the dependency and evidence
+declarations, the `Execution: sweep` marker, the Dispatch Map, reuse-before-rebuild, and the
+output contract — is unconditional, so a finished plan has the same shape whichever engine
+produced it.
 
 ## Feasibility gate — before any detailed planning
 
@@ -40,6 +58,104 @@ The goals reinforce each other — a task small enough to hold a self-contained 
 
 Dependencies are then **derived, not decreed**: a task depends on exactly the tasks whose produced interfaces or files it consumes — nothing more, unless a real ordering constraint exists that consumption doesn't capture (a migration before schema users, a destructive step last), in which case declare it with its reason like any other dependency. The declarations below and the Dispatch Map turn those derived dependencies into the execution order; anything not forced into sequence by a real dependency stays parallel.
 
+## Plan mechanics — the native engine (`lean` / `standard`)
+
+Skip this section at `thorough`; the sub-skill supplies it there.
+
+**Where the plan goes:** `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`. A user preference for plan location overrides this default.
+
+**Scope check.** If the spec covers multiple independent subsystems, it should have been split into sub-project specs during brainstorming. If it wasn't, suggest one plan per subsystem — each plan must produce working, testable software on its own.
+
+**Task right-sizing.** A task is the smallest unit that carries its own test cycle and is worth a fresh reviewer's gate. Fold setup, configuration, scaffolding, and documentation steps into the task whose deliverable needs them; split only where a reviewer could meaningfully reject one task while approving its neighbor. Each task ends with an independently testable deliverable.
+
+**Step granularity.** Each step is one action, 2–5 minutes of work, written in the order the task's evidence class requires — for `red-green`: write the failing test / run it and confirm it fails / write the minimal code / run it and confirm it passes. No commit step (see Overrides).
+
+**Plan header — every plan starts with it:**
+
+```markdown
+# <Feature Name> Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: use `devcycle:executing-waves` to implement
+> this plan wave by wave. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** <one sentence describing what this builds>
+
+**Architecture:** <2-3 sentences about the approach>
+
+**Tech Stack:** <key technologies and libraries>
+
+## Global Constraints
+
+<the spec's project-wide requirements — version floors, dependency limits, naming and copy
+rules, platform requirements — one line each, with exact values copied verbatim from the
+spec. Every task's requirements implicitly include this section.>
+
+---
+```
+
+**Task template:**
+
+````markdown
+### Task N: <Component Name>
+
+**Files:**
+- Create: `exact/path/to/file.py`
+- Modify: `exact/path/to/existing.py:123-145`
+- Test: `tests/exact/path/to/test.py`
+
+**Interfaces:**
+- Consumes: <what this task uses from earlier tasks — exact signatures>
+- Produces: <what later tasks rely on — exact function names, parameter and return types.
+  An implementer sees only their own task; this block is how they learn the names and
+  types neighboring tasks use.>
+
+**Dependencies:** none (completely independent)
+
+**Evidence:** red-green
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+def test_specific_behavior():
+    result = function(input)
+    assert result == expected
+```
+
+- [ ] **Step 2: Run the test and confirm it fails**
+
+Run: `pytest tests/path/test.py::test_name -v`
+Expected: FAIL with "function not defined"
+
+- [ ] **Step 3: Write the minimal implementation**
+
+```python
+def function(input):
+    return expected
+```
+
+- [ ] **Step 4: Run the test and confirm it passes**
+
+Run: `pytest tests/path/test.py::test_name -v`
+Expected: PASS
+````
+
+**No placeholders.** Every step contains the actual content the implementer needs. These are **plan failures** — never write them:
+
+- "TBD", "TODO", "implement later", "fill in details"
+- "Add appropriate error handling" / "add validation" / "handle edge cases"
+- "Write tests for the above" (without the actual test code)
+- "Similar to Task N" (repeat the code — tasks are read out of order, and concurrently)
+- Steps that describe what to do without showing how (code steps need code blocks)
+- References to types, functions, or methods no task defines
+
+**Self-review — once the plan is complete.** A checklist you run yourself, not a subagent dispatch:
+
+1. **Spec coverage:** skim each spec requirement and point to the task that implements it. Add a task for any gap.
+2. **Placeholder scan:** search the plan for the red flags above and fix them.
+3. **Type consistency:** the signatures, method names, and property names later tasks use match what earlier tasks define — `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
+
+Fix issues inline and move on; no re-review pass.
+
 ## Dependencies — one declaration per task
 
 Every task carries a `**Dependencies:**` line in exactly one of these forms:
@@ -50,22 +166,9 @@ Every task carries a `**Dependencies:**` line in exactly one of these forms:
 
 ## Evidence class — one declaration per task
 
-Every task carries an `**Evidence:**` line naming the proof its implementation must
-produce, in exactly one of these forms:
-
-- `**Evidence:** red-green` — the task adds or changes behavior: verbatim failing (red)
-  test output before the code, verbatim passing (green) output after. The default; use it
-  whenever a failing test can express the task's outcome.
-- `**Evidence:** green-green (behavior-preserving)` — refactors and other
-  behavior-preserving changes, where no honest red state exists: the same suite command
-  run green before the change and green after, both captured verbatim.
-- `**Evidence:** convention (<command or procedure>)` — non-code tasks (docs, config) and
-  repos with no test suite: the repo's own documented verification convention, its
-  before/after output captured the same way.
-
-The class is planning's call, not the implementer's: derive it from what the task actually
-changes, and never declare `red-green` where no failing test can exist — that forces the
-implementer to fake a red or the reviewer to reject correct work.
+Every task carries an `**Evidence:**` line. Read
+`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` for the three classes and their exact
+declaration forms, and use those forms verbatim.
 
 ## Execution route — optional, one declaration per task
 
@@ -117,6 +220,8 @@ The finished plan satisfies this contract, consumed by `devcycle:executing-waves
 
 ## Overrides of upstream writing-plans
 
+These bind the `thorough` overlay; the native templates above already carry them.
+
 - The header's "For agentic workers" line names `devcycle:executing-waves` as the executor. Do not offer upstream's subagent-vs-inline execution choice.
 - Do not give tasks an implementer-executed commit step: the Conventional Commit lands via the executing-waves review cycle, on review acceptance.
 
@@ -124,15 +229,7 @@ The finished plan satisfies this contract, consumed by `devcycle:executing-waves
 
 After saving the plan (or issuing a NO-GO report), update `.devcycle/state.md`
 (`stage: execution` — the stage to resume at — and the `plan:` path; after a
-NO-GO, keep `stage: planning`) before emitting:
-
-```markdown
-## Handoff
-- Stage completed: planning
-- Artifacts: <plan path, or NO-GO report>
-- Carry-overs: <pinned interfaces / open decisions, or "none">
-- Context action: <Continue | Compact with hint | Clear + /devcycle:continue | Fresh session>
-- Compaction hint: Keep <plan path, pinned interfaces, dispatch map>. Drop <planning exploration and drafts>.
-```
-
-The plan file carries everything execution needs, so the default context action after planning is `Clear + /devcycle:continue`.
+NO-GO, keep `stage: planning`), then emit this stage's handoff block per
+`${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with `Stage completed: planning` and the
+plan path (or the NO-GO report) as its artifact. The plan file carries everything execution
+needs, so the context action after planning is `Clear + /devcycle:continue`.

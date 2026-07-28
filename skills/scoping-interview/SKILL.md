@@ -103,6 +103,8 @@ that is uncertain.
 
 ## Output and handoff
 
+This stage reports per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
+
 When the interview resolves (answers in, remaining unknowns marked `<tbd>`), write
 the scope summary to `.devcycle/scope.md` — and present it to the user — as a
 well-structured goal:
@@ -124,17 +126,15 @@ REQUIRED next stage — two cases:
   context — its questioning then targets design refinement, not re-establishing
   scope. Do not restate or replace its process here.
 
+An audit-shaped request may never reach this stage at all: `/devcycle:cycle`'s triage
+can enter the pipeline at the audit stage (`devcycle:auditing-a-repo`) instead, which
+then hands its selected findings to brainstorm.
+
 End the stage by naming the next stage explicitly in your final output. Update
 `.devcycle/state.md` (`stage: diagnosis` or `stage: brainstorm` — the stage to
-resume at — and `scope: .devcycle/scope.md`) before emitting the devcycle
-handoff block (both boundaries continue in the same conversation, per the
-pipeline lifecycle):
+resume at — and `scope: .devcycle/scope.md`), then emit the handoff block per
+`${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with:
 
-```markdown
-## Handoff
-- Stage completed: scoping
-- Artifacts: .devcycle/scope.md
-- Carry-overs: <confirmed scope, constraints, open `<tbd>` items>
-- Context action: Continue
-- Compaction hint: Keep everything. Drop nothing.
-```
+- `Stage completed:` scoping.
+- `Artifacts:` `.devcycle/scope.md`.
+- `Carry-overs:` confirmed scope, constraints, open `<tbd>` items.

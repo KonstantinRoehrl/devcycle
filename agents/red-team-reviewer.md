@@ -67,6 +67,7 @@ Verdict: accept | needs-changes
 ...
 ```
 
-State each finding symptom first (what goes wrong, under what concrete
-scenario) before the mechanism, in plain language. If you found no scenario
-worth reporting, say so explicitly rather than omitting the findings section.
+Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`. Within that, state
+each finding symptom first (what goes wrong, under what concrete scenario)
+before the mechanism, in plain language. If you found no scenario worth
+reporting, say so explicitly rather than omitting the findings section.

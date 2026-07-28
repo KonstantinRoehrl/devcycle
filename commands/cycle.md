@@ -8,17 +8,15 @@ Run the devcycle pipeline for the request in `$ARGUMENTS`. Files are the state; 
 conversation is a cache — every stage writes its artifacts to disk so the pipeline
 survives `/clear` and resumes via `/devcycle:continue`.
 
-## Configuration
+## Conventions this command does not restate
 
-Knob values arrive via `${user_config.KEY}` placeholders, each read by the stage
-skill that consumes it (gitPolicy by `devcycle:finishing-the-cycle`, models and
-review depth and the on-device gate by their stages). The resolution convention,
-everywhere: a value that still reads as a literal `${user_config...}` placeholder
-is unset, and a value outside its allowed set is invalid — both fall back to the
-knob's documented default. When a knob's placeholder is literal but the state
-file's `configured:` line records a value for it (first-run walkthrough below),
-that recorded value governs this run — same-session substitution cannot refresh,
-so `--config` writes only reach future sessions.
+- Knobs, the `profile`, and model tiers: `${CLAUDE_PLUGIN_ROOT}/references/config.md`.
+- Stage boundaries — handoff block shape, context actions, the await gate:
+  `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`.
+- Branch discipline before any stage that commits:
+  `${CLAUDE_PLUGIN_ROOT}/references/branch.md`.
+- How this command and every agent it dispatches reports:
+  `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
 ## Step 0 — create the state file (FIRST action, binding)
 
@@ -49,23 +47,34 @@ truth — every later rewrite uses exactly it:
 
 ```markdown
 # devcycle state
-- stage: <scoping|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|finish|done>  (the stage to RESUME at)
+- stage: <scoping|audit|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|finish|done>  (the stage to RESUME at)
 - root: <absolute repo toplevel this cycle belongs to>
 - branch: <git branch>
 - request: <one line: what this cycle is building/fixing>
 - scope: <path or none>
+- audit: <path or none>
 - diagnosis: <path or none>
 - spec: <path or none>
 - plan: <path or none>
-- ledger: .superpowers/sdd/progress.md
+- ledger: .devcycle/ledger.md
 - checklist: <path or none>
-- configured: <no | defaults | date + KEY=VALUE list>
+- configured: <no | defaults | date + KEY=VALUE list (possibly empty)>[ · profile-asked]
 - updated: <ISO-8601 UTC>
 ```
 
 `root:` and `request:` pin the file to one project and one goal: every reader
 verifies `root:` against its own `git rev-parse --show-toplevel` before trusting
 anything else in the file.
+
+`configured:` has one form per outcome, and this is the list that decides between
+them: `no` — never offered. `defaults` — an offer ran and wrote nothing because
+every answer matched its recommended default, so nothing is explicitly configured.
+`<date> + KEY=VALUE list` — an offer ran and wrote those. `<date>` with an empty
+list — an offer ran and wrote nothing, but explicit knobs remain from before it
+(the upgrade offer's *keep* answer); this is not `defaults`, which asserts the
+opposite. The `· profile-asked` marker rides on any of the last three: it records
+that this release's configuration question has already been put to the user in
+this repo, whichever offer put it there and whatever the answer wrote.
 
 `stage:` records the stage the NEXT session should resume at, never the stage
 just completed: at every transition, write the upcoming stage's name.
@@ -77,39 +86,164 @@ stage, that is a stage transition: rewrite the file then.
 
 ## First-run configuration (after Step 0, before triage)
 
-Offer a one-time configuration walkthrough if and only if BOTH hold:
+Read five knobs as they render in THIS text — `${user_config.profile}`,
 `${user_config.gitPolicy}`, `${user_config.reviewDepth}`,
-`${user_config.crossModelReview}`, and `${user_config.onDeviceGate}` all still
-render as literal `${user_config` placeholders, AND the state file's
-`configured:` line reads `no`. Otherwise skip straight to triage.
+`${user_config.crossModelReview}`, `${user_config.onDeviceGate}` — each either
+substituted to a real value (explicitly configured) or still a literal
+`${user_config` placeholder (never configured). That reading picks exactly one
+path, checked in order:
 
-The walkthrough is ONE AskUserQuestion batch over those four knobs — one line
-of meaning each, the default marked "(recommended)" — plus a first-class
-option **"use defaults, don't ask again"**:
+1. `profile` substituted → it is already configured; skip to triage.
+2. `profile` literal AND at least one of the four behavioral knobs substituted
+   AND the `configured:` line does NOT carry `· profile-asked` → **the upgrade
+   offer** below.
+3. `profile` literal, all four behavioral knobs literal, AND the `configured:`
+   line reads `no` → **the first-run walkthrough** below.
+
+Anything else skips to triage. None of this is profile-conditional.
+
+### The upgrade offer (explicit knobs shadow the profile)
+
+Two different users render path 2's knob combination, and the marker is the only
+thing that tells them apart:
+
+- someone configured **before** `profile` existed — most likely through the
+  pre-0.8.0 walkthrough, which wrote all four knobs explicitly, including on its
+  "use defaults" answer. They have never been asked about `profile`, and their
+  knobs will silently make any profile they pick do nothing. This offer is for
+  them;
+- someone already asked on **this** release, whose answer wrote a knob without
+  writing `profile` — the customize path does exactly that. They pinned that knob
+  deliberately, days ago, and must never be asked to undo it.
+
+The `· profile-asked` marker separates the two, which is why every completion of
+either offer writes it. Reaching this offer therefore means the profile question
+has not been put to this user in this repo. It is a per-repo record: see the
+caveat at the end of this section.
+
+The reason any of this matters is the resolution order in
+`references/config.md` — an explicitly configured knob wins over the profile
+verbatim and forever.
+
+Only profile-covered knobs can shadow a profile. The **shadowing set** is
+whichever of `reviewDepth` and `onDeviceGate` render substituted here.
+`gitPolicy` and `crossModelReview` are outside the profile matrix — an explicit
+value there shadows nothing and is never rewritten. If the shadowing set is
+empty there is nothing to migrate: run the first-run walkthrough below instead
+and record its outcome exactly as that section says, marker included.
+
+Otherwise ask ONE AskUserQuestion, before any stage runs — a batch of two:
+
+- **What should govern these settings?** State first, in plain language, which
+  knobs are explicitly set and to what, that those values override whatever
+  profile is picked so switching profiles would otherwise change nothing, and
+  that `auto` means "let the profile govern this" rather than deleting the key.
+  Offer: **adopt a profile and let it govern** (recommended) · **keep my current
+  knobs, skip the profile** · **customize individual knobs**.
+- **Which profile, if you adopt one?** `lean` · `standard` (recommended, its
+  column reproduces the pre-0.8.0 defaults) · `thorough`. Ignored unless the
+  first answer is *adopt*.
+
+What each answer writes, and nothing more:
+
+- **Adopt** — the profile plus `auto` for each knob in the shadowing set:
+
+  ```
+  claude plugin install devcycle@devcycle --config profile=<value> --config reviewDepth=auto --config onDeviceGate=auto
+  ```
+
+  Drop the `--config <knob>=auto` for any knob not in the shadowing set.
+  `gitPolicy` and `crossModelReview` are not written.
+- **Keep my current knobs** — nothing is written at all, not even `profile`
+  (unset, it reads as `standard`). The state file is what stops the re-ask.
+- **Customize** — the four-knob path below, with one change: the comparison
+  baseline is each knob's currently configured value shown in the question, not
+  the offered default, so a knob is written only when the answer moves it.
+
+Then record the outcome on the `configured:` line per Step 0's form list: the
+date, the KEY=VALUE list of what was written (empty on *keep* — not `defaults`,
+which would assert the opposite), and the `· profile-asked` marker. So
+`configured: 2026-07-27 profile=thorough, reviewDepth=auto · profile-asked` on
+*adopt*, `configured: 2026-07-27 · profile-asked` on *keep*.
+
+**The marker is per-repo; only *adopt* closes the question globally.** *Adopt*
+writes `profile`, so `${user_config.profile}` substitutes in every later session
+everywhere and path 1 takes over. *Keep* and *customize* leave `profile`
+unwritten, so the state file is the only record that the question was asked — and
+`.devcycle/state.md` lives in one repo. Those two answers therefore hold for this
+repo, and the same user starting a cycle in a different repo will be asked once
+there too. That is the honest limit of a per-repo record, and it is why the offer
+never acts on its own: being asked twice across two repos is recoverable, having
+a knob silently rewritten is not.
+
+### The first-run walkthrough
+
+The walkthrough is ONE AskUserQuestion over `profile` — the preset that sizes
+cost against rigor across every stage:
+
+- **`standard` (recommended)** — the default; picking it is also "use defaults,
+  don't ask again". Devcycle-native engines, single-reviewer branch review,
+  human-required on-device gate.
+- **`lean`** — fewer review rounds, shorter evidence tails, `auto-ok` on-device
+  gate.
+- **`thorough`** — upstream overlays, review panel, deepest audits.
+- **customize individual knobs** — take the four-knob path below instead.
+
+On a profile answer, write **only** the profile:
+
+```
+claude plugin install devcycle@devcycle --config profile=<value>
+```
+
+Nothing else, deliberately: an explicitly configured knob wins over the profile
+verbatim and forever (resolution order in `references/config.md`), so writing
+the individual knobs here would freeze this moment's values and the profile
+would never move them again.
+
+The **customize** path asks the existing four knobs in one AskUserQuestion batch
+— one line of meaning each, the default marked "(recommended)" — and then writes
+ONLY the knobs whose answer differs from the offered default, one `--config` per
+changed knob. A knob the user simply accepted at its "(recommended)" value is
+left unwritten, for the same reason the profile branch writes nothing but the
+profile: writing it would make that knob explicitly configured, and an explicit
+knob wins over the profile forever, so a later `profile: thorough` would never
+move it. If every answer matches its default, nothing is written. The four:
 
 - `gitPolicy` — what the finish stage may do with the branch
   (`local-commits-only` recommended · `push-allowed` · `open-pr`).
-- `reviewDepth` — branch review engine (`single` recommended · `panel`).
+- `reviewDepth` — branch review engine (`single` recommended · `panel` · `auto`).
 - `crossModelReview` — add a cross-model lens to the review panel
   (`false` recommended · `true`).
 - `onDeviceGate` — whether the on-device checklist closes only via a human
-  walkthrough (`human-required` recommended · `auto-ok`).
+  walkthrough (`human-required` recommended · `auto-ok` · `auto`).
 
-Model knobs are excluded: models are chosen automatically per task unless you
-pin one in `/plugin configure`.
+`auto` on the two profile-covered knobs means "let the profile govern this". It
+is worth offering only when the knob is already explicitly configured — reaching
+this path from the upgrade offer — since leaving a knob unwritten has the same
+effect and is what a first run does anyway.
 
-Apply the answers via `claude plugin install devcycle@devcycle --config
-KEY=VALUE` (one `--config` per knob) — including on "use defaults": write the
-explicit default values, so the placeholders substitute in future sessions and
-this offer never fires again. Record the answers in the state file's
-`configured:` line — `defaults`, or the date plus the KEY=VALUE list. Because
-same-session substitution cannot refresh, stage skills read THIS run's values
-from that line (see Configuration above).
+Model knobs are excluded either way: models are chosen automatically per task
+unless you pin one in `/plugin configure`.
+
+Record what was written in the state file's `configured:` line — the date plus
+the KEY=VALUE list, or `defaults` when the walkthrough ran and wrote nothing (a
+customize pass that accepted every default) — **and always the `· profile-asked`
+marker**, on every completion of this walkthrough, whether it was reached
+directly or from the upgrade offer above. Always, because the customize path
+writes a moved knob without writing `profile`: without the marker that user
+renders the upgrade offer's exact signature on their next cycle, and would be
+invited to convert to `auto` the knob they had just deliberately pinned. The
+marker is the record that this release has already asked; nothing else on the
+line distinguishes a knob pinned by choice from one inherited from an older
+version. Either way the line stops reading `no`, so the walkthrough is offered
+once and not again. Because same-session substitution cannot refresh, stage
+skills read THIS run's values from that line.
 
 ## Triage the input
 
-Judge `$ARGUMENTS` on three axes and announce all verdicts with the entry stage
-before proceeding.
+Judge `$ARGUMENTS` on three axes, then confirm every verdict with the user in
+ONE AskUserQuestion **before any stage runs**. Nothing below is
+profile-conditional.
 
 **Maturity** picks the entry stage:
 
@@ -119,6 +253,10 @@ before proceeding.
   criteria already established) → skip scoping; start at **brainstorm** as a
   validation pass of the provided material. If an approved spec document already
   exists on disk, start at **planning**.
+- **Audit-shaped** ("audit X", "review the repo for Y" — an assessment of
+  existing code, not a change to it) → the **audit** stage runs **in place of**
+  scoping: `devcycle:auditing-a-repo` establishes what is wrong before anything
+  is designed, and its selected findings feed brainstorm.
 
 **Kind** (feature | bug | refactor) shapes the walk:
 
@@ -155,14 +293,27 @@ files — requires ALL of:
 Any doubt on any one criterion disqualifies that verdict. Trivial beats
 bulk-mechanical; an undiagnosed bug is never either.
 
-Neither verdict is ever acted on automatically: announce it and ask via
-AskUserQuestion, offering the short path against the full pipeline. Confirmed →
-rewrite the state file with `stage: fast-path` or `stage: sweep` and invoke
-`devcycle:fast-path` or `devcycle:sweeping-mechanical-changes` accordingly —
-for the sweep that is gate 1 of a two-step confirm, the second gate being the
-concrete file list and verify command, which belong to the sweep skill and run
-before any agent edits. Declined → the verdict is discarded, the normal
-maturity/kind walk below applies, and nothing extra is recorded.
+### The confirmation (one question, always)
+
+No verdict is ever acted on automatically. State, in the question itself: the
+entry stage the maturity verdict picked **and why**, the kind verdict, and the
+size verdict when one fired. Offer:
+
+- **Confirm** — start at the announced stage.
+- **Start at scoping instead** — the input is less settled than it reads.
+- **Take the offered short path** — present only when a short path is on the
+  table: `fast-path` (trivial), `sweep` (bulk-mechanical), or `audit` (an
+  audit-shaped request, replacing scoping).
+- **Run the full pipeline** — discard the short-path verdict and walk the
+  stages.
+
+On a confirmed short path, rewrite the state file with `stage: fast-path`,
+`stage: sweep`, or `stage: audit` and invoke `devcycle:fast-path`,
+`devcycle:sweeping-mechanical-changes`, or `devcycle:auditing-a-repo`
+accordingly — for the sweep that is gate 1 of a two-step confirm, the second
+gate being the concrete file list and verify command, which belong to the sweep
+skill and run before any agent edits. Declined → the verdict is discarded, the
+normal maturity/kind walk applies, and nothing extra is recorded.
 
 ## State file
 
@@ -176,7 +327,12 @@ preserved.
 Run the stages in order, each via the named skill:
 
 1. **scoping** — `devcycle:scoping-interview` (skipped for mature input per triage).
-2. **diagnosis** (bugs only, per triage) — `superpowers:systematic-debugging`
+2. **audit** (audit-shaped input only, per triage) — `devcycle:auditing-a-repo`,
+   in place of scoping. It writes `docs/audits/YYYY-MM-DD-<topic>.md`, recorded
+   in the state file's `audit:` line; the findings the user selects for action
+   become brainstorm's explored context. A cycle that ends at the report (no
+   change selected) closes there.
+3. **diagnosis** (bugs only, per triage) — `superpowers:systematic-debugging`
    (upstream, unmodified): reproduce the failure first, then isolate the root
    cause. The stage ends with a root-cause report written to
    `.devcycle/diagnosis.md` — reproduction steps, the established cause with its
@@ -187,7 +343,7 @@ Run the stages in order, each via the named skill:
    as its explored context. If diagnosis overturns the confirmed scope (the bug
    lives somewhere else entirely), say so and return to scoping rather than
    designing a fix for the wrong problem.
-3. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified), with two
+4. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified), with two
    notes layered on top. First: the user's batching preference carries into this
    stage — where the upstream skill says to ask questions one at a time, ask via
    AskUserQuestion in batches of 1–4 with concrete options plus Other instead.
@@ -197,66 +353,16 @@ Run the stages in order, each via the named skill:
    repo's own ignore rules rather than force-adding past them. Everything else
    upstream stands. When the spec is approved, transition to
    `devcycle:planning-waves` (not directly to upstream writing-plans).
-4. **planning** — `devcycle:planning-waves`.
-5. **execution** — `devcycle:executing-waves`.
-6. **branch-review** — `devcycle:reviewing-the-branch`.
-7. **on-device** — `devcycle:verifying-on-device` (skip only when the change has no
+5. **planning** — `devcycle:planning-waves`.
+6. **execution** — `devcycle:executing-waves`.
+7. **branch-review** — `devcycle:reviewing-the-branch`.
+8. **on-device** — `devcycle:verifying-on-device` (skip only when the change has no
    rendered/on-device surface; record the skip in the handoff).
-8. **finish** — `devcycle:finishing-the-cycle`: resolves the effective git policy
+9. **finish** — `devcycle:finishing-the-cycle`: resolves the effective git policy
    (the configured `gitPolicy` clamped by two external push signals), acts on it,
    and closes the state file with `stage: done`.
 
-## Stage boundaries
-
-At every boundary: update `.devcycle/state.md`, then emit the handoff block as the
-stage's final output. **One block per completed stage, no batching:** when several
-stages complete in a single response or session, each stage still emits its own
-`## Handoff` block, in order, at that stage's end — never one merged or summary
-block for the run. A stage that is skipped or judged not applicable (e.g.
-on-device with no rendered surface) still emits its block: the skip IS the stage
-outcome. The finish stage emits the pipeline's final block. The block shape:
-
-```markdown
-## Handoff
-- Stage completed: <stage>
-- Artifacts: <paths, one per line>
-- Carry-overs: <pinned interfaces / open decisions, or "none">
-- Context action: <Continue | Compact with hint | Clear + /devcycle:continue | Fresh session>
-- Compaction hint: Keep <X>. Drop <Y>.
-```
-
-At a wave → wave boundary within execution the first field is instead
-`Wave completed: <n> of <m> (stage: execution)` — `Stage completed:` is
-reserved for true stage ends. These are the only two sanctioned first-field
-labels.
-
-At the finish stage specifically, the block carries one additional line, directly after
-`Artifacts:` — the resolved git policy, in the exact shape `devcycle:finishing-the-cycle`
-defines. No other stage's block carries this line.
-
-Pick the context action from this table and recommend it to the user explicitly:
-
-| Boundary | Action | Keep | Drop |
-| --- | --- | --- | --- |
-| scoping → brainstorm | Continue | everything | — |
-| scoping → diagnosis (bugs) | Continue | everything | — |
-| diagnosis → brainstorm (root cause established) | Compact with hint | diagnosis report path, reproduction steps, root cause | debugging transcripts, ruled-out hypotheses |
-| brainstorm → planning (spec approved) | Compact with hint | spec path, decisions, constraints | design back-and-forth |
-| planning → execution (plan approved) | Clear + `/devcycle:continue` | nothing (files carry it) | planning conversation |
-| wave → wave (within execution) | Compact if over ~40% context | ledger/plan paths, pinned interfaces, dispatch map, wave status | implementer transcripts, resolved findings |
-| execution → branch-review | Clear + `/devcycle:continue` or Fresh session (a reviewer that watched the code being written inherits the implementer's assumptions) | branch, spec path, ledger path | all implementation context |
-| branch-review → on-device | Fresh session | checklist path, branch | everything else |
-| fast-path → finish | Continue | everything | — |
-| sweep → finish | Continue | everything | — |
-
-### Await the context action — never run past a recommended compact or clear
-
-Emitting the handoff block is NOT permission to continue. **Only a `Continue` action lets the
-pipeline proceed to the next stage in the same turn.** For every other action — `Compact with
-hint`, `Clear + /devcycle:continue`, `Fresh session`, or a `wave → wave` boundary where the
-~40% condition to compact is met — STOP after the block and wait: the user must run `/compact`
-or `/clear` (or explicitly tell you to continue anyway) before any next-stage work begins. Never
-begin the next stage in the same response that recommended a compact or clear — a user who looks
-away would otherwise sail past the boundary with an un-cleared context, exactly what this gate
-prevents. `/clear` ends the session by design; state the `/devcycle:continue` resume path in the
-same message you halt on.
+At `lean` and `standard`, planning and execution run devcycle-native — the two
+skills above are the whole engine. At `thorough` they overlay their upstream
+counterparts. Each skill owns that switch and resolves the profile per
+`${CLAUDE_PLUGIN_ROOT}/references/config.md`; do not second-guess it from here.
