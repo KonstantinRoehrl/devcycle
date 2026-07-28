@@ -11,7 +11,7 @@ github.com — not a local preview, whose Mermaid version differs from GitHub's.
 
 ## Items
 
-- [ ] The diagram draws as a flowchart, not a `Unable to render rich display` error box
+- [x] The diagram draws as a flowchart, not a `Unable to render rich display` error box
       Where: README.md, "The pipeline" section  ·  How to get there: open the branch on github.com, scroll to "The pipeline"
 
 - [ ] The two standalone terminals render as amber pills carrying their full text
@@ -112,16 +112,25 @@ github.com — not a local preview, whose Mermaid version differs from GitHub's.
       opens and closes, that no clause got doubled or orphaned across the rewrap, and that the
       paragraph still says what the diagram's audit branch shows.
 
-- [ ] `branch:<name>` renders literally everywhere it appears, angle brackets and all
+- [x] (auto) `branch:<name>` renders literally everywhere it appears, angle brackets and all
       Where: numbered item 2, and the `/devcycle:audit` row of the "What's in the plugin" table
       Why this is in doubt: markdown eats an unbackticked `<name>` as an HTML tag and shows
       nothing. On the rendered page the token either reads `branch:<name>` or silently reads
       `branch:` — and only the rendered page shows which.
 
-- [ ] The "What's in the plugin" table renders as a table, with the `/devcycle:audit` row readable
+- [x] (auto) The "What's in the plugin" table renders as a table, with the `/devcycle:audit` row readable
       Where: README.md, "What's in the plugin"  ·  How to get there: scroll past the numbered list
       That row was rewritten into a long semicolon-joined sentence; check the cell wraps rather
       than pushing the table into a horizontal scroll that hides the right-hand column.
+
+## Walkthrough outcome
+
+Walked 2026-07-28 against the branch pushed to GitHub. Three items closed — one human verdict
+and two `(auto)` from DOM reads of the main document. The remaining eighteen, every one of them
+a diagram observation, were **waived by the user**, who judged the diagram fine as it stands.
+Unchecked boxes below mean nobody looked, not that anything failed. Details, including why no
+diagram item could ever have been `(auto)`-checked, are in `on-device-results.md` beside this
+file.
 
 ## Not verifiable here
 
