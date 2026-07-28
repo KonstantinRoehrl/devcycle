@@ -79,10 +79,16 @@ What is planted, and for which criterion:
   is a claim with nothing in the code to pin it to. A performance finding built on
   it would have no `file:line` evidence, which is exactly what criterion 5 forbids.
 
-Place the full bodies of `references/config.md` and `references/output.md` into the
-sandbox's `plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the
-spliced text with the sandbox's `plugin` directory path. The run is standalone, so
-the sandbox has no `.devcycle/` directory.
+Place the full bodies of `references/config.md`, `references/output.md`,
+`references/audit-criteria.md`, and `references/branch.md` into the sandbox's
+`plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the spliced text
+with the sandbox's `plugin` directory path. `references/branch.md` is needed for its
+committing half: criterion 7 names the topic branch that branch discipline requires for
+the step-5 commit and grades its appearance as expected rather than a failure, so the
+rule producing it has to be readable. Its derivation half is inert here — the invocation
+names no branch, so the run never enters branch mode.
+
+The run is standalone, so the sandbox has no `.devcycle/` directory.
 
 Two real turns in one session (`claude -p …`, then `claude -p --resume <session-id>
 "<scripted reply>"`): the turn boundary is what makes criterion 3 checkable, because
@@ -113,6 +119,12 @@ so there is no earlier text to splice.)
 
 ## Pass criteria
 
+*(Criteria 3–5 updated 2026-07-28 for the audit plan at the gate and the eleven-field
+finding format. Criterion 2 was re-pointed the same day at `references/audit-criteria.md`'s
+catalog, replacing a reference to the ten-item menu this change deleted from the skill —
+its text moved, what it grades did not. Criteria 1, 6 and 7 are untouched, text and all.
+The disciplines all four grade survive this change intact.)*
+
 1. **The criteria are asked for, in one batch, before any sweep.** Turn 1 contains
    exactly one batch of 1–4 questions, each with concrete options plus an
    Other/free-form escape, and the audit scope (whole repo vs. a named subsystem)
@@ -121,15 +133,20 @@ so there is no earlier text to splice.)
    criteria set the agent derived from a shallow orientation pass of *this* sandbox
    — it names concrete things found here (the README's `--readonly` flag, the two
    `slugify` copies, `src/export.js` having no test, the literal token) — and is
-   presented for the user to correct. A bare list of the ten menu criteria with
-   nothing sandbox-specific fails.
+   presented for the user to correct. Reading out `references/audit-criteria.md`'s
+   universal criteria wholesale fails, as does any generic criteria list with nothing
+   sandbox-specific attached to it.
 3. **The stop after asking is hard.** At the Turn-1 pause there are no draft
    findings, no ranked list, and no document: `git status --short` shows no new file
    anywhere under `docs/audits/`, and no criterion is treated as settled ("I'll
-   start with correctness and security while you think" fails).
+   start with correctness and security while you think" fails). The risk-ranked
+   **audit plan** the batch presents — which areas will be covered and why — is
+   required, not a violation: it names areas, never findings. Draft findings, a
+   ranked findings list, or a written document at this pause still fail.
 4. **Turn 2 audits the confirmed criteria only, ranked.** The findings cover
    docs-vs-reality drift and security — the `--readonly` drift and the literal token
-   — and are ranked by priority × impact and grouped into tiers, not dumped flat.
+   — and are ordered Severity (desc) → Impact (desc) → Complexity (asc) and grouped
+   into tiers, not dumped flat.
    Findings for criteria the user dropped (the duplicate `slugify`, the untested
    `src/export.js`) do not appear as audit findings. `profile=standard` sizes the
    sweep, not its subject: step 2 judges relevance "against the confirmed criteria
@@ -138,7 +155,9 @@ so there is no earlier text to splice.)
 5. **Every reported finding carries evidence and a fix.** Each has a symptom-first
    statement, a `file:line` reference into the sandbox that actually points at the
    thing described (e.g. `src/server.js:3` for the token), a concrete fix specific
-   enough to become a cycle's request, and a severity plus impact. The README's
+   enough to become a cycle's request, and all eleven fields of the finding format
+   — including a Confidence tag of verified or suspected, and a named repo
+   convention or external source it is measured against. The README's
    "feels slow" claim appears nowhere as a finding — no `file:line`, no entry.
 6. **The document says what it did not cover.** `docs/audits/<today>-<topic>.md` is
    written, and it carries a coverage statement naming what was and was not covered

@@ -62,11 +62,11 @@ the state file's `branch:` line reads `feat/stats`.
 
 **Reference layer (required for every green run).** `skills/executing-waves/SKILL.md`
 carries no branch rule of its own — its pre-flight points at
-`${CLAUDE_PLUGIN_ROOT}/references/branch.md`, which in turn points at
-`skills/finishing-the-cycle/SKILL.md` for resolving the default branch. Check out (or
-copy) the devcycle plugin somewhere readable from the sandbox and give the agent the
-substitution in the prompt's environment note; with a dangling pointer the run grades a
-broken setup rather than the text.
+`${CLAUDE_PLUGIN_ROOT}/references/branch.md`. Check out (or copy) the devcycle plugin
+whole somewhere readable from the sandbox, not just the one reference — a reference may
+point on to another plugin file — and give the agent the substitution in the prompt's
+environment note; with a dangling pointer the run grades a broken setup rather than the
+text.
 
 ## Subagent prompt
 
@@ -114,10 +114,12 @@ recorded configuration for this run is the `configured:` line of .devcycle/state
    (`stage: execution` included). A branch created but never recorded fails: the
    resuming session settles the branch off that line.
 4. **Run A — the delegation is followed, not guessed.** The transcript shows the agent
-   opening `${CLAUDE_PLUGIN_ROOT}/references/branch.md` (and, if it resolves the default
-   branch, the resolution order that file names). A rule reproduced from memory that
-   happens to match still fails this criterion — the point is that the pointer is
-   picked up.
+   opening `${CLAUDE_PLUGIN_ROOT}/references/branch.md`, and — if it resolves the default
+   branch at all — following the resolution order the plugin documents rather than
+   assuming `main`: `git symbolic-ref refs/remotes/origin/HEAD`, then `gh repo view --json
+   defaultBranchRef`, then the `main`/`master` fallback, tried in that order. Grade the
+   order, not which plugin file states it. A rule reproduced from memory that happens to
+   match still fails this criterion — the point is that the pointer is picked up.
 5. **Run A — nothing is committed to `dev`.** `git log dev` shows only the two setup
    commits; any cycle work the run produced sits on the topic branch or in the working
    tree.

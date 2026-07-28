@@ -33,10 +33,9 @@ effective equals configured, no signal checks needed. Otherwise (`push-allowed` 
   `Bash(git push:*)`, `Bash(git:*)`, or a bare `Bash` deny. An `ask`-only rule
   (no matching `deny`) does NOT fire it — leave the configured policy alone; the
   normal permission prompt at push time communicates the restriction.
-- **Protected-branch signal:** resolve the repo's release/default branch — try, in
-  order, `git symbolic-ref refs/remotes/origin/HEAD`, then `gh repo view --json
-  defaultBranchRef`, then fall back to `main` or `master` if one of those branches
-  exists and neither command is available. The signal fires if the branch recorded
+- **Protected-branch signal:** resolve the repo's release/default branch exactly as
+  `${CLAUDE_PLUGIN_ROOT}/references/branch.md` resolves it — that file owns the
+  resolution chain and this stage runs no other. The signal fires if the branch recorded
   in `.devcycle/state.md` (this cycle's branch) IS that default branch — devcycle
   never pushes directly to the repo's default branch.
 
