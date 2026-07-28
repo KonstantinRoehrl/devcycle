@@ -1,6 +1,6 @@
 ---
 name: auditing-a-repo
-description: Use when a repository needs a criteria-driven audit — the criteria are interviewed for, never assumed — producing a findings list ranked by priority and impact, with file-referenced evidence and a concrete fix per finding.
+description: Use when a repository or a branch needs a criteria-driven audit — criteria are derived from the stacks actually present and the repo's own conventions, then interviewed for, never assumed — producing findings ranked by severity, impact, and fix complexity, each with file-referenced evidence and a concrete fix.
 ---
 
 # Auditing a Repo
@@ -21,11 +21,54 @@ how far steps 2–3 go (see Depth below). Report as
 
 ## The walk
 
+0. **Scope and discovery.** Runs first, in both modes, and is shallow — enough to propose
+   criteria, not the deep sweep step 2 performs.
+
+   **Mode.** A branch supplied by `/devcycle:audit` or by the cycle stage selects
+   **branch-scoped** mode; no branch means **full-codebase** mode (the whole repo or a named
+   subsystem). Everything downstream of this step — the gate, sourcing, the sweep, the
+   finding format, the coverage statement — is identical in both modes.
+
+   **Branch-scoped scope derivation:**
+   - *Base*, in order: an explicitly supplied base; the repo's integration branch (`dev`,
+     `develop`, or `development`) when one exists locally or on the remote; else the default
+     branch, resolved exactly as `skills/finishing-the-cycle/SKILL.md` resolves it — that
+     file is the authority, and this one does not re-derive it.
+   - *Changed files*: `git diff --name-only $(git merge-base <base> <branch>) <branch>`. A
+     branch audit audits committed branch content: when `<branch>` is the checked-out branch
+     and the worktree is dirty, the uncommitted files are excluded from the audited set and
+     named in the coverage statement.
+   - *Expansion to the feature dependency graph*: from the changed files, trace outward —
+     callers, callees, shared types and DTOs, tests exercising them, and any config or schema
+     belonging to the same feature — repeating until an iteration pulls in no new file. The
+     audit runs against this stabilized set, never the raw diff: a change's correctness
+     routinely depends on code it did not touch.
+   - *Frontier*: if the stabilized set is larger than the resolved profile's depth can
+     genuinely read, audit the highest-risk subset and name **every** file left at the
+     frontier in the coverage statement, with the reason it was not read. Never truncate
+     silently.
+
+   **Discovery (both modes):**
+   - **Detect every stack present in the audited scope**, from what the files, manifests, and
+     toolchain configs actually show. A repo may hold several — frontend, backend, ML,
+     scripts, infrastructure — and each detected stack gets its own criteria. No stack is
+     assumed and none is hardcoded here.
+   - **Inventory the repo's own conventions before reaching for generic advice**:
+     `CONTRIBUTING.md`, `ARCHITECTURE.md`, `CLAUDE.md` / `AGENTS.md`, ADRs, style guides,
+     linter/formatter/CI configs, and any documented desired-pattern or anti-pattern.
+
+   Read `${CLAUDE_PLUGIN_ROOT}/references/audit-criteria.md` here and follow it: it owns the
+   criteria catalog, the sourcing precedence, and the seed index, and is not restated in this
+   skill.
+
+   Discovery **feeds** step 1's proposal. It never replaces the interview and never settles a
+   criterion on its own — deriving a good proposal is not permission to act on it.
+
 1. **Interview for the criteria.** Ask via AskUserQuestion, 1–4 questions in one
    batch, each with concrete options plus Other.
    - **Slot 1 is a criteria set you derived from this repo**, presented for the user
-     to correct — never a blank menu. Derive it from a shallow orientation pass of
-     step 2's procedure (root docs, layout, languages, test and CI setup, obvious
+     to correct — never a blank menu. Derive it from step 0's discovery (detected
+     stacks, the repo's own convention documents, layout, test and CI setup, obvious
      pain): a user handed a proposal corrects it in one turn, a user handed an empty
      list has to invent one.
    - The menu the proposal and the remaining slots draw from: correctness and bugs ·
@@ -34,6 +77,12 @@ how far steps 2–3 go (see Depth below). Report as
      dependency hygiene · conformance to the project's own stated conventions.
    - Settle here too: **audit scope** — the whole repo or a named subsystem — and any
      criterion the user adds that the menu does not carry.
+   - **The audit plan, in this same batch**: which areas will be covered, risk-ranked, and
+     why. It is a visible artifact presented at this stop, not hidden reasoning — a wrong
+     plan is corrected here, before a full pass is spent on it. It names areas, never
+     findings: drafting a finding before the user replies violates the STOP below.
+   - **In branch mode**, show the derived base and the stabilized file set from step 0 here
+     too. Both are correctable at this stop, exactly like the criteria.
    - **Hard STOP after asking**, exactly as `devcycle:scoping-interview` stops: no
      research sweep, no draft findings, no assumed answers until the user has replied.
      Criteria are never assumed, never inferred from the request's wording, and never
@@ -44,6 +93,18 @@ how far steps 2–3 go (see Depth below). Report as
    plus the two-phase `*.md` index-then-fetch) — read-only, never triggering a graph
    build or `--update`. Relevance here is judged against the confirmed criteria and the
    confirmed scope, not against the original request.
+
+   **Sourcing, for confirmed criteria no local convention already covers.** Order: the seed
+   index in `${CLAUDE_PLUGIN_ROOT}/references/audit-criteria.md` first, then a live lookup
+   for any stack the seed does not carry and for any seed link that has moved or 404s. The
+   precedence that file defines is binding and is cited per finding. With no web access the
+   audit still runs against repo conventions plus the seed, and records that limit in the
+   coverage statement.
+
+   **What the sweep covers** for each confirmed criterion is that same file's catalog: the
+   universal cross-cutting criteria, the stack-specific criteria for each stack step 0
+   detected, and its rules for reuse before rebuild, multi-file feature chains, data contracts
+   across every boundary they cross, and accessibility wherever the scope contains a UI.
 
 3. **Findings.** Each finding carries, in this order:
    - a symptom-first statement in plain language — what is wrong, before the mechanism;

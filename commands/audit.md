@@ -10,8 +10,13 @@ skill, which owns the criteria interview, the sweep, the findings document at
 state-file, and stop-at-the-document rules. Do not restate or replace its process
 here.
 
-**This run is standalone: no cycle, and this command is not a pipeline stage.** That
-is the one fact the skill cannot derive on its own, and it is what selects the
-skill's standalone behavior over its in-cycle behavior.
+**This run is standalone: no cycle, and this command is not a pipeline stage.** That is the
+one fact the skill cannot derive on its own, and it is what selects the skill's standalone
+behavior over its in-cycle behavior.
+
+**`$ARGUMENTS` may name a branch** (`/devcycle:audit feat/csv-export`, optionally with a
+base). A branch selects the skill's branch-scoped mode — the audited set is that branch's
+diff expanded to its feature dependency graph, per the skill's step 0. No branch means the
+whole repo or a named subsystem, settled at the skill's interview as before.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
