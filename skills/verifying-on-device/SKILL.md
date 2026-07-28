@@ -29,20 +29,10 @@ everything after — the walkthrough, the gate, the results report — is identi
 one from the branch, **automatically — there is no confirmation step**, because the branch is
 the whole instruction.
 
-- *Base*, in order: an explicitly supplied base; the repo's integration branch (`dev`,
-  `develop`, or `development`) when one exists locally or on the remote; else the default
-  branch, resolved exactly as `skills/finishing-the-cycle/SKILL.md` resolves it.
-- *Changed files*: resolve the merge base as its own step, check it, then diff from it:
-
-  ```
-  base_sha=$(git merge-base <base> <branch>) || stop
-  git diff --name-only "$base_sha" <branch>
-  ```
-
-  An empty or failed merge base means the refs do not share history — unknown ref, unrelated
-  histories, shallow clone. The run stops and says so. It never falls through to
-  `git diff --name-only <branch>`, which diffs the working tree instead of the branch and
-  would hand the walkthrough a file set built from local uncommitted edits.
+- *Base and changed files*: "Deriving a branch's file set" in
+  `${CLAUDE_PLUGIN_ROOT}/references/branch.md` owns both — read it there and follow it; it is
+  not restated here. Its merge-base guard is what keeps the walkthrough from being handed a
+  file set built from local uncommitted edits.
 - *Affected UI areas*: from the changed files, trace routes, navigation, and component-usage
   outward — which screens render these components, which routes reach those screens —
   repeating until an iteration pulls in no new surface. Items are written against those
@@ -54,21 +44,20 @@ the whole instruction.
 - *Nothing renders*: if the traced set contains no rendered surface, write no checklist, and
   report the stage not applicable with that reason — the same outcome the in-cycle skip has.
 
-The checklist is generated from git refs, so it does not need the branch checked out. The
-walkthrough does: it is performed against the running app. **Never switch the checkout
-yourself** — per `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s discipline, the branch a
-session sits on is not this stage's to change, and another session may be mid-cycle on it.
+The checklist is generated from git refs, so it does not need the branch checked out — that
+follows from the content source `${CLAUDE_PLUGIN_ROOT}/references/branch.md` pins. The
+walkthrough is the part that does: it is performed against the running app, which needs the
+branch's files on disk.
 
 When `<branch>` is not the current checkout, generate the checklist, say so plainly, and offer
-two ways forward:
+two ways forward — this stage switches the checkout in neither:
 
 - **The user checks the branch out** in the current checkout and starts the app there; or
-- **a throwaway worktree** — `git worktree add <path> <branch>` — which leaves the checkout
-  where it is. Offer it, never create it unasked. On acceptance, run the rest of the stage
-  from that worktree: the app is started there and the walkthrough observes it. The checklist
-  stays at its scratch path in the **invoking** checkout, not in the worktree, so removing the
-  worktree does not take the run's only artifact with it. When the walkthrough ends, offer
-  `git worktree remove <path>` and leave the decision to the user.
+- **a throwaway worktree**, offered exactly as `${CLAUDE_PLUGIN_ROOT}/references/branch.md`
+  says to offer one. On acceptance, run the rest of the stage from that worktree: the app is
+  started there and the walkthrough observes it. The checklist stays at its scratch path in
+  the **invoking** checkout, not in the worktree, so removing the worktree does not take the
+  run's only artifact with it.
 
 Either way the human starts the app: this stage does not build, serve, or launch anything.
 

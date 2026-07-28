@@ -52,11 +52,8 @@ Apply regardless of stack:
 - token and context cost, wherever a repo's content is read by an agent — prompts, skills,
   instruction files: restated content, context loaded wholesale for a narrow decision,
   duplication across files that then has to be kept in sync;
-- conformance to the project's own stated conventions — the repo measured against its own
-  `CONTRIBUTING.md`, `ARCHITECTURE.md`, `CLAUDE.md` / `AGENTS.md`, ADRs, and
-  linter/formatter config. Precedence rule 1 above governs how every finding is sourced;
-  confirmed as a criterion, that conformance becomes the sweep's subject rather than only
-  its yardstick.
+- conformance to the project's own stated conventions — the documents in Precedence rule 1
+  above, audited as a subject rather than only used as a yardstick.
 
 ## Stack-specific anchors
 

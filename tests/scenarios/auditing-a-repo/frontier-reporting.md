@@ -1,5 +1,5 @@
 # Scenario: frontier-reporting
-- Skill under test: devcycle:auditing-a-repo (invoked via `/devcycle:audit <branch>`)
+- Skill under test: devcycle:auditing-a-repo (invoked via `/devcycle:audit branch:<name>`)
 - Type: discipline + output-shape
 
 When a branch's expanded dependency graph is genuinely larger than the resolved profile's
@@ -365,11 +365,24 @@ only one whose `LIMITS.min` admits negative amounts, so the rounding change reac
 signed path none of its 479 siblings has. It sits at index 463 of 480 deliberately: a subset
 taken in file order never gets there.
 
-Place the full bodies of `references/config.md`, `references/output.md`, and
-`references/audit-criteria.md` into the sandbox's `plugin/references/`, and substitute every
-`${CLAUDE_PLUGIN_ROOT}` in the spliced text with the sandbox's `plugin` directory path. The
-run is standalone, so the sandbox has no `.devcycle/` directory. There is no `dev` branch and
-no remote, so the base must resolve to the default branch `main`.
+Place the full bodies of `references/config.md`, `references/output.md`,
+`references/audit-criteria.md`, and `references/branch.md` into the sandbox's
+`plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the spliced text with
+the sandbox's `plugin` directory path. This run goes past the gate to step 5, so it needs the
+whole reference layer, not just the criteria: `references/branch.md` owns both halves it
+depends on — the base, the merge-base-guarded diff, and reading content through the ref, which
+criteria 1 through 3 are graded against, and the standalone topic-branch rule step 5 commits
+the document under, which criterion 5 reaches.
+
+`references/branch.md` in turn names `skills/finishing-the-cycle/SKILL.md` as the authority on
+resolving the default branch, by a bare plugin-relative path the `${CLAUDE_PLUGIN_ROOT}`
+substitution never rewrites. Place that file's full body at the sandbox's
+`plugin/skills/finishing-the-cycle/SKILL.md` and tell the agent in the environment note where
+bare plugin-relative paths resolve; with either pointer left dangling the run grades a broken
+sandbox rather than the text.
+
+The run is standalone, so the sandbox has no `.devcycle/` directory. There is no `dev` branch
+and no remote, so the base must resolve to the default branch `main`.
 
 ## Subagent prompt
 
@@ -380,7 +393,7 @@ reach the graded behavior.
 
 > You are a coding agent in this repository, in a brand-new session. Produce your response to the invocation below, then STOP and wait for the user.
 >
-> === COMMAND (the user invoked `/devcycle:audit fix/round-half-even`; follow this exactly) ===
+> === COMMAND (the user invoked `/devcycle:audit branch:fix/round-half-even`; follow this exactly) ===
 > [Splice here: full body of commands/audit.md.]
 > === END COMMAND ===
 >
@@ -388,7 +401,7 @@ reach the graded behavior.
 > [Splice here: full body of skills/auditing-a-repo/SKILL.md.]
 > === END SKILL ===
 >
-> Environment notes: AskUserQuestion is not available in this session — where guidance says to use it, send the batch as one plain message with the same shape, then stop for the answer. `profile` resolves to `standard` for this run. You may read and write files and run git commands. No web access is available. No human is available mid-response, so ask and stop.
+> Environment notes: AskUserQuestion is not available in this session — where guidance says to use it, send the batch as one plain message with the same shape, then stop for the answer. `profile` resolves to `standard` for this run. The devcycle plugin's files are readable at <absolute path of the sandbox's `plugin` directory>; guidance that names a bare plugin-relative path, such as `skills/finishing-the-cycle/SKILL.md`, resolves under that directory. You may read and write files and run git commands. No web access is available. No human is available mid-response, so ask and stop.
 
 Turn 2 is the scripted reply, sent by resuming the same session:
 

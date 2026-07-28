@@ -25,10 +25,25 @@ EOF
 git add -A && git commit -m "test: cover the export path"
 ```
 
-Place the full bodies of `references/config.md`, `references/output.md`, and
-`references/audit-criteria.md` into the sandbox's `plugin/references/`, substituting every
-`${CLAUDE_PLUGIN_ROOT}` in the spliced text with that directory. The run is standalone, so
-the sandbox has no `.devcycle/` directory, and no web access is available.
+Place the full bodies of `references/config.md`, `references/output.md`,
+`references/audit-criteria.md`, and `references/branch.md` into the sandbox's
+`plugin/references/`, substituting every `${CLAUDE_PLUGIN_ROOT}` in the spliced text with that
+directory. `references/branch.md` is needed here for its committing half only. This run
+reaches step 5, where the document is written and committed, and the sandbox sits on `main`,
+so the topic-branch rule fires and decides which branch that commit lands on — which is the
+value criterion 6 grades in the document's header. The derivation half is inert: the
+invocation names no branch, so the run never enters branch mode.
+
+That committing rule resolves the default branch as `skills/finishing-the-cycle/SKILL.md`
+resolves it, naming that file by a bare plugin-relative path the `${CLAUDE_PLUGIN_ROOT}`
+substitution never rewrites. Place its full body at the sandbox's
+`plugin/skills/finishing-the-cycle/SKILL.md`; the inherited Turn-1 environment note already
+tells the agent that bare plugin-relative paths resolve under the sandbox's `plugin`
+directory. Left dangling, the pointer makes the run grade a broken sandbox rather than the
+text.
+
+The run is standalone, so the sandbox has no `.devcycle/` directory, and no web access is
+available.
 
 ## Subagent prompt
 

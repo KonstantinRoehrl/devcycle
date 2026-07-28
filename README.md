@@ -69,7 +69,7 @@ history, not the plugin.
 flowchart TD
     CYCLE(["/devcycle:cycle request"]):::entry
     CONT(["/devcycle:continue"]):::entry
-    AUDITCMD(["/devcycle:audit — optional branch"]):::entry
+    AUDITCMD(["/devcycle:audit — optional branch:name"]):::entry
     VERIFYCMD(["/devcycle:verify branch"]):::entry
 
     CYCLE --> STATE["Step 0 · state file<br/>root · branch · request · first-run config"]:::orch
@@ -173,11 +173,11 @@ flowchart TD
    findings to act on; those become the cycle's scope and the walk continues at brainstorm.
    The same audit is available on its own as `/devcycle:audit` (below), outside any cycle.
    The audit derives its criteria proposal from the stacks actually present and from your
-   repo's own convention documents — those outrank generic best practice — and it can be
-   scoped to a branch, in which case it audits that branch's diff expanded to the feature's
-   dependency graph. Every finding carries eleven fields — among them its `file:line`
-   location, how to reproduce it, the fix direction, a confidence tag, and a fix-effort
-   estimate — so you can start work from the finding alone.
+   repo's own convention documents — those outrank generic best practice — and a `branch:`
+   token (form in the table below) scopes it to one branch, in which case it audits that
+   branch's diff expanded to the feature's dependency graph. Every finding carries eleven
+   fields — among them its `file:line` location, how to reproduce it, the fix direction, a
+   confidence tag, and a fix-effort estimate — so you can start work from the finding alone.
 3. **Diagnosis** — for bugs whose root cause isn't established yet: reproduce the failure,
    then isolate the cause (upstream `superpowers:systematic-debugging`), ending in a
    root-cause report that the fix's design builds on. A fix is never designed for an
@@ -229,7 +229,7 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | --- | --- |
 | `/devcycle:cycle` | Runs the pipeline for a request. |
 | `/devcycle:continue` | Resumes an interrupted pipeline from the state file. |
-| `/devcycle:audit` | Audits this repo — or one branch's diff and everything it depends on — against criteria you confirm, and writes a ranked findings document. Standalone — starts no cycle. |
+| `/devcycle:audit` | Audits this repo against criteria you confirm, and writes a ranked findings document. A `branch:<name>` token anywhere in the arguments scopes it to that branch's diff and everything it depends on — `/devcycle:audit branch:feat/csv-export security`, optionally with `base:<name>` to pick the base to diff against. Every other argument is the concern, never a branch: `/devcycle:audit feat/csv-export` audits the whole repo for a concern called "feat/csv-export". Standalone — starts no cycle. |
 | `/devcycle:verify` | Walks an on-device checklist derived from a branch's diff — verification for code this session did not write. Standalone — starts no cycle. |
 | Skill `scoping-interview` | The batched scope interview with a hard stop before design begins. |
 | Skill `auditing-a-repo` | The criteria interview, repo sweep, and ranked evidence-backed findings document behind `/devcycle:audit` and the audit stage. |

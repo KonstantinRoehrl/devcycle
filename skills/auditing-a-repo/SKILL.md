@@ -24,41 +24,20 @@ how far steps 2–3 go (see Depth below). Report as
 0. **Scope and discovery.** Runs first, in both modes, and is shallow — enough to propose
    criteria, not the deep sweep step 2 performs.
 
-   **Mode.** A branch selects **branch-scoped** mode, and it is named by an explicit token,
-   never inferred. From `/devcycle:audit` the token is `branch:<name>` anywhere in the
-   arguments, optionally with `base:<name>`; everything else in the argument string is the
-   concern to audit. A bare argument is **always** the concern and is never guessed to be a
-   branch, even when a ref of that name exists. A `branch:` token naming a ref that does not
-   resolve (`git rev-parse --verify <name>`) stops the run with that error rather than
-   degrading into a full-codebase audit of a concern by that name. The cycle stage supplies
-   its branch directly. No branch means **full-codebase** mode (the whole repo or a named
-   subsystem). Everything downstream of this step — the gate, sourcing, the sweep, the
-   finding format, the coverage statement — is identical in both modes.
+   **Mode.** **Branch-scoped** mode is selected by the branch this skill is handed — from
+   `/devcycle:audit` by the `$ARGUMENTS` grammar that command owns, or directly by the cycle
+   stage. No branch means **full-codebase** mode (the whole repo or a named subsystem). A
+   branch is never inferred: this skill audits the branch it was given and guesses none.
+   Everything downstream of this step — the gate, sourcing, the sweep, the finding format,
+   the coverage statement — is identical in both modes.
 
-   **Branch-scoped scope derivation:**
-   - *Base*, in order: an explicitly supplied base; the repo's integration branch (`dev`,
-     `develop`, or `development`) when one exists locally or on the remote; else the default
-     branch, resolved exactly as `skills/finishing-the-cycle/SKILL.md` resolves it — that
-     file is the authority, and this one does not re-derive it.
-   - *Changed files*: resolve the merge base as its own step, check it, and only then diff —
-     `base_sha=$(git merge-base <base> <branch>)`, then
-     `git diff --name-only "$base_sha" <branch>`. An empty or failed merge base means the two
-     refs do not share history (an unknown ref, unrelated histories, a shallow clone): the run
-     **stops and says so**. It never falls through into `git diff --name-only <branch>`, which
-     diffs the *working tree* against the branch and yields a plausible-looking file set that
-     is not the branch's. A branch audit audits committed branch content: when `<branch>` is
-     the checked-out branch and the worktree is dirty, the uncommitted files are excluded from
-     the audited set and named in the coverage statement.
-   - *Content source*: file **contents** come from the audited branch, not from the checkout —
-     the branch being audited is usually not the one checked out. Read through the ref
-     (`git show <branch>:<path>`), or, when something needs real files on disk, from a
-     throwaway worktree (`git worktree add <path> <branch>`) — offered, never created unasked,
-     with `git worktree remove <path>` offered when the audit ends. **This skill never switches
-     the checkout**, per `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s discipline: the branch a
-     session sits on is not this stage's to change, and another session may be mid-cycle on it.
-     Every `file:line` a finding cites must resolve against the audited branch's content —
-     a line read from the checked-out working tree points at different code, so the finding
-     describes one branch while citing another.
+   **Branch-scoped scope derivation.** The base, the merge-base-guarded diff, and where file
+   contents are read from are owned by "Deriving a branch's file set" in
+   `${CLAUDE_PLUGIN_ROOT}/references/branch.md` — read it there and follow it; it is not
+   restated here. What this skill does with the file set that derivation returns:
+   - *Evidence resolves against the audited branch*: every `file:line` a finding cites must
+     resolve against the audited branch's content — a line read from the checked-out working
+     tree points at different code, so the finding describes one branch while citing another.
    - *Expansion to the feature dependency graph*: from the changed files, trace outward —
      callers, callees, shared types and DTOs, tests exercising them, and any config or schema
      belonging to the same feature — repeating until an iteration pulls in no new file. The

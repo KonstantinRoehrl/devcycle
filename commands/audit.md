@@ -14,7 +14,8 @@ here.
 one fact the skill cannot derive on its own, and it is what selects the skill's standalone
 behavior over its in-cycle behavior.
 
-**`$ARGUMENTS` grammar — explicit tokens, never inference.** A `branch:<name>` token
+**`$ARGUMENTS` grammar — explicit tokens, never inference. This command owns it; the skill
+consumes the branch it is handed and does not re-derive the syntax.** A `branch:<name>` token
 anywhere in the string selects the skill's branch-scoped mode, optionally with a
 `base:<name>` token naming the base to diff against. Everything else in the string is the
 concern to audit. So `/devcycle:audit branch:feat/csv-export security` audits that branch
@@ -23,10 +24,8 @@ for security, and `/devcycle:audit branch:feat/csv-export base:dev` audits it ag
 A bare argument is **always** the concern and is never guessed to be a branch, even in a repo
 that happens to have a branch by that name: `/devcycle:audit security` audits the whole repo
 for security. No `branch:` token means the whole repo or a named subsystem, settled at the
-skill's interview as before. A `branch:` token naming a ref that does not resolve stops with
-that error rather than falling back to treating it as a concern.
-
-In branch-scoped mode the audited set is that branch's diff expanded to its feature
-dependency graph, per the skill's step 0.
+skill's interview as before. A `branch:` token naming a ref that does not resolve
+(`git rev-parse --verify <name>`) stops the run with that error rather than falling back to
+treating it as a concern.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
