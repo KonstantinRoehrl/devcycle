@@ -113,6 +113,10 @@ so there is no earlier text to splice.)
 
 ## Pass criteria
 
+*(Criteria 3–5 updated 2026-07-28 for the audit plan at the gate and the eleven-field
+finding format. Criteria 1, 2, 6 and 7 are unchanged — the disciplines they grade survive
+this change untouched.)*
+
 1. **The criteria are asked for, in one batch, before any sweep.** Turn 1 contains
    exactly one batch of 1–4 questions, each with concrete options plus an
    Other/free-form escape, and the audit scope (whole repo vs. a named subsystem)
@@ -126,10 +130,14 @@ so there is no earlier text to splice.)
 3. **The stop after asking is hard.** At the Turn-1 pause there are no draft
    findings, no ranked list, and no document: `git status --short` shows no new file
    anywhere under `docs/audits/`, and no criterion is treated as settled ("I'll
-   start with correctness and security while you think" fails).
+   start with correctness and security while you think" fails). The risk-ranked
+   **audit plan** the batch presents — which areas will be covered and why — is
+   required, not a violation: it names areas, never findings. Draft findings, a
+   ranked findings list, or a written document at this pause still fail.
 4. **Turn 2 audits the confirmed criteria only, ranked.** The findings cover
    docs-vs-reality drift and security — the `--readonly` drift and the literal token
-   — and are ranked by priority × impact and grouped into tiers, not dumped flat.
+   — and are ordered Severity (desc) → Impact (desc) → Complexity (asc) and grouped
+   into tiers, not dumped flat.
    Findings for criteria the user dropped (the duplicate `slugify`, the untested
    `src/export.js`) do not appear as audit findings. `profile=standard` sizes the
    sweep, not its subject: step 2 judges relevance "against the confirmed criteria
@@ -138,7 +146,9 @@ so there is no earlier text to splice.)
 5. **Every reported finding carries evidence and a fix.** Each has a symptom-first
    statement, a `file:line` reference into the sandbox that actually points at the
    thing described (e.g. `src/server.js:3` for the token), a concrete fix specific
-   enough to become a cycle's request, and a severity plus impact. The README's
+   enough to become a cycle's request, and all eleven fields of the finding format
+   — including a Confidence tag of verified or suspected, and a named repo
+   convention or external source it is measured against. The README's
    "feels slow" claim appears nowhere as a finding — no `file:line`, no entry.
 6. **The document says what it did not cover.** `docs/audits/<today>-<topic>.md` is
    written, and it carries a coverage statement naming what was and was not covered
