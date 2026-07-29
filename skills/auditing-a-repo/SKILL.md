@@ -57,7 +57,7 @@ how far steps 2–3 go (see Depth below). Report as
      `CONTRIBUTING.md`, `ARCHITECTURE.md`, `CLAUDE.md` / `AGENTS.md`, ADRs, style guides,
      linter/formatter/CI configs, and any documented desired-pattern or anti-pattern.
 
-   Read `${CLAUDE_PLUGIN_ROOT}/references/audit-criteria.md` here and follow it: it owns the
+   Read `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md` here and follow it: it owns the
    criteria catalog, the sourcing precedence, and the seed index, and is not restated in this
    skill.
 
@@ -72,7 +72,7 @@ how far steps 2–3 go (see Depth below). Report as
      pain): a user handed a proposal corrects it in one turn, a user handed an empty
      list has to invent one.
    - What the proposal and the remaining slots draw from is the catalog in
-     `${CLAUDE_PLUGIN_ROOT}/references/audit-criteria.md` — its universal criteria plus the
+     `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md` — its universal criteria plus the
      stack-specific criteria for each stack step 0 detected. That file is the single owner of
      what an audit measures against, and no second menu lives here to drift from it.
    - Settle here too: **audit scope** — the whole repo or a named subsystem — and any
@@ -95,7 +95,7 @@ how far steps 2–3 go (see Depth below). Report as
    confirmed scope, not against the original request.
 
    **Sourcing, for confirmed criteria no local convention already covers.** Order: the seed
-   index in `${CLAUDE_PLUGIN_ROOT}/references/audit-criteria.md` first, then a live lookup
+   index in `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md` first, then a live lookup
    for any stack the seed does not carry and for any seed link that has moved or 404s. The
    precedence that file defines is binding and is cited per finding. With no web access the
    audit still runs against repo conventions plus the seed, and records that limit in the
@@ -148,7 +148,7 @@ how far steps 2–3 go (see Depth below). Report as
      concern, the finding is reclassified as a test-coverage gap, not reported as a live bug.
    - Every finding names what it is measured against — a repo convention or a named external
      source — per the precedence rule in
-     `${CLAUDE_PLUGIN_ROOT}/references/audit-criteria.md`.
+     `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`.
 
    **Order** the list Severity (desc) → Impact (desc) → Complexity (asc), so within a severity
    tier the quickest high-value wins surface first. Keep the tier grouping, so the user reads

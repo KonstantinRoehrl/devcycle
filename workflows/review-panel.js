@@ -8,15 +8,20 @@
 // docs/platform-notes.md section (c).)
 //
 // Args (argv[2], JSON):
-//   { ref: string, specPath: string,
-//     lenses?: ("spec"|"correctness"|"simplify")[], crossModel?: boolean }
+//   { scope: {ref: string} | {paths: string[]},   // exactly one of the two
+//     specPath?: string,
+//     lenses?: (string | {key: string, charter: string})[],
+//     crossModel?: boolean }
 // Output (stdout, JSON):
-//   { findings: [{ file, line?, claim, severity: "high"|"medium"|"low",
-//                  lens, verified: boolean, verification: string }],
+//   { findings: [{ file, line?, claim,
+//                  severity: "critical"|"high"|"medium"|"low",
+//                  measuredAgainst, lens, verified: boolean, verification: string }],
 //     summary: string }
+// The finding shape is owned by references/findings.md; keep the two in step.
 //
-// Stages: 1) 2-3 read-only lens reviewers in parallel (default all three;
-// cross-model codex lens only when crossModel) -> 2) adversarial per-finding
+// Stages: 1) read-only lens reviewers in parallel — the caller's lenses when
+// `lenses` is given, the three built-ins (spec, correctness, simplify)
+// otherwise; cross-model codex lens only when crossModel -> 2) adversarial per-finding
 // verification, its method spliced from agents/red-team-reviewer.md
 // (unverified findings are marked, never dropped) -> 3) dedup by
 // file+claim -> 4) reconciler ranks confirmed findings by severity.
@@ -32,7 +37,7 @@
 //
 // Smoke-tested (sandbox git repo with a planted spec deviation):
 //   node "${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js" \
-//     '{"ref":"HEAD~1","specPath":"docs/spec.md","lenses":["spec","correctness"]}'
+//     '{"scope":{"ref":"HEAD~1"},"specPath":"docs/spec.md","lenses":["spec","correctness"]}'
 
 "use strict";
 
@@ -45,7 +50,7 @@ const AGENT_TIMEOUT_MS = 15 * 60 * 1000;
 const DIFF_CHAR_CAP = 60_000;
 const SPEC_CHAR_CAP = 30_000;
 const VERIFY_CONCURRENCY = 4;
-const SEVERITIES = ["high", "medium", "low"];
+const SEVERITIES = ["critical", "high", "medium", "low"];
 const LENS_CHARTERS = {
   spec:
     "Spec compliance: compare the diff against the spec below. Report every place the " +
@@ -153,15 +158,48 @@ function parseArgs() {
   try {
     args = JSON.parse(process.argv[2] ?? "");
   } catch {
-    fatal("argv[2] must be a JSON object: { ref, specPath, lenses?, crossModel? }");
+    fatal("argv[2] must be a JSON object: { scope, specPath?, lenses?, crossModel? }");
   }
-  if (typeof args.ref !== "string" || !args.ref) fatal("args.ref (string) is required");
-  if (typeof args.specPath !== "string" || !args.specPath) fatal("args.specPath (string) is required");
-  const lenses = args.lenses ?? Object.keys(LENS_CHARTERS);
-  if (!Array.isArray(lenses) || lenses.length === 0 || lenses.some((l) => !(l in LENS_CHARTERS))) {
-    fatal(`args.lenses must be a non-empty subset of ${Object.keys(LENS_CHARTERS).join("|")}`);
+  const scope = args.scope;
+  if (!scope || typeof scope !== "object" || Array.isArray(scope)) {
+    fatal("args.scope (object) is required: { ref: string } or { paths: string[] }");
   }
-  return { ref: args.ref, specPath: args.specPath, lenses, crossModel: args.crossModel === true };
+  const hasRef = typeof scope.ref === "string" && scope.ref !== "";
+  const hasPaths =
+    Array.isArray(scope.paths) &&
+    scope.paths.length > 0 &&
+    scope.paths.every((p) => typeof p === "string" && p !== "");
+  if (hasRef === hasPaths) {
+    fatal("args.scope must carry exactly one of ref (non-empty string) or paths (non-empty string[])");
+  }
+  if (args.specPath !== undefined && (typeof args.specPath !== "string" || !args.specPath)) {
+    fatal("args.specPath, when given, must be a non-empty string");
+  }
+  const requested = args.lenses ?? Object.keys(LENS_CHARTERS);
+  if (!Array.isArray(requested) || requested.length === 0) {
+    fatal("args.lenses must be a non-empty array of built-in keys and/or { key, charter } objects");
+  }
+  const lenses = requested.map((l) => {
+    if (typeof l === "string") {
+      if (!(l in LENS_CHARTERS)) {
+        fatal(`unknown built-in lens "${l}" (built-ins: ${Object.keys(LENS_CHARTERS).join("|")})`);
+      }
+      return { key: l, charter: LENS_CHARTERS[l] };
+    }
+    if (l && typeof l.key === "string" && l.key && typeof l.charter === "string" && l.charter) {
+      return { key: l.key, charter: l.charter };
+    }
+    return fatal("each lens must be a built-in key or { key, charter } with non-empty strings");
+  });
+  if (!args.specPath && lenses.some((l) => l.key === "spec")) {
+    fatal('the "spec" lens requires args.specPath');
+  }
+  return {
+    scope: hasRef ? { ref: scope.ref } : { paths: scope.paths },
+    specPath: typeof args.specPath === "string" ? args.specPath : null,
+    lenses,
+    crossModel: args.crossModel === true,
+  };
 }
 
 function gitReadOnly(argv) {
@@ -194,49 +232,51 @@ const FINDINGS_SCHEMA = {
           line: { type: ["integer", "null"] },
           claim: { type: "string" },
           severity: { enum: SEVERITIES },
+          measuredAgainst: { type: "string" },
         },
-        required: ["file", "claim", "severity"],
+        required: ["file", "claim", "severity", "measuredAgainst"],
       },
     },
   },
   required: ["findings"],
 };
 
-function lensPrompt(lens, ctx) {
+function lensPrompt(charter, ctx) {
   return [
     `You are one lens of a read-only review panel. Your single lens:`,
-    LENS_CHARTERS[lens],
+    charter,
     ``,
-    `You review the diff below (ref: ${ctx.ref}) in the repository at your working`,
-    `directory. You may use Read/Grep/Glob to inspect surrounding code, but you are`,
-    `strictly read-only. Report only concrete, evidenced findings for YOUR lens —`,
-    `no restated diff hunks, no style nits outside your charter. For each finding`,
-    `give the file path (repo-relative), the line in the new version when known,`,
-    `a one-to-two sentence claim in plain language (symptom first), and a severity:`,
-    `high (broken behavior / spec violation / security), medium (likely defect or`,
-    `meaningful deviation), low (worthwhile improvement). Return an empty findings`,
-    `array if your lens finds nothing.`,
+    `You review the ${ctx.scopeLabel} in the repository at your working directory. You may`,
+    `use Read/Grep/Glob to inspect surrounding code, but you are strictly read-only. Report`,
+    `only concrete, evidenced findings for YOUR lens — no restated diff hunks, no style nits`,
+    `outside your charter. For each finding give the file path (repo-relative), the line in`,
+    `the reviewed version when known, a one-to-two sentence claim in plain language (symptom`,
+    `first), a severity, and what the finding is measured against.`,
     ``,
-    `## Spec (${ctx.specPath})`,
-    ctx.spec,
+    `Severity: critical (data loss, a security hole, or a broken release path), high (broken`,
+    `behavior or a violation of what the spec requires), medium (a likely defect or`,
+    `meaningful deviation worth fixing), low (a worthwhile improvement).`,
     ``,
-    `## Changed files`,
-    ctx.fileList || "(none reported by git)",
+    `"measuredAgainst" names the repo convention (by file path) or the external source the`,
+    `finding is measured against. A finding measured against neither is an unsupported`,
+    `opinion: do not report it. Return an empty findings array if your lens finds nothing.`,
+    ...(ctx.spec ? [``, `## Spec (${ctx.specPath})`, ctx.spec] : []),
     ``,
-    `## Diff`,
-    ctx.diff || "(empty diff)",
+    ctx.diff === null ? `## Files under review` : `## Changed files`,
+    ctx.fileList || "(none)",
+    ...(ctx.diff === null ? [] : [``, `## Diff`, ctx.diff || "(empty diff)"]),
   ].join("\n");
 }
 
 async function runClaudeLens(lens, ctx, model) {
-  log(`lens "${lens}" reviewing...`);
+  log(`lens "${lens.key}" reviewing...`);
   const res = await claudeStructured({
-    prompt: lensPrompt(lens, ctx),
+    prompt: lensPrompt(lens.charter, ctx),
     tools: "Read,Grep,Glob",
     schema: FINDINGS_SCHEMA,
     model,
   });
-  if (!res.ok) return { lens, findings: [], note: `lens "${lens}" failed: ${res.error}` };
+  if (!res.ok) return { lens: lens.key, findings: [], note: `lens "${lens.key}" failed: ${res.error}` };
   const findings = (res.value.findings ?? [])
     .filter((f) => f && typeof f.file === "string" && typeof f.claim === "string")
     .map((f) => ({
@@ -244,10 +284,12 @@ async function runClaudeLens(lens, ctx, model) {
       ...(Number.isInteger(f.line) ? { line: f.line } : {}),
       claim: f.claim,
       severity: SEVERITIES.includes(f.severity) ? f.severity : "medium",
-      lens,
+      measuredAgainst:
+        typeof f.measuredAgainst === "string" && f.measuredAgainst.trim() ? f.measuredAgainst : "unstated",
+      lens: lens.key,
     }));
-  log(`lens "${lens}": ${findings.length} finding(s)`);
-  return { lens, findings, note: null };
+  log(`lens "${lens.key}": ${findings.length} finding(s)`);
+  return { lens: lens.key, findings, note: null };
 }
 
 // Cross-model lens via the codex CLI (read-only sandbox). Degrades gracefully:
@@ -259,12 +301,13 @@ async function runCrossModelLens(ctx) {
   const outFile = join(outDir, "last-message.txt");
   try {
     const prompt = [
-      lensPrompt("correctness", ctx),
+      lensPrompt(LENS_CHARTERS.correctness, ctx),
       ``,
       `Cross-model pass: you are a second, independent model auditing this diff for`,
       `anything the primary reviewers may have missed (any lens). Respond with ONLY a`,
       `JSON object: {"findings":[{"file":string,"line":integer|null,"claim":string,`,
-      `"severity":"high"|"medium"|"low"}]}. No prose outside the JSON.`,
+      `"severity":"critical"|"high"|"medium"|"low","measuredAgainst":string}]}. No prose`,
+      `outside the JSON.`,
     ].join("\n");
     const res = await run("codex", [
       "exec", "--sandbox", "read-only", "--skip-git-repo-check",
@@ -288,6 +331,8 @@ async function runCrossModelLens(ctx) {
         ...(Number.isInteger(f.line) ? { line: f.line } : {}),
         claim: f.claim,
         severity: SEVERITIES.includes(f.severity) ? f.severity : "medium",
+        measuredAgainst:
+          typeof f.measuredAgainst === "string" && f.measuredAgainst.trim() ? f.measuredAgainst : "unstated",
         lens: "cross-model",
       }));
     log(`lens "cross-model": ${findings.length} finding(s)`);
@@ -335,11 +380,12 @@ async function verifyFinding(finding, ctx, model, charter) {
     ``,
     `  file: ${finding.file}${finding.line !== undefined ? ` (line ${finding.line})` : ""}`,
     `  severity: ${finding.severity} (lens: ${finding.lens})`,
+    `  measured against: ${finding.measuredAgainst}`,
     `  claim: ${finding.claim}`,
     ``,
-    `Context: the claim is about the diff for ref ${ctx.ref} in the repository at your`,
-    `working directory. Inspect the actual code with Read/Grep/Glob (strictly`,
-    `read-only) and try to REFUTE the claim. Set verified=true only if the evidence`,
+    `Context: the claim is about the ${ctx.scopeLabel} in the repository at your working`,
+    `directory. Inspect the actual code with Read/Grep/Glob (strictly read-only) and try to`,
+    `REFUTE the claim. Set verified=true only if the evidence`,
     `you inspected supports it; verified=false if it is wrong, already handled, or`,
     `unsupported by the code. "verification" is 1-2 sentences citing what you`,
     `inspected and why the claim stands or falls.`,
@@ -414,7 +460,8 @@ function fallbackSummary(findings, notes) {
   const confirmed = findings.filter((f) => f.verified);
   const parts = [
     `Review panel: ${findings.length} finding(s), ${confirmed.length} confirmed ` +
-      `(${confirmed.filter((f) => f.severity === "high").length} high, ` +
+      `(${confirmed.filter((f) => f.severity === "critical").length} critical, ` +
+      `${confirmed.filter((f) => f.severity === "high").length} high, ` +
       `${confirmed.filter((f) => f.severity === "medium").length} medium, ` +
       `${confirmed.filter((f) => f.severity === "low").length} low), ` +
       `${findings.length - confirmed.length} unverified (retained, marked).`,
@@ -452,13 +499,30 @@ async function main() {
   const notes = [];
 
   gitReadOnly(["rev-parse", "--git-dir"]); // fail fast outside a git repo
-  if (!existsSync(args.specPath)) fatal(`spec not found: ${args.specPath}`);
-  const spec = truncate(readFileSync(args.specPath, "utf8"), SPEC_CHAR_CAP, "spec");
-  const diff = truncate(gitReadOnly(["diff", args.ref]), DIFF_CHAR_CAP, "diff");
-  if (spec.note) notes.push(spec.note);
-  if (diff.note) notes.push(diff.note);
-  const fileList = gitReadOnly(["diff", "--name-only", args.ref]).trim();
-  const ctx = { ref: args.ref, specPath: args.specPath, spec: spec.text, diff: diff.text, fileList };
+
+  let spec = { text: null, note: null };
+  if (args.specPath) {
+    if (!existsSync(args.specPath)) fatal(`spec not found: ${args.specPath}`);
+    spec = truncate(readFileSync(args.specPath, "utf8"), SPEC_CHAR_CAP, "spec");
+    if (spec.note) notes.push(spec.note);
+  }
+
+  let scopeLabel;
+  let fileList;
+  let diff = { text: null, note: null };
+  if (args.scope.ref) {
+    scopeLabel = `diff for ref ${args.scope.ref}`;
+    diff = truncate(gitReadOnly(["diff", args.scope.ref]), DIFF_CHAR_CAP, "diff");
+    if (diff.note) notes.push(diff.note);
+    fileList = gitReadOnly(["diff", "--name-only", args.scope.ref]).trim();
+  } else {
+    scopeLabel = `file set below (${args.scope.paths.length} file(s))`;
+    const list = truncate(args.scope.paths.join("\n"), DIFF_CHAR_CAP, "file list");
+    if (list.note) notes.push(list.note);
+    fileList = list.text;
+  }
+
+  const ctx = { scopeLabel, specPath: args.specPath, spec: spec.text, diff: diff.text, fileList };
 
   // Stage 1: lens reviewers in parallel (claude lenses + optional codex lens).
   const lensJobs = args.lenses.map((lens) => () => runClaudeLens(lens, ctx, model));
@@ -488,4 +552,4 @@ if (require.main === module) {
 }
 
 // Pure helpers, exported for the deterministic tests in tests/unit/.
-module.exports = { dedupFindings, rankFindings, truncate, fallbackSummary, mapLimit };
+module.exports = { dedupFindings, rankFindings, truncate, fallbackSummary, mapLimit, SEVERITIES };

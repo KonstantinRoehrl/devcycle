@@ -62,6 +62,30 @@ test("fallbackSummary counts confirmed vs unverified and appends notes", () => {
   assert.match(s, /Notes: diff truncated/);
 });
 
+test("the severity vocabulary is the four values findings.md defines, in rank order", () => {
+  assert.deepEqual(panel.SEVERITIES, ["critical", "high", "medium", "low"]);
+});
+
+test("rankFindings orders all four severities", () => {
+  const f = (file, severity) => ({ file, severity, verified: true, claim: "", lens: "", verification: "" });
+  const ranked = panel.rankFindings([f("d.js", "low"), f("b.js", "high"), f("a.js", "critical"), f("c.js", "medium")]);
+  assert.deepEqual(ranked.map((x) => x.file), ["a.js", "b.js", "c.js", "d.js"]);
+});
+
+test("dedupFindings carries measuredAgainst through the merge", () => {
+  const weak = { file: "f.js", claim: "same claim", severity: "medium", lens: "spec", verified: false, verification: "v1", measuredAgainst: "CONTRIBUTING.md" };
+  const strong = { file: "f.js", claim: "Same  Claim", severity: "critical", lens: "correctness", verified: true, verification: "v2", measuredAgainst: "OWASP Top Ten" };
+  const out = panel.dedupFindings([weak, strong]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].severity, "critical");
+  assert.equal(out[0].measuredAgainst, "OWASP Top Ten");
+});
+
+test("fallbackSummary counts critical findings", () => {
+  const s = panel.fallbackSummary([{ verified: true, severity: "critical" }], []);
+  assert.match(s, /1 critical/);
+});
+
 // ---------- end-to-end against a stubbed claude CLI ----------
 
 test("panel end-to-end: lenses find, verifier confirms, dedup collapses, report on stdout", () => {
@@ -78,7 +102,7 @@ test("panel end-to-end: lenses find, verifier confirms, dedup collapses, report 
 const prompt = process.argv[process.argv.length - 1];
 let out;
 if (prompt.includes("You are one lens")) {
-  out = { findings: [{ file: "src/a.js", line: 1, claim: "exports 3 where the spec requires 2", severity: "high" }] };
+  out = { findings: [{ file: "src/a.js", line: 1, claim: "exports 3 where the spec requires 2", severity: "high", measuredAgainst: "the spec" }] };
 } else if (prompt.includes("adversarial verifier")) {
   out = { verified: true, verification: "read src/a.js; the claim stands" };
 } else {
@@ -88,7 +112,7 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: out })
 `
   );
 
-  const res = runScript(SCRIPT, { ref: "HEAD", specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   // three lenses reported the identical claim -> dedup collapses to one
@@ -105,7 +129,81 @@ test("panel exits 1 when every lens reviewer fails (unusable CLI output)", () =>
   commitAll(repo, "base");
 
   const bin = makeFakeBin("claude", `process.stdout.write("this is not json");`);
-  const res = runScript(SCRIPT, { ref: "HEAD", specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /all lens reviewers failed/);
+});
+
+// A fake claude that answers every stage and reports back what its prompt contained.
+const echoingClaude = `
+const prompt = process.argv[process.argv.length - 1];
+let out;
+if (prompt.includes("You are one lens")) {
+  out = { findings: [{
+    file: "src/a.js", line: 1,
+    claim: prompt.includes("CUSTOM-CHARTER-TOKEN") ? "custom charter reached the lens" : "built-in charter only",
+    severity: "critical",
+    measuredAgainst: prompt.includes("## Spec") ? "the spec" : "repo convention",
+  }] };
+} else if (prompt.includes("adversarial verifier")) {
+  out = { verified: true, verification: "read the file; the claim stands" };
+} else {
+  out = { summary: "one confirmed finding." };
+}
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+`;
+
+test("scope {paths} reviews a file list with no spec and no diff", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+
+  const bin = makeFakeBin("claude", echoingClaude);
+  const res = runScript(SCRIPT, { scope: { paths: ["src/a.js"] }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.equal(report.findings.length, 1);
+  assert.equal(report.findings[0].severity, "critical");
+  // no specPath given -> no spec block reached the lens prompt
+  assert.equal(report.findings[0].measuredAgainst, "repo convention");
+});
+
+test("a custom {key, charter} lens runs alongside a built-in key", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+
+  const bin = makeFakeBin("claude", echoingClaude);
+  const res = runScript(
+    SCRIPT,
+    { scope: { paths: ["src/a.js"] }, lenses: [{ key: "conventions", charter: "CUSTOM-CHARTER-TOKEN: check repo conventions." }] },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.equal(report.findings[0].claim, "custom charter reached the lens");
+  assert.equal(report.findings[0].lens, "conventions");
+});
+
+test("scope rejects carrying both ref and paths", () => {
+  const repo = makeRepo();
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD", paths: ["a.js"] } }, { cwd: repo });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /exactly one of ref .* or paths/);
+});
+
+test("scope rejects carrying neither ref nor paths", () => {
+  const repo = makeRepo();
+  const res = runScript(SCRIPT, { scope: {} }, { cwd: repo });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /exactly one of ref .* or paths/);
+});
+
+test("the spec lens is unselectable without a specPath", () => {
+  const repo = makeRepo();
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["spec"] }, { cwd: repo });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /"spec" lens requires args\.specPath/);
 });

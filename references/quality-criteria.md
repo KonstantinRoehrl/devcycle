@@ -1,9 +1,12 @@
-# Audit criteria — catalog, precedence, and seed index
+# Quality criteria — catalog, precedence, and seed index
 
-The single owner of what an audit measures against and where those standards come from.
-`devcycle:auditing-a-repo` reads this at discovery and does not restate it. Nothing here
-chooses criteria: the user does, at the skill's step 1. This file supplies the proposal's
-raw material and the rules for sourcing it.
+The single owner of what any devcycle review or plan measures against, and where those
+standards come from. `devcycle:auditing-a-repo` reads it at discovery,
+`devcycle:reviewing-code` reads it when it builds review lenses, and
+`devcycle:planning-waves` reads it when it derives a plan's quality constraints — none of
+them restate it. Nothing here chooses criteria: at an audit the user does, at that skill's
+step 1, and planning filters by the confirmed scope. This file supplies the raw material and
+the rules for sourcing it.
 
 ## Precedence
 
@@ -124,3 +127,20 @@ Record the limitation in the coverage statement, naming which confirmed criteria
 measured against the seed alone rather than against a source verified live. Never silently
 degrade — an audit that could not check current guidance and does not say so reads as one
 that did.
+
+## Forward use
+
+How this catalog reaches the stages that write code, rather than only the ones that judge
+code afterwards.
+
+- **Filter by scope.** `devcycle:planning-waves` selects only the criteria that apply to the
+  stacks the confirmed scope actually contains and to the areas `.devcycle/scope.md` names.
+  The whole catalog is never carried forward.
+- **Per-task excerpt.** An implementer brief carries only the constraint lines whose subject
+  that task's own `**Files:**` touch — never the catalog, and never another task's lines.
+- **Name the source.** Every constraint derived from this file names what it is measured
+  against, per Precedence above. A constraint with no named source is an unsupported opinion
+  in a plan exactly as it is in a finding.
+- **The cost rule.** This catalog is long, and "token and context cost" is one of its own
+  universal criteria. Splicing it wholesale into a brief, a plan, or a skill load is the
+  anti-pattern it names.
