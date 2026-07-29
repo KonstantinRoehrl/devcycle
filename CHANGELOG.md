@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1
+
+- docs(changelog): drop Unreleased entries already shipped in 0.8.0 (#24)
+
+## 0.8.0
+
+- feat: add branch-scoped audits, a compact profile-driven pipeline, and sweep routing
+
 ## 0.7.0
 
 - feat: add trivial-change fast path plus audit-round triage and review improvements (#18)
