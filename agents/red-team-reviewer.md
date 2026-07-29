@@ -41,8 +41,10 @@ claim and couldn't find a scenario, that claim does not appear in your
 findings — silence on a claim means you tried and failed to break it, not
 that you skipped it.
 
-Rank findings by severity: how bad is the outcome if the scenario occurs, and
-how likely is the triggering state in real use.
+Rank findings by severity per `${CLAUDE_PLUGIN_ROOT}/references/findings.md`,
+which owns the vocabulary and the core fields. What decides the tier here: how
+bad the outcome is if the scenario occurs, and how likely the triggering state
+is in real use.
 
 ## Reviewer hygiene (read before judging anything)
 

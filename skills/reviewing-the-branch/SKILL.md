@@ -36,58 +36,26 @@ none of it is repeated here. What this stage consumes:
 
 ## Fresh context (bias control — non-negotiable)
 
-A reviewer that watched the code being written inherits the implementer's
-assumptions and reviews the intention instead of the code. The branch review
-MUST run in fresh context:
+The rule and its rationale are owned by `devcycle:reviewing-code`; this stage names it and
+does not restate it. What it constrains here is the **Inputs** above: those three are
+deliberately all a reviewer receives.
 
-- Reviewers receive ONLY the branch, the spec path, and the ledger path —
-  never the implementation conversation, task reports, or implementer
-  reasoning.
-- If you carry implementation context yourself, do not review the branch
-  directly: dispatch fresh reviewer subagents (model: the resolved
-  branch-review model) and act on their findings.
+## Engine selection
 
-## Engine selection (keyed to reviewDepth)
+Delegated in full to `devcycle:reviewing-code`. It picks the engine from `reviewDepth`,
+invokes `workflows/review-panel.js` for `panel`, runs the same lenses inline plus the
+refutation pass for `single`, degrades `panel→single` with the reason disclosed, and exports
+`DEVCYCLE_PANEL_MODEL` when `branchReviewModel` is an explicit id. None of that is restated
+here.
 
-**reviewDepth = `single`:** this skill's spec-compliance layer (below) plus the
-reviewer guidance of `superpowers:requesting-code-review` — severity-calibrated
-findings (critical / important / minor), read-only review of the work product,
-structured findings, and precisely crafted reviewer context rather than session
-history. That combination IS the engine: a complete review in its own right,
-with nothing missing and nothing to apologise for.
+Invoke it with `scope: {ref: "<base>..<branch>"}`, the spec path as `specPath`, and this
+stage's criteria — what the spec requires and forbids, plus the default criteria set — and
+record the engine line it returns **verbatim** in the report below.
 
-The built-in `code-review` skill is user-invocation-only in current Claude
-Code — an agent cannot launch it, so never plan a review around it. It is an
-opportunistic fold-in only: if the user has run it on the branch independently,
-fold its findings into this review and record the engine as `single + user-run
-code-review`. With no such user-run pass available, the engine is `single`.
-
-**reviewDepth = `panel`:**
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js" '{"ref":"<base>..<branch>","specPath":"<spec path>","crossModel":<crossModelReview>}'
-```
-
-Args are a single JSON argv. The JSON report is the panel's stdout ONLY —
-progress output goes to stderr — with `findings` (file, line, claim,
-severity, lens, verified, verification) plus `summary`. The panel runs
-2–3 read-only lens reviewers (spec compliance, correctness + security,
-simplification) with per-finding adversarial verification; it never mutates
-files or git. Pass `"crossModel": true` only when the crossModelReview
-option is true, and record the engine as `panel [+ cross-model lens]` when it
-ran. When branchReviewModel is an explicit id, export it before invoking:
-`DEVCYCLE_PANEL_MODEL=<id> node ...` — omitting it would silently replace the
-user's binding choice with the CLI's default. When it resolved to the session
-tier, omit the export: the panel's subagents then run on the claude CLI's
-configured default model.
-
-**Graceful degradation of `panel` — a first-class path, not an apology.** When
-`review-panel.js` is missing, or exits non-zero, the panel engine is
-unavailable: an exit code of 1 means the panel itself failed, NOT that findings
-exist, and it is never a review verdict. Fall back to `single` — the full
-engine above — and say so in the engine line as `panel→single (panel
-unavailable: <reason>)`. A fallback silently presented as a panel run makes the
-gate unauditable; the disclosure is what keeps it honest.
+The built-in `code-review` skill is user-invocation-only in current Claude Code — an agent
+cannot launch it, so never plan a review around it. It is an opportunistic fold-in only: if
+the user has run it on the branch independently, fold its findings into this review and
+record the engine as `single + user-run code-review`.
 
 ## Spec-compliance layer
 
@@ -144,11 +112,12 @@ the spec says.
    Only the user may grant rounds beyond the cap, and only explicitly. Record
    that as `task=branch event=user-decision outcome=review-cap extended to <n>`
    and treat `<n>` as the cap from then on; the report's `Rounds:` line names it.
-2. **Only blocking findings re-open the loop.** Each goes to a fresh
-   `devcycle:implementer` dispatch (brief = the finding plus the spec path;
-   never the review conversation). Non-blocking findings are recorded as
-   carry-overs the round they are first raised, and never re-open the loop or
-   consume a round.
+2. **Only blocking findings re-open the loop.** **Blocking means `critical` or `high`** —
+   `${CLAUDE_PLUGIN_ROOT}/references/findings.md` owns the severity vocabulary and derives
+   blocking from it, and neither is restated here. Each blocking finding goes to a fresh
+   `devcycle:implementer` dispatch (brief = the finding plus the spec path; never the review
+   conversation). Non-blocking findings — `medium` and `low` — are recorded as carry-overs
+   the round they are first raised, and never re-open the loop or consume a round.
 3. **Rounds 2..N are narrow.** After the fixes are committed, re-run the SAME
    engine over the fix diff plus a re-check of the specific findings the
    previous round raised — not a fresh whole-branch pass. Round 1 already
@@ -164,12 +133,11 @@ the spec says.
      does not hand off to on-device and does not proceed to finishing.
 
 **The cap bounds effort, never truth.** Reaching the cap NEVER converts an
-outstanding blocking finding into a pass, and a finding is NEVER downgraded in
-severity — to non-blocking, to a carry-over, to a note — in order to reach the
-cap or close the loop faster. A cap that could launder a blocking finding into
-a pass would make every `pass` from this gate unreadable. This guardrail is
-unconditional: it holds at every profile, and the cap's own value never softens
-it.
+outstanding blocking finding into a pass. Severity itself is not this skill's
+to adjust: `references/findings.md` owns it, including what may and may not
+change it. A cap that could launder a blocking finding into a pass would make
+every `pass` from this gate unreadable. This guardrail is unconditional: it
+holds at every profile, and the cap's own value never softens it.
 
 ## Review report (REQUIRED shape)
 
@@ -186,7 +154,9 @@ it.
 ```
 
 The engine line records what actually ran, and its value is one of the five
-above — no variants. Findings in plain everyday language, symptom first;
+above — no variants. `[severity]` on a finding is one of the four values
+`references/findings.md` defines; the carry-overs line holds exactly the
+non-blocking ones. Findings in plain everyday language, symptom first;
 jargon only where it adds precision.
 
 ## Handoff
