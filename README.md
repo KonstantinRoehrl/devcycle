@@ -340,10 +340,9 @@ stage's output. `local-commits-only` is unaffected either way; it never pushes.
 
 **`reviewDepth`** picks the branch-review engine — `single` at `lean` and `standard`,
 `panel` at `thorough`, unless you set it yourself (or set it to `auto`, which hands it back
-to the profile). `single` is one reviewer running
-devcycle's spec-compliance checks plus the reviewer guidance of
-`superpowers:requesting-code-review` — severity-calibrated, read-only, structured
-findings. Claude Code's built-in `code-review` skill is user-invocation-only, so an agent
+to the profile). `single` runs the review's two to five criteria lenses as inline read-only
+reviewers, then re-verifies each finding against the code — a complete review in its own
+right, not a degraded panel. Claude Code's built-in `code-review` skill is user-invocation-only, so an agent
 cannot launch it; if you have run it on the branch yourself, its findings are folded in
 and the engine line says `single + user-run code-review`. `panel` runs
 `review-panel.js` instead: two to five read-only reviewers, each with a lens built from the

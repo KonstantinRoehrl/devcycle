@@ -13,7 +13,7 @@
 //     lenses?: (string | {key: string, charter: string})[],
 //     crossModel?: boolean }
 // Output (stdout, JSON):
-//   { findings: [{ file, line?, claim,
+//   { findings: [{ file, line: integer|null, claim,
 //                  severity: "critical"|"high"|"medium"|"low",
 //                  measuredAgainst, lens, verified: boolean, verification: string }],
 //     summary: string }
@@ -175,7 +175,8 @@ function parseArgs() {
   if (args.specPath !== undefined && (typeof args.specPath !== "string" || !args.specPath)) {
     fatal("args.specPath, when given, must be a non-empty string");
   }
-  const requested = args.lenses ?? Object.keys(LENS_CHARTERS);
+  const defaulted = args.lenses === undefined;
+  const requested = defaulted ? Object.keys(LENS_CHARTERS) : args.lenses;
   if (!Array.isArray(requested) || requested.length === 0) {
     fatal("args.lenses must be a non-empty array of built-in keys and/or { key, charter } objects");
   }
@@ -191,13 +192,17 @@ function parseArgs() {
     }
     return fatal("each lens must be a built-in key or { key, charter } with non-empty strings");
   });
+  // The spec lens needs a spec. Asking for it without one is an arg error; getting it
+  // from the default set without one just drops it, so a spec-less scope still runs.
+  let selected = lenses;
   if (!args.specPath && lenses.some((l) => l.key === "spec")) {
-    fatal('the "spec" lens requires args.specPath');
+    if (!defaulted) fatal('the "spec" lens requires args.specPath');
+    selected = lenses.filter((l) => l.key !== "spec");
   }
   return {
     scope: hasRef ? { ref: scope.ref } : { paths: scope.paths },
     specPath: typeof args.specPath === "string" ? args.specPath : null,
-    lenses,
+    lenses: selected,
     crossModel: args.crossModel === true,
   };
 }
@@ -281,7 +286,7 @@ async function runClaudeLens(lens, ctx, model) {
     .filter((f) => f && typeof f.file === "string" && typeof f.claim === "string")
     .map((f) => ({
       file: f.file,
-      ...(Number.isInteger(f.line) ? { line: f.line } : {}),
+      line: Number.isInteger(f.line) ? f.line : null,
       claim: f.claim,
       severity: SEVERITIES.includes(f.severity) ? f.severity : "medium",
       measuredAgainst:
@@ -328,7 +333,7 @@ async function runCrossModelLens(ctx) {
       .filter((f) => f && typeof f.file === "string" && typeof f.claim === "string")
       .map((f) => ({
         file: f.file,
-        ...(Number.isInteger(f.line) ? { line: f.line } : {}),
+        line: Number.isInteger(f.line) ? f.line : null,
         claim: f.claim,
         severity: SEVERITIES.includes(f.severity) ? f.severity : "medium",
         measuredAgainst:
@@ -378,7 +383,7 @@ async function verifyFinding(finding, ctx, model, charter) {
   const prompt = [
     `You are an adversarial verifier on a review panel. A reviewer claims:`,
     ``,
-    `  file: ${finding.file}${finding.line !== undefined ? ` (line ${finding.line})` : ""}`,
+    `  file: ${finding.file}${Number.isInteger(finding.line) ? ` (line ${finding.line})` : ""}`,
     `  severity: ${finding.severity} (lens: ${finding.lens})`,
     `  measured against: ${finding.measuredAgainst}`,
     `  claim: ${finding.claim}`,

@@ -60,15 +60,23 @@ pre-change customize path did not write one.
 shadowing set is empty here — `gitPolicy` is outside the profile matrix — so this
 variant grades the fall-through branch, not the migration.
 
-Splices. Runs A and B: the full bodies of `references/config.md` and
-`skills/reviewing-the-branch/SKILL.md`, with every `${CLAUDE_PLUGIN_ROOT}` occurrence
+Splices. Runs A and B: the full bodies of `references/config.md`,
+`skills/reviewing-the-branch/SKILL.md` and — under the header "=== SKILL
+devcycle:reviewing-code (the engine the stage delegates to) ===", the convention
+`tests/scenarios/reviewing-the-branch/engine-selection.md` uses for the same splice —
+`skills/reviewing-code/SKILL.md`, with every `${CLAUDE_PLUGIN_ROOT}` occurrence
 replaced by the sandbox's `plugin` directory path (the platform's substitution,
 simulated), and `references/config.md` also written into `plugin/references/config.md`
-so the skill's own pointer resolves. Runs C and D and their variants: the full bodies
+so the skill's own pointer resolves. The third body is required, not decorative:
+engine selection and the panel invocation criteria 1, 3 and 4 grade live in
+`devcycle:reviewing-code`, which the sandbox subagent cannot resolve as a plugin skill,
+so without it those criteria grade a missing skill rather than the resolved knob. Runs C
+and D and their variants: the full bodies
 of `commands/cycle.md` and `references/config.md`, each with that run's own
 substitutions applied to the command body. For the **baseline (red)** runs, splice the same files
-from the pre-change commit (`git show ba79dab:<path>`) — `references/config.md` does
-not exist there, so the red prompt carries only the pre-change skill or command body.
+from the pre-change commit (`git show ba79dab:<path>`) — neither `references/config.md`
+nor `skills/reviewing-code/SKILL.md` exists there, so the red prompt carries only the
+pre-change skill or command body.
 
 ## Subagent prompt
 
@@ -77,8 +85,10 @@ checked out):
 
 ```
 [SKILL CONTENT: full text of references/config.md, then
-skills/reviewing-the-branch/SKILL.md, ${CLAUDE_PLUGIN_ROOT} replaced by the
-sandbox's plugin directory]
+skills/reviewing-the-branch/SKILL.md, then — under the header "=== SKILL
+devcycle:reviewing-code (the engine the stage delegates to) ===" — full text
+of skills/reviewing-code/SKILL.md, ${CLAUDE_PLUGIN_ROOT} replaced by the
+sandbox's plugin directory in all three]
 
 You are at the branch-review stage of a devcycle pipeline in this repo. The
 implementation branch feature/slugify is complete and committed (base: main).
@@ -293,6 +303,14 @@ the isolated-config protocol, and grade from disk rather than from the transcrip
 `configured:` line read off the file afterwards for the `· profile-asked` marker. Run C is
 re-graded in the same pass for criterion 13, since the change adds a branch that must
 *not* fire for it.
+
+**Amended 2026-07-29 (engine splice), still not run.** Criteria 1, 3 and 4 grade the
+`review-panel.js` invocation, which since the shared-engine change appears only in
+`skills/reviewing-code/SKILL.md` — a body runs A and B did not splice, so run A graded a
+skill the sandbox subagent cannot resolve and criterion 4 passed vacuously. That third
+body is now spliced for both runs, per the convention the
+`tests/scenarios/reviewing-the-branch/` scenarios already use. Nothing was run; nothing
+here is claimed as observed.
 
 **Amended 2026-07-27 (second cycle), still not run.** Review found that the criteria above
 graded only the literal first run, and so would have passed a version that offers the

@@ -207,3 +207,55 @@ test("the spec lens is unselectable without a specPath", () => {
   assert.equal(res.status, 1);
   assert.match(res.stderr, /"spec" lens requires args\.specPath/);
 });
+
+test("an explicit lens list naming spec without a specPath still fails, even beside other lenses", () => {
+  const repo = makeRepo();
+  const res = runScript(SCRIPT, { scope: { paths: ["a.js"] }, lenses: ["correctness", "spec"] }, { cwd: repo });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /"spec" lens requires args\.specPath/);
+});
+
+test("with lenses omitted and no specPath, the spec lens is dropped and the other built-ins run", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+
+  const bin = makeFakeBin("claude", echoingClaude);
+  const res = runScript(SCRIPT, { scope: { paths: ["src/a.js"] } }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  assert.doesNotMatch(res.stderr, /lens "spec" reviewing/);
+  assert.match(res.stderr, /lens "correctness" reviewing/);
+  const report = JSON.parse(res.stdout);
+  assert.equal(report.findings.length, 1);
+});
+
+// A fake claude whose lens reports no line at all, and whose verifier reports back
+// whether a line reached its prompt.
+const linelessClaude = `
+const prompt = process.argv[process.argv.length - 1];
+let out;
+if (prompt.includes("You are one lens")) {
+  out = { findings: [{ file: "src/a.js", claim: "no line reported", severity: "medium", measuredAgainst: "repo convention" }] };
+} else if (prompt.includes("adversarial verifier")) {
+  out = { verified: true, verification: prompt.includes("(line") ? "a line reached the verifier" : "no line reached the verifier" };
+} else {
+  out = { summary: "one confirmed finding." };
+}
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+`;
+
+test("a finding with no integer line round-trips as line: null, and no line reaches the verifier", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+
+  const bin = makeFakeBin("claude", linelessClaude);
+  const res = runScript(SCRIPT, { scope: { paths: ["src/a.js"] }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.ok("line" in report.findings[0], "the line key is emitted, per references/findings.md");
+  assert.equal(report.findings[0].line, null);
+  assert.equal(report.findings[0].verification, "no line reached the verifier");
+});

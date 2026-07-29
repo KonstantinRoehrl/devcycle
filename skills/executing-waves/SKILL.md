@@ -72,10 +72,13 @@ Invariants:
    task's steps, the global constraints and pinned interfaces that apply, and
    the task's **quality constraints, resolved** — nothing else.
 
-   **Resolving quality constraints.** Look each id on the task's
-   `**Quality constraints:**` line up in the plan's `## Quality Constraints`
-   section and splice those lines into the brief verbatim, ids included. An
-   implementer sees only its own brief, so a bare `QC3` is unreadable. **Never
+   **Resolving quality constraints — every brief, at every profile.** Look each
+   id on the task's `**Quality constraints:**` line up in the plan's
+   `## Quality Constraints` section and splice those lines into the brief
+   verbatim, ids included. An implementer sees only its own brief, so a bare
+   `QC3` is unreadable. Upstream's file-handoff mechanics know of neither the
+   line nor the section, so at `thorough` resolve the ids and add them to the
+   sliced brief the same way. **Never
    splice the whole criteria catalog, and never the plan's whole constraints
    section** — only the lines this task's ids name; `references/quality-criteria.md`'s
    cost rule owns why. A task declaring `**Quality constraints:** none`, or a

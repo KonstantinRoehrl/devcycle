@@ -117,10 +117,9 @@ how far steps 2–3 go (see Depth below). Report as
    here.
 
    What an audit adds on top of that contract: it reports the **document tier** on every
-   finding — the core fields plus Category, Impact, Complexity, Impact if unaddressed, How
-   to verify/reproduce, Suggested fix direction and Effort estimate — detailed enough that
-   someone reading only that one finding can start work immediately: what, where, why, and
-   how.
+   finding — the core fields plus the document fields that same file lists, which it scopes
+   to this document and nowhere else — detailed enough that someone reading only that one
+   finding can start work immediately: what, where, why, and how.
 
 4. **Coverage statement.** The document states what was read and what was not — areas
    skipped, criteria the evidence was thin for, limits the scope imposed. Silent
@@ -183,7 +182,7 @@ How far steps 2–3 sweep is the `audit depth` row of
 
 What that row's deepest value means here: at `thorough` the refutation pass is
 `devcycle:reviewing-code`'s adversarial verification — real machinery, not a paragraph this
-skill performs itself. Refuted findings are dropped, not softened.
+skill performs itself.
 
 Depth never touches step 1 or step 3's evidence rule: a `lean` audit
 interviews for its criteria and drops evidence-free findings exactly as a `thorough`
@@ -214,9 +213,9 @@ apart is what leaves the selection decision with the user, which is the whole po
 | "It's obvious what this repo needs audited" | That is your taste, not the user's priorities. Step 1 is the skill; derive a proposal and let them correct it. |
 | "I'll research first and interview with real findings" | Research before criteria audits the whole repo against everything. The stop after step 1 is hard. |
 | "The user said 'audit it', that's permission to pick criteria" | It is permission to run the audit, not to choose what it measures. Ask. |
-| "I'm sure this is a problem, I just can't point at the line" | Then it is not a finding. No `file:line`, no entry. |
+| "I'm sure this is a problem, I just can't point at the line" | Then it fails the evidence discipline `references/findings.md` sets, and it is not a finding. |
 | "I only got through half of it, close enough" | Say so in the coverage statement. Silent truncation reads as completeness. |
 | "Finding 1 is clearly the most urgent, I'll just start fixing it" | Step 6 stops. The user picks, and each pick is its own cycle. |
 | "It's a one-line fix, I'll just do it while I'm here" | The audit writes findings, never code. Fixing while auditing takes the selection decision away from the user. |
-| "The pattern looks wrong; I don't need to trace the call path" | Then it is a guess. Trace the path and mark it verified, tag it suspected, or drop it. |
+| "The pattern looks wrong; I don't need to trace the call path" | Then it is a guess. Trace the path, and record the Confidence `references/findings.md` requires. |
 | "The severity is obvious — the other ten fields are busywork" | Every field `references/findings.md` requires, on every finding. A finding nobody can start work from was mentioned, not reported. |
