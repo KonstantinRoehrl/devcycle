@@ -319,7 +319,7 @@ Version handling on GitHub is enforced by CI, not discipline alone:
 
 ### 15.1 The reference layer: one owner per convention
 
-`references/` holds six plain markdown files, each the sole owner of one cross-cutting
+`references/` holds nine plain markdown files, each the sole owner of one cross-cutting
 convention:
 
 | File | Owns |
@@ -330,6 +330,9 @@ convention:
 | `handoff.md` | the handoff block shape, the context-action table, the one-block-per-stage rule, the await gate |
 | `branch.md` | branch discipline for every committing path |
 | `output.md` | output discipline for every agent and skill |
+| `checklist.md` | the on-device checklist contract: paths, item shape, dimensions, and the `(auto)` boundary |
+| `quality-criteria.md` | what any review or plan measures against: the criteria catalog, sourcing precedence, the seed index, and the forward-use rules |
+| `findings.md` | how a finding is expressed: severity with blocking derived, the core and document field sets, evidence discipline, ordering, the machine shape |
 
 A consumer names one — "Read `${CLAUDE_PLUGIN_ROOT}/references/<name>.md` and follow it" —
 and does not restate its content.
@@ -440,6 +443,48 @@ state file untouched, emits no handoff block, and ends at the findings document.
 finding into work is a separate, explicit call — `/devcycle:cycle <request>` naming that
 finding. The reason is the same as §4.4's: an entry point that chains onward takes the
 selection decision away from the user.
+
+## 16. Shared review criteria (added 2026-07-29)
+
+The audit and the whole-branch review were two implementations of one idea, and each held
+what the other lacked. The audit owned the criteria — stack-derived, precedence-ranked,
+externally sourced — but verified findings in prose. The review owned the machinery — lens
+fan-out, per-finding refutation, dedup, ranking — but measured against three charters
+hardcoded in JavaScript that no repo convention informed. Severity was spoken four different
+ways across five surfaces.
+
+**Two references, split by axis.** `quality-criteria.md` owns *what you measure against*;
+`findings.md` owns *how you report what you found*. The split is not cosmetic: the consumers
+differ. `planning-waves` needs only the first, `task-reviewer` needs only the second, and the
+two whole-scope reviews need both. One combined file would force every consumer to load both
+halves — the cost §15.1 exists to avoid.
+
+**One shared skill, not a merge.** `reviewing-code` owns the engine both whole-scope reviews
+share: lens construction from the criteria, engine selection and its `panel→single`
+degradation, the fresh-context rule, and verify → dedup → rank. `auditing-a-repo` and
+`reviewing-the-branch` stay separate skills because their stops, outputs and lifecycles
+genuinely differ — the audit interviews for criteria and stops for a user selection; the
+review enumerates a spec and runs a bounded rounds loop. What they shared was never the
+stage, only the engine.
+
+**Blocking is derived.** Severity is `critical` / `high` / `medium` / `low`, and blocking
+means `critical` or `high` — not a separate field a reviewer can set independently. Before
+this, `reviewing-the-branch` gated on "blocking findings" without defining the word; the gate
+is now stricter and predictable. Deliberately: a vocabulary that can be bargained with makes
+every verdict built on it unreadable.
+
+**The knowledge reaches forward.** The criteria catalog was the best statement in the repo of
+what good code looks like, and it was readable only by the audit — i.e. only after the code
+was written. `planning-waves` now derives a `## Quality Constraints` section from it, filtered
+to the confirmed scope, and `executing-waves` splices each task's own constraint lines into
+that task's brief. An implementer is told up front what the audit would later flag it for,
+and no brief carries the whole catalog.
+
+**The panel generalized.** `review-panel.js` takes a `scope` that is either a ref or a file
+list, an optional `specPath`, and caller-built lens charters. That is what lets the audit use
+the same machinery over a file set that the branch review uses over a diff. Its read-only
+guarantee, its exit-code taxonomy, and its "unverified findings are marked, never dropped"
+contract are unchanged.
 
 ---
 

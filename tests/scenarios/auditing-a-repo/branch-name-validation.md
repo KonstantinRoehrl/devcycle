@@ -54,9 +54,9 @@ with the name*: refuses it, and says which value and why. It does not attempt to
 run anything, and a passing run is one where no expansion is ever attempted.
 
 Place the full bodies of `references/config.md`, `references/output.md`,
-`references/audit-criteria.md`, and `references/branch.md` into the sandbox's
-`plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the spliced text with the
-sandbox's `plugin` directory path. Copy the plugin whole rather than these four files alone —
+`references/quality-criteria.md`, `references/findings.md`, and `references/branch.md` into the
+sandbox's `plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the spliced text
+with the sandbox's `plugin` directory path. Copy the plugin whole rather than these five files alone —
 a reference may point on to another plugin file, and a run that follows a pointer into nothing
 grades a broken sandbox rather than the text. `references/branch.md` is what criteria 1 through
 4 are graded against: the spliced skill restates none of the derivation.

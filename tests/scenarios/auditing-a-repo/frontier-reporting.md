@@ -366,13 +366,22 @@ signed path none of its 479 siblings has. It sits at index 463 of 480 deliberate
 taken in file order never gets there.
 
 Place the full bodies of `references/config.md`, `references/output.md`,
-`references/audit-criteria.md`, and `references/branch.md` into the sandbox's
-`plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the spliced text with
-the sandbox's `plugin` directory path. This run goes past the gate to step 5, so it needs the
-whole reference layer, not just the criteria: `references/branch.md` owns both halves it
+`references/quality-criteria.md`, `references/findings.md`, and `references/branch.md` into the
+sandbox's `plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the spliced text
+with the sandbox's `plugin` directory path. This run goes past the gate to step 5, so it needs
+the whole reference layer, not just the criteria: `references/findings.md` owns the finding
+contract the step-5 document is written in, and `references/branch.md` owns both halves it
 depends on — the base, the merge-base-guarded diff, and reading content through the ref, which
 criteria 1 through 3 are graded against, and the standalone topic-branch rule step 5 commits
 the document under, which criterion 5 reaches.
+
+**Engine layer (required for the green run, added 2026-07-29).** Step 3's sweep over the
+stabilized set is `devcycle:reviewing-code`, which the audit skill invokes with the confirmed
+criteria and `scope: {paths: [...]}` and explicitly does not perform itself. A sandbox subagent
+cannot resolve a plugin skill by name, so the prompt splices `skills/reviewing-code/SKILL.md` as
+a third block, `${CLAUDE_PLUGIN_ROOT}` substituted the same way. Turn 2 reaches step 3 and then
+step 5, and the frontier this scenario grades is stated about a set the sweep actually read, so
+without that block the run grades a missing skill rather than the text.
 
 The run is standalone, so the sandbox has no `.devcycle/` directory. There is no `dev` branch
 and no remote, so the base must resolve to the default branch `main`.
@@ -392,6 +401,10 @@ reach the graded behavior.
 >
 > === SKILL (devcycle:auditing-a-repo, named by the command) ===
 > [Splice here: full body of skills/auditing-a-repo/SKILL.md.]
+> === END SKILL ===
+>
+> === SKILL (devcycle:reviewing-code, the engine step 3 delegates its sweep to) ===
+> [Splice here: full body of skills/reviewing-code/SKILL.md.]
 > === END SKILL ===
 >
 > Environment notes: AskUserQuestion is not available in this session — where guidance says to use it, send the batch as one plain message with the same shape, then stop for the answer. `profile` resolves to `standard` for this run. You may read and write files and run git commands. No web access is available. No human is available mid-response, so ask and stop.
