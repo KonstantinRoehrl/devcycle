@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0
+
+- feat: unify every review surface on shared criteria and one review engine (#25)
+
 ## 0.8.1
 
 - docs(changelog): drop Unreleased entries already shipped in 0.8.0 (#24)
