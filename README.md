@@ -232,10 +232,11 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | `/devcycle:audit` | Audits this repo against criteria you confirm, and writes a ranked findings document; a `branch:<name>` token — not a bare argument — scopes it to that branch's diff. Standalone — starts no cycle. |
 | `/devcycle:verify` | Walks an on-device checklist derived from a branch's diff — verification for code this session did not write. Standalone — starts no cycle. |
 | Skill `scoping-interview` | The batched scope interview with a hard stop before design begins. |
-| Skill `auditing-a-repo` | The criteria interview, repo sweep, and ranked evidence-backed findings document behind `/devcycle:audit` and the audit stage. |
+| Skill `auditing-a-repo` | The criteria interview, the repo sweep (through the shared `reviewing-code` engine), and the ranked evidence-backed findings document behind `/devcycle:audit` and the audit stage. |
 | Skill `planning-waves` | Feasibility gate + wave-structured planning (overlays `superpowers:writing-plans` at `thorough`). |
 | Skill `executing-waves` | Parallel subagent execution with green gate, ledger, and commit discipline. |
-| Skill `reviewing-the-branch` | The whole-branch review gate, single-reviewer or panel. |
+| Skill `reviewing-the-branch` | The whole-branch review gate — the spec-compliance layer and the bounded rounds loop, over the shared `reviewing-code` engine. |
+| Skill `reviewing-code` | The review engine the audit and the branch review share: lens construction from the criteria, engine selection, adversarial verification, dedup, ranking. Invoked by other skills, not by a user. |
 | Skill `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes, from a plan or from a branch diff. |
 | Skill `finishing-the-cycle` | Resolves the effective git policy and hands back, pushes, or opens the PR. |
 | Skill `fast-path` | Mini-cycle for confirmed-trivial requests: in-session implementation, one reviewer pass, normal finish. |
@@ -243,9 +244,10 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | Agent `implementer` | Implements one task from a brief; never commits. |
 | Agent `task-reviewer` | Read-only reviewer for each task during execution. |
 | Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
-| Workflow `review-panel.js` | Multi-lens branch review engine for `reviewDepth: panel`. |
+| Workflow `review-panel.js` | Multi-lens read-only review engine for `reviewDepth: panel` — over a branch diff for the review, a file set for the audit. |
 | Workflow `mechanical-sweep.js` | Pilot-first bulk edit engine behind the sweep path and `**Execution:** sweep` plan tasks. |
-| Reference `audit-criteria.md` | The criteria catalog, sourcing precedence, and seed best-practice index the audit reads at discovery. |
+| Reference `quality-criteria.md` | What any devcycle review or plan measures against — the criteria catalog, sourcing precedence, seed best-practice index, and how the catalog reaches planning and execution. |
+| Reference `findings.md` | How a finding is expressed — the four-value severity vocabulary with blocking derived, the core and document field sets, the evidence discipline, and the panel's machine shape. |
 | Reference `checklist.md` | The on-device checklist contract — paths, item shape, dimensions, and the `(auto)` boundary — shared by checklist generation and the on-device stage. |
 
 ## Configuration
@@ -344,9 +346,10 @@ devcycle's spec-compliance checks plus the reviewer guidance of
 findings. Claude Code's built-in `code-review` skill is user-invocation-only, so an agent
 cannot launch it; if you have run it on the branch yourself, its findings are folded in
 and the engine line says `single + user-run code-review`. `panel` runs
-`review-panel.js` instead: two to three read-only reviewers, each with a different lens
-(spec compliance; correctness and security; simplification), whose findings are
-adversarially re-verified against the code and merged into one report — slower and more
+`review-panel.js` instead: two to five read-only reviewers, each with a lens built from the
+criteria the review is measuring against (spec compliance when a spec governs the branch,
+then groupings drawn from `quality-criteria.md` and the repo's own conventions), whose
+findings are adversarially re-verified against the code and merged into one report — slower and more
 expensive, harder to fool. With `crossModelReview: true` the panel adds one more lens run
 by a non-Claude model via the `codex` CLI, if installed — a hedge against blind spots one
 model family might share.

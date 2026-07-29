@@ -106,53 +106,21 @@ how far steps 2–3 go (see Depth below). Report as
    detected, and its rules for reuse before rebuild, multi-file feature chains, data contracts
    across every boundary they cross, and accessibility wherever the scope contains a UI.
 
-3. **Findings.** Every finding carries all eleven fields, in this order, with none omitted:
+3. **Findings.** The sweep that produces them is `devcycle:reviewing-code`, invoked with
+   the confirmed criteria from step 1 and `scope: {paths: [...]}` — step 0's stabilized file
+   set. It owns lens construction, engine selection, adversarial per-finding verification,
+   dedup and ranking; this skill neither restates that machinery nor performs it by hand.
 
-   ```
-   Title
-   Severity | Complexity | Impact
-   Category
-   Location(s) (file:line)
-   What's wrong
-   Why it's wrong (root cause)
-   Impact if unaddressed
-   How to verify/reproduce
-   Suggested fix direction
-   Confidence (verified vs. suspected)
-   Effort estimate
-   ```
+   How a finding is expressed is owned by
+   `${CLAUDE_PLUGIN_ROOT}/references/findings.md` — the severity vocabulary, the core
+   fields, the evidence discipline, and the ordering. Read it there; none of it is restated
+   here.
 
-   Detailed enough that someone reading only this one finding can start work immediately —
-   what, where, why, and how. `What's wrong` stays symptom-first and in plain language: the
-   mechanism belongs in `Why it's wrong`.
-
-   **Rubric — fixed, never profile-conditional:**
-   - **Severity** — Critical / High / Medium / Low, by the user- or system-facing consequence
-     if the finding is left unaddressed.
-   - **Impact** — how much of the system or user base the issue touches. This is the blast
-     radius of the *issue*, distinct from step 0's scope blast radius; the
-     `Impact if unaddressed` field is this rating's prose justification.
-   - **Complexity** — effort to fix, as a T-shirt size (S / M / L / XL). `Effort estimate` is
-     that size's concrete grounding: the files and rough size of the change, or the time.
-
-   **A finding without file-referenced evidence is not reported.** "This could be a problem",
-   "this pattern is often risky", "there may be more of these" are not findings — the same
-   discipline `agents/red-team-reviewer.md` applies to review claims. If you suspected
-   something and could not point at it in a file, it does not appear in the document at all.
-
-   **Anti-false-positive discipline:**
-   - Every finding rests on an actually-traced code path, never a pattern-match guess.
-   - `Confidence` is tagged **verified** or **suspected** on every finding — never omitted,
-     and never upgraded to verified because the pattern is familiar.
-   - Cross-reference the existing tests before flagging. If a test already exercises the
-     concern, the finding is reclassified as a test-coverage gap, not reported as a live bug.
-   - Every finding names what it is measured against — a repo convention or a named external
-     source — per the precedence rule in
-     `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`.
-
-   **Order** the list Severity (desc) → Impact (desc) → Complexity (asc), so within a severity
-   tier the quickest high-value wins surface first. Keep the tier grouping, so the user reads
-   a shortlist rather than a flat dump.
+   What an audit adds on top of that contract: it reports the **document tier** on every
+   finding — the core fields plus Category, Impact, Complexity, Impact if unaddressed, How
+   to verify/reproduce, Suggested fix direction and Effort estimate — detailed enough that
+   someone reading only that one finding can start work immediately: what, where, why, and
+   how.
 
 4. **Coverage statement.** The document states what was read and what was not — areas
    skipped, criteria the evidence was thin for, limits the scope imposed. Silent
@@ -213,10 +181,11 @@ how far steps 2–3 go (see Depth below). Report as
 How far steps 2–3 sweep is the `audit depth` row of
 `${CLAUDE_PLUGIN_ROOT}/references/config.md` — read it there; it is not repeated here.
 
-What that row's deepest value means here — the `thorough` verification pass: before a
-finding is reported, a second reader tries to refute it against the repo, to show the
-evidence does not say what the finding claims or that the code already handles the case.
-Refuted findings are dropped, not softened. Depth never touches step 1 or step 3's evidence rule: a `lean` audit
+What that row's deepest value means here: at `thorough` the refutation pass is
+`devcycle:reviewing-code`'s adversarial verification — real machinery, not a paragraph this
+skill performs itself. Refuted findings are dropped, not softened.
+
+Depth never touches step 1 or step 3's evidence rule: a `lean` audit
 interviews for its criteria and drops evidence-free findings exactly as a `thorough`
 one does.
 
@@ -250,4 +219,4 @@ apart is what leaves the selection decision with the user, which is the whole po
 | "Finding 1 is clearly the most urgent, I'll just start fixing it" | Step 6 stops. The user picks, and each pick is its own cycle. |
 | "It's a one-line fix, I'll just do it while I'm here" | The audit writes findings, never code. Fixing while auditing takes the selection decision away from the user. |
 | "The pattern looks wrong; I don't need to trace the call path" | Then it is a guess. Trace the path and mark it verified, tag it suspected, or drop it. |
-| "The severity is obvious — the other ten fields are busywork" | All eleven fields, every finding. A finding nobody can start work from was mentioned, not reported. |
+| "The severity is obvious — the other ten fields are busywork" | Every field `references/findings.md` requires, on every finding. A finding nobody can start work from was mentioned, not reported. |

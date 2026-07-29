@@ -60,8 +60,8 @@ inspection and verification).
 ```markdown
 Verdict: accept | needs-changes
 
-1. <finding, symptom first>
-2. <finding, symptom first>
+1. [severity] <finding, symptom first>
+2. [severity] <finding, symptom first>
 ...
 ```
 
@@ -69,3 +69,7 @@ Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`. Within that, state
 each finding symptom first (what's wrong or missing) before the mechanism, in
 plain language. If there is nothing to flag, say so explicitly rather than
 omitting the findings section.
+
+`${CLAUDE_PLUGIN_ROOT}/references/findings.md` owns the severity vocabulary and
+the core fields every finding carries — read it there and use its values;
+neither is restated here.

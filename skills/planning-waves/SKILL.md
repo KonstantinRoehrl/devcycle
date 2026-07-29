@@ -47,6 +47,37 @@ Never plan in detail on an unvalidated assumption. Never silently substitute a d
 
 Red flags: you are writing Task 1 and have not verified the spec's named APIs; you caught yourself writing "assuming X exists".
 
+## Quality constraints — derived, before any task is written
+
+After the feasibility gate and before writing tasks, read
+`${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md` filtered to the confirmed scope — its
+`## Forward use` section owns the filtering rule and the cost rule, and neither is restated
+here — and emit a `## Quality Constraints` section into the plan:
+
+```markdown
+## Quality Constraints
+
+- QC1 — <one-line do or don't> (measured against: <repo convention or named source>)
+- QC2 — <one-line do or don't> (measured against: <…>)
+```
+
+One line each, numbered `QC<n>`, each naming what it is measured against, and only
+constraints that apply to the confirmed scope.
+
+This section is **not** `## Global Constraints`. Those lines are copied verbatim from the
+spec; these are derived from the criteria catalog. The precedence rule requires the
+difference to stay visible, so the two never merge.
+
+Each task then carries a `**Quality constraints:**` line beside `**Dependencies:**` and
+`**Evidence:**`, listing the ids whose subject that task's own `**Files:**` touch, or
+`none`:
+
+- `**Quality constraints:** QC1, QC3`
+- `**Quality constraints:** none`
+
+The ids are what `devcycle:executing-waves` resolves back to verbatim lines when it slices
+each brief, so an implementer is told up front what a later audit would flag it for.
+
 ## Execution strategy — twin goals
 
 The plan IS the execution strategy: while drawing task boundaries, decide how the tasks will run, not just what they contain. Two goals govern every boundary decision, together:
@@ -90,6 +121,12 @@ Skip this section at `thorough`; the sub-skill supplies it there.
 rules, platform requirements — one line each, with exact values copied verbatim from the
 spec. Every task's requirements implicitly include this section.>
 
+## Quality Constraints
+
+<the criteria-derived do's and don'ts that apply to the confirmed scope — one line each,
+numbered QC<n>, each naming what it is measured against. Distinct from Global Constraints
+above, whose lines come verbatim from the spec.>
+
 ---
 ```
 
@@ -112,6 +149,8 @@ spec. Every task's requirements implicitly include this section.>
 **Dependencies:** none (completely independent)
 
 **Evidence:** red-green
+
+**Quality constraints:** QC1, QC3
 
 - [ ] **Step 1: Write the failing test**
 
@@ -200,7 +239,11 @@ A wave holds only dependency-ready, file-disjoint tasks: never place two tasks t
 
 ## Reuse before rebuild
 
-Each task names the existing modules, helpers, or components it extends (found by searching the codebase during planning). A task that introduces a new abstraction must state why no existing one fits.
+The rule is owned by `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md` (§Reuse before
+rebuild) — read it there; it is not restated here. What planning does with it: each task
+names the existing modules, helpers, or components it extends, found by searching the
+codebase during planning, and a task that introduces a new abstraction states why no
+existing one fits.
 
 Before searching file-by-file, run the **repo-research procedure** exactly as
 scoping-interview defines it (canonical there): an existing graphify graph in the target
@@ -216,7 +259,7 @@ concretely known — starting from implementation-scoped docs (a `frontend.md`,
 
 ## Output contract
 
-The finished plan satisfies this contract, consumed by `devcycle:executing-waves`: plan header (Goal/Architecture/Global Constraints) + per task: `**Files:**` (Create/Modify/Test), `**Interfaces:**` (Consumes/Produces, exact signatures), `**Dependencies:**` (`none` | `Task N (reason)` | `Tasks N+M committed`), `**Evidence:**` (`red-green` | `green-green` | `convention`), optionally **Execution:** (`sweep`, with the instruction, file list, and verifyCommand pinned in the task body), checkbox steps ordered per the task's evidence class (test-first for `red-green`; baseline suite run first for `green-green`), and a `## Dispatch Map` section listing waves of file-disjoint, dependency-ready tasks.
+The finished plan satisfies this contract, consumed by `devcycle:executing-waves`: plan header (Goal/Architecture/Global Constraints/Quality Constraints) + per task: `**Files:**` (Create/Modify/Test), `**Interfaces:**` (Consumes/Produces, exact signatures), `**Dependencies:**` (`none` | `Task N (reason)` | `Tasks N+M committed`), `**Evidence:**` (`red-green` | `green-green` | `convention`), `**Quality constraints:**` (the `QC<n>` ids that apply to the task's files, or `none`), optionally **Execution:** (`sweep`, with the instruction, file list, and verifyCommand pinned in the task body), checkbox steps ordered per the task's evidence class (test-first for `red-green`; baseline suite run first for `green-green`), and a `## Dispatch Map` section listing waves of file-disjoint, dependency-ready tasks.
 
 ## Overrides of upstream writing-plans
 
