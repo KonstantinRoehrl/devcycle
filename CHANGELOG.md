@@ -6,19 +6,6 @@
 
 ## Unreleased
 
-- feat(auditing-a-repo): derive audit criteria at run time from the stacks actually present and the repo's own convention docs, and add a branch-scoped mode that expands a diff to its feature dependency graph
-- feat(auditing-a-repo): require eleven fields per finding with a fixed severity/impact/complexity rubric, confidence tagging, provenance in the document header, and an explicit read-only guardrail
-- feat(verifying-on-device): accept a branch and derive the checklist from its diff, so the stage can verify code this session did not write
-- feat(verify): new `/devcycle:verify <branch>` command — standalone on-device verification that starts no cycle and writes no state file
-- refactor(checklist): extract the on-device checklist contract into `references/checklist.md`, shared by checklist generation and the on-device stage
-- docs(readme): add a pipeline flow diagram with per-stage sub-steps, artifacts, loops, optional paths, and non-cycle entry points
-- feat(cycle): triage gains a size axis — a confirmed-trivial request (after an AskUserQuestion gate) takes the fast path instead of the full pipeline
-- feat(fast-path): new mini-cycle skill — in-session implementation with evidence, one task-reviewer pass, then the normal finish stage
-- feat(cycle): triage size axis gains a bulk-mechanical verdict — a confirmed request routes to the new sweep stage instead of the full pipeline
-- feat(sweeping-mechanical-changes): new skill — blast-radius-gated bulk sweep via workflows/mechanical-sweep.js, one commit, one task-reviewer pass, then the normal finish stage
-- feat(planning-waves): tasks may declare `**Execution:** sweep` when the instruction, file list, and verifyCommand are pinned in the task body
-- feat(executing-waves): `**Execution:** sweep` tasks run via the mechanical-sweep workflow instead of an implementer dispatch; review cycle, green gate, and ledger semantics unchanged
-
 ## 0.6.1
 
 - fix(cycle): make the command model-invocable and halt for compact/clear at boundaries (#11)
