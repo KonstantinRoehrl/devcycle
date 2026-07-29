@@ -230,6 +230,34 @@ test("with lenses omitted and no specPath, the spec lens is dropped and the othe
   assert.equal(report.findings.length, 1);
 });
 
+// A fake claude whose summarizer reports back the panel notes its prompt carried.
+const noteEchoingClaude = `
+const prompt = process.argv[process.argv.length - 1];
+let out;
+if (prompt.includes("You are one lens")) {
+  out = { findings: [{ file: "src/a.js", line: 1, claim: "a finding", severity: "low", measuredAgainst: "repo convention" }] };
+} else if (prompt.includes("adversarial verifier")) {
+  out = { verified: true, verification: "read the file; the claim stands" };
+} else {
+  const m = prompt.match(/Panel notes to mention: (.*)/);
+  out = { summary: m ? "notes reaching the summary: " + m[1] : "no notes reached the summarizer" };
+}
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+`;
+
+test("dropping the spec lens from a defaulted set is disclosed as a note that reaches the summary", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+
+  const bin = makeFakeBin("claude", noteEchoingClaude);
+  const res = runScript(SCRIPT, { scope: { paths: ["src/a.js"] } }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.match(report.summary, /spec lens skipped: no specPath given/);
+});
+
 // A fake claude whose lens reports no line at all, and whose verifier reports back
 // whether a line reached its prompt.
 const linelessClaude = `
@@ -238,7 +266,10 @@ let out;
 if (prompt.includes("You are one lens")) {
   out = { findings: [{ file: "src/a.js", claim: "no line reported", severity: "medium", measuredAgainst: "repo convention" }] };
 } else if (prompt.includes("adversarial verifier")) {
-  out = { verified: true, verification: prompt.includes("(line") ? "a line reached the verifier" : "no line reached the verifier" };
+  // Only the prompt's own "file:" line may carry a line number; the spliced
+  // red-team charter must not be able to decide this assertion.
+  const fileLine = (prompt.match(/^\\s*file: .*$/m) || [""])[0];
+  out = { verified: true, verification: fileLine.includes("(line") ? "a line reached the verifier" : "no line reached the verifier" };
 } else {
   out = { summary: "one confirmed finding." };
 }

@@ -78,12 +78,11 @@ Invariants:
    verbatim, ids included. An implementer sees only its own brief, so a bare
    `QC3` is unreadable. Upstream's file-handoff mechanics know of neither the
    line nor the section, so at `thorough` resolve the ids and add them to the
-   sliced brief the same way. **Never
-   splice the whole criteria catalog, and never the plan's whole constraints
-   section** — only the lines this task's ids name; `references/quality-criteria.md`'s
-   cost rule owns why. A task declaring `**Quality constraints:** none`, or a
-   plan written before this contract and carrying no such section, adds
-   nothing here.
+   sliced brief the same way. **Never splice the whole criteria catalog, and
+   never the plan's whole constraints section** — only the lines this task's
+   ids name; `references/quality-criteria.md`'s cost rule owns why. A task
+   declaring `**Quality constraints:** none`, or a plan written before this
+   contract and carrying no such section, adds nothing here.
 
    **Every brief, at every profile, carries the task's id and an
    `**Evidence tail:** <N>` line.** The id because `references/evidence.md` keys

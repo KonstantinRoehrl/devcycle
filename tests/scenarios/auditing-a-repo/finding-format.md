@@ -97,9 +97,10 @@ Same isolated-config blocker recorded in `criteria-interview.md`. Established wi
 run: at `934ecdb`, the commit before this change, `skills/auditing-a-repo/SKILL.md` carried
 the eleven-field block and the `Critical / High / Medium / Low` rubric inline instead of
 pointing at the shared contract — `git show 934ecdb:skills/auditing-a-repo/SKILL.md | grep -c
-'references/findings.md'` returns `0` while the same grep at the post-change commit returns
-`2`. That text cannot satisfy criterion 2: its rubric line reads `Severity — Critical / High /
-Medium / Low`, the capitalized vocabulary the shared contract replaced, so a run following it
+'references/findings.md'` returns `0`, while the same grep at `89aa084` (pinned, not `HEAD`,
+so the count cannot rot) returns `4`. That text cannot satisfy criterion 2: its rubric
+line reads `Severity — Critical / High / Medium / Low`, the capitalized vocabulary the
+shared contract replaced, so a run following it
 emits `Severity: High` and fails on the values alone. Nor criterion 1: its eleven ordered
 fields do not include `Measured against` — the pre-change skill carries that only as a
 free-floating prose rule further down (line 149), not as a field a finding is required to

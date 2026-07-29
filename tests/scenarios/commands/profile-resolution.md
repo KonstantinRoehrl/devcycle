@@ -304,14 +304,6 @@ the isolated-config protocol, and grade from disk rather than from the transcrip
 re-graded in the same pass for criterion 13, since the change adds a branch that must
 *not* fire for it.
 
-**Amended 2026-07-29 (engine splice), still not run.** Criteria 1, 3 and 4 grade the
-`review-panel.js` invocation, which since the shared-engine change appears only in
-`skills/reviewing-code/SKILL.md` — a body runs A and B did not splice, so run A graded a
-skill the sandbox subagent cannot resolve and criterion 4 passed vacuously. That third
-body is now spliced for both runs, per the convention the
-`tests/scenarios/reviewing-the-branch/` scenarios already use. Nothing was run; nothing
-here is claimed as observed.
-
 **Amended 2026-07-27 (second cycle), still not run.** Review found that the criteria above
 graded only the literal first run, and so would have passed a version that offers the
 migration to a brand-new user: this release's own customize path writes a moved knob
@@ -323,3 +315,11 @@ working-tree bodies, graded on the absence of a configuration question in a sing
 plus the `configured:` line of every other run read off disk for the marker. Still nothing
 run, still nothing observed; 13b's missing red baseline is described in the Baseline
 section above.
+
+**Amended 2026-07-29 (engine splice), still not run.** Criteria 1, 3 and 4 grade the
+`review-panel.js` invocation, which since the shared-engine change appears only in
+`skills/reviewing-code/SKILL.md` — a body runs A and B did not splice. As written, run A
+would have graded a skill the sandbox subagent cannot resolve, and criterion 4 would have
+passed vacuously. That third body is now spliced for both runs, per the convention the
+`tests/scenarios/reviewing-the-branch/` scenarios already use. Nothing was run; nothing
+here is claimed as observed.

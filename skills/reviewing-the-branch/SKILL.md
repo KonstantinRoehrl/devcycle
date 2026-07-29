@@ -133,12 +133,11 @@ the spec says.
      does not hand off to on-device and does not proceed to finishing.
 
 **The cap bounds effort, never truth.** Reaching the cap NEVER converts an
-outstanding blocking finding into a pass, and a finding is NEVER downgraded in
-severity to reach the cap or close the loop faster — `references/findings.md`
-owns that rule. A cap that could launder a blocking
-finding into a pass would make every `pass` from this gate unreadable. This guardrail is
-unconditional: it holds at every profile, and the cap's own value never softens
-it.
+outstanding blocking finding into a pass. Severity itself is not this skill's
+to adjust: `references/findings.md` owns it, including what may and may not
+change it. A cap that could launder a blocking finding into a pass would make
+every `pass` from this gate unreadable. This guardrail is unconditional: it
+holds at every profile, and the cap's own value never softens it.
 
 ## Review report (REQUIRED shape)
 

@@ -342,16 +342,16 @@ stage's output. `local-commits-only` is unaffected either way; it never pushes.
 `panel` at `thorough`, unless you set it yourself (or set it to `auto`, which hands it back
 to the profile). `single` runs the review's two to five criteria lenses as inline read-only
 reviewers, then re-verifies each finding against the code — a complete review in its own
-right, not a degraded panel. Claude Code's built-in `code-review` skill is user-invocation-only, so an agent
-cannot launch it; if you have run it on the branch yourself, its findings are folded in
-and the engine line says `single + user-run code-review`. `panel` runs
-`review-panel.js` instead: two to five read-only reviewers, each with a lens built from the
-criteria the review is measuring against (spec compliance when a spec governs the branch,
-then groupings drawn from `quality-criteria.md` and the repo's own conventions), whose
-findings are adversarially re-verified against the code and merged into one report — slower and more
-expensive, harder to fool. With `crossModelReview: true` the panel adds one more lens run
-by a non-Claude model via the `codex` CLI, if installed — a hedge against blind spots one
-model family might share.
+right, not a degraded panel. Claude Code's built-in `code-review` skill is
+user-invocation-only, so an agent cannot launch it; if you have run it on the branch
+yourself, its findings are folded in and the engine line says `single + user-run
+code-review`. `panel` runs `review-panel.js` instead: two to five read-only reviewers,
+each with a lens built from the criteria the review is measuring against (spec compliance
+when a spec governs the branch, then groupings drawn from `quality-criteria.md` and the
+repo's own conventions), whose findings are adversarially re-verified against the code and
+merged into one report — slower and more expensive, harder to fool. With
+`crossModelReview: true` the panel adds one more lens run by a non-Claude model via the
+`codex` CLI, if installed — a hedge against blind spots one model family might share.
 
 **`onDeviceGate`** governs the last verification. The checklist is hybrid by design:
 items a browser can structurally verify are auto-checked through claude-in-chrome — Claude

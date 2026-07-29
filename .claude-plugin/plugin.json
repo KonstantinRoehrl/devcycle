@@ -56,7 +56,7 @@
       "type": "string",
       "title": "Review depth",
       "default": "single",
-      "description": "Branch review engine. One of: single (spec-compliance layer plus code-review-style reviewer guidance, opportunistically folding in a user-run code-review pass), panel (multi-lens review panel workflow), or 'auto' to let the profile govern this knob."
+      "description": "Branch review engine. One of: single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass), panel (multi-lens review panel workflow), or 'auto' to let the profile govern this knob."
     },
     "crossModelReview": {
       "type": "boolean",

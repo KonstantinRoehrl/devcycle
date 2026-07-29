@@ -218,4 +218,4 @@ apart is what leaves the selection decision with the user, which is the whole po
 | "Finding 1 is clearly the most urgent, I'll just start fixing it" | Step 6 stops. The user picks, and each pick is its own cycle. |
 | "It's a one-line fix, I'll just do it while I'm here" | The audit writes findings, never code. Fixing while auditing takes the selection decision away from the user. |
 | "The pattern looks wrong; I don't need to trace the call path" | Then it is a guess. Trace the path, and record the Confidence `references/findings.md` requires. |
-| "The severity is obvious — the other ten fields are busywork" | Every field `references/findings.md` requires, on every finding. A finding nobody can start work from was mentioned, not reported. |
+| "The severity is obvious — the rest of the fields are busywork" | Every field `references/findings.md` requires, on every finding. A finding nobody can start work from was mentioned, not reported. |

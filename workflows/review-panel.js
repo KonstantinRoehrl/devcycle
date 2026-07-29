@@ -21,10 +21,12 @@
 //
 // Stages: 1) read-only lens reviewers in parallel — the caller's lenses when
 // `lenses` is given, the three built-ins (spec, correctness, simplify)
-// otherwise; cross-model codex lens only when crossModel -> 2) adversarial per-finding
-// verification, its method spliced from agents/red-team-reviewer.md
-// (unverified findings are marked, never dropped) -> 3) dedup by
-// file+claim -> 4) reconciler ranks confirmed findings by severity.
+// otherwise, minus the spec lens when no specPath is given (dropped, and
+// disclosed in `notes`); cross-model codex lens only when crossModel ->
+// 2) adversarial per-finding verification, its method spliced from
+// agents/red-team-reviewer.md (unverified findings are marked, never
+// dropped) -> 3) dedup by file+claim -> 4) reconciler ranks confirmed
+// findings by severity.
 //
 // STRICTLY READ-ONLY: the script itself only runs `git diff`/`git rev-parse`;
 // every claude subagent is restricted to --tools "Read,Grep,Glob" and the
@@ -194,15 +196,19 @@ function parseArgs() {
   });
   // The spec lens needs a spec. Asking for it without one is an arg error; getting it
   // from the default set without one just drops it, so a spec-less scope still runs.
+  // The drop is a coverage reduction, so it is reported back for disclosure in `notes`.
   let selected = lenses;
+  let specLensDropped = false;
   if (!args.specPath && lenses.some((l) => l.key === "spec")) {
     if (!defaulted) fatal('the "spec" lens requires args.specPath');
     selected = lenses.filter((l) => l.key !== "spec");
+    specLensDropped = true;
   }
   return {
     scope: hasRef ? { ref: scope.ref } : { paths: scope.paths },
     specPath: typeof args.specPath === "string" ? args.specPath : null,
     lenses: selected,
+    specLensDropped,
     crossModel: args.crossModel === true,
   };
 }
@@ -502,6 +508,7 @@ async function main() {
   const args = parseArgs();
   const model = process.env.DEVCYCLE_PANEL_MODEL || undefined;
   const notes = [];
+  if (args.specLensDropped) notes.push("spec lens skipped: no specPath given");
 
   gitReadOnly(["rev-parse", "--git-dir"]); // fail fast outside a git repo
 
