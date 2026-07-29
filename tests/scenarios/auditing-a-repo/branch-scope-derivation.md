@@ -51,9 +51,11 @@ the unit change breaks: every caller still passes a fraction, and the existing t
 asserts the fraction contract. An audit of the raw diff alone cannot see that.
 
 Place the full bodies of `references/config.md`, `references/output.md`,
-`references/audit-criteria.md`, and `references/branch.md` into the sandbox's
-`plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the spliced text with
-the sandbox's `plugin` directory path. `references/branch.md` is what criteria 1 and 2 are
+`references/quality-criteria.md`, `references/findings.md`, and `references/branch.md` into the
+sandbox's `plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the spliced text
+with the sandbox's `plugin` directory path. `references/findings.md` is in the list because the
+skill sends the run there for the finding contract and restates none of it; an unreadable
+reference grades a broken sandbox rather than the text. `references/branch.md` is what criteria 1 and 2 are
 graded against: the spliced skill restates none of the derivation and points there for the
 base, the merge-base-guarded diff, and reading content through the ref. Its committing half
 never comes up — this run stops at the gate, before anything is written.

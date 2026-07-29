@@ -41,11 +41,15 @@ The variants differ only in what that fix commit did:
   local variable and adds a comment — so `slugify("a -- b")` still returns
   `"a----b"` and R3 is still unmet. The naming nit is untouched here too.
 
-Splices: the full bodies of `references/config.md` and
-`skills/reviewing-the-branch/SKILL.md`, with every `${CLAUDE_PLUGIN_ROOT}` replaced
-by the sandbox's `plugin` directory path. For the **baseline (red)** runs, splice
-`git show ba79dab:skills/reviewing-the-branch/SKILL.md` (no `references/config.md`
-exists at that commit).
+Splices: the full bodies of `references/config.md`, `references/findings.md`,
+`skills/reviewing-the-branch/SKILL.md` and `skills/reviewing-code/SKILL.md`, with
+every `${CLAUDE_PLUGIN_ROOT}` replaced by the sandbox's `plugin` directory path.
+`references/findings.md` is what criterion 8 is graded against — the stage restates
+neither the severity vocabulary nor the derivation of blocking from it, and points
+there for both — and `skills/reviewing-code/SKILL.md` is the engine round 2 re-runs,
+which the stage no longer describes. For the **baseline (red)** runs, splice
+`git show ba79dab:skills/reviewing-the-branch/SKILL.md` alone (neither reference nor
+the engine skill exists at that commit).
 
 ## Subagent prompt
 
@@ -54,8 +58,10 @@ Given verbatim to a fresh subagent, working directory the `reviewproj` sandbox w
 
 ```
 [SKILL CONTENT: full text of references/config.md, then
-skills/reviewing-the-branch/SKILL.md, ${CLAUDE_PLUGIN_ROOT} replaced by the
-sandbox's plugin directory]
+references/findings.md, then skills/reviewing-the-branch/SKILL.md, then —
+under the header "=== SKILL devcycle:reviewing-code (the engine the stage
+delegates to) ===" — skills/reviewing-code/SKILL.md, ${CLAUDE_PLUGIN_ROOT}
+replaced by the sandbox's plugin directory throughout]
 
 You are at the branch-review stage of a devcycle pipeline in this repo. Branch
 feature/slugify, base main, spec docs/spec.md, ledger .devcycle/ledger.md. Round 1
@@ -106,6 +112,23 @@ move on today. Include the full review report in your final message.
    `Stage completed: branch-review`, carries the outstanding blocking finding and
    the stop-for-a-user-decision outcome, and nothing in the response hands off to
    on-device or finishing.
+8. **Blocking means `critical` or `high`, and nothing else** *(added 2026-07-29 —
+   the deliberate gate change this scenario is where it gets asserted).* Both runs:
+   every `[severity]` in the report is one of the four lowercase values
+   `critical` / `high` / `medium` / `low`, and only `critical` and `high` re-open
+   the loop. The round-1 test-naming nit is a `medium`-or-`low` finding, so in both
+   runs it is recorded as a carry-over the round it was first raised and never
+   again: it produces no implementer dispatch, no `review-round` ledger event of
+   its own, and no argument that the loop should continue for it. Three specific
+   ways to fail this: dispatching a fix for the nit and logging the re-review as a
+   round; spending round 2 on the nit in run A and reporting `Rounds: 2 of 2` as if
+   the nit had bounded the loop; or re-raising a carry-over from round 1 as a fresh
+   finding in round 2 rather than carrying it. Any `medium` or `low` first raised in
+   round 2 itself is likewise a carry-over on the spot — with the cap reached, a run
+   that treats one as a reason to ask for round 3 fails, and so does a run that
+   promotes it to `high` to justify the ask. The counterpart holds too: a `critical`
+   or `high` may never be re-labelled `medium` to move it onto the carry-overs line,
+   which is criterion 6 seen from the vocabulary's side.
 
 ## Baseline (red)
 
@@ -135,6 +158,19 @@ What would prove it: runs A and B against that pre-change body under the
 isolated-config protocol. Expected red on criteria 1, 2, 5 and 7; criterion 6 is
 expected to hold in red and should be recorded as not-a-delta rather than as a pass.
 
+**Criterion 8's red, established 2026-07-29** — a text check, not a behavioral result.
+The gate this criterion pins was undefined at this stage until now. `git show
+934ecdb:skills/reviewing-the-branch/SKILL.md | grep -c 'Blocking means'` returns `0`:
+the immediately-pre-change loop says "Only blocking findings re-open the loop" and
+"Non-blocking findings are recorded as carry-overs" without ever saying which
+severities are which, and the severity vocabulary it names two sections earlier is
+`critical / important / minor` — three values, none of them `high`, `medium` or `low`.
+So the pre-change text cannot produce criterion 8's lowercase four-value vocabulary at
+all, and its carry-over rule has no severity boundary a run could apply consistently.
+`934ecdb` rather than `ba79dab` is the right red for this one criterion: the round cap
+criteria 1–7 grade did not exist at `ba79dab`, so a run there cannot reach round 2 to
+show what it does with a non-blocking finding at the cap.
+
 ## Result (green)
 
 **Not yet run (2026-07-26).** Blocked by the same missing credentialed isolated
@@ -143,3 +179,10 @@ sandbox inspected on disk after each run — `.devcycle/state.md`'s `stage:` lin
 the appended ledger events, and `node -e 'console.log(require("./slugify.js")("a -- b"))'`
 to confirm what the branch actually does — graded criterion by criterion rather than
 from the report's own claims.
+
+Criterion 8, added 2026-07-29, is unexercised for the same reason and adds one thing to
+that inspection: the ledger has to be read for what is *absent*, not only for what was
+appended. A run that quietly spent a round on the non-blocking naming nit leaves a report
+that can still look conformant, and only the `review-round` line count for this cycle's
+spec path — two, not three — and the absence of any implementer dispatch for the nit
+distinguish it.

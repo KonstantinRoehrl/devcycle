@@ -80,13 +80,24 @@ What is planted, and for which criterion:
   it would have no `file:line` evidence, which is exactly what criterion 5 forbids.
 
 Place the full bodies of `references/config.md`, `references/output.md`,
-`references/audit-criteria.md`, and `references/branch.md` into the sandbox's
-`plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the spliced text
-with the sandbox's `plugin` directory path. `references/branch.md` is needed for its
-committing half: criterion 7 names the topic branch that branch discipline requires for
-the step-5 commit and grades its appearance as expected rather than a failure, so the
-rule producing it has to be readable. Its derivation half is inert here — the invocation
-names no branch, so the run never enters branch mode.
+`references/quality-criteria.md`, `references/findings.md`, and `references/branch.md` into
+the sandbox's `plugin/references/`, and substitute every `${CLAUDE_PLUGIN_ROOT}` in the
+spliced text with the sandbox's `plugin` directory path. `references/findings.md` is what
+criterion 5 is graded against: the skill restates none of the finding contract and sends the
+run there for the fields, the severity vocabulary and the evidence discipline, so an
+unreadable copy grades a broken sandbox rather than the text. `references/branch.md` is
+needed for its committing half: criterion 7 names the topic branch that branch discipline
+requires for the step-5 commit and grades its appearance as expected rather than a failure,
+so the rule producing it has to be readable. Its derivation half is inert here — the
+invocation names no branch, so the run never enters branch mode.
+
+**Engine layer (required for the green run, added 2026-07-29).** Step 3's sweep is
+`devcycle:reviewing-code` — the skill hands it the confirmed criteria and the file set and
+"neither restates that machinery nor performs it by hand" — and the sandbox subagent cannot
+resolve a plugin skill by name. So the prompt splices `skills/reviewing-code/SKILL.md` as a
+third block, with `${CLAUDE_PLUGIN_ROOT}` substituted the same way. Turn 2 is step 3, and
+criteria 4 and 5 grade exactly what it produces, so without that block the run has no sweep
+to perform and grades a missing skill rather than the text.
 
 The run is standalone, so the sandbox has no `.devcycle/` directory.
 
@@ -106,24 +117,31 @@ the sandbox is inspected on disk after Turn 1 and before the reply is sent.
 > [Splice here: full body of skills/auditing-a-repo/SKILL.md.]
 > === END SKILL ===
 >
+> === SKILL (devcycle:reviewing-code, the engine step 3 delegates its sweep to) ===
+> [Splice here: full body of skills/reviewing-code/SKILL.md.]
+> === END SKILL ===
+>
 > Environment notes: AskUserQuestion is not available in this session — where guidance says to use it, send the batch as one plain message with the same shape, then stop for the answer. `profile` resolves to `standard` for this run. You may read and write files and run git commands. No human is available mid-response, so ask and stop.
 
 Turn 2 is the scripted reply, sent by resuming the same session:
 
 > Criteria: docs-vs-reality drift and security — those two only. Scope: the whole repo.
 
-For the **baseline (red)** run, omit both spliced blocks and give the user request
-plainly: "Audit this repo and write up what you find." (`commands/audit.md` and
-`skills/auditing-a-repo/SKILL.md` do not exist at the pre-change commit `ba79dab`,
-so there is no earlier text to splice.)
+For the **baseline (red)** run, omit all three spliced blocks and give the user
+request plainly: "Audit this repo and write up what you find." (`commands/audit.md`,
+`skills/auditing-a-repo/SKILL.md` and `skills/reviewing-code/SKILL.md` all do not
+exist at the pre-change commit `ba79dab`, so there is no earlier text to splice.)
 
 ## Pass criteria
 
 *(Criteria 3–5 updated 2026-07-28 for the audit plan at the gate and the eleven-field
-finding format. Criterion 2 was re-pointed the same day at `references/audit-criteria.md`'s
-catalog, replacing a reference to the ten-item menu this change deleted from the skill —
-its text moved, what it grades did not. Criteria 1, 6 and 7 are untouched, text and all.
-The disciplines all four grade survive this change intact.)*
+finding format. Criterion 2 was re-pointed the same day at the criteria catalog, replacing a
+reference to the ten-item menu this change deleted from the skill — its text moved, what it
+grades did not. Criteria 1, 6 and 7 are untouched, text and all. Updated again 2026-07-29:
+that catalog now lives in `references/quality-criteria.md`, shared by every review surface
+rather than owned by the audit, and criterion 5 grades the finding contract in
+`references/findings.md` instead of an eleven-field list the skill spelled out itself. The
+disciplines all four grade survive both changes intact.)*
 
 1. **The criteria are asked for, in one batch, before any sweep.** Turn 1 contains
    exactly one batch of 1–4 questions, each with concrete options plus an
@@ -133,9 +151,11 @@ The disciplines all four grade survive this change intact.)*
    criteria set the agent derived from a shallow orientation pass of *this* sandbox
    — it names concrete things found here (the README's `--readonly` flag, the two
    `slugify` copies, `src/export.js` having no test, the literal token) — and is
-   presented for the user to correct. Reading out `references/audit-criteria.md`'s
+   presented for the user to correct. Reading out `references/quality-criteria.md`'s
    universal criteria wholesale fails, as does any generic criteria list with nothing
-   sandbox-specific attached to it.
+   sandbox-specific attached to it — that file is the catalog every devcycle review
+   surface measures against, so its universal section is by construction not about this
+   sandbox.
 3. **The stop after asking is hard.** At the Turn-1 pause there are no draft
    findings, no ranked list, and no document: `git status --short` shows no new file
    anywhere under `docs/audits/`, and no criterion is treated as settled ("I'll
@@ -155,9 +175,10 @@ The disciplines all four grade survive this change intact.)*
 5. **Every reported finding carries evidence and a fix.** Each has a symptom-first
    statement, a `file:line` reference into the sandbox that actually points at the
    thing described (e.g. `src/server.js:3` for the token), a concrete fix specific
-   enough to become a cycle's request, and all eleven fields of the finding format
-   — including a Confidence tag of verified or suspected, and a named repo
-   convention or external source it is measured against. The README's
+   enough to become a cycle's request, and every field `references/findings.md`
+   requires — the core fields plus the document tier the audit adds, including a
+   Confidence tag of `verified` or `suspected` and a `Measured against` value naming
+   a repo convention or an external source. The README's
    "feels slow" claim appears nowhere as a finding — no `file:line`, no entry.
 6. **The document says what it did not cover.** `docs/audits/<today>-<topic>.md` is
    written, and it carries a coverage statement naming what was and was not covered
