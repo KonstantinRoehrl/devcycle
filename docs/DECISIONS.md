@@ -5,6 +5,42 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-07-31 — the context reset becomes binding at every boundary, and the stage budget is counted rather than estimated
+
+**Decision:** Every stage boundary in `references/handoff.md` now defaults to a reset, and the
+action column takes exactly three values — `Continue` · `Clear + /devcycle:continue` ·
+`Fresh session`. `Compact with hint` is retired as an action; the `Keep`/`Drop` compaction hint
+stays, as the instruction the *resumed* session is briefed with rather than a way to avoid
+resuming. `Continue` is no longer any boundary's default except `finish → (end)`, and is
+reachable at five named boundaries only when the ended stage stayed under budget, dispatched no
+implementer, task-reviewer or sweep, and left the next stage's inputs on disk; any doubt resolves
+to the table's default. The await gate is unconditional: emitting the block is not permission to
+proceed. The budget the coordinator must stay under is a count it can actually keep — **~30 tool
+calls** or **~15 files read** within one stage — and a new `references/delegation.md` owns it
+together with the coordinator's duties and the repo-research procedure that other skills now
+point at.
+**Why:** The two mechanisms meant to bound context both already existed and neither bound
+anything: the action table offered `Continue` as a legitimate per-row value and the await gate
+let a `Continue` action pass through, so a coordinator that wanted to keep going always had a
+sanctioned way to. Measurement is what settled it — a 268k median context in `executing-waves`
+and 244k in on-device, with the main thread taking 43% of turns but 72% of cost, which is the
+signature of work that should have been delegated or reset staying on the expensive thread.
+`Compact with hint` went because compaction is not a reset and the numbers say so: the month's
+most expensive session was 39% post-`/compact` and still the single largest line item, so the
+mechanism sold as the cheap middle path demonstrably failed to bound the thing it was there to
+bound, while reading as compliance. The budget is counted rather than estimated because an agent
+cannot reliably observe its own context fill — the same reasoning `references/config.md` already
+applies when it restricts the model-tier derivation predicates to dispatch-time-observable
+inputs. Tool calls made and files read are things a coordinator can tally as it goes; "about 40%
+full" is a guess wearing a threshold's clothes, so the ~40% figure survives only as an explicitly
+non-binding hint beside the two counters.
+**Supersedes:** `references/handoff.md`'s four-value action column, whose fourth value
+`Compact with hint` is now unsanctioned, and its per-row `Continue` values, replaced by resets
+plus the narrow three-condition softening test. It also ends `devcycle:scoping-interview`'s
+ownership of the repo-research procedure, which it spelled out in full: the procedure now lives
+in `references/delegation.md`, and scoping-interview — with planning and audit research — points
+at it rather than carrying a copy.
+
 ## 2026-07-27 — `auto` releases a knob back to the profile; the upgrade trap is asked about, not fixed silently
 
 **Decision:** `auto` becomes a sanctioned value on the two profile-covered behavioral knobs
