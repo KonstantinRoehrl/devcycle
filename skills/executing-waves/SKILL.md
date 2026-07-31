@@ -203,9 +203,9 @@ re-run rule — is owned by **devcycle:sweeping-mechanical-changes**
   `dispatched outcome=sweep`, dirty targets are the interrupted run's own
   edits and take the sweep skill's Resume confirmation instead.
 - **Exit 0, `applied` non-empty.** The saved report IS the implementer
-  report: ledger `event=report-received` with it as `ref=`, then diff
-  production, the task-reviewer dispatch (report included, skips and all),
-  the green gate, and the acceptance commit exactly as steps 4–7 define,
+  report: ledger `event=report-received` with it as `ref=`, then the
+  task-reviewer dispatch (report included, skips and all), the green gate,
+  and the acceptance commit exactly as steps 4–7 define,
   step 7's pathspec included. There is no
   implementer to write the evidence files, so the coordinator writes them itself
   per the file-backed contract in `references/evidence.md` — with one binding
@@ -286,7 +286,7 @@ implementer fix and takes the generic rows.
 | ledger last event for a task | resume action |
 | --- | --- |
 | `dispatched` | re-dispatch the same brief (the run may have died) |
-| `report-received` | produce the diff, dispatch the reviewer |
+| `report-received` | dispatch the reviewer (it produces the diff itself) |
 | `review-round` (no verdict after it) | the reviewer's run may have died: re-dispatch the reviewer for that round |
 | `review-verdict outcome=accepted` | run the green gate, commit |
 | `review-verdict outcome=rejected` | re-dispatch the implementer with the findings — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet (findings, task body, applied-edits disclosure), never a sweep re-run |
