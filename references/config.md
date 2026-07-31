@@ -89,10 +89,16 @@ Derivation predicates (dispatch-time-observable inputs only):
   expected behavior; else session tier.
 - **task-reviewer**: fast tier iff the task diff is ≤400 changed lines
   and ≤5 files; else session tier.
+- **research / exploration dispatch**: fast tier, always. Read-only work
+  whose output is a map rather than a judgment — locating files, tracing
+  usage, mapping surfaces, doc discovery. Session tier remains for
+  dispatches that must judge: review, diagnosis, design.
 
 Upstream's Model Selection tiers are background only; these predicates
 decide. Auditability: every dispatch's ledger event records the decision
 and its inputs — e.g. `outcome=model fast:<resolved id> (auto: files=1,
 deps=none, steps=specified)` or `outcome=model session (auto: files=4)`
 for derived choices, or `outcome=model <id> (pinned)` for explicit
-config.
+config. Research dispatches in scoping and planning run before any ledger
+exists and log nothing; where a ledger exists, they record the same
+shape.
