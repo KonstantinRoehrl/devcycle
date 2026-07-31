@@ -235,3 +235,9 @@ or drop those files.
 | "Most files swept fine, commit and move on" | Skipped files with reasons go to the reviewer and the handoff — silently dropping them ships a partial sweep as a complete one. |
 | "It's mechanical, skip the reviewer pass" | Step 6 is not optional — one `devcycle:task-reviewer` dispatch is the floor, exactly as on the fast path. |
 | "A few files need small case-by-case tweaks" | Per-file judgment is the escalation valve's trigger (not a sweep at all) — stop and re-enter the pipeline. |
+
+**Delegation.** `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` exempts this path from its
+delegate-by-default rule (`## The short paths`) — the sweep script is the worker, and
+supervising it in-session is the design. The counters in `## The stage budget` still bind:
+reaching them means the change was not the uniform mechanical edit triage took it for, and the
+answer is to escalate, not to keep sweeping.
