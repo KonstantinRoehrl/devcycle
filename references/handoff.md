@@ -68,14 +68,19 @@ a heavy one stops.
 ## Await the context action — never run past a recommended compact or clear
 
 Emitting the handoff block is NOT permission to continue. **Only a `Continue` action lets the
-pipeline proceed to the next stage in the same turn**, and `Continue` is only ever reached
+pipeline proceed past that boundary in the same turn**, and `Continue` is only ever reached
 through the table above or its test. For `Clear + /devcycle:continue` and `Fresh session`,
 STOP after the block and wait: the user must run `/clear` (or explicitly tell you to continue
-anyway) before any next-stage work begins.
+anyway) before **any work past that boundary** begins — the next stage, or the next wave
+within execution. Every boundary the table names is a boundary in this sense: finishing wave 1
+of 3 halts exactly as hard as finishing a stage, and dispatching wave 2's implementers is work
+past that boundary.
 
 The gate is unconditional for the agent and overridable only by the user. The orchestrator may
 not decide on its own judgment that this particular boundary is cheap enough to run through —
-that judgment is what the table and its test already made. A user who looks away would
+that judgment is what the table and its test already made. How small the plan is, how few waves
+are left, and how urgent the run feels are not exceptions; they are the reasons the gate is
+written down rather than left to judgment. A user who looks away would
 otherwise sail past the boundary with an un-cleared context, which is exactly what this gate
 prevents. `/clear` ends the session by design; state the `/devcycle:continue` resume path in the
 same message you halt on.
