@@ -88,11 +88,11 @@ how far steps 2–3 go (see Depth below). Report as
      Criteria are never assumed, never inferred from the request's wording, and never
      defaulted because the answer looks obvious.
 
-2. **Research.** Run the canonical repo-research procedure `devcycle:scoping-interview`
-   defines (graphify graph first when one exists, otherwise plain reading and search
-   plus the two-phase `*.md` index-then-fetch) — read-only, never triggering a graph
-   build or `--update`. Relevance here is judged against the confirmed criteria and the
-   confirmed scope, not against the original request.
+2. **Research.** Run the repo-research procedure
+   `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`) — as a
+   dispatch, on the fast tier — with the confirmed audit criteria as its relevance filter:
+   what the confirmed criteria and the confirmed scope call for, never the original
+   request's wording.
 
    **Sourcing, for confirmed criteria no local convention already covers.** Order: the seed
    index in `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md` first, then a live lookup

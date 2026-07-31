@@ -245,17 +245,12 @@ names the existing modules, helpers, or components it extends, found by searchin
 codebase during planning, and a task that introduces a new abstraction states why no
 existing one fits.
 
-Before searching file-by-file, run the **repo-research procedure** exactly as
-scoping-interview defines it (canonical there): an existing graphify graph in the target
-repo first — `graphify-out/` / root `GRAPH_REPORT.md`, queried read-only for the
-structural picture (modules, existing patterns, what already exists) and for
-`document`-type doc nodes — falling back, when the graph is absent or too stale/thin,
-to plain search plus the two-phase `*.md` index-then-fetch for docs; never trigger a
-graphify build or `--update`, and stay silent about which path was used. The one
-difference is the relevance filter: here it is the confirmed scope and affected areas
-recorded in `.devcycle/scope.md` — the first point in the pipeline where scope is
-concretely known — starting from implementation-scoped docs (a `frontend.md`,
-`backend.md`, or equivalent).
+Before searching file-by-file, run the repo-research procedure
+`${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`) — as a
+dispatch, on the fast tier, returning a map rather than file dumps. The one thing this stage
+supplies is the relevance filter: the confirmed scope and affected areas recorded in
+`.devcycle/scope.md` — the first point in the pipeline where scope is concretely known —
+starting from implementation-scoped docs (a `frontend.md`, `backend.md`, or equivalent).
 
 ## Output contract
 
