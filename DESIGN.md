@@ -140,15 +140,34 @@ Mechanics:
   re-derives pipeline position from state + ledger + plan, making **clear-and-resume** viable (cheaper and
   cleaner than compaction).
 
+The action column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, `Fresh session` — and
+`references/handoff.md` owns the table each boundary defaults to:
+
 | Boundary | Action | Keep | Drop |
 | --- | --- | --- | --- |
-| scoping → brainstorm | Continue | everything | — |
-| spec → planning | Compact with hint | spec path, approved decisions, constraints | design back-and-forth, rejected alternatives |
-| plan → execution | **Clear + `/devcycle:continue`** | nothing in-context (plan/briefs/state carry it) | entire planning conversation |
-| wave → wave | Compact if >~40% | ledger + plan paths, pinned interfaces, dispatch map, wave status, open decisions | implementer transcripts, resolved findings, superseded diffs |
-| execution → branch review | **Clear (or fresh agents only)** | branch, spec path, ledger path | all implementation context |
-| review → on-device | Fresh session | checklist path, branch | everything else |
-| verification → finish | Continue | results report path | — |
+| scoping → brainstorm | Clear + `/devcycle:continue` | scope path, confirmed constraints, open `<tbd>`s | interview transcript, research output |
+| scoping → diagnosis (bugs) | Clear + `/devcycle:continue` | scope path, reproduction steps | interview transcript |
+| audit → brainstorm (findings selected) | Clear + `/devcycle:continue` | audit path, the selected findings | audit transcript, rejected findings |
+| diagnosis → brainstorm (root cause established) | Clear + `/devcycle:continue` | diagnosis report path, reproduction steps, root cause | debugging transcripts, ruled-out hypotheses |
+| brainstorm → planning (spec approved) | Clear + `/devcycle:continue` | spec path, decisions, constraints | design back-and-forth |
+| planning → execution (plan approved) | Clear + `/devcycle:continue` | nothing (files carry it) | planning conversation |
+| wave → wave (within execution) | Clear + `/devcycle:continue` | ledger/plan paths, dispatch map, wave status | implementer transcripts, resolved findings |
+| execution → branch-review | Clear + `/devcycle:continue` | branch, spec path, ledger path | all implementation context |
+| branch-review → on-device | Fresh session | checklist path, branch | everything else |
+| fast-path → finish | Clear + `/devcycle:continue` | branch, what changed | the implementation conversation |
+| sweep → finish | Clear + `/devcycle:continue` | branch, sweep report path | per-file sweep output |
+| finish → (end) | Continue | — | — |
+
+Only one test softens a default. At `scoping → brainstorm`, `scoping → diagnosis`, `audit → brainstorm`,
+`fast-path → finish`, and `sweep → finish` — and nowhere else — the action becomes `Continue` when the stage that
+just ended stayed under the budget in `references/delegation.md`, dispatched no implementer, task-reviewer, or
+sweep, and left all of the next stage's inputs on disk. Any doubt resolves to the table's default.
+
+What this costs the user is stops: the pipeline halts at nearly every boundary, so a cycle spans several short
+sessions instead of one long one. Compacting is gone as an action entirely — compaction leaves the
+expensive part of a context behind, and the measured case was decisive: the month's most expensive session sat at
+39% *after* `/compact` and was still the single largest line item. Clearing is the only action that actually
+returns the context, and files already carry everything the next stage needs.
 
 The execution→review boundary is **bias control**, not just cost hygiene: a reviewer that watched the code being
 written inherits the implementer's assumptions. Context loss there is the point.
@@ -319,7 +338,7 @@ Version handling on GitHub is enforced by CI, not discipline alone:
 
 ### 15.1 The reference layer: one owner per convention
 
-`references/` holds nine plain markdown files, each the sole owner of one cross-cutting
+`references/` holds ten plain markdown files, each the sole owner of one cross-cutting
 convention:
 
 | File | Owns |
@@ -328,6 +347,7 @@ convention:
 | `evidence.md` | the three evidence classes, the file-backed evidence contract, the implementer report and reviewer verdict shapes |
 | `resume.md` | settling the branch from the state file, git-evidence resume rules, "review acceptance is never inferable from git" |
 | `handoff.md` | the handoff block shape, the context-action table, the one-block-per-stage rule, the await gate |
+| `delegation.md` | who does the work: the coordinator's closed duty list, the stage budget's counters, the research-dispatch contract, and the return envelopes |
 | `branch.md` | branch discipline for every committing path |
 | `output.md` | output discipline for every agent and skill |
 | `checklist.md` | the on-device checklist contract: paths, item shape, dimensions, and the `(auto)` boundary |

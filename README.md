@@ -220,6 +220,12 @@ Bulk-mechanical requests — one uniform edit rule across many files — take an
 path: after two confirmation gates the change runs through the pilot-first mechanical-sweep
 workflow instead of implementer waves.
 
+Expect the walk to stop often. Nearly every stage boundary ends the session: devcycle halts and
+asks you to run `/clear` and then `/devcycle:continue`, so a cycle plays out as several short
+sessions rather than one long one. Nothing is lost across those stops — the scope, spec, plan,
+ledger, and state file on disk are what carry the run forward, and the conversation that
+produced them is not needed again.
+
 Why the stages are shaped this way — fresh-context reviews, files-as-state, wave
 parallelism — is covered in [DESIGN.md](DESIGN.md).
 
