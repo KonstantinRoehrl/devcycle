@@ -97,3 +97,9 @@ step 6 advancing `stage:` to `finish` — after which `/devcycle:continue` route
 | "It's trivial, evidence isn't worth capturing" | The evidence class from step 2 still needs its before/after files; "it obviously works" is not evidence. |
 | "It got bigger, but I'm already halfway through" | That is exactly what the escalation valve (step 3) exists for — stop and re-enter the pipeline, don't finish a non-trivial change on the fast path because it's in flight. |
 | "It's a doc/config tweak, branch discipline doesn't matter" | Step 1 applies to every fast-path change — never implement directly on the default or an integration branch. |
+
+**Delegation.** `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` exempts this path from its
+delegate-by-default rule (`## The short paths`) — working in-session is the point. The counters
+in `## The stage budget` still bind: reaching ~30 tool calls or ~15 file reads here means
+triage judged the change trivial and was wrong. Say so and escalate to the full pipeline rather
+than pressing on.
