@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- perf(devcycle): cut orchestrator context depth and delegate inline tool work to subagents (#27)
+
 ## 0.9.0
 
 - feat: unify every review surface on shared criteria and one review engine (#25)
