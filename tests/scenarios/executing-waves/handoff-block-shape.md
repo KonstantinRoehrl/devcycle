@@ -105,9 +105,15 @@ path of the devcycle checkout>; where guidance references
    for true stage ends; these are the only two sanctioned first-field labels) —
    followed by `Artifacts:`, `Carry-overs:`, `Context action:`,
    `Compaction hint:`.
-2. `Context action` is a wave→wave action from the pipeline table —
-   `Continue` or `Compact with hint` — NOT `Clear + /devcycle:continue` and
-   NOT `Fresh session` (the plan still has wave 2 to run in this session).
+2. *(Enum updated 2026-07-31 for 0.9.1.)* `Context action` is one of the
+   three values the action column takes — `Continue`,
+   `Clear + /devcycle:continue`, `Fresh session` — and at this wave→wave
+   boundary it is the table's default for that row,
+   `Clear + /devcycle:continue`. `Compact with hint` is retired: emitting it
+   fails this criterion, as does `Continue` here (the wave→wave row is not
+   one of the boundaries the softening test may reach). The agent must also
+   halt after the block rather than opening wave 2 in the same response —
+   only `Continue` licenses running on.
 3. `Compaction hint` has Keep/Drop shape and matches the wave-boundary row:
    Keep names ledger/plan paths, pinned interfaces or dispatch map, and wave
    status; Drop names implementer transcripts and/or resolved findings.
@@ -136,6 +142,13 @@ path of the devcycle checkout>; where guidance references
    guesses it right proves nothing about whether the pointer works.
 
 ## Baseline (red)
+
+*Note added 2026-07-31:* every run recorded below predates the 0.9.1 action
+enum. Where one quotes `Context action: Continue` as the correct wave→wave
+value, that was correct on its date and is recorded unaltered — under the
+current table the wave→wave default is `Clear + /devcycle:continue`, which is
+what criterion 2 now grades. The recorded outcomes stand as history; they are
+not evidence about the current enum.
 
 Run 2026-07-22: fresh subagent (claude-sonnet-5 via `claude -p`, isolated
 settings, no skill content). FAILED criteria 1–4: the final output was a
@@ -296,3 +309,26 @@ only auth, init event confirming `plugins: []`) against the working-tree
 new risk and criterion 1 the consequence: an agent that never opens the reference has
 no source for `Wave completed: <n> of <m> (stage: execution)` and will most likely fall
 back to the retired `Stage completed: executing-waves (wave 1 of 2)` label.
+
+## Regression (0.9.1 action enum)
+
+Re-check 2026-07-31 after the action column dropped to three values
+(`Continue`, `Clear + /devcycle:continue`, `Fresh session`) and the wave→wave
+row moved from a context-percentage compact to `Clear + /devcycle:continue`.
+This was a text re-check of the criteria against the shipped contract, not a
+headless run — nothing below is claimed as observed agent behavior.
+
+- Criterion 2 re-checked against `references/handoff.md`: the retired
+  `Compact with hint` is gone from the criterion, the graded value is the
+  table's wave→wave default `Clear + /devcycle:continue`, and the criterion
+  now also grades the halt the unconditional await gate requires.
+- Criteria 1, 3, 4, 6, 7 re-read against the same reference: unaffected by
+  this change. Criterion 3's Keep/Drop still matches the wave→wave row
+  (ledger/plan paths, dispatch map, wave status / implementer transcripts,
+  resolved findings).
+- Recorded runs left unaltered; the dated note under `## Baseline (red)`
+  marks their `Continue` quotes as pre-0.9.1.
+- Net: GREEN — the scenario grades the current contract. Runtime behavior
+  under the new enum remains unproven: no headless run has been made since
+  2026-07-26, so the open item in `## Regression (compact profile-driven
+  devcycle)` now also covers criterion 2's new expected value.

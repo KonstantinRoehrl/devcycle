@@ -55,6 +55,29 @@ handoff block below.
 As this stage's final state-file write, set `stage: done` and a fresh `updated:`
 timestamp — nothing remains to resume.
 
+## Clean up this cycle's ephemeral artifacts
+
+The pipeline writes files whose only purpose was to pass content between this cycle's
+dispatches, and nothing has ever removed them. After the state file is closed above and before
+the handoff block below, offer to.
+
+1. **Enumerate.** The ephemeral set is exactly: `.devcycle/reports/*`, `.devcycle/evidence/*`,
+   `.devcycle/findings/*`, `.devcycle/sweep-args-*.json`, `.devcycle/sweep-report*.json`, and
+   any generated per-task brief files. Nothing else is a candidate.
+2. **Show and ask.** Present the list and what it totals — file count and size — and ask for
+   confirmation in one question.
+3. **Remove only on an explicit yes.** Anything short of that leaves every file in place.
+
+**Never removed, whatever the answer:** `.devcycle/state.md`, `.devcycle/ledger.md`,
+`.devcycle/scope.md`, the spec, the plan, the checklist, and the on-device results — this
+cycle's audit trail. Never anything tracked by git: check with `git ls-files --error-unmatch
+<path>` and keep the file if it is tracked, rather than assuming a path under `.devcycle/`
+is ignored in every repo. Never anything outside the repo root.
+
+Cleanup never blocks the finish and never changes its verdict: a declined offer, or a removal
+that fails, is reported and the stage completes regardless. The fast path and the sweep path
+reach this stage too, so they inherit it.
+
 ## Handoff — the pipeline's final block
 
 Emit the block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with:

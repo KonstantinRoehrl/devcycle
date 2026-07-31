@@ -57,19 +57,10 @@ Whenever scope, intent, architecture, data, or user preference is uncertain:
 1. **Research BEFORE questions.** Read the relevant code and docs first, so every
    question is informed by what the repo already shows. Never ask what the repo can
    answer.
-   **Repo-research procedure** (canonical — planning-waves runs this same procedure
-   with its own relevance filter): when a `graphify` skill is listed among this
-   session's available skills, check the target repo (never this plugin's own repo)
-   for `graphify-out/` and/or a root `GRAPH_REPORT.md`. If present, read the report
-   and query the graph for what this step needs — including `document`-type nodes
-   for relevant docs (graphify tags markdown separately from code). If absent, or
-   too stale/thin for the area in question: research the code by plain reading and
-   search, and find docs two-phase — list `*.md` files repo-wide (excluding
-   `node_modules/`, `vendor/`, `dist/`, `build/`, `.git/`, and equivalents), index
-   only each file's title/first heading, and read in full only entries judged
-   relevant. Always read-only (never trigger a graphify build or `--update`) and
-   silent either way: no note about whether a graph was used, and no docs found is
-   nothing to report.
+   Research is a dispatch, not an inline reading exercise: run the repo-research procedure
+   `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`), which
+   covers graph-first precedence, the fallback to plain search with two-phase doc discovery,
+   the fast tier, and the read-only-and-silent rule. None of it is restated here.
    Relevance here is judged against the request itself — scope is not yet
    confirmed — starting from root repo-orientation docs (a `project.md`,
    `architecture.md`, or equivalent).

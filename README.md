@@ -74,7 +74,7 @@ flowchart TD
 
     CYCLE --> STATE["Step 0 · state file<br/>root · branch · request · first-run config"]:::orch
     STATE --> TRIAGE{"Triage<br/>maturity · kind · size"}:::orch
-    CONT -. "re-derives position from .devcycle/state.md<br/>and re-enters at any stage below" .-> TRIAGE
+    CONT -. "re-derives position from .devcycle/state.md<br/>and re-enters at any stage below — this is how<br/>a cycle crosses nearly every boundary" .-> TRIAGE
 
     TRIAGE -->|"rough idea"| SCOPING
     TRIAGE -. "mature input — scoping skipped" .-> BRAINSTORM
@@ -82,7 +82,7 @@ flowchart TD
     TRIAGE -. "trivial, after you confirm" .-> FAST
     TRIAGE -. "bulk mechanical, after two gates" .-> SWEEP
 
-    SCOPING["Scoping<br/>batched interview · repo research · confirm the picture · hard stop"]:::orch
+    SCOPING["Scoping<br/>batched interview · dispatched repo research · confirm the picture · hard stop"]:::orch
     SCOPING --> A_SCOPE[/"confirmed scope"/]:::art
     A_SCOPE --> ISBUG{"bug with no known cause?"}:::orch
     ISBUG -->|yes| DIAG
@@ -91,7 +91,7 @@ flowchart TD
     DIAG["Diagnosis<br/>reproduce · isolate · establish the cause"]:::orch
     DIAG --> A_DIAG[/"root-cause report"/]:::art --> BRAINSTORM
 
-    AUDIT["Audit<br/>scope + discovery · criteria gate with audit plan · sweep · eleven-field findings"]:::orch
+    AUDIT["Audit<br/>scope + dispatched discovery · criteria gate with audit plan · sweep · eleven-field findings"]:::orch
     AUDIT --> A_AUDIT[/"ranked findings document"/]:::art
     A_AUDIT -->|"in cycle — you pick findings to act on"| BRAINSTORM
     A_AUDIT -. "in cycle — nothing picked" .-> STOP
@@ -101,13 +101,13 @@ flowchart TD
     BRAINSTORM["Brainstorm<br/>design dialogue · approaches · spec self-review · your approval"]:::orch
     BRAINSTORM --> A_SPEC[/"approved spec"/]:::art --> PLANNING
 
-    PLANNING["Planning<br/>feasibility gate · task cut · dependencies · dispatch map"]:::orch
+    PLANNING["Planning<br/>feasibility gate · dispatched research · task cut · dependencies · dispatch map"]:::orch
     PLANNING -. "NO-GO — blocking unknown" .-> STOP
     PLANNING --> A_PLAN[/"wave plan"/]:::art --> IMPL
 
     subgraph EXECUTION["Execution — wave by wave"]
         IMPL["implementer<br/>one task brief · test-first"]:::sub
-        REVIEW["task-reviewer<br/>reads the diff and the evidence files"]:::sub
+        REVIEW["task-reviewer<br/>produces the diff itself · reads the evidence files"]:::sub
         GATE{"green gate<br/>coordinator re-runs the tests itself"}:::orch
         COMMIT["commit + ledger entry"]:::orch
         CHK["checklist generated<br/>the moment rendered changes land"]:::orch
@@ -138,11 +138,18 @@ flowchart TD
     FAST["Fast path<br/>in-session implementation · one task-reviewer pass"]:::orch --> FINISH
     SWEEP["Mechanical sweep<br/>blast-radius gate · pilot-first sweep · one reviewer pass"]:::orch --> FINISH
 
-    FINISH["Finish<br/>resolve gitPolicy · apply the external clamps · hand back"]:::orch
+    FINISH["Finish<br/>resolve gitPolicy · apply the external clamps · offer to clear ephemeral artifacts · hand back"]:::orch
     FINISH --> A_FIN[/"branch, pushed branch, or PR"/]:::art --> STOP(["cycle closed"]):::entry
 
     AUDITCMD -. "standalone — starts no cycle" .-> AUDIT
     VERIFYCMD -. "standalone — checklist from the branch diff" .-> ONDEV
+
+    subgraph DELEG["Inside every stage — who does the work"]
+        DUTY["the coordinator keeps only these:<br/>interviews · dispatches · the green gate<br/>commits · ledger · state file · handoff blocks"]:::orch
+        RSCH["everything else is a dispatch:<br/>searching · mapping · reading source<br/>producing diffs · drafting fix briefs"]:::sub
+        ENV[/"returns an envelope — paths and counts,<br/>never the file contents"/]:::art
+        DUTY --> RSCH --> ENV --> DUTY
+    end
 
     subgraph LEGEND["Legend"]
         L1["the orchestrator does this itself"]:::orch
@@ -152,6 +159,7 @@ flowchart TD
         L5["solid arrow = the default walk"]
         L6["dashed arrow = optional, skipped, or standalone"]
         L7["arrow back up the flow = a loop"]
+        L8["stage-to-stage arrow = also a stop:<br/>handoff written, then /clear + /devcycle:continue"]
     end
 
     classDef orch fill:#e8f0fe,stroke:#3367d6,color:#111
@@ -161,19 +169,21 @@ flowchart TD
 ```
 
 1. **Scoping** — batched interview that turns your request into a precise, well-structured
-   goal: you answer questions about intent and desired outcomes; devcycle researches the
-   repo itself to establish what the change touches and confirms that picture with you —
-   research draws on an existing graphify graph when one is available, and also looks for repo
-   orientation docs the same way. For a bug, the interview collects the symptom and
-   reproduction (steps, expected vs. actual, evidence) instead of design intent.
+   goal: you answer questions about intent and desired outcomes; a read-only research
+   subagent establishes what the change touches and hands back a map of paths, never the
+   files themselves, and devcycle confirms that picture with you — research draws on an
+   existing graphify graph when one is available, and also looks for repo orientation docs
+   the same way. For a bug, the interview collects the symptom and reproduction (steps,
+   expected vs. actual, evidence) instead of design intent.
 2. **Audit** — for audit-shaped requests ("audit X", "review the repo for Y" — an
    assessment of existing code rather than a change to it): devcycle interviews you for the
    criteria to measure the repo against — never assuming them — then sweeps the repo and
    writes a ranked findings document to `docs/audits/YYYY-MM-DD-<topic>.md`. You pick which
    findings to act on; those become the cycle's scope and the walk continues at brainstorm.
    The same audit is available on its own as `/devcycle:audit` (below), outside any cycle.
-   The audit derives its criteria proposal from the stacks actually present and from your
-   repo's own convention documents — those outrank generic best practice — and a
+   The audit derives its criteria proposal from a dispatched discovery pass over the stacks
+   actually present and your repo's own convention documents — those outrank generic best
+   practice — and a
    `branch:<name>` token scopes it to one branch, in which case it audits that branch's diff
    expanded to the feature's dependency graph. Every finding carries eleven fields — among
    them its `file:line` location, how to reproduce it, the fix direction, a
@@ -189,15 +199,16 @@ flowchart TD
    from its own brief alone, so every subagent works with a small context — dependencies are
    derived from what each task consumes, and everything not forced into sequence by a real
    dependency is grouped into *waves* of file-disjoint tasks that run in parallel — research
-   draws on an existing graphify graph when one is available, and also looks for
-   implementation-scoped docs the same way. You approve the plan.
+   is dispatched the same way scoping's is, drawing on an existing graphify graph when one is
+   available and looking for implementation-scoped docs alongside it. You approve the plan.
 6. **Execution** — each task goes to a fresh implementer subagent carrying only that task's
    brief, working test-first (failing test before code) when the task adds behavior — a
    behavior-preserving task instead proves the suite green before and after the change, per
-   the evidence class its plan task declares. A reviewer checks every task, the
-   coordinator re-runs the tests itself before accepting (the *green gate*: the task's test
-   command must pass in the coordinator's own re-run, not just in the implementer's
-   report), and only accepted work is committed.
+   the evidence class its plan task declares. A reviewer checks every task — producing the
+   task's diff itself rather than being handed one — the coordinator re-runs the tests
+   itself before accepting (the *green gate*: the task's test command must pass in the
+   coordinator's own re-run, not just in the implementer's report), and only accepted work
+   is committed.
 7. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole
    branch against the spec: everything the spec asked for is there, nothing it didn't ask
    for crept in.
@@ -208,7 +219,11 @@ flowchart TD
    one item at a time. The checklist comes from the plan during execution — or, for a branch
    nobody planned in this session, from that branch's diff traced out to the screens it
    affects.
-9. **Finish** — hands the branch back per your `gitPolicy` (below).
+9. **Finish** — hands the branch back per your `gitPolicy` (below), and first offers to
+   delete the files that only ever existed to pass content between this cycle's dispatches
+   (per-task reports, evidence, findings, sweep arguments). It shows the list and the total
+   before asking, removes nothing without an explicit yes, and never touches the audit trail
+   — state file, ledger, scope, spec, plan, checklist — or any file your repo tracks in git.
 
 Triage judges size, too. A request at typo, rename, or few-line-fix scale — measured against a
 strict checklist, where any doubt on any criterion means not trivial — gets called out before
@@ -219,6 +234,31 @@ the normal finish stage. Decline, and the full pipeline runs as if the question 
 Bulk-mechanical requests — one uniform edit rule across many files — take an analogous sweep
 path: after two confirmation gates the change runs through the pilot-first mechanical-sweep
 workflow instead of implementer waves.
+
+Expect the walk to stop often. Nearly every stage boundary ends the session: devcycle halts and
+asks you to run `/clear` and then `/devcycle:continue`, so a cycle plays out as several short
+sessions rather than one long one. Nothing is lost across those stops — the scope, spec, plan,
+ledger, and state file on disk are what carry the run forward, and the conversation that
+produced them is not needed again. Compacting is deliberately not one of the options: it leaves
+the expensive part of a context behind, where clearing actually returns it.
+
+### What the coordinator does itself
+
+Cost in a pipeline like this is mostly the orchestrator's own context — every file it reads
+stays in the window for the rest of the session, and the stages that read the most are the ones
+that run first. So the coordinator's job is defined as a short, closed list: talk to you,
+dispatch subagents, run the green gate, commit, append the ledger, update the state file, emit
+handoff blocks. Everything else — searching, mapping, reading source, producing diffs, drafting
+fix briefs — is a dispatch, which makes "should I just do this inline?" a lookup rather than a
+judgment call. The few files it may always open directly are the small bounded ones it has to
+reason about itself: the state file, the ledger, the plan's dispatch map, a spec under approval.
+
+What comes back from a dispatch is an envelope — paths and counts, not content. The coordinator
+opens a report only when a decision needs something the envelope can't carry. Each stage also
+runs under a budget (roughly 30 tool calls or 15 files read); crossing it means delegate what's
+left and stop at the next boundary. On the fast and sweep paths, which are in-session by design,
+that budget is the tell that triage called the change trivial and got it wrong — devcycle says so
+and escalates to the full pipeline rather than pressing on.
 
 Why the stages are shaped this way — fresh-context reviews, files-as-state, wave
 parallelism — is covered in [DESIGN.md](DESIGN.md).
@@ -246,6 +286,8 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
 | Workflow `review-panel.js` | Multi-lens read-only review engine for `reviewDepth: panel` — over a branch diff for the review, a file set for the audit. |
 | Workflow `mechanical-sweep.js` | Pilot-first bulk edit engine behind the sweep path and `**Execution:** sweep` plan tasks. |
+| Reference `delegation.md` | Who does the work inside a stage — the coordinator's closed duty list, the stage budget, the research-dispatch contract, and the return envelopes. |
+| Reference `handoff.md` | What happens at a stage boundary — the handoff block, the three-value context action, the one-block-per-stage rule, and the await gate. |
 | Reference `quality-criteria.md` | What any devcycle review or plan measures against — the criteria catalog, sourcing precedence, seed best-practice index, and how the catalog reaches planning and execution. |
 | Reference `findings.md` | How a finding is expressed — the four-value severity vocabulary with blocking derived, the core and document field sets, the evidence discipline, and the panel's machine shape. |
 | Reference `checklist.md` | The on-device checklist contract — paths, item shape, dimensions, and the `(auto)` boundary — shared by checklist generation and the on-device stage. |
@@ -368,7 +410,10 @@ The four **model options** trade cost against capability per role. They default 
 from what the plan makes observable (task size, dependency count, diff size) and records
 each derivation in the ledger — the session's own model where judgment matters, a fast
 one where the task is narrow and fully specified; the branch review inherits the
-session's model and the walkthrough takes a fast one. Deriving by tier rather than by
+session's model and the walkthrough takes a fast one. Research and exploration dispatches
+always take the fast tier, whatever the stage: their output is a map rather than a
+judgment, and the roles that must judge — review, diagnosis, design — are the ones that
+keep the session's model. Deriving by tier rather than by
 model ids written into the plugin means new model generations are picked up without a
 plugin update. Set an explicit model id to pin a role; an explicit id is binding and
 never second-guessed.
@@ -404,6 +449,8 @@ Release history: [CHANGELOG.md](CHANGELOG.md) ·
 Decision log: [docs/DECISIONS.md](docs/DECISIONS.md)
 
 Contributing — including how the scenario test harness in `tests/scenarios/` works:
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md). `scripts/session-metrics.mjs` re-measures devcycle's own
+token profile from a local Claude Code session corpus, which is how the cost claims above are
+kept honest rather than assumed.
 
 [superpowers]: https://github.com/obra/superpowers

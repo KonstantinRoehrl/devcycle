@@ -10,6 +10,10 @@ description: Use when executing a wave-based implementation plan with subagent i
 Resolve `profile` first — read `${CLAUDE_PLUGIN_ROOT}/references/config.md` and
 follow it.
 
+What the coordinator does itself and what it delegates is owned by
+`${CLAUDE_PLUGIN_ROOT}/references/delegation.md`, including the stage budget that binds this
+skill hardest — read it and follow it; none of it is restated here.
+
 - **`thorough`** — load **superpowers:subagent-driven-development** (REQUIRED)
   and overlay it exactly as before: it owns brief slicing and file handoffs, the
   review/fix loop, implementer-status handling, reviewer-prompt construction, and
@@ -118,18 +122,28 @@ Invariants:
    devcycle the coordinator owns commits (step 7, after review and the green
    gate); upstream's implementers-commit convention does not apply here. Ledger:
    `event=dispatched`.
-4. On report: ledger `event=report-received`. Produce the task diff — run
-   `git add -N` on new files first (or they are invisible to diff), then
-   `git diff -U10 HEAD -- <files>` to a file. (This replaces upstream's
-   `scripts/review-package`: devcycle implementers do not commit, so there
-   are no task commits to package until after acceptance.)
-5. Dispatch **devcycle:task-reviewer** (read-only; its definition encodes
-   devcycle's reviewer hygiene) with the brief, the report, the diff path, the
-   two evidence-file paths the report names, and the task's constraints block.
-   At `thorough`, upstream's reviewer-prompt rules govern the dispatch wording.
-   Ledger one `event=review-round` per reviewer dispatch (round n), and
-   `event=review-verdict` for its outcome. Findings loop back to the implementer;
-   re-review after fixes, logging the next `review-round`.
+
+   The dispatch returns the implementer envelope
+   `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` defines — `status`, the report path
+   `.devcycle/reports/<task-id>.md`, the files touched, the on-device item count, and the
+   deviation count — never the report body. The on-device count is what triggers checklist
+   generation below without the coordinator opening the file.
+4. On report: ledger `event=report-received`, with `ref=` set to the report path the envelope
+   named. The coordinator does not produce the task diff and does not read it — diff
+   production moved into the reviewer dispatch below, where the diff is read anyway. (This is
+   also what replaces upstream's `scripts/review-package`: devcycle implementers do not commit,
+   so there are no task commits to package until after acceptance.)
+5. Dispatch **devcycle:task-reviewer** (read-only; its definition encodes devcycle's reviewer
+   hygiene) with the brief, the report path, the task's file list, the two evidence-file paths
+   the report names, and the task's constraints block. The dispatch prompt instructs it to
+   produce the diff itself — `git add -N <new files>` first, or they are invisible to diff,
+   then `git diff -U10 HEAD -- <files>` — and to write its findings to
+   `.devcycle/findings/<task-id>-round-<n>.md`. At `thorough`, upstream's reviewer-prompt rules
+   govern the dispatch wording. It returns the task-reviewer envelope
+   `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` defines: verdict, blocking-finding count,
+   findings path. Ledger one `event=review-round` per reviewer dispatch (round n), and
+   `event=review-verdict` for its outcome. A non-zero blocking count sends the findings path
+   back to the implementer; re-review after fixes, logging the next `review-round`.
 6. **Green gate (REQUIRED, deterministic):** before accepting, re-run the
    task's test command yourself and read the exit status. The implementer's
    claimed output — including the evidence files and the tail in its report — is
@@ -189,9 +203,9 @@ re-run rule — is owned by **devcycle:sweeping-mechanical-changes**
   `dispatched outcome=sweep`, dirty targets are the interrupted run's own
   edits and take the sweep skill's Resume confirmation instead.
 - **Exit 0, `applied` non-empty.** The saved report IS the implementer
-  report: ledger `event=report-received` with it as `ref=`, then diff
-  production, the task-reviewer dispatch (report included, skips and all),
-  the green gate, and the acceptance commit exactly as steps 4–7 define,
+  report: ledger `event=report-received` with it as `ref=`, then the
+  task-reviewer dispatch (report included, skips and all), the green gate,
+  and the acceptance commit exactly as steps 4–7 define,
   step 7's pathspec included. There is no
   implementer to write the evidence files, so the coordinator writes them itself
   per the file-backed contract in `references/evidence.md` — with one binding
@@ -272,7 +286,7 @@ implementer fix and takes the generic rows.
 | ledger last event for a task | resume action |
 | --- | --- |
 | `dispatched` | re-dispatch the same brief (the run may have died) |
-| `report-received` | produce the diff, dispatch the reviewer |
+| `report-received` | dispatch the reviewer (it produces the diff itself) |
 | `review-round` (no verdict after it) | the reviewer's run may have died: re-dispatch the reviewer for that round |
 | `review-verdict outcome=accepted` | run the green gate, commit |
 | `review-verdict outcome=rejected` | re-dispatch the implementer with the findings — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet (findings, task body, applied-edits disclosure), never a sweep re-run |

@@ -16,8 +16,6 @@
 
 - feat: add trivial-change fast path plus audit-round triage and review improvements (#18)
 
-## Unreleased
-
 ## 0.6.1
 
 - fix(cycle): make the command model-invocable and halt for compact/clear at boundaries (#11)

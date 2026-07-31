@@ -27,6 +27,14 @@ implementer to fake a red or the reviewer to reject correct work.
 - Paths: `.devcycle/evidence/<task-id>-before.txt`, `.devcycle/evidence/<task-id>-after.txt`.
   `<task-id>` is the plan's task number on the full pipeline, `fast` on the fast path,
   `sweep` on the sweep path.
+
+The report itself is a file on the same principle: the implementer writes it to
+`.devcycle/reports/<task-id>.md` in the shape below, and what the dispatch returns to the
+coordinator is the short envelope `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` defines
+(`## Return envelopes`) — the path plus the few counts the coordinator must act on without
+opening the file. A report pasted into the dispatch's reply instead of written to that path is
+the same defect as an inlined evidence tail.
+
 - Implementer report shape:
 
 ```markdown
