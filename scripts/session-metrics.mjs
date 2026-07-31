@@ -174,10 +174,12 @@ function run(args) {
   const sessions = [];
   for (const file of files) {
     const records = readRecords(file);
+    // Membership is a session-level property, so it is decided over every record;
+    // the window then narrows only what gets measured.
+    if (!isDevcycleSession(records)) continue;
     const windowed = records.filter((r) => inWindow(r.timestamp, args.since, args.until));
     if (windowed.length === 0) continue;
-    if (!isDevcycleSession(windowed)) continue;
-    const sessionId = windowed.find((r) => r.sessionId)?.sessionId ?? basename(file, ".jsonl");
+    const sessionId = records.find((r) => r.sessionId)?.sessionId ?? basename(file, ".jsonl");
     sessions.push(summarizeSession(sessionId, windowed));
   }
 

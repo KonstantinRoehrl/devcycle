@@ -155,6 +155,36 @@ test("cli: --since excludes records before the window", () => {
   assert.match(res.stdout, /no sessions/i);
 });
 
+// Session membership is a property of the whole transcript, so the marker sits on a
+// record that a mid-session --since excludes.
+function markerBeforeWindowDir() {
+  const dir = mkdtempSync(join(tmpdir(), "session-metrics-window-"));
+  const proj = join(dir, "-some-project");
+  mkdirSync(proj, { recursive: true });
+  const lines = [
+    turn({ timestamp: "2026-07-01T09:00:00.000Z", attributionSkill: "devcycle:executing-waves" }),
+    turn({ timestamp: "2026-07-20T10:00:00.000Z" }),
+    turn({ timestamp: "2026-07-31T10:00:00.000Z" }),
+  ];
+  writeFileSync(join(proj, "sess-abcdef123456.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  return dir;
+}
+
+test("cli: a devcycle marker before the window still keeps the session, measuring only in-window records", () => {
+  const res = run(["--dir", markerBeforeWindowDir(), "--since", "2026-07-15", "--json"]);
+  assert.equal(res.status, 0, res.stderr);
+  const parsed = JSON.parse(res.stdout);
+  assert.equal(parsed.sessions.length, 1);
+  assert.equal(parsed.sessions[0].turns, 2);
+  assert.equal(parsed.totals.turns, 2);
+});
+
+test("cli: a devcycle session with no in-window records drops out entirely", () => {
+  const res = run(["--dir", markerBeforeWindowDir(), "--since", "2026-08-01"]);
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /no sessions/i);
+});
+
 test("cli: an unreadable --dir fails loudly rather than reporting zero", () => {
   const res = run(["--dir", join(tmpdir(), "does-not-exist-9d1f")]);
   assert.equal(res.status, 1);
