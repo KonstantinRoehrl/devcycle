@@ -5,6 +5,31 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-01 — context depth becomes measurable, and implementer routing inverts
+
+**Decision:** Two reversals ship together. First, context depth becomes a measured quantity
+rather than an estimated one: `references/delegation.md`'s claim that "an agent cannot
+reliably observe its own context fill" is retired, because the live transcript's
+`message.usage` records exact depth per request and a running session can read its own
+transcript — the probe (`scripts/doctor.mjs --depth`) and the depth gate are therefore one
+design, not two, and the depth ceiling is now enforceable rather than aspirational. Second,
+implementer routing inverts from session-by-default to fast-by-default with named escalation
+triggers, on the evidence that fast-declared implementers did the same raw work (785k vs 794k
+raw context units per run, 18k vs 20k output tokens) at a fifth of the price, and that a wrong
+cheap guess costs at most one review round.
+**Why:** Both reversals rest on the same kind of correction — a premise that was assumed
+rather than checked. The depth premise was checked by reading what the transcript actually
+carries; the routing premise was checked by measuring what fast and session implementers
+actually cost and produced. The 15%/20% depth thresholds in the new gate are recorded as
+absolute measurements taken on 1M-window sessions, divided by 1M — expressing them as
+fractions is a deliberate approximation so they adapt to smaller-window models, even though
+cache-read cost actually scales with absolute tokens, not with the fraction of the window
+used. Doctor's own per-model band data is what should confirm or correct these thresholds as
+more models are profiled.
+**Supersedes:** `references/delegation.md`'s "an agent cannot reliably observe its own context
+fill" claim, and the session-by-default implementer routing predicate it and
+`references/config.md` previously encoded.
+
 ## 2026-07-31 — the context reset becomes binding at every boundary, and the stage budget is counted rather than estimated
 
 **Decision:** Every stage boundary in `references/handoff.md` now defaults to a reset, and the

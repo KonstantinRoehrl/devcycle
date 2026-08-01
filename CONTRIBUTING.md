@@ -51,8 +51,13 @@ Run the validators and the workflow-script tests locally; CI runs the same check
 ```
 node scripts/validate.mjs          # manifests, frontmatter, description budget, fences
 node scripts/redaction-check.mjs   # no machine paths or deny-listed terms
+node scripts/doctor.mjs            # token/context profile; --depth is the context gate's probe
 node --test tests/unit/*.test.mjs  # workflow-script tests (stubbed CLIs, keyless)
 ```
+
+`scripts/doctor.mjs` prices what it measures against `scripts/pricing.mjs`, the data module
+that holds per-model dollar rates and context windows with no CLI of its own — update that
+file when prices change.
 
 **PR titles must be Conventional Commits** (`type(scope)?!: subject`). PRs are
 squash-merged and the title becomes the squash subject, which drives the semver bump

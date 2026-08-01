@@ -71,6 +71,7 @@ flowchart TD
     CONT(["/devcycle:continue"]):::entry
     AUDITCMD(["/devcycle:audit — optional branch:name"]):::entry
     VERIFYCMD(["/devcycle:verify branch"]):::entry
+    DOCTORCMD(["/devcycle:doctor — optional --all"]):::entry
 
     CYCLE --> STATE["Step 0 · state file<br/>root · branch · request · first-run config"]:::orch
     STATE --> TRIAGE{"Triage<br/>maturity · kind · size"}:::orch
@@ -271,8 +272,10 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | `/devcycle:continue` | Resumes an interrupted pipeline from the state file. |
 | `/devcycle:audit` | Audits this repo against criteria you confirm, and writes a ranked findings document; a `branch:<name>` token — not a bare argument — scopes it to that branch's diff. Standalone — starts no cycle. |
 | `/devcycle:verify` | Walks an on-device checklist derived from a branch's diff — verification for code this session did not write. Standalone — starts no cycle. |
+| `/devcycle:doctor` | Profiles token cost, context depth, model routing, and agent startup cost — for this session, a date window, or the whole transcript history; `--depth` is the bare probe the context gate calls. Standalone — starts no cycle. |
 | Skill `scoping-interview` | The batched scope interview with a hard stop before design begins. |
 | Skill `auditing-a-repo` | The criteria interview, the repo sweep (through the shared `reviewing-code` engine), and the ranked evidence-backed findings document behind `/devcycle:audit` and the audit stage. |
+| Skill `doctor` | Runs the token/context/routing/startup-cost analyzer and interprets it by ranking findings by dollar impact — the engine behind `/devcycle:doctor`. |
 | Skill `planning-waves` | Feasibility gate + wave-structured planning (overlays `superpowers:writing-plans` at `thorough`). |
 | Skill `executing-waves` | Parallel subagent execution with green gate, ledger, and commit discipline. |
 | Skill `reviewing-the-branch` | The whole-branch review gate — the spec-compliance layer and the bounded rounds loop, over the shared `reviewing-code` engine. |
@@ -449,7 +452,7 @@ Release history: [CHANGELOG.md](CHANGELOG.md) ·
 Decision log: [docs/DECISIONS.md](docs/DECISIONS.md)
 
 Contributing — including how the scenario test harness in `tests/scenarios/` works:
-[CONTRIBUTING.md](CONTRIBUTING.md). `scripts/session-metrics.mjs` re-measures devcycle's own
+[CONTRIBUTING.md](CONTRIBUTING.md). `scripts/doctor.mjs` re-measures devcycle's own
 token profile from a local Claude Code session corpus, which is how the cost claims above are
 kept honest rather than assumed.
 

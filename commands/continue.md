@@ -45,6 +45,18 @@ the user's recollection contradicts the files, follow the files and say so.
 
 ## Resume
 
+**Depth check first.** Before resuming any stage, run
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth
+```
+
+If it reports `over-budget` or `hard-stop`, say so and STOP: report the depth and the band,
+and tell the user this session is already too deep to resume into — `/clear` first, then
+`/devcycle:continue` again. Resuming anyway is the user's explicit call, not yours. If the
+probe exits non-zero, say the depth could not be measured, name its one-line reason, and
+proceed — an unmeasurable depth is not a deep one.
+
 Continue at the recorded stage via its skill:
 
 | stage | resume via |
