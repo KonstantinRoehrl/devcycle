@@ -75,6 +75,9 @@ Invariants:
    `**Dependencies:**`, the task's `**Evidence:**` class from the plan, the
    task's steps, the global constraints and pinned interfaces that apply, and
    the task's **quality constraints, resolved** — nothing else.
+   Plus one named reference: `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`
+   § Read discipline, named in the brief and never restated in it — the same
+   naming convention the brief already uses for `references/evidence.md`.
 
    **Resolving quality constraints — every brief, at every profile.** Look each
    id on the task's `**Quality constraints:**` line up in the plan's

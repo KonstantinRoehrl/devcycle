@@ -76,6 +76,25 @@ request itself, since scope is not yet confirmed; `devcycle:planning-waves` judg
 confirmed scope in `.devcycle/scope.md`; `devcycle:auditing-a-repo` judges against the
 confirmed audit criteria.
 
+## Read discipline
+
+Applies to every dispatched agent and to the coordinator's own exempt reads. Measured on the
+real corpus: 22.5% of main-thread reads re-read a file already read in the same session, only
+25.7% of reads bound the range, and 1.4M tokens of Bash output was file contents printed
+around `Read`.
+
+- **Locate with `Grep`/`Glob`, confirm with `Read`.** A search returns line numbers; that is
+  usually the whole answer. Opening the file is the second step, not the first.
+- **Bound the read.** Once a search has named the lines, `Read` with `limit`/`offset` rather
+  than pulling the whole file.
+- **Read a file once.** What you already read this session is still in context; re-reading it
+  buys nothing and is billed again on every later request.
+- **Never print file contents through Bash.** `cat`, `sed -n`, `head`, and `tail` on a source
+  file bypass `Read`'s truncation and its de-duplication. Bash stays correct for what it is
+  for — running tests, `git diff`, `git status`, exit statuses.
+
+The brief names this section; it is never restated per skill.
+
 ## Return envelopes
 
 What a dispatch hands back to the coordinator is a short envelope of paths and counts — never
