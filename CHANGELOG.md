@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.2
+
+- perf(devcycle): act on the token audit's cost model, routing, and depth-gate findings (#29)
+
 ## 0.9.1
 
 - perf(devcycle): cut orchestrator context depth and delegate inline tool work to subagents (#27)
