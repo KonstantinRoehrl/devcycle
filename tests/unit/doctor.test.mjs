@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   parseArgs, isDevcycleSession, contextDepth, costUSD, depthBand, median,
-  summarizeSession, formatReport,
+  summarizeSession, formatReport, budgetBand, resolveDepth,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -115,7 +115,12 @@ function fixtureDir() {
   return dir;
 }
 
-const run = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+const run = (args, env = {}, cwd = process.cwd()) =>
+  spawnSync(process.execPath, [SCRIPT, ...args], {
+    encoding: "utf8",
+    cwd,
+    env: { ...process.env, CLAUDE_CODE_SESSION_ID: "", ...env },
+  });
 
 test("cli: reports the devcycle session and filters out the non-devcycle one", () => {
   const res = run(["--dir", fixtureDir()]);
@@ -310,4 +315,116 @@ test("parseArgs: --all and --depth are read", () => {
   assert.equal(parseArgs(["--depth"]).depth, true);
   assert.equal(parseArgs([]).all, false);
   assert.equal(parseArgs([]).depth, false);
+});
+
+// --- the depth probe: budgetBand and resolveDepth ---
+
+function turnWithUsage(model, u) {
+  return { type: "assistant", message: { model, usage: u, content: [] } };
+}
+
+// Builds <root>/<slug-of-cwd>/<sessionId>.jsonl and returns both paths. cwd is a real
+// directory (not a literal placeholder) so the CLI tests can spawnSync with it: the
+// child process's working directory must actually exist on disk.
+function depthFixture(sessionId, records) {
+  const root = mkdtempSync(join(tmpdir(), "doctor-depth-"));
+  const cwd = mkdtempSync(join(tmpdir(), "doctor-cwd-"));
+  const slug = join(root, cwd.replaceAll("/", "-"));
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(join(slug, `${sessionId}.jsonl`), records.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  return { root, cwd, slug };
+}
+
+test("budgetBand: 15% is over budget, 20% is a hard stop", () => {
+  assert.equal(budgetBand(100_000, 1_000_000), "ok");
+  assert.equal(budgetBand(149_999, 1_000_000), "ok");
+  assert.equal(budgetBand(150_000, 1_000_000), "over-budget");
+  assert.equal(budgetBand(199_999, 1_000_000), "over-budget");
+  assert.equal(budgetBand(200_000, 1_000_000), "hard-stop");
+});
+
+test("budgetBand: the fractions adapt to a smaller context window", () => {
+  // haiku's 200k window: 15% is 30k, not 150k.
+  assert.equal(budgetBand(29_999, 200_000), "ok");
+  assert.equal(budgetBand(30_000, 200_000), "over-budget");
+  assert.equal(budgetBand(40_000, 200_000), "hard-stop");
+});
+
+test("resolveDepth: reads the last usage record of the session named by the env var", () => {
+  const { root, cwd } = depthFixture("sess-1111", [
+    turnWithUsage("claude-opus-5", usage(10, 20, 30, 5)),
+    turnWithUsage("claude-opus-5", usage(100, 200, 300, 5)),
+  ]);
+  const r = resolveDepth(
+    { CLAUDE_CODE_SESSION_ID: "sess-1111", CLAUDE_DOCTOR_PROJECTS: root },
+    cwd,
+  );
+  assert.equal(r.depth, 600); // the LAST record: 100 + 200 + 300
+  assert.equal(r.model, "claude-opus-5");
+  assert.equal(r.window, 1_000_000);
+  assert.equal(r.band, "ok");
+});
+
+test("resolveDepth: falls back to a filename search when the cwd slug does not match", () => {
+  const { root } = depthFixture("sess-2222", [turnWithUsage("claude-sonnet-5", usage(0, 0, 160_000, 1))]);
+  const r = resolveDepth(
+    { CLAUDE_CODE_SESSION_ID: "sess-2222", CLAUDE_DOCTOR_PROJECTS: root },
+    "/somewhere/else/entirely",
+  );
+  assert.equal(r.depth, 160_000);
+  assert.equal(r.band, "over-budget");
+});
+
+test("resolveDepth: no session id is an explicit failure, not an unknown pass", () => {
+  assert.throws(() => resolveDepth({}, "/tmp"), /CLAUDE_CODE_SESSION_ID/);
+});
+
+test("resolveDepth: no matching transcript is an explicit failure", () => {
+  const { root, cwd } = depthFixture("sess-3333", [turnWithUsage("claude-opus-5", usage(1, 1, 1, 1))]);
+  assert.throws(
+    () => resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-none", CLAUDE_DOCTOR_PROJECTS: root }, cwd),
+    /no transcript/i,
+  );
+});
+
+test("resolveDepth: a transcript with no usage record is an explicit failure", () => {
+  const { root, cwd } = depthFixture("sess-4444", [{ type: "user", message: { content: "hi" } }]);
+  assert.throws(
+    () => resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-4444", CLAUDE_DOCTOR_PROJECTS: root }, cwd),
+    /no usage record/i,
+  );
+});
+
+test("cli: --depth prints one line and exits 0", () => {
+  const { root, cwd } = depthFixture("sess-5555", [
+    turnWithUsage("claude-opus-5", usage(0, 0, 152_340, 10)),
+  ]);
+  const out = run(["--depth"], { CLAUDE_CODE_SESSION_ID: "sess-5555", CLAUDE_DOCTOR_PROJECTS: root }, cwd);
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(
+    out.stdout.trim(),
+    "depth: 152340 tokens (15.2% of 1000000, model claude-opus-5) — band: over-budget",
+  );
+});
+
+test("cli: --depth --json emits the machine shape", () => {
+  const { root, cwd } = depthFixture("sess-6666", [
+    turnWithUsage("claude-opus-5", usage(0, 0, 152_340, 10)),
+  ]);
+  const out = run(["--depth", "--json"], { CLAUDE_CODE_SESSION_ID: "sess-6666", CLAUDE_DOCTOR_PROJECTS: root }, cwd);
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(JSON.parse(out.stdout), {
+    depth: 152340,
+    model: "claude-opus-5",
+    window: 1000000,
+    fraction: 0.15234,
+    band: "over-budget",
+  });
+});
+
+test("cli: --depth failure exits non-zero with a one-line reason on stderr", () => {
+  const out = run(["--depth"], { CLAUDE_DOCTOR_PROJECTS: "/nonexistent" }, "/tmp");
+  assert.notEqual(out.status, 0);
+  assert.equal(out.stderr.trim().split("\n").length, 1);
+  assert.match(out.stderr, /CLAUDE_CODE_SESSION_ID/);
 });

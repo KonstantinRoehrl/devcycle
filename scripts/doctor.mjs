@@ -2,7 +2,7 @@
 // Re-measures devcycle's token cost from session transcripts: turn counts, main-thread
 // vs subagent split, context depth, tool mix, and dollar cost by model, stage, and agent.
 // Read-only. Emits counts, dollars, model ids, tool names, and skill names only.
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -96,6 +96,56 @@ export const BAND_LABELS = [...BANDS.map(([, label]) => label), "300k+"];
 export function depthBand(depth) {
   for (const [ceiling, label] of BANDS) if (depth < ceiling) return label;
   return "300k+";
+}
+
+// Fractions of the running model's context window. The underlying measurement is absolute —
+// cost per 1k output tokens bottoms at 15.1k in the 100-150k band and climbs to 40.7k past
+// 300k — taken on 1M-window sessions, so these fractions are those absolutes divided by 1M.
+// Expressing them as fractions is a deliberate approximation that lets them adapt to smaller
+// windows; cache-read cost actually scales with absolute tokens, not with the fraction used.
+// Doctor's own per-model band data is what should confirm or correct them once smaller-window
+// sessions have been measured.
+const OVER_BUDGET = 0.15;
+const HARD_STOP = 0.2;
+
+export function budgetBand(depth, window) {
+  const f = depth / window;
+  if (f >= HARD_STOP) return "hard-stop";
+  if (f >= OVER_BUDGET) return "over-budget";
+  return "ok";
+}
+
+// CLAUDE_DOCTOR_PROJECTS overrides the transcript root; it exists so the probe is testable
+// without writing into the real ~/.claude. It defaults to ~/.claude/projects.
+export function resolveDepth(env, cwd) {
+  const id = env.CLAUDE_CODE_SESSION_ID;
+  if (!id) throw new Error("CLAUDE_CODE_SESSION_ID is not set — cannot identify this session");
+  const root = env.CLAUDE_DOCTOR_PROJECTS || join(homedir(), ".claude", "projects");
+
+  // 1. cwd slug, 2. a filename search for a session whose cwd moved after it started.
+  const direct = join(root, cwd.replaceAll("/", "-"), `${id}.jsonl`);
+  const file = existsSync(direct)
+    ? direct
+    : (findTranscriptFiles(root) ?? []).find((f) => basename(f) === `${id}.jsonl`);
+  if (!file) throw new Error(`no transcript found for session ${id} under ${root}`);
+
+  let last = null;
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    if (!line.includes('"usage"')) continue;
+    let r;
+    try {
+      r = JSON.parse(line);
+    } catch {
+      continue; // transcripts are appended live; a torn trailing line is normal
+    }
+    if (r.message?.usage && r.message.model && r.message.model !== SYNTHETIC_MODEL) last = r.message;
+  }
+  if (!last) throw new Error(`no usage record in ${basename(file)} — nothing to measure`);
+
+  const depth = contextDepth(last.usage);
+  const window = priceFor(last.model)?.window;
+  if (!window) throw new Error(`model ${last.model} is not in the pricing table — no window to measure against`);
+  return { depth, model: last.model, window, fraction: depth / window, band: budgetBand(depth, window) };
 }
 
 export function median(numbers) {
@@ -392,6 +442,22 @@ function run(args) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.depth) {
+    let r;
+    try {
+      r = resolveDepth(process.env, process.cwd());
+    } catch (e) {
+      console.error(`doctor: ${e.message}`);
+      process.exit(1);
+    }
+    if (args.json) {
+      console.log(JSON.stringify(r));
+    } else {
+      const pct = (r.fraction * 100).toFixed(1);
+      console.log(`depth: ${r.depth} tokens (${pct}% of ${r.window}, model ${r.model}) — band: ${r.band}`);
+    }
+    return;
+  }
   const result = run(args);
   if (!result.ok) {
     console.error("SESSION METRICS FAILED:\n" + result.reasons.map((r) => ` - ${r}`).join("\n"));
