@@ -16,9 +16,20 @@ outcome. The finish stage emits the pipeline's final block. The block shape:
 - Stage completed: <stage>
 - Artifacts: <paths, one per line>
 - Carry-overs: <pinned interfaces / open decisions, or "none">
+- Context depth: <n> (<pct>% of window, <band>)
 - Context action: <Continue | Clear + /devcycle:continue | Fresh session>
 - Compaction hint: Keep <X>. Drop <Y>.
 ```
+
+`Context depth:` is measured, not estimated. At every boundary this file names, run
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth
+```
+
+and copy its numbers into the field. If the probe exits non-zero, write
+`Context depth: unknown (<the probe's one-line reason>)` — an unknown depth is reported as
+unknown and never as a pass.
 
 At a wave → wave boundary within execution the first field is instead
 `Wave completed: <n> of <m> (stage: execution)` — `Stage completed:` is
@@ -84,3 +95,11 @@ written down rather than left to judgment. A user who looks away would
 otherwise sail past the boundary with an un-cleared context, which is exactly what this gate
 prevents. `/clear` ends the session by design; state the `/devcycle:continue` resume path in the
 same message you halt on.
+
+**The hard-stop band overrides the table.** When the probe reports `hard-stop` (≥20% of the
+running model's context window), the boundary's context action is `Clear +
+/devcycle:continue` regardless of what the table's row says — including the rows that read
+`Continue`. The gate above then carries the enforcement unchanged: no new work begins in this
+session. At `over-budget` (≥15%) the table's action stands, and
+`${CLAUDE_PLUGIN_ROOT}/references/delegation.md` § The stage budget already requires
+delegating what remains and stopping here rather than continuing through.

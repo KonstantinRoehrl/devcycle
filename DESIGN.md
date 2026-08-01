@@ -62,7 +62,9 @@ devcycle/                (public GitHub repo)
 ├── commands/
 │   ├── cycle.md                  # entry: input-maturity triage → stage walk; model-invocable (wrappers can call it)
 │   ├── continue.md               # resume from .devcycle/state.md after /clear (see §5)
-│   └── audit.md                  # standalone audit; starts no cycle (see §15.3)
+│   ├── audit.md                  # standalone audit; starts no cycle (see §15.3)
+│   ├── verify.md                 # standalone on-device walkthrough; starts no cycle
+│   └── doctor.md                 # standalone token/context profile; starts no cycle
 ├── references/                   # the reference layer: one owner per convention (see §15.1)
 │   ├── config.md                 # knob resolution, the profile matrix, model tiers
 │   ├── evidence.md               # evidence classes, file-backed evidence, report/verdict shapes
@@ -74,6 +76,7 @@ devcycle/                (public GitHub repo)
 │   ├── scoping-interview/        # rough idea → bounded scope; batched AskUserQuestion; nothing assumed;
 │   │                             # hands off to superpowers:brainstorming
 │   ├── auditing-a-repo/          # interviewed criteria → ranked, file-referenced findings (see §15.3)
+│   ├── doctor/                   # token/context/routing/startup-cost analyzer, ranked by dollar impact
 │   ├── planning-waves/           # layers on superpowers:writing-plans — file-disjoint tasks, explicit
 │   │                             # dependencies, dispatch map, pinned interfaces
 │   ├── executing-waves/          # layers on superpowers:subagent-driven-development — ledger, brief/diff file
@@ -318,7 +321,8 @@ Version handling on GitHub is enforced by CI, not discipline alone:
 ## 13. Naming
 
 - Plugin: **`devcycle`** (user decision 2026-07-22; over full-cycle/dev-cycle/idea-to-pr).
-- Commands: `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:audit`.
+- Commands: `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:audit`, `/devcycle:verify`,
+  `/devcycle:doctor`.
 - Skills: verb-first gerunds (`executing-waves`, `planning-waves`, `verifying-on-device`,
   `reviewing-the-branch`, `scoping-interview`, `auditing-a-repo`, `onboarding-a-repo`,
   `distilling-learnings`, `sweeping-mechanical-changes`).

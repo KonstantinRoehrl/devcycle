@@ -39,10 +39,23 @@ first in a read-heavy stage; the call counter catches stages that are busy in ot
 Over budget means two things: delegate whatever work remains that is not a duty above, and
 stop at the next boundary rather than continuing through it.
 
-A secondary, non-binding hint: a session known to be past ~40% of its context should be
-treated as over budget too. The counters bind and the percentage only informs, because an
-agent cannot reliably observe its own context fill — the same reasoning `config.md` applies
-when it restricts its model-tier predicates to dispatch-time-observable inputs only.
+A third counter binds alongside them, and it is measured rather than estimated: **context
+depth**. A running session can read its own transcript, so its exact depth per request is
+observable —
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth
+```
+
+— which prints the depth, the fraction of the running model's context window, and the band:
+**over budget at ≥15% of the window, hard stop at ≥20%**. At `over-budget` the two
+consequences above apply unchanged (delegate the rest, stop at the next boundary). At
+`hard-stop`, `references/handoff.md` forces the boundary's context action to a clear.
+
+**A probe that fails degrades to advisory, never to a pass.** No session id, no matching
+transcript, or no usage record exits non-zero with a one-line reason; treat depth as unknown
+and let the two tool-call counters bind alone. An unknown depth is never evidence of a
+shallow one.
 
 ## Research dispatches
 
@@ -75,6 +88,25 @@ Each caller supplies its own relevance filter: `devcycle:scoping-interview` judg
 request itself, since scope is not yet confirmed; `devcycle:planning-waves` judges against the
 confirmed scope in `.devcycle/scope.md`; `devcycle:auditing-a-repo` judges against the
 confirmed audit criteria.
+
+## Read discipline
+
+Applies to every dispatched agent and to the coordinator's own exempt reads. Measured on the
+real corpus: 22.5% of main-thread reads re-read a file already read in the same session, only
+25.7% of reads bound the range, and 1.4M tokens of Bash output was file contents printed
+around `Read`.
+
+- **Locate with `Grep`/`Glob`, confirm with `Read`.** A search returns line numbers; that is
+  usually the whole answer. Opening the file is the second step, not the first.
+- **Bound the read.** Once a search has named the lines, `Read` with `limit`/`offset` rather
+  than pulling the whole file.
+- **Read a file once.** What you already read this session is still in context; re-reading it
+  buys nothing and is billed again on every later request.
+- **Never print file contents through Bash.** `cat`, `sed -n`, `head`, and `tail` on a source
+  file bypass `Read`'s truncation and its de-duplication. Bash stays correct for what it is
+  for — running tests, `git diff`, `git status`, exit statuses.
+
+The brief names this section; it is never restated per skill.
 
 ## Return envelopes
 

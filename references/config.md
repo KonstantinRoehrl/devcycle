@@ -84,9 +84,16 @@ model id written here, because ids in skill prose rot as models change:
 
 Derivation predicates (dispatch-time-observable inputs only):
 
-- **implementer**: fast tier iff the task's `**Files:**` block lists ≤2
-  files AND `**Dependencies:** none` AND every step names its file and
-  expected behavior; else session tier.
+- **implementer**: **fast tier by default.** Escalate to session tier only
+  on a dispatch-time-observable signal — the task's `**Files:**` block lists
+  more than 5 files; or `**Dependencies:**` is anything other than `none`; or
+  any step fails to name its file and expected behavior; or a prior review
+  round on this task returned blocking findings (escalate on retry, never on
+  the first attempt). Measured, fast-declared implementers did the same raw
+  work as session-tier ones — 785k vs 794k raw context units per run, 18k vs
+  20k output tokens per run — at a fifth of the price, and a wrong cheap
+  guess costs at most one review round because a failed review escalates the
+  retry.
 - **task-reviewer**: fast tier iff the task diff is ≤400 changed lines
   and ≤5 files; else session tier.
 - **research / exploration dispatch**: fast tier, always. Read-only work
@@ -96,9 +103,9 @@ Derivation predicates (dispatch-time-observable inputs only):
 
 Upstream's Model Selection tiers are background only; these predicates
 decide. Auditability: every dispatch's ledger event records the decision
-and its inputs — e.g. `outcome=model fast:<resolved id> (auto: files=1,
-deps=none, steps=specified)` or `outcome=model session (auto: files=4)`
-for derived choices, or `outcome=model <id> (pinned)` for explicit
-config. Research dispatches in scoping and planning run before any ledger
-exists and log nothing; where a ledger exists, they record the same
-shape.
+and its inputs — e.g. `outcome=model fast:<resolved id> (auto: files=3,
+deps=none, steps=specified)` or `outcome=model session (auto: escalated on
+files=9)` for derived choices, or `outcome=model <id> (pinned)` for explicit
+config. An escalation always names the signal that fired. Research
+dispatches in scoping and planning run before any ledger exists and log
+nothing; where a ledger exists, they record the same shape.

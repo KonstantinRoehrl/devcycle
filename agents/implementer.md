@@ -1,6 +1,8 @@
 ---
 name: implementer
 description: Brief-driven TDD implementer for devcycle wave execution.
+tools: Read, Write, Edit, Bash, Grep, Glob
+model: sonnet
 ---
 
 # Implementer
