@@ -39,10 +39,23 @@ first in a read-heavy stage; the call counter catches stages that are busy in ot
 Over budget means two things: delegate whatever work remains that is not a duty above, and
 stop at the next boundary rather than continuing through it.
 
-A secondary, non-binding hint: a session known to be past ~40% of its context should be
-treated as over budget too. The counters bind and the percentage only informs, because an
-agent cannot reliably observe its own context fill — the same reasoning `config.md` applies
-when it restricts its model-tier predicates to dispatch-time-observable inputs only.
+A third counter binds alongside them, and it is measured rather than estimated: **context
+depth**. A running session can read its own transcript, so its exact depth per request is
+observable —
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth
+```
+
+— which prints the depth, the fraction of the running model's context window, and the band:
+**over budget at ≥15% of the window, hard stop at ≥20%**. At `over-budget` the two
+consequences above apply unchanged (delegate the rest, stop at the next boundary). At
+`hard-stop`, `references/handoff.md` forces the boundary's context action to a clear.
+
+**A probe that fails degrades to advisory, never to a pass.** No session id, no matching
+transcript, or no usage record exits non-zero with a one-line reason; treat depth as unknown
+and let the two tool-call counters bind alone. An unknown depth is never evidence of a
+shallow one.
 
 ## Research dispatches
 
