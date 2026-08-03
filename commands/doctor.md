@@ -1,5 +1,5 @@
 ---
-description: "Profile this session's or the whole transcript history's token cost, context depth, and model routing and rank what to fix — or, given a target file, flag stale devcycle config references against the config changelog. Standalone: no cycle is started."
+description: "Profile every devcycle-tagged session under ~/.claude/projects for token cost, context depth, and model routing and rank what to fix — or, given a target file, flag stale devcycle config references against the config changelog. Standalone: no cycle is started."
 ---
 
 # /devcycle:doctor
