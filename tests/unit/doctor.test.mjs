@@ -2,13 +2,14 @@
 // against synthetic transcripts. No real session transcript is ever read.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   parseArgs, isDevcycleSession, contextDepth, costUSD, depthBand, median,
   summarizeSession, formatReport, budgetBand, resolveDepth,
+  extractPluginVersion, emitCandidates, configDrift,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -38,7 +39,7 @@ test("parseArgs: defaults resolve the transcript dir under the home directory", 
 
 test("parseArgs: every flag is read", () => {
   const a = parseArgs(["--dir", "/tmp/x", "--since", "2026-07-01", "--until", "2026-07-31", "--json"]);
-  assert.deepEqual(a, { dir: "/tmp/x", since: "2026-07-01", until: "2026-07-31", json: true, all: false, depth: false });
+  assert.deepEqual(a, { dir: "/tmp/x", since: "2026-07-01", until: "2026-07-31", json: true, all: false, depth: false, drift: null });
 });
 
 test("isDevcycleSession: a devcycle attributionSkill includes the session", () => {
@@ -427,4 +428,114 @@ test("cli: --depth failure exits non-zero with a one-line reason on stderr", () 
   assert.notEqual(out.status, 0);
   assert.equal(out.stderr.trim().split("\n").length, 1);
   assert.match(out.stderr, /CLAUDE_CODE_SESSION_ID/);
+});
+
+test("extractPluginVersion finds a devcycle plugin path version in tool_use content", () => {
+  const record = {
+    message: {
+      content: [
+        {
+          type: "tool_use",
+          input: {
+            command:
+              'node "/Users/x/.claude/plugins/cache/devcycle/devcycle/0.9.2/scripts/doctor.mjs" --depth',
+          },
+        },
+      ],
+    },
+  };
+  assert.strictEqual(extractPluginVersion(record), "0.9.2");
+});
+
+test("extractPluginVersion returns null with no plugin path present", () => {
+  assert.strictEqual(extractPluginVersion({ message: { content: [] } }), null);
+});
+
+test("emitCandidates flags a version-over-version cost regression for the same skill", () => {
+  const summaries = [
+    {
+      id: "s1",
+      costByStage: { "devcycle:planning-waves": 0.4 },
+      pluginVersion: "0.9.1",
+      medianDepth: 40000,
+      unpriced: {},
+    },
+    {
+      id: "s2",
+      costByStage: { "devcycle:planning-waves": 0.9 },
+      pluginVersion: "0.9.2",
+      medianDepth: 40000,
+      unpriced: {},
+    },
+  ];
+  const candidates = emitCandidates(summaries);
+  const regression = candidates.find(
+    (c) => c.type === "version-regression" && c.skill === "devcycle:planning-waves"
+  );
+  assert.ok(regression, "expected a version-regression candidate");
+  assert.strictEqual(regression.version_from, "0.9.1");
+  assert.strictEqual(regression.version_to, "0.9.2");
+  assert.ok(regression.delta_pct > 100);
+  assert.strictEqual(regression.dollars, 0.9);
+});
+
+test("emitCandidates flags unpriced-model usage as a candidate", () => {
+  const summaries = [
+    { id: "s1", costByStage: {}, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: { "claude-haiku-4-1": 3 } },
+  ];
+  const candidates = emitCandidates(summaries);
+  const unpriced = candidates.find((c) => c.type === "unpriced-model");
+  assert.ok(unpriced, "expected an unpriced-model candidate");
+  assert.strictEqual(unpriced.sessions_sampled, 1);
+});
+
+test("configDrift flags a stale superseded key with its exact line and replacement", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-drift-"));
+  const changelogPath = join(dir, "config-changelog.md");
+  const targetPath = join(dir, "CLAUDE.md");
+  writeFileSync(
+    changelogPath,
+    [
+      "# Config changelog",
+      "",
+      "```yaml",
+      '- version: "0.7.0"',
+      "  change: deprecated",
+      "  key: legacyReviewMode",
+      '  note: "superseded by reviewDepth"',
+      "```",
+    ].join("\n"),
+    "utf8"
+  );
+  writeFileSync(
+    targetPath,
+    ["# CLAUDE.md", "", "Set legacyReviewMode to strict for this repo."].join("\n"),
+    "utf8"
+  );
+  try {
+    const result = configDrift(targetPath, changelogPath);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].line, 3);
+    assert.strictEqual(result[0].key, "legacyReviewMode");
+    assert.match(result[0].supersededBy, /reviewDepth/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("configDrift returns no findings for a target file with no stale references", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-drift-clean-"));
+  const changelogPath = join(dir, "config-changelog.md");
+  const targetPath = join(dir, "CLAUDE.md");
+  writeFileSync(
+    changelogPath,
+    ["# Config changelog", "", "```yaml", '- version: "0.7.0"', "  change: deprecated", "  key: legacyReviewMode", '  note: "superseded by reviewDepth"', "```"].join("\n"),
+    "utf8"
+  );
+  writeFileSync(targetPath, ["# CLAUDE.md", "", "This repo uses reviewDepth: panel."].join("\n"), "utf8");
+  try {
+    assert.deepStrictEqual(configDrift(targetPath, changelogPath), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
