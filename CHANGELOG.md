@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0
+
+- feat(devcycle): add onboarding-a-repo and distilling-learnings skills (#31)
+
 ## 0.9.2
 
 - perf(devcycle): act on the token audit's cost model, routing, and depth-gate findings (#29)
