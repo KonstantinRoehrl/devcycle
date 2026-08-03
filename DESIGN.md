@@ -512,6 +512,34 @@ contract are unchanged.
 
 ---
 
+## 17. Skill-description-sufficiency contract (added 2026-08-03)
+
+Every skill's frontmatter `description` must be sufficient **on its own** — without its
+body — for a model to correctly decide invoke-or-not. This is distinct from the
+existing length-*budget* check §4.6 already runs (`scripts/validate.mjs`'s 500-char
+per-skill / 6000-char total ceiling): that check asks whether a description is short
+enough; this one asks whether it is complete enough. The need is sharper now that a
+consuming `CLAUDE.md` carries zero restated trigger-condition prose per the migration
+rule (§12) — the description is the *only* signal a model sees before deciding whether
+to read the body at all.
+
+**The scenario-test type.** `description-sufficiency`
+(`tests/scenarios/<skill-name>/description-sufficiency.md`), sibling to the existing
+`discipline`/STOP-gate type, same Setup → Pass-criteria → Result shape the established
+pattern uses. A judge agent is shown **only** the frontmatter `description` — never the
+skill body — then run against 3 prompts that should trigger the skill and 3
+adjacent-but-different prompts that should not. The test passes if every verdict
+matches.
+
+This is a scenario-test convention, not a CI gate — consistent with how the existing
+scenario tests are pre-release verification, produced locally and best-effort, never run
+by `validate.yml` (there is no model credential available to GitHub Actions). Required
+going forward for every new or materially-changed model-invocable skill's port; applied
+this cycle to two existing model-invocable skills — `scoping-interview` and
+`auditing-a-repo` — as the proof of mechanism.
+
+---
+
 ## Appendix: upstream comparison summaries
 
 Full memos live in `docs/comparisons/`; each one compares a planned devcycle skill against its

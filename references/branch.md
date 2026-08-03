@@ -16,10 +16,22 @@ refs/remotes/origin/HEAD`, then `gh repo view --json defaultBranchRef`, then fal
 to `main` or `master` if one of those branches exists and neither command is available.
 
 **Where this applies.** Every committing path, without exception — the full pipeline's
-pre-flight before wave 1, the fast path, the sweep path, and re-entry via
+pre-flight before wave 1, the fast path, the sweep path, re-entry via
 `/devcycle:continue` (which settles the branch off the recorded `branch:` line first,
 per `${CLAUDE_PLUGIN_ROOT}/references/resume.md`, and falls back to this rule only when
-no topic branch was ever recorded).
+no topic branch was ever recorded), and every standalone, side-effectful skill that
+writes and commits outside any cycle — `onboarding-a-repo` (the scaffold write) and
+`distilling-learnings` (promotion edits) among them. A standalone skill owns no
+`.devcycle/state.md`, so it follows the rule above minus the `branch:`-line write: check
+the branch, create a topic branch off the default or an integration branch when needed,
+and commit there.
+
+**Per-commit re-check.** Within a stage that commits more than once — `executing-waves`'
+per-task commits, the sweep path's per-file commits — re-run the branch check
+immediately before *every individual commit*, not only once at stage entry: one `git
+rev-parse --abbrev-ref HEAD` compared against the recorded `branch:` line. A mismatch
+stops the run and surfaces the discrepancy rather than committing to the wrong branch —
+guarding against a concurrent session or worktree switching branches mid-cycle.
 
 ## Deriving a branch's file set
 

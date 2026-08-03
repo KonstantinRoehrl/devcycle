@@ -14,6 +14,35 @@ upstream's, unmodified, and devcycle adds the stages, gates, and mechanics aroun
 Planning and execution ship as compact devcycle-native engines that overlay their upstream
 counterparts only at the `thorough` profile.
 
+## Where to start
+
+```mermaid
+flowchart LR
+    CYCLE(["/devcycle:cycle"]):::entry
+    ONBOARD(["/devcycle:onboard"]):::entry
+    AUDIT(["/devcycle:audit"]):::entry
+    DOCTOR(["/devcycle:doctor"]):::entry
+    VERIFY(["/devcycle:verify"]):::entry
+    DISTILL(["/devcycle:distill"]):::entry
+
+    ONBOARD -. "first, in a new repo" .-> CYCLE
+    CYCLE --> SCOPE["Scope / Design"]:::orch
+    SCOPE --> PLAN["Plan"]:::orch
+    PLAN --> BUILD["Build"]:::orch
+    BUILD --> REVIEW["Review"]:::orch
+    REVIEW --> SHIP["Ship"]:::orch
+
+    AUDIT -. "standalone, anytime" .-> SHIP
+    DOCTOR -. "standalone, anytime" .-> SHIP
+    VERIFY -. "standalone, anytime" .-> SHIP
+    DISTILL -. "standalone, anytime" .-> SHIP
+
+    classDef orch fill:#e8f0fe,stroke:#3367d6,color:#111
+    classDef entry fill:#fef7e0,stroke:#b06000,color:#111
+```
+
+The full pipeline, every stage and every dashed standalone tool, is diagrammed below.
+
 ## Install
 
 ```
@@ -72,6 +101,8 @@ flowchart TD
     AUDITCMD(["/devcycle:audit — optional branch:name"]):::entry
     VERIFYCMD(["/devcycle:verify branch"]):::entry
     DOCTORCMD(["/devcycle:doctor — optional --all"]):::entry
+    ONBOARDCMD(["/devcycle:onboard"]):::entry
+    DISTILLCMD(["/devcycle:distill"]):::entry
 
     CYCLE --> STATE["Step 0 · state file<br/>root · branch · request · first-run config"]:::orch
     STATE --> TRIAGE{"Triage<br/>maturity · kind · size"}:::orch
@@ -144,6 +175,9 @@ flowchart TD
 
     AUDITCMD -. "standalone — starts no cycle" .-> AUDIT
     VERIFYCMD -. "standalone — checklist from the branch diff" .-> ONDEV
+    DOCTORCMD -. "standalone — profiles cost/depth, starts no cycle" .-> DOCTORSTOP(["report delivered"]):::entry
+    ONBOARDCMD -. "standalone — scaffolds the repo, starts no cycle" .-> ONBOARDSTOP(["scaffold written"]):::entry
+    DISTILLCMD -. "standalone — promotes memory, starts no cycle" .-> DISTILLSTOP(["promotions applied"]):::entry
 
     subgraph DELEG["Inside every stage — who does the work"]
         DUTY["the coordinator keeps only these:<br/>interviews · dispatches · the green gate<br/>commits · ledger · state file · handoff blocks"]:::orch

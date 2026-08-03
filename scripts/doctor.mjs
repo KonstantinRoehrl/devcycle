@@ -9,6 +9,13 @@ import { pathToFileURL } from "node:url";
 import { PRICING, priceFor } from "./pricing.mjs";
 
 const DEVCYCLE_PREFIX = /^devcycle:/;
+const PLUGIN_VERSION_RE = /devcycle\/devcycle\/(\d+\.\d+\.\d+)\//;
+
+export function extractPluginVersion(record) {
+  const text = JSON.stringify(record ?? {});
+  const m = text.match(PLUGIN_VERSION_RE);
+  return m ? m[1] : null;
+}
 
 // Records Claude Code writes for its own placeholders (session-limit notices and the like).
 // Every counter on them is zero, so they are skipped outright rather than reported unpriced.
@@ -25,6 +32,7 @@ export function parseArgs(argv) {
     json: false,
     all: false,
     depth: false,
+    drift: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -34,6 +42,7 @@ export function parseArgs(argv) {
     else if (a === "--json") args.json = true;
     else if (a === "--all") args.all = true;
     else if (a === "--depth") args.depth = true;
+    else if (a === "--drift") args.drift = argv[++i];
   }
   return args;
 }
@@ -155,6 +164,167 @@ export function median(numbers) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+export function emitCandidates(summaries) {
+  const candidates = [];
+
+  // Unpriced-model usage — already computed per summary.
+  for (const s of summaries) {
+    for (const [model, count] of Object.entries(s.unpriced ?? {})) {
+      candidates.push({
+        type: "unpriced-model",
+        skill: null,
+        version_from: null,
+        version_to: null,
+        delta_pct: null,
+        dollars: null,
+        sessions_sampled: 1,
+        model,
+        count,
+      });
+    }
+  }
+
+  // Version-over-version regression — same skill, cost moved between two version cohorts.
+  const byVersion = new Map(); // version -> { skill -> [dollars] }
+  for (const s of summaries) {
+    if (!s.pluginVersion) continue;
+    if (!byVersion.has(s.pluginVersion)) byVersion.set(s.pluginVersion, new Map());
+    const bySkill = byVersion.get(s.pluginVersion);
+    for (const [skill, dollars] of Object.entries(s.costByStage ?? {})) {
+      if (!bySkill.has(skill)) bySkill.set(skill, []);
+      bySkill.get(skill).push(dollars);
+    }
+  }
+  const versions = [...byVersion.keys()].sort();
+  for (let i = 0; i + 1 < versions.length; i++) {
+    const from = versions[i];
+    const to = versions[i + 1];
+    const fromSkills = byVersion.get(from);
+    const toSkills = byVersion.get(to);
+    for (const [skill, fromDollars] of fromSkills) {
+      if (!toSkills.has(skill)) continue;
+      const fromMedian = median(fromDollars);
+      const toDollars = toSkills.get(skill);
+      const toMedian = median(toDollars);
+      if (fromMedian <= 0) continue;
+      const delta_pct = ((toMedian - fromMedian) / fromMedian) * 100;
+      if (delta_pct > 20) {
+        candidates.push({
+          type: "version-regression",
+          skill,
+          version_from: from,
+          version_to: to,
+          delta_pct,
+          dollars: toMedian,
+          sessions_sampled: toDollars.length,
+        });
+      }
+    }
+  }
+
+  // Depth-vs-startup-floor outliers. startupFloor is agent-type-keyed ({main: [...],
+  // subagent: [...]}), not a scalar, so it is reduced to the median across every agent
+  // type's samples before the comparison.
+  for (const s of summaries) {
+    const floor = median(Object.values(s.startupFloor ?? {}).flat());
+    if (floor > 0 && s.medianDepth && s.medianDepth > floor * 3) {
+      candidates.push({
+        type: "depth-outlier",
+        skill: null,
+        version_from: null,
+        version_to: null,
+        delta_pct: null,
+        dollars: s.costUSD ?? null,
+        sessions_sampled: 1,
+      });
+    }
+  }
+
+  // Cost outliers — a run costing far more than its peers for the same skill, independent
+  // of any version-cohort comparison (fires even with a single version observed, unlike
+  // version-regression above, which needs two adjacent cohorts to compare).
+  const costsBySkill = new Map(); // skill -> [dollars]
+  for (const s of summaries) {
+    for (const [skill, dollars] of Object.entries(s.costByStage ?? {})) {
+      if (!costsBySkill.has(skill)) costsBySkill.set(skill, []);
+      costsBySkill.get(skill).push(dollars);
+    }
+  }
+  for (const [skill, dollars] of costsBySkill) {
+    if (dollars.length < 3) continue; // too few runs to call anything a peer outlier
+    const skillMedian = median(dollars);
+    if (skillMedian <= 0) continue;
+    for (const d of dollars) {
+      if (d > skillMedian * 3) {
+        candidates.push({
+          type: "cost-outlier",
+          skill,
+          version_from: null,
+          version_to: null,
+          delta_pct: ((d - skillMedian) / skillMedian) * 100,
+          dollars: d,
+          sessions_sampled: dollars.length,
+        });
+      }
+    }
+  }
+
+  return candidates;
+}
+
+export function configDrift(targetPath, changelogPath) {
+  const changelogText = readFileSync(changelogPath, "utf8");
+  const yamlMatch = changelogText.match(/```yaml\n([\s\S]*?)```/);
+  if (!yamlMatch) return [];
+  const records = parseChangelogYaml(yamlMatch[1]);
+  const stale = records.filter((r) => r.change === "deprecated" || r.change === "renamed" || r.change === "removed");
+
+  const targetLines = readFileSync(targetPath, "utf8").split("\n");
+  const findings = [];
+  targetLines.forEach((line, i) => {
+    for (const r of stale) {
+      if (r.key && line.includes(r.key)) {
+        findings.push({
+          file: targetPath,
+          line: i + 1,
+          match: line.trim(),
+          key: r.key,
+          supersededBy: r.note ?? r.new ?? null,
+          changelogVersion: r.version,
+        });
+      }
+    }
+  });
+  return findings;
+}
+
+// Minimal indented-list YAML parser for config-changelog.md's fixed record shape —
+// `- key: value` list items with 2-space-indented continuation keys. Not a general
+// YAML parser; this repo has no YAML dependency and the changelog's shape is fixed.
+function parseChangelogYaml(text) {
+  const records = [];
+  let current = null;
+  for (const raw of text.split("\n")) {
+    if (!raw.trim()) continue;
+    const itemMatch = raw.match(/^-\s+(\w+):\s*(.*)$/);
+    const contMatch = raw.match(/^\s+(\w+):\s*(.*)$/);
+    if (itemMatch) {
+      if (current) records.push(current);
+      current = {};
+      current[itemMatch[1]] = stripQuotes(itemMatch[2]);
+    } else if (contMatch && current) {
+      current[contMatch[1]] = stripQuotes(contMatch[2]);
+    }
+  }
+  if (current) records.push(current);
+  return records;
+}
+
+function stripQuotes(s) {
+  const t = s.trim();
+  return t.replace(/^"(.*)"$/, "$1");
+}
+
 // Only assistant-side records carrying a message.usage count as turns. Synthetic placeholders
 // carry an all-zero usage block and are not requests, so they never reach the counters.
 function isTurn(r) {
@@ -202,6 +372,7 @@ export function summarizeSession(sessionId, records) {
   const carryWeighted = {};
   const dispatches = { total: 0, withoutModel: 0 };
   let totalCost = 0;
+  let pluginVersion = null;
 
   for (const r of turns) {
     const model = r.message.model;
@@ -216,6 +387,10 @@ export function summarizeSession(sessionId, records) {
       bump(costByAgentType, agentTypeOf(r), dollars);
     }
     bandCounts[depthBand(contextDepth(r.message.usage))] += 1;
+    if (!pluginVersion) {
+      const extracted = extractPluginVersion(r);
+      if (extracted) pluginVersion = extracted;
+    }
     const content = r.message.content;
     if (!Array.isArray(content)) continue;
     for (const item of content) {
@@ -268,6 +443,7 @@ export function summarizeSession(sessionId, records) {
     dispatches,
     unpriced,
     models,
+    pluginVersion,
   };
 }
 
@@ -283,6 +459,21 @@ function ranked(map, render) {
     .sort((a, b) => b[1] - a[1])
     .map(([k, v]) => `${k} ${render(v)}`)
     .join(", ");
+}
+
+// One raw signal line per emitCandidates() entry — no severity, no ranking; that judgment
+// call stays at the skill layer (skills/doctor/SKILL.md), consistent with doctor's existing
+// division of labor (this script computes, the skill interprets).
+function formatCandidate(c) {
+  const parts = [c.type];
+  if (c.skill) parts.push(`skill=${c.skill}`);
+  if (c.model) parts.push(`model=${c.model}`);
+  if (c.version_from) parts.push(`${c.version_from}->${c.version_to}`);
+  if (c.delta_pct != null) parts.push(`delta=${c.delta_pct.toFixed(1)}%`);
+  if (c.dollars != null) parts.push(`dollars=${usd(c.dollars)}`);
+  if (c.count != null) parts.push(`count=${c.count}`);
+  parts.push(`sessions=${c.sessions_sampled}`);
+  return `CANDIDATE: ${parts.join(" ")}`;
 }
 
 function aggregate(summaries) {
@@ -330,6 +521,7 @@ export function formatReport(summaries) {
   ];
   for (const [model, count] of Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]))
     lines.push(`UNPRICED MODEL: ${model} (${count} requests)`);
+  for (const c of emitCandidates(summaries)) lines.push(formatCandidate(c));
   lines.push("", vintage, DISCLOSURE, "");
   for (const s of summaries) {
     const modelList = Object.keys(s.models).join(", ") || "none";
@@ -442,6 +634,25 @@ function run(args) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.drift) {
+    const changelogPath = join(
+      process.env.CLAUDE_PLUGIN_ROOT ?? ".",
+      "references/config-changelog.md"
+    );
+    const findings = configDrift(args.drift, changelogPath);
+    if (args.json) {
+      console.log(JSON.stringify(findings, null, 2));
+    } else if (findings.length === 0) {
+      console.log(`config-drift: ok (no stale references found in ${args.drift})`);
+    } else {
+      console.log(
+        findings
+          .map((f) => `${f.file}:${f.line} — stale \`${f.key}\` (superseded in ${f.changelogVersion}: ${f.supersededBy ?? "see changelog"})`)
+          .join("\n")
+      );
+    }
+    process.exit(0);
+  }
   if (args.depth) {
     let r;
     try {
@@ -466,7 +677,13 @@ function main() {
   if (args.json) {
     console.log(
       JSON.stringify(
-        { window: result.window, pricesAsOf: PRICING.asOf, sessions: result.sessions, totals: result.totals },
+        {
+          window: result.window,
+          pricesAsOf: PRICING.asOf,
+          sessions: result.sessions,
+          totals: result.totals,
+          candidates: emitCandidates(result.sessions),
+        },
         null,
         2,
       ),
