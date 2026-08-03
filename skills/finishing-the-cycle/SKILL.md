@@ -51,6 +51,8 @@ handoff block below.
 - `push-allowed`: push the branch; NEVER merge it.
 - `open-pr`: push the branch and open a PR whose title parses as a Conventional
   Commit; do not merge it.
+  The subject additionally matches whatever `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`
+  derived for this run, recorded at the top of `.devcycle/ledger.md`.
 
 As this stage's final state-file write, set `stage: done` and a fresh `updated:`
 timestamp — nothing remains to resume.

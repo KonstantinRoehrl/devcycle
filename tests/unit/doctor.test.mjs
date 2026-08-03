@@ -2,13 +2,14 @@
 // against synthetic transcripts. No real session transcript is ever read.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   parseArgs, isDevcycleSession, contextDepth, costUSD, depthBand, median,
   summarizeSession, formatReport, budgetBand, resolveDepth,
+  extractPluginVersion, emitCandidates, configDrift,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -38,7 +39,7 @@ test("parseArgs: defaults resolve the transcript dir under the home directory", 
 
 test("parseArgs: every flag is read", () => {
   const a = parseArgs(["--dir", "/tmp/x", "--since", "2026-07-01", "--until", "2026-07-31", "--json"]);
-  assert.deepEqual(a, { dir: "/tmp/x", since: "2026-07-01", until: "2026-07-31", json: true, all: false, depth: false });
+  assert.deepEqual(a, { dir: "/tmp/x", since: "2026-07-01", until: "2026-07-31", json: true, all: false, depth: false, drift: null });
 });
 
 test("isDevcycleSession: a devcycle attributionSkill includes the session", () => {
@@ -295,6 +296,49 @@ test("formatReport: discloses the price vintage", () => {
   assert.match(text, new RegExp(`prices as of ${PRICING.asOf}`));
 });
 
+// emitCandidates() is computed but must actually reach the documented CLI surface — the
+// skill layer (skills/doctor/SKILL.md) has nothing to rank/report on otherwise.
+test("cli: --json emits a candidates array carrying emitCandidates' signals", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-candidates-"));
+  const slug = join(dir, "-Users-x-proj");
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(
+    join(slug, "sess-ffff.jsonl"),
+    JSON.stringify(turn({ attributionSkill: "devcycle:executing-waves" })) +
+      "\n" +
+      JSON.stringify({
+        type: "assistant",
+        message: { model: "claude-opus-9", usage: usage(1_000_000, 0, 0, 0), content: [] },
+      }) +
+      "\n",
+  );
+  const out = run(["--dir", dir, "--json"]);
+  assert.equal(out.status, 0, out.stderr);
+  const parsed = JSON.parse(out.stdout);
+  assert.ok(Array.isArray(parsed.candidates), "expected a candidates array in --json output");
+  const unpriced = parsed.candidates.find((c) => c.type === "unpriced-model");
+  assert.ok(unpriced, "expected the unpriced-model signal to reach the CLI's json output");
+});
+
+test("cli: the plain-text report surfaces candidate signals, not just the raw aggregate", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-candidates-text-"));
+  const slug = join(dir, "-Users-x-proj");
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(
+    join(slug, "sess-gggg.jsonl"),
+    JSON.stringify(turn({ attributionSkill: "devcycle:executing-waves" })) +
+      "\n" +
+      JSON.stringify({
+        type: "assistant",
+        message: { model: "claude-opus-9", usage: usage(1_000_000, 0, 0, 0), content: [] },
+      }) +
+      "\n",
+  );
+  const out = run(["--dir", dir]);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /unpriced-model/);
+});
+
 test("cli: a malformed trailing line is skipped rather than fatal", () => {
   const dir = mkdtempSync(join(tmpdir(), "doctor-partial-"));
   const slug = join(dir, "-Users-x-proj");
@@ -427,4 +471,179 @@ test("cli: --depth failure exits non-zero with a one-line reason on stderr", () 
   assert.notEqual(out.status, 0);
   assert.equal(out.stderr.trim().split("\n").length, 1);
   assert.match(out.stderr, /CLAUDE_CODE_SESSION_ID/);
+});
+
+test("extractPluginVersion finds a devcycle plugin path version in tool_use content", () => {
+  const record = {
+    message: {
+      content: [
+        {
+          type: "tool_use",
+          input: {
+            command:
+              'node "/home/dev/.claude/plugins/cache/devcycle/devcycle/0.9.2/scripts/doctor.mjs" --depth',
+          },
+        },
+      ],
+    },
+  };
+  assert.strictEqual(extractPluginVersion(record), "0.9.2");
+});
+
+test("extractPluginVersion returns null with no plugin path present", () => {
+  assert.strictEqual(extractPluginVersion({ message: { content: [] } }), null);
+});
+
+test("emitCandidates flags a version-over-version cost regression for the same skill", () => {
+  const summaries = [
+    {
+      id: "s1",
+      costByStage: { "devcycle:planning-waves": 0.4 },
+      pluginVersion: "0.9.1",
+      medianDepth: 40000,
+      unpriced: {},
+    },
+    {
+      id: "s2",
+      costByStage: { "devcycle:planning-waves": 0.9 },
+      pluginVersion: "0.9.2",
+      medianDepth: 40000,
+      unpriced: {},
+    },
+  ];
+  const candidates = emitCandidates(summaries);
+  const regression = candidates.find(
+    (c) => c.type === "version-regression" && c.skill === "devcycle:planning-waves"
+  );
+  assert.ok(regression, "expected a version-regression candidate");
+  assert.strictEqual(regression.version_from, "0.9.1");
+  assert.strictEqual(regression.version_to, "0.9.2");
+  assert.ok(regression.delta_pct > 100);
+  assert.strictEqual(regression.dollars, 0.9);
+});
+
+test("emitCandidates flags unpriced-model usage as a candidate", () => {
+  const summaries = [
+    { id: "s1", costByStage: {}, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: { "claude-haiku-4-1": 3 } },
+  ];
+  const candidates = emitCandidates(summaries);
+  const unpriced = candidates.find((c) => c.type === "unpriced-model");
+  assert.ok(unpriced, "expected an unpriced-model candidate");
+  assert.strictEqual(unpriced.sessions_sampled, 1);
+});
+
+// startupFloor is agent-type-keyed ({main: [...], subagent: [...]}), not a scalar — the
+// comparison must reduce it to a scalar (the median across every agent type's samples)
+// before comparing against medianDepth, or it silently NaNs and never fires.
+test("emitCandidates flags a depth-vs-startup-floor outlier when medianDepth exceeds 3x the reduced startup floor", () => {
+  const summaries = [
+    {
+      id: "s1",
+      costByStage: {},
+      pluginVersion: "0.9.2",
+      medianDepth: 40000,
+      startupFloor: { main: [1000, 2000], subagent: [1500] },
+      unpriced: {},
+    },
+  ];
+  const candidates = emitCandidates(summaries);
+  const outlier = candidates.find((c) => c.type === "depth-outlier");
+  assert.ok(outlier, "expected a depth-outlier candidate");
+});
+
+test("emitCandidates does not flag a depth-outlier when medianDepth is within 3x the startup floor", () => {
+  const summaries = [
+    {
+      id: "s1",
+      costByStage: {},
+      pluginVersion: "0.9.2",
+      medianDepth: 3000,
+      startupFloor: { main: [1000, 2000], subagent: [1500] },
+      unpriced: {},
+    },
+  ];
+  const candidates = emitCandidates(summaries);
+  const outlier = candidates.find((c) => c.type === "depth-outlier");
+  assert.equal(outlier, undefined);
+});
+
+// Standalone cost-outlier: must fire on an anomalously expensive run relative to its peers
+// even when there is only one version cohort — unlike version-regression, which requires
+// two adjacent cohorts to compare.
+test("emitCandidates flags a cost-outlier for a skill whose cost is far above its peers, with a single version cohort", () => {
+  const summaries = [
+    { id: "s1", costByStage: { "devcycle:executing-waves": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s2", costByStage: { "devcycle:executing-waves": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s3", costByStage: { "devcycle:executing-waves": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s4", costByStage: { "devcycle:executing-waves": 5.0 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+  ];
+  const candidates = emitCandidates(summaries);
+  const outlier = candidates.find(
+    (c) => c.type === "cost-outlier" && c.skill === "devcycle:executing-waves"
+  );
+  assert.ok(outlier, "expected a cost-outlier candidate");
+  assert.strictEqual(outlier.dollars, 5.0);
+});
+
+test("emitCandidates does not flag a cost-outlier when costs are uniform across runs", () => {
+  const summaries = [
+    { id: "s1", costByStage: { "devcycle:executing-waves": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s2", costByStage: { "devcycle:executing-waves": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s3", costByStage: { "devcycle:executing-waves": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s4", costByStage: { "devcycle:executing-waves": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+  ];
+  const candidates = emitCandidates(summaries);
+  const outlier = candidates.find((c) => c.type === "cost-outlier");
+  assert.equal(outlier, undefined);
+});
+
+test("configDrift flags a stale superseded key with its exact line and replacement", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-drift-"));
+  const changelogPath = join(dir, "config-changelog.md");
+  const targetPath = join(dir, "CLAUDE.md");
+  writeFileSync(
+    changelogPath,
+    [
+      "# Config changelog",
+      "",
+      "```yaml",
+      '- version: "0.7.0"',
+      "  change: deprecated",
+      "  key: legacyReviewMode",
+      '  note: "superseded by reviewDepth"',
+      "```",
+    ].join("\n"),
+    "utf8"
+  );
+  writeFileSync(
+    targetPath,
+    ["# CLAUDE.md", "", "Set legacyReviewMode to strict for this repo."].join("\n"),
+    "utf8"
+  );
+  try {
+    const result = configDrift(targetPath, changelogPath);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].line, 3);
+    assert.strictEqual(result[0].key, "legacyReviewMode");
+    assert.match(result[0].supersededBy, /reviewDepth/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("configDrift returns no findings for a target file with no stale references", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-drift-clean-"));
+  const changelogPath = join(dir, "config-changelog.md");
+  const targetPath = join(dir, "CLAUDE.md");
+  writeFileSync(
+    changelogPath,
+    ["# Config changelog", "", "```yaml", '- version: "0.7.0"', "  change: deprecated", "  key: legacyReviewMode", '  note: "superseded by reviewDepth"', "```"].join("\n"),
+    "utf8"
+  );
+  writeFileSync(targetPath, ["# CLAUDE.md", "", "This repo uses reviewDepth: panel."].join("\n"), "utf8");
+  try {
+    assert.deepStrictEqual(configDrift(targetPath, changelogPath), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
