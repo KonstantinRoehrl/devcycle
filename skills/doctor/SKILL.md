@@ -7,8 +7,8 @@ description: Use when a Claude Code session or transcript history needs profilin
 
 ## Announce
 
-State which scope this run covers: "I'm using the doctor skill to profile <this session |
-the transcript history | the window>."
+State which scope this run covers: "I'm using the doctor skill to profile <every
+devcycle-tagged session | every transcript, tagged or not | the window>."
 
 ## Run the script
 
@@ -42,8 +42,10 @@ it has one, that model's requests are excluded from every dollar figure in the r
 
 The script's own two caveats belong in the report verbatim, not smoothed over:
 
-- skill attribution is sticky — sessions whose devcycle work continued past the last skill
-  invocation are under-counted;
+- skill attribution is forward-filled within each transcript from the last explicit skill
+  invocation through to that transcript's end (or the next invocation) — genuinely
+  unrelated work with no further skill call in the same transcript is still counted under
+  the earlier skill;
 - the context-budget bands are a fraction-based approximation, not a measurement of absolute
   cache-read cost.
 
