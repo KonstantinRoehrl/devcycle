@@ -48,9 +48,15 @@ pipeline's `.devcycle/state.md`, and read/rewritten only by this skill.
 3. **Batch the proposed promotions.** `AskUserQuestion`, 1-4 at a time: each memory →
    proposed doc/skill edit, and each drift finding → a concrete stale-line fix. Never
    more than 4 in one batch; never proceed on an item the user has not confirmed.
-4. **Apply confirmed edits.** Any skill file touched in this step gets
-   `superpowers:writing-skills`-style scenario testing before landing — the same TDD
-   discipline every skill in this repo already carries.
+4. **Apply confirmed edits.** Before writing anything, follow
+   `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s Committing rule: if the checkout is on
+   the default branch or an integration branch, create a topic branch first. This skill
+   is standalone and owns no `.devcycle/state.md`, so skip that rule's `branch:`-line
+   write — just create the branch and apply every edit below on it. Any skill file
+   touched in this step gets `superpowers:writing-skills`-style scenario testing before
+   landing — the same TDD discipline every skill in this repo already carries. Commit
+   each applied edit under an explicit pathspec naming exactly the touched file(s) —
+   never `git add -A`, never a bare `git commit`.
 5. **Delete the source memory on promotion.** Reusing the existing convention verbatim
    (DESIGN.md:248: "once encoded, corresponding personal memories... are deleted") — no
    new deletion convention invented. A memory whose promotion the user declined is left
@@ -62,3 +68,5 @@ pipeline's `.devcycle/state.md`, and read/rewritten only by this skill.
 
 `/devcycle:distill`, standalone: no `.devcycle/state.md` touch, no handoff block — the
 same shape as `devcycle:doctor`/`devcycle:audit`.
+
+Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

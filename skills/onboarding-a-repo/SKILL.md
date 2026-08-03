@@ -45,6 +45,12 @@ its own `CLAUDE.md` stub, in addition to the root file.
 
 ## Output
 
+0. **Branch check, before any write.** Follow `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s
+   Committing rule: if the checkout is on the default branch or an integration branch,
+   create a topic branch first. This skill is standalone and owns no
+   `.devcycle/state.md`, so skip that rule's `branch:`-line write — just create the
+   branch and write everything below on it.
+
 1. **Root `CLAUDE.md`.** If none exists, create one containing only a
    `## devcycle onboarding` section (see shape below). If one exists, append a
    `## devcycle onboarding` section to it — never a blind overwrite of existing
@@ -78,7 +84,15 @@ its own `CLAUDE.md` stub, in addition to the root file.
    `Test:` line above) — sufficient for `devcycle:executing-waves`' green gate and this
    repo's own CI to find; no separate state file.
 
+5. **Commit the scaffold**, under an explicit pathspec naming exactly the files this
+   skill wrote (root and any per-package `CLAUDE.md`) — never `git add -A`, never a bare
+   `git commit`: the scaffold is the only thing this run authored. If `git check-ignore`
+   covers a written path, write it and skip the commit for that file; the repo's own
+   ignore rules decide.
+
 ## Entry point
 
 `/devcycle:onboard`, standalone: no `.devcycle/state.md` touch, no handoff block — the
 same shape as `devcycle:doctor`/`devcycle:audit`.
+
+Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
