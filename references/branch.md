@@ -21,6 +21,13 @@ pre-flight before wave 1, the fast path, the sweep path, and re-entry via
 per `${CLAUDE_PLUGIN_ROOT}/references/resume.md`, and falls back to this rule only when
 no topic branch was ever recorded).
 
+**Per-commit re-check.** Within a stage that commits more than once — `executing-waves`'
+per-task commits, the sweep path's per-file commits — re-run the branch check
+immediately before *every individual commit*, not only once at stage entry: one `git
+rev-parse --abbrev-ref HEAD` compared against the recorded `branch:` line. A mismatch
+stops the run and surfaces the discrepancy rather than committing to the wrong branch —
+guarding against a concurrent session or worktree switching branches mid-cycle.
+
 ## Deriving a branch's file set
 
 Which files a branch-scoped stage reads, and where it reads them from.
