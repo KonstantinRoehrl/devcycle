@@ -17,6 +17,8 @@ jobs:
         run: node scripts/validate.mjs
       - name: Redaction guard
         run: node scripts/redaction-check.mjs
+      - name: Duplication check
+        run: node scripts/duplication-check.mjs
       - name: Workflow script tests (stubbed CLIs — no model call, no API key)
         run: node --test tests/unit/*.test.mjs
   pr-title:
