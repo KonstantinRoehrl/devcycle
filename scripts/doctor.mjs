@@ -343,6 +343,28 @@ function transcriptOf(r) {
   return r.agentId ?? r.sessionId ?? "main";
 }
 
+// Forward-fills attributionSkill within each transcript (main thread and each subagent's
+// own transcript, kept separate via transcriptOf) from the last explicit tag through to
+// that transcript's end or the next tag — a turn with no tag anywhere earlier in its own
+// transcript stays unattributed.
+function attributeForwardFill(turns) {
+  const byTranscript = new Map();
+  turns.forEach((r, i) => {
+    const key = transcriptOf(r);
+    if (!byTranscript.has(key)) byTranscript.set(key, []);
+    byTranscript.get(key).push(i);
+  });
+  const effective = new Array(turns.length).fill(undefined);
+  for (const indices of byTranscript.values()) {
+    let current;
+    for (const i of indices) {
+      if (turns[i].attributionSkill) current = turns[i].attributionSkill;
+      effective[i] = current;
+    }
+  }
+  return effective;
+}
+
 function bump(map, key, amount) {
   map[key] = (map[key] ?? 0) + amount;
 }
@@ -374,7 +396,8 @@ export function summarizeSession(sessionId, records) {
   let totalCost = 0;
   let pluginVersion = null;
 
-  for (const r of turns) {
+  const effectiveSkills = attributeForwardFill(turns);
+  turns.forEach((r, i) => {
     const model = r.message.model;
     if (model) models[model] = (models[model] ?? 0) + 1;
     const dollars = costUSD(r.message.usage, model);
@@ -383,7 +406,7 @@ export function summarizeSession(sessionId, records) {
     } else {
       totalCost += dollars;
       bump(costByModel, model, dollars);
-      bump(costByStage, r.attributionSkill ?? "unattributed", dollars);
+      bump(costByStage, effectiveSkills[i] ?? "unattributed", dollars);
       bump(costByAgentType, agentTypeOf(r), dollars);
     }
     bandCounts[depthBand(contextDepth(r.message.usage))] += 1;
@@ -392,7 +415,7 @@ export function summarizeSession(sessionId, records) {
       if (extracted) pluginVersion = extracted;
     }
     const content = r.message.content;
-    if (!Array.isArray(content)) continue;
+    if (!Array.isArray(content)) return;
     for (const item of content) {
       if (!item || item.type !== "tool_use" || typeof item.name !== "string") continue;
       tools[item.name] = (tools[item.name] ?? 0) + 1;
@@ -401,7 +424,7 @@ export function summarizeSession(sessionId, records) {
         if (!item.input?.model) dispatches.withoutModel += 1;
       }
     }
-  }
+  });
 
   // Per-transcript sequencing: a subagent's context is its own, so its startup floor and its
   // carry cost are measured against its own transcript rather than the session as a whole.
@@ -448,8 +471,10 @@ export function summarizeSession(sessionId, records) {
 }
 
 const DISCLOSURE =
-  "note: skill attribution is sticky — sessions whose devcycle work continued after " +
-  "the last skill invocation are under-counted.";
+  "note: skill attribution is forward-filled within each transcript from the last " +
+  "explicit skill invocation through to that transcript's end (or the next invocation) — " +
+  "genuinely unrelated work with no further skill call in the same transcript is still " +
+  "counted under the earlier skill.";
 
 const usd = (n) => "$" + (n >= 1 ? n.toFixed(2) : n.toFixed(4));
 

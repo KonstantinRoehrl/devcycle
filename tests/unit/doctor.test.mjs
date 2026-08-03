@@ -92,9 +92,37 @@ test("summarizeSession: identifies the session by id prefix only", () => {
   assert.equal("sess-abcdef123456".startsWith(s.id), true);
 });
 
-test("formatReport: discloses the sticky-attribution limitation", () => {
+test("summarizeSession: forward-fills attribution onto trailing untagged turns in the same transcript", () => {
+  const recs = [
+    turn({ attributionSkill: "devcycle:executing-waves" }),
+    turn({}),
+    turn({}),
+  ];
+  const s = summarizeSession("sess-abcdef123456", recs);
+  assert.equal(s.costByStage.unattributed, undefined);
+  assert.equal(s.costByStage["devcycle:executing-waves"] > 0, true);
+});
+
+test("summarizeSession: forward-fill does not cross transcripts", () => {
+  const recs = [
+    turn({ attributionSkill: "devcycle:executing-waves" }),
+    turn({}),
+    turn({ isSidechain: true, agentId: "agent-1" }),
+  ];
+  const s = summarizeSession("sess-abcdef123456", recs);
+  assert.equal(s.costByStage.unattributed > 0, true);
+  assert.equal(s.costByStage["devcycle:executing-waves"] > s.costByStage.unattributed, true);
+});
+
+test("summarizeSession: no explicit attribution anywhere in the transcript stays unattributed", () => {
+  const s = summarizeSession("sess-abcdef123456", [turn({}), turn({})]);
+  assert.equal(Object.keys(s.costByStage).length, 1);
+  assert.equal(s.costByStage.unattributed > 0, true);
+});
+
+test("formatReport: discloses the forward-fill attribution caveat", () => {
   const out = formatReport([summarizeSession("sess-abcdef123456", [turn({ attributionSkill: "devcycle:cycle" })])]);
-  assert.match(out, /sticky/i);
+  assert.match(out, /forward-filled/i);
 });
 
 // --- end to end over a synthetic transcript directory ---
