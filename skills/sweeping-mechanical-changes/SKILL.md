@@ -131,7 +131,12 @@ this as a supervised sweep."
    `.devcycle/evidence/sweep-after.txt` — the script's worktree carries HEAD
    state for every non-target file, so this is the only green produced against
    the exact tree being committed. Red → treat it as a hard stop: report
-   verbatim, stop for a user decision, never commit. Green → ONE Conventional
+   verbatim, stop for a user decision, never commit. Green → **branch re-check
+   first.** Immediately before committing, re-run `git rev-parse --abbrev-ref
+   HEAD` and compare it against the recorded `branch:` line, per
+   `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s per-commit re-check — a
+   mismatch stops the run and surfaces the discrepancy rather than committing
+   to the wrong branch. Then ONE Conventional
    Commit for the whole sweep, scoped by pathspec on the commit itself:
    `git commit -- <the confirmed target files>`. Never
    `git add -A`, `commit -a`, or a bare `git commit` — a bare commit ships

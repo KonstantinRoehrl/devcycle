@@ -42,7 +42,11 @@ agent this skill dispatches reports per
    this replaces upstream's never-start-on-main rule, which covers only
    `main`/`master`; devcycle's rule also forbids the integration branches that
    file names.
-2. **Plan hygiene.** A requirements block at the top of a plan that no task's
+2. **Commit convention.** Read `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`
+   and follow its derivation before wave 1's first commit; record the result at the top
+   of `.devcycle/ledger.md` as its own `Commit-convention:` preamble line, alongside the
+   existing `Plan:` / `Branch:` / `Profile:` lines.
+3. **Plan hygiene.** A requirements block at the top of a plan that no task's
    steps implement WILL be silently skipped. When the pre-dispatch read finds
    one, patch the owning task's steps explicitly and re-extract that task's brief
    before dispatching it. At `thorough`, upstream's Pre-Flight Plan Review (the
@@ -156,7 +160,11 @@ Invariants:
    it back to the implementer. If the repo has no test suite but documents its
    own verification convention, run that convention's command as the gate;
    never bolt a new test framework onto the repo to create one.
-7. On acceptance: local commit with a Conventional Commit subject, scoped by an
+7. **Branch re-check first.** Immediately before this commit, re-run `git rev-parse
+   --abbrev-ref HEAD` and compare it against the recorded `branch:` line, per
+   `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s per-commit re-check — a mismatch stops
+   the run and surfaces the discrepancy rather than committing to the wrong branch. Then,
+   on acceptance: local commit with a Conventional Commit subject, scoped by an
    explicit pathspec covering the task's own source files — `git commit --
    <the task's file list>`, never `git add -A` and never a bare `git commit`.
    Concurrent implementers have in-flight edits elsewhere in the tree and the
