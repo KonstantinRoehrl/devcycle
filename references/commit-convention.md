@@ -9,10 +9,11 @@ match. Neither restates the derivation here.
 
 Before wave 1's first commit, alongside the branch check `references/branch.md` owns:
 
-1. Read the repo's own convention docs, using `devcycle:auditing-a-repo`'s existing
-   inventory list verbatim — `CONTRIBUTING.md`, `ARCHITECTURE.md`, `CLAUDE.md` /
-   `AGENTS.md`, ADRs, style guides, linter/formatter/CI configs — never a separately
-   maintained list.
+1. Read the repo's own convention docs. The list of what to check is owned by
+   `skills/auditing-a-repo/SKILL.md`'s "Inventory the repo's own conventions before
+   reaching for generic advice" bullet (step 0, Discovery) — read it there and follow
+   it; it is not restated here, so a change to that list never has to be echoed here
+   too.
 2. Run `git log --oneline -15` on the target repo.
 3. From both, derive: the allowed commit types, scope casing (lowercase, kebab-case, or
    none), subject phrasing (imperative vs. descriptive), ticket-ID encoding (if any), and

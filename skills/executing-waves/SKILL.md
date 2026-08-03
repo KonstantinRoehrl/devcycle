@@ -247,8 +247,24 @@ re-run rule — is owned by **devcycle:sweeping-mechanical-changes**
 Single source of truth for progress, at `.devcycle/ledger.md` (one ledger — do
 not create a second). At `thorough`, where upstream is loaded, this path
 overrides upstream's own progress-file path: devcycle writes only
-`.devcycle/ledger.md`, never both. One appended line per event — all four fields
-REQUIRED, exactly this shape:
+`.devcycle/ledger.md`, never both.
+
+**Preamble.** This skill creates the ledger file, before any per-event line, with three
+one-line records at the top, each written once, in this order:
+
+```
+Plan: `<path to the plan this run is executing>`
+Branch: `<topic branch>` (cut from `<integration or default branch>`)
+Profile: `<resolved profile>` (evidence tail <N> lines)
+```
+
+`Plan:` is the plan path this stage was handed. `Branch:` is recorded once pre-flight step
+1 (Branch discipline, above) has the topic branch. `Profile:` is this skill's own resolved
+profile (`references/config.md`) and its evidence-tail length. Pre-flight step 2 appends a
+fourth preamble line, `Commit-convention:`, after these three, once its derivation runs —
+`references/commit-convention.md` owns that line's format.
+
+One appended line per event — all four fields REQUIRED, exactly this shape:
 
 ```
 - [<ISO-8601 UTC>] task=<id> event=<dispatched|report-received|review-round|review-verdict|committed|user-decision> outcome=<short> ref=<commit-sha|file|none>
