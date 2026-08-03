@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.1
+
+- fix(doctor): forward-fill skill attribution and correct scope docs
+
 ## 0.10.0
 
 - feat(devcycle): add onboarding-a-repo and distilling-learnings skills (#31)
