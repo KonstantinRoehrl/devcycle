@@ -222,9 +222,12 @@ export function emitCandidates(summaries) {
     }
   }
 
-  // Depth-vs-startup-floor outliers.
+  // Depth-vs-startup-floor outliers. startupFloor is agent-type-keyed ({main: [...],
+  // subagent: [...]}), not a scalar, so it is reduced to the median across every agent
+  // type's samples before the comparison.
   for (const s of summaries) {
-    if (s.startupFloor && s.medianDepth && s.medianDepth > s.startupFloor * 3) {
+    const floor = median(Object.values(s.startupFloor ?? {}).flat());
+    if (floor > 0 && s.medianDepth && s.medianDepth > floor * 3) {
       candidates.push({
         type: "depth-outlier",
         skill: null,
@@ -234,6 +237,35 @@ export function emitCandidates(summaries) {
         dollars: s.costUSD ?? null,
         sessions_sampled: 1,
       });
+    }
+  }
+
+  // Cost outliers — a run costing far more than its peers for the same skill, independent
+  // of any version-cohort comparison (fires even with a single version observed, unlike
+  // version-regression above, which needs two adjacent cohorts to compare).
+  const costsBySkill = new Map(); // skill -> [dollars]
+  for (const s of summaries) {
+    for (const [skill, dollars] of Object.entries(s.costByStage ?? {})) {
+      if (!costsBySkill.has(skill)) costsBySkill.set(skill, []);
+      costsBySkill.get(skill).push(dollars);
+    }
+  }
+  for (const [skill, dollars] of costsBySkill) {
+    if (dollars.length < 3) continue; // too few runs to call anything a peer outlier
+    const skillMedian = median(dollars);
+    if (skillMedian <= 0) continue;
+    for (const d of dollars) {
+      if (d > skillMedian * 3) {
+        candidates.push({
+          type: "cost-outlier",
+          skill,
+          version_from: null,
+          version_to: null,
+          delta_pct: ((d - skillMedian) / skillMedian) * 100,
+          dollars: d,
+          sessions_sampled: dollars.length,
+        });
+      }
     }
   }
 
@@ -429,6 +461,21 @@ function ranked(map, render) {
     .join(", ");
 }
 
+// One raw signal line per emitCandidates() entry — no severity, no ranking; that judgment
+// call stays at the skill layer (skills/doctor/SKILL.md), consistent with doctor's existing
+// division of labor (this script computes, the skill interprets).
+function formatCandidate(c) {
+  const parts = [c.type];
+  if (c.skill) parts.push(`skill=${c.skill}`);
+  if (c.model) parts.push(`model=${c.model}`);
+  if (c.version_from) parts.push(`${c.version_from}->${c.version_to}`);
+  if (c.delta_pct != null) parts.push(`delta=${c.delta_pct.toFixed(1)}%`);
+  if (c.dollars != null) parts.push(`dollars=${usd(c.dollars)}`);
+  if (c.count != null) parts.push(`count=${c.count}`);
+  parts.push(`sessions=${c.sessions_sampled}`);
+  return `CANDIDATE: ${parts.join(" ")}`;
+}
+
 function aggregate(summaries) {
   const agg = {
     costUSD: 0,
@@ -474,6 +521,7 @@ export function formatReport(summaries) {
   ];
   for (const [model, count] of Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]))
     lines.push(`UNPRICED MODEL: ${model} (${count} requests)`);
+  for (const c of emitCandidates(summaries)) lines.push(formatCandidate(c));
   lines.push("", vintage, DISCLOSURE, "");
   for (const s of summaries) {
     const modelList = Object.keys(s.models).join(", ") || "none";
@@ -629,7 +677,13 @@ function main() {
   if (args.json) {
     console.log(
       JSON.stringify(
-        { window: result.window, pricesAsOf: PRICING.asOf, sessions: result.sessions, totals: result.totals },
+        {
+          window: result.window,
+          pricesAsOf: PRICING.asOf,
+          sessions: result.sessions,
+          totals: result.totals,
+          candidates: emitCandidates(result.sessions),
+        },
         null,
         2,
       ),

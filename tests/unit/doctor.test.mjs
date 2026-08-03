@@ -296,6 +296,49 @@ test("formatReport: discloses the price vintage", () => {
   assert.match(text, new RegExp(`prices as of ${PRICING.asOf}`));
 });
 
+// emitCandidates() is computed but must actually reach the documented CLI surface — the
+// skill layer (skills/doctor/SKILL.md) has nothing to rank/report on otherwise.
+test("cli: --json emits a candidates array carrying emitCandidates' signals", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-candidates-"));
+  const slug = join(dir, "-Users-x-proj");
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(
+    join(slug, "sess-ffff.jsonl"),
+    JSON.stringify(turn({ attributionSkill: "devcycle:executing-waves" })) +
+      "\n" +
+      JSON.stringify({
+        type: "assistant",
+        message: { model: "claude-opus-9", usage: usage(1_000_000, 0, 0, 0), content: [] },
+      }) +
+      "\n",
+  );
+  const out = run(["--dir", dir, "--json"]);
+  assert.equal(out.status, 0, out.stderr);
+  const parsed = JSON.parse(out.stdout);
+  assert.ok(Array.isArray(parsed.candidates), "expected a candidates array in --json output");
+  const unpriced = parsed.candidates.find((c) => c.type === "unpriced-model");
+  assert.ok(unpriced, "expected the unpriced-model signal to reach the CLI's json output");
+});
+
+test("cli: the plain-text report surfaces candidate signals, not just the raw aggregate", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-candidates-text-"));
+  const slug = join(dir, "-Users-x-proj");
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(
+    join(slug, "sess-gggg.jsonl"),
+    JSON.stringify(turn({ attributionSkill: "devcycle:executing-waves" })) +
+      "\n" +
+      JSON.stringify({
+        type: "assistant",
+        message: { model: "claude-opus-9", usage: usage(1_000_000, 0, 0, 0), content: [] },
+      }) +
+      "\n",
+  );
+  const out = run(["--dir", dir]);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /unpriced-model/);
+});
+
 test("cli: a malformed trailing line is skipped rather than fatal", () => {
   const dir = mkdtempSync(join(tmpdir(), "doctor-partial-"));
   const slug = join(dir, "-Users-x-proj");
@@ -487,6 +530,71 @@ test("emitCandidates flags unpriced-model usage as a candidate", () => {
   const unpriced = candidates.find((c) => c.type === "unpriced-model");
   assert.ok(unpriced, "expected an unpriced-model candidate");
   assert.strictEqual(unpriced.sessions_sampled, 1);
+});
+
+// startupFloor is agent-type-keyed ({main: [...], subagent: [...]}), not a scalar — the
+// comparison must reduce it to a scalar (the median across every agent type's samples)
+// before comparing against medianDepth, or it silently NaNs and never fires.
+test("emitCandidates flags a depth-vs-startup-floor outlier when medianDepth exceeds 3x the reduced startup floor", () => {
+  const summaries = [
+    {
+      id: "s1",
+      costByStage: {},
+      pluginVersion: "0.9.2",
+      medianDepth: 40000,
+      startupFloor: { main: [1000, 2000], subagent: [1500] },
+      unpriced: {},
+    },
+  ];
+  const candidates = emitCandidates(summaries);
+  const outlier = candidates.find((c) => c.type === "depth-outlier");
+  assert.ok(outlier, "expected a depth-outlier candidate");
+});
+
+test("emitCandidates does not flag a depth-outlier when medianDepth is within 3x the startup floor", () => {
+  const summaries = [
+    {
+      id: "s1",
+      costByStage: {},
+      pluginVersion: "0.9.2",
+      medianDepth: 3000,
+      startupFloor: { main: [1000, 2000], subagent: [1500] },
+      unpriced: {},
+    },
+  ];
+  const candidates = emitCandidates(summaries);
+  const outlier = candidates.find((c) => c.type === "depth-outlier");
+  assert.equal(outlier, undefined);
+});
+
+// Standalone cost-outlier: must fire on an anomalously expensive run relative to its peers
+// even when there is only one version cohort — unlike version-regression, which requires
+// two adjacent cohorts to compare.
+test("emitCandidates flags a cost-outlier for a skill whose cost is far above its peers, with a single version cohort", () => {
+  const summaries = [
+    { id: "s1", costByStage: { "devcycle:executing-waves": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s2", costByStage: { "devcycle:executing-waves": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s3", costByStage: { "devcycle:executing-waves": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s4", costByStage: { "devcycle:executing-waves": 5.0 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+  ];
+  const candidates = emitCandidates(summaries);
+  const outlier = candidates.find(
+    (c) => c.type === "cost-outlier" && c.skill === "devcycle:executing-waves"
+  );
+  assert.ok(outlier, "expected a cost-outlier candidate");
+  assert.strictEqual(outlier.dollars, 5.0);
+});
+
+test("emitCandidates does not flag a cost-outlier when costs are uniform across runs", () => {
+  const summaries = [
+    { id: "s1", costByStage: { "devcycle:executing-waves": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s2", costByStage: { "devcycle:executing-waves": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s3", costByStage: { "devcycle:executing-waves": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s4", costByStage: { "devcycle:executing-waves": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+  ];
+  const candidates = emitCandidates(summaries);
+  const outlier = candidates.find((c) => c.type === "cost-outlier");
+  assert.equal(outlier, undefined);
 });
 
 test("configDrift flags a stale superseded key with its exact line and replacement", () => {
