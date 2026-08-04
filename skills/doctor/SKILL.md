@@ -71,22 +71,17 @@ structural fix per cluster — a new skill, consolidating existing skills, extra
 shared reference — applying the one-owner discipline proactively rather than only
 patching each finding individually.
 
-**Previously promoted — did it hold.** After the systemic recommendations, run:
+**Previously promoted — did it hold.** After the systemic recommendations, render this
+appendix from the latest `.devcycle/dreaming/<date>-dream.md` artifact's recurrence
+section — written by `dreaming-across-sessions`' own `--check-recurrence` step, never by
+doctor. Report each hit as its own finding, ranked by the same severity vocabulary and
+dollar-impact ordering as everything above — a reappearance means the promotion did not
+fix the pattern, and it is a new finding rather than a reason to re-promote the same fix.
+Render the appendix present-but-empty when the artifact's recurrence section carries no
+hits; omit it entirely when no artifact exists at all.
 
-```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --check-recurrence
-```
-
-It matches every committed record in `docs/devcycle/promotions/` against the sessions
-accumulated since that promotion landed. Report each hit as its own finding, ranked by the
-same severity vocabulary and dollar-impact ordering as everything above — a reappearance
-means the promotion did not fix the pattern, and it is a new finding rather than a reason
-to re-promote the same fix. The appendix is present even when empty; on a repo with no
-promotions yet there is simply nothing to check.
-
-This skill reads those artifacts and never invokes
-`devcycle:dreaming-across-sessions` itself — doctor stays runnable standalone and pays none
-of a dream's cost.
+This skill reads that artifact and never invokes `devcycle:dreaming-across-sessions`
+itself — doctor stays runnable standalone and pays none of a dream's cost.
 
 **Recurring scratch code (detection only).** When the latest
 `.devcycle/dreaming/<date>-dream.md` carries scratch-code findings — verification scripts,
@@ -96,8 +91,10 @@ cost findings already are. Omit the section entirely when no artifact exists or 
 none.
 
 Nothing is extracted or promoted from these: they exist to answer whether the recurrence is
-frequent enough to justify building an extraction path at all. That pass runs only at
-`thorough`, so on other profiles this section is expected to be absent.
+frequent enough to justify building an extraction path at all. That pass runs only at the
+`thorough` profile of the dream that wrote the artifact — doctor never resolves a profile
+of its own, it only renders what the artifact carries — so a report reading a `lean` or
+`standard` dream's artifact is expected to have this section absent.
 
 ## Persisted artifact
 

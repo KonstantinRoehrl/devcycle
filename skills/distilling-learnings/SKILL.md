@@ -73,16 +73,24 @@ pipeline's `.devcycle/state.md`, and read/rewritten only by this skill.
    each applied edit under an explicit pathspec naming exactly the touched file(s) —
    never `git add -A`, never a bare `git commit`.
 
-   Once the commit lands, record it:
+   Once the commit lands, record it. Write the JSON — `title`, `promotionType`,
+   `clusterSignature`, `filesTouched`, `landed`, and `commit` — to a scratch file, then pass
+   it through with the double-quoted `$(cat …)` form
+   `skills/sweeping-mechanical-changes/SKILL.md` already uses for the same reason: the
+   file's contents ride through as one intact argument, so no escaping is needed no matter
+   what the instruction contains (an apostrophe in `clusterSignature` breaks the inline
+   single-quoted form outright). Never single-quote the JSON inline.
 
    ```
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --record-promotion '<json>'
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --record-promotion "$(cat <scratch-file>)"
    ```
 
-   with `title`, `promotionType`, `clusterSignature`, `filesTouched`, `landed`, and
-   `commit`. The record goes to `docs/devcycle/promotions/`, which is committed — so it is
-   visible to every developer on the repo, not only whoever ran the promotion. Commit it
-   under an explicit pathspec alongside the edit it describes.
+   The record goes to `docs/devcycle/promotions/`, which is committed — so it is visible to
+   every developer on the repo, not only whoever ran the promotion. If `git check-ignore`
+   covers that path, write the file and skip the commit: the repo's own ignore rules decide
+   what lands in history, not this skill (same guard `skills/auditing-a-repo/SKILL.md` and
+   `skills/onboarding-a-repo/SKILL.md` apply to their own committed artifacts). Otherwise
+   commit it under an explicit pathspec alongside the edit it describes.
 5. **Delete the source memory on promotion.** Reusing the existing convention verbatim
    (DESIGN.md:248: "once encoded, corresponding personal memories... are deleted") — no
    new deletion convention invented. A memory whose promotion the user declined is left

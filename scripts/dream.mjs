@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Deterministic half of devcycle's dreaming pass: checkpoint, corpus manifest, session
 // cap, artifact freshness. The semantic half lives in skills/dreaming-across-sessions.
-// Emits no message text — only ids, paths, timestamps, and counts.
+// Emits no message text, no branch names — only ids, paths, timestamps, and counts.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, readRecords, inWindow } from "./doctor.mjs";
@@ -12,16 +12,24 @@ const CAP = 100;
 const dreamDir = (root) => join(root, ".devcycle", "dreaming");
 const statePath = (root) => join(dreamDir(root), "state.md");
 
+// `\s*` matches a newline too, so a field left blank on its own line would otherwise let
+// the capture cross into the next "- key: value" line and read that line back as the
+// value. `[ \t]*` stops at the newline: it only ever captures the rest of the field's own
+// line, blank or not. Also shared by readPromotions' field reader below (one regex, not two).
+function field(text, key) {
+  const m = text.match(new RegExp(`^- ${key}:[ \\t]*(.*)$`, "m"));
+  return m ? m[1].trim() : "";
+}
+
 export function readCheckpoint(repoRoot) {
   const p = statePath(repoRoot);
   if (!existsSync(p)) return { lastDreamedThrough: null, lastArtifact: null };
   const text = readFileSync(p, "utf8");
-  const field = (k) => {
-    const m = text.match(new RegExp(`^- ${k}:\\s*(.*)$`, "m"));
-    const v = m ? m[1].trim() : "";
-    return !v || v === "never" || v === "none" ? null : v;
+  const literal = (v) => (!v || v === "never" || v === "none" ? null : v);
+  return {
+    lastDreamedThrough: literal(field(text, "last-dreamed-through")),
+    lastArtifact: literal(field(text, "last-artifact")),
   };
-  return { lastDreamedThrough: field("last-dreamed-through"), lastArtifact: field("last-artifact") };
 }
 
 export function writeCheckpoint(repoRoot, { lastDreamedThrough, lastArtifact }) {
@@ -34,53 +42,152 @@ export function writeCheckpoint(repoRoot, { lastDreamedThrough, lastArtifact }) 
   );
 }
 
-export function artifactFresh(repoRoot, since) {
+const DATED_ARTIFACT_RE = /^\d{4}-\d{2}-\d{2}-dream\.md$/;
+
+function latestArtifactFile(repoRoot) {
   const dir = dreamDir(repoRoot);
-  if (!existsSync(dir)) return { fresh: false, path: null };
-  const dated = readdirSync(dir)
-    .filter((f) => /^\d{4}-\d{2}-\d{2}-dream\.md$/.test(f))
-    .sort();
+  if (!existsSync(dir)) return null;
+  const dated = readdirSync(dir).filter((f) => DATED_ARTIFACT_RE.test(f)).sort();
   const latest = dated.at(-1);
-  if (!latest) return { fresh: false, path: null };
-  const path = join(dir, latest);
-  if (!since) return { fresh: true, path };
-  return { fresh: latest.slice(0, 10) >= since.slice(0, 10), path };
+  return latest ? join(dir, latest) : null;
 }
 
+// Fresh only when no in-range session is newer than the range the artifact actually
+// covers — `since`, the checkpoint boundary the artifact was written against. Compares
+// full ISO-8601 instants (not just the artifact filename's calendar date), so an artifact
+// written and checkpointed on the same day a session lands later that same day correctly
+// goes stale instead of reading fresh forever after.
+export function artifactFresh(repoRoot, since, sessions = []) {
+  const path = latestArtifactFile(repoRoot);
+  if (!path) return { fresh: false, path: null };
+  // `since = null` means the checkpoint has never advanced — nothing has been mined yet,
+  // so there is no covered range the artifact could be fresh *against*. Calling that
+  // state "fresh" is how an artifact present with the checkpoint stuck at "never" turns
+  // every later dream into a permanent no-op even with un-mined sessions on disk.
+  if (!since) return { fresh: false, path };
+  const newest = sessions.reduce((m, s) => (s.lastTimestamp > m ? s.lastTimestamp : m), since);
+  return { fresh: newest <= since, path };
+}
+
+// Accepts the ISO-8601 UTC-instant forms a caller would reasonably emit: optional
+// fractional seconds, optional seconds at all (minute precision), and either a literal
+// "Z" or a numeric "+HH:MM"/"-HH:MM" offset — not just the one exact shape this repo's
+// own `writeCheckpoint` happens to write.
+const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+const isIsoInstant = (s) => typeof s === "string" && ISO_INSTANT_RE.test(s) && !Number.isNaN(Date.parse(s));
+
+// The only writer of last-dreamed-through: validates the instant, then records which
+// artifact (if any) this checkpoint now covers — the vehicle artifactFresh above and a
+// later run both need, and the one thing nothing previously populated.
+export function commitCheckpoint(repoRoot, iso) {
+  if (!isIsoInstant(iso)) throw new Error(`invalid ISO-8601 timestamp: ${JSON.stringify(iso ?? null)}`);
+  const prev = readCheckpoint(repoRoot);
+  const latest = latestArtifactFile(repoRoot);
+  const lastArtifact = latest ? relative(repoRoot, latest) : prev.lastArtifact;
+  writeCheckpoint(repoRoot, { lastDreamedThrough: iso, lastArtifact });
+  return { lastDreamedThrough: iso, lastArtifact };
+}
+
+// Two branches finished the same day are ordinary (finishing-the-cycle names archives
+// `archive-<date>-<branch-slug>`), so grouping by date alone produced byte-identical
+// entries a reader couldn't tell apart or address. Each archive now gets an `id`/`index`
+// disambiguator derived only from sort order — never from the directory name, which
+// still must not reach the manifest — plus its evidence files listed by name (not by
+// path, so the branch-slugged parent directory never appears) so a reader has enough to
+// actually work with, per the manifest's own established file-list pattern.
 function archives(repoRoot) {
   const dir = join(repoRoot, ".devcycle");
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((d) => /^archive-\d{4}-\d{2}-\d{2}-/.test(d))
-    .map((d) => {
-      const full = join(dir, d);
+  const byDate = new Map();
+  for (const d of readdirSync(dir).filter((d) => /^archive-\d{4}-\d{2}-\d{2}-/.test(d)).sort()) {
+    const date = d.slice("archive-".length, "archive-".length + 10);
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date).push(d);
+  }
+  const out = [];
+  for (const [date, names] of byDate) {
+    names.forEach((name, i) => {
+      const full = join(dir, name);
       const ev = join(full, "evidence");
-      return {
-        dir: full,
-        date: d.slice("archive-".length, "archive-".length + 10),
-        ledger: existsSync(join(full, "ledger.md")) ? join(full, "ledger.md") : null,
-        evidenceCount: existsSync(ev) ? readdirSync(ev).length : 0,
-      };
-    })
-    .sort((a, b) => b.date.localeCompare(a.date));
+      const hasLedger = existsSync(join(full, "ledger.md"));
+      const evidenceFiles = existsSync(ev) ? readdirSync(ev).sort() : [];
+      out.push({
+        id: `${date}-${i + 1}`,
+        date,
+        index: i + 1,
+        evidenceFiles,
+        evidenceCount: evidenceFiles.length,
+        // A glob keyed on date, never the real directory name. `index` (above) is what
+        // disambiguates same-date archives; a reader sorts the glob's expansion and
+        // takes the `index`-th entry.
+        ledger: hasLedger ? `.devcycle/archive-${date}-*/ledger.md` : null,
+      });
+    });
+  }
+  return out.sort((a, b) => b.date.localeCompare(a.date) || a.index - b.index);
 }
 
 const promoDir = (root) => join(root, "docs", "devcycle", "promotions");
 const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+// A value that itself contained a newline could otherwise open what looks like its own
+// "- key: value" line in the written record, and a later read-back would match that
+// phantom line before the real one (readCheckpoint/readPromotions take the first match).
+// `\r` alone and the U+2028/U+2029 line/paragraph separators are line terminators for
+// `^`/`$`/`.` in JavaScript regexes too, so all of them — not just "\r?\n" — must fold.
+const oneLine = (s) => String(s ?? "").replace(/\r\n|[\r\n\u2028\u2029]/g, " ").trim();
+
+const PROMOTION_TYPES = new Set([
+  "doc-edit",
+  "skill-edit",
+  "contradiction-resolution",
+  "config-proposal",
+  "extract-to-script",
+]);
+const LANDED_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// `Date.parse("2026-02-30")` rolls over to March 2 in V8 instead of returning NaN, so
+// `Number.isNaN(Date.parse(...))` alone accepts impossible calendar dates the shape regex
+// already let through. Round-tripping through `toISOString` catches the rollover.
+const isValidCalendarDate = (s) =>
+  LANDED_RE.test(s) && !Number.isNaN(Date.parse(s)) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
+
+function validatePromotion(rec) {
+  if (!PROMOTION_TYPES.has(rec.promotionType))
+    throw new Error(
+      `invalid promotion-type "${rec.promotionType}" — must be one of: ${[...PROMOTION_TYPES].join(", ")}`,
+    );
+  if (!isValidCalendarDate(rec.landed ?? ""))
+    throw new Error(`invalid landed date "${rec.landed}" — must be a real YYYY-MM-DD calendar date`);
+  // Required because it is the record's entire purpose: checkRecurrence skips any
+  // promotion whose signature is empty, so one recorded without it is permanently
+  // invisible to the recurrence metric with nothing anywhere reporting it.
+  if (!String(rec.clusterSignature ?? "").trim())
+    throw new Error("cluster-signature is required and cannot be empty");
+}
 
 export function recordPromotion(repoRoot, rec) {
+  validatePromotion(rec);
   mkdirSync(promoDir(repoRoot), { recursive: true });
-  let path = join(promoDir(repoRoot), `${rec.landed}-${slugify(rec.title)}.md`);
-  for (let n = 2; existsSync(path); n++)
-    path = join(promoDir(repoRoot), `${rec.landed}-${slugify(rec.title)}-${n}.md`);
+  const slug = slugify(oneLine(rec.title));
+  let path = join(promoDir(repoRoot), `${rec.landed}-${slug}.md`);
+  for (let n = 2; existsSync(path); n++) path = join(promoDir(repoRoot), `${rec.landed}-${slug}-${n}.md`);
+  // README.md documents files-touched as "comma-separated paths" — a plain string is the
+  // documented shape; an array (the --record-promotion JSON payload's own shape) and an
+  // absent value are also accepted rather than crashing after the promotion already landed.
+  // Each element is sanitized on its own before joining: joining raw elements let a
+  // newline (or \r, or U+2028) inside a single element forge a phantom "- landed:" line,
+  // same as an unsanitized joined string would.
+  const filesTouched = Array.isArray(rec.filesTouched)
+    ? rec.filesTouched.map((f) => oneLine(f)).join(", ")
+    : oneLine(rec.filesTouched);
   writeFileSync(
     path,
-    `# ${rec.title}\n` +
-      `- promotion-type: ${rec.promotionType}\n` +
-      `- cluster-signature: ${rec.clusterSignature}\n` +
-      `- files-touched: ${rec.filesTouched.join(", ")}\n` +
-      `- landed: ${rec.landed}\n` +
-      `- commit: ${rec.commit}\n`,
+    `# ${oneLine(rec.title)}\n` +
+      `- promotion-type: ${oneLine(rec.promotionType)}\n` +
+      `- cluster-signature: ${oneLine(rec.clusterSignature)}\n` +
+      `- files-touched: ${filesTouched}\n` +
+      `- landed: ${oneLine(rec.landed)}\n` +
+      `- commit: ${oneLine(rec.commit)}\n`,
   );
   return path;
 }
@@ -92,45 +199,145 @@ export function readPromotions(repoRoot) {
     .filter((f) => f.endsWith(".md") && f !== "README.md")
     .map((f) => {
       const text = readFileSync(join(dir, f), "utf8");
-      const get = (k) => (text.match(new RegExp(`^- ${k}:\\s*(.*)$`, "m")) ?? [, ""])[1].trim();
       return {
+        path: relative(repoRoot, join(dir, f)),
         title: (text.match(/^# (.*)$/m) ?? [, ""])[1].trim(),
-        promotionType: get("promotion-type"),
-        clusterSignature: get("cluster-signature"),
-        filesTouched: get("files-touched").split(",").map((s) => s.trim()).filter(Boolean),
-        landed: get("landed"),
-        commit: get("commit"),
+        promotionType: field(text, "promotion-type"),
+        clusterSignature: field(text, "cluster-signature"),
+        filesTouched: field(text, "files-touched").split(",").map((s) => s.trim()).filter(Boolean),
+        landed: field(text, "landed"),
+        commit: field(text, "commit"),
       };
     });
 }
 
-const words = (s) => new Set(s.toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) ?? []);
+// Every whitespace form a transcript can contain folds to a single separator — literal
+// newline/tab/CRLF, U+2028/U+2029, and JSON-escaped "\n"/"\r"/"\t" (the two characters
+// backslash+letter, for text that reaches here without having been JSON-decoded first).
+// A *single* separator, never deleted: deleting instead of spacing would glue words
+// split by a genuine line wrap back together but would just as wrongly glue two
+// unrelated words meeting at a mid-word wrap into a spurious match.
+const WHITESPACE_RE = /\\[nrt]|\r\n|[\r\n\t\u2028\u2029]/g;
+const normalizePhrase = (s) =>
+  String(s ?? "")
+    .replace(WHITESPACE_RE, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+// devcycle's own dreaming/doctor sessions echo the recurrence output (a promotion's commit,
+// landed date, cluster phrasing quoted back) into their own transcript — corpus for a
+// later run — so a signature could otherwise match the very run that reported it.
+// Excluded from the recurrence corpus only; --plan's mining corpus still sees them.
+const SELF_SKILL_RE = /^devcycle:(dreaming-across-sessions|doctor)$/;
+function isSelfRecord(r) {
+  if (SELF_SKILL_RE.test(r.attributionSkill ?? "")) return true;
+  const content = r.message?.content;
+  if (!Array.isArray(content)) return false;
+  for (const item of content)
+    if (
+      item &&
+      item.type === "tool_use" &&
+      item.name === "Skill" &&
+      typeof item.input?.skill === "string" &&
+      SELF_SKILL_RE.test(item.input.skill)
+    )
+      return true;
+  return false;
+}
 
 export function checkRecurrence(promotions, manifest, readText = defaultReadText) {
+  // Compute each promotion's normalized signature first and bail out before reading the
+  // corpus at all when none carries one — with zero promotion records (every repo's
+  // first dreams) this was a full corpus read-and-normalize for nothing: 2.63 s and RSS
+  // from 209 MB to 805 MB on this repo's own 65-session corpus.
+  const candidates = promotions
+    .map((p) => ({ p, sig: normalizePhrase(p.clusterSignature) }))
+    .filter(({ sig }) => sig);
+  if (!candidates.length) return [];
+
+  // Read and normalize every session's text once, not once per promotion — re-reading and
+  // re-tokenizing the whole corpus per record was the measured cost (4.6s/13.5s/43.6s for
+  // 1/3/10 records).
+  const sessions = manifest.sessions.map((s) => ({ ...s, normalized: normalizePhrase(readText(s)) }));
   const out = [];
-  for (const p of promotions) {
-    const sig = words(p.clusterSignature);
-    if (!sig.size) continue;
+  for (const { p, sig } of candidates) {
     const hits = [];
-    for (const s of manifest.sessions) {
+    for (const s of sessions) {
       if (s.lastTimestamp.slice(0, 10) <= p.landed) continue;
-      const seen = words(readText(s));
-      let shared = 0;
-      for (const w of sig) if (seen.has(w)) shared += 1;
-      if (shared / sig.size >= 0.6) hits.push(s.id);
+      if (s.normalized.includes(sig)) hits.push(s.id);
     }
-    if (hits.length) out.push({ clusterSignature: p.clusterSignature, landed: p.landed, hits });
+    if (hits.length)
+      out.push({ recordPath: p.path, title: p.title, commit: p.commit, landed: p.landed, hits });
   }
   return out;
 }
 
-function defaultReadText(session) {
-  return session.files.map((f) => readFileSync(f, "utf8")).join("\n");
+// Extracts a record's actual message text rather than dumping the raw transcript line:
+// matching over raw JSONL meant a message newline (the two characters "\" and "n" in the
+// file on disk) survived normalization with the "n" read back as a stray word, so a
+// phrase that happened to wrap in the transcript silently missed. Reading the decoded
+// text field means JSON.parse has already turned that escape into a real newline before
+// normalizePhrase (above) ever sees it.
+function messageText(record) {
+  const content = record.message?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((c) => c && c.type === "text" && typeof c.text === "string")
+    .map((c) => c.text)
+    .join("\n");
 }
 
-export function planCorpus({ repoRoot, projectsDir, since, cap = CAP }) {
+function defaultReadText(session) {
+  return session.files
+    .flatMap((f) => readRecords(f))
+    .map(messageText)
+    .join("\n");
+}
+
+// Claude Code's real project-directory convention: every character that is not
+// alphanumeric becomes its own "-", not just "/" — a repo path containing "_" or "."
+// (e.g. "Hobby_Programming", "site.com") previously computed a slug that never existed,
+// mining zero sessions and reporting success as if none had ever run.
+const escapeProjectPath = (p) => p.replace(/[^A-Za-z0-9]/g, "-");
+
+// Mirrors scripts/doctor.mjs's own `findTranscriptFiles` contract at its one caller
+// (`run()`, doctor.mjs:622-625): `null` (missing or unreadable) is not silently the same
+// as an empty result. A path that simply does not exist yet is "nothing mined here
+// before" — not a failure. A path that exists but cannot be read (permission denied, or
+// something other than a directory sitting where one is expected) is a genuine failure,
+// and must surface as one rather than as an empty, indistinguishable-from-success corpus.
+function readTranscriptsOrFail(dir, label) {
+  const files = findTranscriptFiles(dir);
+  if (files !== null) return files;
+  if (!existsSync(dir)) return null;
+  throw new Error(`${label} exists but could not be read: ${dir}`);
+}
+
+function sessionCwdMatches(file, repoRoot) {
+  return readRecords(file).some((r) => r.cwd === repoRoot);
+}
+
+// Safety net scripts/doctor.mjs's resolveDepth already has and this engine lacked: when
+// the (correctly escaped) slug directory doesn't exist at all, fall back to a search of
+// the whole projects root rather than reporting an empty corpus — the same fallback
+// doctor.mjs:135-138 uses when its own slug misses. Kept repo-scoped by filtering on each
+// session's own recorded `cwd`, so a sibling project's sessions still never leak in; this
+// is the fallback path only, not the common case, so it does not reintroduce the
+// machine-wide scan spec §10's amendment rejected on cost and leakage grounds.
+function resolveProjectFiles(repoRoot, projectsDir) {
+  const repoProjectDir = join(projectsDir, escapeProjectPath(repoRoot));
+  const direct = readTranscriptsOrFail(repoProjectDir, "project directory");
+  if (direct !== null) return direct;
+  const all = readTranscriptsOrFail(projectsDir, "projects root");
+  if (all === null) return [];
+  return all.filter((f) => sessionCwdMatches(f, repoRoot));
+}
+
+export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false }) {
   const groups = new Map();
-  for (const file of findTranscriptFiles(projectsDir)) {
+  for (const file of resolveProjectFiles(repoRoot, projectsDir)) {
     const id = owningSession(file);
     if (!groups.has(id)) groups.set(id, []);
     groups.get(id).push(file);
@@ -140,12 +347,15 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP }) {
   for (const [id, files] of groups) {
     const stamps = [];
     let records = 0;
+    let self = false;
     for (const f of files)
       for (const r of readRecords(f)) {
         records += 1;
         if (r.timestamp) stamps.push(r.timestamp);
+        if (excludeSelf && !self && isSelfRecord(r)) self = true;
       }
     if (!stamps.length) continue;
+    if (excludeSelf && self) continue;
     stamps.sort();
     const lastTimestamp = stamps.at(-1);
     if (!inWindow(lastTimestamp, since, null)) continue;
@@ -155,7 +365,7 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP }) {
   sessions.sort((a, b) => b.lastTimestamp.localeCompare(a.lastTimestamp));
   const capped = sessions.length > cap;
   const kept = sessions.slice(0, cap);
-  const { fresh, path } = artifactFresh(repoRoot, since);
+  const { fresh, path } = artifactFresh(repoRoot, since, sessions);
 
   return {
     since: since ?? null,
@@ -163,48 +373,95 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP }) {
     capped,
     sessions: kept,
     archives: archives(repoRoot).filter((a) => inWindow(`${a.date}T23:59:59Z`, since, null)),
-    // Escaping rule, owned by devcycle:distilling-learnings: the absolute cwd with every
-    // "/" replaced by "-". basename() would silently point at the wrong store.
-    memoryDir: join(homedir(), ".claude", "projects", repoRoot.replaceAll("/", "-"), "memory"),
+    // Same escaping as the transcript project directory above: every non-alphanumeric
+    // character becomes "-". Replacing only "/" points at a store that does not exist
+    // for any repo path containing "." or "_".
+    memoryDir: join(homedir(), ".claude", "projects", escapeProjectPath(repoRoot), "memory"),
     artifactFresh: fresh,
     artifactPath: path,
   };
 }
 
+// The recurrence corpus is windowed per promotion by that promotion's own `landed` date
+// (done inside checkRecurrence), not by the checkpoint — so it must not itself be bounded
+// by the checkpoint, or a promotion landed before the checkpoint but after by less than a
+// full mining cycle would see its own recurring sessions silently excluded. The 100-session
+// cap still applies, which is what keeps the comparison independent of checkpoint age (§10).
+// `capped` travels alongside `hits` rather than as a bare array: an empty result and a
+// corpus truncated to the 100-most-recent-session cap otherwise render identically, and
+// on a repo past 100 sessions cap truncation is the normal case, not the exception.
+export function runCheckRecurrence({ repoRoot, projectsDir }) {
+  const manifest = planCorpus({ repoRoot, projectsDir, since: null, excludeSelf: true });
+  return { capped: manifest.capped, hits: checkRecurrence(readPromotions(repoRoot), manifest) };
+}
+
+// CLAUDE_DREAM_PROJECTS overrides the transcript root, mirroring doctor.mjs's
+// CLAUDE_DOCTOR_PROJECTS; it exists so the CLI is testable without scanning ~/.claude.
+const resolveProjectsRoot = () => process.env.CLAUDE_DREAM_PROJECTS || join(homedir(), ".claude", "projects");
+
 function main() {
   const argv = process.argv.slice(2);
   const root = process.cwd();
-  if (argv.includes("--plan")) {
-    const { lastDreamedThrough } = readCheckpoint(root);
-    console.log(JSON.stringify(planCorpus({
-      repoRoot: root,
-      projectsDir: join(homedir(), ".claude", "projects"),
-      since: lastDreamedThrough,
-    }), null, 2));
+
+  const hasPlan = argv.includes("--plan");
+  const hasCheckRecurrence = argv.includes("--check-recurrence");
+  const commitIdx = argv.indexOf("--commit-checkpoint");
+  const hasCommit = commitIdx !== -1;
+
+  if (hasCommit && hasPlan) {
+    console.error("dream: --commit-checkpoint and --plan cannot be combined");
+    process.exit(1);
+  }
+
+  if (hasCommit && hasCheckRecurrence) {
+    console.error("dream: --commit-checkpoint and --check-recurrence cannot be combined");
+    process.exit(1);
+  }
+
+  if (hasPlan) {
+    try {
+      const { lastDreamedThrough } = readCheckpoint(root);
+      console.log(
+        JSON.stringify(
+          planCorpus({ repoRoot: root, projectsDir: resolveProjectsRoot(), since: lastDreamedThrough }),
+          null,
+          2,
+        ),
+      );
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
     return;
   }
-  const i = argv.indexOf("--commit-checkpoint");
-  if (i !== -1 && argv[i + 1]) {
-    const prev = readCheckpoint(root);
-    writeCheckpoint(root, { lastDreamedThrough: argv[i + 1], lastArtifact: prev.lastArtifact });
+
+  if (hasCommit) {
+    try {
+      commitCheckpoint(root, argv[commitIdx + 1]);
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
     console.log("checkpoint: ok");
     return;
   }
+
   const r = argv.indexOf("--record-promotion");
   if (r !== -1 && argv[r + 1]) {
-    console.log(recordPromotion(root, JSON.parse(argv[r + 1])));
+    try {
+      console.log(recordPromotion(root, JSON.parse(argv[r + 1])));
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
     return;
   }
-  if (argv.includes("--check-recurrence")) {
-    const { lastDreamedThrough } = readCheckpoint(root);
-    const manifest = planCorpus({
-      repoRoot: root,
-      projectsDir: join(homedir(), ".claude", "projects"),
-      since: lastDreamedThrough,
-    });
-    console.log(JSON.stringify(checkRecurrence(readPromotions(root), manifest), null, 2));
+
+  if (hasCheckRecurrence) {
+    console.log(JSON.stringify(runCheckRecurrence({ repoRoot: root, projectsDir: resolveProjectsRoot() }), null, 2));
     return;
   }
+
   console.error(
     "usage: dream.mjs --plan | --commit-checkpoint <iso> | --record-promotion <json> | --check-recurrence",
   );

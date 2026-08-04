@@ -51,13 +51,22 @@ working-tree skill/command text, checked against criteria 1-6.
 
 ## Regression (session-memory dreaming — appendix and scratch-code section)
 
+Setup adds a `.devcycle/dreaming/<date>-dream.md` fixture artifact, authored directly (no
+dream run happens in this scenario) with a "previously promoted — did it hold" recurrence
+section carrying one hit (record title, commit, landed date, session id) and a
+scratch-code section carrying one finding.
+
 Pass criteria:
-1. With one promotion record present whose signature recurs, the report carries a
-   "previously promoted — did it hold" finding using the same severity vocabulary as the
-   rest, not a new one.
-2. With no promotion records, the appendix is present and empty rather than omitted.
-3. With no dream artifact, the scratch-code section is omitted entirely — not rendered
-   empty.
-4. The run never invokes `devcycle:dreaming-across-sessions`.
+1. With that artifact present, the report carries a "previously promoted — did it hold"
+   finding using the same severity vocabulary as the rest, rendered from the artifact's
+   recurrence section — not derived from `docs/devcycle/promotions/` records directly and
+   not from a live match doctor runs itself.
+2. With the fixture artifact's recurrence section emptied to no hits (artifact otherwise
+   present), the appendix is rendered present-but-empty rather than omitted.
+3. With no dream artifact on disk at all, both the appendix and the scratch-code section
+   are omitted entirely — neither is rendered empty.
+4. The run never invokes `devcycle:dreaming-across-sessions` and never shells into
+   `dream.mjs --check-recurrence` itself — the match already happened when the artifact
+   was written, by the dream run, not by doctor.
 
 Result: to be recorded when this scenario is run against the committed text.

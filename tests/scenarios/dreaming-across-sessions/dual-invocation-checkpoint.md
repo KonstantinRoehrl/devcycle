@@ -1,7 +1,7 @@
 # Scenario: dual-invocation-checkpoint
 - Skill under test: devcycle:dreaming-across-sessions (via `/devcycle:dream`), then
   devcycle:distilling-learnings (via `/devcycle:distill`)
-- Type: dual-invocation
+- Type: discipline
 
 Does a standalone dream followed immediately by a distill mine the corpus exactly once —
 the second run reusing the first run's artifact rather than re-mining, with no candidate
@@ -12,13 +12,23 @@ lost between the preview and the distill batch?
 A sandboxed `$HOME` (`dream.mjs` resolves `~/.claude/projects` the same
 `os.homedir()`-dependent way `doctor.mjs` does, so the isolation is a fresh `$HOME` for
 the whole subagent process, credentials placed under its `.claude`, matching the sibling
-`doctor` scenario's protocol) containing two synthetic session transcripts under
-`$HOME/.claude/projects/-fixture-project/`, both mentioning the same recurring friction
-("forgot to pin the dispatch's model tier, caught in review, twice") so mining has one
-real pattern to cluster into a candidate. A fake memory directory (path substituted for
-`~/.claude/projects/<escaped-cwd>/memory/`) with one unrelated entry and its
-`MEMORY.md` index. No `.devcycle/dreaming/state.md` or `.devcycle/distilling-state.md`
-exists yet (first run of both).
+`doctor` scenario's protocol) containing two synthetic session transcripts under the
+project directory for the scenario's repo root — `$HOME/.claude/projects/<escaped repo
+root>/`, where `<escaped repo root>` is whatever `dream.mjs`'s current escaping rule
+derives from the sandbox repo checkout's absolute path (the same rule `memoryDir` below
+is keyed by; do not hardcode a slug, since the rule replaces more than `/` and changes
+independently of this scenario). Placing the fixture anywhere else fails silently: the
+repo-scoped lookup finds zero sessions rather than erroring, so confirm on disk before
+running that `--plan` reports at least the two fixture sessions under `sessions`. Both
+transcripts mention the same recurring friction ("forgot to pin the dispatch's model
+tier, caught in review, twice") so mining has one real pattern to cluster into a
+candidate. A fake memory directory (path substituted for
+`~/.claude/projects/<escaped-cwd>/memory/`, the same escaped repo root as above) with one
+unrelated entry and its `MEMORY.md` index. No `.devcycle/dreaming/state.md` or
+`.devcycle/distilling-state.md` exists yet (first run of both), and no
+`docs/devcycle/promotions/` records exist yet either, so turn 1's recurrence-check step is
+expected to run and return an empty result — nothing to check on a repo with no landed
+promotions, not a failure.
 
 ## Subagent prompt
 
