@@ -675,3 +675,17 @@ test("configDrift returns no findings for a target file with no stale references
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("doctor.mjs exports its transcript-walk helpers", async () => {
+  const m = await import("../../scripts/doctor.mjs");
+  for (const name of ["findTranscriptFiles", "owningSession", "readRecords", "inWindow"])
+    assert.equal(typeof m[name], "function", `${name} must be exported`);
+});
+
+test("doctor.mjs is importable when process.argv[1] is undefined", () => {
+  const r = spawnSync(process.execPath, [
+    "-e",
+    'import("./scripts/doctor.mjs").then(() => process.exit(0), () => process.exit(1))',
+  ], { cwd: new URL("../../", import.meta.url).pathname, encoding: "utf8" });
+  assert.equal(r.status, 0, "importing must not throw when argv[1] is undefined");
+});
