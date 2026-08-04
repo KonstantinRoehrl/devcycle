@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readCheckpoint, writeCheckpoint, planCorpus, artifactFresh } from "../../scripts/dream.mjs";
+import {
+  readCheckpoint,
+  writeCheckpoint,
+  planCorpus,
+  artifactFresh,
+  recordPromotion,
+  readPromotions,
+  checkRecurrence,
+} from "../../scripts/dream.mjs";
 
 const repo = () => mkdtempSync(join(tmpdir(), "dream-repo-"));
 
@@ -108,4 +116,52 @@ test("the manifest leaks no message text", () => {
   );
   const m = planCorpus({ repoRoot: repo(), projectsDir: dir, since: null, cap: 100 });
   assert.equal(JSON.stringify(m).includes("SUPERSECRETPAYLOAD"), false);
+});
+
+const REC = {
+  title: "Reviewer rejects unauthorized-file claims",
+  promotionType: "skill-edit",
+  clusterSignature: "task-reviewer flags files from a concurrent task",
+  filesTouched: ["agents/task-reviewer.md"],
+  landed: "2026-08-04",
+  commit: "abc1234",
+};
+
+test("a promotion record round-trips through the committed directory", () => {
+  const root = repo();
+  const p = recordPromotion(root, REC);
+  assert.match(p, /docs\/devcycle\/promotions\/2026-08-04-reviewer-rejects-unauthorized-file-claims\.md$/);
+  const [back] = readPromotions(root);
+  assert.equal(back.promotionType, "skill-edit");
+  assert.equal(back.clusterSignature, REC.clusterSignature);
+  assert.deepEqual(back.filesTouched, ["agents/task-reviewer.md"]);
+  assert.equal(back.commit, "abc1234");
+});
+
+test("two promotions on one day get distinct filenames", () => {
+  const root = repo();
+  recordPromotion(root, REC);
+  recordPromotion(root, { ...REC, title: "Something else entirely" });
+  assert.equal(readPromotions(root).length, 2);
+});
+
+test("recurrence reports a signature that reappears after it landed", () => {
+  const manifest = {
+    sessions: [{ id: "s1", files: [], lastTimestamp: "2026-08-06T00:00:00Z", records: 1 }],
+  };
+  const hits = checkRecurrence(
+    [{ ...REC, promotionType: "skill-edit", filesTouched: [] }],
+    manifest,
+    () => "the task-reviewer flags files from a concurrent task again",
+  );
+  assert.equal(hits.length, 1);
+  assert.deepEqual(hits[0].hits, ["s1"]);
+});
+
+test("recurrence ignores sessions that predate the promotion", () => {
+  const manifest = {
+    sessions: [{ id: "old", files: [], lastTimestamp: "2026-08-01T00:00:00Z", records: 1 }],
+  };
+  const hits = checkRecurrence([REC], manifest, () => REC.clusterSignature);
+  assert.equal(hits.length, 0);
 });

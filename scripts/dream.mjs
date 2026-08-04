@@ -65,6 +65,69 @@ function archives(repoRoot) {
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
+const promoDir = (root) => join(root, "docs", "devcycle", "promotions");
+const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+
+export function recordPromotion(repoRoot, rec) {
+  mkdirSync(promoDir(repoRoot), { recursive: true });
+  let path = join(promoDir(repoRoot), `${rec.landed}-${slugify(rec.title)}.md`);
+  for (let n = 2; existsSync(path); n++)
+    path = join(promoDir(repoRoot), `${rec.landed}-${slugify(rec.title)}-${n}.md`);
+  writeFileSync(
+    path,
+    `# ${rec.title}\n` +
+      `- promotion-type: ${rec.promotionType}\n` +
+      `- cluster-signature: ${rec.clusterSignature}\n` +
+      `- files-touched: ${rec.filesTouched.join(", ")}\n` +
+      `- landed: ${rec.landed}\n` +
+      `- commit: ${rec.commit}\n`,
+  );
+  return path;
+}
+
+export function readPromotions(repoRoot) {
+  const dir = promoDir(repoRoot);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".md") && f !== "README.md")
+    .map((f) => {
+      const text = readFileSync(join(dir, f), "utf8");
+      const get = (k) => (text.match(new RegExp(`^- ${k}:\\s*(.*)$`, "m")) ?? [, ""])[1].trim();
+      return {
+        title: (text.match(/^# (.*)$/m) ?? [, ""])[1].trim(),
+        promotionType: get("promotion-type"),
+        clusterSignature: get("cluster-signature"),
+        filesTouched: get("files-touched").split(",").map((s) => s.trim()).filter(Boolean),
+        landed: get("landed"),
+        commit: get("commit"),
+      };
+    });
+}
+
+const words = (s) => new Set(s.toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) ?? []);
+
+export function checkRecurrence(promotions, manifest, readText = defaultReadText) {
+  const out = [];
+  for (const p of promotions) {
+    const sig = words(p.clusterSignature);
+    if (!sig.size) continue;
+    const hits = [];
+    for (const s of manifest.sessions) {
+      if (s.lastTimestamp.slice(0, 10) <= p.landed) continue;
+      const seen = words(readText(s));
+      let shared = 0;
+      for (const w of sig) if (seen.has(w)) shared += 1;
+      if (shared / sig.size >= 0.6) hits.push(s.id);
+    }
+    if (hits.length) out.push({ clusterSignature: p.clusterSignature, landed: p.landed, hits });
+  }
+  return out;
+}
+
+function defaultReadText(session) {
+  return session.files.map((f) => readFileSync(f, "utf8")).join("\n");
+}
+
 export function planCorpus({ repoRoot, projectsDir, since, cap = CAP }) {
   const groups = new Map();
   for (const file of findTranscriptFiles(projectsDir)) {
@@ -127,7 +190,24 @@ function main() {
     console.log("checkpoint: ok");
     return;
   }
-  console.error("usage: dream.mjs --plan | --commit-checkpoint <iso>");
+  const r = argv.indexOf("--record-promotion");
+  if (r !== -1 && argv[r + 1]) {
+    console.log(recordPromotion(root, JSON.parse(argv[r + 1])));
+    return;
+  }
+  if (argv.includes("--check-recurrence")) {
+    const { lastDreamedThrough } = readCheckpoint(root);
+    const manifest = planCorpus({
+      repoRoot: root,
+      projectsDir: join(homedir(), ".claude", "projects"),
+      since: lastDreamedThrough,
+    });
+    console.log(JSON.stringify(checkRecurrence(readPromotions(root), manifest), null, 2));
+    return;
+  }
+  console.error(
+    "usage: dream.mjs --plan | --commit-checkpoint <iso> | --record-promotion <json> | --check-recurrence",
+  );
   process.exit(1);
 }
 
