@@ -5,6 +5,43 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-04 — dreaming's engine/skill split, corpus, and artifact handoff settle four departures from the originating ticket
+
+**Decision:** Four points diverge from the ticket that proposed session-memory dreaming.
+First, promotion records are committed under `docs/devcycle/promotions/` rather than
+`.devcycle/promotions/`, because `.gitignore` excludes `.devcycle/` repo-wide and git has no
+mechanism to re-include one subdirectory of an excluded parent — the checkpoint and dream
+artifact stay under `.devcycle/` since only the promotion records need to survive a clone.
+Second, the corpus a dreaming pass mines is transcripts plus memory, not transcripts plus an
+accumulated ledger, because devcycle keeps no such ledger; archiving is added at finish so a
+ledger-shaped corpus exists for future passes without inventing one retroactively for this
+one. Third, Phase 1b-i (the semantic mining and clustering work) lives in the skill layer
+(`dreaming-across-sessions`) rather than in `scripts/doctor.mjs`, because doctor is not
+guaranteed to emit message text at all profiles and semantic work needs it; the engine
+(`scripts/dream.mjs`) stays deterministic and owns only what doesn't need message text —
+checkpoint, corpus enumeration, the 100-session cap, artifact freshness, promotion records,
+and recurrence matching. Fourth, the dream artifact is the handoff between the two invocation
+paths (`/devcycle:dream` standalone and `distilling-learnings` step 0) rather than the
+checkpoint, because advancing the checkpoint from a read-only preview run would discard
+candidates a later real run should still see.
+**Why:** Each departure follows from a constraint the ticket didn't carry: `.gitignore`'s
+repo-wide exclusion is a git limitation, not a design preference, so the artifacts that must
+ship with the repo need a path outside `.devcycle/` entirely rather than a narrower ignore
+rule. The corpus choice follows the same principle as the profile-knob entries below — build
+the mechanism the repo actually has (transcripts, memory) rather than assume infrastructure
+(a ledger) that doesn't exist yet, and grow it forward from here. The engine/skill split
+follows doctor's actual contract: a deterministic script can be trusted to run unattended and
+cheaply, but it cannot promise message text, so the step that needs message text has to be
+where an agent, not a script, does the reading. The artifact-as-handoff choice protects the
+one asymmetry between the two callers — `/devcycle:dream` is allowed to preview without
+committing, and only the artifact (not the checkpoint) can capture that without also making
+the preview run un-repeatable for the caller that does commit.
+**Supersedes:** Nothing reversed — the originating ticket proposed `.devcycle/promotions/`,
+transcripts-only corpus mining inside `doctor.mjs`, and checkpoint-as-handoff; none of those
+were ever implemented, so nothing here reverses shipped behavior. The named non-goal:
+cross-developer raw aggregation (pooling promotion records or dream artifacts across
+contributors into one corpus) is documented as a future direction, not built in this pass.
+
 ## 2026-08-01 — context depth becomes measurable, and implementer routing inverts
 
 **Decision:** Two reversals ship together. First, context depth becomes a measured quantity
