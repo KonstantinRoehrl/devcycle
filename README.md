@@ -24,6 +24,7 @@ flowchart LR
     DOCTOR(["/devcycle:doctor"]):::entry
     VERIFY(["/devcycle:verify"]):::entry
     DISTILL(["/devcycle:distill"]):::entry
+    DREAM(["/devcycle:dream"]):::entry
 
     ONBOARD -. "first, in a new repo" .-> CYCLE
     CYCLE --> SCOPE["Scope / Design"]:::orch
@@ -36,6 +37,7 @@ flowchart LR
     DOCTOR -. "standalone, anytime" .-> SHIP
     VERIFY -. "standalone, anytime" .-> SHIP
     DISTILL -. "standalone, anytime" .-> SHIP
+    DREAM -. "standalone, anytime" .-> SHIP
 
     classDef orch fill:#e8f0fe,stroke:#3367d6,color:#111
     classDef entry fill:#fef7e0,stroke:#b06000,color:#111
@@ -88,7 +90,8 @@ Resume any time with:
 the state file, the ledger, per-task evidence files, sweep reports — is scratch for the run
 in progress, not project history. The artifacts worth keeping land outside it: the spec and
 plan under `docs/`, an audit under `docs/audits/`, the on-device checklist next to the
-feature. Before committing any artifact it writes, devcycle asks `git check-ignore` first
+feature, and promotion records under `docs/devcycle/promotions/`. Before committing any
+artifact it writes, devcycle asks `git check-ignore` first
 and skips the commit if your repo ignores that path — your ignore rules decide what enters
 history, not the plugin.
 
@@ -103,6 +106,7 @@ flowchart TD
     DOCTORCMD(["/devcycle:doctor — optional --all"]):::entry
     ONBOARDCMD(["/devcycle:onboard"]):::entry
     DISTILLCMD(["/devcycle:distill"]):::entry
+    DREAMCMD(["/devcycle:dream"]):::entry
 
     CYCLE --> STATE["Step 0 · state file<br/>root · branch · request · first-run config"]:::orch
     STATE --> TRIAGE{"Triage<br/>maturity · kind · size"}:::orch
@@ -178,6 +182,8 @@ flowchart TD
     DOCTORCMD -. "standalone — profiles cost/depth, starts no cycle" .-> DOCTORSTOP(["report delivered"]):::entry
     ONBOARDCMD -. "standalone — scaffolds the repo, starts no cycle" .-> ONBOARDSTOP(["scaffold written"]):::entry
     DISTILLCMD -. "standalone — promotes memory, starts no cycle" .-> DISTILLSTOP(["promotions applied"]):::entry
+    DREAMCMD -. "standalone — consolidates sessions into candidates, promotes nothing" .-> DREAMSTOP(["dream artifact delivered"]):::entry
+    DISTILLCMD -. "step 0 — reuses a fresh dream, or mines one" .-> DREAMCMD
 
     subgraph DELEG["Inside every stage — who does the work"]
         DUTY["the coordinator keeps only these:<br/>interviews · dispatches · the green gate<br/>commits · ledger · state file · handoff blocks"]:::orch
@@ -307,9 +313,15 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 | `/devcycle:audit` | Audits this repo against criteria you confirm, and writes a ranked findings document; a `branch:<name>` token — not a bare argument — scopes it to that branch's diff. Standalone — starts no cycle. |
 | `/devcycle:verify` | Walks an on-device checklist derived from a branch's diff — verification for code this session did not write. Standalone — starts no cycle. |
 | `/devcycle:doctor` | Profiles token cost, context depth, model routing, and agent startup cost — for this session, a date window, or the whole transcript history; `--depth` is the bare probe the context gate calls. Standalone — starts no cycle. |
+| `/devcycle:dream` | Mines session transcripts and accumulated memory for cross-session patterns and writes a dated dream artifact of promotion candidates; promotes nothing itself. Standalone — starts no cycle. |
+| `/devcycle:distill` | Reviews this repo's accumulated memory for a promotion session, checks devcycle config drift since the last run, and batches every candidate for confirmation before applying it. Standalone — starts no cycle. |
+| `/devcycle:onboard` | Bootstraps tier-2 setup for this repo: detects real build/test/lint commands, scaffolds `CLAUDE.md` and per-package rules, and proposes a permission allowlist. Standalone — starts no cycle. |
 | Skill `scoping-interview` | The batched scope interview with a hard stop before design begins. |
 | Skill `auditing-a-repo` | The criteria interview, the repo sweep (through the shared `reviewing-code` engine), and the ranked evidence-backed findings document behind `/devcycle:audit` and the audit stage. |
 | Skill `doctor` | Runs the token/context/routing/startup-cost analyzer and interprets it by ranking findings by dollar impact — the engine behind `/devcycle:doctor`. |
+| Skill `dreaming-across-sessions` | Mines session transcripts and memory for cross-session patterns, clusters and dedupes them into promotion candidates, and screens for sensitive content — the engine behind `/devcycle:dream` and step 0 of `/devcycle:distill`. |
+| Skill `distilling-learnings` | Turns vetted memory into doc or skill edits, checks for devcycle config drift, batches every promotion for confirmation, and deletes each memory once its promotion lands — the engine behind `/devcycle:distill`. |
+| Skill `onboarding-a-repo` | Detects a repo's real build/test/lint commands, scaffolds `CLAUDE.md` and per-package rules, and proposes a permission allowlist for confirmation — the engine behind `/devcycle:onboard`. |
 | Skill `planning-waves` | Feasibility gate + wave-structured planning (overlays `superpowers:writing-plans` at `thorough`). |
 | Skill `executing-waves` | Parallel subagent execution with green gate, ledger, and commit discipline. |
 | Skill `reviewing-the-branch` | The whole-branch review gate — the spec-compliance layer and the bounded rounds loop, over the shared `reviewing-code` engine. |
@@ -361,6 +373,7 @@ so you don't tune six options to say "cheaper" or "be thorough":
 | evidence tail in reports | 10 lines | 20 lines | 50 lines |
 | branch-review round cap | 2 | 3 | 5 |
 | audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
+| dreaming depth | dedup only | dedup + cross-session pattern mining | dedup + mining + scratch-code pass (1b-i) |
 
 Resolution order, in one rule: **an option you configured explicitly wins verbatim, always;
 anything left at its default takes the profile's column value.** So the `Default` column in

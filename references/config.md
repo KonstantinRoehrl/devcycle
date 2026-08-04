@@ -26,8 +26,8 @@ review depth and the on-device gate by their stages).
    Where they land depends on whether the profile matrix (below) covers the knob:
    - Profile-covered — the branch review engine (`reviewDepth`), the on-device
      gate (`onDeviceGate`), the evidence tail, the branch-review round cap, the
-     audit depth, and the planning/execution engine choice: the profile's column
-     value.
+     audit depth, the dreaming depth, and the planning/execution engine choice:
+     the profile's column value.
    - Not profile-covered — `gitPolicy`, `crossModelReview`, and the `*Model`
      knobs (whose unset value is `auto`, derived per the model-tier rules
      below): that knob's own documented default.
@@ -50,6 +50,7 @@ review depth and the on-device gate by their stages).
 | evidence tail in reports | 10 lines | 20 lines | 50 lines |
 | branch-review round cap | 2 | 3 | 5 |
 | audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
+| dreaming depth | dedup only | dedup + cross-session pattern mining | dedup + mining + scratch-code pass (1b-i) |
 
 Which column applies, and when a knob overrides it, is the resolution order above —
 this table supplies the values, not the rule for choosing them.
