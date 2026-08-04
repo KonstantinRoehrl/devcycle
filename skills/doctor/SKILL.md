@@ -71,6 +71,34 @@ structural fix per cluster — a new skill, consolidating existing skills, extra
 shared reference — applying the one-owner discipline proactively rather than only
 patching each finding individually.
 
+**Previously promoted — did it hold.** After the systemic recommendations, run:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --check-recurrence
+```
+
+It matches every committed record in `docs/devcycle/promotions/` against the sessions
+accumulated since that promotion landed. Report each hit as its own finding, ranked by the
+same severity vocabulary and dollar-impact ordering as everything above — a reappearance
+means the promotion did not fix the pattern, and it is a new finding rather than a reason
+to re-promote the same fix. The appendix is present even when empty; on a repo with no
+promotions yet there is simply nothing to check.
+
+This skill reads those artifacts and never invokes
+`devcycle:dreaming-across-sessions` itself — doctor stays runnable standalone and pays none
+of a dream's cost.
+
+**Recurring scratch code (detection only).** When the latest
+`.devcycle/dreaming/<date>-dream.md` carries scratch-code findings — verification scripts,
+fixtures, startup sequences, or one-off scripts re-derived across sessions without ever
+becoming committed code — render them here, ranked by estimated re-derivation cost the way
+cost findings already are. Omit the section entirely when no artifact exists or it carries
+none.
+
+Nothing is extracted or promoted from these: they exist to answer whether the recurrence is
+frequent enough to justify building an extraction path at all. That pass runs only at
+`thorough`, so on other profiles this section is expected to be absent.
+
 ## Persisted artifact
 
 Every run with at least one finding writes `.devcycle/doctor/YYYY-MM-DD-report.md`

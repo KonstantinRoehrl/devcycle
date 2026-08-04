@@ -48,3 +48,16 @@ ranked list with no follow-up offered.
 
 Not yet run — same blocker. What would prove it: the run above against the
 working-tree skill/command text, checked against criteria 1-6.
+
+## Regression (session-memory dreaming — appendix and scratch-code section)
+
+Pass criteria:
+1. With one promotion record present whose signature recurs, the report carries a
+   "previously promoted — did it hold" finding using the same severity vocabulary as the
+   rest, not a new one.
+2. With no promotion records, the appendix is present and empty rather than omitted.
+3. With no dream artifact, the scratch-code section is omitted entirely — not rendered
+   empty.
+4. The run never invokes `devcycle:dreaming-across-sessions`.
+
+Result: to be recorded when this scenario is run against the committed text.
