@@ -37,3 +37,16 @@ Not yet run — same credentialing blocker. Expected red: skill/command absent p
 
 Not yet run — same blocker. What would prove it: the two-turn run above, checked
 against criteria 1-4, with the sandbox inspected on disk between turns.
+
+## Regression (session-memory dreaming — step 0 and promotion records)
+
+Pass criteria:
+1. The run invokes `devcycle:dreaming-across-sessions` before any promotion batching.
+2. A promotion record appears under `docs/devcycle/promotions/` with all five fields, and
+   the commit sha in it matches the commit that landed the edit.
+3. With `dream.mjs` made to exit non-zero, the run reports the failure and still completes
+   with raw 1:1 batching — it does not abort.
+4. A memory whose promotion was declined is still deleted only on promotion, never on skip
+   — the pre-existing behavior is unchanged.
+
+Result: to be recorded when this scenario is run against the committed text.
