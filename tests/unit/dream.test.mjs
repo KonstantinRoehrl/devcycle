@@ -321,6 +321,103 @@ test("artifactFresh treats since=null as nothing-mined-yet, never as uncondition
   );
 });
 
+// A record isSelfRecord() matches: a Skill tool_use naming the dreaming skill.
+const selfRecord = (ts) => ({
+  timestamp: ts,
+  type: "assistant",
+  message: {
+    content: [
+      { type: "tool_use", name: "Skill", input: { skill: "devcycle:dreaming-across-sessions" } },
+    ],
+  },
+});
+const plainRecord = (ts) => ({ timestamp: ts, type: "assistant", message: { content: [] } });
+
+function projectsWith(repoRoot, entries) {
+  const dir = mkdtempSync(join(tmpdir(), "dream-proj-"));
+  // Same escaping rule the engine uses: every non-alphanumeric character becomes "-".
+  const slug = join(dir, repoRoot.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(slug, { recursive: true });
+  for (const [id, records] of entries) {
+    writeFileSync(
+      join(slug, `${id}.jsonl`),
+      records.map((r) => JSON.stringify(r)).join("\n") + "\n",
+    );
+  }
+  return dir;
+}
+
+function withArtifact(repoRoot, name = "2026-08-05-dream.md") {
+  mkdirSync(join(repoRoot, ".devcycle", "dreaming"), { recursive: true });
+  writeFileSync(join(repoRoot, ".devcycle", "dreaming", name), "# dream\n");
+}
+
+test("planCorpus: the dream's own session does not make its own artifact stale", () => {
+  const root = realpathSync(repo());
+  withArtifact(root);
+  const proj = projectsWith(root, [["selfsess", [selfRecord("2026-08-05T12:00:00Z")]]]);
+  const m = planCorpus({
+    repoRoot: root,
+    projectsDir: proj,
+    since: "2026-08-05T11:00:00Z",
+  });
+  assert.equal(m.artifactFresh, true, "a self session newer than the checkpoint must not go stale");
+  assert.equal(m.sessions.length, 1, "the self session stays mineable in the returned list");
+  assert.equal(m.sessions[0].self, true);
+});
+
+test("planCorpus: a non-self session newer than the checkpoint does make the artifact stale", () => {
+  const root = realpathSync(repo());
+  withArtifact(root);
+  const proj = projectsWith(root, [["othersess", [plainRecord("2026-08-05T12:00:00Z")]]]);
+  const m = planCorpus({
+    repoRoot: root,
+    projectsDir: proj,
+    since: "2026-08-05T11:00:00Z",
+  });
+  assert.equal(m.artifactFresh, false, "a real new session must make the artifact stale");
+  assert.equal(m.sessions[0].self, false);
+});
+
+test("artifactFresh: compares instants, not strings, across accepted ISO forms", () => {
+  const root = realpathSync(repo());
+  withArtifact(root);
+  // "+02:00" is 10:00Z — earlier than the 11:00Z session, so the artifact is stale.
+  // Lexicographically "2026-08-05T12:00:00+02:00" > "2026-08-05T11:00:00Z", which is the bug.
+  assert.equal(
+    artifactFresh(root, "2026-08-05T12:00:00+02:00", [{ lastTimestamp: "2026-08-05T11:00:00Z" }])
+      .fresh,
+    false,
+  );
+  // Minute precision: 12:00Z is earlier than 12:00:30Z, so the artifact is stale.
+  assert.equal(
+    artifactFresh(root, "2026-08-05T12:00Z", [{ lastTimestamp: "2026-08-05T12:00:30Z" }]).fresh,
+    false,
+  );
+  // Genuinely covered: the session predates the checkpoint.
+  assert.equal(
+    artifactFresh(root, "2026-08-05T12:00:00Z", [{ lastTimestamp: "2026-08-05T11:00:00Z" }]).fresh,
+    true,
+  );
+});
+
+test("artifactFresh: ignores self sessions when computing the newest instant", () => {
+  const root = realpathSync(repo());
+  withArtifact(root);
+  assert.equal(
+    artifactFresh(root, "2026-08-05T11:00:00Z", [
+      { lastTimestamp: "2026-08-05T12:00:00Z", self: true },
+    ]).fresh,
+    true,
+  );
+  assert.equal(
+    artifactFresh(root, "2026-08-05T11:00:00Z", [
+      { lastTimestamp: "2026-08-05T12:00:00Z", self: false },
+    ]).fresh,
+    false,
+  );
+});
+
 test("commitCheckpoint rejects a non-ISO value and writes nothing", () => {
   const root = repo();
   assert.throws(() => commitCheckpoint(root, "banana"));

@@ -61,12 +61,21 @@ export function artifactFresh(repoRoot, since, sessions = []) {
   const path = latestArtifactFile(repoRoot);
   if (!path) return { fresh: false, path: null };
   // `since = null` means the checkpoint has never advanced — nothing has been mined yet,
-  // so there is no covered range the artifact could be fresh *against*. Calling that
-  // state "fresh" is how an artifact present with the checkpoint stuck at "never" turns
-  // every later dream into a permanent no-op even with un-mined sessions on disk.
+  // so there is no covered range the artifact could be fresh *against*.
   if (!since) return { fresh: false, path };
-  const newest = sessions.reduce((m, s) => (s.lastTimestamp > m ? s.lastTimestamp : m), since);
-  return { fresh: newest <= since, path };
+  const sinceMs = Date.parse(since);
+  if (Number.isNaN(sinceMs)) return { fresh: false, path };
+  // Instants, never strings: `commitCheckpoint` accepts "+HH:MM" offsets and minute
+  // precision, and a lexicographic compare reads "T12:00:00+02:00" (=10:00Z) as later than
+  // "T11:00:00Z" — which turns the dream into a permanent no-op on the first non-UTC call.
+  // Self sessions are skipped here on every call, whatever `excludeSelf` was: a dream's own
+  // session sits in its own corpus, and letting it count makes `fresh` permanently false.
+  const newestMs = sessions.reduce((max, s) => {
+    if (s.self) return max;
+    const t = Date.parse(s.lastTimestamp);
+    return Number.isNaN(t) ? max : Math.max(max, t);
+  }, sinceMs);
+  return { fresh: newestMs <= sinceMs, path };
 }
 
 // Accepts the ISO-8601 UTC-instant forms a caller would reasonably emit: optional
@@ -352,14 +361,17 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
       for (const r of readRecords(f)) {
         records += 1;
         if (r.timestamp) stamps.push(r.timestamp);
-        if (excludeSelf && !self && isSelfRecord(r)) self = true;
+        if (!self && isSelfRecord(r)) self = true;
       }
     if (!stamps.length) continue;
+    // `excludeSelf` (the recurrence path) drops these sessions outright, because a printed
+    // signature would self-seed a permanent hit. Freshness ignores them on every path — see
+    // artifactFresh — but they stay mineable here.
     if (excludeSelf && self) continue;
     stamps.sort();
     const lastTimestamp = stamps.at(-1);
     if (!inWindow(lastTimestamp, since, null)) continue;
-    sessions.push({ id, files, firstTimestamp: stamps[0], lastTimestamp, records });
+    sessions.push({ id, files, firstTimestamp: stamps[0], lastTimestamp, records, self });
   }
 
   sessions.sort((a, b) => b.lastTimestamp.localeCompare(a.lastTimestamp));
