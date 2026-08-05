@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.0
+
+- feat(dream): add dreaming across sessions (#36)
+
 ## 0.10.1
 
 - fix(doctor): forward-fill skill attribution and correct scope docs
