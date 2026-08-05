@@ -492,17 +492,12 @@ never second-guessed.
   version, and reinstalling the same version does not refresh it. Bump the version or
   uninstall and reinstall.
 
-## See a real run
-
-[docs/dry-run-report.md](docs/dry-run-report.md) — a complete cycle against a sandbox repo,
-run headless with nothing configured: every stage, the artifacts it produced, and the rough
-edges it exposed.
-
 ## Learn more
 
 Design rationale and architecture: [DESIGN.md](DESIGN.md) ·
 Release history: [CHANGELOG.md](CHANGELOG.md) ·
-Decision log: [docs/DECISIONS.md](docs/DECISIONS.md)
+Decision log: [docs/DECISIONS.md](docs/DECISIONS.md) ·
+Open defects: [docs/known-issues.md](docs/known-issues.md)
 
 Contributing — including how the scenario test harness in `tests/scenarios/` works:
 [CONTRIBUTING.md](CONTRIBUTING.md). `scripts/doctor.mjs` re-measures devcycle's own

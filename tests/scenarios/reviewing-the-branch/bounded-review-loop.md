@@ -190,9 +190,9 @@ check over the pre-change skill, not a behavioral result. `git show
 pre-change rule 3 read "After the fixes are committed, re-run the SAME engine…" — passive,
 naming no actor. Nothing in that skill text, or anywhere else in the file, tells whoever
 drafts the fix-dispatch brief that the brief itself must not carry a commit instruction, or
-that the coordinator is the one who commits. `docs/benchmarks/2026-08-04-dreaming-first-run.md`
-records the resulting failure directly: three implementers across earlier rounds resolved that
-ambiguity three different ways. What would prove it: runs A and B against the `4bbb64e` body
+that the coordinator is the one who commits. The first real-conditions dreaming run recorded
+the resulting failure directly — three implementers across earlier rounds resolved that
+ambiguity three different ways — in a run report kept local and untracked. What would prove it: runs A and B against the `4bbb64e` body
 under the isolated-config protocol, with the round-1 fix-dispatch brief inspected for a commit
 instruction the pre-change text neither forbids nor assigns elsewhere. Expected red: at least
 one of the two runs drafts or narrates the implementer committing the fix.

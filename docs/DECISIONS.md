@@ -652,7 +652,7 @@ superpowers' install mechanics (marketplace-add command included).
 silently. The README instead names the expected symptom (devcycle shows "failed to load"
 until superpowers is present) so the intermediate state reads as normal, not broken.
 **Supersedes:** `docs/platform-notes.md` §(d)'s recommendation that the README tell users
-to add the superpowers marketplace first, and `docs/dry-run-report.md` rough edge #1
+to add the superpowers marketplace first, and the first end-to-end dry run's rough edge #1
 ("the README should carry step 3").
 
 ## 2026-07-23 — model options default to `auto`; an explicit id is binding

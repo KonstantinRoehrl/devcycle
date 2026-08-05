@@ -103,6 +103,23 @@ malformed title fails CI; one that slipped through would ship no release. Scenar
 evidence for behavior changes is encouraged per the harness above, but not required to
 merge.
 
+## What belongs in `docs/`
+
+`marketplace.json` sets the plugin `source` to `./`, so the repository tree *is* the shipped
+payload — there is no build step that could filter anything out. Every file committed here is
+downloaded by every user who installs the plugin, which makes `docs/` a budget, not a
+scratchpad.
+
+Commit a doc only if a future implementer needs it to make a correct change: the decision log,
+empirically verified platform behavior, the memos explaining why a skill diverges from its
+upstream, open defects. Keep run reports, benchmarks, dry runs, on-device checklists and
+results, plans, and specs out of the repository — they are records of one run on one machine,
+they date immediately, and nobody installing the plugin has a use for them. `.devcycle/` is
+gitignored and is where those belong.
+
+`docs/known-issues.md` is the one place open defects are recorded. Fixing a defect means
+deleting its entry in the same commit.
+
 ## Releasing
 
 A release is a `main` ← `dev` PR, squash-merged the same way as any other PR above. After
