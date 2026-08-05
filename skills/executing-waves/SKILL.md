@@ -135,22 +135,31 @@ Invariants:
    `.devcycle/reports/<task-id>.md`, the files touched, the on-device item count, and the
    deviation count — never the report body. The on-device count is what triggers checklist
    generation below without the coordinator opening the file.
-4. On report: ledger `event=report-received`, with `ref=` set to the report path the envelope
-   named. The coordinator does not produce the task diff and does not read it — diff
-   production moved into the reviewer dispatch below, where the diff is read anyway. (This is
-   also what replaces upstream's `scripts/review-package`: devcycle implementers do not commit,
-   so there are no task commits to package until after acceptance.)
+4. **Confirm the report file exists** at the envelope's named path before logging
+   `event=report-received` — the envelope's `report:` field is the implementer's claim, not
+   proof; per `references/evidence.md`, a report returned only inline instead of written to
+   that path is the same defect as an inlined evidence tail. A missing file is treated the
+   way step 6 treats a failed green gate: ledger `event=report-received outcome=rejected
+   (missing report file)` with `ref=` the envelope's named path, then back to the implementer
+   — no reviewer dispatch. Otherwise: ledger `event=report-received`, with `ref=` set to the
+   report path the envelope named. The coordinator does not produce the task diff and does not
+   read it — diff production moved into the reviewer dispatch below, where the diff is read
+   anyway. (This is also what replaces upstream's `scripts/review-package`: devcycle
+   implementers do not commit, so there are no task commits to package until after
+   acceptance.)
 5. Dispatch **devcycle:task-reviewer** (read-only; its definition encodes devcycle's reviewer
    hygiene) with the brief, the report path, the task's file list, the two evidence-file paths
    the report names, and the task's constraints block. The dispatch prompt instructs it to
    produce the diff itself — `git add -N <new files>` first, or they are invisible to diff,
-   then `git diff -U10 HEAD -- <files>` — and to write its findings to
-   `.devcycle/findings/<task-id>-round-<n>.md`. At `thorough`, upstream's reviewer-prompt rules
-   govern the dispatch wording. It returns the task-reviewer envelope
+   then `git diff -U10 HEAD -- <files>`. At `thorough`, upstream's reviewer-prompt rules govern
+   the dispatch wording. It returns the task-reviewer envelope
    `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` defines: verdict, blocking-finding count,
-   findings path. Ledger one `event=review-round` per reviewer dispatch (round n), and
-   `event=review-verdict` for its outcome. A non-zero blocking count sends the findings path
-   back to the implementer; re-review after fixes, logging the next `review-round`.
+   findings. The reviewer has no write tool and stays strictly read-only, so it is the
+   coordinator, not the reviewer, that writes what the envelope returns to
+   `.devcycle/findings/<task-id>-round-<n>.md` — the path is unchanged, only who writes it.
+   Ledger one `event=review-round` per reviewer dispatch (round n), and `event=review-verdict`
+   for its outcome. A non-zero blocking count sends the findings path back to the implementer;
+   re-review after fixes, logging the next `review-round`.
 6. **Green gate (REQUIRED, deterministic):** before accepting, re-run the
    task's test command yourself and read the exit status. The implementer's
    claimed output — including the evidence files and the tail in its report — is
