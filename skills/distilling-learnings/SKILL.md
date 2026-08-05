@@ -91,8 +91,9 @@ pipeline's `.devcycle/state.md`, and read/rewritten only by this skill.
    write — just create the branch and apply every edit below on it. Any skill file
    touched in this step gets `superpowers:writing-skills`-style scenario testing before
    landing — the same TDD discipline every skill in this repo already carries. Commit
-   each applied edit under an explicit pathspec naming exactly the touched file(s) —
-   never `git add -A`, never a bare `git commit`.
+   each applied edit scoped per
+   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit" — read
+   it there and follow it.
 
    Once the commit lands, record it. Write the JSON — `title`, `promotionType`,
    `clusterSignature`, `filesTouched`, `landed`, and `commit` — to a scratch file, then pass

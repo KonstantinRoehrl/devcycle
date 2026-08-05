@@ -137,10 +137,10 @@ this as a supervised sweep."
    `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s per-commit re-check — a
    mismatch stops the run and surfaces the discrepancy rather than committing
    to the wrong branch. Then ONE Conventional
-   Commit for the whole sweep, scoped by pathspec on the commit itself:
-   `git commit -- <the confirmed target files>`. Never
-   `git add -A`, `commit -a`, or a bare `git commit` — a bare commit ships
-   whatever else the user had staged. Then record the resulting sha on a
+   Commit for the whole sweep, scoped per
+   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit" — read
+   it there and follow it: `git commit -- <the confirmed target files>`. Then record the
+   resulting sha on a
    `sweepCommit:` line in `.devcycle/state.md` IMMEDIATELY, before any other
    action: resume's commit-marker check keys off that line rather than guessing
    which entry in `git log` is the sweep's, and a crash inside this window

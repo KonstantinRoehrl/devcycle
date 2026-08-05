@@ -144,14 +144,13 @@ how far steps 2–3 go (see Depth below). Report as
    sha at all, which is what the omitted-rather-than-guessed rule above exists to prevent.
 
    Write `docs/audits/YYYY-MM-DD-<topic>.md` (today's date, a short topic
-   slug), then commit it under an explicit pathspec naming that one file:
-   `git add docs/audits/YYYY-MM-DD-<topic>.md && git commit -- docs/audits/YYYY-MM-DD-<topic>.md`.
-   The `git add` is not optional — the document is a new file, and a pathspec naming a
-   path git does not know yet aborts the commit outright. Never `git add -A` and never
-   a bare `git commit`: the document is the only thing this run authored, and an
-   unscoped commit ships whatever else the checkout happened to have staged. If
-   `git check-ignore` covers the path, write the file and skip the commit: the repo's
-   own ignore rules decide what lands in history, not this skill.
+   slug), then commit it scoped per
+   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit" — read
+   it there and follow it: `git add docs/audits/YYYY-MM-DD-<topic>.md && git commit --
+   docs/audits/YYYY-MM-DD-<topic>.md`. The `git add` is not optional — the document is a
+   new file, and a pathspec naming a path git does not know yet aborts the commit
+   outright. If `git check-ignore` covers the path, write the file and skip the commit:
+   the repo's own ignore rules decide what lands in history, not this skill.
 
    The document is a commit, so branch discipline applies either way — but whether the
    branch is recorded depends on whether this run owns a state file:

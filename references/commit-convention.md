@@ -37,3 +37,22 @@ Every commit for the rest of the run's execution and finish stages matches this 
 task whose natural type conflicts with it (e.g. the repo avoids `feat` and the change is
 feature-sized) uses the nearest allowed type and never invents one outside the derived
 set.
+
+## Scoping the commit
+
+The single owner of how any devcycle-driven commit is scoped, cited rather than restated
+by every skill that commits: `skills/executing-waves/SKILL.md`, `skills/fast-path/SKILL.md`,
+`skills/sweeping-mechanical-changes/SKILL.md`, `skills/distilling-learnings/SKILL.md`,
+`skills/onboarding-a-repo/SKILL.md`, and `skills/auditing-a-repo/SKILL.md`.
+
+Every commit is scoped by an explicit pathspec naming exactly the files this run authored
+— `git commit -- <the file list>` — never `git add -A` and never a bare `git commit`,
+which ships whatever else the checkout happened to have staged. Concurrent implementers
+have in-flight edits elsewhere in the tree, and the index picks up entries from their
+`git add -N` calls, so an unscoped commit sweeps another task's work into this one's.
+
+The pathspec names source files and nothing else: evidence files under
+`.devcycle/evidence/` stay out of it. Target repos are told to gitignore `.devcycle/`
+(README), so naming an ignored, untracked evidence path in a pathspec aborts the whole
+commit with "pathspec did not match any file known to git". Evidence files are
+working-tree artifacts a reviewer reads from the checkout, not history.

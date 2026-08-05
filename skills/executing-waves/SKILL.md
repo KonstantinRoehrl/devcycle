@@ -173,18 +173,9 @@ Invariants:
    --abbrev-ref HEAD` and compare it against the recorded `branch:` line, per
    `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s per-commit re-check — a mismatch stops
    the run and surfaces the discrepancy rather than committing to the wrong branch. Then,
-   on acceptance: local commit with a Conventional Commit subject, scoped by an
-   explicit pathspec covering the task's own source files — `git commit --
-   <the task's file list>`, never `git add -A` and never a bare `git commit`.
-   Concurrent implementers have in-flight edits elsewhere in the tree and the
-   index picks up entries from their `git add -N` calls, so an unscoped commit
-   sweeps another task's work into this one's. The pathspec names the task's
-   files and nothing else: the evidence files under `.devcycle/evidence/` stay
-   out of it — target repos are told to gitignore `.devcycle/` (README), so
-   naming an ignored, untracked path in a pathspec aborts the whole commit with
-   "pathspec did not match any file known to git". Evidence files are
-   working-tree artifacts the reviewer reads from the checkout, not history.
-   Ledger `event=committed` with the sha.
+   on acceptance: local commit with a Conventional Commit subject, scoped per
+   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit" — read
+   it there and follow it. Ledger `event=committed` with the sha.
 
 **Trigger: this commit closes the wave.** When no task in the current wave remains
 undispatched, in review, or uncommitted, stop here — before forming the next wave — and
