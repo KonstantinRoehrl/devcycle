@@ -169,12 +169,15 @@ const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-
 // `^`/`$`/`.` in JavaScript regexes too, so all of them — not just "\r?\n" — must fold.
 const oneLine = (s) => String(s ?? "").replace(/\r\n|[\r\n\u2028\u2029]/g, " ").trim();
 
+// `enforcement-gap` — the rule already exists and is being violated; the fix is enforcement,
+// not a new rule (spec §6). `extract-to-script` is gone: its only producer was Phase 1b-ii,
+// which is dropped (§12), and a dead value in a committed schema outlives the reason for it.
 const PROMOTION_TYPES = new Set([
   "doc-edit",
   "skill-edit",
+  "enforcement-gap",
   "contradiction-resolution",
   "config-proposal",
-  "extract-to-script",
 ]);
 const LANDED_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -187,7 +190,7 @@ const isValidCalendarDate = (s) =>
 function validatePromotion(rec) {
   if (!PROMOTION_TYPES.has(rec.promotionType))
     throw new Error(
-      `invalid promotion-type "${rec.promotionType}" — must be one of: ${[...PROMOTION_TYPES].join(", ")}`,
+      `invalid promotionType "${rec.promotionType}" — must be one of: ${[...PROMOTION_TYPES].join(", ")}`,
     );
   if (!isValidCalendarDate(rec.landed ?? ""))
     throw new Error(`invalid landed date "${rec.landed}" — must be a real YYYY-MM-DD calendar date`);
@@ -312,7 +315,7 @@ export function checkRecurrence(promotions, manifest, readText = defaultReadText
 // phrase that happened to wrap in the transcript silently missed. Reading the decoded
 // text field means JSON.parse has already turned that escape into a real newline before
 // normalizePhrase (above) ever sees it.
-function messageText(record) {
+export function messageText(record) {
   const content = record.message?.content;
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -377,7 +380,10 @@ function resolveProjectFiles(repoRoot, projectsDir) {
   const direct = readTranscriptsOrFail(repoProjectDir, "project directory");
   if (direct !== null) return direct;
   const all = readTranscriptsOrFail(projectsDir, "projects root");
-  if (all === null) return [];
+  // A repo with no project directory yet is normal (handled by the fallback above). A
+  // projects root that does not exist at all is not: the transcript source is absent, and
+  // reporting an empty corpus at exit 0 is the silent swallow §9 forbids.
+  if (all === null) throw new Error(`projects root does not exist: ${projectsDir}`);
   return all.filter((f) => sessionCwdMatches(f, repoRoot));
 }
 
@@ -478,6 +484,14 @@ function main() {
     process.exit(1);
   }
 
+  const r = argv.indexOf("--record-promotion");
+  const hasRecord = r !== -1;
+
+  if (hasRecord && (hasPlan || hasCommit || hasCheckRecurrence)) {
+    console.error("dream: --record-promotion cannot be combined with another subcommand");
+    process.exit(1);
+  }
+
   const extractIdx = argv.indexOf("--extract");
   if (extractIdx !== -1) {
     try {
@@ -523,8 +537,7 @@ function main() {
     return;
   }
 
-  const r = argv.indexOf("--record-promotion");
-  if (r !== -1 && argv[r + 1]) {
+  if (hasRecord && argv[r + 1]) {
     try {
       console.log(recordPromotion(root, JSON.parse(argv[r + 1])));
     } catch (e) {
@@ -535,7 +548,14 @@ function main() {
   }
 
   if (hasCheckRecurrence) {
-    console.log(JSON.stringify(runCheckRecurrence({ repoRoot: root, projectsDir: resolveProjectsRoot() }), null, 2));
+    try {
+      console.log(
+        JSON.stringify(runCheckRecurrence({ repoRoot: root, projectsDir: resolveProjectsRoot() }), null, 2),
+      );
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
     return;
   }
 

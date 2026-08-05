@@ -18,6 +18,7 @@ import {
   hasObservations,
   listObservations,
   extractSession,
+  messageText,
 } from "../../scripts/dream.mjs";
 
 const SCRIPT = new URL("../../scripts/dream.mjs", import.meta.url).pathname;
@@ -135,12 +136,14 @@ test("planCorpus reads only this repo's own transcripts, not every project under
   assert.deepEqual(m.sessions.map((s) => s.id), ["own"]);
 });
 
-test("planCorpus tolerates a missing projects directory instead of crashing", () => {
+// A repo with no project directory yet under an *existing* projects root is normal —
+// "nothing mined here before" — and stays tolerant. (The projects root itself missing is
+// the opposite case, covered separately below: that one now fails per §9.)
+test("planCorpus tolerates a missing project directory under an existing projects root instead of crashing", () => {
   const root = repo();
-  const parent = mkdtempSync(join(tmpdir(), "dream-parent-"));
-  const missing = join(parent, "does-not-exist");
-  assert.doesNotThrow(() => planCorpus({ repoRoot: root, projectsDir: missing, since: null, cap: 100 }));
-  const m = planCorpus({ repoRoot: root, projectsDir: missing, since: null, cap: 100 });
+  const projectsDir = mkdtempSync(join(tmpdir(), "dream-parent-"));
+  assert.doesNotThrow(() => planCorpus({ repoRoot: root, projectsDir, since: null, cap: 100 }));
+  const m = planCorpus({ repoRoot: root, projectsDir, since: null, cap: 100 });
   assert.deepEqual(m.sessions, []);
 });
 
@@ -985,4 +988,95 @@ test("the manifest still carries no message text", () => {
   ]);
   const m = planCorpus({ repoRoot: root, projectsDir: proj, since: null });
   assert.ok(!JSON.stringify(m).includes("SECRET-CANARY-STRING"));
+});
+
+test("recordPromotion accepts enforcement-gap and rejects extract-to-script", () => {
+  const root = realpathSync(repo());
+  const ok = recordPromotion(root, {
+    title: "Fix dispatches must not instruct the implementer to commit",
+    promotionType: "enforcement-gap",
+    clusterSignature: "implementer instructed to commit by its own brief",
+    filesTouched: "skills/reviewing-the-branch/SKILL.md",
+    landed: "2026-08-05",
+    commit: "abc1234",
+  });
+  assert.match(ok, /docs\/devcycle\/promotions\/2026-08-05-/);
+  assert.throws(
+    () =>
+      recordPromotion(root, {
+        title: "dead type",
+        promotionType: "extract-to-script",
+        clusterSignature: "sig",
+        filesTouched: "x.md",
+        landed: "2026-08-05",
+        commit: "abc1234",
+      }),
+    /promotionType/,
+  );
+});
+
+test("--check-recurrence reports failures as dream: <message>, not a stack trace", () => {
+  const root = realpathSync(repo());
+  // A projects root that exists but is a file, not a directory: readable-path failure, which
+  // §9 requires to surface as a failure rather than an empty success.
+  const notADir = join(root, "not-a-dir");
+  writeFileSync(notADir, "x\n");
+  const r = spawnSync(process.execPath, [SCRIPT, "--check-recurrence"], {
+    cwd: root,
+    env: { ...process.env, CLAUDE_DREAM_PROJECTS: notADir },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^dream: /m);
+  assert.doesNotMatch(r.stderr, /at .*dream\.mjs:\d+/, "no raw stack trace");
+});
+
+test("--record-promotion cannot be combined with the other subcommands", () => {
+  const root = realpathSync(repo());
+  const json = JSON.stringify({
+    title: "t",
+    promotionType: "doc-edit",
+    clusterSignature: "s",
+    filesTouched: "x.md",
+    landed: "2026-08-05",
+    commit: "abc1234",
+  });
+  for (const other of [["--plan"], ["--check-recurrence"], ["--commit-checkpoint", "2026-08-05T12:00:00Z"]]) {
+    const r = spawnSync(process.execPath, [SCRIPT, "--record-promotion", json, ...other], {
+      cwd: root,
+      env: { ...process.env, CLAUDE_DREAM_PROJECTS: join(root, "projects") },
+      encoding: "utf8",
+    });
+    assert.equal(r.status, 1, `--record-promotion + ${other[0]} must be rejected`);
+    assert.match(r.stderr, /cannot be combined/);
+  }
+});
+
+test("a missing projects root fails rather than reporting an empty corpus", () => {
+  const root = realpathSync(repo());
+  const r = spawnSync(process.execPath, [SCRIPT, "--plan"], {
+    cwd: root,
+    env: { ...process.env, CLAUDE_DREAM_PROJECTS: join(root, "no-such-projects-root") },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^dream: projects root does not exist/m);
+});
+
+test("messageText: decodes string and text-block content, ignores tool blocks", () => {
+  assert.equal(messageText({ message: { content: "plain string" } }), "plain string");
+  assert.equal(
+    messageText({
+      message: {
+        content: [
+          { type: "text", text: "kept" },
+          { type: "tool_use", name: "Bash", input: { command: "dropped" } },
+          { type: "text", text: "also kept" },
+        ],
+      },
+    }),
+    "kept\nalso kept",
+  );
+  assert.equal(messageText({ message: {} }), "");
+  assert.equal(messageText({}), "");
 });
