@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.1
+
+- ci(release): make main changeable only by checked pull request
+
 ## 0.11.0
 
 - feat(dream): add dreaming across sessions (#36)

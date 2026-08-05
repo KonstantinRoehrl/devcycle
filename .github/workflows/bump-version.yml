@@ -1,4 +1,7 @@
 name: Release
+# Tags and publishes whatever version main already carries. The bump itself arrives through
+# the release PR (see `Prepare release`), so this workflow never writes to main — which is
+# what lets a ruleset require every change there to come through a checked pull request.
 on:
   push:
     branches: [main]
@@ -8,8 +11,7 @@ concurrency:
   group: release-main
   cancel-in-progress: false
 jobs:
-  bump:
-    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -17,33 +19,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5 — same pin as validate.yml
         with:
           fetch-depth: 0
-      - name: Bump version and changelog
-        id: bump
-        run: echo "version=$(node scripts/bump-version.mjs)" >> "$GITHUB_OUTPUT"
-      - name: Commit, tag, release
+
+      - name: Read the version main carries
+        id: v
+        run: echo "version=$(node -p "require('./.claude-plugin/plugin.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Tag and publish
         env:
           GH_TOKEN: ${{ github.token }}
-          V: ${{ steps.bump.outputs.version }}
+          V: ${{ steps.v.outputs.version }}
         run: |
+          # Every push to main runs this, but only a release PR changes the version — so an
+          # unchanged version means this push was not a release and there is nothing to do.
           if git rev-parse -q --verify "refs/tags/devcycle--v$V" >/dev/null; then
             echo "tag devcycle--v$V already exists — nothing to release"
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .claude-plugin/plugin.json CHANGELOG.md
-          git commit -m "chore(release): v$V [skip ci]"
-          # Branch first, tag only after the branch push lands: a tag pushed before a
-          # failed branch push leaves an orphan tag that blocks every later release.
-          n=0
-          until git push origin main; do
-            n=$((n+1))
-            if [ "$n" -ge 3 ]; then
-              echo "branch push failed after $n rebase retries — manual release repair needed"
-              exit 1
-            fi
-            git pull --rebase origin main
-          done
+          # Fails loudly on an empty section rather than publishing a release body that says
+          # nothing about what shipped.
+          node scripts/bump-version.mjs --notes-for "$V" > .release-notes.md
           git tag "devcycle--v$V"
           git push origin "devcycle--v$V"
           gh release create "devcycle--v$V" --title "devcycle v$V" --notes-file .release-notes.md
