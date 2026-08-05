@@ -177,6 +177,10 @@ Invariants:
    working-tree artifacts the reviewer reads from the checkout, not history.
    Ledger `event=committed` with the sha.
 
+**Trigger: this commit closes the wave.** When no task in the current wave remains
+undispatched, in review, or uncommitted, stop here — before forming the next wave — and
+follow ## Wave boundaries and handoff below.
+
 Green-gate red flags — if you are thinking "the report shows green", "the
 reviewer already accepted", "we're behind schedule", or "re-running is
 redundant", you are about to skip the gate. The gate is one command run.
