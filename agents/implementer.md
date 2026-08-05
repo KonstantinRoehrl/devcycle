@@ -60,6 +60,9 @@ A self-contained task brief containing:
    skip it, complete the rest of the task, report completion with the
    changed files listed, and flag the commit instruction as a contradiction
    under Deviations in your report.
+8. For `convention`-class fixes to prose, make the smallest edit that
+   resolves the finding: prefer replacing or removing wrong text over adding
+   rationale, and check for existing coverage first.
 
 ## Evidence files and report
 
