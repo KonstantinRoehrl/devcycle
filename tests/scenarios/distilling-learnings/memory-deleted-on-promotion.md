@@ -50,3 +50,40 @@ Pass criteria:
    — the pre-existing behavior is unchanged.
 
 Result: to be recorded when this scenario is run against the committed text.
+
+## Regression (two-tier disposition — conditional delete on promotions with no memory entry)
+
+Same sandbox, plus a dream artifact
+(`.devcycle/dreaming/<YYYY-MM-DD>-dream.md`) whose **Bulk** part contains one `doc-edit`
+candidate mined from a session transcript (no corresponding memory file) alongside memory
+A's promotion, and whose **Requires explicit decision** part contains memory B's
+skill-edit proposal, flagged as a `contradiction-resolution`.
+
+## Subagent prompt
+
+Same two-turn shape as above. Turn 2: confirm the bulk in one reviewed decision (adopt),
+then confirm memory B's item individually when prompted.
+
+## Pass criteria
+
+1. Both the transcript-mined `doc-edit` and memory A's promotion land from the single bulk
+   decision; memory B's `contradiction-resolution` still requires its own per-item
+   `AskUserQuestion` round and is never folded into the bulk decision.
+2. The transcript-mined `doc-edit` lands with **no** memory file deleted — its record
+   (or the run's own report) states plainly that it had no source memory entry, and that
+   this is a normal outcome, not a skipped step.
+3. Memory A's file is still deleted, exactly as in the base scenario above — a landed
+   promotion that *does* have a source memory entry still deletes exactly that one entry,
+   never a different one.
+4. Memory B's file is deleted only once its own per-item confirmation lands, and only if a
+   memory entry exists for it — the conditional-delete contract governs the escalated set
+   identically to the bulk.
+
+## Baseline (red)
+
+Not yet run — same credentialing blocker as the base scenario above.
+
+## Result (green)
+
+Not yet run — same blocker. What would prove it: the two-turn run above, checked against
+criteria 1-4, with the sandbox and the dream artifact inspected on disk between turns.

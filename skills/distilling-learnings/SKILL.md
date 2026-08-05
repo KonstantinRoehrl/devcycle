@@ -55,14 +55,28 @@ pipeline's `.devcycle/state.md`, and read/rewritten only by this skill.
 
    (or `/devcycle:doctor drift <path>` as the user-facing form) — reusing doctor's
    drift engine rather than re-implementing stale-key detection.
-3. **Batch the proposed promotions.** `AskUserQuestion`, 1-4 at a time: each memory or
-   dream candidate → proposed doc/skill edit, and each drift finding → a concrete
-   stale-line fix. Each candidate carries its type — `doc-edit`, `skill-edit`, or
-   `contradiction-resolution`. A `contradiction-resolution` is never resolved by
-   recency; it requires an explicit human choice between the two preserved sides. A
-   candidate flagged as resembling a secret is surfaced with that flag on top of the
-   confirm/skip choice. Never more than 4 in one batch; never proceed on an item the
-   user has not confirmed.
+3. **Dispose of the dream artifact in two tiers.** The artifact
+   (`.devcycle/dreaming/<YYYY-MM-DD>-dream.md`) is already partitioned by
+   `devcycle:dreaming-across-sessions` into a **Bulk** part (ordinary `doc-edit`,
+   `skill-edit`, and `enforcement-gap` candidates) and a **Requires explicit decision**
+   part (every sensitive-flagged candidate and every `contradiction-resolution`) — the
+   partition is authored by the dream, never chosen here.
+
+   - **Bulk**: one reviewed decision covers the whole part — adopt, discard, or
+     adopt-with-exclusions. Exclusions are expressed by editing the artifact itself, so
+     the reviewed document and the exclusion list are the same object.
+   - **Requires explicit decision**: per-item `AskUserQuestion` confirmation, 1-4 at a
+     time. A candidate is never moved out of this set to skip its round. A
+     `contradiction-resolution` is still never resolved by recency; it requires an
+     explicit human choice between the two preserved sides.
+
+   This changes disposition *granularity*, never the *existence* of confirmation: the
+   bulk decision is itself a review of the whole document, and nothing is ever
+   auto-applied. Drift findings from step 2 are not dream candidates and are not part of
+   this partition; they keep their own per-item `AskUserQuestion` batching, 1-4 at a
+   time, each → a concrete stale-line fix. On the step 0 dream-failure fallback (raw 1:1
+   memory-entry batching, no artifact to partition), every candidate stays at that same
+   per-item batching.
 4. **Apply confirmed edits.** Before writing anything, follow
    `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s Committing rule: if the checkout is on
    the default branch or an integration branch, create a topic branch first. This skill
@@ -91,10 +105,15 @@ pipeline's `.devcycle/state.md`, and read/rewritten only by this skill.
    what lands in history, not this skill (same guard `skills/auditing-a-repo/SKILL.md` and
    `skills/onboarding-a-repo/SKILL.md` apply to their own committed artifacts). Otherwise
    commit it under an explicit pathspec alongside the edit it describes.
-5. **Delete the source memory on promotion.** Reusing the existing convention verbatim
-   (DESIGN.md:248: "once encoded, corresponding personal memories... are deleted") — no
-   new deletion convention invented. A memory whose promotion the user declined is left
-   in place, untouched.
+5. **Delete the source memory when the promotion has one.** Reusing the existing
+   convention verbatim (DESIGN.md:248: "once encoded, corresponding personal memories...
+   are deleted") — no new deletion convention invented. Most dreaming candidates are
+   mined from session transcripts and carry no source memory entry at all; for those,
+   deleting nothing is the normal outcome, not a skipped step. The contract stays
+   narrow either way: a landed promotion never deletes a memory entry it did not come
+   from — judging that one entry supersedes another is exactly where a wrong call
+   silently destroys a fact. A memory whose promotion the user declined is left in
+   place, untouched.
 6. **Rewrite the checkpoint** — `last-run:` to now, `last-reviewed-devcycle-version:` to
    the installed `plugin.json` version.
 
