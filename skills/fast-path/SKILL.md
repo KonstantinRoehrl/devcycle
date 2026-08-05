@@ -39,18 +39,10 @@ Report as `${CLAUDE_PLUGIN_ROOT}/references/output.md` requires.
    the normal pipeline at whichever stage the discovery calls for (usually scoping
    or brainstorm), updating `.devcycle/state.md` accordingly. Never push a
    non-trivial change through the fast path just because it is already in flight.
-4. **Commit** with a Conventional Commit subject, scoped by an explicit pathspec
-   over the change's own source files — `git commit -- <the files step 2
-   touched>`, never `git add -A`, never `commit -a`, and never a bare
-   `git commit`, which ships whatever the checkout already had staged when the
-   fast path started. Run `git add -N` on any file the change creates before
-   committing, or the pathspec matches nothing for it and the commit aborts. The
-   pathspec names source files and nothing else: step 2's
-   `.devcycle/evidence/fast-*.txt` stay OUT of it — target repos are told to
-   gitignore `.devcycle/` (README), and naming an ignored, untracked path in a
-   pathspec aborts the whole commit with "pathspec did not match any file known
-   to git". Evidence files are working-tree artifacts step 5's reviewer reads
-   from the checkout, not history.
+4. **Commit** with a Conventional Commit subject, scoped per
+   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit" — read
+   it there and follow it. Run `git add -N` on any file the change creates before
+   committing, or the pathspec matches nothing for it and the commit aborts.
 5. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent with
    the diff, the two evidence-file paths from step 2, and — because the short
    path produces no implementer report to carry them — the declared evidence

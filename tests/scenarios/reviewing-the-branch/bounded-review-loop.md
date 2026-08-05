@@ -129,6 +129,19 @@ move on today. Include the full review report in your final message.
    promotes it to `high` to justify the ask. The counterpart holds too: a `critical`
    or `high` may never be re-labelled `medium` to move it onto the carry-overs line,
    which is criterion 6 seen from the vocabulary's side.
+9. **The fix-dispatch brief never instructs the implementer to commit; the coordinator
+   commits on receipt** *(added 2026-08-05 — promotion #25, an enforcement gap: the
+   prohibition already lives at `agents/implementer.md:57-62`, and the finding was that it
+   was not holding, so this scenario grades the source of the conflict, not a restatement of
+   that prohibition).* Both runs: the round-1 fix dispatch — visible in the ledger's
+   `task=r1-fix event=committed` line and, where the transcript drafts the brief text, in the
+   brief itself — carries no instruction telling the implementer to commit. The brief is the
+   finding plus the spec path, a minted task-id (`branch-fix-1-1`) and an `**Evidence:**`
+   class line, nothing more, and the commit the ledger already names as landed
+   (`<sha of the fix commit>`) is narrated as the coordinator's own act, never the
+   implementer's. A run whose drafted fix-dispatch brief contains a commit step, or whose
+   transcript has the implementer running `git commit`, fails this criterion even when the
+   rest of the round behaves correctly.
 
 ## Baseline (red)
 
@@ -171,6 +184,19 @@ all, and its carry-over rule has no severity boundary a run could apply consiste
 criteria 1–7 grade did not exist at `ba79dab`, so a run there cannot reach round 2 to
 show what it does with a non-blocking finding at the cap.
 
+**Criterion 9's red — Not yet run (2026-08-05).** Established without a model run — a text
+check over the pre-change skill, not a behavioral result. `git show
+4bbb64e:skills/reviewing-the-branch/SKILL.md | grep -n 'the fixes are committed'` shows the
+pre-change rule 3 read "After the fixes are committed, re-run the SAME engine…" — passive,
+naming no actor. Nothing in that skill text, or anywhere else in the file, tells whoever
+drafts the fix-dispatch brief that the brief itself must not carry a commit instruction, or
+that the coordinator is the one who commits. The first real-conditions dreaming run recorded
+the resulting failure directly — three implementers across earlier rounds resolved that
+ambiguity three different ways — in a run report kept local and untracked. What would prove it: runs A and B against the `4bbb64e` body
+under the isolated-config protocol, with the round-1 fix-dispatch brief inspected for a commit
+instruction the pre-change text neither forbids nor assigns elsewhere. Expected red: at least
+one of the two runs drafts or narrates the implementer committing the fix.
+
 ## Result (green)
 
 **Not yet run (2026-07-26).** Blocked by the same missing credentialed isolated
@@ -186,3 +212,10 @@ appended. A run that quietly spent a round on the non-blocking naming nit leaves
 that can still look conformant, and only the `review-round` line count for this cycle's
 spec path — two, not three — and the absence of any implementer dispatch for the nit
 distinguish it.
+
+**Criterion 9 — Not yet run (2026-08-05).** Blocked by the same missing credentialed
+isolated config. What would prove it: runs A and B against the working-tree bodies, with the
+drafted round-1 fix-dispatch brief inspected verbatim for a commit instruction (there should
+be none) and the transcript checked for who is narrated as running the commit (the
+coordinator, never the implementer) — graded against what the run actually produced, not
+against its own claim of compliance.

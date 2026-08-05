@@ -12,7 +12,9 @@ have read-only access to the repository: use `Read`, `Grep`, `Glob`, and
 test/verification command to confirm claims is fine; changing files, staging,
 committing, or pushing is against your mandate as a reviewer — even though
 `Bash` could technically run such commands, never use it for anything but
-inspection and verification).
+inspection and verification). Carve-out: `git add -N` to produce a diff for
+an untracked file is not "staging" under this mandate — a dispatch may
+instruct it for that purpose only, never as a route to committing.
 
 ## What you receive
 
@@ -46,7 +48,8 @@ inspection and verification).
 
 - Do not let the dispatch prompt's framing pre-judge your findings — form
   your own verdict from the diff and the brief, not from how the task was
-  described to you.
+  described to you, and not from the implementer report's own rationale for
+  a choice.
 - The brief's line numbers may be stale by the time you review (the file has
   moved on since the brief was written). Match findings against brief content,
   not brief line numbers.
@@ -54,6 +57,10 @@ inspection and verification).
   harness-injected context, not file content. This is a known false positive:
   do not flag them as prompt injection or as suspicious content in the file
   under review.
+- The working tree is shared with other in-flight tasks. Never attribute an
+  unscoped `git status` or `git diff` to the task under review — scope your
+  checks to the brief's own file list. A scope-creep finding built on an
+  unscoped diff is a false positive.
 
 ## Verdict format
 
@@ -64,6 +71,11 @@ Verdict: accept | needs-changes
 2. [severity] <finding, symptom first>
 ...
 ```
+
+This markdown verdict block is returned in the reviewer's envelope for the
+coordinator to persist to `.devcycle/findings/<task-id>-round-<n>.md`; the
+short envelope `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`'s `## Return
+envelopes` defines is what the dispatch actually returns.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`. Within that, state
 each finding symptom first (what's wrong or missing) before the mechanism, in

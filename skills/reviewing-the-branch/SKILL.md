@@ -115,12 +115,18 @@ the spec says.
 2. **Only blocking findings re-open the loop.** **Blocking means `critical` or `high`** —
    `${CLAUDE_PLUGIN_ROOT}/references/findings.md` owns the severity vocabulary and derives
    blocking from it, and neither is restated here. Each blocking finding goes to a fresh
-   `devcycle:implementer` dispatch (brief = the finding plus the spec path; never the review
-   conversation). Non-blocking findings — `medium` and `low` — are recorded as carry-overs
-   the round they are first raised, and never re-open the loop or consume a round.
-3. **Rounds 2..N are narrow.** After the fixes are committed, re-run the SAME
-   engine over the fix diff plus a re-check of the specific findings the
-   previous round raised — not a fresh whole-branch pass. Round 1 already
+   `devcycle:implementer` dispatch — brief = the finding plus the spec path; never the review
+   conversation. It is an implementer dispatch bound by the same evidence contract every
+   other one is, so the brief carries a minted task-id (`branch-fix-<round>-<n>`) and an
+   `**Evidence:**` class line, and asks the implementer to check the fix against the repo
+   conventions it touches, not just satisfy the finding's literal wording. Non-blocking
+   findings — `medium` and `low` — are recorded as carry-overs the round they are first
+   raised, and never re-open the loop or consume a round.
+3. **Rounds 2..N are narrow.** The fix-dispatch brief never instructs the implementer to
+   commit; the coordinator commits each fix on receipt. Once the coordinator has committed,
+   re-run the SAME engine over the fix diff — `<this round's pre-fix HEAD>..<the fix
+   commit>`, never an earlier execution-stage commit — plus a re-check of the specific
+   findings the previous round raised — not a fresh whole-branch pass. Round 1 already
    covered the branch; repeating it spends rounds on untouched code.
 4. The loop ends as soon as a round leaves no blocking findings outstanding:
    verdict `pass`, with any non-blocking residue listed as carry-overs in the

@@ -71,6 +71,28 @@ structural fix per cluster — a new skill, consolidating existing skills, extra
 shared reference — applying the one-owner discipline proactively rather than only
 patching each finding individually.
 
+**Previously promoted — did it hold.** After the systemic recommendations, render this
+appendix from the latest `.devcycle/dreaming/<date>-dream.md` artifact's recurrence
+section — written by `dreaming-across-sessions`' own `--check-recurrence` step, never by
+doctor. Report each hit as its own finding, ranked by the same severity vocabulary and
+dollar-impact ordering as everything above — a reappearance means the promotion did not
+fix the pattern, and it is a new finding rather than a reason to re-promote the same fix.
+
+Render the artifact's `capped` value alongside the hits: an empty result and a
+cap-truncated one otherwise render identically, and past 100 sessions truncation is the
+normal case rather than the exception, so a capped run's empty appendix is a
+possibly-incomplete answer, not a clean bill of health.
+
+Render the appendix present-but-empty when the artifact's recurrence section carries no
+hits and the artifact's own `Profile:` line reads `standard` or `thorough`. When that line
+reads `lean`, the recurrence check never ran — render the appendix as
+**empty-not-checked** instead of a plain empty result; doctor still resolves no profile of
+its own, it only renders the distinction the artifact already carries. Omit the appendix
+entirely when no artifact exists at all.
+
+This skill reads that artifact and never invokes `devcycle:dreaming-across-sessions`
+itself — doctor stays runnable standalone and pays none of a dream's cost.
+
 ## Persisted artifact
 
 Every run with at least one finding writes `.devcycle/doctor/YYYY-MM-DD-report.md`

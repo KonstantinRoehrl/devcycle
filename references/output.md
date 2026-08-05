@@ -9,3 +9,7 @@ agent that needs this names this file and does not restate it.
 > had nothing to report about it.
 
 This is unconditional: the profile sizes the evidence tail, not the discipline.
+
+Any command transcript in a report or finding must be real captured output, never narration
+typeset to look like output: paste the real output with its exit status, or drop the
+transcript.

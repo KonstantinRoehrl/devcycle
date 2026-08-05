@@ -3,6 +3,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Lets validation be re-run without inventing a commit. A squash-merge into an
+  # integration branch can leave that branch's tip with no check suite at all, and
+  # without this there is no way to ask for one.
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:

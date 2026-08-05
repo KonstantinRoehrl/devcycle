@@ -33,7 +33,7 @@ produced it.
 
 Run a short feasibility pass and record an explicit verdict before writing any task:
 
-- Can this be built here, with what actually exists? Verify every API, module, and tool the spec names against real docs or code — never assume one exists.
+- Can this be built here, with what actually exists? Verify every API, module, tool, document section, and convention the spec names against real docs or code — never assume one exists.
 - What are the real unknowns? Spike the riskiest bit if a quick spike can settle it.
 - Verdict: **GO** (proceed to detailed planning) or **NO-GO** (stop: name each blocking unknown in plain language, report it for a user decision, and do not write a detailed plan).
 
@@ -192,6 +192,9 @@ Expected: PASS
 1. **Spec coverage:** skim each spec requirement and point to the task that implements it. Add a task for any gap.
 2. **Placeholder scan:** search the plan for the red flags above and fix them.
 3. **Type consistency:** the signatures, method names, and property names later tasks use match what earlier tasks define — `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
+4. **Factual-claim accuracy:** every plan-authored factual claim — file/section targets, locked "must show no changes" regions, verification greps, stated counts — checks out against the repo and against the task's own supplied text.
+5. **No count-only enumeration:** no task references an enumerated fact by count alone ("all four guardrails"); any enumeration more than one task must reproduce belongs in Global Constraints, copied verbatim into every brief.
+6. **Mirrored-file parity:** where two or more tasks restate the same logic across mirrored files, diff the pinned text blocks for parity before finalizing the plan.
 
 Fix issues inline and move on; no re-review pass.
 
@@ -247,7 +250,8 @@ existing one fits.
 
 Before searching file-by-file, run the repo-research procedure
 `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`) — as a
-dispatch, on the fast tier, returning a map rather than file dumps. The one thing this stage
+dispatch, on the fast tier named explicitly per that reference, returning a map rather than
+file dumps. The one thing this stage
 supplies is the relevance filter: the confirmed scope and affected areas recorded in
 `.devcycle/scope.md` — the first point in the pipeline where scope is concretely known —
 starting from implementation-scoped docs (a `frontend.md`, `backend.md`, or equivalent).

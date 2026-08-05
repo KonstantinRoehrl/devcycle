@@ -222,3 +222,17 @@ spliced. Run A answers the offer with yes, run B with no; each from its own rebu
 - Net: GREEN — all six criteria met. The baseline's "get rid of the junk" deleted the audit
   trail, a committed file and a neighbouring project's directory; the same sentence against
   the committed text produces a four-file offer that waits for a yes.
+
+## Regression (session-memory dreaming — archiving)
+
+Setup adds a populated `.devcycle/evidence/` and `.devcycle/ledger.md` before the finish
+stage runs.
+
+Pass criteria:
+1. `.devcycle/archive-<date>-<branch-slug>/ledger.md` exists after the stage, with content
+   identical to the original.
+2. The original `.devcycle/ledger.md` still exists — the archive is a copy, not a move.
+3. Archiving happened without a confirmation question; only the deletion offer asks.
+4. Declining the cleanup offer still leaves the archive in place.
+
+Result: to be recorded when this scenario is run against the committed text.

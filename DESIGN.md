@@ -222,7 +222,7 @@ gated by `userConfig.crossModelReview`.
 
 - `profile` (added 2026-07-26) is the preset behind the rest: every other option keeps its
   own shipped default, and any option left at that default takes the profile's column value
-  instead (matrix and resolution order in §15.2 and `references/config.md`). It is what the
+  instead (matrix and resolution order in `references/config.md`). It is what the
   first-run walkthrough asks about — one question, not the four-knob batch, which stays
   available behind a *customize* answer.
 - The model options are four flat string keys — the plugin manifest's `userConfig` schema
@@ -342,7 +342,7 @@ Version handling on GitHub is enforced by CI, not discipline alone:
 
 ### 15.1 The reference layer: one owner per convention
 
-`references/` holds ten plain markdown files, each the sole owner of one cross-cutting
+`references/` holds twelve plain markdown files, each the sole owner of one cross-cutting
 convention:
 
 | File | Owns |
@@ -357,6 +357,8 @@ convention:
 | `checklist.md` | the on-device checklist contract: paths, item shape, dimensions, and the `(auto)` boundary |
 | `quality-criteria.md` | what any review or plan measures against: the criteria catalog, sourcing precedence, the seed index, and the forward-use rules |
 | `findings.md` | how a finding is expressed: severity with blocking derived, the core and document field sets, evidence discipline, ordering, the machine shape |
+| `commit-convention.md` | how a devcycle-driven commit's subject matches the target repo's own conventions, derived once before wave 1's first commit |
+| `config-changelog.md` | every `userConfig` addition, rename, and deprecation, and the version each landed in |
 
 A consumer names one — "Read `${CLAUDE_PLUGIN_ROOT}/references/<name>.md` and follow it" —
 and does not restate its content.
@@ -380,20 +382,9 @@ they cost nothing until a skill in flight names one and reads it.
 ### 15.2 Native engines vs upstream overlays, keyed to `profile`
 
 `profile` ∈ `lean | standard | thorough`, default `standard`. It is one preset over the
-knobs that size a run:
-
-| | `lean` | `standard` | `thorough` |
-| --- | --- | --- | --- |
-| planning / execution engine | devcycle-native compact | devcycle-native compact | upstream overlays |
-| branch review engine | `single` | `single` | `panel` |
-| on-device gate | `auto-ok` | `human-required` | `human-required` |
-| evidence tail in reports | 10 lines | 20 lines | 50 lines |
-| branch-review round cap | 2 | 3 | 5 |
-| audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
-
-Resolution order (binding, stated once in `config.md`): an explicitly configured knob wins
-verbatim; otherwise the profile's column value applies; a `profile` that is unset or outside
-the three reads as `standard`.
+knobs that size a run. `references/config.md` is the single owner of the profile matrix and
+its resolution order — see it there rather than a second copy here, per §15.1's own
+one-owner invariant applied to this file.
 
 **The engine split.** Two stages take it, and each owns its own switch rather than being
 told from `/cycle`:
@@ -458,8 +449,8 @@ Two properties carry the stage:
   does not appear in the document at all, and a coverage statement names what was not read,
   so a partial audit cannot read as a complete one.
 
-Only depth is profile-conditional (the matrix row above); the interview and the evidence
-rule are not.
+Only depth is profile-conditional (the matrix row in `references/config.md`); the interview
+and the evidence rule are not.
 
 `/devcycle:audit` exposes the same skill standalone, and is deliberately **not** a pipeline
 stage: it neither creates nor requires `.devcycle/state.md`, leaves any in-flight cycle's
