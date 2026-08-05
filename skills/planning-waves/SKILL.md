@@ -250,7 +250,8 @@ existing one fits.
 
 Before searching file-by-file, run the repo-research procedure
 `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`) — as a
-dispatch, on the fast tier, returning a map rather than file dumps. The one thing this stage
+dispatch, on the fast tier named explicitly per that reference, returning a map rather than
+file dumps. The one thing this stage
 supplies is the relevance filter: the confirmed scope and affected areas recorded in
 `.devcycle/scope.md` — the first point in the pipeline where scope is concretely known —
 starting from implementation-scoped docs (a `frontend.md`, `backend.md`, or equivalent).

@@ -90,7 +90,8 @@ how far steps 2–3 go (see Depth below). Report as
 
 2. **Research.** Run the repo-research procedure
    `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`) — as a
-   dispatch, on the fast tier — with the confirmed audit criteria as its relevance filter:
+   dispatch, on the fast tier named explicitly per that reference — with the confirmed audit
+   criteria as its relevance filter:
    what the confirmed criteria and the confirmed scope call for, never the original
    request's wording.
 
