@@ -77,24 +77,21 @@ section — written by `dreaming-across-sessions`' own `--check-recurrence` step
 doctor. Report each hit as its own finding, ranked by the same severity vocabulary and
 dollar-impact ordering as everything above — a reappearance means the promotion did not
 fix the pattern, and it is a new finding rather than a reason to re-promote the same fix.
+
+Render the artifact's `capped` value alongside the hits: an empty result and a
+cap-truncated one otherwise render identically, and past 100 sessions truncation is the
+normal case rather than the exception, so a capped run's empty appendix is a
+possibly-incomplete answer, not a clean bill of health.
+
 Render the appendix present-but-empty when the artifact's recurrence section carries no
-hits; omit it entirely when no artifact exists at all.
+hits and the artifact's own `Profile:` line reads `standard` or `thorough`. When that line
+reads `lean`, the recurrence check never ran — render the appendix as
+**empty-not-checked** instead of a plain empty result; doctor still resolves no profile of
+its own, it only renders the distinction the artifact already carries. Omit the appendix
+entirely when no artifact exists at all.
 
 This skill reads that artifact and never invokes `devcycle:dreaming-across-sessions`
 itself — doctor stays runnable standalone and pays none of a dream's cost.
-
-**Recurring scratch code (detection only).** When the latest
-`.devcycle/dreaming/<date>-dream.md` carries scratch-code findings — verification scripts,
-fixtures, startup sequences, or one-off scripts re-derived across sessions without ever
-becoming committed code — render them here, ranked by estimated re-derivation cost the way
-cost findings already are. Omit the section entirely when no artifact exists or it carries
-none.
-
-Nothing is extracted or promoted from these: they exist to answer whether the recurrence is
-frequent enough to justify building an extraction path at all. That pass runs only at the
-`thorough` profile of the dream that wrote the artifact — doctor never resolves a profile
-of its own, it only renders what the artifact carries — so a report reading a `lean` or
-`standard` dream's artifact is expected to have this section absent.
 
 ## Persisted artifact
 
