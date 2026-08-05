@@ -48,7 +48,8 @@ instruct it for that purpose only, never as a route to committing.
 
 - Do not let the dispatch prompt's framing pre-judge your findings — form
   your own verdict from the diff and the brief, not from how the task was
-  described to you.
+  described to you, and not from the implementer report's own rationale for
+  a choice.
 - The brief's line numbers may be stale by the time you review (the file has
   moved on since the brief was written). Match findings against brief content,
   not brief line numbers.
@@ -71,8 +72,9 @@ Verdict: accept | needs-changes
 ...
 ```
 
-This markdown verdict block is what goes into the findings file; the short
-envelope `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`'s `## Return
+This markdown verdict block is returned in the reviewer's envelope for the
+coordinator to persist to `.devcycle/findings/<task-id>-round-<n>.md`; the
+short envelope `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`'s `## Return
 envelopes` defines is what the dispatch actually returns.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`. Within that, state
