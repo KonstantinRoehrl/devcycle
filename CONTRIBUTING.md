@@ -122,13 +122,23 @@ deleting its entry in the same commit.
 
 ## Releasing
 
-A release is a `main` ← `dev` PR, squash-merged the same way as any other PR above. After
-every release, merge `main` back into `dev` — on that merge-back, `.claude-plugin/plugin.json`
-either keeps `main`'s bumped version or the automated bump counter resets. A `CHANGELOG.md`
-fix made on `dev` does not clean up `main`: squash merges leave the individual commits out of
-the merge base, so those entries are absent from `main` and need their own PR against it.
-`[skip ci]` added only to a PR title has no effect on a single-commit PR: GitHub's
-squash-merge defaults the squash subject to that lone commit's own message, not the PR
-title, so a `[skip ci]` that lives only in the title never reaches the commit CI reads.
-`main` is never pushed to directly, and the version is never hand-edited; both are owned
-by the release PR and its automation.
+Run the **Prepare release** workflow from `dev`, giving it the release PR title. The title is
+the whole input: it must be a Conventional Commit, its type sets the bump (`feat` → minor,
+`fix`/`perf` → patch, `!` or a `BREAKING CHANGE:` trailer → major), and it becomes both the
+`CHANGELOG.md` entry and — because the PR is squash-merged — `main`'s commit subject. A title
+outside the convention is refused rather than treated as a patch, since it would ship no bump.
+
+Prepare commits `chore(release): prepare vX.Y.Z` to `dev` and opens the `main` ← `dev` PR.
+Squash-merge it **with that same title** once checks pass. `Release` then tags
+`devcycle--vX.Y.Z` and publishes the GitHub release from that version's CHANGELOG section.
+After every release, merge `main` back into `dev`.
+
+**Nothing pushes to `main`.** The version bump arrives inside the release PR, so `main` only
+ever changes through a checked pull request — which is what lets a ruleset require exactly
+that. Never hand-edit the version.
+
+Two consequences of squash-merging worth remembering. A `CHANGELOG.md` fix made on `dev` does
+not clean up `main`: the individual commits stay out of the merge base, so those entries are
+absent from `main` and need their own PR against it. And no ref-range on `dev` can tell you
+what is unreleased — `main..dev` reports long-shipped work as new — which is why the release
+notes come from the PR title rather than from a commit range.

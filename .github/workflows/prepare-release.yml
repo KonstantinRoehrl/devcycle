@@ -1,0 +1,80 @@
+name: Prepare release
+# Stages a release on dev: bumps the version, writes the CHANGELOG entry, and opens the
+# dev -> main PR. The bump travels in that PR because nothing may push straight to main.
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: 'Release PR title — a Conventional Commit; its type sets the version bump (feat -> minor, fix -> patch, ! -> major)'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Refuse to prepare a release from anything but dev
+        run: |
+          # The dispatch ref is chooseable in the UI; the checkout above pins dev, so a run
+          # started elsewhere would silently stage the wrong tree without this.
+          if [ "${{ github.ref_name }}" != "dev" ]; then
+            echo "Run this workflow from dev — got '${{ github.ref_name }}'."
+            exit 1
+          fi
+
+      - name: Bump version and changelog
+        id: bump
+        env:
+          TITLE: ${{ inputs.title }}
+        run: echo "version=$(node scripts/bump-version.mjs --subject "$TITLE")" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to reuse a released version
+        env:
+          V: ${{ steps.bump.outputs.version }}
+        run: |
+          # An already-published tag means the bump landed on a stale plugin.json; pushing
+          # on would open a PR whose merge could never be tagged.
+          if git rev-parse -q --verify "refs/tags/devcycle--v$V" >/dev/null; then
+            echo "tag devcycle--v$V already exists — dev's plugin.json is behind main"
+            exit 1
+          fi
+
+      - name: Commit the bump to dev and open the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ inputs.title }}
+          V: ${{ steps.bump.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .claude-plugin/plugin.json CHANGELOG.md
+          git commit -m "chore(release): prepare v$V"
+          n=0
+          until git push origin dev; do
+            n=$((n+1))
+            if [ "$n" -ge 3 ]; then
+              echo "push to dev failed after $n rebase retries"
+              exit 1
+            fi
+            git pull --rebase origin dev
+          done
+          gh pr create --base main --head dev --title "$TITLE" \
+            --body "Release **v$V**, staged by \`Prepare release\`.
+
+          \`.claude-plugin/plugin.json\` and \`CHANGELOG.md\` are already bumped in this PR, so
+          merging it needs no push to \`main\`. On merge, \`Release\` tags \`devcycle--v$V\` and
+          publishes the GitHub release from the CHANGELOG section.
+
+          Squash-merge with this exact title — it becomes main's commit subject."
