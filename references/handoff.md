@@ -57,6 +57,7 @@ column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, 
 | branch-review → on-device | Fresh session | checklist path, branch | everything else |
 | fast-path → finish | Clear + `/devcycle:continue` | branch, what changed | the implementation conversation |
 | sweep → finish | Clear + `/devcycle:continue` | branch, sweep report path | per-file sweep output |
+| on-device → finish | Clear + `/devcycle:continue` | checklist path, verified items | on-device transcript |
 | finish → (end) | Continue | — | — |
 
 A reviewer that watched the code being written inherits the implementer's assumptions, which is

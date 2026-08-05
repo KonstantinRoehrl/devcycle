@@ -26,8 +26,8 @@ review depth and the on-device gate by their stages).
    Where they land depends on whether the profile matrix (below) covers the knob:
    - Profile-covered — the branch review engine (`reviewDepth`), the on-device
      gate (`onDeviceGate`), the evidence tail, the branch-review round cap, the
-     audit depth, and the planning/execution engine choice: the profile's column
-     value.
+     audit depth, the dreaming depth, and the planning/execution engine choice:
+     the profile's column value.
    - Not profile-covered — `gitPolicy`, `crossModelReview`, and the `*Model`
      knobs (whose unset value is `auto`, derived per the model-tier rules
      below): that knob's own documented default.
@@ -50,9 +50,16 @@ review depth and the on-device gate by their stages).
 | evidence tail in reports | 10 lines | 20 lines | 50 lines |
 | branch-review round cap | 2 | 3 | 5 |
 | audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
+| dreaming depth | memory store only | + archives / findings / ledgers + user-correction turns | + raw transcripts |
 
 Which column applies, and when a knob overrides it, is the resolution order above —
 this table supplies the values, not the rule for choosing them.
+
+The dreaming depth column controls how deep into the corpus a run mines, staged densest signal
+first: **memory → archives/findings/ledgers → user-correction turns → raw transcript text**.
+Gating is by profile, never by token budget or a signal heuristic — a budget gate would make
+coverage nondeterministic and destroy the marginal-vs-first-run comparison the measurement gate
+depends on.
 
 **Never profile-conditional:** the state file, handoff blocks, evidence classes, the
 coordinator's green gate, the `gitPolicy` clamps, branch discipline, the one-`task-reviewer`
@@ -76,7 +83,12 @@ model id written here, because ids in skill prose rot as models change:
 - **session tier** — dispatch with NO model override, so the subagent
   inherits this coordinator session's own model: the strongest model the
   user has already sanctioned, tracking model generations without this
-  skill naming any.
+  skill naming any. This only works when the agent definition itself carries
+  no `model:` frontmatter key — an omitted dispatch-time override resolves to
+  the agent definition's own frontmatter model when it has one, and only
+  falls through to the caller's model when the definition names none. The
+  session tier therefore requires every agent definition it dispatches to be
+  free of a `model:` key.
 - **fast tier** — the newest fast/small Claude model available to this
   session (the current Sonnet-class generation). If no such id can be
   resolved with confidence, fall back to the session tier — a stronger

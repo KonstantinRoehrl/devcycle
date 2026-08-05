@@ -562,7 +562,7 @@ export function formatReport(summaries) {
 
 // Recursively collects .jsonl transcript files under dir. Returns null when dir
 // cannot be read at all (missing or not a directory).
-function findTranscriptFiles(dir) {
+export function findTranscriptFiles(dir) {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -579,7 +579,7 @@ function findTranscriptFiles(dir) {
 }
 
 // <slug>/<session>/subagents/agent-<id>.jsonl -> <session>; <slug>/<session>.jsonl -> <session>.
-function owningSession(file) {
+export function owningSession(file) {
   const parts = file.split(sep);
   const i = parts.lastIndexOf("subagents");
   return i > 0 ? parts[i - 1] : basename(file, ".jsonl");
@@ -587,7 +587,7 @@ function owningSession(file) {
 
 // Malformed JSON lines are skipped, not fatal — transcripts are appended live
 // and the last line may be partial.
-function readRecords(file) {
+export function readRecords(file) {
   let text;
   try {
     text = readFileSync(file, "utf8");
@@ -606,7 +606,7 @@ function readRecords(file) {
   return records;
 }
 
-function inWindow(timestamp, since, until) {
+export function inWindow(timestamp, since, until) {
   if (!since && !until) return true;
   if (!timestamp) return false;
   const t = new Date(timestamp).getTime();
@@ -718,4 +718,4 @@ function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

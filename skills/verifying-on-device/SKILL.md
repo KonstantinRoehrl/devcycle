@@ -69,8 +69,9 @@ its model already exist by the time this text is read), so the recommendation tr
 producer-side: the branch-review handoff carries a `Start the fresh session on <model>`
 line, resolved from `walkthroughModel` per
 `${CLAUDE_PLUGIN_ROOT}/references/config.md`. When that knob derives rather than pins, the
-walkthrough takes the fast tier — it is interview mechanics, and per-task derivation buys
-nothing here.
+walkthrough takes the fast tier, named explicitly per
+`${CLAUDE_PLUGIN_ROOT}/references/delegation.md` — it is interview mechanics, and per-task
+derivation buys nothing here.
 
 Interview rule: **ONE question per checklist item, never batched.** This is a deliberate
 exception to devcycle's batched-interview standard — findings quality drops when items are

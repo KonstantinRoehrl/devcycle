@@ -84,11 +84,11 @@ its own `CLAUDE.md` stub, in addition to the root file.
    `Test:` line above) — sufficient for `devcycle:executing-waves`' green gate and this
    repo's own CI to find; no separate state file.
 
-5. **Commit the scaffold**, under an explicit pathspec naming exactly the files this
-   skill wrote (root and any per-package `CLAUDE.md`) — never `git add -A`, never a bare
-   `git commit`: the scaffold is the only thing this run authored. If `git check-ignore`
-   covers a written path, write it and skip the commit for that file; the repo's own
-   ignore rules decide.
+5. **Commit the scaffold**, scoped per
+   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit" — read
+   it there and follow it: the scaffold (root and any per-package `CLAUDE.md`) is the only
+   thing this run authored. If `git check-ignore` covers a written path, write it and skip
+   the commit for that file; the repo's own ignore rules decide.
 
 ## Entry point
 
