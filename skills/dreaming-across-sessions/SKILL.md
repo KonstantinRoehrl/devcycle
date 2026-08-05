@@ -85,6 +85,16 @@ coordinator's context stays flat however large the corpus grows. A slice that al
 has an observation file is not re-mined, which is what makes an interrupted run
 resumable and a marginal run cheap.
 
+After writing, each dispatch verifies its own file through the engine — never by
+re-reading it itself:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --check-observations <slice-id>
+```
+
+A nonzero exit means the write is missing, truncated, or malformed (an interrupted
+dispatch's own failure mode); redo the write before reporting the count back.
+
 **Which slices, by profile.** A slice is not only a session, and the memory store is
 not optional:
 
@@ -111,9 +121,17 @@ is not a saving. Cost is governed by corpus depth now, not by tier.
 A **single** dispatch reading the **full** observation store — not one slice of it —
 **at the caller's tier**: this is genuine judgement, and the only stage at which
 ≥2-session evidence and cross-slice contradiction detection are possible at all. It
-groups records by `subject`. It also reads `docs/devcycle/promotions/` and drops any
-candidate whose subject matches a landed `cluster-signature`, so a durable store never
-re-proposes work that already landed.
+groups records by `subject`. For each resulting group, run the engine's suppression
+check on that group's `subject` and drop the candidate when it answers `true`, so a
+durable store never re-proposes work that already landed:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --check-suppressed "<subject>"
+```
+
+stdout is a single JSON line, `{"suppressed": true}` or `{"suppressed": false}` — never
+the subject or a landed cluster-signature, since either would land in this session's
+own transcript and self-seed as a permanent hit in a later run.
 
 Roughly 120 tokens per observation record: at ~10 records per session across a
 69-session corpus that is ~83k tokens, which fits a single reduce dispatch — the
@@ -146,7 +164,11 @@ sensitive-content and contradiction guarantees intact under a whole-artifact rev
 
 ## Check recurrence
 
-Run the engine's recurrence match. It does not scan the corpus this run covers: each
+Gated on the profile resolved above: at `lean`, skip this step — the recurrence match
+does not run, and the artifact's recurrence section is written empty (see Write and
+checkpoint below), which is exactly what its `Profile:` line lets doctor tell apart
+from a check that ran and found nothing. At `standard` or `thorough`, run the engine's
+recurrence match. It does not scan the corpus this run covers: each
 recorded `cluster-signature` is matched against the full session corpus (capped,
 self-excluded), windowed independently per promotion by that promotion's own `landed`
 date — not by this run's `since`/covered range. A hit can therefore legitimately name a
@@ -179,9 +201,14 @@ recurrence-check result above as its own "previously promoted — did it hold" s
 (doctor renders this section rather than re-deriving it) — noting there, next to that
 section's hits, that each is windowed from its own record's `landed` date rather than
 from the covered range below, so a hit naming a session outside that range is expected,
-not a contradiction — plus the covered range, session count, and whether the cap bound
-the input (`capped`, kept in the artifact so doctor can render a cap-truncated result
-distinguishably from an empty one). Then advance the checkpoint:
+not a contradiction — plus the covered range, session count, whether the cap bound the
+input (`capped`, kept in the artifact so doctor can render a cap-truncated result
+distinguishably from an empty one), and a `Profile: <lean|standard|thorough>` line
+carrying the profile this run resolved above. Doctor reads that line to tell "the
+recurrence check did not run" apart from "the recurrence check ran and found nothing":
+a `lean` run writes the recurrence section empty because Check recurrence above never
+ran it, and `Profile: lean` is what tells doctor to render that emptiness as
+*empty-not-checked* rather than a clean bill of health. Then advance the checkpoint:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --commit-checkpoint <now, ISO-8601 UTC>
