@@ -83,7 +83,12 @@ model id written here, because ids in skill prose rot as models change:
 - **session tier** — dispatch with NO model override, so the subagent
   inherits this coordinator session's own model: the strongest model the
   user has already sanctioned, tracking model generations without this
-  skill naming any.
+  skill naming any. This only works when the agent definition itself carries
+  no `model:` frontmatter key — an omitted dispatch-time override resolves to
+  the agent definition's own frontmatter model when it has one, and only
+  falls through to the caller's model when the definition names none. The
+  session tier therefore requires every agent definition it dispatches to be
+  free of a `model:` key.
 - **fast tier** — the newest fast/small Claude model available to this
   session (the current Sonnet-class generation). If no such id can be
   resolved with confidence, fall back to the session tier — a stronger

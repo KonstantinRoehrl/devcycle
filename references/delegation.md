@@ -61,8 +61,8 @@ shallow one.
 
 Repo research — locating code, mapping surfaces, tracing usage, discovering docs — is a
 subagent dispatch that returns **a map, not file dumps**, on the fast tier per
-`references/config.md`. A dispatch names its model explicitly, because a dispatch that omits
-one inherits the caller's.
+`references/config.md`. A dispatch names its model explicitly; `references/config.md` owns how
+an omitted one resolves.
 
 The procedure, canonical here and named rather than restated by the stages that run it:
 
