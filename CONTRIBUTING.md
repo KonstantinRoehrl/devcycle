@@ -20,7 +20,11 @@ each with:
 
 Runs are fresh headless sessions — `claude -p`, an isolated config directory containing
 nothing but credentials (fresh `CLAUDE_CONFIG_DIR`; no installed plugins, no global user
-instructions) — so nothing on the runner's machine leaks into the result.
+instructions) — so nothing on the runner's machine leaks into the result. **Never populate
+that config directory with a live production credential** pulled from wherever your own
+tooling normally keeps one. Provision a test-only credential for scenario runs, or skip
+the run if none is available; either way, delete any scratch credential files the run
+leaves behind before you're done.
 
 **To re-run a scenario:** build the sandbox per its Setup, splice the current skill text
 into the prompt's marked slot, run it headless as above, and grade the response against
@@ -29,6 +33,17 @@ directory (e.g. `tests/scenarios/scoping-interview/batched-questions.md`), write
 criteria first, record the red baseline before touching the skill text, then the green
 run against your change — and append dated regression sections rather than overwriting
 old evidence.
+
+A few authoring pitfalls: copying an existing scenario carries over its Setup
+tool-permission clause verbatim — re-derive it for the new scenario, since a sandbox that
+forbids the reads its own Pass criteria need is grading a broken sandbox, not the skill
+under test. When spliced skill/command text points onward to another plugin file and a
+Pass criterion depends on it, the sandbox must place that file too — grep sibling
+scenarios for the same dangling reference before calling the fix done. When a scenario
+run can mutate the sandbox, snapshot the clean state after Setup and before the red run,
+and restore it before the green run. Verify any citations against the working tree or
+`git show <ref>:path`, never `${CLAUDE_PLUGIN_ROOT}` — the install cache is version-keyed
+and lags the branch, so an accurate citation against it can still look fabricated.
 
 Scenario evidence is encouraged, best-effort — not a merge gate. Nothing in CI runs these
 (there is no model credential available to GitHub Actions); they're produced locally, by
@@ -59,9 +74,22 @@ node --test tests/unit/*.test.mjs  # workflow-script tests (stubbed CLIs, keyles
 that holds per-model dollar rates and context windows with no CLI of its own — update that
 file when prices change.
 
+Writing a new `scripts/*.mjs`? Reuse `doctor.mjs`'s exported helpers
+(`findTranscriptFiles`, `owningSession`, `readRecords`, `inWindow`) for corpus enumeration,
+project-path escaping, and missing/unreadable-directory handling rather than
+reimplementing them.
+
+`plugin.json`'s `userConfig` descriptions are a third hand-kept copy of the config knobs,
+alongside README's config table and the owning skill's own explanation — update all three
+by hand together when one changes; `validate.mjs` checks only that the key exists, never
+that the description text is current.
+
 **PR titles must be Conventional Commits** (`type(scope)?!: subject`). PRs are
 squash-merged and the title becomes the squash subject, which drives the semver bump
 (`fix:`→patch, `feat:`→minor, `!`/`BREAKING CHANGE`→major), the changelog entry, and the
-release tag (`devcycle--vX.Y.Z`). A malformed title fails CI; one that slipped through
-would ship no release. Scenario evidence for behavior changes is encouraged per the
-harness above, but not required to merge.
+release tag (`devcycle--vX.Y.Z`). Reserve `feat:` for substantial user-facing
+improvements; routine work — engine swaps, doc edits, refactors, small fixes — takes
+`refactor:`/`fix:`/`docs:`/`chore:` so the automated bump reflects real impact. A
+malformed title fails CI; one that slipped through would ship no release. Scenario
+evidence for behavior changes is encouraged per the harness above, but not required to
+merge.
