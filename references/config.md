@@ -50,10 +50,16 @@ review depth and the on-device gate by their stages).
 | evidence tail in reports | 10 lines | 20 lines | 50 lines |
 | branch-review round cap | 2 | 3 | 5 |
 | audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
-| dreaming depth | dedup only | dedup + cross-session pattern mining | dedup + mining + scratch-code pass (1b-i) |
+| dreaming depth | memory store only | + archives / findings / ledgers + user-correction turns | + raw transcripts |
 
 Which column applies, and when a knob overrides it, is the resolution order above —
 this table supplies the values, not the rule for choosing them.
+
+The dreaming depth column controls how deep into the corpus a run mines, staged densest signal
+first: **memory → archives/findings/ledgers → user-correction turns → raw transcript text**.
+Gating is by profile, never by token budget or a signal heuristic — a budget gate would make
+coverage nondeterministic and destroy the marginal-vs-first-run comparison the measurement gate
+depends on.
 
 **Never profile-conditional:** the state file, handoff blocks, evidence classes, the
 coordinator's green gate, the `gitPolicy` clamps, branch discipline, the one-`task-reviewer`

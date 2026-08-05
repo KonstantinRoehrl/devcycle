@@ -19,9 +19,9 @@ pays none of a dream's cost.
 
 ## Record shape
 
-- `promotion-type` — one of `doc-edit`, `skill-edit`, `contradiction-resolution`,
-  `config-proposal`, `extract-to-script`. The last two are reserved for deferred phases and
-  no current code path produces them.
+- `promotion-type` — one of `doc-edit`, `skill-edit`, `enforcement-gap`,
+  `contradiction-resolution`, `config-proposal`. `config-proposal` is present for schema
+  completeness and forward-compatibility with Phase 3; no code path in this cycle produces it.
 - `cluster-signature` — the stable phrase later runs match against. Screened for secrets
   before it is written: a signature can be more revealing than the fix it describes.
 - `files-touched` — comma-separated repository-relative paths, as stored in the record

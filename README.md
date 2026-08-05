@@ -373,7 +373,7 @@ so you don't tune six options to say "cheaper" or "be thorough":
 | evidence tail in reports | 10 lines | 20 lines | 50 lines |
 | branch-review round cap | 2 | 3 | 5 |
 | audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
-| dreaming depth | dedup only | dedup + cross-session pattern mining | dedup + mining + scratch-code pass (1b-i) |
+| dreaming depth | memory store only | + archives / findings / ledgers + user-correction turns | + raw transcripts |
 
 Resolution order, in one rule: **an option you configured explicitly wins verbatim, always;
 anything left at its default takes the profile's column value.** So the `Default` column in
