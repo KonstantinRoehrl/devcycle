@@ -5,6 +5,59 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-05 — dreaming's mining splits into map→reduce, corpus staging replaces a budget gate, and disposition goes two-tier
+
+**Decision:** Five changes land together as amendment 2 to the 2026-08-04 design. First,
+mining splits into a fast-tier **map** stage (one dispatch per session slice, writing an
+observation record to the durable store at `.devcycle/dreaming/observations/`) and a
+caller-tier **reduce** stage that reads the *full* store, because a single-slice dispatch
+saw exactly one session and could never cite a second — evidence spanning two or more
+sessions was structurally impossible, not merely rare, under the old per-slice design.
+Second, the corpus a dream mines is staged by signal density — memory, then
+archives/findings/ledgers, then user-correction turns, then raw transcript text — and how
+far a run goes into that stage order is gated by `profile`, not by a token budget. Third,
+disposition becomes two-tier: one reviewed decision covers the bulk of the artifact
+(adopt, discard, or adopt-with-exclusions), while every sensitive-flagged candidate and
+every `contradiction-resolution` stays at per-item confirmation, decoupling the cost of
+deciding from how many good candidates a run finds. Fourth, the candidate-type list gains
+`enforcement-gap` (the rule already exists and is being violated; the fix is enforcement,
+not a new rule) and drops scratch-code recurrence detection as a named non-goal. Fifth,
+`contradiction-resolution` is still never auto-resolved by recency — that remains a
+deliberate divergence from the external reference this design's four-stage model draws
+from, because that reference's consolidated memory is a private store it may freely
+rewrite, while devcycle's output is a committed instruction surface other developers
+inherit on pull, where a silent latest-wins could delete a decision a human already made.
+**Why:** Each change follows from evidence the first benchmark produced. The map→reduce
+split follows directly from that benchmark scoring 0/29 on cross-session evidence,
+structurally rather than by accident, and from a genuine contradiction surfacing as two
+independent doc-edits aimed at two different files — confirming both would have written
+conflicting rules into the repo. Staging by signal density (not by budget) follows because
+a budget gate makes coverage nondeterministic — two runs over the same corpus would mine
+different amounts, destroying the marginal-vs-first-run comparison the design's own
+measurement depends on — and a signal-heuristic gate would let a quiet high-density stage
+suppress mining the denser evidence underneath it; profile-gating also finally gives `lean`
+an implemented input (previously its whole job, memory dedup, had none) and moves the
+expensive raw-transcript stage to the profile a user opted into. Two-tier disposition
+follows because per-candidate confirmation does not scale with a corpus that grows every
+cycle, while the two categories that most need a human's individual attention — flagged
+content and genuine conflicts — are small by construction and the ones confirmation exists
+to protect. `enforcement-gap` follows because three of the first benchmark's candidates
+were rediscoveries of rules the repo already states, which the prior vocabulary forced to
+masquerade as `doc-edit`s proposing text already present — restating an unenforced rule is
+the one fix guaranteed not to work. Scratch-code recurrence drops because the map→reduce
+architecture subsumes its signal (a re-derived fixture now clusters across sessions like
+any other observation) and because it never produced a datapoint: the prior design gated it
+to `thorough`, the benchmark ran at `standard`, so no code path that could produce the type
+ever executed.
+**Supersedes:** The 2026-08-04 entry's engine/skill split describes the prior per-slice
+dispatch design; this entry's map→reduce split replaces its mining mechanism, not its
+architectural boundary (the engine/skill split itself — `scripts/dream.mjs` deterministic,
+`dreaming-across-sessions` judgemental — stands unchanged). It also completes a carry-over
+from the same cycle: an earlier confirmed promotion asked for a missing `dreaming depth`
+row in `DESIGN.md` §15.2's profile matrix; that matrix is deleted in this same change
+(replaced by a pointer to `references/config.md`, the matrix's single owner), so the
+row-addition carry-over is now moot rather than actioned.
+
 ## 2026-08-04 — dreaming's engine/skill split, corpus, and artifact handoff settle four departures from the originating ticket
 
 **Decision:** Four points diverge from the ticket that proposed session-memory dreaming.
@@ -15,7 +68,7 @@ artifact stay under `.devcycle/` since only the promotion records need to surviv
 Second, the corpus a dreaming pass mines is transcripts plus memory, not transcripts plus an
 accumulated ledger, because devcycle keeps no such ledger; archiving is added at finish so a
 ledger-shaped corpus exists for future passes without inventing one retroactively for this
-one. Third, Phase 1b-i (the semantic mining and clustering work) lives in the skill layer
+one. Third, the semantic mining and clustering work lives in the skill layer
 (`dreaming-across-sessions`) rather than in `scripts/doctor.mjs`, because doctor is not
 guaranteed to emit message text at all profiles and semantic work needs it; the engine
 (`scripts/dream.mjs`) stays deterministic and owns only what doesn't need message text —

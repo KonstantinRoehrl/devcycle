@@ -380,20 +380,9 @@ they cost nothing until a skill in flight names one and reads it.
 ### 15.2 Native engines vs upstream overlays, keyed to `profile`
 
 `profile` ∈ `lean | standard | thorough`, default `standard`. It is one preset over the
-knobs that size a run:
-
-| | `lean` | `standard` | `thorough` |
-| --- | --- | --- | --- |
-| planning / execution engine | devcycle-native compact | devcycle-native compact | upstream overlays |
-| branch review engine | `single` | `single` | `panel` |
-| on-device gate | `auto-ok` | `human-required` | `human-required` |
-| evidence tail in reports | 10 lines | 20 lines | 50 lines |
-| branch-review round cap | 2 | 3 | 5 |
-| audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
-
-Resolution order (binding, stated once in `config.md`): an explicitly configured knob wins
-verbatim; otherwise the profile's column value applies; a `profile` that is unset or outside
-the three reads as `standard`.
+knobs that size a run. `references/config.md` is the single owner of the profile matrix and
+its resolution order — see it there rather than a second copy here, per §15.1's own
+one-owner invariant applied to this file.
 
 **The engine split.** Two stages take it, and each owns its own switch rather than being
 told from `/cycle`:
