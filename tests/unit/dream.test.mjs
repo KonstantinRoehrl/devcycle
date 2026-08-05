@@ -14,6 +14,10 @@ import {
   readPromotions,
   checkRecurrence,
   runCheckRecurrence,
+  observationsDir,
+  hasObservations,
+  listObservations,
+  extractSession,
 } from "../../scripts/dream.mjs";
 
 const SCRIPT = new URL("../../scripts/dream.mjs", import.meta.url).pathname;
@@ -861,4 +865,124 @@ test("cli: --commit-checkpoint combined with --check-recurrence fails instead of
   const res = run(["--commit-checkpoint", "2026-08-01T00:00:00Z", "--check-recurrence"], root);
   assert.notEqual(res.status, 0);
   assert.deepEqual(readCheckpoint(root), { lastDreamedThrough: null, lastArtifact: null });
+});
+
+test("planCorpus: reports per-session and total byte sizes", () => {
+  const root = realpathSync(repo());
+  const proj = projectsWith(root, [["s1", [plainRecord("2026-08-05T12:00:00Z")]]]);
+  const m = planCorpus({ repoRoot: root, projectsDir: proj, since: null });
+  assert.ok(m.sessions[0].bytes > 0, "each session carries its byte size");
+  assert.equal(m.totalBytes, m.sessions.reduce((n, s) => n + s.bytes, 0));
+});
+
+test("planCorpus: unmined lists exactly the sessions with no observation file", () => {
+  const root = realpathSync(repo());
+  const proj = projectsWith(root, [
+    ["mined", [plainRecord("2026-08-05T12:00:00Z")]],
+    ["fresh", [plainRecord("2026-08-05T12:30:00Z")]],
+  ]);
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), "mined.json"), "[]\n");
+  // A non-session slice: the memory store is mined at every profile and has no session id.
+  writeFileSync(join(observationsDir(root), "memory.json"), "[]\n");
+  const m = planCorpus({ repoRoot: root, projectsDir: proj, since: null });
+  assert.deepEqual(m.unmined, ["fresh"], "unmined is the session-shaped work list");
+  assert.deepEqual(m.observations, ["memory", "mined"], "observations lists every slice id");
+  assert.equal(hasObservations(root, "mined"), true);
+  assert.equal(hasObservations(root, "fresh"), false);
+  assert.deepEqual(listObservations(root), ["memory", "mined"]);
+});
+
+test("extractSession: returns decoded message text for one session", () => {
+  const root = realpathSync(repo());
+  const proj = projectsWith(root, [
+    [
+      "s1",
+      [
+        {
+          timestamp: "2026-08-05T12:00:00Z",
+          type: "assistant",
+          message: { content: [{ type: "text", text: "line one\nline two" }] },
+        },
+      ],
+    ],
+  ]);
+  const text = extractSession({ repoRoot: root, projectsDir: proj, sessionId: "s1" });
+  assert.match(text, /line one\nline two/);
+});
+
+test("extractSession: an unknown session id fails rather than returning empty", () => {
+  const root = realpathSync(repo());
+  const proj = projectsWith(root, [["s1", [plainRecord("2026-08-05T12:00:00Z")]]]);
+  assert.throws(
+    () => extractSession({ repoRoot: root, projectsDir: proj, sessionId: "nope" }),
+    /no transcript for session: nope/,
+  );
+});
+
+test("CLI --extract prints text; an unknown id exits 1 with a dream: message", () => {
+  const root = realpathSync(repo());
+  const proj = projectsWith(root, [
+    [
+      "s1",
+      [
+        {
+          timestamp: "2026-08-05T12:00:00Z",
+          type: "assistant",
+          message: { content: [{ type: "text", text: "hello corpus" }] },
+        },
+      ],
+    ],
+  ]);
+  const ok = spawnSync(process.execPath, [SCRIPT, "--extract", "s1"], {
+    cwd: root,
+    env: { ...process.env, CLAUDE_DREAM_PROJECTS: proj },
+    encoding: "utf8",
+  });
+  assert.equal(ok.status, 0);
+  assert.match(ok.stdout, /hello corpus/);
+
+  const bad = spawnSync(process.execPath, [SCRIPT, "--extract", "nope"], {
+    cwd: root,
+    env: { ...process.env, CLAUDE_DREAM_PROJECTS: proj },
+    encoding: "utf8",
+  });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /^dream: no transcript for session: nope/m);
+});
+
+test("archives: a same-date ledger carries its glob and index together", () => {
+  const root = realpathSync(repo());
+  for (const name of ["archive-2026-08-02-feat-alpha", "archive-2026-08-02-fix-beta"]) {
+    mkdirSync(join(root, ".devcycle", name), { recursive: true });
+    writeFileSync(join(root, ".devcycle", name, "ledger.md"), "# ledger\n");
+  }
+  const m = planCorpus({
+    repoRoot: root,
+    projectsDir: projectsWith(root, [["s1", [plainRecord("2026-08-05T12:00:00Z")]]]),
+    since: null,
+  });
+  const [first, second] = m.archives;
+  assert.deepEqual(first.ledger, { glob: ".devcycle/archive-2026-08-02-*/ledger.md", index: 1 });
+  assert.deepEqual(second.ledger, { glob: ".devcycle/archive-2026-08-02-*/ledger.md", index: 2 });
+  // Still no branch slug anywhere in the manifest.
+  assert.ok(!JSON.stringify(m).includes("feat-alpha"));
+});
+
+test("the manifest still carries no message text", () => {
+  const root = realpathSync(repo());
+  const proj = projectsWith(root, [
+    [
+      "s1",
+      [
+        {
+          timestamp: "2026-08-05T12:00:00Z",
+          type: "assistant",
+          message: { content: [{ type: "text", text: "SECRET-CANARY-STRING" }] },
+        },
+      ],
+    ],
+  ]);
+  const m = planCorpus({ repoRoot: root, projectsDir: proj, since: null });
+  assert.ok(!JSON.stringify(m).includes("SECRET-CANARY-STRING"));
 });

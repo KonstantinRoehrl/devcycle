@@ -2,7 +2,7 @@
 // Deterministic half of devcycle's dreaming pass: checkpoint, corpus manifest, session
 // cap, artifact freshness. The semantic half lives in skills/dreaming-across-sessions.
 // Emits no message text, no branch names — only ids, paths, timestamps, and counts.
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -11,6 +11,28 @@ import { findTranscriptFiles, owningSession, readRecords, inWindow } from "./doc
 const CAP = 100;
 const dreamDir = (root) => join(root, ".devcycle", "dreaming");
 const statePath = (root) => join(dreamDir(root), "state.md");
+
+// The durable store the map stage writes and both the reduce stage and every later dream
+// read (spec §5.4). Local-only under the already-gitignored .devcycle/, so nothing is added
+// to .gitignore. The engine only *reads* it: which sessions have a file is the mining work
+// list, and that list is what makes a marginal run cheaper rather than merely asserted to be.
+export const observationsDir = (repoRoot) => join(dreamDir(repoRoot), "observations");
+
+export function hasObservations(repoRoot, sliceId) {
+  return existsSync(join(observationsDir(repoRoot), `${sliceId}.json`));
+}
+
+// The staged corpus mines more than sessions — the memory store and each archive are slices
+// too — so the skill needs the store's actual contents to derive each stage's work list, not
+// just the session-shaped subset `unmined` reports.
+export function listObservations(repoRoot) {
+  const dir = observationsDir(repoRoot);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => f.slice(0, -".json".length))
+    .sort();
+}
 
 // `\s*` matches a newline too, so a field left blank on its own line would otherwise let
 // the capture cross into the next "- key: value" line and read that line back as the
@@ -126,10 +148,12 @@ function archives(repoRoot) {
         index: i + 1,
         evidenceFiles,
         evidenceCount: evidenceFiles.length,
-        // A glob keyed on date, never the real directory name. `index` (above) is what
-        // disambiguates same-date archives; a reader sorts the glob's expansion and
+        // A glob keyed on date, never the real directory name — the branch slug must not reach
+        // the manifest. `index` travels inside this value rather than only beside it: two
+        // archives finished on one day share the glob, and a consumer that uses the string
+        // alone reads whichever entry sorts first. A reader sorts the glob's expansion and
         // takes the `index`-th entry.
-        ledger: hasLedger ? `.devcycle/archive-${date}-*/ledger.md` : null,
+        ledger: hasLedger ? { glob: `.devcycle/archive-${date}-*/ledger.md`, index: i + 1 } : null,
       });
     });
   }
@@ -305,6 +329,19 @@ function defaultReadText(session) {
     .join("\n");
 }
 
+// The one subcommand that emits message text, by definition (spec §3.1). It is called by a
+// map dispatch reading its own slice, never by a path that writes the manifest — which is what
+// keeps the manifest's redaction property intact. Deliberately not routed through planCorpus:
+// the 100-session cap and the checkpoint window bound *mining*, and a caller holding a session
+// id must be able to read that session's text regardless of either.
+export function extractSession({ repoRoot, projectsDir, sessionId }) {
+  const files = resolveProjectFiles(repoRoot, projectsDir).filter(
+    (f) => owningSession(f) === sessionId,
+  );
+  if (!files.length) throw new Error(`no transcript for session: ${sessionId}`);
+  return defaultReadText({ files });
+}
+
 // Claude Code's real project-directory convention: every character that is not
 // alphanumeric becomes its own "-", not just "/" — a repo path containing "_" or "."
 // (e.g. "Hobby_Programming", "site.com") previously computed a slug that never existed,
@@ -357,12 +394,15 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     const stamps = [];
     let records = 0;
     let self = false;
-    for (const f of files)
+    let bytes = 0;
+    for (const f of files) {
+      bytes += statSync(f).size;
       for (const r of readRecords(f)) {
         records += 1;
         if (r.timestamp) stamps.push(r.timestamp);
         if (!self && isSelfRecord(r)) self = true;
       }
+    }
     if (!stamps.length) continue;
     // `excludeSelf` (the recurrence path) drops these sessions outright, because a printed
     // signature would self-seed a permanent hit. Freshness ignores them on every path — see
@@ -371,7 +411,7 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     stamps.sort();
     const lastTimestamp = stamps.at(-1);
     if (!inWindow(lastTimestamp, since, null)) continue;
-    sessions.push({ id, files, firstTimestamp: stamps[0], lastTimestamp, records, self });
+    sessions.push({ id, files, firstTimestamp: stamps[0], lastTimestamp, records, bytes, self });
   }
 
   sessions.sort((a, b) => b.lastTimestamp.localeCompare(a.lastTimestamp));
@@ -384,6 +424,14 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     cap,
     capped,
     sessions: kept,
+    // `records` alone let a dispatch be handed an unreadable 22.6 MB slice with no warning,
+    // and a run cannot be budgeted without a size. Totals cover the kept sessions only, so the
+    // number describes what a run would actually mine rather than what the cap discarded.
+    totalBytes: kept.reduce((n, s) => n + s.bytes, 0),
+    // The mining work list: an interrupted run resumes by mining only these, which is the same
+    // mechanism that makes a marginal run cheap.
+    observations: listObservations(repoRoot),
+    unmined: kept.filter((s) => !hasObservations(repoRoot, s.id)).map((s) => s.id),
     archives: archives(repoRoot).filter((a) => inWindow(`${a.date}T23:59:59Z`, since, null)),
     // Same escaping as the transcript project directory above: every non-alphanumeric
     // character becomes "-". Replacing only "/" points at a store that does not exist
@@ -428,6 +476,23 @@ function main() {
   if (hasCommit && hasCheckRecurrence) {
     console.error("dream: --commit-checkpoint and --check-recurrence cannot be combined");
     process.exit(1);
+  }
+
+  const extractIdx = argv.indexOf("--extract");
+  if (extractIdx !== -1) {
+    try {
+      process.stdout.write(
+        extractSession({
+          repoRoot: root,
+          projectsDir: resolveProjectsRoot(),
+          sessionId: argv[extractIdx + 1],
+        }),
+      );
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
+    return;
   }
 
   if (hasPlan) {
@@ -475,7 +540,7 @@ function main() {
   }
 
   console.error(
-    "usage: dream.mjs --plan | --commit-checkpoint <iso> | --record-promotion <json> | --check-recurrence",
+    "usage: dream.mjs --plan | --extract <session-id> | --commit-checkpoint <iso> | --record-promotion <json> | --check-recurrence",
   );
   process.exit(1);
 }
