@@ -31,6 +31,8 @@ implementer to fake a red or the reviewer to reject correct work.
 - When the verification command chains multiple steps with `&&`, brace-group them before
   redirecting — `{ c1 && c2; } > file 2>&1` — never the bare `c1 && c2 > file 2>&1` form,
   which redirects only the last command and silently drops every earlier command's output.
+- The captured command is the repo's whole verification gate, not a subset of it; capturing
+  fewer commands than the gate runs is a declared deviation.
 
 The report itself is a file on the same principle: the implementer writes it to
 `.devcycle/reports/<task-id>.md` in the shape below, and what the dispatch returns to the
