@@ -68,7 +68,13 @@ node scripts/validate.mjs          # manifests, frontmatter, description budget,
 node scripts/redaction-check.mjs   # no machine paths or deny-listed terms
 node scripts/doctor.mjs            # token/context profile; --depth is the context gate's probe
 node --test tests/unit/*.test.mjs  # workflow-script tests (stubbed CLIs, keyless)
+git diff main...HEAD | gitleaks stdin --redact --no-banner  # secret scan over the branch; skip if gitleaks isn't installed
 ```
+
+The commands above use the repo-relative form (`node scripts/<engine>.mjs`), correct for
+running by hand against this checkout. An engine invocation written into skill or command
+markdown instead uses `${CLAUDE_PLUGIN_ROOT}/scripts/<engine>.mjs`, because that text runs
+from the installed plugin, not this repo.
 
 `scripts/doctor.mjs` prices what it measures against `scripts/pricing.mjs`, the data module
 that holds per-model dollar rates and context windows with no CLI of its own — update that
@@ -93,3 +99,16 @@ improvements; routine work — engine swaps, doc edits, refactors, small fixes �
 malformed title fails CI; one that slipped through would ship no release. Scenario
 evidence for behavior changes is encouraged per the harness above, but not required to
 merge.
+
+## Releasing
+
+A release is a `main` ← `dev` PR, squash-merged the same way as any other PR above. After
+every release, merge `main` back into `dev` — on that merge-back, `.claude-plugin/plugin.json`
+either keeps `main`'s bumped version or the automated bump counter resets. A `CHANGELOG.md`
+fix made on `dev` does not clean up `main`: squash merges leave the individual commits out of
+the merge base, so those entries are absent from `main` and need their own PR against it.
+`[skip ci]` added only to a PR title has no effect on a single-commit PR: GitHub's
+squash-merge defaults the squash subject to that lone commit's own message, not the PR
+title, so a `[skip ci]` that lives only in the title never reaches the commit CI reads.
+`main` is never pushed to directly, and the version is never hand-edited; both are owned
+by the release PR and its automation.
