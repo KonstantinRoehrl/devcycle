@@ -2,10 +2,12 @@ name: Validate
 on:
   pull_request:
   push:
-    branches: [main]
-  # Lets validation be re-run without inventing a commit. A squash-merge into an
-  # integration branch can leave that branch's tip with no check suite at all, and
-  # without this there is no way to ask for one.
+    # `dev` is listed so every commit that lands there gets a check suite at push time,
+    # including the ones GitHub's merge API creates on squash-merge. Without it nothing
+    # subscribes to `dev`, its tip carries no suite, and a `dev` -> `main` release PR
+    # opened on that tip reports mergeable with zero checks — silently unverified.
+    branches: [main, dev]
+  # Manual re-run, for requesting a suite without inventing a commit.
   workflow_dispatch:
 permissions:
   contents: read
