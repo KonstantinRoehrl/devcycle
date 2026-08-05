@@ -34,6 +34,45 @@ export function listObservations(repoRoot) {
     .sort();
 }
 
+// Spec §5.4's five-value enum. A typo here must fail loud rather than silently seeding a
+// garbage grouping key the reduce stage would then cluster on.
+const OBSERVATION_KINDS = new Set(["friction", "correction", "rule-violation", "decision", "contradiction-side"]);
+
+// Mirrors validatePromotion's style and error-message shape below. `subject` and `quote`
+// are the two fields §5.4 calls load-bearing: `subject` is the cross-session grouping key
+// and `quote` is the grounding anchor ("an observation may state only what its quote
+// shows"), so both are required rather than merely typed.
+function validateObservation(rec, index) {
+  if (!OBSERVATION_KINDS.has(rec?.kind))
+    throw new Error(
+      `record ${index}: invalid kind "${rec?.kind}" — must be one of: ${[...OBSERVATION_KINDS].join(", ")}`,
+    );
+  if (!String(rec.subject ?? "").trim()) throw new Error(`record ${index}: subject is required and cannot be empty`);
+  if (!String(rec.quote ?? "").trim()) throw new Error(`record ${index}: quote is required and cannot be empty`);
+  if (rec.target !== null && typeof rec.target !== "string")
+    throw new Error(`record ${index}: target must be a repo-relative path or null`);
+}
+
+// The observation store's validating reader (spec §15's 2026-08-05 amendment). Without it,
+// hasObservations' existence-only check let a truncated file left by an interrupted map
+// dispatch count as mined forever, and a record missing subject/quote or carrying an
+// out-of-enum kind was caught by nothing. Throws rather than returning partial data — a
+// caller wanting the unchanged "does a file exist" semantics already has that in
+// hasObservations/listObservations.
+export function readObservations(repoRoot, sliceId) {
+  const path = join(observationsDir(repoRoot), `${sliceId}.json`);
+  if (!existsSync(path)) throw new Error(`no observation file for session: ${sliceId}`);
+  let records;
+  try {
+    records = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new Error(`malformed observation file (invalid JSON): ${sliceId}`);
+  }
+  if (!Array.isArray(records)) throw new Error(`malformed observation file (not an array): ${sliceId}`);
+  records.forEach((rec, i) => validateObservation(rec, i));
+  return records;
+}
+
 // `\s*` matches a newline too, so a field left blank on its own line would otherwise let
 // the capture cross into the next "- key: value" line and read that line back as the
 // value. `[ \t]*` stops at the newline: it only ever captures the rest of the field's own
@@ -282,6 +321,17 @@ function isSelfRecord(r) {
   return false;
 }
 
+// The reduce stage's suppression primitive (spec §4 step 5, §3.2): a candidate whose
+// subject matches a landed cluster-signature is work that already landed and must not be
+// re-proposed. Reuses normalizePhrase and requires an exact match on the normalized phrase,
+// never a similarity score — §10's amendment 1 records that a 60%-word-overlap approach
+// matched 74-95 of 100 unrelated sessions.
+export function suppressedByLandedSignature(subject, promotions) {
+  const norm = normalizePhrase(subject);
+  if (!norm) return false;
+  return promotions.some((p) => normalizePhrase(p.clusterSignature) === norm);
+}
+
 export function checkRecurrence(promotions, manifest, readText = defaultReadText) {
   // Compute each promotion's normalized signature first and bail out before reading the
   // corpus at all when none carries one — with zero promotion records (every repo's
@@ -473,6 +523,12 @@ function main() {
   const hasCheckRecurrence = argv.includes("--check-recurrence");
   const commitIdx = argv.indexOf("--commit-checkpoint");
   const hasCommit = commitIdx !== -1;
+  const suppressedIdx = argv.indexOf("--check-suppressed");
+  const hasSuppressed = suppressedIdx !== -1;
+  const extractIdx = argv.indexOf("--extract");
+  const hasExtract = extractIdx !== -1;
+  const observationsIdx = argv.indexOf("--check-observations");
+  const hasCheckObservations = observationsIdx !== -1;
 
   if (hasCommit && hasPlan) {
     console.error("dream: --commit-checkpoint and --plan cannot be combined");
@@ -484,16 +540,45 @@ function main() {
     process.exit(1);
   }
 
+  if (hasSuppressed && hasPlan) {
+    console.error("dream: --check-suppressed and --plan cannot be combined");
+    process.exit(1);
+  }
+
+  if (hasSuppressed && hasCommit) {
+    console.error("dream: --check-suppressed and --commit-checkpoint cannot be combined");
+    process.exit(1);
+  }
+
+  // §9's guard requirement covers every sibling flag, not only --plan/--commit-checkpoint:
+  // --extract and --check-recurrence both dispatch and return before --check-suppressed's own
+  // handler runs below, so without these two a combined invocation silently ran the other
+  // subcommand and omitted `{"suppressed": ...}` from its output entirely — read by a caller
+  // expecting that key, that omission reads as a confident (and wrong) "not suppressed".
+  if (hasSuppressed && hasExtract) {
+    console.error("dream: --check-suppressed and --extract cannot be combined");
+    process.exit(1);
+  }
+
+  if (hasSuppressed && hasCheckRecurrence) {
+    console.error("dream: --check-suppressed and --check-recurrence cannot be combined");
+    process.exit(1);
+  }
+
+  if (hasCheckObservations && (hasPlan || hasCommit || hasCheckRecurrence || hasSuppressed || hasExtract)) {
+    console.error("dream: --check-observations cannot be combined with another subcommand");
+    process.exit(1);
+  }
+
   const r = argv.indexOf("--record-promotion");
   const hasRecord = r !== -1;
 
-  if (hasRecord && (hasPlan || hasCommit || hasCheckRecurrence)) {
+  if (hasRecord && (hasPlan || hasCommit || hasCheckRecurrence || hasSuppressed || hasExtract || hasCheckObservations)) {
     console.error("dream: --record-promotion cannot be combined with another subcommand");
     process.exit(1);
   }
 
-  const extractIdx = argv.indexOf("--extract");
-  if (extractIdx !== -1) {
+  if (hasExtract) {
     try {
       process.stdout.write(
         extractSession({
@@ -547,6 +632,23 @@ function main() {
     return;
   }
 
+  // Gives readObservations a real caller: the Map dispatch verifies the slice it just wrote
+  // via this subcommand rather than the skill re-reading the file itself ("the skill invokes
+  // the CLI, not the module"). Reports pass/fail only — never the records themselves, which
+  // would put a subject or a quote into this session's own transcript.
+  if (hasCheckObservations) {
+    try {
+      const sliceId = argv[observationsIdx + 1];
+      if (!sliceId) throw new Error("--check-observations requires a session id argument");
+      readObservations(root, sliceId);
+      console.log("observations: ok");
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
   if (hasCheckRecurrence) {
     try {
       console.log(
@@ -559,8 +661,35 @@ function main() {
     return;
   }
 
+  // The reduce stage's suppression check, called by the skill as a subcommand — the skill
+  // invokes the CLI, not the module. Prints only the boolean verdict, never the subject or
+  // a landed cluster-signature: either would land in this session's transcript, which is
+  // corpus for every later run (spec §10's amendment 1).
+  if (hasSuppressed) {
+    try {
+      const subject = argv[suppressedIdx + 1];
+      if (!subject) throw new Error("--check-suppressed requires a subject argument");
+      // `subject` is a normalized multi-word phrase (the skill's own example:
+      // "scenario evidence sections omitted"). If a caller passes it unquoted, the shell
+      // splits it into several argv elements and only the first would be read above —
+      // matching on that single word alone would silently answer for a phrase that was
+      // never actually checked, so any further non-flag argv element here must fail loudly
+      // rather than be dropped.
+      const trailing = [];
+      for (let i = suppressedIdx + 2; i < argv.length && !argv[i].startsWith("--"); i++) trailing.push(argv[i]);
+      if (trailing.length)
+        throw new Error("--check-suppressed requires its subject as a single (quoted) argument, not several");
+      console.log(JSON.stringify({ suppressed: suppressedByLandedSignature(subject, readPromotions(root)) }));
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
   console.error(
-    "usage: dream.mjs --plan | --extract <session-id> | --commit-checkpoint <iso> | --record-promotion <json> | --check-recurrence",
+    "usage: dream.mjs --plan | --extract <session-id> | --commit-checkpoint <iso> | --record-promotion <json> | " +
+      "--check-recurrence | --check-suppressed <subject> | --check-observations <session-id>",
   );
   process.exit(1);
 }

@@ -17,6 +17,8 @@ import {
   observationsDir,
   hasObservations,
   listObservations,
+  readObservations,
+  suppressedByLandedSignature,
   extractSession,
   messageText,
 } from "../../scripts/dream.mjs";
@@ -894,6 +896,194 @@ test("planCorpus: unmined lists exactly the sessions with no observation file", 
   assert.equal(hasObservations(root, "mined"), true);
   assert.equal(hasObservations(root, "fresh"), false);
   assert.deepEqual(listObservations(root), ["memory", "mined"]);
+});
+
+// spec §5.4's observation-record schema. quote is verbatim in this fixture; readObservations
+// must hand it back unchanged for the round-trip to mean anything.
+const OBSERVATION = {
+  session: "f2a2877b",
+  ts: "2026-08-03T14:22:10Z",
+  kind: "correction",
+  subject: "scenario evidence sections omitted",
+  target: "CONTRIBUTING.md",
+  quote: "a reasonable, disclosed judgment call rather than a spec violation",
+  confidence: "high",
+};
+
+test("readObservations round-trips a valid record written to the store", () => {
+  const root = realpathSync(repo());
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), "f2a2877b.json"), JSON.stringify([OBSERVATION]));
+  const [back] = readObservations(root, "f2a2877b");
+  assert.deepEqual(back, OBSERVATION);
+});
+
+test("readObservations rejects a record whose kind is outside the five-value enum", () => {
+  const root = realpathSync(repo());
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(
+    join(observationsDir(root), "bad.json"),
+    JSON.stringify([{ ...OBSERVATION, kind: "opinion" }]),
+  );
+  assert.throws(() => readObservations(root, "bad"), /invalid kind/);
+});
+
+test("readObservations rejects a record missing subject", () => {
+  const root = realpathSync(repo());
+  mkdirSync(observationsDir(root), { recursive: true });
+  const { subject, ...rest } = OBSERVATION;
+  writeFileSync(join(observationsDir(root), "bad.json"), JSON.stringify([rest]));
+  assert.throws(() => readObservations(root, "bad"), /subject is required/);
+});
+
+test("readObservations rejects a record missing quote — the grounding anchor is not optional", () => {
+  const root = realpathSync(repo());
+  mkdirSync(observationsDir(root), { recursive: true });
+  const { quote, ...rest } = OBSERVATION;
+  writeFileSync(join(observationsDir(root), "bad.json"), JSON.stringify([rest]));
+  assert.throws(() => readObservations(root, "bad"), /quote is required/);
+});
+
+test("readObservations fails loudly on a truncated file left by an interrupted map dispatch", () => {
+  const root = realpathSync(repo());
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), "cut.json"), '[{"session":"s1","kind":"friction"');
+  assert.throws(() => readObservations(root, "cut"), /malformed observation file/);
+});
+
+test("readObservations fails for a session with no observation file", () => {
+  const root = realpathSync(repo());
+  assert.throws(() => readObservations(root, "nope"), /no observation file/);
+});
+
+// G1-c: readObservations had no caller anywhere in the shipped flow. This is its consumer —
+// a CLI subcommand the Map dispatch calls to verify the slice it just wrote, without the
+// skill re-reading the file itself ("the skill invokes the CLI, not the module").
+test("cli: --check-observations reports ok for a valid observation file", () => {
+  const root = realpathSync(repo());
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), "f2a2877b.json"), JSON.stringify([OBSERVATION]));
+  const r = run(["--check-observations", "f2a2877b"], root);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), "observations: ok");
+});
+
+test("cli: --check-observations fails loudly, as dream: <message>, for a missing or malformed file", () => {
+  const root = realpathSync(repo());
+  const missing = run(["--check-observations", "nope"], root);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /^dream: no observation file/m);
+
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), "cut.json"), '[{"session":"s1","kind":"friction"');
+  const malformed = run(["--check-observations", "cut"], root);
+  assert.equal(malformed.status, 1);
+  assert.match(malformed.stderr, /^dream: malformed observation file/m);
+});
+
+// Verifying a slice must not print the slice's own content — a subject or a quote in stdout
+// would land in this session's own transcript, corpus for a later run, the same reasoning
+// that already keeps --check-suppressed and --check-recurrence silent about their subjects.
+test("cli: --check-observations never prints the observation's subject or quote", () => {
+  const root = realpathSync(repo());
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), "f2a2877b.json"), JSON.stringify([OBSERVATION]));
+  const r = run(["--check-observations", "f2a2877b"], root);
+  assert.equal(r.stdout.includes(OBSERVATION.subject), false);
+  assert.equal(r.stdout.includes(OBSERVATION.quote), false);
+});
+
+test("cli: --check-observations cannot be combined with another subcommand", () => {
+  const root = realpathSync(repo());
+  const r = run(["--check-observations", "f2a2877b", "--plan"], root);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /cannot be combined/);
+});
+
+// spec §4 step 5 / §3.2: the reduce stage suppresses any candidate whose subject matches a
+// landed cluster-signature. §10's amendment 1 requires an exact normalized-phrase match, not
+// a similarity score, so casing/punctuation differences must still match and an unrelated
+// subject sharing some words must not.
+test("suppressedByLandedSignature reports a candidate matching a landed cluster-signature", () => {
+  const root = realpathSync(repo());
+  recordPromotion(root, { ...REC, clusterSignature: "task-reviewer flags files from a concurrent task" });
+  const promotions = readPromotions(root);
+  assert.equal(
+    suppressedByLandedSignature("Task-Reviewer Flags Files From A Concurrent Task!", promotions),
+    true,
+  );
+});
+
+test("suppressedByLandedSignature reports a non-matching subject as not suppressed", () => {
+  const root = realpathSync(repo());
+  recordPromotion(root, { ...REC, clusterSignature: "task-reviewer flags files from a concurrent task" });
+  const promotions = readPromotions(root);
+  // Shares every word, scattered rather than contiguous — must not pass an exact-phrase match.
+  assert.equal(
+    suppressedByLandedSignature("files from a concurrent task were reviewed separately", promotions),
+    false,
+  );
+});
+
+test("cli: --check-suppressed reports suppressed:true without printing the signature text", () => {
+  const root = realpathSync(repo());
+  const signature = "task-reviewer flags files from a concurrent task";
+  recordPromotion(root, { ...REC, clusterSignature: signature });
+  const res = run(["--check-suppressed", signature], root);
+  assert.equal(res.status, 0);
+  assert.deepEqual(JSON.parse(res.stdout), { suppressed: true });
+  assert.equal(res.stdout.includes(signature), false);
+});
+
+test("cli: --check-suppressed reports suppressed:false for an unrelated subject", () => {
+  const root = realpathSync(repo());
+  recordPromotion(root, { ...REC, clusterSignature: "task-reviewer flags files from a concurrent task" });
+  const res = run(["--check-suppressed", "an entirely unrelated finding"], root);
+  assert.equal(res.status, 0);
+  assert.deepEqual(JSON.parse(res.stdout), { suppressed: false });
+});
+
+test("cli: --check-suppressed cannot be combined with --plan, --commit-checkpoint, or --record-promotion", () => {
+  const root = realpathSync(repo());
+  const recordJson = JSON.stringify({ ...REC, landed: "2026-08-05" });
+  for (const other of [
+    ["--plan"],
+    ["--commit-checkpoint", "2026-08-05T12:00:00Z"],
+    ["--record-promotion", recordJson],
+  ]) {
+    const r = run(["--check-suppressed", "some subject", ...other], root);
+    assert.equal(r.status, 1, `--check-suppressed + ${other[0]} must be rejected`);
+    assert.match(r.stderr, /cannot be combined/);
+  }
+});
+
+// G1-b: --extract and --check-recurrence both dispatch and return before --check-suppressed's
+// own handler, so without this pair a combined invocation silently ran the other subcommand
+// and printed a payload with no `suppressed` key at all — which a caller parsing for
+// `{"suppressed": ...}` reads as a confident (and wrong) "not suppressed".
+test("cli: --check-suppressed cannot be combined with --extract or --check-recurrence", () => {
+  const root = realpathSync(repo());
+  for (const other of [["--extract", "some-session"], ["--check-recurrence"]]) {
+    const r = run(["--check-suppressed", "some subject", ...other], root);
+    assert.equal(r.status, 1, `--check-suppressed + ${other[0]} must be rejected`);
+    assert.match(r.stderr, /cannot be combined/);
+  }
+});
+
+// G1-a: `subject` is a normalized multi-word phrase (the skill's own example: "scenario
+// evidence sections omitted"). A caller passing it unquoted lets the shell split it into
+// several argv elements — reproduced here directly, without a shell, by passing each word as
+// its own array element (spawnSync's array form never re-quotes, so this is exactly what a
+// split unquoted invocation looks like to the process). Matching on the first word alone
+// would silently answer for a phrase that was never actually checked against the landed
+// signature below, so the extra words must be rejected rather than dropped.
+test("cli: --check-suppressed rejects a subject split across several argv elements instead of matching the first word", () => {
+  const root = realpathSync(repo());
+  recordPromotion(root, { ...REC, clusterSignature: "scenario evidence sections omitted" });
+  const r = run(["--check-suppressed", "scenario", "evidence", "sections", "omitted"], root);
+  assert.equal(r.status, 1, "a split subject must be rejected, not matched on its first word");
+  assert.match(r.stderr, /^dream: /m);
+  assert.equal(r.stdout.trim(), "", "no {\"suppressed\": ...} payload on the rejected path");
 });
 
 test("extractSession: returns decoded message text for one session", () => {
