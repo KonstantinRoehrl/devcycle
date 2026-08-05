@@ -86,14 +86,18 @@ Resume any time with:
 /devcycle:continue
 ```
 
-**Add `.devcycle/` to the target repo's `.gitignore`.** Everything devcycle writes there —
-the state file, the ledger, per-task evidence files, sweep reports — is scratch for the run
-in progress, not project history. The artifacts worth keeping land outside it: the spec and
-plan under `docs/`, an audit under `docs/audits/`, the on-device checklist next to the
-feature, and promotion records under `docs/devcycle/promotions/`. Before committing any
-artifact it writes, devcycle asks `git check-ignore` first
-and skips the commit if your repo ignores that path — your ignore rules decide what enters
-history, not the plugin.
+**Add `.devcycle/` to the target repo's `.gitignore`** — none of it belongs in git history.
+Most of what devcycle writes there is scratch for the run in progress: the state file, the
+ledger, per-task evidence files, sweep reports. The artifacts worth keeping in git land
+outside it: the spec and plan under `docs/`, an audit under `docs/audits/`, the on-device
+checklist next to the feature, and promotion records under `docs/devcycle/promotions/`.
+Before committing any artifact it writes, devcycle asks `git check-ignore` first and skips
+the commit if your repo ignores that path — your ignore rules decide what enters history,
+not the plugin. Two things under `.devcycle/` are durable rather than scratch and should
+survive even a manual cleanup of the directory: `.devcycle/dreaming/` (the cross-session
+checkpoint, dream artifacts, and observation store — deleting it forces the next dream to
+re-mine from scratch) and each cycle's `.devcycle/archive-<date>-<branch-slug>/` (finish's
+copy of the run's audit trail).
 
 ## The pipeline
 
@@ -260,11 +264,13 @@ flowchart TD
    one item at a time. The checklist comes from the plan during execution — or, for a branch
    nobody planned in this session, from that branch's diff traced out to the screens it
    affects.
-9. **Finish** — hands the branch back per your `gitPolicy` (below), and first offers to
-   delete the files that only ever existed to pass content between this cycle's dispatches
-   (per-task reports, evidence, findings, sweep arguments). It shows the list and the total
-   before asking, removes nothing without an explicit yes, and never touches the audit trail
-   — state file, ledger, scope, spec, plan, checklist — or any file your repo tracks in git.
+9. **Finish** — hands the branch back per your `gitPolicy` (below); first copies the
+   cycle's audit trail (ledger, evidence, findings, reports) into
+   `.devcycle/archive-<date>-<branch-slug>/`, unconditionally, then offers to delete the
+   files that only ever existed to pass content between this cycle's dispatches (per-task
+   reports, evidence, findings, sweep arguments). It shows the list and the total before
+   asking, removes nothing without an explicit yes, and never touches the audit trail —
+   state file, ledger, scope, spec, plan, checklist — or any file your repo tracks in git.
 
 Triage judges size, too. A request at typo, rename, or few-line-fix scale — measured against a
 strict checklist, where any doubt on any criterion means not trivial — gets called out before

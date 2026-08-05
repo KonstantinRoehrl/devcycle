@@ -61,14 +61,17 @@ extend these tests with the behavior you changed.
 
 ## Before opening a PR
 
-Run the validators and the workflow-script tests locally; CI runs the same checks:
+Run the validators and the workflow-script tests locally. CI (`.github/workflows/validate.yml`)
+runs the first four; `doctor.mjs` and the gitleaks scan are local-only — there's no CI step for
+either, so they're the two a reviewer won't catch for you:
 
 ```
-node scripts/validate.mjs          # manifests, frontmatter, description budget, fences
-node scripts/redaction-check.mjs   # no machine paths or deny-listed terms
-node scripts/doctor.mjs            # token/context profile; --depth is the context gate's probe
-node --test tests/unit/*.test.mjs  # workflow-script tests (stubbed CLIs, keyless)
-git diff main...HEAD | gitleaks stdin --redact --no-banner  # secret scan over the branch; skip if gitleaks isn't installed
+node scripts/validate.mjs             # manifests, frontmatter, description budget, fences — CI
+node scripts/redaction-check.mjs      # no machine paths or deny-listed terms — CI
+node scripts/duplication-check.mjs    # cross-skill prose duplication — CI
+node --test tests/unit/*.test.mjs     # workflow-script tests (stubbed CLIs, keyless) — CI
+node scripts/doctor.mjs               # token/context profile; --depth is the context gate's probe — local only
+git diff main...HEAD | gitleaks stdin --redact --no-banner  # secret scan over the branch; local only, skip if gitleaks isn't installed
 ```
 
 The commands above use the repo-relative form (`node scripts/<engine>.mjs`), correct for

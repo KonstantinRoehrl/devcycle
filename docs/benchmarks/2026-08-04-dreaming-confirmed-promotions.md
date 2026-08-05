@@ -1,5 +1,11 @@
 # Confirmed promotions from the 2026-08-04 dreaming benchmark — cycle input
 
+> **2026-08-05 — superseded by landing.** All 26 promotions below have since landed:
+> `docs/devcycle/promotions/` now holds a record for each, and the memory deletion noted at
+> the end of this document (promotion 24, `reserve-feat-for-substantial-changes`) has been
+> carried out — that memory entry is gone. This document is left otherwise unedited as the
+> historical record of the benchmark run; see `docs/DECISIONS.md` for what superseded what.
+
 26 promotions confirmed by explicit human confirmation during the benchmark's Phase 4
 decision run, then **deliberately not landed**: they touch the same surfaces the follow-up
 cycle edits, so they were carried here as that cycle's input instead of applied inline.
