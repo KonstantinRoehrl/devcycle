@@ -1,6 +1,7 @@
 name: Validate
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   push:
     # `dev` is listed so every commit that lands there gets a check suite at push time,
     # including the ones GitHub's merge API creates on squash-merge. Without it nothing
@@ -16,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -28,7 +29,7 @@ jobs:
           # Nothing in this job writes to the repository, so the checkout credential has no
           # reason to stay in .git/config where any later step could reach it.
           persist-credentials: false
-      - name: Validate manifests, skills, budget, fences
+      - name: Validate manifests, playbooks, budget, fences
         run: node scripts/validate.mjs
       - name: Redaction guard (host paths, session ids, deny-listed terms)
         run: node scripts/redaction-check.mjs
@@ -51,7 +52,7 @@ jobs:
           ./gitleaks git --no-banner --redact --exit-code 1 .
   pr-title:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: PR title must be a Conventional Commit
@@ -63,3 +64,29 @@ jobs:
             echo "The squash-merge subject drives the release version bump; a malformed title ships no release."
             exit 1
           }
+  commit-convention:
+    name: Commit subjects are Conventional Commits
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check every commit subject on this PR
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          fail=0
+          while IFS= read -r subject; do
+            case "$subject" in
+              Merge\ *) continue ;;
+            esac
+            if ! printf '%s' "$subject" | grep -Eq '^(feat|fix|perf|docs|chore|ci|refactor|style|test|build)(\([a-z0-9./-]+\))?!?: .+'; then
+              echo "::error::not a Conventional Commit: $subject"
+              fail=1
+            fi
+          done < <(git log --format=%s "$BASE_SHA".."$HEAD_SHA")
+          exit "$fail"
