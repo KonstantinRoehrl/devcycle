@@ -33,6 +33,8 @@ File-based, so a `/clear` between the loop and the reader cannot erase it.
 
 ## Stale statuses are archived, never left in place
 
-When a loop re-runs and reaches a new status, the previous status file moves to
-`.devcycle/archive-<date>-<loop-id>/` before the new one is written. A directory holding two
-contradicting verdicts for the same loop is the defect this rule exists to prevent.
+When a loop re-runs and reaches a new status, the previous status file moves to the cycle's own
+`.devcycle/archive-<date>-<branch-slug>/` before the new one is written — or, for a standalone
+run outside a cycle with no branch to slug, to `.devcycle/archive-<date>-<loop-id>/`. A
+directory holding two contradicting verdicts for the same loop is the defect this rule exists
+to prevent.
