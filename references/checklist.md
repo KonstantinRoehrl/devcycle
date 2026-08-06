@@ -52,15 +52,14 @@ A SCRIPT OR SCREENSHOT NEVER CHECKS OFF A CHECKLIST ITEM.
 ```
 
 One exception, keyed to an observable predicate: an item asserting DOM structure, CSS values,
-or exact text that a structural browser check — via claude-in-chrome (the intended engine: it
-navigates, screenshots, and reads the DOM/CSS/text/network of a page in the user's own Chrome)
-or an equivalent structural check — has verified, fresh output in hand, may be checked off
-with the tag `(auto)`. claude-in-chrome is preferred because the user can open an
-authenticated page in their real Chrome and hand the agent that already-logged-in session to
-inspect — which a separate browser context (e.g. Playwright's) cannot do without
-re-authenticating. When claude-in-chrome is not available, nothing is auto-checked: every item
-stays a human item. Everything a browser check cannot structurally see (feel, smoothness,
-visual alignment, contrast, legibility) stays unchecked for the human.
+or exact text that a structural browser check has verified, fresh output in hand, may be
+checked off with the tag `(auto)`. The intended engine is claude-in-chrome — it navigates,
+screenshots, and reads the DOM/CSS/text/network of a page in the user's own Chrome, so the
+user can hand the agent an already-authenticated session, which a separate browser context
+(e.g. Playwright's) cannot do without re-authenticating. When claude-in-chrome is not
+available, nothing is auto-checked: every item stays a human item. Everything a browser check
+cannot structurally see (feel, smoothness, visual alignment, contrast, legibility) stays
+unchecked for the human.
 
 | Rationalization | Reality |
 |---|---|

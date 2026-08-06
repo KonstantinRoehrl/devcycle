@@ -21,20 +21,14 @@ outcome. The finish stage emits the pipeline's final block. The block shape:
 - Compaction hint: Keep <X>. Drop <Y>.
 ```
 
-`Context depth:` is measured, not estimated. At every boundary this file names, run
+`Context depth:` is measured, not estimated: at every boundary this file names, run the depth
+probe `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` (`## The stage budget`) owns and copy
+its numbers into the field. A failed probe is written
+`Context depth: unknown (<the probe's one-line reason>)`.
 
-```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth
-```
-
-and copy its numbers into the field. If the probe exits non-zero, write
-`Context depth: unknown (<the probe's one-line reason>)` — an unknown depth is reported as
-unknown and never as a pass.
-
-At a wave → wave boundary within execution the first field is instead
-`Wave completed: <n> of <m> (stage: execution)` — `Stage completed:` is
-reserved for true stage ends. These are the only two sanctioned first-field
-labels.
+At a wave → wave boundary within execution the first field is instead `Wave completed: <n> of
+<m> (stage: execution)` — `Stage completed:` is reserved for true stage ends, and these are the
+only two sanctioned first-field labels.
 
 At the finish stage specifically, the block carries one additional line, directly after
 `Artifacts:` — the resolved git policy, in the exact shape `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md`
@@ -42,7 +36,7 @@ defines. No other stage's block carries this line.
 
 Pick the context action from this table and recommend it to the user explicitly. The action
 column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, `Fresh session`
-— and the table gives each boundary's default. Only the test below may soften one.
+— and the table gives each boundary's default; only the test below may soften one.
 
 | Boundary | Action | Keep | Drop |
 | --- | --- | --- | --- |
@@ -92,15 +86,11 @@ The gate is unconditional for the agent and overridable only by the user. The or
 not decide on its own judgment that this particular boundary is cheap enough to run through —
 that judgment is what the table and its test already made. How small the plan is, how few waves
 are left, and how urgent the run feels are not exceptions; they are the reasons the gate is
-written down rather than left to judgment. A user who looks away would
-otherwise sail past the boundary with an un-cleared context, which is exactly what this gate
-prevents. `/clear` ends the session by design; state the `/devcycle:continue` resume path in the
-same message you halt on.
+written down rather than left to judgment. `/clear` ends the session by design; state the
+`/devcycle:continue` resume path in the same message you halt on.
 
-**The hard-stop band overrides the table.** When the probe reports `hard-stop` (≥20% of the
-running model's context window), the boundary's context action is `Clear +
-/devcycle:continue` regardless of what the table's row says — including the rows that read
-`Continue`. The gate above then carries the enforcement unchanged: no new work begins in this
-session. At `over-budget` (≥15%) the table's action stands, and
-`${CLAUDE_PLUGIN_ROOT}/references/delegation.md` § The stage budget already requires
-delegating what remains and stopping here rather than continuing through.
+**The hard-stop band overrides the table.** When the probe reports `hard-stop`, the boundary's
+context action is `Clear + /devcycle:continue` regardless of what the table's row says —
+including the rows that read `Continue`. The gate above then carries the enforcement
+unchanged: no new work begins in this session. At `over-budget` the table's action stands and
+the stage budget's own two consequences apply.

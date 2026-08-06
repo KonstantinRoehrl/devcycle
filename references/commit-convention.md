@@ -41,9 +41,7 @@ set.
 ## Scoping the commit
 
 The single owner of how any devcycle-driven commit is scoped, cited rather than restated
-by every skill that commits: `playbooks/executing-waves.md`, `playbooks/taking-the-fast-path.md`,
-`playbooks/sweeping-mechanical-changes.md`, `playbooks/learning-from-sessions.md`,
-`playbooks/onboarding-a-repo.md`, and `playbooks/reviewing-code.md`.
+by every playbook that commits.
 
 Every commit is scoped by an explicit pathspec naming exactly the files this run authored
 — `git commit -- <the file list>` — never `git add -A` and never a bare `git commit`,

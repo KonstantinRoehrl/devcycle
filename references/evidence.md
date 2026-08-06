@@ -35,11 +35,10 @@ implementer to fake a red or the reviewer to reject correct work.
   fewer commands than the gate runs is a declared deviation.
 
 The report itself is a file on the same principle: the implementer writes it to
-`.devcycle/reports/<task-id>.md` in the shape below, and what the dispatch returns to the
-coordinator is the short envelope `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` defines
-(`## Return envelopes`) — the path plus the few counts the coordinator must act on without
-opening the file. A report pasted into the dispatch's reply instead of written to that path is
-the same defect as an inlined evidence tail.
+`.devcycle/reports/<task-id>.md` in the shape below, and the dispatch returns only the short
+envelope `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` defines (`## Return envelopes`). A
+report pasted into the dispatch's reply instead of written to that path is the same defect as
+an inlined evidence tail.
 
 - Implementer report shape:
 
@@ -84,5 +83,5 @@ report. Reject when:
 ## Why the evidence lives in files
 
 The coordinator's green gate re-runs the command itself and reads the exit status, so an
-inlined copy of the output duplicated ground truth at the cost of a whole suite's output
-per task per round.
+inlined copy of the output duplicated ground truth at the cost of a whole suite's output per
+task per round.

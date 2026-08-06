@@ -18,19 +18,13 @@ review depth and the on-device gate by their stages).
 2. **Everything else falls back** — a literal placeholder and `auto` are unset, a
    value outside the knob's allowed set is invalid, and both take the same route.
    `auto` is sanctioned on every knob, not only the `*Model` ones: it is how a user
-   says *let the profile govern this* without deleting the key, so `reviewDepth:
-   auto` and `onDeviceGate: auto` resolve to the profile's column exactly as an
-   unset knob does. Where a stage skill enumerates a knob's allowed values (e.g.
-   `single` | `panel`), that names what the knob resolves *to* — `auto` is settled
-   here, before that enumeration applies, and is never the invalid case.
-   Where they land depends on whether the profile matrix (below) covers the knob:
-   - Profile-covered — the branch review engine (`reviewDepth`), the on-device
-     gate (`onDeviceGate`), the evidence tail, the branch-review round cap, the
-     audit depth, the dreaming depth, and the planning/execution engine choice:
-     the profile's column value.
-   - Not profile-covered — `gitPolicy`, `crossModelReview`, and the `*Model`
-     knobs (whose unset value is `auto`, derived per the model-tier rules
-     below): that knob's own documented default.
+   says *let the profile govern this* without deleting the key. Where a stage skill
+   enumerates a knob's allowed values (e.g. `single` | `panel`), that names what the
+   knob resolves *to* — `auto` is settled here, before that enumeration applies, and
+   is never the invalid case. A knob with a row in the profile matrix below falls
+   back to that row's column value; every other knob — `gitPolicy`,
+   `crossModelReview`, and the `*Model` knobs (whose unset value is `auto`, derived
+   per the model tiers below) — falls back to its own documented default.
 3. **`profile` itself** takes the same two steps: a literal placeholder or a value
    outside `lean | standard | thorough` is unset, and falls back to `standard`.
 4. **The state file's `configured:` line supplies the configured value** for steps
@@ -45,8 +39,8 @@ review depth and the on-device gate by their stages).
 | | `lean` | `standard` | `thorough` |
 | --- | --- | --- | --- |
 | planning / execution engine | devcycle-native compact | devcycle-native compact | upstream overlays |
-| branch review engine | `single` | `single` | `panel` |
-| on-device gate | `auto-ok` | `human-required` | `human-required` |
+| branch review engine (`reviewDepth`) | `single` | `single` | `panel` |
+| on-device gate (`onDeviceGate`) | `auto-ok` | `human-required` | `human-required` |
 | evidence tail in reports | 10 lines | 20 lines | 50 lines |
 | branch-review round cap | 2 | 3 | 5 |
 | audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
@@ -101,23 +95,21 @@ Derivation predicates (dispatch-time-observable inputs only):
   more than 5 files; or `**Dependencies:**` is anything other than `none`; or
   any step fails to name its file and expected behavior; or a prior review
   round on this task returned blocking findings (escalate on retry, never on
-  the first attempt). Measured, fast-declared implementers did the same raw
-  work as session-tier ones — 785k vs 794k raw context units per run, 18k vs
-  20k output tokens per run — at a fifth of the price, and a wrong cheap
-  guess costs at most one review round because a failed review escalates the
-  retry.
+  the first attempt). Measured, fast-tier implementers did the same raw work
+  as session-tier ones (785k vs 794k context units, 18k vs 20k output tokens
+  per run) at a fifth of the price, and a wrong cheap guess costs at most one
+  review round.
 - **task-reviewer**: fast tier iff the task diff is ≤400 changed lines
   and ≤5 files; else session tier.
-- **research / exploration dispatch**: fast tier, always. Read-only work
-  whose output is a map rather than a judgment — locating files, tracing
-  usage, mapping surfaces, doc discovery. Session tier remains for
-  dispatches that must judge: review, diagnosis, design.
+- **research / exploration dispatch** (`references/delegation.md` §
+  Research dispatches): fast tier, always — read-only work whose output is a
+  map rather than a judgment. Session tier remains for dispatches that must
+  judge: review, diagnosis, design.
 
 Upstream's Model Selection tiers are background only; these predicates
-decide. Auditability: every dispatch's ledger event records the decision
-and its inputs — e.g. `outcome=model fast:<resolved id> (auto: files=3,
-deps=none, steps=specified)` or `outcome=model session (auto: escalated on
-files=9)` for derived choices, or `outcome=model <id> (pinned)` for explicit
-config. An escalation always names the signal that fired. Research
-dispatches in scoping and planning run before any ledger exists and log
-nothing; where a ledger exists, they record the same shape.
+decide. Auditability: every dispatch's ledger event records the decision and
+its inputs — `outcome=model fast:<resolved id> (auto: files=3, deps=none,
+steps=specified)` or `outcome=model session (auto: escalated on files=9)` for
+derived choices, `outcome=model <id> (pinned)` for explicit config. An
+escalation always names the signal that fired. Research dispatches that run
+before any ledger exists log nothing; where a ledger exists, same shape.
