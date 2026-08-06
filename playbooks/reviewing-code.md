@@ -1,7 +1,7 @@
 # Reviewing Code
 
 The single review engine: *given this scope and these criteria, what is wrong with this code?*
-**Which caller invoked it decides more than the scope does.** An **audit run** — `/devcycle:audit`
+**Which caller invoked it decides more than the scope does.** An **audit run** — `/devcycle:review`
 standalone, or `/devcycle:cycle`'s audit stage, at any scope below — runs the criteria interview
 (step 1) and ends in the ranked findings document (step 5). **The branch-review stage**
 (`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md`) skips both, inheriting the cycle spec's
@@ -21,7 +21,7 @@ governs it.
 | `repo` | a repo path — whole repo or named subsystem | a whole-repo audit |
 | `files` | `{paths: [...]}` | exactly that file set |
 
-Scope and caller are independent: `/devcycle:audit branch:<name>` is an audit run at `branch` scope
+Scope and caller are independent: `/devcycle:review branch:<name>` is an audit run at `branch` scope
 and gets the interview and the document like any other audit. A branch is never inferred — the
 `branch` form reviews the branch it was handed, deriving its base, its merge-base-guarded diff and
 where contents are read from per "Deriving a branch's file set" in
@@ -140,7 +140,7 @@ Branch discipline follows `${CLAUDE_PLUGIN_ROOT}/references/branch.md`. **In-cyc
 `.devcycle/state.md` exists and this cycle owns it): follow it in full including the `branch:`-line
 write, keep `stage: audit` while that is the stage to resume at, record the document on the `audit:`
 line, and emit the handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` with
-`Stage completed: audit`. **Standalone** (`/devcycle:audit`): that baseline forces a topic branch only
+`Stage completed: audit`. **Standalone** (`/devcycle:review`): that baseline forces a topic branch only
 off a default or integration branch, so a run during another cycle would land this document in that
 cycle's history and review. It therefore always gets its own topic branch, cut from current HEAD and
 named in the report, and must NOT create, read-modify, or write `.devcycle/state.md`.

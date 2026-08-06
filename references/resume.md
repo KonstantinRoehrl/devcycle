@@ -3,6 +3,45 @@
 How any stage re-enters itself after an interruption. Skills name this file; none of
 them restate it.
 
+## The state file
+
+A cycle's file lives at `<repo root>/.devcycle/state.md`, where repo root is
+`git rev-parse --show-toplevel` of the working directory, and nowhere else: never adopt
+one found in a parent directory or another project's checkout. `/devcycle:cycle` writes
+it as its first action and every stage rewrites it at every transition, in this shape:
+
+```markdown
+# devcycle state
+- stage: <the stage to RESUME at; the enum lives in commands/cycle.md>
+- root: <absolute repo toplevel this cycle belongs to>
+- branch: <git branch>
+- request: <one line: what this cycle is building/fixing>
+- scope: <path or none>
+- audit: <path or none>
+- diagnosis: <path or none>
+- spec: <path or none>
+- plan: <path or none>
+- ledger: .devcycle/ledger.md
+- checklist: <path or none>
+- configured: <no | defaults | date + KEY=VALUE list (possibly empty)>[ · profile-asked]
+- updated: <ISO-8601 UTC>
+```
+
+`stage:` names the stage the NEXT session resumes at, never the one just completed.
+`configured:` records what configuration was written for this repo and is carried
+forward unchanged when a new cycle reuses the file; `references/config.md` owns what
+its values mean.
+
+**The ownership check, run before trusting anything else in the file.** `root:` and
+`request:` pin it to one project and one goal, so every reader verifies `root:` against
+its own `git rev-parse --show-toplevel` first. A differing `root:` means the file
+belongs to another checkout or leaked from another project: never resume it and never
+silently reset it — report what its `root:` and `request:` say versus where you are,
+and let the user choose between adopting it (the repo genuinely moved: rewrite `root:`,
+keep everything else) and leaving it alone. A file with no `root:` line predates this
+format and is not foreign: adopt it by writing `root:` and `request:` at the next
+rewrite.
+
 ## Settle the branch first, before reading anything else
 
 On re-entry, settle the branch before any edit, any git-evidence check, and any

@@ -9,7 +9,10 @@ stages complete in a single response or session, each stage still emits its own
 `## Handoff` block, in order, at that stage's end — never one merged or summary
 block for the run. A stage that is skipped or judged not applicable (e.g.
 on-device with no rendered surface) still emits its block: the skip IS the stage
-outcome. The finish stage emits the pipeline's final block. The block shape:
+outcome. **One exception, and only this one:** the stage must have been entered
+and judged inapplicable. A cycle kind that never routes to a stage at all emits
+nothing for it — a feature or refactor cycle, which never enters diagnosis, emits
+no diagnosis block. The finish stage emits the pipeline's final block. The block shape:
 
 ```markdown
 ## Handoff

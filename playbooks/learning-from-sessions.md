@@ -147,4 +147,4 @@ Finally rewrite the checkpoint's two lines: `last-run:` to now, the version to t
 
 ## Entry points
 
-`/devcycle:distill` runs the default loop; `/devcycle:dream` runs `--preview`; neither emits a handoff block.
+`/devcycle:learn` runs the default loop; `/devcycle:learn --preview` runs the preview; neither emits a handoff block.
