@@ -62,17 +62,26 @@ extend these tests with the behavior you changed.
 ## Before opening a PR
 
 Run the validators and the workflow-script tests locally. CI (`.github/workflows/validate.yml`)
-runs the first four; `doctor.mjs` and the gitleaks scan are local-only — there's no CI step for
-either, so they're the two a reviewer won't catch for you:
+runs everything except `doctor.mjs` — that one is local-only, so it's the one a reviewer won't
+catch for you:
 
 ```
 node scripts/validate.mjs             # manifests, frontmatter, description budget, fences — CI
-node scripts/redaction-check.mjs      # no machine paths or deny-listed terms — CI
+node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-listed terms — CI
 node scripts/duplication-check.mjs    # cross-skill prose duplication — CI
 node --test tests/unit/*.test.mjs     # workflow-script tests (stubbed CLIs, keyless) — CI
+gitleaks git --no-banner --redact     # credentials, over the full history — CI
 node scripts/doctor.mjs               # token/context profile; --depth is the context gate's probe — local only
-git diff main...HEAD | gitleaks stdin --redact --no-banner  # secret scan over the branch; local only, skip if gitleaks isn't installed
 ```
+
+The two scanners divide the work and neither subsumes the other. gitleaks owns credentials and
+tokens: it is rule-maintained, and it reads **history**, so a secret that was committed and
+removed one commit later still fails the build. `redaction-check.mjs` owns the privacy classes
+that are specific to how devcycle runs and that no generic scanner knows about — absolute
+home-directory paths, session ids, and the escaped project-directory form that binds a
+transcript path to one person's machine. It reads the current tree only. Verbatim transcript
+*excerpts* are detected by neither; that class is held by review, and by keeping
+excerpt-carrying artifacts out of the tracked tree in the first place.
 
 The commands above use the repo-relative form (`node scripts/<engine>.mjs`), correct for
 running by hand against this checkout. An engine invocation written into skill or command
