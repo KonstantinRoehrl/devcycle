@@ -509,7 +509,7 @@ test("extractPluginVersion finds a devcycle plugin path version in tool_use cont
           type: "tool_use",
           input: {
             command:
-              'node "/home/dev/.claude/plugins/cache/devcycle/devcycle/0.9.2/scripts/doctor.mjs" --depth',
+              'node "~/.claude/plugins/cache/devcycle/devcycle/0.9.2/scripts/doctor.mjs" --depth',
           },
         },
       ],
