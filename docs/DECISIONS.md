@@ -5,6 +5,27 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-06 — the runtime surface budget is 3,500 lines, not 2,600
+
+**Decision:** `scripts/validate.mjs` enforces `SURFACE_LINE_BUDGET = 3500` across
+`commands/` + `playbooks/` + `agents/` + `references/`, with the per-file ceilings
+unchanged at 100 lines for a command and 150 for a playbook. The cycle's ≤2,400
+aspiration stays a target, not a gate.
+
+**Why:** The per-file ceilings never implied a 2,600 total. Twelve playbooks at the
+permitted 150 lines each is 1,800 on its own, before `commands/`, `agents/` or
+`references/` — so the per-file gate and a 2,600 total were never jointly satisfiable at
+the shipped file count. Two independent reviewers then established that the residual is
+not cuttable without behaviour loss: the `references/` overage in particular is
+single-owner concept content, and the 750-line target for that directory was set below
+the size of the concept layer it owns (`quality-criteria.md`'s catalog alone is 142
+lines; 750 across thirteen files implies a 58-line average). The measured surface is
+3,435 lines — 285 in `commands/`, 1,533 in `playbooks/`, 245 in `agents/`, 1,372 in
+`references/` — so 3,500 gates the real tree with roughly 65 lines of headroom.
+
+**Supersedes:** The 2,600-line total named in the v0.12 overhaul plan and its global
+constraints. The per-file ceilings it also named are unchanged.
+
 ## 2026-08-06 — `skills/` is dissolved into `playbooks/`, and the commands become the whole listed surface
 
 **Decision:** The `skills/` directory ceases to exist. All fourteen `SKILL.md` files become

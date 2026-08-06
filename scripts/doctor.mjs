@@ -591,7 +591,10 @@ export function readRecords(file) {
   let text;
   try {
     text = readFileSync(file, "utf8");
-  } catch {
+  } catch (err) {
+    // A transcript deleted between listing and reading is normal; anything else
+    // (permissions, I/O) is a real fault and must not read as an empty session.
+    if (err.code !== "ENOENT") throw err;
     return [];
   }
   const records = [];

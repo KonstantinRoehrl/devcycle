@@ -49,6 +49,8 @@ export function writeInto(dir, relPath, text) {
 // manifests, one well-formed playbook, and a routing table whose single row
 // matches the one fixture command. Each validator test starts from this green
 // tree and breaks exactly one thing.
+export const FIXTURE_PLAYBOOK_HEAD = "# Demoing things\n\nThe routing table lives in references/routing.md.\n";
+
 export function makePluginFixture() {
   const dir = mkdtempSync(join(tmpdir(), "devcycle-test-plugin-"));
   writeInto(
@@ -78,7 +80,9 @@ export function makePluginFixture() {
       2
     ) + "\n"
   );
-  writeInto(dir, "playbooks/demoing-things.md", "# Demoing things\n\nNothing to see here.\n");
+  // The playbook consumes references/routing.md so the fixture satisfies check 11
+  // (every reference needs a consumer); the real tree's consumer is a script.
+  writeInto(dir, "playbooks/demoing-things.md", FIXTURE_PLAYBOOK_HEAD);
   writeInto(
     dir,
     "references/routing.md",

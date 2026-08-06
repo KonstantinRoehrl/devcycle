@@ -2,10 +2,11 @@
 // plugin trees. Every test starts from a green fixture and breaks one thing.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { makePluginFixture, writeInto, runValidate } from "./helpers.mjs";
+import { makePluginFixture, writeInto, runValidate, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
 
-// Replaces the fixture playbook's body. Playbooks have no frontmatter.
-const playbook = (dir, body) => writeInto(dir, "playbooks/demoing-things.md", "# Demoing things\n\n" + body);
+// Replaces the fixture playbook's body, keeping the head that consumes
+// references/routing.md. Playbooks have no frontmatter.
+const playbook = (dir, body) => writeInto(dir, "playbooks/demoing-things.md", FIXTURE_PLAYBOOK_HEAD + "\n" + body);
 
 // The stage enum lives in commands/cycle.md; checks that consult it need it present.
 const withStageEnum = (dir) =>
@@ -165,4 +166,98 @@ test("routing check: a read-only command carrying the guard fails", () => {
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
   assert.match(stderr, /review\.md.*forbids disable-model-invocation/);
+});
+
+// --- check 7: skills/ is not part of the surface any more ---
+
+test("structure check: a resurrected skills/ directory fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "skills/x/SKILL.md", "---\nname: x\ndescription: Use when x is needed.\n---\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /skills\/.*no longer part of the surface/);
+});
+
+// --- check 8: commands are verbs, playbooks are gerunds ---
+
+test("naming check: a command named as a gerund fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "commands/reviewing.md", '---\ndescription: "r"\n---\n');
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /reviewing\.md.*verbs, not gerunds/);
+});
+
+test("naming check: a playbook that is not a gerund fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "playbooks/fast-path.md", "# Fast path\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /fast-path\.md.*gerunds/);
+});
+
+// --- check 9: line budgets, per file and across the surface ---
+
+test("budget check: a command over 100 lines fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "commands/cycle.md", '---\ndescription: "c"\n---\n' + "x\n".repeat(120));
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /commands\/cycle\.md: \d+ lines > 100/);
+});
+
+// Pads the surface with `count` gerund-named playbooks of 100 lines each — each
+// one under the 150-line per-file ceiling, so only the total arm can fire.
+const padSurface = (dir, count) => {
+  for (let i = 0; i < count; i++) writeInto(dir, `playbooks/padding-${i}.md`, "x\n".repeat(100));
+};
+
+test("budget check: a surface over 3500 lines in total fails", () => {
+  const dir = makePluginFixture();
+  padSurface(dir, 40); // 4000 lines
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /runtime surface \d+ lines > 3500/);
+  assert.doesNotMatch(stderr, /lines > 150/); // the total arm fired, not the per-file arm
+});
+
+test("budget check: the same surface under 3500 lines in total passes", () => {
+  const dir = makePluginFixture();
+  padSurface(dir, 30); // 3000 lines
+  ok(runValidate(dir));
+});
+
+// --- check 10: no agent pins a model ---
+
+test("agent check: a model: pin in agent frontmatter fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/implementer.md", "---\nname: implementer\nmodel: sonnet\n---\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /agents\/implementer\.md.*must not set model:/);
+});
+
+// --- check 11: every reference has a consumer ---
+
+test("reference check: a reference with no consumer fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/orphan.md", "# Orphan\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /orphan\.md.*no consumer/);
+});
+
+test("reference check: a reference that mentions only itself is still an orphan", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/orphan.md", "# Orphan\n\nSee references/orphan.md for the shape.\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /orphan\.md.*no consumer/);
+});
+
+test("reference check: a reference loaded only by a script has a consumer", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/orphan.md", "# Orphan\n");
+  writeInto(dir, "scripts/uses-it.mjs", 'readFileSync(join(root, "references/orphan.md"), "utf8");\n');
+  ok(runValidate(dir));
 });

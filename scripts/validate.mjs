@@ -163,5 +163,64 @@ else if (existsSync(join(root, "commands"))) {
       fail(`references/routing.md: row "${name}" names no command`);
 }
 
+// 7. skills/ is not part of the surface any more.
+if (existsSync(join(root, "skills")))
+  fail("skills/: no longer part of the surface — stage logic lives in playbooks/, loaded by path");
+
+// Flat listing of the .md files directly under a surface directory.
+const namesIn = (dir) =>
+  existsSync(join(root, dir)) ? readdirSync(join(root, dir)).filter((f) => f.endsWith(".md")) : [];
+
+// 8. Naming: commands are verbs, playbooks are gerunds, agents are role nouns.
+// No exemption list: the rule is "not a gerund", and the one recorded exception to
+// "commands are verbs" — `doctor`, on the brew/flutter/npm precedent — is a noun, so it
+// satisfies this rule on its own merits. The precedent is recorded in references/routing.md,
+// not in code. A command that genuinely needs a gerund name gets an allowlist then, with a
+// test that exercises it.
+for (const f of namesIn("commands")) {
+  const name = f.replace(/\.md$/, "");
+  if (/ing$/.test(name))
+    fail(`commands/${f}: command names are verbs, not gerunds ("${name}" ends in -ing)`);
+}
+for (const f of namesIn("playbooks")) {
+  const name = f.replace(/\.md$/, "");
+  if (!/(^|-)[a-z]+ing(-|$)/.test(name))
+    fail(`playbooks/${f}: playbook names are gerunds ("${name}" contains no -ing word)`);
+}
+
+// 9. Line budgets, as numbers. Counted the way `wc -l` counts: a file's closing
+//    newline terminates its last line rather than starting an empty one.
+const SURFACE_LINE_BUDGET = 3500, COMMAND_LINE_MAX = 100, PLAYBOOK_LINE_MAX = 150;
+const lines = (p) => {
+  const text = readFileSync(p, "utf8");
+  return text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
+};
+let surfaceLines = 0;
+for (const p of surface) {
+  const n = lines(p), r = rel(p);
+  surfaceLines += n;
+  if (r.startsWith("commands/") && n > COMMAND_LINE_MAX) fail(`${r}: ${n} lines > ${COMMAND_LINE_MAX}`);
+  if (r.startsWith("playbooks/") && n > PLAYBOOK_LINE_MAX) fail(`${r}: ${n} lines > ${PLAYBOOK_LINE_MAX}`);
+}
+if (surfaceLines > SURFACE_LINE_BUDGET)
+  fail(`runtime surface ${surfaceLines} lines > ${SURFACE_LINE_BUDGET} (commands+playbooks+agents+references)`);
+
+// 10. No agent pins a model — a pin defeats session-tier escalation.
+for (const f of namesIn("agents"))
+  if (frontmatter(join(root, "agents", f))?.model)
+    fail(`agents/${f}: frontmatter must not set model: — a pin defeats session-tier escalation`);
+
+// 11. Every reference has at least one consumer — a surface file that loads it, or a
+//     script that reads it (references/routing.md's consumer is this validator's check 6).
+//     A reference mentioning itself is not a consumer of itself.
+const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
+for (const f of namesIn("references")) {
+  const needle = `references/${f}`;
+  const consumed = [...surface, ...scripts].some(
+    (p) => !rel(p).endsWith(needle) && readFileSync(p, "utf8").includes(needle)
+  );
+  if (!consumed) fail(`references/${f}: no consumer — every reference must be loaded by something`);
+}
+
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
 console.log("validate: ok");
