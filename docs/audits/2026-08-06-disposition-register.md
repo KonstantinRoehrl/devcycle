@@ -85,6 +85,7 @@ Disposition is one of: `fixed-here` (with the commit or task), `cycle-2`, `cycle
 | BR4 | branch-review | medium | declined | already fixed by `c48f94d` — the recurrence step is now gated on profile (skipped at `lean`), and doctor renders the appendix as "empty-not-checked" rather than a plain empty result when the artifact's `Profile:` line reads `lean` |
 | BR5 | branch-review | medium | cycle-2 | still present — the doctor skill's frontmatter and "Interpret, don't transcribe" step still say "rank … by dollar impact" while its own "Severity, ranking" section says the dollar figure is "never the sort key"; instrumentation-reporting subject, not covered by any cycle-1 task |
 | BR6 | branch-review | medium | declined | already fixed by `c48f94d` — DESIGN.md §15.2 no longer carries a copy of the profile matrix; it now points at `references/config.md` as the single owner, per §15.1 |
+| SC1 | task-16 | medium | cycle-3 | **3 of the 56 `tests/scenarios/` files were deleted with nothing harvested** — `auditing-a-repo/description-sufficiency.md`, `dreaming-across-sessions/description-sufficiency.md`, `scoping-interview/description-sufficiency.md`, each of which grades six model verdicts against expected labels and yields no assertion a file read can settle. The other 53 gave up only their file-readable half (now 53 `harvested:` tests in `tests/unit/golden-path.test.mjs`); what all 56 graded about a *running* agent — whether a question was well formed, whether a stop was actually taken, whether a review found the real defect — is unasserted anywhere. Needs an LLM-judge runner; deferred with the instrumentation that would make its output trustworthy |
 
 ## Notes on this register's id scheme and scope
 
@@ -106,6 +107,9 @@ Disposition is one of: `fixed-here` (with the commit or task), `cycle-2`, `cycle
   task's coordinator resolution, only `branch-review-final.md`'s "~6 medium carry-overs" are
   in scope — the many per-task round files in the same archive directory are prior-cycle
   review rounds already resolved inside the shipped `c48f94d`, not carry-overs.
+- `SC1` is the one row this cycle's own work opened rather than inherited: task 16 deleted
+  `tests/scenarios/` and this row records what that deletion dropped. Its `source` is the task
+  that raised it, not an audit.
 - `unassigned` is not one of the five disposition values this register's own header defines.
   It is used only where a row is confirmed genuinely open, does not match cycle-2's
   instrumentation/benchmarks charter or cycle-3's typed-agents/improvement-loop charter, and no
