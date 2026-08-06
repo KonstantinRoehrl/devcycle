@@ -33,7 +33,7 @@ jobs:
         run: node scripts/validate.mjs
       - name: Redaction guard (host paths, session ids, deny-listed terms)
         run: node scripts/redaction-check.mjs
-      - name: Duplication check
+      - name: Check for duplicated prose across the runtime surface
         run: node scripts/duplication-check.mjs
       - name: Workflow script tests (stubbed CLIs — no model call, no API key)
         run: node --test tests/unit/*.test.mjs
