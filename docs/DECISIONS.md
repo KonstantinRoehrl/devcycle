@@ -5,7 +5,125 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-06 — `skills/` is dissolved into `playbooks/`, and the commands become the whole listed surface
+
+**Decision:** The `skills/` directory ceases to exist. All fourteen `SKILL.md` files become
+plain `playbooks/*.md` files with no frontmatter, loaded only as
+`${CLAUDE_PLUGIN_ROOT}/playbooks/<name>.md` by the command that runs them, and every
+`devcycle:<skill-id>` is removed from the vocabulary: `auditing-a-repo`,
+`distilling-learnings`, `doctor`, `dreaming-across-sessions`, `executing-waves`, `fast-path`,
+`finishing-the-cycle`, `onboarding-a-repo`, `planning-waves`, `reviewing-code`,
+`reviewing-the-branch`, `scoping-interview`, `sweeping-mechanical-changes`,
+`verifying-on-device`. What remains listed to a user or a model is seven commands, and
+`references/routing.md` is their single owner. `scripts/validate.mjs` fails the build when a
+`devcycle:` id names a playbook, when a command is missing from the routing table, or when a
+command's declared consequence disagrees with its `disable-model-invocation` frontmatter.
+**Why:** a skill is selected by its `description`, which made every stage's prose reachable by
+trigger phrase, out of order and outside the command that owns its preconditions — the audit
+found five separate instances (a `doctor` skill unreachable behind a command of the same name;
+playbook descriptions competing with `superpowers:brainstorming` for the same phrasing;
+`fast-path` and `sweeping-mechanical-changes` enterable without the state file the pipeline
+binds a run to; "invoked by other skills, not by a user" written as a wish in prose that
+nothing enforced). Deleting the roster entry removes the route rather than adding another
+warning to it, and the descriptions it deletes were spending the finite description budget the
+seven commands now have to themselves. The layer is `playbooks/`, not `stages/`, because four
+of the twelve back standalone commands rather than pipeline stages.
+**Supersedes:** `DESIGN.md` §3's `skills/` tree and §13's skill-name list (both rewritten to
+the five-layer model), and every "Skill `<name>`" row in `README.md`. Playbook names keep the
+verb-first gerund rule; only their addressability changed.
+
+## 2026-08-06 — `dream` and `distill` fold into `learn`, and the preview asymmetry survives as a flag
+
+**Decision:** `/devcycle:dream` and `/devcycle:distill` are removed and replaced by one
+command, `/devcycle:learn`, over one playbook, `playbooks/learning-from-sessions.md` (merged
+from `dreaming-across-sessions` and `distilling-learnings`). The one behaviour that genuinely
+differed between the two entry points — mining and proposing *without* committing anything —
+survives as `/devcycle:learn --preview`, which writes the dated artifact, lands no edit, and
+deletes no memory.
+**Why:** distill was a strict superset of dream: it ran the dream as its own step 0, and
+neither command's description said so. A newcomer reading them as alternatives ran both and
+paid the mining pass — the most expensive artifact family in the repo — twice. Two entry
+points existed to express one asymmetry, which a flag expresses at no cost to the surface, and
+the subsumption that used to be discoverable only by reading the skill body is now the single
+command's own first line.
+**Supersedes:** the 2026-08-04 entry's fourth point, which made the dream artifact the handoff
+*between two invocation paths*. There is one path now; the artifact remains the handoff, and
+remains what `--preview` stops at, so the reason that point gave — advancing the checkpoint
+from a read-only run would discard candidates a later real run should still see — is unchanged
+and still binding. Nothing in the 2026-08-05 entry's map→reduce mining, corpus staging, or
+two-tier disposition is affected.
+
+## 2026-08-06 — amendment 4's model-invocability rule is upheld, and moves from prose into a declared consequence class
+
+**Decision:** `DESIGN.md` §4 amendment 4 — entry points cannot auto-fire, except `/cycle`
+deliberately — stands unchanged in substance and stops being the place the rule lives. Each
+command now declares a `consequence` class in `references/routing.md`: `read-only` (must not
+carry `disable-model-invocation`), `confirm-first` (may write, but takes no irreversible action
+before its first user confirmation), `side-effectful` and `resume` (both must carry the guard).
+`scripts/validate.mjs` fails the build on any disagreement between a row and a command's real
+frontmatter.
+**Why:** the audit's cross-model disagreement report recorded this as one of its two direct
+contradictions, and it is recorded here so it is not re-litigated a third time. The independent
+Opus 5 pass flagged unguarded `/devcycle:cycle` as a defect: the guard is applied inversely to
+consequence, since `cycle` creates branches, dispatches writers, and can push, while
+lower-consequence commands carry it. The panel's adversarial verification of the adjacent
+finding cited amendment 4 as *sanctioning* `/cycle` as the intentional exception. One model
+read it as a design bug, the other as a design decision; the audit listed it as neither and
+reported the disagreement. The resolution is that both readings were right about different
+things — the exception is deliberate, and "deliberate" was only ever asserted in prose. The
+`confirm-first` class makes the claim checkable: `cycle` may write `.devcycle/state.md` and
+nothing else before its first confirmation, it creates no branch and makes no commit, and it
+surfaces a state-file collision rather than overwriting one. A reviewer can now test that
+claim against the command; before, they could only find the sentence granting the exception.
+**Supersedes:** amendment 4 as the rule's *owner* — it is now the record of why the exception
+was granted. `references/routing.md` owns which commands may be model-invoked, and nothing
+else restates it.
+
+## 2026-08-06 — the line budget counts what enters a context window, not directories
+
+**Decision:** devcycle's runtime line budget — 2,600 lines total across `commands/`,
+`playbooks/`, `agents/` and `references/`, with per-file ceilings of 100 lines for a command
+and 150 for a playbook — governs *what can be loaded into a context window*, not a fixed list
+of directory names. `scripts/` and `workflows/` sit outside it because they are executed, never
+read as prose, and may grow. The per-directory allocations written into the restructure's spec
+are guidance for planning a cut; the gate is the total plus the per-file ceilings.
+**Why:** a budget attached to directory names can be satisfied by renaming one. This
+restructure moved fourteen files from `skills/` to `playbooks/`, and under a directory-list
+reading that move would have scored as a saving while every one of those lines still loads
+exactly as before. Only prose that is deleted, or that stops being loaded, counts. The
+per-directory table was rejected as a gate for the mirror-image reason: it squeezed
+`references/` by 52% while that directory holds the densest single-owner content in the repo,
+which would have forced behaviour cuts to hit a number.
+**Supersedes:** any reading of the budget as a per-directory allocation, including the
+restructure spec's own table. Nothing about the total or the per-file ceilings changed.
+
+## 2026-08-06 — `tests/scenarios/` is harvested and deleted, and the LLM-judge runner is deferred
+
+**Decision:** The 56 prose scenario files are read for what they assert; every assertion a file
+read can settle moves into `tests/unit/golden-path.test.mjs`, and the directory is deleted. The
+judge-dependent remainder — the assertions that need a model to decide whether a response was
+right — is counted and recorded in `docs/audits/2026-08-06-disposition-register.md`, deferred to
+cycle 3 along with the LLM-judge runner that would make its output trustworthy.
+**Why:** nothing ran them. There is no model credential available to GitHub Actions, so they
+were never a merge gate, and "best-effort, by hand, when practical" meant in practice that a
+change shipped without them. A check nobody runs is worse than an absent one: it reads as
+coverage that exists. They also cost every installer 9,733 lines of payload, because
+`marketplace.json` sets the plugin source to `./` and there is no build step to filter them.
+Deferring the runner rather than writing one now keeps it with the instrumentation work that
+has to land before a judge's verdicts could be compared across runs at all.
+**Supersedes:** `CONTRIBUTING.md`'s "The scenario harness" section, replaced by its
+golden-path fixture section; `DESIGN.md` §17's `description-sufficiency` scenario-test type,
+rescoped to commands and to review-time checking; and §12 step 3's "scenario-tested before it
+replaces the prose it supersedes". One pointer is left dangling for its owner to clear:
+`references/evidence.md` § Scenario evidence still describes the scenario file's required
+`Baseline (red)` / `Result (green)` sections and names the retired `CONTRIBUTING.md` section as
+their owner.
+
 ## 2026-08-05 — dreaming's mining splits into map→reduce, corpus staging replaces a budget gate, and disposition goes two-tier
+
+*(Naming, 2026-08-06: this entry's `dreaming-across-sessions` skill is today's
+`playbooks/learning-from-sessions.md`, reached by `/devcycle:learn`. The mechanism below is
+unchanged — see the 2026-08-06 entries above.)*
 
 **Decision:** Five changes land together as amendment 2 to the 2026-08-04 design. First,
 mining splits into a fast-tier **map** stage (one dispatch per session slice, writing an
@@ -59,6 +177,12 @@ row in `DESIGN.md` §15.2's profile matrix; that matrix is deleted in this same 
 row-addition carry-over is now moot rather than actioned.
 
 ## 2026-08-04 — dreaming's engine/skill split, corpus, and artifact handoff settle four departures from the originating ticket
+
+*(Naming, 2026-08-06: `/devcycle:dream` and `/devcycle:distill` below are today's single
+`/devcycle:learn`, and the `dreaming-across-sessions` / `distilling-learnings` skills are today's
+`playbooks/learning-from-sessions.md`. The fourth point's two invocation paths are now one
+command and its `--preview` flag — see the 2026-08-06 entries above. The engine/skill split
+itself, `scripts/dream.mjs` deterministic and the playbook judgemental, is unchanged.)*
 
 **Decision:** Four points diverge from the ticket that proposed session-memory dreaming.
 First, promotion records are committed under `docs/devcycle/promotions/` rather than
