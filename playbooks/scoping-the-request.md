@@ -1,4 +1,4 @@
-# Scoping Interview
+# Scoping the Request
 
 Turn a rough request into an established scope before any design work starts. This is
 the devcycle pre-stage in front of `superpowers:brainstorming` — or, for bugs whose
@@ -49,6 +49,9 @@ mid-interview still leaves a state file, pinned to this repo and goal, for
 Whenever scope, intent, architecture, data, or user preference is uncertain:
 **interview, never guess.**
 
+Questions go through AskUserQuestion in batches of 1–4, each with concrete options plus Other.
+Never one question per message.
+
 1. **Research BEFORE questions.** Read the relevant code and docs first, so every
    question is informed by what the repo already shows. Never ask what the repo can
    answer.
@@ -59,11 +62,10 @@ Whenever scope, intent, architecture, data, or user preference is uncertain:
    Relevance here is judged against the request itself — scope is not yet
    confirmed — starting from root repo-orientation docs (a `project.md`,
    `architecture.md`, or equivalent).
-2. **Batch, don't trickle.** Ask via AskUserQuestion: 1–4 questions per call, each
-   with concrete options plus Other — never one question per message. If
-   AskUserQuestion is unavailable, send the whole batch as one plain message with
-   the SAME shape: the summary confirmation as item 1, and every question still
-   listing its concrete options plus an explicit Other/free-form escape.
+2. **Batch, don't trickle.** If AskUserQuestion is unavailable, send the whole
+   batch as one plain message with the SAME shape: the summary confirmation as
+   item 1, and every question still listing its concrete options plus an explicit
+   Other/free-form escape.
 3. **Summary confirmation occupies slot 1** of the first batch: your one-paragraph
    reading of what the user wants, offered to confirm or correct.
 4. **Hard STOP after asking.** No drafting, no assuming answers, no continuing
