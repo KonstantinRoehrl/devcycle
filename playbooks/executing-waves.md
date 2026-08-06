@@ -67,15 +67,8 @@ file conflicts these invariants already preserve.)
      catalog, and never the plan's whole constraints section** — only the lines this task's ids name;
      `references/quality-criteria.md`'s cost rule owns why. A task declaring `none`, or a plan with
      no such section, adds nothing here.
-   - **Preload what the evidence class needs:** `red-green` at `thorough`, the relevant
-     **superpowers:test-driven-development** content (REQUIRED); `red-green` at `lean`/`standard`, an
-     excerpt carrying exactly three things and nothing beyond them — write the failing test first,
-     run it and capture the red output before writing implementation code, then write only enough
-     code to pass and capture the green output; `green-green` and `convention`, no TDD splice but the
-     exact suite or convention command their before/after evidence must run. Plus any convention-skill
-     content the task needs — never an instruction for the subagent to fetch a skill itself, which it
-     can silently skip where injected content cannot. Evidence is never profile-conditional; only
-     `<N>` varies.
+   - **Preload what the evidence class needs:** splice exactly what
+     `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Preloading a class into a brief names.
 3. **Dispatch devcycle:implementer** with that brief only, never accumulated session history or other
    tasks' reports, on the model `references/config.md` resolves. The dispatch prompt must NEVER
    instruct the implementer to commit, stage, or push. Ledger `event=dispatched`. It returns the
@@ -120,63 +113,13 @@ handoff below.
 
 ### Sweep-executed tasks
 
-A task whose plan entry carries `**Execution:** sweep` replaces steps 2–3 with one run of the
-mechanical-sweep workflow; steps 4–7 then apply with the deltas below. The invocation contract —
-args-JSON shape, the `$(cat …)` invocation, `DEVCYCLE_SWEEP_MODEL` resolution, the clean-targets
-precondition, the exit-code taxonomy, and the re-run rule — is owned by
-**${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md** (REQUIRED, its steps 2–4).
-
-- **Run it.** Take files, instruction, and verifyCommand verbatim from the task body into
-  `.devcycle/sweep-args-<task-id>.json` and save the stdout report to
-  `.devcycle/sweep-report-<task-id>.json` — per task, since the triage path's single names would
-  collide across concurrent sweeps. Ledger IMMEDIATELY before the invocation, in
-  `references/config.md`'s audit shape: `event=dispatched outcome=sweep model <decision>`, so a crash
-  mid-sweep still shows the task dispatched.
-- **Clean targets** apply before a task's FIRST invocation, and a dirty target means the sweep does
-  not run for that task: ledger `event=user-decision outcome=sweep dirty-targets` naming the files,
-  then the fallback below. On a re-run of a task already logged `dispatched outcome=sweep`, dirty
-  targets are the interrupted run's own edits and take the sweep playbook's Resume confirmation
-  instead.
-- **Exit 0, `applied` non-empty.** The saved report IS the implementer report: ledger
-  `event=report-received` with it as `ref=`, then the task-reviewer dispatch (report included, skips
-  and all), the green gate, and the acceptance commit exactly as steps 4–7 define. No implementer
-  exists to write the evidence files, so the coordinator writes them itself per
-  `references/evidence.md`, with one binding substitution: `<task-id>` is the plan's task number, not
-  the literal `sweep` id that reference names for the standalone triage route.
-- **Exit 0, `applied` empty.** Nothing was swept: no diff to review, nothing to commit, steps 4–7 do
-  not apply. Ledger `event=report-received outcome=sweep applied-none` with the report as `ref=`,
-  relay its per-file reasons verbatim, then the fallback — that line already marks the pending
-  decision, so log nothing further.
-- **Hard stop** (exit 1 with a stdout report): ledger `event=review-verdict outcome=rejected (sweep
-  hard stop: <reason>)`, then the fallback. A fatal exit 1 without a report logs no verdict.
-- **The fallback**, in each case above, is a user decision: corrected parameters and a re-run, or a
-  normal `devcycle:implementer` dispatch for the task. A **rejection** of a swept diff (reviewer
-  findings or green gate) goes straight to that implementer dispatch, never a sweep re-run of the
-  rejected instruction. Any such brief must disclose the files the sweep already applied, or instruct
-  reverting them first; it never assumes a clean slate.
+A task whose plan entry carries `**Execution:** sweep` replaces steps 2–3 with one mechanical-sweep
+run; steps 4–7 apply with six deltas: `${CLAUDE_PLUGIN_ROOT}/references/sweep-execution.md` owns them.
 
 ## Ledger
 
-Single source of truth for progress, at `.devcycle/ledger.md` — one ledger, never a second. This
-skill creates the file, before any per-event line, with these three records at the top, each written
-once, in this order:
-
-```
-Plan: `<the plan path this stage was handed>`
-Branch: `<topic branch>` (cut from `<integration or default branch>`)
-Profile: `<resolved profile>` (evidence tail <N> lines)
-```
-
-`Branch:` is recorded once pre-flight step 1 has the topic branch, `Profile:` from this skill's own
-resolved profile, and pre-flight step 2 appends a fourth line, `Commit-convention:`, after these
-three once its derivation runs — `references/commit-convention.md` owns that line's format. Then one
-appended line per event, all four fields REQUIRED, exactly this shape:
-
-```
-- [<ISO-8601 UTC>] task=<id> event=<dispatched|report-received|review-round|review-verdict|committed|user-decision> outcome=<short> ref=<commit-sha|file|none>
-```
-
-After any compaction or resume, trust the ledger and `git log` over conversation memory.
+Progress is written to `.devcycle/ledger.md`; pre-flight steps 1–2 supply its `Branch:` and
+`Commit-convention:` lines, and `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns its write format.
 
 ## UI and on-device outcomes
 
@@ -201,20 +144,5 @@ finishing).
 
 ## Resuming after /clear
 
-Read `${CLAUDE_PLUGIN_ROOT}/references/resume.md` and follow it — it settles the branch and re-derives
-position from git evidence. Then read `.devcycle/state.md`, the plan's Dispatch Map, and the ledger,
-and resume each task from its last ledger event, most specific row winning. Sweep rows key on the
-event's logged `outcome=` (a `sweep` token in it), never on the task's `**Execution:** sweep` marker:
-a bare `dispatched` on a sweep-marked task is a post-rejection implementer fix and takes the generic
-rows.
-
-| ledger last event for a task | resume action |
-| --- | --- |
-| `dispatched` | re-dispatch the same brief (the run may have died) |
-| `report-received` | dispatch the reviewer (it produces the diff itself) |
-| `review-round` (no verdict after it) | the reviewer's run may have died: re-dispatch it for that round |
-| `review-verdict outcome=accepted` | run the green gate, commit |
-| `review-verdict outcome=rejected` | re-dispatch the implementer with the findings — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet (findings, task body, applied-edits disclosure), never a sweep re-run |
-| `committed` | task done — move to the next task |
-| `dispatched outcome=sweep …` | no brief to re-dispatch: re-run the sweep bullets from the clean-targets check |
-| any other sweep-token outcome (`applied-none`, `dirty-targets`, `sweep hard stop: …`) | a decision was pending when the run died: re-present the fallback, never an automatic dispatch. Reasons come from the saved report, or for `dirty-targets` from the files the event names (no sweep ran, so no report exists); a hard stop also carries its applied-files disclosure |
+Read `${CLAUDE_PLUGIN_ROOT}/references/resume.md` and follow it: it settles the branch, re-derives
+position from git evidence, and owns the ledger-event → resume-action table, sweep rows included.

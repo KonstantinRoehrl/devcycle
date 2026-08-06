@@ -6,9 +6,12 @@ them restate it.
 ## The state file
 
 A cycle's file lives at `<repo root>/.devcycle/state.md`, where repo root is
-`git rev-parse --show-toplevel` of the working directory, and nowhere else: never adopt
-one found in a parent directory or another project's checkout. `/devcycle:cycle` writes
-it as its first action and every stage rewrites it at every transition, in this shape:
+`git rev-parse --show-toplevel` of the working directory: never adopt one found in a
+parent directory or another project's checkout. `commands/continue.md` enumerates every
+`.devcycle/state.md` under this repo root, since a nested checkout or subproject may hold
+one of its own; the ownership check below is what decides which of them belongs here.
+`/devcycle:cycle` writes it as its first action and every stage rewrites it at every
+transition, in this shape:
 
 ```markdown
 # devcycle state
@@ -74,6 +77,26 @@ A stage that records its own commit marker in `.devcycle/state.md` (e.g. a
 `git merge-base --is-ancestor <sha> <branch>` exits 0 — never guessed from the log.
 A stage may add evidence rows of its own for states this table does not name; it may
 never weaken the two rows above.
+
+## Resuming a wave's per-task position
+
+`${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` re-enters by reading
+`.devcycle/state.md`, the plan's Dispatch Map, and the ledger, then resuming each task
+from its last ledger event, most specific row winning. Sweep rows key on the event's
+logged `outcome=` (a `sweep` token in it), never on the task's `**Execution:** sweep`
+marker: a bare `dispatched` on a sweep-marked task is a post-rejection implementer fix
+and takes the generic rows.
+
+| ledger last event for a task | resume action |
+| --- | --- |
+| `dispatched` | re-dispatch the same brief (the run may have died) |
+| `report-received` | dispatch the reviewer (it produces the diff itself) |
+| `review-round` (no verdict after it) | the reviewer's run may have died: re-dispatch it for that round |
+| `review-verdict outcome=accepted` | run the green gate, commit |
+| `review-verdict outcome=rejected` | re-dispatch the implementer with the findings — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet (findings, task body, applied-edits disclosure), never a sweep re-run |
+| `committed` | task done — move to the next task |
+| `dispatched outcome=sweep …` | no brief to re-dispatch: re-run the sweep bullets from the clean-targets check |
+| any other sweep-token outcome (`applied-none`, `dirty-targets`, `sweep hard stop: …`) | a decision was pending when the run died: re-present the fallback, never an automatic dispatch. Reasons come from the saved report, or for `dirty-targets` from the files the event names (no sweep ran, so no report exists); a hard stop also carries its applied-files disclosure |
 
 ## Review acceptance is never inferable from git
 

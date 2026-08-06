@@ -23,6 +23,18 @@ The class is planning's call, not the implementer's: derive it from what the tas
 changes, and never declare `red-green` where no failing test can exist — that forces the
 implementer to fake a red or the reviewer to reject correct work.
 
+## Preloading a class into a brief
+
+The content a dispatching stage splices into a task's brief, per class: `red-green` at
+`thorough`, the relevant **superpowers:test-driven-development** content (REQUIRED);
+`red-green` at `lean`/`standard`, an excerpt carrying exactly three things and nothing beyond
+them — write the failing test first, run it and capture the red output before writing
+implementation code, then write only enough code to pass and capture the green output;
+`green-green` and `convention`, no TDD splice but the exact suite or convention command their
+before/after evidence must run. Plus any convention-skill content the task needs — never an
+instruction for the subagent to fetch a skill itself, which it can silently skip where injected
+content cannot. Evidence is never profile-conditional; only `<N>` varies.
+
 ## File-backed evidence
 
 - Paths: `.devcycle/evidence/<task-id>-before.txt`, `.devcycle/evidence/<task-id>-after.txt`.
