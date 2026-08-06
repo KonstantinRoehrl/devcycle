@@ -130,3 +130,39 @@ test("handoff check: a playbook emitting a handoff block without the reference f
   playbook(dir, "## Handoff\n\nEmit whatever block you like.\n");
   failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /references\/handoff\.md/);
 });
+
+// --- check 6: commands against the routing table in references/routing.md ---
+
+test("routing check: a command missing from the routing table fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "commands/verify.md", '---\ndescription: "v"\n---\n');
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /verify\.md.*routing table/);
+});
+
+test("routing check: a side-effectful command without the guard fails", () => {
+  const dir = makePluginFixture();
+  writeInto(
+    dir,
+    "references/routing.md",
+    "# Routing\n\n| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n| run the pipeline | `cycle` | confirm-first | yes |\n| set up a repo | `onboard` | side-effectful | no |\n"
+  );
+  writeInto(dir, "commands/onboard.md", '---\ndescription: "o"\n---\n');
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /onboard\.md.*disable-model-invocation/);
+});
+
+test("routing check: a read-only command carrying the guard fails", () => {
+  const dir = makePluginFixture();
+  writeInto(
+    dir,
+    "references/routing.md",
+    "# Routing\n\n| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n| run the pipeline | `cycle` | confirm-first | yes |\n| review code | `review` | read-only | yes |\n"
+  );
+  writeInto(dir, "commands/review.md", '---\ndescription: "r"\ndisable-model-invocation: true\n---\n');
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /review\.md.*forbids disable-model-invocation/);
+});

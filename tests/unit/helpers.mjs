@@ -46,8 +46,9 @@ export function writeInto(dir, relPath, text) {
 }
 
 // Throwaway plugin tree that `scripts/validate.mjs` accepts as-is: both
-// manifests plus one well-formed playbook. Each validator test starts from this
-// green tree and breaks exactly one thing.
+// manifests, one well-formed playbook, and a routing table whose single row
+// matches the one fixture command. Each validator test starts from this green
+// tree and breaks exactly one thing.
 export function makePluginFixture() {
   const dir = mkdtempSync(join(tmpdir(), "devcycle-test-plugin-"));
   writeInto(
@@ -78,6 +79,12 @@ export function makePluginFixture() {
     ) + "\n"
   );
   writeInto(dir, "playbooks/demoing-things.md", "# Demoing things\n\nNothing to see here.\n");
+  writeInto(
+    dir,
+    "references/routing.md",
+    "# Routing\n\n| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n| run the pipeline | `cycle` | confirm-first | yes |\n"
+  );
+  writeInto(dir, "commands/cycle.md", '---\ndescription: "Fixture command."\n---\n\n# /devcycle:cycle\n\n- stage: <scoping|planning|execution>\n');
   return dir;
 }
 

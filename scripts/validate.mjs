@@ -135,5 +135,33 @@ if (existsSync(join(root, "playbooks")))
       fail(`playbooks/${f}: emits "## Handoff" without referencing references/handoff.md`);
   }
 
+// 6. Every command appears exactly once in the routing table, and its declared consequence
+//    agrees with its disable-model-invocation frontmatter.
+const routingPath = join(root, "references/routing.md");
+if (!existsSync(routingPath)) fail("references/routing.md: missing (the routing table has no owner)");
+else if (existsSync(join(root, "commands"))) {
+  const routing = readFileSync(routingPath, "utf8");
+  const rows = new Map();
+  for (const [, name, consequence] of routing.matchAll(/^\|[^|]*\|\s*`([a-z-]+)`\s*\|\s*([a-z-]+)\s*\|/gm)) {
+    if (rows.has(name)) fail(`references/routing.md: ${name} appears more than once`);
+    rows.set(name, consequence);
+  }
+  const GUARD_REQUIRED = new Set(["side-effectful", "resume"]);
+  for (const f of readdirSync(join(root, "commands"))) {
+    if (!f.endsWith(".md")) continue;
+    const name = f.replace(/\.md$/, "");
+    if (!rows.has(name)) { fail(`commands/${f}: missing from the routing table in references/routing.md`); continue; }
+    const consequence = rows.get(name);
+    const guarded = frontmatter(join(root, "commands", f))?.["disable-model-invocation"] === "true";
+    if (GUARD_REQUIRED.has(consequence) && !guarded)
+      fail(`commands/${f}: consequence "${consequence}" requires disable-model-invocation: true`);
+    if (consequence === "read-only" && guarded)
+      fail(`commands/${f}: consequence "read-only" forbids disable-model-invocation`);
+  }
+  for (const name of rows.keys())
+    if (!existsSync(join(root, `commands/${name}.md`)))
+      fail(`references/routing.md: row "${name}" names no command`);
+}
+
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
 console.log("validate: ok");
