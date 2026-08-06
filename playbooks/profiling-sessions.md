@@ -15,12 +15,9 @@ walk transcripts yourself.
 ## Scope — what the script actually covers, and announce it
 
 With no flags the script scans **every transcript under `~/.claude/projects`** — not this
-session — and keeps the sessions whose records carry a `devcycle:`-prefixed skill id.
-Devcycle now ships playbooks loaded by path rather than `devcycle:<name>` skills, so current
-sessions emit no such id: the no-arg corpus holds pre-playbook transcripts only, and a no-arg
-run can legitimately print `no sessions matched.` while transcripts exist. Until the script's
-session identification is fixed, use `--all` (every transcript, tagged or not) for anything
-recent.
+session — and keeps the sessions whose records carry a `devcycle:`-prefixed attribution id,
+which every devcycle slash command records. `--all` widens it to every transcript, tagged or
+not.
 
 `--since`/`--until` narrow what is measured within each kept session and drop sessions with no
 records in the window; membership itself is still decided over each session's whole transcript,

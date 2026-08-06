@@ -529,6 +529,31 @@ test("planCorpus excludes devcycle's own dreaming/doctor sessions only when aske
   assert.deepEqual(excluded.sessions, []);
 });
 
+// A dreaming session records `devcycle:learn` — the command that runs this script — now that
+// `devcycle:dreaming-across-sessions` names nothing. Missing it puts the run's own echoed
+// cluster signatures back in the recurrence corpus, where they self-seed a permanent hit.
+test("planCorpus excludes a session attributed to the learn command as one of devcycle's own", () => {
+  const root = repo();
+  const dir = mkdtempSync(join(tmpdir(), "dream-self-learn-"));
+  const slug = join(dir, root.replaceAll("/", "-"));
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(
+    join(slug, "learn-session.jsonl"),
+    JSON.stringify({
+      timestamp: "2026-08-05T00:00:00Z",
+      type: "assistant",
+      attributionSkill: "devcycle:learn",
+      message: { content: [] },
+    }) + "\n",
+  );
+
+  const included = planCorpus({ repoRoot: root, projectsDir: dir, since: null, cap: 100 });
+  assert.deepEqual(included.sessions.map((s) => s.id), ["learn-session"]);
+
+  const excluded = planCorpus({ repoRoot: root, projectsDir: dir, since: null, cap: 100, excludeSelf: true });
+  assert.deepEqual(excluded.sessions, [], "a learn session must not reach the recurrence corpus");
+});
+
 const REC = {
   title: "Reviewer rejects unauthorized-file claims",
   promotionType: "skill-edit",

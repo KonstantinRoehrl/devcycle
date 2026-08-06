@@ -158,6 +158,28 @@ test("cli: reports the devcycle session and filters out the non-devcycle one", (
   assert.doesNotMatch(res.stdout, /999999999999/);
 });
 
+// A devcycle session's whole attribution can now be its slash command — nothing else marks it,
+// since a playbook is not addressable and fires no Skill tool call. The no-arg corpus is built
+// on this filter, so a filter that stopped keeping command-only sessions would report zero
+// turns while still exiting 0.
+test("cli: a session attributed only to a devcycle command is kept in the corpus", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-command-"));
+  const proj = join(dir, "-some-project");
+  mkdirSync(proj, { recursive: true });
+  writeFileSync(
+    join(proj, "sess-eeeeeeeeeeee.jsonl"),
+    JSON.stringify(turn({ sessionId: "sess-eeeeeeeeeeee", attributionSkill: "devcycle:learn" })) + "\n",
+  );
+  writeFileSync(
+    join(proj, "sess-999999999999.jsonl"),
+    JSON.stringify(turn({ sessionId: "sess-999999999999", attributionSkill: "graphify" })) + "\n",
+  );
+  const res = run(["--dir", dir]);
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /sess-eee/);
+  assert.doesNotMatch(res.stdout, /999999999999/);
+});
+
 test("cli: output leaks no message text, no project path, and no branch name", () => {
   const res = run(["--dir", fixtureDir()]);
   assert.doesNotMatch(res.stdout, /SECRETMESSAGEBODY/);

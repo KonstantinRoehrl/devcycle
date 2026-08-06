@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Deterministic half of devcycle's dreaming pass: checkpoint, corpus manifest, session
-// cap, artifact freshness. The semantic half lives in playbooks/dreaming-across-sessions.md.
+// cap, artifact freshness. The semantic half lives in playbooks/learning-from-sessions.md.
 // Emits no message text, no branch names — only ids, paths, timestamps, and counts.
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -304,9 +304,12 @@ const normalizePhrase = (s) =>
 // landed date, cluster phrasing quoted back) into their own transcript — corpus for a
 // later run — so a signature could otherwise match the very run that reported it.
 // Excluded from the recurrence corpus only; --plan's mining corpus still sees them.
-const SELF_SKILL_RE = /^devcycle:(dreaming-across-sessions|doctor)$/;
+// The ids are the commands that run these two scripts. `dreaming-across-sessions` is the
+// pre-v0.12 id for what is now `learn`, kept because the corpus is historical transcripts
+// that still carry it — dropping it would re-admit every dream recorded before the rename.
+const SELF_ATTRIBUTION_RE = /^devcycle:(learn|dreaming-across-sessions|doctor)$/;
 function isSelfRecord(r) {
-  if (SELF_SKILL_RE.test(r.attributionSkill ?? "")) return true;
+  if (SELF_ATTRIBUTION_RE.test(r.attributionSkill ?? "")) return true;
   const content = r.message?.content;
   if (!Array.isArray(content)) return false;
   for (const item of content)
@@ -315,7 +318,7 @@ function isSelfRecord(r) {
       item.type === "tool_use" &&
       item.name === "Skill" &&
       typeof item.input?.skill === "string" &&
-      SELF_SKILL_RE.test(item.input.skill)
+      SELF_ATTRIBUTION_RE.test(item.input.skill)
     )
       return true;
   return false;
