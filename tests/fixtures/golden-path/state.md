@@ -1,0 +1,9 @@
+# devcycle state
+- stage: scoping
+- root: /repo
+- branch: topic/example
+- request: an example request, for the structural fixture only
+- scope: .devcycle/scope.md
+- plan: none
+- ledger: .devcycle/ledger.md
+- updated: 2026-01-01T00:00:00Z
