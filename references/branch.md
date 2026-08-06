@@ -21,7 +21,7 @@ pre-flight before wave 1, the fast path, the sweep path, re-entry via
 per `${CLAUDE_PLUGIN_ROOT}/references/resume.md`, and falls back to this rule only when
 no topic branch was ever recorded), and every standalone, side-effectful skill that
 writes and commits outside any cycle — `onboarding-a-repo` (the scaffold write) and
-`distilling-learnings` (promotion edits) among them. A standalone skill owns no
+`learning-from-sessions` (promotion edits) among them. A standalone skill owns no
 `.devcycle/state.md`, so it follows the rule above minus the `branch:`-line write: check
 the branch, create a topic branch off the default or an integration branch when needed,
 and commit there.
@@ -36,7 +36,7 @@ guarding against a concurrent session or worktree switching branches mid-cycle.
 ## Deriving a branch's file set
 
 Which files a branch-scoped stage reads, and where it reads them from.
-`${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` and `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` both run this derivation.
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` and `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` both run this derivation.
 What a stage then *does* with the file set is that stage's own — the audit expands it to a
 feature dependency graph, the verify stage traces it to routes and screens — and is
 described there, not here.

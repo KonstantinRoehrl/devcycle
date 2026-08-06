@@ -87,7 +87,7 @@ follows: content a subagent must fetch can be silently skipped, while injected c
 
 Each caller supplies its own relevance filter: `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` judges against the
 request itself, since scope is not yet confirmed; `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` judges against the
-confirmed scope in `.devcycle/scope.md`; `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` judges against the
+confirmed scope in `.devcycle/scope.md`; `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` judges against the
 confirmed audit criteria.
 
 ## Read discipline

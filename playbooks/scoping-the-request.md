@@ -113,7 +113,7 @@ REQUIRED next stage — two cases:
   scope. Do not restate or replace its process here.
 
 An audit-shaped request may never reach this stage at all: `/devcycle:cycle`'s triage
-can enter the pipeline at the audit stage (`${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md`) instead, which
+can enter the pipeline at the audit stage (`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`) instead, which
 then hands its selected findings to brainstorm.
 
 End the stage by naming the next stage explicitly in your final output. Update

@@ -255,7 +255,7 @@ profile-conditional.
   exists on disk, start at **planning**.
 - **Audit-shaped** ("audit X", "review the repo for Y" — an assessment of
   existing code, not a change to it) → the **audit** stage runs **in place of**
-  scoping: `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` establishes what is wrong before anything
+  scoping: `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` establishes what is wrong before anything
   is designed, and its selected findings feed brainstorm.
 
 **Kind** (feature | bug | refactor) shapes the walk:
@@ -309,7 +309,7 @@ size verdict when one fired. Offer:
 
 On a confirmed short path, rewrite the state file with `stage: fast-path`,
 `stage: sweep`, or `stage: audit` and invoke `${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md`,
-`${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md`, or `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md`
+`${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md`, or `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`
 accordingly — for the sweep that is gate 1 of a two-step confirm, the second
 gate being the concrete file list and verify command, which belong to the sweep
 skill and run before any agent edits. Declined → the verdict is discarded, the
@@ -327,7 +327,7 @@ preserved.
 Run the stages in order, each via the named skill:
 
 1. **scoping** — `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` (skipped for mature input per triage).
-2. **audit** (audit-shaped input only, per triage) — `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md`,
+2. **audit** (audit-shaped input only, per triage) — `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`,
    in place of scoping. It writes `docs/audits/YYYY-MM-DD-<topic>.md`, recorded
    in the state file's `audit:` line; the findings the user selects for action
    become brainstorm's explored context. A cycle that ends at the report (no

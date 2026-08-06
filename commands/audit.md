@@ -5,10 +5,9 @@ description: "Audit this repo — or one branch, via a branch:<name> argument �
 # /devcycle:audit
 
 Audit this repo — or one branch of it — per `$ARGUMENTS` (grammar below) via the
-`${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` skill, which owns the criteria interview, the sweep, the findings document at
-`docs/audits/YYYY-MM-DD-<topic>.md`, and — in its steps 5 and 6 — the branch,
-state-file, and stop-at-the-document rules. Do not restate or replace its process
-here.
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` playbook, which owns the criteria interview, the
+sweep, the findings document at `docs/audits/YYYY-MM-DD-<topic>.md`, and — in its step 5 — the
+branch, state-file, and stop-at-the-document rules. Do not restate or replace its process here.
 
 **This run is standalone: no cycle, and this command is not a pipeline stage.** That is the
 one fact the skill cannot derive on its own, and it is what selects the skill's standalone

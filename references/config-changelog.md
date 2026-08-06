@@ -2,7 +2,7 @@
 
 The single owner of every `userConfig` addition, rename, and deprecation and the version
 each landed in. Two consumers read it: `${CLAUDE_PLUGIN_ROOT}/playbooks/profiling-sessions.md`'s config-drift mode
-(`scripts/doctor.mjs`'s `--drift` flag) and `${CLAUDE_PLUGIN_ROOT}/playbooks/distilling-learnings.md`, which calls
+(`scripts/doctor.mjs`'s `--drift` flag) and `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`, which calls
 into that same mode rather than re-implementing stale-key detection. Neither restates
 the history below; both parse it.
 

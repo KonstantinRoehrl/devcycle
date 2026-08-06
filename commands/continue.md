@@ -62,7 +62,7 @@ Continue at the recorded stage via its skill:
 | stage | resume via |
 | --- | --- |
 | scoping | `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` |
-| audit | `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` — re-reads the confirmed criteria from the state file's `audit:` artifact if one was written, otherwise re-runs the criteria interview; never assumes criteria a previous session did not record |
+| audit | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` — re-reads the confirmed criteria from the state file's `audit:` artifact if one was written, otherwise re-runs the criteria interview; never assumes criteria a previous session did not record |
 | diagnosis | `superpowers:systematic-debugging` — bugs only (restated here because this session may never load `/devcycle:cycle`): reproduce first, isolate the root cause, and end the stage by writing the root-cause report (reproduction steps, established cause with evidence, surfaces involved) to `.devcycle/diagnosis.md`, recording it in the state file's `diagnosis:` line; the fix's design belongs to brainstorm, which takes that report as explored context |
 | brainstorm | `superpowers:brainstorming` — with devcycle's batching note (restated here because this session may never load `/devcycle:cycle`): where upstream asks questions one at a time, ask via AskUserQuestion in batches of 1–4 with concrete options plus Other |
 | planning | `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` |

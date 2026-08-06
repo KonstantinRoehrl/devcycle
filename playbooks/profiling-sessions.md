@@ -68,7 +68,7 @@ patching each finding individually.
 
 **Previously promoted — did it hold.** After the systemic recommendations, render this
 appendix from the latest `.devcycle/dreaming/<date>-dream.md` artifact's recurrence
-section — written by `dreaming-across-sessions`' own `--check-recurrence` step, never by
+section — written by `learning-from-sessions`' own `--check-recurrence` step, never by
 doctor. Report each hit as its own finding, ranked by the same severity vocabulary and
 dollar-impact ordering as everything above — a reappearance means the promotion did not
 fix the pattern, and it is a new finding rather than a reason to re-promote the same fix.
@@ -85,19 +85,19 @@ reads `lean`, the recurrence check never ran — render the appendix as
 its own, it only renders the distinction the artifact already carries. Omit the appendix
 entirely when no artifact exists at all.
 
-This skill reads that artifact and never invokes `${CLAUDE_PLUGIN_ROOT}/playbooks/dreaming-across-sessions.md`
-itself — doctor stays runnable standalone and pays none of a dream's cost.
+This skill reads that artifact and never invokes `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`
+itself — doctor stays runnable standalone and pays none of that loop's mining cost.
 
 ## Persisted artifact
 
 Every run with at least one finding writes `.devcycle/doctor/YYYY-MM-DD-report.md`
 (`.devcycle/` is already repo-wide gitignored, so this is a safe default with no new
-ignore rule needed) — **not** `docs/doctor/`, unlike `auditing-a-repo`'s
+ignore rule needed) — **not** `docs/doctor/`, unlike a repo-scoped `reviewing-code` run's
 `docs/audits/YYYY-MM-DD-<topic>.md`: an audit's findings are about the target repo's
 code and belong committed alongside it; a doctor report contains the user's own session
 cost/usage data and should not default to being committed into whatever repo it happens
 to run in. A run with zero findings need not write this file — there is nothing for a
-later `distilling-learnings` run or a GitHub issue draft to reference.
+later `learning-from-sessions` run or a GitHub issue draft to reference.
 
 ## Actionability (optional)
 
@@ -129,7 +129,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --drift <path>
 
 Report each finding it prints as an exact `file:line` reference with the changelog's
 recorded replacement, per `${CLAUDE_PLUGIN_ROOT}/references/config-changelog.md` (this
-is the same engine `${CLAUDE_PLUGIN_ROOT}/playbooks/distilling-learnings.md` calls into — one engine, two
+is the same engine `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md` calls into — one engine, two
 callers). Never re-parse the changelog or re-grep the target file yourself; the script
 already did both.
 

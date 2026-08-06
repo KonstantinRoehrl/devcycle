@@ -10,8 +10,8 @@ match. Neither restates the derivation here.
 Before wave 1's first commit, alongside the branch check `references/branch.md` owns:
 
 1. Read the repo's own convention docs. The list of what to check is owned by
-   `playbooks/auditing-a-repo.md`'s "Inventory the repo's own conventions before
-   reaching for generic advice" bullet (step 0, Discovery) — read it there and follow
+   `playbooks/reviewing-code.md`'s "Inventory the repo's own conventions before
+   reaching for generic advice" bullet (step 1, Discovery) — read it there and follow
    it; it is not restated here, so a change to that list never has to be echoed here
    too.
 2. Run `git log --oneline -15` on the target repo.
@@ -42,8 +42,8 @@ set.
 
 The single owner of how any devcycle-driven commit is scoped, cited rather than restated
 by every skill that commits: `playbooks/executing-waves.md`, `playbooks/taking-the-fast-path.md`,
-`playbooks/sweeping-mechanical-changes.md`, `playbooks/distilling-learnings.md`,
-`playbooks/onboarding-a-repo.md`, and `playbooks/auditing-a-repo.md`.
+`playbooks/sweeping-mechanical-changes.md`, `playbooks/learning-from-sessions.md`,
+`playbooks/onboarding-a-repo.md`, and `playbooks/reviewing-code.md`.
 
 Every commit is scoped by an explicit pathspec naming exactly the files this run authored
 — `git commit -- <the file list>` — never `git add -A` and never a bare `git commit`,

@@ -103,7 +103,7 @@ happened — a human pass, or a close without one and what stayed unverified.
 binding:
 
 - **It must not create, read-modify, or write `.devcycle/state.md`.** An existing state file
-  belongs to somebody else's in-flight cycle — exactly as `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md`'s
+  belongs to somebody else's in-flight cycle — exactly as `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`'s
   standalone rule establishes — and its lines are not this run's to rewrite. The checklist
   path goes in the handoff instead, and nowhere else.
 - **The checklist is scratch**: it goes to the diff-derived path

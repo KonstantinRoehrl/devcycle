@@ -1,12 +1,12 @@
 # Quality criteria — catalog, precedence, and seed index
 
 The single owner of what any devcycle review or plan measures against, and where those
-standards come from. `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` reads it at discovery,
-`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` reads it when it builds review lenses, and
-`${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` reads it when it derives a plan's quality constraints — none of
-them restate it. Nothing here chooses criteria: at an audit the user does, at that skill's
-step 1, and planning filters by the confirmed scope. This file supplies the raw material and
-the rules for sourcing it.
+standards come from. `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` reads it at discovery and
+again when it builds review lenses, and
+`${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` reads it when it derives a plan's quality constraints — neither
+restates it. Nothing here chooses criteria: at an audit the user does, at that playbook's
+criteria interview, and planning filters by the confirmed scope. This file supplies the raw
+material and the rules for sourcing it.
 
 ## Precedence
 

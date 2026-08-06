@@ -10,8 +10,8 @@ Checks for devcycle config drift since the last distill run, using
 `${CLAUDE_PLUGIN_ROOT}/playbooks/profiling-sessions.md`'s drift engine. Batches every proposed promotion for confirmation
 before applying anything, and deletes each memory once its promotion lands.
 
-Use the `${CLAUDE_PLUGIN_ROOT}/playbooks/distilling-learnings.md` skill. It starts no cycle and writes no
-`.devcycle/state.md` (it keeps its own small checkpoint at
-`.devcycle/distilling-state.md`).
+Use the `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md` playbook in its default mode,
+which runs the whole loop through to landing. It starts no cycle and writes no `.devcycle/state.md`
+(it keeps its own small checkpoint at `.devcycle/distilling-state.md`).
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
