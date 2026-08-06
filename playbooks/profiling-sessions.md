@@ -1,9 +1,4 @@
-# Doctor
-
-## Announce
-
-State which scope this run covers: "I'm using the doctor skill to profile <every
-devcycle-tagged session | every transcript, tagged or not | the window>."
+# Profiling Sessions
 
 ## Run the script
 
@@ -13,8 +8,27 @@ Never re-implement its analysis — run it and read its output:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" [--all] [--since <date>] [--until <date>]
 ```
 
-Add `--json` for machine output, `--depth` for the bare depth probe. Do not walk transcripts
-yourself.
+Add `--json` for machine output, `--depth` for the bare depth probe — the probe ignores the
+window flags and exits non-zero with a one-line reason when it cannot resolve a depth. Do not
+walk transcripts yourself.
+
+## Scope — what the script actually covers, and announce it
+
+With no flags the script scans **every transcript under `~/.claude/projects`** — not this
+session — and keeps the sessions whose records carry a `devcycle:`-prefixed skill id.
+Devcycle now ships playbooks loaded by path rather than `devcycle:<name>` skills, so current
+sessions emit no such id: the no-arg corpus holds pre-playbook transcripts only, and a no-arg
+run can legitimately print `no sessions matched.` while transcripts exist. Until the script's
+session identification is fixed, use `--all` (every transcript, tagged or not) for anything
+recent.
+
+`--since`/`--until` narrow what is measured within each kept session and drop sessions with no
+records in the window; membership itself is still decided over each session's whole transcript,
+window or not.
+
+State the scope the run actually used — "every `devcycle:`-tagged transcript", "every
+transcript, tagged or not", or the window — in the announce and again in the report. Every
+number below is only as wide as that corpus.
 
 ## Interpret, don't transcribe
 
@@ -30,108 +44,82 @@ impact, and give each one its concrete lever:
 ## Report the price vintage and unpriced models
 
 Carry forward the script's `prices as of` line. If it emitted any `UNPRICED MODEL` lines,
-report them by name: an unpriced model means `scripts/pricing.mjs` needs an entry, and until
-it has one, that model's requests are excluded from every dollar figure in the report.
+report them by name: an unpriced model means `scripts/pricing.mjs` needs an entry, and until it
+has one, that model's requests are excluded from every dollar figure in the report.
 
-## Carry the script's disclosures forward
+## Carry the script's disclosure forward
 
-The script's own two caveats belong in the report verbatim, not smoothed over:
-
-- skill attribution is forward-filled within each transcript from the last explicit skill
-  invocation through to that transcript's end (or the next invocation) — genuinely
-  unrelated work with no further skill call in the same transcript is still counted under
-  the earlier skill;
-- the context-budget bands are a fraction-based approximation, not a measurement of absolute
-  cache-read cost.
-
-Hiding either in the interpretation would make the report read as more certain than it is.
+The report prints one `note:` line — skill attribution is forward-filled within each transcript
+from the last explicit skill invocation through to that transcript's end, so unrelated work
+with no further skill call is still counted under the earlier skill. Reproduce it rather than
+smoothing it over. The context-depth bands are a fraction-of-window approximation the script
+does not disclose in its output: say so yourself wherever the report leans on them.
 
 ## Severity, ranking, and systemic recommendations
 
-`scripts/doctor.mjs`'s candidate-finding signals (`emitCandidates()`'s
-`{type, skill, version_from, version_to, delta_pct, dollars, sessions_sampled}` objects)
-carry no severity — assigning it is this skill's job, using
-`${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s vocabulary **verbatim**
-(critical/high/medium/low; blocking is derived as critical-or-high, never redefined
-here). The dollar figure rides along per finding as a supporting field, never the sort
-key.
+The script's `CANDIDATE:` lines carry no severity — assigning it is this playbook's job, using
+`${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s vocabulary **verbatim** and ranking the list
+in that file's document-form order. The dollar figure rides along per finding as a supporting
+field, never the sort key.
 
-**Rank severity desc, impact desc** — the same ordering `references/findings.md`
-specifies for the audit stage's document form, reused rather than invented fresh.
+**Systemic recommendations.** After the per-finding list, group findings that share a root
+cause and propose one structural fix per cluster — consolidating playbooks, extracting a shared
+reference — rather than only patching each finding individually.
 
-**Systemic recommendations.** After the per-finding list, run a synthesis pass: group
-findings that share a root cause (the same skill regressing across two unrelated
-signals, the same missing pricing entry surfacing on multiple sessions) and propose one
-structural fix per cluster — a new skill, consolidating existing skills, extracting a
-shared reference — applying the one-owner discipline proactively rather than only
-patching each finding individually.
+**Previously promoted — did it hold.** After the systemic recommendations, render an appendix
+from the recurrence section of the latest `.devcycle/dreaming/<date>-dream.md` artifact,
+written by `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`'s own
+`--check-recurrence` step, never by this run — this playbook reads that artifact and never
+invokes that loop, so it stays runnable standalone and pays none of the mining cost. Each hit
+is its own finding, ranked like everything above: a reappearance means the promotion did not
+fix the pattern, not a reason to re-promote it.
 
-**Previously promoted — did it hold.** After the systemic recommendations, render this
-appendix from the latest `.devcycle/dreaming/<date>-dream.md` artifact's recurrence
-section — written by `learning-from-sessions`' own `--check-recurrence` step, never by
-doctor. Report each hit as its own finding, ranked by the same severity vocabulary and
-dollar-impact ordering as everything above — a reappearance means the promotion did not
-fix the pattern, and it is a new finding rather than a reason to re-promote the same fix.
-
-Render the artifact's `capped` value alongside the hits: an empty result and a
-cap-truncated one otherwise render identically, and past 100 sessions truncation is the
-normal case rather than the exception, so a capped run's empty appendix is a
-possibly-incomplete answer, not a clean bill of health.
-
-Render the appendix present-but-empty when the artifact's recurrence section carries no
-hits and the artifact's own `Profile:` line reads `standard` or `thorough`. When that line
-reads `lean`, the recurrence check never ran — render the appendix as
-**empty-not-checked** instead of a plain empty result; doctor still resolves no profile of
-its own, it only renders the distinction the artifact already carries. Omit the appendix
-entirely when no artifact exists at all.
-
-This skill reads that artifact and never invokes `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`
-itself — doctor stays runnable standalone and pays none of that loop's mining cost.
+- Render the artifact's `capped` value alongside the hits: past 100 sessions truncation is the
+  normal case, so a capped run's empty appendix is a possibly-incomplete answer, not a clean
+  bill of health.
+- No hits and the artifact's `Profile:` line reads `standard` or `thorough` → render the
+  appendix present-but-empty. `Profile: lean` → the recurrence check never ran, so render it
+  **empty-not-checked**; doctor resolves no profile of its own, it only renders the
+  distinction the artifact already carries.
+- No artifact at all → omit the appendix entirely.
 
 ## Persisted artifact
 
-Every run with at least one finding writes `.devcycle/doctor/YYYY-MM-DD-report.md`
-(`.devcycle/` is already repo-wide gitignored, so this is a safe default with no new
-ignore rule needed) — **not** `docs/doctor/`, unlike a repo-scoped `reviewing-code` run's
-`docs/audits/YYYY-MM-DD-<topic>.md`: an audit's findings are about the target repo's
-code and belong committed alongside it; a doctor report contains the user's own session
-cost/usage data and should not default to being committed into whatever repo it happens
-to run in. A run with zero findings need not write this file — there is nothing for a
-later `learning-from-sessions` run or a GitHub issue draft to reference.
+Every run with at least one finding writes `.devcycle/doctor/YYYY-MM-DD-report.md` — never
+`docs/doctor/`, where a repo-scoped audit goes: a doctor report holds the user's own session
+cost data and must not default to being committed into whatever repo it ran in. A run with
+zero findings need not write the file.
 
 ## Actionability (optional)
 
-Every step in this section is skippable — the ranked report and its overview/benchmark
-value stand alone. If findings exist and are worth acting on, offer one batched
-`AskUserQuestion` (multi-select) letting the user choose, per finding, among:
+Every step here is skippable — the ranked report stands alone. If findings exist and are worth
+acting on, offer one batched `AskUserQuestion` (multi-select) letting the user choose, per
+finding, among:
 
 - **skip** — no action;
-- **draft a GitHub issue** — rendered inline for review; only actually posted via
-  `gh issue create` on a further, separate explicit confirmation, never automatic;
-- **get a `/devcycle:cycle` entry point** — a one-line request string handed back for
-  the user to run themselves. This skill never invokes `/devcycle:cycle` on its own —
-  the same chaining-entry-point precedent `/devcycle:audit` follows (DESIGN.md §15.3 /
-  §4.4): an entry point that chains onward takes the selection decision away from the
-  user.
+- **draft a GitHub issue** — rendered inline for review; posted via `gh issue create` only on a
+  further, separate explicit confirmation, never automatically;
+- **get a `/devcycle:cycle` entry point** — a one-line request string handed back for the user
+  to run themselves. This run never invokes `/devcycle:cycle` itself: an entry point that
+  chains onward takes the selection decision away from the user.
 
-Always include an explicit "just the overview, no action" choice in the same batch —
-the follow-up question is itself skippable, never a forced gate on finishing the
-command.
+Always include an explicit "just the overview, no action" choice in the same batch — the
+follow-up is itself skippable, never a forced gate on finishing the command.
 
 ## Config-drift mode
 
-`/devcycle:doctor drift <path>` (internally `--drift <path>`) skips the cost-analysis
-machinery entirely. Run:
+`/devcycle:doctor drift <path>` (internally `--drift <path>`) skips the cost-analysis machinery
+entirely and takes precedence over every other flag:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --drift <path>
 ```
 
-Report each finding it prints as an exact `file:line` reference with the changelog's
-recorded replacement, per `${CLAUDE_PLUGIN_ROOT}/references/config-changelog.md` (this
-is the same engine `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md` calls into — one engine, two
-callers). Never re-parse the changelog or re-grep the target file yourself; the script
-already did both.
+It resolves the changelog at `${CLAUDE_PLUGIN_ROOT}/references/config-changelog.md` — the same
+engine `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md` calls into, one engine, two
+callers — and prints each finding as a `file:line` reference with the changelog's recorded
+replacement. Report them as printed; never re-parse the changelog or re-grep the target file
+yourself.
 
 ## Standalone
 
