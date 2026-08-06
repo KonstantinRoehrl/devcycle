@@ -487,8 +487,8 @@ function ranked(map, render) {
 }
 
 // One raw signal line per emitCandidates() entry — no severity, no ranking; that judgment
-// call stays at the skill layer (skills/doctor/SKILL.md), consistent with doctor's existing
-// division of labor (this script computes, the skill interprets).
+// call stays at the playbook layer (playbooks/profiling-sessions.md), consistent with doctor's
+// existing division of labor (this script computes, the playbook interprets).
 function formatCandidate(c) {
   const parts = [c.type];
   if (c.skill) parts.push(`skill=${c.skill}`);

@@ -1,8 +1,3 @@
----
-name: sweeping-mechanical-changes
-description: Use when devcycle triage has confirmed a bulk-mechanical request and the run takes the sweep path — derive parameters, confirm the blast radius, run the mechanical-sweep workflow, one commit, one task-reviewer pass, then the finish stage.
----
-
 # Sweeping Mechanical Changes
 
 The supervised sweep walk for requests triage has judged bulk-mechanical — one
@@ -167,7 +162,7 @@ this as a supervised sweep."
    to the full branch-review stage, not here.
 7. **Handoff.** Emit this stage's block (`Stage completed: sweep`) per
    **Handoff block** below, set `stage: finish` in `.devcycle/state.md`, and
-   hand to `devcycle:finishing-the-cycle` unchanged — its policy resolution and
+   hand to `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` unchanged — its policy resolution and
    git action apply exactly as at the end of the full pipeline.
 
 **Evidence.** The classes, the file-backed contract, and this path's

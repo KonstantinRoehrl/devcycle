@@ -1,8 +1,3 @@
----
-name: doctor
-description: Use when a Claude Code session or transcript history needs profiling for token cost, context depth, model routing, or agent startup cost — running the analyzer and ranking what it finds by dollar impact, each with the concrete lever that changes it.
----
-
 # Doctor
 
 ## Announce
@@ -90,7 +85,7 @@ reads `lean`, the recurrence check never ran — render the appendix as
 its own, it only renders the distinction the artifact already carries. Omit the appendix
 entirely when no artifact exists at all.
 
-This skill reads that artifact and never invokes `devcycle:dreaming-across-sessions`
+This skill reads that artifact and never invokes `${CLAUDE_PLUGIN_ROOT}/playbooks/dreaming-across-sessions.md`
 itself — doctor stays runnable standalone and pays none of a dream's cost.
 
 ## Persisted artifact
@@ -134,7 +129,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --drift <path>
 
 Report each finding it prints as an exact `file:line` reference with the changelog's
 recorded replacement, per `${CLAUDE_PLUGIN_ROOT}/references/config-changelog.md` (this
-is the same engine `devcycle:distilling-learnings` calls into — one engine, two
+is the same engine `${CLAUDE_PLUGIN_ROOT}/playbooks/distilling-learnings.md` calls into — one engine, two
 callers). Never re-parse the changelog or re-grep the target file yourself; the script
 already did both.
 

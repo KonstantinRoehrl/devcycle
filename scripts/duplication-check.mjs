@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Splits every skills/**/*.md and references/*.md paragraph (or --dir's *.md files),
+// Splits every playbooks/*.md and references/*.md paragraph (or --dir's *.md files),
 // normalizes whitespace, and flags near-duplicate paragraphs living in different files
 // via shingled Jaccard similarity — near-verbatim restatement only, not paraphrase.
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
@@ -34,11 +34,9 @@ function collectFiles(dir) {
 function targetFiles() {
   if (dirFlagIdx !== -1) return collectFiles(targetDir);
   const files = [];
-  if (existsSync(join(root, "skills")))
-    for (const dir of readdirSync(join(root, "skills"))) {
-      const p = join(root, "skills", dir, "SKILL.md");
-      if (existsSync(p)) files.push(p);
-    }
+  if (existsSync(join(root, "playbooks")))
+    for (const name of readdirSync(join(root, "playbooks")))
+      if (name.endsWith(".md")) files.push(join(root, "playbooks", name));
   if (existsSync(join(root, "references")))
     for (const name of readdirSync(join(root, "references")))
       if (name.endsWith(".md")) files.push(join(root, "references", name));

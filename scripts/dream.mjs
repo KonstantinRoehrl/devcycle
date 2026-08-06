@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Deterministic half of devcycle's dreaming pass: checkpoint, corpus manifest, session
-// cap, artifact freshness. The semantic half lives in skills/dreaming-across-sessions.
+// cap, artifact freshness. The semantic half lives in playbooks/dreaming-across-sessions.md.
 // Emits no message text, no branch names — only ids, paths, timestamps, and counts.
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";

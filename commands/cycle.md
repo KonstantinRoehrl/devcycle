@@ -255,7 +255,7 @@ profile-conditional.
   exists on disk, start at **planning**.
 - **Audit-shaped** ("audit X", "review the repo for Y" — an assessment of
   existing code, not a change to it) → the **audit** stage runs **in place of**
-  scoping: `devcycle:auditing-a-repo` establishes what is wrong before anything
+  scoping: `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` establishes what is wrong before anything
   is designed, and its selected findings feed brainstorm.
 
 **Kind** (feature | bug | refactor) shapes the walk:
@@ -308,8 +308,8 @@ size verdict when one fired. Offer:
   stages.
 
 On a confirmed short path, rewrite the state file with `stage: fast-path`,
-`stage: sweep`, or `stage: audit` and invoke `devcycle:fast-path`,
-`devcycle:sweeping-mechanical-changes`, or `devcycle:auditing-a-repo`
+`stage: sweep`, or `stage: audit` and invoke `${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md`,
+`${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md`, or `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md`
 accordingly — for the sweep that is gate 1 of a two-step confirm, the second
 gate being the concrete file list and verify command, which belong to the sweep
 skill and run before any agent edits. Declined → the verdict is discarded, the
@@ -326,8 +326,8 @@ preserved.
 
 Run the stages in order, each via the named skill:
 
-1. **scoping** — `devcycle:scoping-interview` (skipped for mature input per triage).
-2. **audit** (audit-shaped input only, per triage) — `devcycle:auditing-a-repo`,
+1. **scoping** — `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` (skipped for mature input per triage).
+2. **audit** (audit-shaped input only, per triage) — `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md`,
    in place of scoping. It writes `docs/audits/YYYY-MM-DD-<topic>.md`, recorded
    in the state file's `audit:` line; the findings the user selects for action
    become brainstorm's explored context. A cycle that ends at the report (no
@@ -352,13 +352,13 @@ Run the stages in order, each via the named skill:
    (`git check-ignore`); if so, write the file but skip the commit — respect the
    repo's own ignore rules rather than force-adding past them. Everything else
    upstream stands. When the spec is approved, transition to
-   `devcycle:planning-waves` (not directly to upstream writing-plans).
-5. **planning** — `devcycle:planning-waves`.
-6. **execution** — `devcycle:executing-waves`.
-7. **branch-review** — `devcycle:reviewing-the-branch`.
-8. **on-device** — `devcycle:verifying-on-device` (skip only when the change has no
+   `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` (not directly to upstream writing-plans).
+5. **planning** — `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md`.
+6. **execution** — `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`.
+7. **branch-review** — `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md`.
+8. **on-device** — `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` (skip only when the change has no
    rendered/on-device surface; record the skip in the handoff).
-9. **finish** — `devcycle:finishing-the-cycle`: resolves the effective git policy
+9. **finish** — `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md`: resolves the effective git policy
    (the configured `gitPolicy` clamped by two external push signals), acts on it,
    and closes the state file with `stage: done`.
 

@@ -1,8 +1,3 @@
----
-name: reviewing-the-branch
-description: Use when a plan's implementation is complete and committed and the branch needs its whole-branch review gate before finishing.
----
-
 # Reviewing the Branch
 
 The whole-branch review gate between execution and finishing: one review of
@@ -36,13 +31,13 @@ none of it is repeated here. What this stage consumes:
 
 ## Fresh context (bias control — non-negotiable)
 
-The rule and its rationale are owned by `devcycle:reviewing-code`; this stage names it and
+The rule and its rationale are owned by `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`; this stage names it and
 does not restate it. What it constrains here is the **Inputs** above: those three are
 deliberately all a reviewer receives.
 
 ## Engine selection
 
-Delegated in full to `devcycle:reviewing-code`. It picks the engine from `reviewDepth`,
+Delegated in full to `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`. It picks the engine from `reviewDepth`,
 invokes `workflows/review-panel.js` for `panel`, runs the same lenses inline plus the
 refutation pass for `single`, degrades `panel→single` with the reason disclosed, and exports
 `DEVCYCLE_PANEL_MODEL` when `branchReviewModel` is an explicit id. None of that is restated

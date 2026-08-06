@@ -1,12 +1,7 @@
----
-name: reviewing-code
-description: Use when a whole scope of code — a branch's diff or a file set — needs reviewing against a criteria set, as the shared engine behind devcycle's audit and branch review; owns lens construction, engine selection, adversarial verification, dedup and ranking. Invoked by other skills, never directly by a user.
----
-
 # Reviewing Code
 
-The review engine devcycle's whole-scope reviews share. `devcycle:auditing-a-repo` and
-`devcycle:reviewing-the-branch` both invoke it; a user never does, and it has no command.
+The review engine devcycle's whole-scope reviews share. `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` and
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` both invoke it; a user never does, and it has no command.
 It is the answer to one question — *given this scope and these criteria, what is wrong with
 this code?* — and nothing else.
 

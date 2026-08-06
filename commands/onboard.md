@@ -12,6 +12,6 @@ allowlist for confirmation before writing it.
 Re-running on an already-onboarded repo detects the existing scaffold and offers
 update/merge — it never silently overwrites.
 
-Use the `devcycle:onboarding-a-repo` skill. It starts no cycle and writes no state file.
+Use the `${CLAUDE_PLUGIN_ROOT}/playbooks/onboarding-a-repo.md` skill. It starts no cycle and writes no state file.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

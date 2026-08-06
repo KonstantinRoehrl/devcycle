@@ -61,17 +61,17 @@ Continue at the recorded stage via its skill:
 
 | stage | resume via |
 | --- | --- |
-| scoping | `devcycle:scoping-interview` |
-| audit | `devcycle:auditing-a-repo` — re-reads the confirmed criteria from the state file's `audit:` artifact if one was written, otherwise re-runs the criteria interview; never assumes criteria a previous session did not record |
+| scoping | `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` |
+| audit | `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` — re-reads the confirmed criteria from the state file's `audit:` artifact if one was written, otherwise re-runs the criteria interview; never assumes criteria a previous session did not record |
 | diagnosis | `superpowers:systematic-debugging` — bugs only (restated here because this session may never load `/devcycle:cycle`): reproduce first, isolate the root cause, and end the stage by writing the root-cause report (reproduction steps, established cause with evidence, surfaces involved) to `.devcycle/diagnosis.md`, recording it in the state file's `diagnosis:` line; the fix's design belongs to brainstorm, which takes that report as explored context |
 | brainstorm | `superpowers:brainstorming` — with devcycle's batching note (restated here because this session may never load `/devcycle:cycle`): where upstream asks questions one at a time, ask via AskUserQuestion in batches of 1–4 with concrete options plus Other |
-| planning | `devcycle:planning-waves` |
-| execution | `devcycle:executing-waves` (its resume table maps each task's last ledger event to the resume action) |
-| branch-review | `devcycle:reviewing-the-branch` |
-| on-device | `devcycle:verifying-on-device` |
-| fast-path | `devcycle:fast-path` (its Resume section, which follows `${CLAUDE_PLUGIN_ROOT}/references/resume.md`) |
-| sweep | `devcycle:sweeping-mechanical-changes` (its Resume section, which follows `${CLAUDE_PLUGIN_ROOT}/references/resume.md`) |
-| finish | `devcycle:finishing-the-cycle` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
+| planning | `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` |
+| execution | `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` (its resume table maps each task's last ledger event to the resume action) |
+| branch-review | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` |
+| on-device | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` |
+| fast-path | `${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md` (its Resume section, which follows `${CLAUDE_PLUGIN_ROOT}/references/resume.md`) |
+| sweep | `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md` (its Resume section, which follows `${CLAUDE_PLUGIN_ROOT}/references/resume.md`) |
+| finish | `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
 
 From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file
 updates and a handoff block at every stage boundary, per

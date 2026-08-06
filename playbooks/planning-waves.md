@@ -1,8 +1,3 @@
----
-name: planning-waves
-description: Use when an approved spec or design needs an implementation plan for parallel subagent execution, before any implementation starts.
----
-
 # Planning Waves
 
 Produce an implementation plan that wave-based parallel execution can consume. Report per
@@ -75,7 +70,7 @@ Each task then carries a `**Quality constraints:**` line beside `**Dependencies:
 - `**Quality constraints:** QC1, QC3`
 - `**Quality constraints:** none`
 
-The ids are what `devcycle:executing-waves` resolves back to verbatim lines when it slices
+The ids are what `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` resolves back to verbatim lines when it slices
 each brief, so an implementer is told up front what a later audit would flag it for.
 
 ## Execution strategy — twin goals
@@ -106,7 +101,7 @@ Skip this section at `thorough`; the sub-skill supplies it there.
 ```markdown
 # <Feature Name> Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: use `devcycle:executing-waves` to implement
+> **For agentic workers:** REQUIRED SUB-SKILL: use `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` to implement
 > this plan wave by wave. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** <one sentence describing what this builds>
@@ -258,13 +253,13 @@ starting from implementation-scoped docs (a `frontend.md`, `backend.md`, or equi
 
 ## Output contract
 
-The finished plan satisfies this contract, consumed by `devcycle:executing-waves`: plan header (Goal/Architecture/Global Constraints/Quality Constraints) + per task: `**Files:**` (Create/Modify/Test), `**Interfaces:**` (Consumes/Produces, exact signatures), `**Dependencies:**` (`none` | `Task N (reason)` | `Tasks N+M committed`), `**Evidence:**` (`red-green` | `green-green` | `convention`), `**Quality constraints:**` (the `QC<n>` ids that apply to the task's files, or `none`), optionally **Execution:** (`sweep`, with the instruction, file list, and verifyCommand pinned in the task body), checkbox steps ordered per the task's evidence class (test-first for `red-green`; baseline suite run first for `green-green`), and a `## Dispatch Map` section listing waves of file-disjoint, dependency-ready tasks.
+The finished plan satisfies this contract, consumed by `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`: plan header (Goal/Architecture/Global Constraints/Quality Constraints) + per task: `**Files:**` (Create/Modify/Test), `**Interfaces:**` (Consumes/Produces, exact signatures), `**Dependencies:**` (`none` | `Task N (reason)` | `Tasks N+M committed`), `**Evidence:**` (`red-green` | `green-green` | `convention`), `**Quality constraints:**` (the `QC<n>` ids that apply to the task's files, or `none`), optionally **Execution:** (`sweep`, with the instruction, file list, and verifyCommand pinned in the task body), checkbox steps ordered per the task's evidence class (test-first for `red-green`; baseline suite run first for `green-green`), and a `## Dispatch Map` section listing waves of file-disjoint, dependency-ready tasks.
 
 ## Overrides of upstream writing-plans
 
 These bind the `thorough` overlay; the native templates above already carry them.
 
-- The header's "For agentic workers" line names `devcycle:executing-waves` as the executor. Do not offer upstream's subagent-vs-inline execution choice.
+- The header's "For agentic workers" line names `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` as the executor. Do not offer upstream's subagent-vs-inline execution choice.
 - Do not give tasks an implementer-executed commit step: the Conventional Commit lands via the executing-waves review cycle, on review acceptance.
 
 ## Handoff — required final output

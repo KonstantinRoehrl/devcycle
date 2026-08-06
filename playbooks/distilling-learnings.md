@@ -1,8 +1,3 @@
----
-name: distilling-learnings
-description: Use when the current repo's accumulated auto-memory entries are ready for a codified promotion session — turning vetted memory into doc or skill edits, checking for devcycle config drift since the last run, batching every promotion for confirmation, and deleting each memory once its promotion lands. Side-effectful (edits docs/skills, deletes memories); invoke only via /devcycle:distill.
----
-
 # Distilling learnings
 
 ## Announce
@@ -31,7 +26,7 @@ pipeline's `.devcycle/state.md`, and read/rewritten only by this skill.
 
 ## Session flow
 
-0. **Consolidate first.** Run `devcycle:dreaming-across-sessions` — the same
+0. **Consolidate first.** Run `${CLAUDE_PLUGIN_ROOT}/playbooks/dreaming-across-sessions.md` — the same
    one-engine-two-callers reuse this skill already applies to doctor's drift engine. Its
    candidates replace raw 1:1 memory entries as the input to the batching below, and
    include instruction, guideline, and skill-definition clarifications sourced from
@@ -57,7 +52,7 @@ pipeline's `.devcycle/state.md`, and read/rewritten only by this skill.
    drift engine rather than re-implementing stale-key detection.
 3. **Dispose of the dream artifact in two tiers.** The artifact
    (`.devcycle/dreaming/<YYYY-MM-DD>-dream.md`) is already partitioned by
-   `devcycle:dreaming-across-sessions` into a **Bulk** part (ordinary `doc-edit`,
+   `${CLAUDE_PLUGIN_ROOT}/playbooks/dreaming-across-sessions.md` into a **Bulk** part (ordinary `doc-edit`,
    `skill-edit`, and `enforcement-gap` candidates) and a **Requires explicit decision**
    part (every sensitive-flagged candidate and every `contradiction-resolution`) — the
    partition is authored by the dream, never chosen here.
@@ -98,7 +93,7 @@ pipeline's `.devcycle/state.md`, and read/rewritten only by this skill.
    Once the commit lands, record it. Write the JSON — `title`, `promotionType`,
    `clusterSignature`, `filesTouched`, `landed`, and `commit` — to a scratch file, then pass
    it through with the double-quoted `$(cat …)` form
-   `skills/sweeping-mechanical-changes/SKILL.md` already uses for the same reason: the
+   `playbooks/sweeping-mechanical-changes.md` already uses for the same reason: the
    file's contents ride through as one intact argument, so no escaping is needed no matter
    what the instruction contains (an apostrophe in `clusterSignature` breaks the inline
    single-quoted form outright). Never single-quote the JSON inline.
@@ -110,8 +105,8 @@ pipeline's `.devcycle/state.md`, and read/rewritten only by this skill.
    The record goes to `docs/devcycle/promotions/`, which is committed — so it is visible to
    every developer on the repo, not only whoever ran the promotion. If `git check-ignore`
    covers that path, write the file and skip the commit: the repo's own ignore rules decide
-   what lands in history, not this skill (same guard `skills/auditing-a-repo/SKILL.md` and
-   `skills/onboarding-a-repo/SKILL.md` apply to their own committed artifacts). Otherwise
+   what lands in history, not this skill (same guard `playbooks/auditing-a-repo.md` and
+   `playbooks/onboarding-a-repo.md` apply to their own committed artifacts). Otherwise
    commit it under an explicit pathspec alongside the edit it describes.
 5. **Delete the source memory when the promotion has one.** Reusing the existing
    convention verbatim (DESIGN.md:248: "once encoded, corresponding personal memories...

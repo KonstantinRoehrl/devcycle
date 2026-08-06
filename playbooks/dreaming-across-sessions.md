@@ -1,8 +1,3 @@
----
-name: dreaming-across-sessions
-description: Use when the session transcripts and memory accumulated for this repo since the last dream are ready for a cross-session consolidation pass — mining, clustering, and deduping recurring patterns and contradictions into promotion candidates for devcycle:distilling-learnings, screening every candidate and cluster signature for sensitive content. Read-only: writes only a dated dream artifact and its own checkpoint; promotes nothing itself.
----
-
 # Dreaming across sessions
 
 ## Announce
@@ -215,12 +210,12 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --commit-checkpoint <now, ISO-860
 ```
 
 The other flag is called elsewhere, not by this skill: `--record-promotion <json>` by
-`devcycle:distilling-learnings`, once per confirmed promotion.
+`${CLAUDE_PLUGIN_ROOT}/playbooks/distilling-learnings.md`, once per confirmed promotion.
 
 ## Standalone
 
 `/devcycle:dream` is read-only: it reports the artifact above and stops. It promotes
-nothing — only `devcycle:distilling-learnings`' own confirmation flow can, on a later,
+nothing — only `${CLAUDE_PLUGIN_ROOT}/playbooks/distilling-learnings.md`' own confirmation flow can, on a later,
 separate run. It starts no cycle, writes no `.devcycle/state.md`, and emits no handoff
 block.
 

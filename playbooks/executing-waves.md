@@ -1,8 +1,3 @@
----
-name: executing-waves
-description: Use when executing a wave-based implementation plan with subagent implementers, resuming one after /clear, or when dispatching, reviewing, or committing plan tasks.
----
-
 # Executing Waves
 
 ## Engine
@@ -199,7 +194,7 @@ A task whose plan entry carries `**Execution:** sweep` replaces steps 2–3
 workflow; steps 4–7 then apply with the deltas below. The invocation
 contract — args-JSON shape, the `$(cat …)` invocation, `DEVCYCLE_SWEEP_MODEL`
 resolution, the clean-targets precondition, the exit-code taxonomy, and the
-re-run rule — is owned by **devcycle:sweeping-mechanical-changes**
+re-run rule — is owned by **${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md**
 (REQUIRED, its steps 2–4). Only the task-level deltas live here:
 
 - **Run it.** Take files, instruction, and verifyCommand verbatim from the
@@ -281,7 +276,7 @@ conversation memory.
 
 Never claim a rendered or on-device outcome from a script, test, or report.
 Generating the on-device checklist is a mid-wave coordinator duty and lives here;
-the later walkthrough of that checklist is **devcycle:verifying-on-device**'s
+the later walkthrough of that checklist is **${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md**'s
 stage.
 
 **Trigger: the moment a task produces rendered changes** — generate or update the checklist in
@@ -291,7 +286,7 @@ skill's own; everything else about the checklist is not.
 What a checklist is — its path and state-file record, its item shape, the dimensions it
 covers, and the `(auto)` boundary that decides what may ever be checked off without a human —
 is `${CLAUDE_PLUGIN_ROOT}/references/checklist.md`. Read it and follow it; it is not restated
-here, and `devcycle:verifying-on-device` follows the same file.
+here, and `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` follows the same file.
 
 ## Wave boundaries and handoff
 
@@ -302,7 +297,7 @@ the handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`: read it and
 follow it, including which first-field label the boundary takes, the context
 action, and the gate that stops the run until the user acts. After the last
 wave's handoff this skill ends; the next stage is
-**devcycle:reviewing-the-branch** (REQUIRED — the branch gate before finishing).
+**${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md** (REQUIRED — the branch gate before finishing).
 
 ## Resuming after /clear
 

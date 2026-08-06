@@ -1,8 +1,3 @@
----
-name: onboarding-a-repo
-description: Use when a repository needs tier-2 setup bootstrapped from scratch or refreshed — detecting its real build/test/lint commands from manifests and CI config (never guessed), scaffolding CLAUDE.md and per-package rules, proposing a permission allowlist, and wiring a verification command devcycle's own green gate and CI can find. Side-effectful (writes files); invoke only via /devcycle:onboard, never silently.
----
-
 # Onboarding a repo
 
 ## Announce
@@ -81,7 +76,7 @@ its own `CLAUDE.md` stub, in addition to the root file.
    `settings.json` until the user confirms it.**
 
 4. **The verification command**, recorded in the scaffolded `CLAUDE.md` itself (the
-   `Test:` line above) — sufficient for `devcycle:executing-waves`' green gate and this
+   `Test:` line above) — sufficient for `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`' green gate and this
    repo's own CI to find; no separate state file.
 
 5. **Commit the scaffold**, scoped per

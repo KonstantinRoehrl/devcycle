@@ -6,7 +6,7 @@ that needs any of this names this file and does not restate it.
 ## Knob resolution
 
 Knob values arrive via `${user_config.KEY}` placeholders, each read by the stage
-skill that consumes it (gitPolicy by `devcycle:finishing-the-cycle`, models and
+skill that consumes it (gitPolicy by `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md`, models and
 review depth and the on-device gate by their stages).
 
 **Resolution order — binding, and stated only here.** For every knob, in order:

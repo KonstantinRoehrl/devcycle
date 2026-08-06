@@ -4,7 +4,7 @@ description: "Walk an on-device checklist derived from a branch's diff, on the r
 
 # /devcycle:verify
 
-Verify on-device the branch named in `$ARGUMENTS` via the `devcycle:verifying-on-device`
+Verify on-device the branch named in `$ARGUMENTS` via the `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md`
 skill, which owns the checklist-source resolution, the diff-derived generation, the
 walkthrough, the gate, and the standalone reporting rules. Do not restate or replace its
 process here.

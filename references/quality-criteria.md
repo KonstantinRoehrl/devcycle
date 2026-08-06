@@ -1,9 +1,9 @@
 # Quality criteria — catalog, precedence, and seed index
 
 The single owner of what any devcycle review or plan measures against, and where those
-standards come from. `devcycle:auditing-a-repo` reads it at discovery,
-`devcycle:reviewing-code` reads it when it builds review lenses, and
-`devcycle:planning-waves` reads it when it derives a plan's quality constraints — none of
+standards come from. `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` reads it at discovery,
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` reads it when it builds review lenses, and
+`${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` reads it when it derives a plan's quality constraints — none of
 them restate it. Nothing here chooses criteria: at an audit the user does, at that skill's
 step 1, and planning filters by the confirmed scope. This file supplies the raw material and
 the rules for sourcing it.
@@ -133,7 +133,7 @@ that did.
 How this catalog reaches the stages that write code, rather than only the ones that judge
 code afterwards.
 
-- **Filter by scope.** `devcycle:planning-waves` selects only the criteria that apply to the
+- **Filter by scope.** `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` selects only the criteria that apply to the
   stacks the confirmed scope actually contains and to the areas `.devcycle/scope.md` names.
   The whole catalog is never carried forward.
 - **Per-task excerpt.** An implementer brief carries only the constraint lines whose subject

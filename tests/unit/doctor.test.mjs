@@ -325,7 +325,7 @@ test("formatReport: discloses the price vintage", () => {
 });
 
 // emitCandidates() is computed but must actually reach the documented CLI surface — the
-// skill layer (skills/doctor/SKILL.md) has nothing to rank/report on otherwise.
+// playbook layer (playbooks/profiling-sessions.md) has nothing to rank/report on otherwise.
 test("cli: --json emits a candidates array carrying emitCandidates' signals", () => {
   const dir = mkdtempSync(join(tmpdir(), "doctor-candidates-"));
   const slug = join(dir, "-Users-x-proj");

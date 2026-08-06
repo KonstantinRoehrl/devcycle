@@ -1186,7 +1186,7 @@ test("recordPromotion accepts enforcement-gap and rejects extract-to-script", ()
     title: "Fix dispatches must not instruct the implementer to commit",
     promotionType: "enforcement-gap",
     clusterSignature: "implementer instructed to commit by its own brief",
-    filesTouched: "skills/reviewing-the-branch/SKILL.md",
+    filesTouched: "playbooks/reviewing-the-branch.md",
     landed: "2026-08-05",
     commit: "abc1234",
   });

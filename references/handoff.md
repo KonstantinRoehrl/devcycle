@@ -37,7 +37,7 @@ reserved for true stage ends. These are the only two sanctioned first-field
 labels.
 
 At the finish stage specifically, the block carries one additional line, directly after
-`Artifacts:` — the resolved git policy, in the exact shape `devcycle:finishing-the-cycle`
+`Artifacts:` — the resolved git policy, in the exact shape `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md`
 defines. No other stage's block carries this line.
 
 Pick the context action from this table and recommend it to the user explicitly. The action

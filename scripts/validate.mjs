@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-// Validates plugin manifests, skill/command frontmatter, description budget,
+// Validates plugin manifests, command frontmatter, description budget,
 // markdown fences, and cross-references between the plugin's own surface files.
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 const DESCRIPTION_BUDGET_TOTAL = 6000; // chars; source: docs/platform-notes.md
-const DESCRIPTION_MAX = 500;
 const root = process.cwd();
 const errors = [];
 const fail = (m) => errors.push(m);
@@ -36,7 +35,9 @@ function* walk(dir) {
   }
 }
 
-// --- frontmatter of skills + commands ---
+// --- frontmatter of commands ---
+// Playbooks are loaded by path and appear in no roster, so they carry no
+// frontmatter and consume no description budget.
 function frontmatter(path) {
   const text = readFileSync(path, "utf8");
   const m = text.match(/^---\n([\s\S]*?)\n---/);
@@ -49,16 +50,6 @@ function frontmatter(path) {
   return fm;
 }
 let budget = 0;
-if (existsSync(join(root, "skills")))
-  for (const dir of readdirSync(join(root, "skills"))) {
-    const p = join(root, "skills", dir, "SKILL.md");
-    if (!existsSync(p)) { fail(`skills/${dir}: missing SKILL.md`); continue; }
-    const fm = frontmatter(p);
-    if (!fm?.name || !fm?.description) { fail(`${p}: frontmatter needs name+description`); continue; }
-    if (!fm.description.startsWith("Use when")) fail(`${p}: description must start "Use when"`);
-    if (fm.description.length > DESCRIPTION_MAX) fail(`${p}: description > ${DESCRIPTION_MAX} chars`);
-    budget += fm.description.length;
-  }
 if (existsSync(join(root, "commands")))
   for (const f of readdirSync(join(root, "commands"))) {
     const fm = frontmatter(join(root, "commands", f));
@@ -77,7 +68,7 @@ for (const p of walk(root))
 // --- cross-references across the plugin surface ---
 // These are the files Claude loads at runtime; docs/ and DESIGN.md are prose
 // about the plugin and legitimately carry `<name>`-style placeholders.
-const SURFACE = ["skills", "commands", "agents", "references"];
+const SURFACE = ["playbooks", "commands", "agents", "references"];
 const surface = SURFACE.flatMap((d) =>
   existsSync(join(root, d)) ? [...walk(join(root, d))].filter((p) => p.endsWith(".md")) : []
 );
@@ -116,10 +107,15 @@ for (const p of surface) {
     else if (!knobs.has(key)) once(`knob:${key}`, `${rel(p)}: unknown knob \${user_config.${key}} (not in plugin.json userConfig)`);
   }
 
-  // 3. Every devcycle:<name> must resolve to a skill, an agent, or a command.
-  for (const [, , name] of text.matchAll(/(^|[^A-Za-z0-9_-])devcycle:([a-z0-9][a-z0-9-]*)/g))
-    if (![`skills/${name}/SKILL.md`, `agents/${name}.md`, `commands/${name}.md`].some((c) => existsSync(join(root, c))))
-      once(`ref:${name}`, `${rel(p)}: unresolved devcycle:${name} (no skills/${name}/SKILL.md, agents/${name}.md, or commands/${name}.md)`);
+  // 3. Every devcycle:<name> must resolve to an agent or a command. Playbooks are addressed
+  //    by path (check 4), never by a devcycle: id — naming one here means someone tried to
+  //    invoke stage logic as if it were a user-facing skill.
+  for (const [, , name] of text.matchAll(/(^|[^A-Za-z0-9_-])devcycle:([a-z0-9][a-z0-9-]*)/g)) {
+    if (existsSync(join(root, `playbooks/${name}.md`)))
+      once(`ref:${name}`, `${rel(p)}: devcycle:${name} names a playbook — reference it as \${CLAUDE_PLUGIN_ROOT}/playbooks/${name}.md`);
+    else if (![`agents/${name}.md`, `commands/${name}.md`].some((c) => existsSync(join(root, c))))
+      once(`ref:${name}`, `${rel(p)}: unresolved devcycle:${name} (no agents/${name}.md or commands/${name}.md)`);
+  }
 
   // 4. Every ${CLAUDE_PLUGIN_ROOT}/<path> must name a file that ships.
   for (const [, raw] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([A-Za-z0-9._/-]+)/g)) {
@@ -130,14 +126,13 @@ for (const p of surface) {
   }
 }
 
-// 5. A skill that emits a handoff block must name the reference that owns its shape.
-if (existsSync(join(root, "skills")))
-  for (const dir of readdirSync(join(root, "skills"))) {
-    const p = join(root, "skills", dir, "SKILL.md");
-    if (!existsSync(p)) continue;
-    const text = readFileSync(p, "utf8");
+// 5. A playbook that emits a handoff block must name the reference that owns its shape.
+if (existsSync(join(root, "playbooks")))
+  for (const f of readdirSync(join(root, "playbooks"))) {
+    if (!f.endsWith(".md")) continue;
+    const text = readFileSync(join(root, "playbooks", f), "utf8");
     if (text.includes("## Handoff") && !text.includes("references/handoff.md"))
-      fail(`skills/${dir}/SKILL.md: emits "## Handoff" without referencing references/handoff.md`);
+      fail(`playbooks/${f}: emits "## Handoff" without referencing references/handoff.md`);
   }
 
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }

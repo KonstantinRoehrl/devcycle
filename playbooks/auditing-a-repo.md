@@ -1,8 +1,3 @@
----
-name: auditing-a-repo
-description: Use when a repository or a branch needs a criteria-driven audit — criteria are derived from the stacks actually present and the repo's own conventions, then interviewed for, never assumed — producing findings ranked by severity, impact, and fix complexity, each with file-referenced evidence and a concrete fix.
----
-
 # Auditing a Repo
 
 Turn a repository into a ranked list of findings the user can act on, one cycle at a
@@ -83,7 +78,7 @@ how far steps 2–3 go (see Depth below). Report as
      findings: drafting a finding before the user replies violates the STOP below.
    - **In branch mode**, show the derived base and the stabilized file set from step 0 here
      too. Both are correctable at this stop, exactly like the criteria.
-   - **Hard STOP after asking**, exactly as `devcycle:scoping-interview` stops: no
+   - **Hard STOP after asking**, exactly as `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` stops: no
      research sweep, no draft findings, no assumed answers until the user has replied.
      Criteria are never assumed, never inferred from the request's wording, and never
      defaulted because the answer looks obvious.
@@ -107,7 +102,7 @@ how far steps 2–3 go (see Depth below). Report as
    detected, and its rules for reuse before rebuild, multi-file feature chains, data contracts
    across every boundary they cross, and accessibility wherever the scope contains a UI.
 
-3. **Findings.** The sweep that produces them is `devcycle:reviewing-code`, invoked with
+3. **Findings.** The sweep that produces them is `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`, invoked with
    the confirmed criteria from step 1 and `scope: {paths: [...]}` — step 0's stabilized file
    set. It owns lens construction, engine selection, adversarial per-finding verification,
    dedup and ranking; this skill neither restates that machinery nor performs it by hand.
@@ -181,7 +176,7 @@ How far steps 2–3 sweep is the `audit depth` row of
 `${CLAUDE_PLUGIN_ROOT}/references/config.md` — read it there; it is not repeated here.
 
 What that row's deepest value means here: at `thorough` the refutation pass is
-`devcycle:reviewing-code`'s adversarial verification — real machinery, not a paragraph this
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`'s adversarial verification — real machinery, not a paragraph this
 skill performs itself.
 
 Depth never touches step 1 or step 3's evidence rule: a `lean` audit

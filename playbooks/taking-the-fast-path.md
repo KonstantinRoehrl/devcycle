@@ -1,8 +1,3 @@
----
-name: fast-path
-description: Use when devcycle triage has confirmed a trivial request and the run takes the fast path — in-session implementation with evidence, one task-reviewer pass, then the finish stage.
----
-
 # Fast Path
 
 The mini-cycle for requests triage has judged trivial and the user has confirmed
@@ -59,7 +54,7 @@ Report as `${CLAUDE_PLUGIN_ROOT}/references/output.md` requires.
    `Stage completed: fast-path` — its table's `fast-path → finish` row gives the
    context action, so the fast path and finish fit in one session. Then set
    `stage: finish` in `.devcycle/state.md` and hand to
-   `devcycle:finishing-the-cycle` unchanged — that skill's policy resolution and
+   `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` unchanged — that skill's policy resolution and
    git action apply exactly as they do at the end of the full pipeline.
 
 ## State file
@@ -79,7 +74,7 @@ On re-entry at `stage: fast-path`, read
 skill: its `(re)implement` row is step 2, its `dispatch the task reviewer` row is
 step 5, and the acceptance it says is never inferable from git is recorded only by
 step 6 advancing `stage:` to `finish` — after which `/devcycle:continue` routes to
-`devcycle:finishing-the-cycle` and never re-enters this skill.
+`${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` and never re-enters this skill.
 
 ## Guardrails preserved vs. dropped
 

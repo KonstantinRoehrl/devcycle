@@ -82,12 +82,12 @@ The procedure, canonical here and named rather than restated by the stages that 
    either way**: no note about which mode ran, and no docs found is nothing to report.
 
 The coordinator never tells a subagent to go invoke graphify. A subagent's own skill list may
-differ from the coordinator's, and `devcycle:executing-waves` already establishes the rule this
+differ from the coordinator's, and `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` already establishes the rule this
 follows: content a subagent must fetch can be silently skipped, while injected content cannot.
 
-Each caller supplies its own relevance filter: `devcycle:scoping-interview` judges against the
-request itself, since scope is not yet confirmed; `devcycle:planning-waves` judges against the
-confirmed scope in `.devcycle/scope.md`; `devcycle:auditing-a-repo` judges against the
+Each caller supplies its own relevance filter: `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` judges against the
+request itself, since scope is not yet confirmed; `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` judges against the
+confirmed scope in `.devcycle/scope.md`; `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` judges against the
 confirmed audit criteria.
 
 ## Read discipline
@@ -137,7 +137,7 @@ The coordinator opens a report or findings file only when a decision needs conte
 envelope cannot carry.
 
 **Why the envelope carries counts and not just paths.** Both counted fields drive a
-coordinator duty that fires *without* reading the file. `devcycle:executing-waves` requires the
+coordinator duty that fires *without* reading the file. `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` requires the
 on-device checklist to be generated the moment a task produces rendered changes, in that same
 wave; a coordinator that never opens the report would never learn a task produced any, and the
 checklist would silently not exist. The deviations count works the same way — it tells the
@@ -146,7 +146,7 @@ either field would trade a real gate for a token saving.
 
 ## The short paths
 
-`devcycle:fast-path` and `devcycle:sweeping-mechanical-changes` are in-session by design. The
+`${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md` and `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md` are in-session by design. The
 **delegation default does not apply to them**; the **counters do**. A short path that reaches
 the budget means triage judged the change trivial and was wrong: say so and escalate to the
 full pipeline. It is a signal, not a licence to keep going.

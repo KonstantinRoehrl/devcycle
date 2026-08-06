@@ -1,8 +1,3 @@
----
-name: verifying-on-device
-description: Use when implemented changes affect rendered UI or on-device behavior that automated tests cannot fully verify, when a walkthrough of an on-device checklist is requested, or when a branch must be verified on-device without a plan — including code this session did not write.
----
-
 # Verifying On-Device
 
 ## Overview
@@ -23,7 +18,7 @@ Two sources, one engine. Which one applies is settled before the walkthrough beg
 everything after — the walkthrough, the gate, the results report — is identical either way.
 
 **Plan-derived (in-cycle, unchanged).** The checklist was produced during execution by
-`devcycle:executing-waves`; read its path from the `checklist:` field of `.devcycle/state.md`.
+`${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`; read its path from the `checklist:` field of `.devcycle/state.md`.
 
 **Diff-derived (standalone, `/devcycle:verify <branch>`).** No checklist exists yet: generate
 one from the branch, **automatically — there is no confirmation step**, because the branch is
@@ -39,7 +34,7 @@ the whole instruction.
   surfaces, not against the changed files: a diff in a shared component is verified wherever
   it renders.
 - *Generation*: follow `${CLAUDE_PLUGIN_ROOT}/references/checklist.md` — the same contract
-  `devcycle:executing-waves` follows. Its `Where:` and `How to get there:` fields are
+  `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` follows. Its `Where:` and `How to get there:` fields are
   REQUIRED here: without a plan, nothing else tells the human where to look.
 - *Nothing renders*: if the traced set contains no rendered surface, write no checklist, and
   report the stage not applicable with that reason — the same outcome the in-cycle skip has.
@@ -108,7 +103,7 @@ happened — a human pass, or a close without one and what stayed unverified.
 binding:
 
 - **It must not create, read-modify, or write `.devcycle/state.md`.** An existing state file
-  belongs to somebody else's in-flight cycle — exactly as `devcycle:auditing-a-repo`'s
+  belongs to somebody else's in-flight cycle — exactly as `${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md`'s
   standalone rule establishes — and its lines are not this run's to rewrite. The checklist
   path goes in the handoff instead, and nowhere else.
 - **The checklist is scratch**: it goes to the diff-derived path

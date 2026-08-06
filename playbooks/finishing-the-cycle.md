@@ -1,8 +1,3 @@
----
-name: finishing-the-cycle
-description: Use when a devcycle cycle's gates have all passed and the branch must be handed back, pushed, or turned into a PR per the resolved git policy — the pipeline's finish stage.
----
-
 # Finishing the Cycle
 
 The pipeline's last stage: resolve the effective git policy, act on it, close the

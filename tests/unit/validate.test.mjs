@@ -4,10 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { makePluginFixture, writeInto, runValidate } from "./helpers.mjs";
 
-const SKILL_HEAD = "---\nname: demo\ndescription: Use when a fixture skill is needed.\n---\n\n# Demo\n\n";
-
-// Replaces the fixture skill's body, keeping its valid frontmatter.
-const skill = (dir, body) => writeInto(dir, "skills/demo/SKILL.md", SKILL_HEAD + body);
+// Replaces the fixture playbook's body. Playbooks have no frontmatter.
+const playbook = (dir, body) => writeInto(dir, "playbooks/demoing-things.md", "# Demoing things\n\n" + body);
 
 // The stage enum lives in commands/cycle.md; checks that consult it need it present.
 const withStageEnum = (dir) =>
@@ -31,7 +29,7 @@ const failsWith = (res, ...patterns) => {
 test("stage check: backticked stages in the enum pass, and unbackticked prose is not a reference", () => {
   const dir = makePluginFixture();
   withStageEnum(dir);
-  skill(
+  playbook(
     dir,
     "Write `stage: planning`, then `stage: done`.\n\n" +
       "The `stage:` line records the stage to resume at.\n\n" +
@@ -43,22 +41,22 @@ test("stage check: backticked stages in the enum pass, and unbackticked prose is
 test("stage check: a backticked stage outside the enum fails, naming file and token", () => {
   const dir = makePluginFixture();
   withStageEnum(dir);
-  skill(dir, "Write `stage: reviewing` and continue.\n");
-  failsWith(runValidate(dir), /skills\/demo\/SKILL\.md/, /reviewing/);
+  playbook(dir, "Write `stage: reviewing` and continue.\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /reviewing/);
 });
 
 // --- check 2: ${user_config.X} against plugin.json's userConfig ---
 
 test("user_config check: a declared knob passes, and the literal ${user_config.KEY} placeholder is exempt", () => {
   const dir = makePluginFixture();
-  skill(dir, "Resolve `${user_config.profile}`. The convention is `${user_config.KEY}`.\n");
+  playbook(dir, "Resolve `${user_config.profile}`. The convention is `${user_config.KEY}`.\n");
   ok(runValidate(dir));
 });
 
 test("user_config check: an undeclared knob fails, naming file and token", () => {
   const dir = makePluginFixture();
-  skill(dir, "Resolve `${user_config.reviewDepth}` before reviewing.\n");
-  failsWith(runValidate(dir), /skills\/demo\/SKILL\.md/, /reviewDepth/);
+  playbook(dir, "Resolve `${user_config.reviewDepth}` before reviewing.\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /reviewDepth/);
 });
 
 test("user_config check: an unreadable knob list fails loudly rather than skipping the check", () => {
@@ -82,25 +80,25 @@ test("user_config check: an unreadable knob list fails loudly rather than skippi
         2
       ) + "\n"
     );
-    skill(dir, "Resolve `${user_config.profile}` before planning.\n");
-    failsWith(runValidate(dir), /skills\/demo\/SKILL\.md/, /profile/, /unverifiable/);
+    playbook(dir, "Resolve `${user_config.profile}` before planning.\n");
+    failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /profile/, /unverifiable/);
   }
 });
 
-// --- check 3: devcycle:<name> against skills, agents, and commands ---
+// --- check 3: devcycle:<name> against agents and commands ---
 
-test("devcycle: reference check: names resolving to a skill, an agent, or a command all pass", () => {
+test("devcycle: reference check: names resolving to an agent or a command all pass", () => {
   const dir = makePluginFixture();
   withStageEnum(dir);
   writeInto(dir, "agents/task-reviewer.md", "---\nname: task-reviewer\n---\n\nReviewer.\n");
-  skill(dir, "Invoke `devcycle:demo`, dispatch `devcycle:task-reviewer`, resume via `/devcycle:cycle`.\n");
+  playbook(dir, "Dispatch `devcycle:task-reviewer`, resume via `/devcycle:cycle`.\n");
   ok(runValidate(dir));
 });
 
 test("devcycle: reference check: a name resolving to nothing fails, naming file and token", () => {
   const dir = makePluginFixture();
-  skill(dir, "Invoke `devcycle:ghost-stage` to finish.\n");
-  failsWith(runValidate(dir), /skills\/demo\/SKILL\.md/, /devcycle:ghost-stage/);
+  playbook(dir, "Invoke `devcycle:ghost-stage` to finish.\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /devcycle:ghost-stage/);
 });
 
 // --- check 4: ${CLAUDE_PLUGIN_ROOT}/<path> against the tree ---
@@ -108,27 +106,27 @@ test("devcycle: reference check: a name resolving to nothing fails, naming file 
 test("plugin-root check: a path that exists passes", () => {
   const dir = makePluginFixture();
   writeInto(dir, "references/handoff.md", "# Handoff\n\nThe block shape.\n");
-  skill(dir, "Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and follow it.\n");
+  playbook(dir, "Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and follow it.\n");
   ok(runValidate(dir));
 });
 
 test("plugin-root check: a path that does not exist fails, naming file and token", () => {
   const dir = makePluginFixture();
-  skill(dir, "Read `${CLAUDE_PLUGIN_ROOT}/references/nowhere.md` and follow it.\n");
-  failsWith(runValidate(dir), /skills\/demo\/SKILL\.md/, /references\/nowhere\.md/);
+  playbook(dir, "Read `${CLAUDE_PLUGIN_ROOT}/references/nowhere.md` and follow it.\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /references\/nowhere\.md/);
 });
 
-// --- check 5: a skill emitting a handoff block must name the reference ---
+// --- check 5: a playbook emitting a handoff block must name the reference ---
 
-test("handoff check: a skill emitting a handoff block that names references/handoff.md passes", () => {
+test("handoff check: a playbook emitting a handoff block that names references/handoff.md passes", () => {
   const dir = makePluginFixture();
   writeInto(dir, "references/handoff.md", "# Handoff\n\nThe block shape.\n");
-  skill(dir, "Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and follow it.\n\n## Handoff\n\nEmit the block.\n");
+  playbook(dir, "Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and follow it.\n\n## Handoff\n\nEmit the block.\n");
   ok(runValidate(dir));
 });
 
-test("handoff check: a skill emitting a handoff block without the reference fails, naming file and token", () => {
+test("handoff check: a playbook emitting a handoff block without the reference fails, naming file and token", () => {
   const dir = makePluginFixture();
-  skill(dir, "## Handoff\n\nEmit whatever block you like.\n");
-  failsWith(runValidate(dir), /skills\/demo\/SKILL\.md/, /references\/handoff\.md/);
+  playbook(dir, "## Handoff\n\nEmit whatever block you like.\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /references\/handoff\.md/);
 });

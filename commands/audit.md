@@ -5,7 +5,7 @@ description: "Audit this repo — or one branch, via a branch:<name> argument �
 # /devcycle:audit
 
 Audit this repo — or one branch of it — per `$ARGUMENTS` (grammar below) via the
-`devcycle:auditing-a-repo` skill, which owns the criteria interview, the sweep, the findings document at
+`${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` skill, which owns the criteria interview, the sweep, the findings document at
 `docs/audits/YYYY-MM-DD-<topic>.md`, and — in its steps 5 and 6 — the branch,
 state-file, and stop-at-the-document rules. Do not restate or replace its process
 here.

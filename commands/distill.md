@@ -7,10 +7,10 @@ disable-model-invocation: true
 
 Review accumulated memory for this repo and promote what's ready into docs or skills.
 Checks for devcycle config drift since the last distill run, using
-`devcycle:doctor`'s drift engine. Batches every proposed promotion for confirmation
+`${CLAUDE_PLUGIN_ROOT}/playbooks/profiling-sessions.md`'s drift engine. Batches every proposed promotion for confirmation
 before applying anything, and deletes each memory once its promotion lands.
 
-Use the `devcycle:distilling-learnings` skill. It starts no cycle and writes no
+Use the `${CLAUDE_PLUGIN_ROOT}/playbooks/distilling-learnings.md` skill. It starts no cycle and writes no
 `.devcycle/state.md` (it keeps its own small checkpoint at
 `.devcycle/distilling-state.md`).
 

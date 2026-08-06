@@ -36,7 +36,7 @@ guarding against a concurrent session or worktree switching branches mid-cycle.
 ## Deriving a branch's file set
 
 Which files a branch-scoped stage reads, and where it reads them from.
-`devcycle:auditing-a-repo` and `devcycle:verifying-on-device` both run this derivation.
+`${CLAUDE_PLUGIN_ROOT}/playbooks/auditing-a-repo.md` and `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` both run this derivation.
 What a stage then *does* with the file set is that stage's own — the audit expands it to a
 feature dependency graph, the verify stage traces it to routes and screens — and is
 described there, not here.
