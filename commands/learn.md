@@ -7,12 +7,8 @@ disable-model-invocation: true
 
 Observe → propose → confirm → land. One loop.
 
-- `/devcycle:learn` — the whole loop. Every promotion is batched for confirmation before it
-  lands; each memory is deleted only once its promotion has landed.
-- `/devcycle:learn --preview` — mine and propose, write the dated artifact, land nothing,
-  delete no memory.
-
-Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`. It starts no cycle and
+Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`, which owns both invocation
+modes — the default and `--preview` — and everything the loop does. It starts no cycle and
 writes no state file.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
