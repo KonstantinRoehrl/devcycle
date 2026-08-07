@@ -3,13 +3,17 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
   push:
-    # `dev` is listed so every commit that lands there gets a check suite at push time,
-    # including the ones GitHub's merge API creates on squash-merge. Without it nothing
-    # subscribes to `dev`, its tip carries no suite, and a `dev` -> `main` release PR
-    # opened on that tip reports mergeable with zero checks — silently unverified.
+    # `dev` is listed so human and merge-API commits landing there get a check suite at push
+    # time. It does NOT cover commits pushed with the implicit token — GitHub does not trigger
+    # workflows from it — so the release workflows call this one directly via workflow_call.
     branches: [main, dev]
   # Manual re-run, for requesting a suite without inventing a commit.
   workflow_dispatch:
+  # Called in-line by the release workflows: the release commit is pushed with the implicit token,
+  # and GitHub does not trigger workflows from it, so the push-triggered suite below never fires
+  # for the one commit that most needs it. Calling this workflow directly runs the check before
+  # the push instead of hoping for one after.
+  workflow_call:
 permissions:
   contents: read
 concurrency:

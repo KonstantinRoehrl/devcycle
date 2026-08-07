@@ -14,7 +14,12 @@ concurrency:
   group: prepare-release
   cancel-in-progress: false
 jobs:
+  # Run the suite before the bump is pushed: the push below uses the implicit token, which
+  # triggers no workflow, so this call is the release commit's only check.
+  validate:
+    uses: ./.github/workflows/validate.yml
   prepare:
+    needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
