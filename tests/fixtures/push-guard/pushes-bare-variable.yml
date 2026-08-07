@@ -1,0 +1,12 @@
+# Fixture: push destinations that are bare variables. A ref with no literal part could expand to
+# anything, including the release branch, so the guard must reject it. The sibling fixture
+# pushes-elsewhere.yml pins the legitimate literal-prefixed form that must keep passing.
+name: Bare variable pushes
+on: workflow_dispatch
+jobs:
+  push:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: git push origin "$BRANCH"
+      - run: git push origin ${TARGET}
+      - run: git push -u origin "${DEPLOY_REF}"

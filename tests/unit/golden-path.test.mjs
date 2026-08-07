@@ -282,6 +282,14 @@ function pushTargets(text) {
   return targets;
 }
 
+// A destination with no literal part could be anything, including the release branch:
+// `git push origin "$BRANCH"` records the literal `$BRANCH`, which is not equal to "main", so the
+// equality guard alone passed it. A literal prefix constrains the expansion, so `devcycle--v$V`
+// — the legitimate tag push pinned by pushes-elsewhere.yml — is fine.
+function isBareVariable(dest) {
+  return /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/.test(dest);
+}
+
 test("the push guard reads a refspec's destination, whatever form the push takes", () => {
   const flagged = pushTargets(read("tests/fixtures/push-guard/pushes-main.yml"));
   assert.equal(flagged.length, 6, `expected six pushes in the fixture, saw ${flagged.length}`);
@@ -336,12 +344,35 @@ test("a blank line ends a continuation instead of merging two pushes", () => {
   );
 });
 
+test("a bare-variable push destination is rejected", () => {
+  assert.strictEqual(isBareVariable("$BRANCH"), true);
+  assert.strictEqual(isBareVariable("${BRANCH}"), true);
+  assert.strictEqual(isBareVariable("main"), false);
+  // A literal prefix constrains what the variable can expand to.
+  assert.strictEqual(isBareVariable("devcycle--v$V"), false);
+  assert.strictEqual(isBareVariable("release/$NAME"), false);
+});
+
+test("the push guard catches a variable destination that could resolve to main", () => {
+  const targets = pushTargets(read("tests/fixtures/push-guard/pushes-bare-variable.yml"));
+  assert.ok(targets.length > 0, "fixture produced no targets — the assertion would be vacuous");
+  assert.ok(targets.some(isBareVariable), "a bare-variable destination was not detected");
+});
+
+test("the legitimate tag push is not caught by the bare-variable rule", () => {
+  const targets = pushTargets(read("tests/fixtures/push-guard/pushes-elsewhere.yml"));
+  assert.ok(targets.length > 0);
+  assert.ok(!targets.some(isBareVariable), "a literal-prefixed destination was wrongly flagged");
+});
+
 test("no workflow pushes to the release branch", () => {
   let pushes = 0;
   for (const f of readdirSync(join(root, ".github/workflows"))) {
     for (const target of pushTargets(read(`.github/workflows/${f}`))) {
       pushes++;
       assert.notEqual(target, RELEASE_BRANCH, `${f} pushes ${RELEASE_BRANCH} directly`);
+      assert.ok(!isBareVariable(target),
+        `${f}: push destination "${target}" is a bare variable and could resolve to ${RELEASE_BRANCH}`);
     }
   }
   assert.ok(pushes > 0, "no `git push` was found in any workflow — this guard would assert nothing");
@@ -454,8 +485,8 @@ test("harvested: commands/state-file-resume — the state file's shape and owner
   const t = read("references/resume.md");
   const template = t.match(/```markdown\n# devcycle state\n([\s\S]*?)```/)?.[1] ?? "";
   const lines = template.trim().split("\n");
-  assert.equal(lines.length, 13, "the state template is no longer 13 lines");
-  for (const field of ["stage", "root", "branch", "request", "scope", "audit", "diagnosis", "spec", "plan", "ledger", "checklist", "configured", "updated"])
+  assert.equal(lines.length, 14, "the state template is no longer 14 lines");
+  for (const field of ["stage", "root", "branch", "request", "scope", "audit", "diagnosis", "spec", "plan", "ledger", "checklist", "run", "configured", "updated"])
     assert.ok(lines.some((l) => l.startsWith(`- ${field}:`)), `state field missing: ${field}`);
   assert.ok(template.includes("- ledger: .devcycle/ledger.md"), "the ledger path is not pinned");
   assert.match(t, /The ownership check, run before trusting anything else in the file/);
