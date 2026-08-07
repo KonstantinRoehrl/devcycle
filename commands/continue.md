@@ -63,7 +63,7 @@ Continue at the recorded stage via its playbook:
 | diagnosis | `superpowers:systematic-debugging`, bugs only — with the devcycle notes in `${CLAUDE_PLUGIN_ROOT}/commands/cycle.md` § Stage walk, which owns them; read that entry, since this session may never have loaded it |
 | brainstorm | `superpowers:brainstorming` — likewise with the notes in `${CLAUDE_PLUGIN_ROOT}/commands/cycle.md` § Stage walk |
 | planning | `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` |
-| execution | `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` (its resume table maps each task's last ledger event to the resume action) |
+| execution | `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`, which follows `${CLAUDE_PLUGIN_ROOT}/references/resume.md` — its table maps each task's last ledger event to the resume action |
 | branch-review | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` |
 | on-device | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` |
 | fast-path | `${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md` (its Resume section, which follows `${CLAUDE_PLUGIN_ROOT}/references/resume.md`) |

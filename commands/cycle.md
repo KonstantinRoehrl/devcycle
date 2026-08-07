@@ -20,12 +20,11 @@ is a cache: every artifact is on disk, so the pipeline survives `/clear` and res
 
 ## Before the first confirmation
 
-Before the first user confirmation, this command may only read the repository and write
-`.devcycle/state.md`. It creates no branch and makes no commit. That write is the pipeline's
-first action, not a side effect of the first stage transition: a cycle interrupted mid-scoping
-must still leave something to resume from. An existing state file at `stage: done` is reused —
-carry `configured:` forward, reset the rest, ask nothing; a finished cycle is not a collision.
-At any other stage, surface the collision and ask — never overwrite it.
+Before the first user confirmation, this command may only read the repository and write `.devcycle/state.md`.
+It creates no branch and makes no commit. That write is the pipeline's first action, not a side effect of the
+first stage transition: a cycle interrupted mid-scoping must still leave something to resume from. An existing
+state file at `stage: done` is reused — carry `configured:` forward, reset the rest, ask nothing; a finished
+cycle is not a collision. At any other stage, surface the collision and ask — never overwrite it.
 
 ## Triage the input
 
@@ -38,11 +37,10 @@ AskUserQuestion **before any stage runs**. Nothing here is profile-conditional.
 "review the repo for Y" — an assessment of existing code, not a change to it) runs **audit** in
 place of scoping, establishing what is wrong before anything is designed and feeding brainstorm.
 
-**Kind** shapes the walk. A **bug** routes through **diagnosis** between scoping and brainstorm
-unless the input already names the root cause with evidence — a stated cause plus how it was
-established, never a hunch; a fix cannot be specced for an undiagnosed problem, so a mature bug
-ticket with a reproduction but no known cause enters at **diagnosis**. **Feature** and
-**refactor** skip diagnosis entirely.
+**Kind** shapes the walk. A **bug** routes through **diagnosis** between scoping and brainstorm unless the
+input already names the root cause with evidence — a stated cause plus how it was established, never a
+hunch; a fix cannot be specced for an undiagnosed problem, so a mature bug ticket with a reproduction but no
+known cause enters at **diagnosis**. **Feature** and **refactor** skip diagnosis entirely.
 
 **Size** may offer a short path. **Trivial** (`fast-path`): fully specified by the request
 itself, no design decisions and no new interfaces, a blast radius of roughly two files and a few
@@ -66,8 +64,10 @@ playbook owns and runs before any agent edits.
 
 ## Stage walk
 
-Run these in order, each via its playbook, rewriting the state file at every transition. The line
-below is the stage enum's single source of truth — `scripts/validate.mjs` reads its literal form:
+Run these in order, each via its playbook, rewriting the state file at every transition; two short paths
+bypass it on confirmation: `fast-path` → `${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md`, `sweep`
+→ `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md`. The line below is the stage enum's
+single source of truth — `scripts/validate.mjs` reads its literal form:
 
 - stage: <scoping|audit|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|finish|done>
 
