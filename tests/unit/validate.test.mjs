@@ -2,9 +2,13 @@
 // plugin trees. Every test starts from a green fixture and breaks one thing.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, cpSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { makePluginFixture as makeBaseFixture, writeInto, runValidate, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
+
+const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
 // The routing table check 6 reads. `cycle` is confirm-first, so the table has to
 // name its justification; helpers.mjs's base table predates that arm and is owned
@@ -460,4 +464,55 @@ test("state-file check: a resume.md that declares no template fails instead of g
   writeFileSync(resume, readFileSync(resume, "utf8").replace("# devcycle state", "# devcycle run state"));
   stateFixture(dir, allFields());
   failsWith(runValidate(dir), /references\/resume\.md/, /undeclared/);
+});
+
+// --- check 13: the run-record schema and its golden fixture ---
+
+test("check 13 accepts the golden run record against its schema", () => {
+  const dir = mkdtempSync(join(tmpdir(), "validate-runrecord-"));
+  cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  const r = spawnSync(process.execPath, [join(dir, "scripts/validate.mjs")], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+});
+
+test("check 13 fails when the golden record violates the schema", () => {
+  const dir = mkdtempSync(join(tmpdir(), "validate-runrecord-bad-"));
+  cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  writeFileSync(
+    join(dir, "tests/fixtures/run-record.golden.jsonl"),
+    JSON.stringify({ kind: "dispatch", runId: "r1", modelSource: "guessed" }) + "\n"
+  );
+  const r = spawnSync(process.execPath, [join(dir, "scripts/validate.mjs")], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /run-record\.golden\.jsonl/);
+});
+
+test("check 13 fails when the schema declares a kind the golden record never exercises", () => {
+  const dir = mkdtempSync(join(tmpdir(), "validate-runrecord-unexercised-"));
+  cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  const schema = JSON.parse(
+    readFileSync(join(dir, "tests/fixtures/run-record.schema.json"), "utf8")
+  );
+  schema.oneOf.push({
+    type: "object",
+    properties: { kind: { const: "phantom" }, runId: { type: "string" } },
+    required: ["kind", "runId"],
+    additionalProperties: false,
+  });
+  writeFileSync(
+    join(dir, "tests/fixtures/run-record.schema.json"),
+    JSON.stringify(schema, null, 2) + "\n"
+  );
+  const r = spawnSync(process.execPath, [join(dir, "scripts/validate.mjs")], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /phantom/);
 });

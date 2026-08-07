@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "devcycle-run-record",
+  "title": "devcycle run record line",
+  "description": "One JSON object per line of ~/.claude/devcycle/runs/<repo-slug>/<run-id>.jsonl. Ids, counts and enum values only: never code, never prose excerpts, never host paths.",
+  "oneOf": [
+    {
+      "title": "run",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "run" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "schemaVersion": { "const": 1 },
+        "pluginVersion": { "type": "string" },
+        "pluginSha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "repoSlug": { "type": "string", "pattern": "^[A-Za-z0-9._-]+-[0-9a-f]{8}$" },
+        "profile": { "enum": ["lean", "standard", "thorough"] },
+        "knobs": { "type": "object", "additionalProperties": { "type": "string" } },
+        "startedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "kind", "runId", "schemaVersion", "pluginVersion", "pluginSha",
+        "repoSlug", "profile", "knobs", "startedAt"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "session",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "session" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "sessionHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "firstSeen": { "type": "string", "format": "date-time" },
+        "lastSeen": { "type": "string", "format": "date-time" }
+      },
+      "required": ["kind", "runId", "sessionHash", "firstSeen", "lastSeen"],
+      "additionalProperties": false
+    },
+    {
+      "title": "stage",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "stage" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "stage": {
+          "enum": [
+            "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
+            "branch-review", "on-device", "fast-path", "sweep", "finish"
+          ]
+        },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" },
+        "outcome": { "enum": ["complete", "blocked", "skipped"] },
+        "path": { "enum": ["driven", "manual", "skipped"] }
+      },
+      "required": ["kind", "runId", "stage", "startedAt", "endedAt", "outcome"],
+      "additionalProperties": false
+    },
+    {
+      "title": "dispatch",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "dispatch" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "taskId": { "type": "string" },
+        "agentId": { "type": "string" },
+        "agentType": { "type": "string" },
+        "model": { "type": "string" },
+        "modelSource": { "enum": ["explicit", "inherited"] },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" },
+        "toolCalls": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "outcome": { "enum": ["complete", "blocked", "rejected"] },
+        "reviewRound": { "type": "integer", "minimum": 0 },
+        "retryIndex": { "type": "integer", "minimum": 0 }
+      },
+      "required": [
+        "kind", "runId", "taskId", "agentType", "model", "modelSource",
+        "startedAt", "endedAt", "toolCalls", "outcome", "reviewRound", "retryIndex"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "verdict",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "verdict" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "taskId": { "type": "string" },
+        "round": { "type": "integer", "minimum": 1 },
+        "blockingCount": { "type": "integer", "minimum": 0 },
+        "evidenceClass": { "enum": ["red-green", "green-green", "convention"] },
+        "conformance": { "enum": ["pass", "fail"] }
+      },
+      "required": [
+        "kind", "runId", "taskId", "round", "blockingCount", "evidenceClass", "conformance"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "commit",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "commit" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "taskId": { "type": "string" },
+        "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      },
+      "required": ["kind", "runId", "taskId", "sha"],
+      "additionalProperties": false
+    }
+  ]
+}

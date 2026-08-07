@@ -290,5 +290,64 @@ for (const p of stateFixtures) {
     fail(`${rel(p)}: state file drifted from references/resume.md — no value for: ${missing.join(", ")}`);
 }
 
+// 13. The run record's shape is declared once, in tests/fixtures/run-record.schema.json, and
+//     exercised by a golden fixture. A declaration nothing exercises is the failure this check
+//     exists to prevent — the same reason check 12 fails on an empty subject.
+const schemaPath = join(root, "tests/fixtures/run-record.schema.json");
+const goldenPath = join(root, "tests/fixtures/run-record.golden.jsonl");
+if (existsSync(schemaPath)) {
+  if (!existsSync(goldenPath))
+    fail("tests/fixtures/run-record.schema.json: declared with no golden fixture exercising it");
+  else {
+    let schema;
+    try {
+      schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+    } catch (err) {
+      fail(`tests/fixtures/run-record.schema.json: not valid JSON — ${err.message}`);
+      schema = null;
+    }
+    const golden = readFileSync(goldenPath, "utf8").split("\n").filter(Boolean);
+    const parsed = [];
+    for (const [i, line] of golden.entries()) {
+      try {
+        parsed.push(JSON.parse(line));
+      } catch (err) {
+        fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: not valid JSON — ${err.message}`);
+      }
+    }
+    if (schema) {
+      const subs = schema.oneOf ?? [];
+      const declaredKinds = subs.map((s) => s.properties?.kind?.const).filter(Boolean);
+      const exercised = new Set(parsed.map((o) => o.kind));
+      for (const k of declaredKinds)
+        if (!exercised.has(k))
+          fail(`tests/fixtures/run-record.golden.jsonl: schema declares kind "${k}" that no golden line exercises`);
+      for (const [i, obj] of parsed.entries()) {
+        const sub = subs.find((s) => s.properties?.kind?.const === obj.kind);
+        if (!sub) {
+          fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: kind "${obj.kind}" is not declared in the schema`);
+          continue;
+        }
+        for (const req of sub.required ?? [])
+          if (!(req in obj))
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: missing required field "${req}"`);
+        for (const key of Object.keys(obj)) {
+          const prop = sub.properties?.[key];
+          if (!prop) {
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: field "${key}" is not declared for kind "${obj.kind}"`);
+            continue;
+          }
+          if (prop.enum && !prop.enum.includes(obj[key]))
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" value "${obj[key]}" is not one of ${prop.enum.join(" | ")}`);
+          if (prop.const !== undefined && obj[key] !== prop.const)
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be ${JSON.stringify(prop.const)}`);
+          if (prop.pattern && !new RegExp(prop.pattern).test(String(obj[key])))
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" does not match ${prop.pattern}`);
+        }
+      }
+    }
+  }
+}
+
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
 console.log("validate: ok");
