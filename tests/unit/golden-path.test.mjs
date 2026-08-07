@@ -230,15 +230,21 @@ const RELEASE_BRANCH = "main";
 // making it do so would trade the safe error for the unsafe one.
 function pushTargets(text) {
   const targets = [];
-  // Join backslash continuations first: `git push \` with `origin main` on the next physical
-  // line is a routine `run: |` idiom, and a per-line parser sees a push with no refspec
-  // followed by a line with no push — recording nothing, and missing a real push to main.
-  for (const line of text.replace(/\\\n\s*/g, " ").split("\n")) {
-    // A `#` comment is prose, not a command. Without this, a workflow that merely mentions
-    // `git push origin main` in a comment reads as one that does it, and every following word
-    // on the line is parsed as a refspec. `#` only opens a comment at a line or word boundary,
-    // so it does not truncate a refspec that happens to contain one.
-    const code = line.replace(/(^|\s)#.*$/, "$1");
+  // Order matters, and getting it wrong loses real pushes both ways.
+  //
+  // Comments are stripped FIRST, per physical line. A `#` comment is prose, not a command:
+  // without this, a workflow that merely mentions `git push origin main` in a comment reads as
+  // one that does it, and every following word is parsed as a refspec. `#` only opens a comment
+  // at a line or word boundary, so it cannot truncate a refspec containing one.
+  //
+  // Continuations are joined SECOND, after the comments are already gone. `git push \` with
+  // `origin main` on the next physical line is a routine `run: |` idiom that a per-line parser
+  // misses entirely — it sees a push with no refspec, then a line with no push. Joining before
+  // stripping instead would let a comment ending in a backslash swallow the next line whole,
+  // taking a real push down with it.
+  const stripped = text.split(/\r?\n/).map((l) => l.replace(/(^|\s)#.*$/, "$1"));
+  for (const line of stripped.join("\n").replace(/\\\n\s*/g, " ").split("\n")) {
+    const code = line;
     for (const [, rest] of code.matchAll(/\bgit push\b([^\n;&|]*)/g)) {
       const positional = rest.trim().split(/\s+/).filter((t) => t && !t.startsWith("-"));
       for (const spec of positional.slice(1)) {
@@ -258,6 +264,25 @@ test("the push guard reads a refspec's destination, whatever form the push takes
   const allowed = pushTargets(read("tests/fixtures/push-guard/pushes-elsewhere.yml"));
   assert.ok(allowed.length > 0, "the allowed-pushes fixture has no pushes in it");
   for (const t of allowed) assert.notEqual(t, RELEASE_BRANCH, "a push that does not target main read as one");
+});
+
+test("the push guard survives the shapes that previously blinded it", () => {
+  // Each of these was a real false negative or a real false positive at some point in this
+  // file's history, so each is pinned rather than described. `String.raw` keeps the single
+  // backslash a shell continuation actually uses.
+  const BS = "\\"; // one backslash — a shell line continuation
+  assert.deepEqual(pushTargets(`        git push ${BS}\n          origin main\n`), ["main"], "a wrapped push is missed");
+
+  // Comments are stripped before continuations are joined. Joining first let a comment ending
+  // in a backslash swallow the next physical line whole — taking a real push down with it.
+  const commentThenPush = `        # example: git push ${BS}\n        git push origin main\n`;
+  assert.deepEqual(pushTargets(commentThenPush), ["main"], "a real push after a backslash comment is swallowed");
+
+  // CRLF: a workflow edited on Windows must not silently disable the guard.
+  assert.deepEqual(pushTargets(`        git push ${BS}\r\n          origin main\r\n`), ["main"], "a CRLF wrapped push is missed");
+
+  // A comment that merely names a push is prose, not a push.
+  assert.deepEqual(pushTargets("        # git push origin main is forbidden\n"), []);
 });
 
 test("no workflow pushes to the release branch", () => {

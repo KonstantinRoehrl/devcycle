@@ -2,6 +2,8 @@
 // plugin trees. Every test starts from a green fixture and breaks one thing.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { makePluginFixture as makeBaseFixture, writeInto, runValidate, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
 
 // The routing table check 6 reads. `cycle` is confirm-first, so the table has to
@@ -426,4 +428,36 @@ test("state-file check: a fixture whose shape is declared nowhere fails as unver
   const dir = makePluginFixture();
   stateFixture(dir, allFields());
   failsWith(runValidate(dir), /tests\/fixtures\/golden-path\/state\.md/, /unverifiable/);
+});
+
+test("state-file check: a blank line inside the template does not drop the fields after it", () => {
+  // The extraction used to read a run of consecutive `- ` lines, which stops at the first
+  // line that is not a field: one blank line took it from every field to the few above the
+  // gap, and the check then passed while the fixture had genuinely drifted.
+  const dir = makePluginFixture();
+  declareState(dir);
+  const resume = join(dir, "references/resume.md");
+  writeFileSync(resume, readFileSync(resume, "utf8").replace("- plan:", "\n- plan:"));
+  stateFixture(dir, allFields().filter((l) => !l.startsWith("- updated:")));
+  failsWith(runValidate(dir), /state file drifted/, /updated/);
+});
+
+test("state-file check: two declared shapes fail rather than the first one silently winning", () => {
+  const dir = makePluginFixture();
+  declareState(dir);
+  stateFixture(dir, allFields());
+  const resume = join(dir, "references/resume.md");
+  writeFileSync(resume, readFileSync(resume, "utf8") + "\n```markdown\n# devcycle state\n- stage: <stale>\n```\n");
+  failsWith(runValidate(dir), /references\/resume\.md/, /declared exactly once/);
+});
+
+test("state-file check: a resume.md that declares no template fails instead of going quiet", () => {
+  // Renaming the header on both sides while the checker's constant stays stale used to empty
+  // the template AND the fixture list at once, so every branch went silent.
+  const dir = makePluginFixture();
+  declareState(dir);
+  const resume = join(dir, "references/resume.md");
+  writeFileSync(resume, readFileSync(resume, "utf8").replace("# devcycle state", "# devcycle run state"));
+  stateFixture(dir, allFields());
+  failsWith(runValidate(dir), /references\/resume\.md/, /undeclared/);
 });
