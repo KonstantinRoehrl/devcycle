@@ -19,12 +19,12 @@ counterparts only at the `thorough` profile.
 ```mermaid
 flowchart LR
     CYCLE(["/devcycle:cycle"]):::entry
+    CONT(["/devcycle:continue"]):::entry
     ONBOARD(["/devcycle:onboard"]):::entry
-    AUDIT(["/devcycle:audit"]):::entry
+    REVIEWCMD(["/devcycle:review"]):::entry
     DOCTOR(["/devcycle:doctor"]):::entry
     VERIFY(["/devcycle:verify"]):::entry
-    DISTILL(["/devcycle:distill"]):::entry
-    DREAM(["/devcycle:dream"]):::entry
+    LEARN(["/devcycle:learn"]):::entry
 
     ONBOARD -. "first, in a new repo" .-> CYCLE
     CYCLE --> SCOPE["Scope / Design"]:::orch
@@ -33,17 +33,19 @@ flowchart LR
     BUILD --> REVIEW["Review"]:::orch
     REVIEW --> SHIP["Ship"]:::orch
 
-    AUDIT -. "standalone, anytime" .-> SHIP
+    CONT -. "resumes wherever the cycle stopped" .-> PLAN
+
+    REVIEWCMD -. "standalone, anytime" .-> SHIP
     DOCTOR -. "standalone, anytime" .-> SHIP
     VERIFY -. "standalone, anytime" .-> SHIP
-    DISTILL -. "standalone, anytime" .-> SHIP
-    DREAM -. "standalone, anytime" .-> SHIP
+    LEARN -. "standalone, anytime" .-> SHIP
 
     classDef orch fill:#e8f0fe,stroke:#3367d6,color:#111
     classDef entry fill:#fef7e0,stroke:#b06000,color:#111
 ```
 
-The full pipeline, every stage and every dashed standalone tool, is diagrammed below.
+Those seven commands are devcycle's entire surface — everything else it ships is machinery they
+load. The full pipeline, every stage and every dashed standalone tool, is diagrammed below.
 
 ## Install
 
@@ -95,9 +97,9 @@ Before committing any artifact it writes, devcycle asks `git check-ignore` first
 the commit if your repo ignores that path — your ignore rules decide what enters history,
 not the plugin. Two things under `.devcycle/` are durable rather than scratch and should
 survive even a manual cleanup of the directory: `.devcycle/dreaming/` (the cross-session
-checkpoint, dream artifacts, and observation store — deleting it forces the next dream to
-re-mine from scratch) and each cycle's `.devcycle/archive-<date>-<branch-slug>/` (finish's
-copy of the run's audit trail).
+checkpoint, the dated artifacts, and the observation store `/devcycle:learn` mines — deleting
+it forces the next run to re-mine from scratch) and each cycle's
+`.devcycle/archive-<date>-<branch-slug>/` (finish's copy of the run's audit trail).
 
 ## The pipeline
 
@@ -105,12 +107,11 @@ copy of the run's audit trail).
 flowchart TD
     CYCLE(["/devcycle:cycle request"]):::entry
     CONT(["/devcycle:continue"]):::entry
-    AUDITCMD(["/devcycle:audit — optional branch:name"]):::entry
+    REVIEWCMD(["/devcycle:review — branch:name, this repo, or paths"]):::entry
     VERIFYCMD(["/devcycle:verify branch"]):::entry
     DOCTORCMD(["/devcycle:doctor — optional --all"]):::entry
     ONBOARDCMD(["/devcycle:onboard"]):::entry
-    DISTILLCMD(["/devcycle:distill"]):::entry
-    DREAMCMD(["/devcycle:dream"]):::entry
+    LEARNCMD(["/devcycle:learn — optional --preview"]):::entry
 
     CYCLE --> STATE["Step 0 · state file<br/>root · branch · request · first-run config"]:::orch
     STATE --> TRIAGE{"Triage<br/>maturity · kind · size"}:::orch
@@ -131,7 +132,7 @@ flowchart TD
     DIAG["Diagnosis<br/>reproduce · isolate · establish the cause"]:::orch
     DIAG --> A_DIAG[/"root-cause report"/]:::art --> BRAINSTORM
 
-    AUDIT["Audit<br/>scope + dispatched discovery · criteria gate with audit plan · sweep · eleven-field findings"]:::orch
+    AUDIT["Audit<br/>scope + dispatched discovery · criteria gate with audit plan · sweep · fourteen-field findings"]:::orch
     AUDIT --> A_AUDIT[/"ranked findings document"/]:::art
     A_AUDIT -->|"in cycle — you pick findings to act on"| BRAINSTORM
     A_AUDIT -. "in cycle — nothing picked" .-> STOP
@@ -181,13 +182,12 @@ flowchart TD
     FINISH["Finish<br/>resolve gitPolicy · apply the external clamps · offer to clear ephemeral artifacts · hand back"]:::orch
     FINISH --> A_FIN[/"branch, pushed branch, or PR"/]:::art --> STOP(["cycle closed"]):::entry
 
-    AUDITCMD -. "standalone — starts no cycle" .-> AUDIT
+    REVIEWCMD -. "standalone — same engine, starts no cycle" .-> AUDIT
     VERIFYCMD -. "standalone — checklist from the branch diff" .-> ONDEV
     DOCTORCMD -. "standalone — profiles cost/depth, starts no cycle" .-> DOCTORSTOP(["report delivered"]):::entry
     ONBOARDCMD -. "standalone — scaffolds the repo, starts no cycle" .-> ONBOARDSTOP(["scaffold written"]):::entry
-    DISTILLCMD -. "standalone — promotes memory, starts no cycle" .-> DISTILLSTOP(["promotions applied"]):::entry
-    DREAMCMD -. "standalone — consolidates sessions into candidates, promotes nothing" .-> DREAMSTOP(["dream artifact delivered"]):::entry
-    DISTILLCMD -. "step 0 — reuses a fresh dream, or mines one" .-> DREAMCMD
+    LEARNCMD -. "standalone — mine, propose, confirm, land; starts no cycle" .-> LEARNSTOP(["promotions applied"]):::entry
+    LEARNCMD -. "--preview — stops at the artifact, lands nothing" .-> PREVIEWSTOP(["candidates delivered"]):::entry
 
     subgraph DELEG["Inside every stage — who does the work"]
         DUTY["the coordinator keeps only these:<br/>interviews · dispatches · the green gate<br/>commits · ledger · state file · handoff blocks"]:::orch
@@ -225,12 +225,12 @@ flowchart TD
    criteria to measure the repo against — never assuming them — then sweeps the repo and
    writes a ranked findings document to `docs/audits/YYYY-MM-DD-<topic>.md`. You pick which
    findings to act on; those become the cycle's scope and the walk continues at brainstorm.
-   The same audit is available on its own as `/devcycle:audit` (below), outside any cycle.
+   The same engine is available on its own as `/devcycle:review` (below), outside any cycle.
    The audit derives its criteria proposal from a dispatched discovery pass over the stacks
    actually present and your repo's own convention documents — those outrank generic best
    practice — and a
-   `branch:<name>` token scopes it to one branch, in which case it audits that branch's diff
-   expanded to the feature's dependency graph. Every finding carries eleven fields — among
+   `branch:<name>` token scopes it to one branch, in which case it reviews that branch's diff
+   expanded to the feature's dependency graph. Every finding carries fourteen fields — among
    them its `file:line` location, how to reproduce it, the fix direction, a
    confidence tag, and a fix-effort estimate — so you can start work from the finding alone.
 3. **Diagnosis** — for bugs whose root cause isn't established yet: reproduce the failure,
@@ -312,40 +312,45 @@ parallelism — is covered in [DESIGN.md](DESIGN.md).
 
 ## What's in the plugin
 
-| Piece | What it does |
+**The seven commands are the whole surface** — everything below them is machinery a command
+loads by path, never something you invoke.
+
+| Command | What it does |
 | --- | --- |
 | `/devcycle:cycle` | Runs the pipeline for a request. |
-| `/devcycle:continue` | Resumes an interrupted pipeline from the state file. |
-| `/devcycle:audit` | Audits this repo against criteria you confirm, and writes a ranked findings document; a `branch:<name>` token — not a bare argument — scopes it to that branch's diff. Standalone — starts no cycle. |
+| `/devcycle:continue` | Resumes an interrupted pipeline: lists every in-flight cycle in this repo with its branch, stage and age, and asks which one. |
+| `/devcycle:review` | Reviews a branch (`branch:<name>`, optionally `base:<name>`), this whole repository, or a file set you name, against criteria you confirm, and writes a ranked findings document. A bare argument is always the *concern* to review, never guessed to be a branch. Standalone — starts no cycle. |
 | `/devcycle:verify` | Walks an on-device checklist derived from a branch's diff — verification for code this session did not write. Standalone — starts no cycle. |
-| `/devcycle:doctor` | Profiles token cost, context depth, model routing, and agent startup cost — for this session, a date window, or the whole transcript history; `--depth` is the bare probe the context gate calls. Standalone — starts no cycle. |
-| `/devcycle:dream` | Mines session transcripts and accumulated memory for cross-session patterns and writes a dated dream artifact of promotion candidates; promotes nothing itself. Standalone — starts no cycle. |
-| `/devcycle:distill` | Reviews this repo's accumulated memory for a promotion session, checks devcycle config drift since the last run, and batches every candidate for confirmation before applying it. Standalone — starts no cycle. |
+| `/devcycle:learn` | Mines this repo's sessions and memory for recurring patterns, proposes doc and skill edits, batches them for confirmation, and deletes each promoted memory once its edit lands. `--preview` stops at the dated artifact: nothing landed, nothing deleted. Standalone — starts no cycle. |
+| `/devcycle:doctor` | Profiles token cost, context depth, model routing, and agent startup cost. With no arguments it reads every transcript under `~/.claude/projects` and keeps the sessions whose records carry a `devcycle:` attribution id, which every devcycle slash command records; `--all` widens it to every transcript, tagged or not. `--since`/`--until` narrow the window; `drift <path>` checks a file for stale config references instead; `--depth` is the bare probe the context gate calls. Standalone — starts no cycle. |
 | `/devcycle:onboard` | Bootstraps tier-2 setup for this repo: detects real build/test/lint commands, scaffolds `CLAUDE.md` and per-package rules, and proposes a permission allowlist. Standalone — starts no cycle. |
-| Skill `scoping-interview` | The batched scope interview with a hard stop before design begins. |
-| Skill `auditing-a-repo` | The criteria interview, the repo sweep (through the shared `reviewing-code` engine), and the ranked evidence-backed findings document behind `/devcycle:audit` and the audit stage. |
-| Skill `doctor` | Runs the token/context/routing/startup-cost analyzer and interprets it by ranking findings by dollar impact — the engine behind `/devcycle:doctor`. |
-| Skill `dreaming-across-sessions` | Mines session transcripts and memory for cross-session patterns, clusters and dedupes them into promotion candidates, and screens for sensitive content — the engine behind `/devcycle:dream` and step 0 of `/devcycle:distill`. |
-| Skill `distilling-learnings` | Turns vetted memory into doc or skill edits, checks for devcycle config drift, batches every promotion for confirmation, and deletes each memory once its promotion lands — the engine behind `/devcycle:distill`. |
-| Skill `onboarding-a-repo` | Detects a repo's real build/test/lint commands, scaffolds `CLAUDE.md` and per-package rules, and proposes a permission allowlist for confirmation — the engine behind `/devcycle:onboard`. |
-| Skill `planning-waves` | Feasibility gate + wave-structured planning (overlays `superpowers:writing-plans` at `thorough`). |
-| Skill `executing-waves` | Parallel subagent execution with green gate, ledger, and commit discipline. |
-| Skill `reviewing-the-branch` | The whole-branch review gate — the spec-compliance layer and the bounded rounds loop, over the shared `reviewing-code` engine. |
-| Skill `reviewing-code` | The review engine the audit and the branch review share: lens construction from the criteria, engine selection, adversarial verification, dedup, ranking. Invoked by other skills, not by a user. |
-| Skill `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes, from a plan or from a branch diff. |
-| Skill `finishing-the-cycle` | Resolves the effective git policy and hands back, pushes, or opens the PR. |
-| Skill `fast-path` | Mini-cycle for confirmed-trivial requests: in-session implementation, one reviewer pass, normal finish. |
-| Skill `sweeping-mechanical-changes` | Triage-confirmed bulk sweep: blast-radius gate, one sweep run, one commit, one reviewer pass, then finish. |
+
+| Machinery | What it does |
+| --- | --- |
+| Playbook `scoping-the-request` | The batched scope interview with a hard stop before design begins. |
+| Playbook `planning-waves` | Feasibility gate + wave-structured planning (overlays `superpowers:writing-plans` at `thorough`). |
+| Playbook `executing-waves` | Parallel subagent execution with green gate, ledger, and commit discipline. |
+| Playbook `reviewing-code` | The review engine the audit and the branch review share: lens construction from the criteria, engine selection, adversarial verification, dedup, ranking — plus the criteria interview and the ranked findings document that only the audit runs. |
+| Playbook `reviewing-the-branch` | The whole-branch review gate — the spec-compliance layer and the bounded rounds loop, over the shared `reviewing-code` engine. |
+| Playbook `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes, from a plan or from a branch diff. |
+| Playbook `finishing-the-cycle` | Resolves the effective git policy and hands back, pushes, or opens the PR. |
+| Playbook `taking-the-fast-path` | Mini-cycle for confirmed-trivial requests: in-session implementation, one reviewer pass, normal finish. |
+| Playbook `sweeping-mechanical-changes` | Triage-confirmed bulk sweep: blast-radius gate, one sweep run, one commit, one reviewer pass, then finish. |
+| Playbook `learning-from-sessions` | Observe → propose → confirm → land: mines transcripts and memory, clusters candidates, screens for sensitive content, and applies only what you confirm. |
+| Playbook `profiling-sessions` | Runs the token/context/routing/startup-cost analyzer and interprets it, naming the corpus every number is drawn from. |
+| Playbook `onboarding-a-repo` | Detects a repo's real build/test/lint commands, scaffolds `CLAUDE.md` and per-package rules, and proposes a permission allowlist for confirmation. |
 | Agent `implementer` | Implements one task from a brief; never commits. |
 | Agent `task-reviewer` | Read-only reviewer for each task during execution. |
 | Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
 | Workflow `review-panel.js` | Multi-lens read-only review engine for `reviewDepth: panel` — over a branch diff for the review, a file set for the audit. |
 | Workflow `mechanical-sweep.js` | Pilot-first bulk edit engine behind the sweep path and `**Execution:** sweep` plan tasks. |
+| Reference `routing.md` | Which command answers which intent, what each may do before your first confirmation, and which ones a model may invoke on its own. |
 | Reference `delegation.md` | Who does the work inside a stage — the coordinator's closed duty list, the stage budget, the research-dispatch contract, and the return envelopes. |
 | Reference `handoff.md` | What happens at a stage boundary — the handoff block, the three-value context action, the one-block-per-stage rule, and the await gate. |
 | Reference `quality-criteria.md` | What any devcycle review or plan measures against — the criteria catalog, sourcing precedence, seed best-practice index, and how the catalog reaches planning and execution. |
 | Reference `findings.md` | How a finding is expressed — the four-value severity vocabulary with blocking derived, the core and document field sets, the evidence discipline, and the panel's machine shape. |
 | Reference `checklist.md` | The on-device checklist contract — paths, item shape, dimensions, and the `(auto)` boundary — shared by checklist generation and the on-device stage. |
+| Reference `loops.md` | What every bounded loop does when it runs out of rounds — the cap, the exhaustion statuses, and how each outcome is reported. |
 
 ## Configuration
 
@@ -499,7 +504,7 @@ Release history: [CHANGELOG.md](CHANGELOG.md) ·
 Decision log: [docs/DECISIONS.md](docs/DECISIONS.md) ·
 Open defects: [docs/known-issues.md](docs/known-issues.md)
 
-Contributing — including how the scenario test harness in `tests/scenarios/` works:
+Contributing — including the golden-path fixture that holds the pipeline's wiring together:
 [CONTRIBUTING.md](CONTRIBUTING.md). `scripts/doctor.mjs` re-measures devcycle's own
 token profile from a local Claude Code session corpus, which is how the cost claims above are
 kept honest rather than assumed.

@@ -68,7 +68,7 @@ replaced by devcycle's `reviewing-the-branch` and finish stages (see (d)5).
 
 ## (b) `lean` / `standard` — the native engine
 
-Upstream is not loaded, so the whole skill is delta. What the skill states inline
+Upstream is not loaded, so the whole playbook is delta. What the playbook states inline
 in place of upstream's mechanics:
 
 - **The brief-slicing contract, enumerated.** A brief carries exactly the task's
@@ -136,8 +136,9 @@ compaction is the point, not a reduction in what the stage does.
    task diff comes from the working tree (`git add -N` on new files, then
    `git diff -U10 HEAD -- <files>`) rather than upstream's commit-based
    `scripts/review-package` (see (d)7).
-10. **Reviewer hygiene additions**, baked into the `devcycle:task-reviewer` agent
-    on top of upstream's no-pre-judging: stale-line-number tolerance, the harness
+10. **Reviewer hygiene additions**, owned by `references/findings.md` § Reviewer
+    hygiene and named by every reviewer agent rather than restated in each, on top
+    of upstream's no-pre-judging: stale-line-number tolerance, the harness
     `<system-reminder>` false positive, and rejection of a report whose named
     evidence files are missing, empty, or contradict the declared class.
 11. **Sweep-executed tasks.** A task marked `**Execution:** sweep` replaces brief
@@ -146,8 +147,8 @@ compaction is the point, not a reduction in what the stage does.
     task-level deltas — per-task args and report filenames, the pre-run
     `dispatched outcome=sweep` ledger line, clean-targets handling, the
     applied-none / hard-stop / rejection fallbacks, and the coordinator writing
-    the evidence files under the plan's task number — live in this skill; the
-    invocation contract belongs to `devcycle:sweeping-mechanical-changes`. No
+    the evidence files under the plan's task number — live in this playbook; the
+    invocation contract belongs to `playbooks/sweeping-mechanical-changes.md`. No
     upstream counterpart at any profile.
 12. **On-device checklist generation** (moved here from
     `devcycle:verifying-on-device` on 2026-07-26): the moment a task produces
@@ -162,7 +163,7 @@ compaction is the point, not a reduction in what the stage does.
     structural browser check has actually verified, honestly tagged `(auto)`.
     Everything a structural check cannot see stays unchecked for the human.
     Generation is a mid-wave coordinator duty; the later walkthrough of that
-    checklist is `devcycle:verifying-on-device`'s stage. Upstream has no notion
+    checklist is `playbooks/verifying-on-device.md`'s stage. Upstream has no notion
     of a human-only verification residue.
 13. **Resume from git evidence.** `references/resume.md` settles the branch and
     re-derives position; the ledger's last event per task then selects the resume
@@ -210,7 +211,7 @@ loaded — but devcycle's side of the resolution is unconditional in every case.
 5. **What follows the last task.** *Live at `thorough`.* Upstream ends with a
    final whole-branch review dispatch and
    `superpowers:finishing-a-development-branch`. **Resolution:** executing-waves
-   ends with a handoff block routing to `devcycle:reviewing-the-branch`, which
+   ends with a handoff block routing to `playbooks/reviewing-the-branch.md`, which
    owns the whole-branch gate; it never dispatches upstream's final reviewer or
    the finishing skill. Unconditional.
 6. **Ledger location and format.** *Live at `thorough`.* Upstream keeps
@@ -231,7 +232,7 @@ loaded — but devcycle's side of the resolution is unconditional in every case.
    only after accept plus the gate, and the review diff comes from the working
    tree, since no task commits exist yet to package.
 
-**Verdict:** at `lean`/`standard` the skill is wholly devcycle-native and shares
+**Verdict:** at `lean`/`standard` the playbook is wholly devcycle-native and shares
 no text with upstream. At `thorough` it remains an overlay that references
 subagent-driven-development for everything in (a). The delta in (c) — waves,
 green gate, ledger, context lifecycle, config-driven routing, file-backed

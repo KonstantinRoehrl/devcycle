@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-// Validates plugin manifests, skill/command frontmatter, description budget,
+// Validates plugin manifests, command frontmatter, description budget,
 // markdown fences, and cross-references between the plugin's own surface files.
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 const DESCRIPTION_BUDGET_TOTAL = 6000; // chars; source: docs/platform-notes.md
-const DESCRIPTION_MAX = 500;
 const root = process.cwd();
 const errors = [];
 const fail = (m) => errors.push(m);
@@ -36,7 +35,9 @@ function* walk(dir) {
   }
 }
 
-// --- frontmatter of skills + commands ---
+// --- frontmatter of commands ---
+// Playbooks are loaded by path and appear in no roster, so they carry no
+// frontmatter and consume no description budget.
 function frontmatter(path) {
   const text = readFileSync(path, "utf8");
   const m = text.match(/^---\n([\s\S]*?)\n---/);
@@ -49,18 +50,9 @@ function frontmatter(path) {
   return fm;
 }
 let budget = 0;
-if (existsSync(join(root, "skills")))
-  for (const dir of readdirSync(join(root, "skills"))) {
-    const p = join(root, "skills", dir, "SKILL.md");
-    if (!existsSync(p)) { fail(`skills/${dir}: missing SKILL.md`); continue; }
-    const fm = frontmatter(p);
-    if (!fm?.name || !fm?.description) { fail(`${p}: frontmatter needs name+description`); continue; }
-    if (!fm.description.startsWith("Use when")) fail(`${p}: description must start "Use when"`);
-    if (fm.description.length > DESCRIPTION_MAX) fail(`${p}: description > ${DESCRIPTION_MAX} chars`);
-    budget += fm.description.length;
-  }
 if (existsSync(join(root, "commands")))
   for (const f of readdirSync(join(root, "commands"))) {
+    if (!f.endsWith(".md")) continue; // a stray .DS_Store is not a command
     const fm = frontmatter(join(root, "commands", f));
     if (!fm?.description) fail(`commands/${f}: frontmatter needs description`);
     else budget += fm.description.length;
@@ -77,7 +69,7 @@ for (const p of walk(root))
 // --- cross-references across the plugin surface ---
 // These are the files Claude loads at runtime; docs/ and DESIGN.md are prose
 // about the plugin and legitimately carry `<name>`-style placeholders.
-const SURFACE = ["skills", "commands", "agents", "references"];
+const SURFACE = ["playbooks", "commands", "agents", "references"];
 const surface = SURFACE.flatMap((d) =>
   existsSync(join(root, d)) ? [...walk(join(root, d))].filter((p) => p.endsWith(".md")) : []
 );
@@ -116,10 +108,15 @@ for (const p of surface) {
     else if (!knobs.has(key)) once(`knob:${key}`, `${rel(p)}: unknown knob \${user_config.${key}} (not in plugin.json userConfig)`);
   }
 
-  // 3. Every devcycle:<name> must resolve to a skill, an agent, or a command.
-  for (const [, , name] of text.matchAll(/(^|[^A-Za-z0-9_-])devcycle:([a-z0-9][a-z0-9-]*)/g))
-    if (![`skills/${name}/SKILL.md`, `agents/${name}.md`, `commands/${name}.md`].some((c) => existsSync(join(root, c))))
-      once(`ref:${name}`, `${rel(p)}: unresolved devcycle:${name} (no skills/${name}/SKILL.md, agents/${name}.md, or commands/${name}.md)`);
+  // 3. Every devcycle:<name> must resolve to an agent or a command. Playbooks are addressed
+  //    by path (check 4), never by a devcycle: id — naming one here means someone tried to
+  //    invoke stage logic as if it were a user-facing skill.
+  for (const [, , name] of text.matchAll(/(^|[^A-Za-z0-9_-])devcycle:([a-z0-9][a-z0-9-]*)/g)) {
+    if (existsSync(join(root, `playbooks/${name}.md`)))
+      once(`ref:${name}`, `${rel(p)}: devcycle:${name} names a playbook — reference it as \${CLAUDE_PLUGIN_ROOT}/playbooks/${name}.md`);
+    else if (![`agents/${name}.md`, `commands/${name}.md`].some((c) => existsSync(join(root, c))))
+      once(`ref:${name}`, `${rel(p)}: unresolved devcycle:${name} (no agents/${name}.md or commands/${name}.md)`);
+  }
 
   // 4. Every ${CLAUDE_PLUGIN_ROOT}/<path> must name a file that ships.
   for (const [, raw] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([A-Za-z0-9._/-]+)/g)) {
@@ -130,15 +127,168 @@ for (const p of surface) {
   }
 }
 
-// 5. A skill that emits a handoff block must name the reference that owns its shape.
-if (existsSync(join(root, "skills")))
-  for (const dir of readdirSync(join(root, "skills"))) {
-    const p = join(root, "skills", dir, "SKILL.md");
-    if (!existsSync(p)) continue;
-    const text = readFileSync(p, "utf8");
-    if (text.includes("## Handoff") && !text.includes("references/handoff.md"))
-      fail(`skills/${dir}/SKILL.md: emits "## Handoff" without referencing references/handoff.md`);
+// 5. A playbook that emits a handoff block must name the reference that owns its shape.
+//    The tree spells the same act three ways, so all three count: a heading naming the
+//    handoff (`## Handoff`, `## Output and handoff`), a bold run-in step label
+//    (`6. **Handoff.**`), and the inline instruction "emit the handoff block". Prose that
+//    denies emitting one ("emits no handoff block") describes a non-emitter and is
+//    deliberately not matched — three playbooks say exactly that and owe no reference.
+const EMITS_HANDOFF = [/^#{1,6}\s.*handoff/i, /\*\*handoff\b/i, /\bemit the handoff\b/i];
+if (existsSync(join(root, "playbooks")))
+  for (const f of readdirSync(join(root, "playbooks"))) {
+    if (!f.endsWith(".md")) continue;
+    const text = readFileSync(join(root, "playbooks", f), "utf8");
+    if (text.includes("references/handoff.md")) continue;
+    const at = text.split("\n").findIndex((l) => EMITS_HANDOFF.some((p) => p.test(l)));
+    if (at !== -1) fail(`playbooks/${f}:${at + 1}: emits a handoff block without referencing references/handoff.md`);
   }
+
+// 6. Every command appears exactly once in the routing table, and its declared consequence
+//    agrees with its disable-model-invocation frontmatter.
+const routingPath = join(root, "references/routing.md");
+if (!existsSync(routingPath)) fail("references/routing.md: missing (the routing table has no owner)");
+else if (existsSync(join(root, "commands"))) {
+  const routing = readFileSync(routingPath, "utf8");
+  const rows = new Map();
+  for (const [, name, consequence] of routing.matchAll(/^\|[^|]*\|\s*`([a-z-]+)`\s*\|\s*([a-z-]+)\s*\|/gm)) {
+    if (rows.has(name)) fail(`references/routing.md: ${name} appears more than once`);
+    rows.set(name, consequence);
+  }
+  const GUARD_REQUIRED = new Set(["side-effectful", "resume"]);
+  // `confirm-first` is the deliberate exception class, so each member names its
+  // justification inline — as prose, since the table has no column for one. A bare label
+  // ("**`cycle`'s justification.**" with nothing behind it) is not a justification, which
+  // is what the character floor rules out.
+  const JUSTIFICATION_MIN_CHARS = 80;
+  const prose = routing.split(/\n[ \t]*\n/).filter((b) => !b.trimStart().startsWith("|"));
+  const justifies = (name) =>
+    prose.some(
+      (b) =>
+        b.includes(`\`${name}\``) && /justif/i.test(b) && b.replace(/\s+/g, " ").trim().length >= JUSTIFICATION_MIN_CHARS
+    );
+  for (const f of readdirSync(join(root, "commands"))) {
+    if (!f.endsWith(".md")) continue;
+    const name = f.replace(/\.md$/, "");
+    if (!rows.has(name)) { fail(`commands/${f}: missing from the routing table in references/routing.md`); continue; }
+    const consequence = rows.get(name);
+    const guarded = frontmatter(join(root, "commands", f))?.["disable-model-invocation"] === "true";
+    if (GUARD_REQUIRED.has(consequence) && !guarded)
+      fail(`commands/${f}: consequence "${consequence}" requires disable-model-invocation: true`);
+    if (consequence === "read-only" && guarded)
+      fail(`commands/${f}: consequence "read-only" forbids disable-model-invocation`);
+    if (consequence === "confirm-first" && !justifies(name))
+      fail(`references/routing.md: \`${name}\` is confirm-first but names no justification — the exception class requires one inline`);
+  }
+  for (const name of rows.keys())
+    if (!existsSync(join(root, `commands/${name}.md`)))
+      fail(`references/routing.md: row "${name}" names no command`);
+}
+
+// 7. skills/ is not part of the surface any more.
+if (existsSync(join(root, "skills")))
+  fail("skills/: no longer part of the surface — stage logic lives in playbooks/, loaded by path");
+
+// Flat listing of the .md files directly under a surface directory.
+const namesIn = (dir) =>
+  existsSync(join(root, dir)) ? readdirSync(join(root, dir)).filter((f) => f.endsWith(".md")) : [];
+
+// 8. Naming: commands are verbs, playbooks are gerunds, agents are role nouns.
+// No exemption list: the rule is "not a gerund", and the one recorded exception to
+// "commands are verbs" — `doctor`, on the brew/flutter/npm precedent — is a noun, so it
+// satisfies this rule on its own merits. The precedent is recorded in references/routing.md,
+// not in code. A command that genuinely needs a gerund name gets an allowlist then, with a
+// test that exercises it.
+for (const f of namesIn("commands")) {
+  const name = f.replace(/\.md$/, "");
+  if (/ing$/.test(name))
+    fail(`commands/${f}: command names are verbs, not gerunds ("${name}" ends in -ing)`);
+}
+for (const f of namesIn("playbooks")) {
+  const name = f.replace(/\.md$/, "");
+  if (!/(^|-)[a-z]+ing(-|$)/.test(name))
+    fail(`playbooks/${f}: playbook names are gerunds ("${name}" contains no -ing word)`);
+}
+
+// 9. Line budgets, as numbers. Counted the way `wc -l` counts: a file's closing
+//    newline terminates its last line rather than starting an empty one.
+const SURFACE_LINE_BUDGET = 3500, COMMAND_LINE_MAX = 100, PLAYBOOK_LINE_MAX = 150;
+const lines = (p) => {
+  const text = readFileSync(p, "utf8");
+  return text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
+};
+let surfaceLines = 0;
+for (const p of surface) {
+  const n = lines(p), r = rel(p);
+  surfaceLines += n;
+  if (r.startsWith("commands/") && n > COMMAND_LINE_MAX) fail(`${r}: ${n} lines > ${COMMAND_LINE_MAX}`);
+  if (r.startsWith("playbooks/") && n > PLAYBOOK_LINE_MAX) fail(`${r}: ${n} lines > ${PLAYBOOK_LINE_MAX}`);
+}
+if (surfaceLines > SURFACE_LINE_BUDGET)
+  fail(`runtime surface ${surfaceLines} lines > ${SURFACE_LINE_BUDGET} (commands+playbooks+agents+references)`);
+
+// 10. No agent pins a model — a pin defeats session-tier escalation.
+for (const f of namesIn("agents"))
+  if (frontmatter(join(root, "agents", f))?.model)
+    fail(`agents/${f}: frontmatter must not set model: — a pin defeats session-tier escalation`);
+
+// 11. Every reference has at least one consumer — a surface file that loads it, or a
+//     script that reads it (references/routing.md's consumer is this validator's check 6).
+//     A reference mentioning itself is not a consumer of itself.
+const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
+for (const f of namesIn("references")) {
+  const needle = `references/${f}`;
+  const consumed = [...surface, ...scripts].some(
+    (p) => !rel(p).endsWith(needle) && readFileSync(p, "utf8").includes(needle)
+  );
+  if (!consumed) fail(`references/${f}: no consumer — every reference must be loaded by something`);
+}
+
+// 12. The state file's shape is declared once and carried by a fixture, and the two agree —
+//     the guard on resumability after `/clear`, which nothing else checks. The declaration is
+//     the `# devcycle state` template in references/resume.md; the fixture is any .md under
+//     tests/fixtures/ whose first line is that same header. A row the declaration names must
+//     be present and carry a value; an extra row is not drift (references/resume.md lets a
+//     stage add evidence rows of its own). A declaration with no fixture is the failure this
+//     check exists to prevent, so it fails rather than passing on an empty subject.
+const STATE_HEADER = "# devcycle state";
+const resumePath = join(root, "references/resume.md");
+// Take the whole fenced block the header opens, not a run of consecutive `- ` lines: a run
+// stops dead at the first line that is not a field — a blank line, a comment, an inserted
+// note — and every field after that point would silently vanish from the check, which would
+// then pass while the fixture had genuinely drifted.
+const stateBlocks = existsSync(resumePath)
+  ? [...readFileSync(resumePath, "utf8").matchAll(new RegExp("```[a-z]*\\n" + STATE_HEADER + "\\n[\\s\\S]*?```", "gm"))]
+  : [];
+// Exactly one block may declare the shape. Silently taking the first would let a second one —
+// a stale "what drift used to look like" example, say — become the yardstick by file order,
+// which is the same silent-wrong-yardstick failure this check exists to prevent.
+if (stateBlocks.length > 1)
+  fail(`references/resume.md: ${stateBlocks.length} fenced "${STATE_HEADER}" blocks — the state shape must be declared exactly once`);
+// A resume.md that exists but yields no template is a broken declaration, not an absent one:
+// without this, renaming the header on both sides while leaving STATE_HEADER stale empties the
+// template AND the fixture list at once, and every branch below goes quiet.
+if (existsSync(resumePath) && !stateBlocks.length)
+  fail(`references/resume.md: no fenced "${STATE_HEADER}" block — the state shape is undeclared, or its fence or header changed shape`);
+const stateTemplate = stateBlocks[0]?.[0] ?? "";
+const stateFields = [...stateTemplate.matchAll(/^- ([A-Za-z][A-Za-z0-9_-]*):/gm)].map((m) => m[1]);
+const fixturesDir = join(root, "tests/fixtures");
+const stateFixtures = (existsSync(fixturesDir) ? [...walk(fixturesDir)] : []).filter(
+  (p) => p.endsWith(".md") && readFileSync(p, "utf8").startsWith(STATE_HEADER)
+);
+if (stateFields.length && !stateFixtures.length)
+  fail(
+    `tests/fixtures/: references/resume.md declares the state file's ${stateFields.length} fields and no fixture carries them — the resume invariant has no guard`
+  );
+for (const p of stateFixtures) {
+  if (!stateFields.length) {
+    fail(`${rel(p)}: state-file shape unverifiable — no fields were read from references/resume.md's "${STATE_HEADER}" template (it is absent, or its fence or field rows changed shape)`);
+    continue;
+  }
+  const text = readFileSync(p, "utf8");
+  const missing = stateFields.filter((f) => !new RegExp(`^- ${f}:[ \\t]*\\S`, "m").test(text));
+  if (missing.length)
+    fail(`${rel(p)}: state file drifted from references/resume.md — no value for: ${missing.join(", ")}`);
+}
 
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
 console.log("validate: ok");

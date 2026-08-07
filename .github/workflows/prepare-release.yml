@@ -15,7 +15,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: write
       pull-requests: write
@@ -24,13 +25,16 @@ jobs:
         with:
           ref: dev
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Refuse to prepare a release from anything but dev
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
           # The dispatch ref is chooseable in the UI; the checkout above pins dev, so a run
           # started elsewhere would silently stage the wrong tree without this.
-          if [ "${{ github.ref_name }}" != "dev" ]; then
-            echo "Run this workflow from dev — got '${{ github.ref_name }}'."
+          if [ "$REF_NAME" != "dev" ]; then
+            echo "Run this workflow from dev — got '$REF_NAME'."
             exit 1
           fi
 
@@ -54,6 +58,7 @@ jobs:
       - name: Commit the bump to dev and open the release PR
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           TITLE: ${{ inputs.title }}
           V: ${{ steps.bump.outputs.version }}
         run: |
@@ -61,6 +66,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .claude-plugin/plugin.json CHANGELOG.md
           git commit -m "chore(release): prepare v$V"
+          # persist-credentials: false above means the checkout left no push credential in
+          # .git/config, so authenticate the push explicitly right before it.
+          git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
           n=0
           until git push origin dev; do
             n=$((n+1))

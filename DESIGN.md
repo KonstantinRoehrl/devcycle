@@ -47,11 +47,28 @@ Verified mechanics this design relies on (checked against official docs 2026-07-
   `version` (bump per release; omitting it makes every commit an update).
 - Team distribution: a repo's `.claude/settings.json` can declare `extraKnownMarketplaces` + `enabledPlugins`;
   teammates are prompted after workspace trust (v2.1.195+).
-- Plugin skills are namespaced (`devcycle:skill-name`) — no collisions with repo or personal skills.
+- Plugin skills are namespaced (`devcycle:skill-name`) — no collisions with repo or personal
+  skills. devcycle ships none: since 2026-08-06 its orchestration prose lives in `playbooks/`,
+  loaded by path, so the only `devcycle:` ids that resolve are its commands and agents (§3).
 
 ---
 
 ## 3. Plugin Blueprint
+
+**Five layers, one directory each** (restructured 2026-08-06), so a file's layer is readable
+from its path and enforceable per-directory rather than by convention:
+
+| layer | directory | holds | rules |
+| --- | --- | --- | --- |
+| L0 | `commands/` | the seven entry points | the only surface listed to a user; names are verbs; ≤100 lines each |
+| L1 | `playbooks/` | orchestration prose | loaded by path, in no roster, no frontmatter; names are gerunds; ≤150 lines each |
+| L2 | `agents/` | typed workers | separately dispatched contexts; names are role nouns; no `model:` in frontmatter |
+| L3 | `references/` | shared concepts | exactly one owner, at least one consumer; loaded on demand (§15.1) |
+| L4 | `scripts/`, `workflows/` | deterministic engines | anything deterministic lives here; may grow; outside the line budget |
+
+The L1/L2 boundary is a property of how a file is consumed, not a judgment about how much
+dispatching a stage does: L1 is loaded into the coordinator's own context, L2 runs as a
+separately dispatched context.
 
 ```
 devcycle/                (public GitHub repo)
@@ -59,53 +76,47 @@ devcycle/                (public GitHub repo)
 │   ├── plugin.json               # name, version (bump per release), dependency on superpowers
 │   │                             # userConfig (see §7)
 │   └── marketplace.json          # source "./", allowCrossMarketplaceDependenciesOn: ["claude-plugins-official"]
-├── commands/
+├── commands/                     # L0 — the whole user-facing surface; intents mapped in references/routing.md
 │   ├── cycle.md                  # entry: input-maturity triage → stage walk; model-invocable (wrappers can call it)
 │   ├── continue.md               # resume from .devcycle/state.md after /clear (see §5)
-│   ├── audit.md                  # standalone audit; starts no cycle (see §15.3)
+│   ├── review.md                 # a branch, this repo, or a file set, scoped by argument; starts no cycle (see §15.3)
 │   ├── verify.md                 # standalone on-device walkthrough; starts no cycle
-│   └── doctor.md                 # standalone token/context profile; starts no cycle
-├── references/                   # the reference layer: one owner per convention (see §15.1)
-│   ├── config.md                 # knob resolution, the profile matrix, model tiers
-│   ├── evidence.md               # evidence classes, file-backed evidence, report/verdict shapes
-│   ├── resume.md                 # re-entry rules for every stage
-│   ├── handoff.md                # handoff block shape and the context-action table
-│   ├── branch.md                 # branch discipline for every committing path
-│   └── output.md                 # output discipline for every agent and skill
-├── skills/
-│   ├── scoping-interview/        # rough idea → bounded scope; batched AskUserQuestion; nothing assumed;
+│   ├── learn.md                  # sessions + memory → landed doc edits; --preview lands nothing
+│   ├── doctor.md                 # standalone token/context/routing profile and config drift; starts no cycle
+│   └── onboard.md                # bootstrap tier-2 in a repo; starts no cycle (see §8)
+├── playbooks/                    # L1 — loaded only as ${CLAUDE_PLUGIN_ROOT}/playbooks/<name>.md
+│   ├── scoping-the-request.md    # rough idea → bounded scope; batched AskUserQuestion; nothing assumed;
 │   │                             # hands off to superpowers:brainstorming
-│   ├── auditing-a-repo/          # interviewed criteria → ranked, file-referenced findings (see §15.3)
-│   ├── doctor/                   # token/context/routing/startup-cost analyzer, ranked by dollar impact
-│   ├── planning-waves/           # layers on superpowers:writing-plans — file-disjoint tasks, explicit
-│   │                             # dependencies, dispatch map, pinned interfaces
-│   ├── executing-waves/          # layers on superpowers:subagent-driven-development — ledger, brief/diff file
-│   │                             # handoffs, TDD green gate, model routing, wave compaction, handoff blocks
-│   ├── reviewing-the-branch/     # whole-branch gate via review-panel workflow + optional cross-model pass
-│   ├── verifying-on-device/      # generalized from the existing on-device-verification skill
-│   ├── finishing-the-cycle/      # finish stage: gitPolicy resolution + push-signal clamp (extracted
-│   │                             # 2026-07-25 from the duplicated cycle/continue command prose)
-│   ├── fast-path/                # confirmed-trivial mini-cycle: in-session implementation, one
-│   │                             # reviewer pass, then the normal finish (added 2026-07-25)
-│   ├── onboarding-a-repo/        # bootstrap tier-2 in any repo (see §8)
-│   ├── distilling-learnings/     # memory→docs/skills promotion session, codified (see §8)
-│   └── sweeping-mechanical-changes/  # bulk uniform edits via the sweep path + **Execution:** sweep tasks
-├── agents/
-│   ├── implementer.md            # brief-driven TDD implementer template
+│   ├── planning-waves.md         # file-disjoint tasks, explicit dependencies, dispatch map, pinned interfaces
+│   ├── executing-waves.md        # ledger, brief/diff file handoffs, green gate, model routing, handoff blocks
+│   ├── reviewing-code.md         # the review engine both whole-scope reviews share, and the audit stage (§15.3, §16)
+│   ├── reviewing-the-branch.md   # whole-branch gate: spec-compliance layer + the bounded rounds loop
+│   ├── verifying-on-device.md    # claude-in-chrome structural checks + the human checklist walkthrough
+│   ├── finishing-the-cycle.md    # finish stage: gitPolicy resolution + push-signal clamp
+│   ├── taking-the-fast-path.md   # confirmed-trivial mini-cycle: in-session implementation, one reviewer pass
+│   ├── sweeping-mechanical-changes.md  # bulk uniform edits via the sweep path + **Execution:** sweep tasks
+│   ├── learning-from-sessions.md # observe → propose → confirm → land, one loop (see §8)
+│   ├── profiling-sessions.md     # token/context/routing/startup-cost analysis, ranked by impact
+│   └── onboarding-a-repo.md      # bootstrap tier-2 in any repo (see §8)
+├── agents/                       # L2
+│   ├── implementer.md            # brief-driven implementer template
 │   ├── task-reviewer.md          # per-task reviewer; read-only tools allowlist
-│   └── red-team-reviewer.md     # adversarial charter; read-only allowlist; spliced into
-│   │                             # review-panel's per-finding verification pass
-├── workflows/
+│   └── red-team-reviewer.md      # adversarial charter; read-only allowlist; spliced into
+│                                 # review-panel's per-finding verification pass
+├── references/                   # L3 — one owner per convention; enumerated in §15.1
+├── scripts/                      # L4 — validate.mjs, doctor.mjs, dream.mjs, the checkers, bump-version.mjs
+├── workflows/                    # L4
 │   ├── review-panel.js           # multi-lens review → adversarial verify → dedup → reconcile
 │   └── mechanical-sweep.js       # pipeline over file list, worktree isolation, verify stage
 │                                 # (invoked by the sweep stage and **Execution:** sweep tasks)
-└── README.md                     # pipeline narrative + demo transcript; CHANGELOG alongside
+└── README.md                     # pipeline narrative; CHANGELOG alongside
 ```
 
 Pipeline stages: intake triage (`/cycle`; a confirmed-trivial request short-circuits to fast-path → finish) →
-scoping-interview (rough input only) *or* auditing-a-repo (audit-shaped input, in place of scoping — see §15.3) →
-superpowers:brainstorming → spec → planning-waves → executing-waves
-(per-wave: dispatch → TDD → review → commit) → reviewing-the-branch → verifying-on-device → finish per `gitPolicy`.
+scoping-the-request (rough input only) *or* the audit stage over reviewing-code (audit-shaped input, in place
+of scoping — see §15.3) → superpowers:brainstorming → spec → planning-waves → executing-waves
+(per-wave: dispatch → implement → review → commit) → reviewing-the-branch → verifying-on-device →
+finish per `gitPolicy`.
 
 ---
 
@@ -118,10 +129,14 @@ superpowers:brainstorming → spec → planning-waves → executing-waves
    (Read/Grep/Glob/Bash) — Edit/Write are structurally absent, not merely forbidden by prose.
 3. **Skill preloading in briefs.** Implementer dispatches inject TDD + relevant repo-convention skill content at
    dispatch time instead of instructing the subagent to invoke skills itself.
-4. **Entry points cannot auto-fire — except `/cycle`, intentionally.** Side-effectful skills and
+4. **Entry points cannot auto-fire — except `/cycle`, intentionally.** Side-effectful commands and
    `/devcycle:continue` carry `disable-model-invocation: true` so they cannot be silently substituted.
    `/cycle` is a deliberate exception (reversed 2026-07-24): it is model-invocable so a wrapper skill —
    e.g. one that loads/saves tickets around a run — can call the pipeline programmatically.
+   The rule itself now lives in `references/routing.md`, which declares each command's
+   `consequence` class and the guard that class requires; `scripts/validate.mjs` fails the build
+   when a command's frontmatter disagrees with it. This amendment records why the exception was
+   granted, not where it is enforced.
 5. **Review panel as saved workflow** (see §6) — resumable, concurrency-capped, deterministic lens assignment.
 6. **Description-budget release check.** Skill/command descriptions share a finite char budget (check via
    `/context`); verify before each release that devcycle + superpowers + a repo tier fit. (Exact budget
@@ -137,34 +152,18 @@ conversation that produced it is then expendable. Each boundary picks the cheape
 
 Mechanics:
 
-- **Handoff block** — every stage skill's required final output: artifact paths, pinned carry-overs (interfaces,
-  open decisions), and a ready-made compaction hint for the user (skills cannot invoke /compact themselves).
+- **Handoff block** — every stage playbook's required final output: artifact paths, pinned carry-overs
+  (interfaces, open decisions), and a ready-made compaction hint for the user (playbooks cannot invoke
+  /compact themselves).
 - **State file** — `.devcycle/state.md`: current stage, artifact paths, branch. `/devcycle:continue`
   re-derives pipeline position from state + ledger + plan, making **clear-and-resume** viable (cheaper and
   cleaner than compaction).
 
-The action column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, `Fresh session` — and
-`references/handoff.md` owns the table each boundary defaults to:
-
-| Boundary | Action | Keep | Drop |
-| --- | --- | --- | --- |
-| scoping → brainstorm | Clear + `/devcycle:continue` | scope path, confirmed constraints, open `<tbd>`s | interview transcript, research output |
-| scoping → diagnosis (bugs) | Clear + `/devcycle:continue` | scope path, reproduction steps | interview transcript |
-| audit → brainstorm (findings selected) | Clear + `/devcycle:continue` | audit path, the selected findings | audit transcript, rejected findings |
-| diagnosis → brainstorm (root cause established) | Clear + `/devcycle:continue` | diagnosis report path, reproduction steps, root cause | debugging transcripts, ruled-out hypotheses |
-| brainstorm → planning (spec approved) | Clear + `/devcycle:continue` | spec path, decisions, constraints | design back-and-forth |
-| planning → execution (plan approved) | Clear + `/devcycle:continue` | nothing (files carry it) | planning conversation |
-| wave → wave (within execution) | Clear + `/devcycle:continue` | ledger/plan paths, dispatch map, wave status | implementer transcripts, resolved findings |
-| execution → branch-review | Clear + `/devcycle:continue` | branch, spec path, ledger path | all implementation context |
-| branch-review → on-device | Fresh session | checklist path, branch | everything else |
-| fast-path → finish | Clear + `/devcycle:continue` | branch, what changed | the implementation conversation |
-| sweep → finish | Clear + `/devcycle:continue` | branch, sweep report path | per-file sweep output |
-| finish → (end) | Continue | — | — |
-
-Only one test softens a default. At `scoping → brainstorm`, `scoping → diagnosis`, `audit → brainstorm`,
-`fast-path → finish`, and `sweep → finish` — and nowhere else — the action becomes `Continue` when the stage that
-just ended stayed under the budget in `references/delegation.md`, dispatched no implementer, task-reviewer, or
-sweep, and left all of the next stage's inputs on disk. Any doubt resolves to the table's default.
+The action column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, `Fresh session`.
+**`references/handoff.md` owns the table** of per-boundary defaults, the one test that softens a
+default to `Continue`, and the await gate that stops the pipeline at every other boundary; read it
+there. This section kept its own copy of that table until 2026-08-06, and the copy had already
+drifted — a second answer to the same question is worse than one place to look.
 
 What this costs the user is stops: the pipeline halts at nearly every boundary, so a cycle spans several short
 sessions instead of one long one. Compacting is gone as an action entirely — compaction leaves the
@@ -249,19 +248,22 @@ gated by `userConfig.crossModelReview`.
 
 ---
 
-## 8. Skill Roadmap — Global Plugin
+## 8. Playbook Roadmap — Global Plugin
 
-| Skill | Purpose | Priority |
+Names are the shipped `playbooks/` files (§3); the ordering is the historical port order.
+
+| Playbook | Purpose | Priority |
 | --- | --- | --- |
-| executing-waves | Ledger, briefs, TDD green gate, model routing, wave compaction, handoff blocks | v1 — first port |
+| executing-waves | Ledger, briefs, green gate, model routing, wave compaction, handoff blocks | v1 — first port |
 | planning-waves | Wave/dispatch-map/pinned-interface plan contract | v1 |
-| verifying-on-device | claude-in-chrome auto-verdicts + human checklist interview (near-pure move of existing skill) | v1 |
+| verifying-on-device | claude-in-chrome auto-verdicts + human checklist interview | v1 |
 | reviewing-the-branch | Branch gate via review-panel workflow + agents | v1 |
-| scoping-interview + /devcycle:cycle + /devcycle:continue + state file | Entry, triage, resume glue | v1 — last |
+| scoping-the-request + /devcycle:cycle + /devcycle:continue + state file | Entry, triage, resume glue | v1 — last |
 | onboarding-a-repo | Bootstrap tier-2 anywhere: detect real commands, scaffold CLAUDE.md/per-package rules, run allowlist scan, wire verification commands | v1.x — right after the pipeline works |
-| distilling-learnings | Codified promotion session: memory/observation inbox → vetted docs/skill edits via writing-skills TDD | v1.x |
+| learning-from-sessions | Observe → propose → confirm → land: sessions and memory become doc edits, standalone `/devcycle:learn` | v1.x |
 | sweeping-mechanical-changes | Bulk uniform migrations, pilot-first | shipped |
-| auditing-a-repo | Interviewed criteria → ranked, file-referenced findings; standalone `/devcycle:audit` or the in-cycle audit stage | shipped |
+| reviewing-code | Interviewed criteria → ranked, file-referenced findings; standalone `/devcycle:review` or the in-cycle audit stage | shipped |
+| profiling-sessions | Token/context/routing/startup-cost analysis and config drift, standalone `/devcycle:doctor` | shipped |
 | running-headless-ci | `-p --output-format stream-json` CI stage | Later — when a CI use case exists |
 | Agent-teams review backend | Native shared-task-list adversarial review | Later — token-heavy; workflow panel covers it |
 
@@ -294,38 +296,40 @@ no phase is ever double-defined.
 1. Create the public repo: manifest + marketplace + README skeleton; declare superpowers dependency; install via
    `claude plugin marketplace add`; enable that marketplace's auto-update toggle.
 2. Port in order: executing-waves → planning-waves → verifying-on-device → reviewing-the-branch (+ agents +
-   review-panel workflow) → scoping-interview + /cycle + state file.
+   review-panel workflow) → scoping-the-request + /cycle + state file.
 3. Each port gets the writing-skills treatment: scenario-tested (STOP-discipline and output-shape tests, as in
    a prior skill overhaul) before it replaces the prose it supersedes; description-budget check per
-   release; version bump per release.
+   release; version bump per release. *(The prose scenario harness was retired 2026-08-06 —
+   `CONTRIBUTING.md` owns what replaced it; the rest of this step stands.)*
 4. Slim `~/.claude/CLAUDE.md` to tier 3; set userConfig values; delete superseded memories.
-5. v1.x skills (onboarding-a-repo, distilling-learnings); repo-tier roadmap items
+5. v1.x playbooks (onboarding-a-repo, learning-from-sessions); repo-tier roadmap items
    in parallel via promotion sessions.
 6. Later, one team decision: repo `.claude/settings.json` provisions superpowers + devcycle for
    teammates.
 
-### Release automation (CI) — added 2026-07-22
+### Release automation (CI) — added 2026-07-22, rewired 2026-08-06
 
-Version handling on GitHub is enforced by CI, not discipline alone:
-
-- **`bump-version.yml`** — on merge to `main`: derive the semver level from conventional-commit subjects since
-  the last tag (`fix:`→patch, `feat:`→minor, `!`/`BREAKING CHANGE`→major; default patch), bump
-  `plugin.json` `version`, append the commit subjects to `CHANGELOG.md`, commit with `[skip ci]`, and create
-  the tag `devcycle--vX.Y.Z`. Requires `contents: write` for the workflow token.
-- **`validate.yml`** — on PRs and `main`: JSON validity + required fields of `plugin.json`/`marketplace.json`,
-  skill frontmatter presence (name/description), per-description length and total description-budget threshold
-  (mechanized form of amendment §4.6), and balanced-markdown-fence checks on all SKILL.md files.
-- Consequence: `main` is always installable, every merge produces exactly one released version, and the brief
-  window between merge and bump-commit only ever shows the previous version string to installers.
+Version handling on GitHub is enforced by CI, not discipline alone. **`CONTRIBUTING.md`
+§ Releasing owns the procedure**; the design point it implements is this one: the version bump
+arrives inside the release PR, so `main` only ever changes through a checked pull request, and
+the `Release` workflow tags and publishes what `main` already carries rather than writing to it.
+`validate.yml` is the gate the release depends on — manifests, command frontmatter and the
+description budget (the mechanized form of amendment §4.6), the routing table against each
+command's guard, balanced fences, the redaction and duplication checkers, the unit suite, and a
+full-history secret scan.
 
 ## 13. Naming
 
 - Plugin: **`devcycle`** (user decision 2026-07-22; over full-cycle/dev-cycle/idea-to-pr).
-- Commands: `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:audit`, `/devcycle:verify`,
-  `/devcycle:doctor`.
-- Skills: verb-first gerunds (`executing-waves`, `planning-waves`, `verifying-on-device`,
-  `reviewing-the-branch`, `scoping-interview`, `auditing-a-repo`, `onboarding-a-repo`,
-  `distilling-learnings`, `sweeping-mechanical-changes`).
+- **Commands are verbs, playbooks are gerunds, agents are role nouns.** `doctor` is the single
+  recorded exception, justified by `brew doctor` / `flutter doctor` / `npm doctor` — a noun
+  every developer already reads as "diagnose this".
+- Commands (the whole user-facing surface, seven since 2026-08-06): `/devcycle:cycle`,
+  `/devcycle:continue`, `/devcycle:review`, `/devcycle:verify`, `/devcycle:learn`,
+  `/devcycle:doctor`, `/devcycle:onboard`. `references/routing.md` maps each to the intent it
+  serves and what it may do before its first confirmation.
+- Playbooks: verb-first gerunds, listed in §3. They are addressed by path, never as
+  `devcycle:<name>`, so a playbook name is never a user-typed string.
 - Agents: `devcycle:implementer`, `devcycle:task-reviewer`,
   `devcycle:red-team-reviewer`.
 
@@ -342,42 +346,47 @@ Version handling on GitHub is enforced by CI, not discipline alone:
 
 ### 15.1 The reference layer: one owner per convention
 
-`references/` holds twelve plain markdown files, each the sole owner of one cross-cutting
+`references/` holds sixteen plain markdown files, each the sole owner of one cross-cutting
 convention:
 
 | File | Owns |
 | --- | --- |
+| `routing.md` | the user-facing surface: which intent each command serves, its `consequence` class, and whether it may be model-invoked |
 | `config.md` | knob resolution, the profile matrix and its resolution order, the model tiers and their derivation predicates |
 | `evidence.md` | the three evidence classes, the file-backed evidence contract, the implementer report and reviewer verdict shapes |
 | `resume.md` | settling the branch from the state file, git-evidence resume rules, "review acceptance is never inferable from git" |
 | `handoff.md` | the handoff block shape, the context-action table, the one-block-per-stage rule, the await gate |
 | `delegation.md` | who does the work: the coordinator's closed duty list, the stage budget's counters, the research-dispatch contract, and the return envelopes |
 | `branch.md` | branch discipline for every committing path |
-| `output.md` | output discipline for every agent and skill |
+| `output.md` | output discipline for every agent and playbook |
 | `checklist.md` | the on-device checklist contract: paths, item shape, dimensions, and the `(auto)` boundary |
 | `quality-criteria.md` | what any review or plan measures against: the criteria catalog, sourcing precedence, the seed index, and the forward-use rules |
 | `findings.md` | how a finding is expressed: severity with blocking derived, the core and document field sets, evidence discipline, ordering, the machine shape |
+| `loops.md` | what every bounded loop does when it runs out of rounds: the cap, the exhaustion statuses, and how each outcome is reported |
+| `ledger.md` | the ledger's write format: its preamble records and its per-event line |
+| `sweep-execution.md` | how a plan task marked `**Execution:** sweep` runs inside the execution stage |
 | `commit-convention.md` | how a devcycle-driven commit's subject matches the target repo's own conventions, derived once before wave 1's first commit |
 | `config-changelog.md` | every `userConfig` addition, rename, and deprecation, and the version each landed in |
 
 A consumer names one — "Read `${CLAUDE_PLUGIN_ROOT}/references/<name>.md` and follow it" —
 and does not restate its content.
 
-**Why.** These conventions are needed by most stages, so before this each skill carried its
+**Why.** These conventions are needed by most stages, so before this each playbook carried its
 own copy of them. Copies drift: a fix to branch discipline had to be found and reapplied in
-every skill that mentioned it, and any one that was missed became a second, contradictory
+every file that mentioned it, and any one that was missed became a second, contradictory
 answer to the same question. The copies also cost context on every load, in a plugin whose
 whole premise is that context is the scarce resource.
 
-The invariant that makes it work is stronger than "add a pointer": **a skill that consumes a
+The invariant that makes it work is stronger than "add a pointer": **a file that consumes a
 reference names it and deletes its own prose on the subject.** A pointer added next to a
 retained restatement leaves two owners, which is worse than one bad owner — the reader now
-has to decide which is authoritative. What stays in a skill is only what is unique to that
-stage.
+has to decide which is authoritative. What stays in a playbook is only what is unique to that
+stage. `scripts/duplication-check.mjs` is the mechanized form of this invariant.
 
-These files are deliberately not skills. They carry no frontmatter, are never invoked by
+These files are addressed only by path. They carry no frontmatter, are never invoked by
 name as `devcycle:<something>`, and take no share of the description budget §4.6 tracks —
-they cost nothing until a skill in flight names one and reads it.
+they cost nothing until a playbook in flight names one and reads it. Since 2026-08-06 the
+playbook layer works the same way (§3), so `commands/` alone spends the description budget.
 
 ### 15.2 Native engines vs upstream overlays, keyed to `profile`
 
@@ -430,7 +439,7 @@ run. Cost is allowed to buy less depth, never a false claim.
 
 Triage's maturity axis gained a third verdict: **audit-shaped** input ("audit X", "review
 the repo for Y" — an assessment of existing code rather than a change to it) routes to the
-**audit** stage, which runs *in place of* scoping. `devcycle:auditing-a-repo` establishes
+**audit** stage, which runs *in place of* scoping. `playbooks/reviewing-code.md` establishes
 what is wrong before anything is designed; the findings the user selects become brainstorm's
 explored context, and the walk continues normally. This is the same ordering rule §3's
 diagnosis stage follows for bugs — you cannot spec a fix for a problem nobody has
@@ -442,7 +451,7 @@ Two properties carry the stage:
   picked measures the repo against the auditor's taste, not the user's priorities. The
   interview proposes a criteria set derived from a shallow orientation pass — a user handed
   a proposal corrects it in one turn, a user handed a blank menu has to invent one — and
-  then hard-stops exactly as `scoping-interview` stops: no research, no draft findings until
+  then hard-stops exactly as `scoping-the-request` stops: no research, no draft findings until
   the user has replied.
 - **No `file:line`, no finding.** The evidence discipline `red-team-reviewer` applies to
   review claims applies to audit claims. A suspicion that cannot be pointed at in a file
@@ -452,7 +461,8 @@ Two properties carry the stage:
 Only depth is profile-conditional (the matrix row in `references/config.md`); the interview
 and the evidence rule are not.
 
-`/devcycle:audit` exposes the same skill standalone, and is deliberately **not** a pipeline
+`/devcycle:review` exposes the same playbook standalone — over a branch, this repository, or a
+file set, per its argument — and is deliberately **not** a pipeline
 stage: it neither creates nor requires `.devcycle/state.md`, leaves any in-flight cycle's
 state file untouched, emits no handoff block, and ends at the findings document. Turning a
 finding into work is a separate, explicit call — `/devcycle:cycle <request>` naming that
@@ -474,13 +484,14 @@ differ. `planning-waves` needs only the first, `task-reviewer` needs only the se
 two whole-scope reviews need both. One combined file would force every consumer to load both
 halves — the cost §15.1 exists to avoid.
 
-**One shared skill, not a merge.** `reviewing-code` owns the engine both whole-scope reviews
+**One shared engine.** `playbooks/reviewing-code.md` owns what both whole-scope reviews
 share: lens construction from the criteria, engine selection and its `panel→single`
-degradation, the fresh-context rule, and verify → dedup → rank. `auditing-a-repo` and
-`reviewing-the-branch` stay separate skills because their stops, outputs and lifecycles
-genuinely differ — the audit interviews for criteria and stops for a user selection; the
-review enumerates a spec and runs a bounded rounds loop. What they shared was never the
-stage, only the engine.
+degradation, the fresh-context rule, and verify → dedup → rank. `playbooks/reviewing-the-branch.md`
+stays a separate file because its stops, outputs and lifecycle genuinely differ — it enumerates
+a spec and runs a bounded rounds loop, where the audit interviews for criteria and stops for a
+user selection. *(Amended 2026-08-06: the audit's own two steps — the criteria interview and the
+findings document — moved into `reviewing-code.md` as sections marked "audit runs only", so the
+audit is no longer a separate file. The branch review's separation is unchanged.)*
 
 **Blocking is derived.** Severity is `critical` / `high` / `medium` / `low`, and blocking
 means `critical` or `high` — not a separate field a reviewer can set independently. Before
@@ -503,40 +514,40 @@ contract are unchanged.
 
 ---
 
-## 17. Skill-description-sufficiency contract (added 2026-08-03)
+## 17. Description-sufficiency contract (added 2026-08-03, rescoped 2026-08-06)
 
-Every skill's frontmatter `description` must be sufficient **on its own** — without its
+Every **command's** frontmatter `description` must be sufficient **on its own** — without its
 body — for a model to correctly decide invoke-or-not. This is distinct from the
-existing length-*budget* check §4.6 already runs (`scripts/validate.mjs`'s 500-char
-per-skill / 6000-char total ceiling): that check asks whether a description is short
-enough; this one asks whether it is complete enough. The need is sharper now that a
-consuming `CLAUDE.md` carries zero restated trigger-condition prose per the migration
-rule (§12) — the description is the *only* signal a model sees before deciding whether
-to read the body at all.
+length-*budget* check §4.6 already runs (`scripts/validate.mjs`'s 6000-char total ceiling
+across `commands/`): that check asks whether the descriptions are short enough; this one asks
+whether each is complete enough. The need is sharper now that a consuming `CLAUDE.md` carries
+zero restated trigger-condition prose per the migration rule (§12) — the description is the
+*only* signal a model sees before deciding whether to read the body at all.
 
-**The scenario-test type.** `description-sufficiency`
-(`tests/scenarios/<skill-name>/description-sufficiency.md`), sibling to the existing
-`discipline`/STOP-gate type, same Setup → Pass-criteria → Result shape the established
-pattern uses. A judge agent is shown **only** the frontmatter `description` — never the
-skill body — then run against 3 prompts that should trigger the skill and 3
-adjacent-but-different prompts that should not. The test passes if every verdict
-matches.
+The contract used to cover skills. It covers commands because, since 2026-08-06, commands are
+the only files with frontmatter: playbooks are loaded by path and carry no description at all
+(§3), so nothing but a command can be selected by description. `references/routing.md` carries
+the same information in prose a human reads, and `scripts/validate.mjs` fails the build when a
+command is absent from it — which is the closest thing to a mechanized sufficiency check the
+repo has.
 
-This is a scenario-test convention, not a CI gate — consistent with how the existing
-scenario tests are pre-release verification, produced locally and best-effort, never run
-by `validate.yml` (there is no model credential available to GitHub Actions). Required
-going forward for every new or materially-changed model-invocable skill's port; applied
-this cycle to two existing model-invocable skills — `scoping-interview` and
-`auditing-a-repo` — as the proof of mechanism.
+The rest is a review-time convention, deliberately not a CI gate: judging whether a description
+is complete enough needs a model, and no model credential is available to GitHub Actions. A new
+or materially-changed command's description is written against the intents in `routing.md` and
+checked by the reviewer of the change. The prose scenario harness that formerly held this as a
+`description-sufficiency` test type was retired 2026-08-06 — see `CONTRIBUTING.md` and the
+decision log.
 
 ---
 
 ## Appendix: upstream comparison summaries
 
-Full memos live in `docs/comparisons/`; each one compares a planned devcycle skill against its
-nearest superpowers upstream skill(s) before the skill was built, per the §11 comparison
+Full memos live in `docs/comparisons/`; each one compares a planned devcycle stage against its
+nearest superpowers upstream skill(s) before it was built, per the §11 comparison
 mandate. Summaries below are 2–3 lines each — read the linked memo for the complete (a)/(b)/(c)
-breakdown and conflict resolutions.
+breakdown and conflict resolutions. The memos keep the names the units had when they were
+written; `scoping-interview` is today's `playbooks/scoping-the-request.md`, and the other four
+kept their names as playbooks (§3).
 
 - **[executing-waves](docs/comparisons/executing-waves.md)** — vs `subagent-driven-development` +
   `executing-plans`. Upstream covers fresh-subagent dispatch, the per-task review loop, the
@@ -597,7 +608,7 @@ required to use, the plugin.
 | Item | Tier | Destination |
 | --- | --- | --- |
 | Foundational principles, working standards, uncertainty→interview | 1 | README + skill preambles |
-| Brainstorming-first mandate, feasibility gate | 1 | /cycle triage + scoping-interview |
+| Brainstorming-first mandate, feasibility gate | 1 | /cycle triage + scoping-the-request |
 | Execution mechanics (waves, ledger, briefs, TDD, dispatch, review flow, backups, wave compaction) | 1 | planning-waves + executing-waves |
 | Model routing lineup; cross-model adversarial review | 1 | userConfig |
 | On-device checklist + walkthrough interview style | 1 | verifying-on-device |

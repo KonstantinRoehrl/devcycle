@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased
+
+No version bump: this work is cycle 1 of a three-cycle restructure, and one release closes the
+programme.
+
+- refactor(surface): dissolve `skills/` into path-loaded `playbooks/`
+- refactor(commands): collapse the command surface from eight verbs to seven
+- refactor(routing): give the command surface one owner (`references/routing.md`) and a gate
+- refactor(references): dedup the single-owner reference layer
+- test(golden-path): assert the pipeline's wiring across every stage
+- ci(workflows): pin runners, gate commit subjects, and scope checkout credentials
+- docs: rewrite `DESIGN.md`, `README.md` and `CONTRIBUTING.md` to the shipped surface
+
+**Renamed entry points.** Pre-1.0, so no aliases and no deprecation period — the old names are
+gone:
+
+- `/devcycle:audit` → `/devcycle:review`, which now takes three scopes: `branch:<name>` (with an
+  optional `base:<name>`), this whole repository, or a file set. A bare argument is the concern
+  to review, never guessed to be a branch.
+- `/devcycle:dream` + `/devcycle:distill` → `/devcycle:learn`. `distill` already ran `dream` as
+  its step 0; the one behaviour that differed, previewing without committing, is now
+  `/devcycle:learn --preview`.
+
+The surviving five — `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:verify`,
+`/devcycle:doctor`, `/devcycle:onboard` — keep their names and arguments.
+
+**Removed skill ids.** devcycle ships no skills. Fourteen `SKILL.md` files became twelve
+`playbooks/*.md` files — two pairs merged, see below — loaded by path from the command that runs
+them and listed in no roster, so none of these ids resolves any more: `devcycle:auditing-a-repo`,
+`devcycle:distilling-learnings`, `devcycle:doctor`, `devcycle:dreaming-across-sessions`,
+`devcycle:executing-waves`, `devcycle:fast-path`, `devcycle:finishing-the-cycle`,
+`devcycle:onboarding-a-repo`, `devcycle:planning-waves`, `devcycle:reviewing-code`,
+`devcycle:reviewing-the-branch`, `devcycle:scoping-interview`,
+`devcycle:sweeping-mechanical-changes`, `devcycle:verifying-on-device`. Anything that invoked
+one by id — a wrapper skill, a repo `CLAUDE.md`, a saved prompt — calls the owning command
+instead. Three of the fourteen also changed file name in the move: `scoping-interview` is
+`playbooks/scoping-the-request.md`, `fast-path` is `playbooks/taking-the-fast-path.md`, and
+`doctor` is `playbooks/profiling-sessions.md`; `auditing-a-repo` merged into
+`playbooks/reviewing-code.md`, and `dreaming-across-sessions` + `distilling-learnings` merged
+into `playbooks/learning-from-sessions.md`.
+
+Entries for 0.11.1 and earlier name the surface as it stood at the time and are left as
+written.
+
 ## 0.11.1
 
 - ci(release): make main changeable only by checked pull request

@@ -16,7 +16,8 @@
 //   { findings: [{ file, line: integer|null, claim,
 //                  severity: "critical"|"high"|"medium"|"low",
 //                  measuredAgainst, lens, verified: boolean, verification: string }],
-//     summary: string }
+//     notes: string[],      // coverage reductions and lens failures, verbatim
+//     summary: string }     // opens with a COVERAGE WARNING when an input was truncated
 // The finding shape is owned by references/findings.md; keep the two in step.
 //
 // Stages: 1) read-only lens reviewers in parallel — the caller's lenses when
@@ -221,11 +222,16 @@ function gitReadOnly(argv) {
   }
 }
 
+// The cap is legitimate — a reviewer prompt has a budget — but a silent one lets a panel
+// over a large branch read as full coverage when it saw a sample, so the note carries how
+// much actually reached the reviewers and main() puts it in the panel's own output.
 function truncate(text, cap, label) {
-  if (text.length <= cap) return { text, note: null };
+  if (text.length <= cap) return { text, note: null, truncated: false };
+  const pct = ((cap / text.length) * 100).toFixed(1);
   return {
     text: text.slice(0, cap) + `\n[... truncated at ${cap} chars ...]`,
-    note: `${label} truncated to ${cap} chars for reviewer prompts`,
+    note: `${label} truncated to ${cap} of ${text.length} chars (${pct}% reached the reviewers)`,
+    truncated: true,
   };
 }
 
@@ -363,10 +369,15 @@ async function runCrossModelLens(ctx) {
 // plugin root). If the file is missing or empty, the verifier degrades to
 // its built-in prompt alone; the fallback is logged to stderr, never fatal.
 function loadRedTeamCharter() {
-  const charterPath = join(__dirname, "..", "agents", "red-team-reviewer.md");
+  const pluginRoot = join(__dirname, "..");
+  const charterPath = join(pluginRoot, "agents", "red-team-reviewer.md");
   try {
     const body = readFileSync(charterPath, "utf8")
       .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "") // strip agent frontmatter
+      // The charter points at references/ with ${CLAUDE_PLUGIN_ROOT}, which only substitutes
+      // in skill/command text — a verifier reading it verbatim gets unresolvable paths, so
+      // the root this script derives from its own location is spliced in here instead.
+      .replaceAll("${CLAUDE_PLUGIN_ROOT}", () => pluginRoot)
       .trim();
     if (body) return body;
     log(`red-team charter at ${charterPath} is empty; verifiers use the built-in prompt only`);
@@ -512,11 +523,22 @@ async function main() {
 
   gitReadOnly(["rev-parse", "--git-dir"]); // fail fast outside a git repo
 
+  // Every input the reviewers saw only part of, kept apart from the other notes: these are
+  // coverage reductions and are disclosed in the report itself, not just in the prompts.
+  const dropped = [];
+  const record = (r) => {
+    if (r.note) notes.push(r.note);
+    if (r.truncated) {
+      dropped.push(r.note);
+      log(r.note);
+    }
+    return r;
+  };
+
   let spec = { text: null, note: null };
   if (args.specPath) {
     if (!existsSync(args.specPath)) fatal(`spec not found: ${args.specPath}`);
-    spec = truncate(readFileSync(args.specPath, "utf8"), SPEC_CHAR_CAP, "spec");
-    if (spec.note) notes.push(spec.note);
+    spec = record(truncate(readFileSync(args.specPath, "utf8"), SPEC_CHAR_CAP, "spec"));
   }
 
   let scopeLabel;
@@ -524,14 +546,11 @@ async function main() {
   let diff = { text: null, note: null };
   if (args.scope.ref) {
     scopeLabel = `diff for ref ${args.scope.ref}`;
-    diff = truncate(gitReadOnly(["diff", args.scope.ref]), DIFF_CHAR_CAP, "diff");
-    if (diff.note) notes.push(diff.note);
+    diff = record(truncate(gitReadOnly(["diff", args.scope.ref]), DIFF_CHAR_CAP, "diff"));
     fileList = gitReadOnly(["diff", "--name-only", args.scope.ref]).trim();
   } else {
     scopeLabel = `file set below (${args.scope.paths.length} file(s))`;
-    const list = truncate(args.scope.paths.join("\n"), DIFF_CHAR_CAP, "file list");
-    if (list.note) notes.push(list.note);
-    fileList = list.text;
+    fileList = record(truncate(args.scope.paths.join("\n"), DIFF_CHAR_CAP, "file list")).text;
   }
 
   const ctx = { scopeLabel, specPath: args.specPath, spec: spec.text, diff: diff.text, fileList };
@@ -556,7 +575,13 @@ async function main() {
   const ranked = rankFindings(deduped);
   const summary = await reconcile(ranked, notes, model);
 
-  process.stdout.write(JSON.stringify({ findings: ranked, summary }, null, 2) + "\n");
+  // The reconciler is a model and may drop a note it was handed, so the coverage line is
+  // prepended here instead: a panel that reviewed a sample must never read as a full pass.
+  const disclosed = dropped.length
+    ? `COVERAGE WARNING: ${dropped.join("; ")}. This panel reviewed a sample, not the whole input.\n\n${summary}`
+    : summary;
+
+  process.stdout.write(JSON.stringify({ findings: ranked, notes, summary: disclosed }, null, 2) + "\n");
 }
 
 if (require.main === module) {
@@ -564,4 +589,6 @@ if (require.main === module) {
 }
 
 // Pure helpers, exported for the deterministic tests in tests/unit/.
-module.exports = { dedupFindings, rankFindings, truncate, fallbackSummary, mapLimit, SEVERITIES };
+module.exports = {
+  dedupFindings, rankFindings, truncate, fallbackSummary, mapLimit, loadRedTeamCharter, SEVERITIES,
+};

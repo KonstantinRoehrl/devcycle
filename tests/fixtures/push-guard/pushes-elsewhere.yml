@@ -1,0 +1,16 @@
+# Not a workflow this repo runs: the pushes that are allowed, which the guard must not flag.
+# A tag whose name contains the release branch's, an integration branch, and a branch whose
+# name merely starts with it are all legitimate.
+name: pushes-elsewhere (fixture)
+on:
+  push:
+    branches: [main, dev]
+jobs:
+  allowed:
+    runs-on: ubuntu-latest
+    steps:
+      - run: git push origin dev
+      - run: git push origin "devcycle--v$V"
+      - run: git push origin HEAD:dev
+      - run: git push -u origin release/main-line
+      - run: until git push origin dev; do git pull --rebase; done

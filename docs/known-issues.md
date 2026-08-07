@@ -2,8 +2,8 @@
 
 Open defects in devcycle's own engines, recorded so they are not rediscovered from scratch.
 Each entry names the code it lives in and what goes wrong if it is left alone. **Fixing one
-means deleting its entry in the same commit** — an entry that outlives its defect is worse
-than no entry.
+means closing its entry in the same commit**, its heading marked with the date and commit that
+fixed it — an entry still readable as open after its defect is gone is worse than no entry.
 
 Not a backlog of ideas: everything here is a confirmed defect with a located cause.
 
@@ -94,11 +94,13 @@ observation file", which is what currently pins `hasObservations`/`unmined` sema
 
 ## Doctor — `scripts/doctor.mjs`
 
-### `readRecords` swallows every filesystem error (high)
+### `readRecords` swallows every filesystem error (high) — fixed 2026-08-06 in `7a925ab`
 
-`readRecords` (`scripts/doctor.mjs:590`) returns `[]` on any read failure, so a
-permission-denied or oversized transcript makes the session vanish from the manifest and
-`--extract` exit 0 with nothing — a silent empty result that reads as success.
+`readRecords` returned `[]` on any read failure, so a permission-denied or oversized
+transcript made the session vanish from the manifest and `--extract` exit 0 with nothing — a
+silent empty result that read as success. It had been left deliberately unfixed while the
+dreaming work was in flight, which froze `doctor.mjs` at "add `export`, no behavior change".
 
-Left deliberately unfixed while the dreaming work was in flight, which froze `doctor.mjs` at
-"add `export`, no behavior change". That freeze has since lifted.
+`readRecords` (`scripts/doctor.mjs:616`) now rethrows everything except `ENOENT`, a transcript
+deleted between listing and reading; `findTranscriptFiles` (`:588`) follows the same rule for
+`ENOENT`/`ENOTDIR`. Tracked as `KI-RR` in `docs/audits/2026-08-06-disposition-register.md`.

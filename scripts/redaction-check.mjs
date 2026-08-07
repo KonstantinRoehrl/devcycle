@@ -63,8 +63,32 @@ function walk(root, base = root) {
   return out;
 }
 
+// Git's own file list is the right corpus in a checkout: it respects .gitignore, so the scan
+// stays on what the repo actually publishes. Outside one — a `git archive` extraction, an
+// unpacked release tarball — there is no such list and `git ls-files` dies, so the working
+// tree stands in, minus the two directories a checkout would never publish anyway.
+function listFiles() {
+  if (dir) return walk(dir);
+  try {
+    return execSync("git ls-files", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    process.stderr.write(
+      "redaction-check: not a git checkout — scanning the working tree instead (.git and node_modules excluded)\n"
+    );
+    return walk(process.cwd());
+  }
+}
+
 const root = dir ?? process.cwd();
-const files = dir ? walk(dir) : execSync("git ls-files", { encoding: "utf8" }).split("\n").filter(Boolean);
+const files = listFiles();
+// Scanning nothing is not a pass: an empty corpus would report the same `redaction: ok`
+// as a clean one.
+if (files.length === 0) {
+  console.error(`redaction-check: no files to scan under ${root}`);
+  process.exit(1);
+}
 
 const errors = [];
 for (const f of files) {

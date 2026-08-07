@@ -2,6 +2,10 @@ name: Release
 # Tags and publishes whatever version main already carries. The bump itself arrives through
 # the release PR (see `Prepare release`), so this workflow never writes to main — which is
 # what lets a ruleset require every change there to come through a checked pull request.
+# Blast radius: this workflow tags the repository and publishes a release. It is the only
+# workflow with write access to tags and releases. A failure here can publish a version that
+# no Validate run gated; a successful run is immutable and cannot be retracted, only
+# superseded. Gated on: the Release job's `needs:` dependency on Validate (added in #41).
 on:
   push:
     branches: [main]
@@ -12,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: write
@@ -22,6 +26,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 — same pin as validate.yml
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Require a green Validate run for this commit
         env:
@@ -54,6 +59,7 @@ jobs:
       - name: Tag and publish
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           V: ${{ steps.v.outputs.version }}
         run: |
           # Every push to main runs this, but only a release PR changes the version — so an
@@ -66,5 +72,8 @@ jobs:
           # nothing about what shipped.
           node scripts/bump-version.mjs --notes-for "$V" > .release-notes.md
           git tag "devcycle--v$V"
+          # persist-credentials: false above means the checkout left no push credential in
+          # .git/config, so authenticate the push explicitly right before it.
+          git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
           git push origin "devcycle--v$V"
           gh release create "devcycle--v$V" --title "devcycle v$V" --notes-file .release-notes.md

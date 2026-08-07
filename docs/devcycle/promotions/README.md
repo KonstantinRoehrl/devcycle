@@ -7,9 +7,9 @@ lines almost every time, while separately-named files essentially never conflict
 These records are committed. They hold no raw session data — only promotions a human
 already confirmed and that already landed as doc or skill edits.
 
-**Who writes, who reads, and when.** `devcycle:distilling-learnings` writes one file here
-per confirmed promotion, calling `dream.mjs --record-promotion` right after the edit's
-commit lands. On every later dreaming run, `dream.mjs`'s `--check-recurrence` step reads
+**Who writes, who reads, and when.** `playbooks/learning-from-sessions.md`, reached by
+`/devcycle:learn`, writes one file here per confirmed promotion, calling
+`dream.mjs --record-promotion` right after the edit's commit lands. On every later dreaming run, `dream.mjs`'s `--check-recurrence` step reads
 every record in this directory and matches its `cluster-signature` against the corpus
 accumulated since that record's `landed` date, folding any hit into that run's
 `.devcycle/dreaming/<date>-dream.md` artifact. `devcycle:doctor` never reads this directory

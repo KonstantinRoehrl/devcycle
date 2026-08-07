@@ -2,14 +2,14 @@
 // against synthetic transcripts. No real session transcript is ever read.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, chmodSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   parseArgs, isDevcycleSession, contextDepth, costUSD, depthBand, median,
   summarizeSession, formatReport, budgetBand, resolveDepth,
-  extractPluginVersion, emitCandidates, configDrift,
+  extractPluginVersion, emitCandidates, configDrift, findTranscriptFiles,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -155,6 +155,28 @@ test("cli: reports the devcycle session and filters out the non-devcycle one", (
   const res = run(["--dir", fixtureDir()]);
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stdout, /sess-abc/);
+  assert.doesNotMatch(res.stdout, /999999999999/);
+});
+
+// A devcycle session's whole attribution can now be its slash command — nothing else marks it,
+// since a playbook is not addressable and fires no Skill tool call. The no-arg corpus is built
+// on this filter, so a filter that stopped keeping command-only sessions would report zero
+// turns while still exiting 0.
+test("cli: a session attributed only to a devcycle command is kept in the corpus", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-command-"));
+  const proj = join(dir, "-some-project");
+  mkdirSync(proj, { recursive: true });
+  writeFileSync(
+    join(proj, "sess-eeeeeeeeeeee.jsonl"),
+    JSON.stringify(turn({ sessionId: "sess-eeeeeeeeeeee", attributionSkill: "devcycle:learn" })) + "\n",
+  );
+  writeFileSync(
+    join(proj, "sess-999999999999.jsonl"),
+    JSON.stringify(turn({ sessionId: "sess-999999999999", attributionSkill: "graphify" })) + "\n",
+  );
+  const res = run(["--dir", dir]);
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /sess-eee/);
   assert.doesNotMatch(res.stdout, /999999999999/);
 });
 
@@ -325,7 +347,7 @@ test("formatReport: discloses the price vintage", () => {
 });
 
 // emitCandidates() is computed but must actually reach the documented CLI surface — the
-// skill layer (skills/doctor/SKILL.md) has nothing to rank/report on otherwise.
+// playbook layer (playbooks/profiling-sessions.md) has nothing to rank/report on otherwise.
 test("cli: --json emits a candidates array carrying emitCandidates' signals", () => {
   const dir = mkdtempSync(join(tmpdir(), "doctor-candidates-"));
   const slug = join(dir, "-Users-x-proj");
@@ -649,11 +671,11 @@ test("configDrift flags a stale superseded key with its exact line and replaceme
     "utf8"
   );
   try {
-    const result = configDrift(targetPath, changelogPath);
-    assert.strictEqual(result.length, 1);
-    assert.strictEqual(result[0].line, 3);
-    assert.strictEqual(result[0].key, "legacyReviewMode");
-    assert.match(result[0].supersededBy, /reviewDepth/);
+    const { findings } = configDrift(targetPath, changelogPath);
+    assert.strictEqual(findings.length, 1);
+    assert.strictEqual(findings[0].line, 3);
+    assert.strictEqual(findings[0].key, "legacyReviewMode");
+    assert.match(findings[0].supersededBy, /reviewDepth/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -670,7 +692,7 @@ test("configDrift returns no findings for a target file with no stale references
   );
   writeFileSync(targetPath, ["# CLAUDE.md", "", "This repo uses reviewDepth: panel."].join("\n"), "utf8");
   try {
-    assert.deepStrictEqual(configDrift(targetPath, changelogPath), []);
+    assert.deepStrictEqual(configDrift(targetPath, changelogPath).findings, []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -680,6 +702,142 @@ test("doctor.mjs exports its transcript-walk helpers", async () => {
   const m = await import("../../scripts/doctor.mjs");
   for (const name of ["findTranscriptFiles", "owningSession", "readRecords", "inWindow"])
     assert.equal(typeof m[name], "function", `${name} must be exported`);
+});
+
+// Installs a runnable copy of doctor.mjs at <dir>/scripts/, so the copy's own location —
+// not the working directory — is what its changelog resolution has to work from. `changelog`
+// null means the tree ships no references/config-changelog.md at all.
+function installDoctor(changelog) {
+  // realpath: on macOS the temp dir is a symlink, and Node resolves an ESM entry point to its
+  // real path — so an unresolved path would make the script's own `is this the entry point`
+  // check fail and main() would never run.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "doctor-install-")));
+  mkdirSync(join(dir, "scripts"), { recursive: true });
+  for (const name of ["doctor.mjs", "pricing.mjs"])
+    copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
+  if (changelog !== null) {
+    mkdirSync(join(dir, "references"), { recursive: true });
+    writeFileSync(join(dir, "references", "config-changelog.md"), changelog, "utf8");
+  }
+  return dir;
+}
+
+const yamlChangelog = (...records) => ["# Config changelog", "", "```yaml", ...records, "```", ""].join("\n");
+
+const ADDED_ONLY = yamlChangelog('- version: "0.8.0"', "  change: added", "  key: profile", "  default: standard");
+const ONE_STALE = yamlChangelog(
+  '- version: "0.7.0"',
+  "  change: deprecated",
+  "  key: legacyReviewMode",
+  '  note: "superseded by reviewDepth"'
+);
+
+test("--drift resolves its changelog from the script's own location, not the working directory", () => {
+  // The documented invocation runs doctor from the target repo, where ./references does not
+  // exist; CLAUDE_PLUGIN_ROOT is not in a script's environment (docs/platform-notes.md (c)).
+  const cwd = mkdtempSync(join(tmpdir(), "doctor-drift-foreign-cwd-"));
+  writeFileSync(join(cwd, "CLAUDE.md"), "profile: standard\n", "utf8");
+  try {
+    const res = run(["--drift", join(cwd, "CLAUDE.md")], { CLAUDE_PLUGIN_ROOT: "" }, cwd);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout, /^config-drift:/m);
+    assert.doesNotMatch(res.stderr, /ENOENT/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("--drift reports an unreadable changelog as a doctor: diagnostic, not a stack trace", () => {
+  const dir = installDoctor(null);
+  writeFileSync(join(dir, "CLAUDE.md"), "profile: standard\n", "utf8");
+  try {
+    const res = spawnSync(process.execPath, [join(dir, "scripts", "doctor.mjs"), "--drift", join(dir, "CLAUDE.md")], {
+      encoding: "utf8",
+      cwd: dir,
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /^doctor: /m);
+    assert.doesNotMatch(res.stderr, /at configDrift|node:internal/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--drift says so when the changelog records no stale keys, instead of reporting clean", () => {
+  const dir = installDoctor(ADDED_ONLY);
+  writeFileSync(join(dir, "CLAUDE.md"), "profile: standard\n", "utf8");
+  try {
+    const res = spawnSync(process.execPath, [join(dir, "scripts", "doctor.mjs"), "--drift", join(dir, "CLAUDE.md")], {
+      encoding: "utf8",
+      cwd: dir,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout, /no deprecated\/renamed\/removed keys/);
+    assert.match(res.stdout, /1 record/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--drift reports a clean target against a changelog that does carry stale keys, with what it checked", () => {
+  const dir = installDoctor(ONE_STALE);
+  writeFileSync(join(dir, "CLAUDE.md"), "reviewDepth: panel\n", "utf8");
+  try {
+    const res = spawnSync(process.execPath, [join(dir, "scripts", "doctor.mjs"), "--drift", join(dir, "CLAUDE.md")], {
+      encoding: "utf8",
+      cwd: dir,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout, /config-drift: ok/);
+    assert.match(res.stdout, /1 stale key/);
+    assert.doesNotMatch(res.stdout, /no deprecated\/renamed\/removed keys/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("configDrift reports what it parsed, so a changelog with no stale keys is not a clean bill of health", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-drift-counts-"));
+  const changelogPath = join(dir, "config-changelog.md");
+  const targetPath = join(dir, "CLAUDE.md");
+  writeFileSync(changelogPath, ADDED_ONLY, "utf8");
+  writeFileSync(targetPath, "profile: standard\n", "utf8");
+  try {
+    const result = configDrift(targetPath, changelogPath);
+    assert.deepStrictEqual(result.findings, []);
+    assert.strictEqual(result.recordsParsed, 1);
+    assert.strictEqual(result.staleKeys, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("configDrift refuses a changelog it parsed nothing from instead of returning no findings", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-drift-unparsable-"));
+  const changelogPath = join(dir, "config-changelog.md");
+  const targetPath = join(dir, "CLAUDE.md");
+  writeFileSync(changelogPath, "# Config changelog\n\nProse only — no yaml block at all.\n", "utf8");
+  writeFileSync(targetPath, "legacyReviewMode: strict\n", "utf8");
+  try {
+    assert.throws(() => configDrift(targetPath, changelogPath), /no records/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("findTranscriptFiles raises an unreadable directory instead of reporting it as no transcripts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-unreadable-"));
+  const locked = join(dir, "locked");
+  mkdirSync(locked);
+  chmodSync(locked, 0o000);
+  try {
+    assert.throws(() => findTranscriptFiles(dir), (err) => err.code === "EACCES");
+    // A path that simply is not there stays a null (no transcripts), not a throw.
+    assert.strictEqual(findTranscriptFiles(join(dir, "absent")), null);
+  } finally {
+    chmodSync(locked, 0o755);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("doctor.mjs is importable when process.argv[1] is undefined", () => {
