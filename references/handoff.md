@@ -24,6 +24,11 @@ no diagnosis block. The finish stage emits the pipeline's final block. The block
 - Compaction hint: Keep <X>. Drop <Y>.
 ```
 
+Every boundary also appends one `stage` line to the run record — `run-record.mjs append --kind
+stage` with the stage name, its start and end timestamps and its outcome. Those timestamps are the
+window `scripts/doctor.mjs` joins cost to, so a boundary that emits a handoff block without the
+record line leaves that stage's cost unattributable.
+
 `Context depth:` is measured, not estimated: at every boundary this file names, run the depth
 probe `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` (`## The stage budget`) owns and copy
 its numbers into the field. A failed probe is written
