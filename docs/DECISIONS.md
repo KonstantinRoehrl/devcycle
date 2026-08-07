@@ -12,24 +12,30 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 unchanged at 100 lines for a command and 150 for a playbook. The cycle's ≤2,400
 aspiration stays a target, not a gate.
 
-**Why:** The per-file ceilings never implied a 2,600 total. Twelve playbooks at the
-permitted 150 lines each is 1,800 on its own, before `commands/`, `agents/` or
-`references/` — so the per-file gate and a 2,600 total were never jointly satisfiable at
-the shipped file count. Two independent reviewers then established that the residual is
-not cuttable without behaviour loss: the `references/` overage in particular is
-single-owner concept content, and the 750-line target for that directory was set below
-the size of the concept layer it owns (`quality-criteria.md`'s catalog alone is 142
-lines; 750 across thirteen files implies a 58-line average). The measured surface is
-3,435 lines — 285 in `commands/`, 1,533 in `playbooks/`, 245 in `agents/`, 1,372 in
-`references/` — so 3,500 gates the real tree with roughly 65 lines of headroom.
+**Why:** Two independent reviewers established that the residual is not cuttable without
+behaviour loss: the `references/` overage in particular is single-owner concept content,
+and the 750-line target for that directory was set below the size of the concept layer it
+owns (`quality-criteria.md`'s catalog alone is 142 lines; 750 across thirteen files
+implies a 58-line average). Measured at `c7ddbde`, the surface is 3,409 lines — 281 in
+`commands/`, 1,530 in `playbooks/`, 209 in `agents/`, 1,389 in `references/` — so 3,500
+gates the real tree with 91 lines of headroom.
+
+**Corrected 2026-08-07.** This entry first also argued that a 2,600 total and the per-file
+ceilings "were never jointly satisfiable", because twelve playbooks at the permitted 150
+lines each is 1,800 on its own. That does not follow: 150 is a ceiling, not a required
+length, and nothing obliges twelve playbooks to reach it. The reviewers' finding above
+carries the decision on its own. The measurements were restated at the same time — a later
+task cut `agents/` after the entry was written.
 
 **Supersedes:** The 2,600-line total named in the v0.12 overhaul plan and its global
 constraints. The per-file ceilings it also named are unchanged.
 
 ## 2026-08-06 — `skills/` is dissolved into `playbooks/`, and the commands become the whole listed surface
 
-**Decision:** The `skills/` directory ceases to exist. All fourteen `SKILL.md` files become
-plain `playbooks/*.md` files with no frontmatter, loaded only as
+**Decision:** The `skills/` directory ceases to exist. Its fourteen `SKILL.md` files become
+twelve plain `playbooks/*.md` files with no frontmatter — two pairs merge on the way
+(`auditing-a-repo` + `reviewing-code` → `reviewing-code`, `dreaming-across-sessions` +
+`distilling-learnings` → `learning-from-sessions`) — loaded only as
 `${CLAUDE_PLUGIN_ROOT}/playbooks/<name>.md` by the command that runs them, and every
 `devcycle:<skill-id>` is removed from the vocabulary: `auditing-a-repo`,
 `distilling-learnings`, `doctor`, `dreaming-across-sessions`, `executing-waves`, `fast-path`,
@@ -47,8 +53,11 @@ playbook descriptions competing with `superpowers:brainstorming` for the same ph
 binds a run to; "invoked by other skills, not by a user" written as a wish in prose that
 nothing enforced). Deleting the roster entry removes the route rather than adding another
 warning to it, and the descriptions it deletes were spending the finite description budget the
-seven commands now have to themselves. The layer is `playbooks/`, not `stages/`, because four
-of the twelve back standalone commands rather than pipeline stages.
+seven commands now have to themselves. The layer is `playbooks/`, not `stages/`, because three
+of the twelve back no pipeline stage at all: `learning-from-sessions`, `profiling-sessions` and
+`onboarding-a-repo` are reached only by the standalone `learn`, `doctor` and `onboard`. (Five
+back a standalone command; `reviewing-code` and `verifying-on-device` are also stages in
+`cycle`'s walk.)
 **Supersedes:** `DESIGN.md` §3's `skills/` tree and §13's skill-name list (both rewritten to
 the five-layer model), and every "Skill `<name>`" row in `README.md`. Playbook names keep the
 verb-first gerund rule; only their addressability changed.

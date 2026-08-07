@@ -46,11 +46,13 @@ script's suite with the behavior you changed.
 
 A rule lives in exactly one file, and every other file that needs it names that file by path
 rather than restating it. For anything cross-cutting that owner is a `references/*.md` file;
-`references/quality-criteria.md` § duplication vs. reuse states the criterion reviews measure
-against. Adding a pointer next to a retained copy is worse than either alone — the reader now
-has to work out which copy is authoritative — so a change that moves a rule deletes the prose
-it moved. `scripts/duplication-check.mjs` is the mechanized floor here, not the whole rule: it
-catches near-identical prose, not two files that say the same thing in different words.
+`references/quality-criteria.md` § Universal criteria states the criterion reviews measure
+against, as "duplication vs. reuse". Adding a pointer next to a retained copy is worse than
+either alone — the reader now has to work out which copy is authoritative — so a change that
+moves a rule deletes the prose it moved. `scripts/duplication-check.mjs` is the mechanized
+floor here, not the whole rule: it catches near-identical prose, and a second pass over content
+words catches a fair share of the same rule restated in different words, but neither pass
+judges whether the surviving copy is the right owner.
 
 ## Before opening a PR
 
@@ -61,7 +63,7 @@ catch for you:
 ```
 node scripts/validate.mjs             # manifests, command frontmatter, description budget, routing table, fences — CI
 node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-listed terms — CI
-node scripts/duplication-check.mjs    # cross-playbook and cross-reference prose duplication — CI
+node scripts/duplication-check.mjs    # duplicated prose across commands/playbooks/agents/references, and within a file — CI
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
 gitleaks git --no-banner --redact     # credentials, over the full history — CI
 node scripts/doctor.mjs               # token/context profile; --depth is the context gate's probe — local only

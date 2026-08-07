@@ -26,9 +26,9 @@ gone:
 The surviving five — `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:verify`,
 `/devcycle:doctor`, `/devcycle:onboard` — keep their names and arguments.
 
-**Removed skill ids.** devcycle ships no skills. All fourteen `SKILL.md` files are now
-`playbooks/*.md`, loaded by path from the command that runs them and listed in no roster, so
-none of these ids resolves any more: `devcycle:auditing-a-repo`,
+**Removed skill ids.** devcycle ships no skills. Fourteen `SKILL.md` files became twelve
+`playbooks/*.md` files — two pairs merged, see below — loaded by path from the command that runs
+them and listed in no roster, so none of these ids resolves any more: `devcycle:auditing-a-repo`,
 `devcycle:distilling-learnings`, `devcycle:doctor`, `devcycle:dreaming-across-sessions`,
 `devcycle:executing-waves`, `devcycle:fast-path`, `devcycle:finishing-the-cycle`,
 `devcycle:onboarding-a-repo`, `devcycle:planning-waves`, `devcycle:reviewing-code`,
