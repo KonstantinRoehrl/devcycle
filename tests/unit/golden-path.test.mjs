@@ -268,9 +268,8 @@ test("the push guard reads a refspec's destination, whatever form the push takes
 
 test("the push guard survives the shapes that previously blinded it", () => {
   // Each of these was a real false negative or a real false positive at some point in this
-  // file's history, so each is pinned rather than described. `String.raw` keeps the single
-  // backslash a shell continuation actually uses.
-  const BS = "\\"; // one backslash — a shell line continuation
+  // file's history, so each is pinned rather than described.
+  const BS = "\\"; // exactly one backslash — the shell line continuation these cases turn on
   assert.deepEqual(pushTargets(`        git push ${BS}\n          origin main\n`), ["main"], "a wrapped push is missed");
 
   // Comments are stripped before continuations are joined. Joining first let a comment ending
