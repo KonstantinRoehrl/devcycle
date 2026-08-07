@@ -42,10 +42,12 @@ test("rankFindings orders verified first, then by severity, then by file", () =>
 });
 
 test("truncate passes short text through and caps long text with a note", () => {
-  assert.deepEqual(panel.truncate("short", 100, "spec"), { text: "short", note: null });
-  const long = panel.truncate("x".repeat(101), 100, "spec");
+  assert.deepEqual(panel.truncate("short", 100, "spec"), { text: "short", note: null, truncated: false });
+  const long = panel.truncate("x".repeat(200), 100, "spec");
   assert.match(long.text, /truncated at 100 chars/);
-  assert.match(long.note, /spec truncated to 100 chars/);
+  assert.equal(long.truncated, true);
+  // The note has to carry how much was dropped: "truncated" alone reads like a detail.
+  assert.match(long.note, /spec truncated to 100 of 200 chars \(50\.0% reached the reviewers\)/);
 });
 
 test("fallbackSummary counts confirmed vs unverified and appends notes", () => {
@@ -275,6 +277,60 @@ if (prompt.includes("You are one lens")) {
 }
 process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
 `;
+
+test("a truncated diff is disclosed in the panel's own output, not only in the reviewer prompts", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "// base\n");
+  commitAll(repo, "base");
+  // Well past DIFF_CHAR_CAP, so the reviewers see a sample of this diff, not all of it.
+  writeFileSync(join(repo, "src", "a.js"), "// x\n".repeat(30_000));
+
+  const bin = makeFakeBin("claude", echoingClaude);
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  // The stubbed reconciler returns its own summary, so a disclosure that depends on the
+  // reconciler repeating a note would be missing here.
+  assert.match(report.summary, /COVERAGE WARNING/);
+  assert.match(report.summary, /diff truncated to 60000 of \d+ chars/);
+  assert.ok(Array.isArray(report.notes), "the panel's notes must reach the caller as a field");
+  assert.ok(
+    report.notes.some((n) => /diff truncated to 60000 of \d+ chars/.test(n)),
+    `notes did not carry the truncation: ${JSON.stringify(report.notes)}`
+  );
+  assert.match(res.stderr, /diff truncated to 60000 of \d+ chars/);
+});
+
+test("an untruncated panel run carries no coverage warning", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "// base\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "src", "a.js"), "// changed\n");
+
+  const bin = makeFakeBin("claude", echoingClaude);
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.doesNotMatch(report.summary, /COVERAGE WARNING/);
+});
+
+test("the red-team charter reaches the verifier with its plugin-root pointers resolved", () => {
+  const charter = panel.loadRedTeamCharter();
+  assert.ok(charter, "the shipped red-team charter must be readable");
+  assert.ok(
+    !charter.includes("CLAUDE_PLUGIN_ROOT"),
+    "the charter must carry no unresolved ${CLAUDE_PLUGIN_ROOT} placeholder"
+  );
+  // The pointers it carries have to name a path that exists from where the verifier runs.
+  const pluginRoot = join(here, "..", "..");
+  for (const ref of ["references/findings.md", "references/output.md"])
+    assert.ok(
+      charter.includes(join(pluginRoot, ref)),
+      `the charter must point at the resolved ${ref}`
+    );
+});
 
 test("a finding with no integer line round-trips as line: null, and no line reaches the verifier", () => {
   const repo = makeRepo();

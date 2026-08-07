@@ -1,8 +1,8 @@
 # Commit convention — deriving and recording this repo's own commit-message rules
 
 The single owner of how a devcycle-driven commit's subject matches the target repo's own
-conventions. `devcycle:executing-waves` runs the derivation once, before wave 1's first
-commit; `devcycle:finishing-the-cycle` names this file when a PR title needs the same
+conventions. `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` runs the derivation once, before wave 1's first
+commit; `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` names this file when a PR title needs the same
 match. Neither restates the derivation here.
 
 ## Deriving the convention
@@ -10,8 +10,8 @@ match. Neither restates the derivation here.
 Before wave 1's first commit, alongside the branch check `references/branch.md` owns:
 
 1. Read the repo's own convention docs. The list of what to check is owned by
-   `skills/auditing-a-repo/SKILL.md`'s "Inventory the repo's own conventions before
-   reaching for generic advice" bullet (step 0, Discovery) — read it there and follow
+   `playbooks/reviewing-code.md`'s "Inventory the repo's own conventions before
+   reaching for generic advice" bullet (step 1, Discovery) — read it there and follow
    it; it is not restated here, so a change to that list never has to be echoed here
    too.
 2. Run `git log --oneline -15` on the target repo.
@@ -41,9 +41,7 @@ set.
 ## Scoping the commit
 
 The single owner of how any devcycle-driven commit is scoped, cited rather than restated
-by every skill that commits: `skills/executing-waves/SKILL.md`, `skills/fast-path/SKILL.md`,
-`skills/sweeping-mechanical-changes/SKILL.md`, `skills/distilling-learnings/SKILL.md`,
-`skills/onboarding-a-repo/SKILL.md`, and `skills/auditing-a-repo/SKILL.md`.
+by every playbook that commits.
 
 Every commit is scoped by an explicit pathspec naming exactly the files this run authored
 — `git commit -- <the file list>` — never `git add -A` and never a bare `git commit`,

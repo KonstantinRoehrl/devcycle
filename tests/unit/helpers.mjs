@@ -46,8 +46,11 @@ export function writeInto(dir, relPath, text) {
 }
 
 // Throwaway plugin tree that `scripts/validate.mjs` accepts as-is: both
-// manifests plus one well-formed skill. Each validator test starts from this
-// green tree and breaks exactly one thing.
+// manifests, one well-formed playbook, and a routing table whose single row
+// matches the one fixture command. Each validator test starts from this green
+// tree and breaks exactly one thing.
+export const FIXTURE_PLAYBOOK_HEAD = "# Demoing things\n\nThe routing table lives in references/routing.md.\n";
+
 export function makePluginFixture() {
   const dir = mkdtempSync(join(tmpdir(), "devcycle-test-plugin-"));
   writeInto(
@@ -77,11 +80,15 @@ export function makePluginFixture() {
       2
     ) + "\n"
   );
+  // The playbook consumes references/routing.md so the fixture satisfies check 11
+  // (every reference needs a consumer); the real tree's consumer is a script.
+  writeInto(dir, "playbooks/demoing-things.md", FIXTURE_PLAYBOOK_HEAD);
   writeInto(
     dir,
-    "skills/demo/SKILL.md",
-    "---\nname: demo\ndescription: Use when a fixture skill is needed.\n---\n\n# Demo\n\nNothing to see here.\n"
+    "references/routing.md",
+    "# Routing\n\n| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n| run the pipeline | `cycle` | confirm-first | yes |\n"
   );
+  writeInto(dir, "commands/cycle.md", '---\ndescription: "Fixture command."\n---\n\n# /devcycle:cycle\n\n- stage: <scoping|planning|execution>\n');
   return dir;
 }
 
@@ -91,7 +98,7 @@ export function runValidate(cwd) {
   return spawnSync(process.execPath, [VALIDATE_SCRIPT], { cwd, encoding: "utf8" });
 }
 
-// Runs a workflow script as a subprocess, exactly as a skill would invoke it,
+// Runs a workflow script as a subprocess, exactly as a playbook would invoke it,
 // with fake CLI dirs prepended to PATH.
 export function runScript(scriptPath, jsonArgs, { cwd, binDirs = [] } = {}) {
   const PATH = [...binDirs, process.env.PATH].join(delimiter);

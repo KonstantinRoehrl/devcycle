@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.12.0
+
+- feat(surface): collapse to seven commands and rename audit, dream and distill
+
+devcycle's command surface is now seven verbs, and the plugin ships no skill ids at all —
+playbooks are loaded by path from the command that runs them. Three entry points were renamed.
+Pre-1.0, so there are no aliases and no deprecation period: **update any saved prompt, wrapper
+skill or repo `CLAUDE.md` that names an old id before upgrading.**
+
+### Breaking — renamed commands
+
+| Was | Now | What changed |
+| --- | --- | --- |
+| `/devcycle:audit` | `/devcycle:review` | Takes three scopes: `branch:<name>` (with an optional `base:<name>`), this whole repository, or a file set. A bare argument is now the *concern* to review, never guessed to be a branch. |
+| `/devcycle:dream` + `/devcycle:distill` | `/devcycle:learn` | `distill` already ran `dream` as its step 0, so the two collapse into one. The single behaviour that differed — previewing without committing — is now `/devcycle:learn --preview`. |
+
+The other five keep their names and their arguments: `/devcycle:cycle`, `/devcycle:continue`,
+`/devcycle:verify`, `/devcycle:doctor`, `/devcycle:onboard`.
+
+### Breaking — every `devcycle:*` skill id is gone
+
+devcycle ships no skills. Fourteen `SKILL.md` files became twelve `playbooks/*.md` files (two
+pairs merged), loaded by path from the command that runs them and listed in no roster — so
+anything that invoked one by id must call the owning command instead. These ids no longer
+resolve:
+
+`devcycle:auditing-a-repo`, `devcycle:distilling-learnings`, `devcycle:doctor`,
+`devcycle:dreaming-across-sessions`, `devcycle:executing-waves`, `devcycle:fast-path`,
+`devcycle:finishing-the-cycle`, `devcycle:onboarding-a-repo`, `devcycle:planning-waves`,
+`devcycle:reviewing-code`, `devcycle:reviewing-the-branch`, `devcycle:scoping-interview`,
+`devcycle:sweeping-mechanical-changes`, `devcycle:verifying-on-device`.
+
+Five changed identity in the move rather than just location: `scoping-interview` →
+`playbooks/scoping-the-request.md`, `fast-path` → `playbooks/taking-the-fast-path.md`, `doctor` →
+`playbooks/profiling-sessions.md`, `auditing-a-repo` merged into `playbooks/reviewing-code.md`,
+and `dreaming-across-sessions` + `distilling-learnings` merged into
+`playbooks/learning-from-sessions.md`.
+
+### Also in this release
+
+- refactor(surface): dissolve `skills/` into path-loaded `playbooks/`
+- refactor(commands): collapse the command surface from eight verbs to seven
+- refactor(routing): give the command surface one owner (`references/routing.md`) and a gate
+- refactor(references): dedup the single-owner reference layer
+- test(golden-path): assert the pipeline's wiring across every stage
+- ci(workflows): pin runners, gate commit subjects, and scope checkout credentials
+- docs: rewrite `DESIGN.md`, `README.md` and `CONTRIBUTING.md` to the shipped surface
+
+This is the first of three cycles restructuring devcycle; the two that follow build on this
+surface rather than changing it again.
+
+Entries for 0.11.1 and earlier name the surface as it stood at the time and are left as
+written.
+
 ## 0.11.1
 
 - ci(release): make main changeable only by checked pull request

@@ -15,6 +15,6 @@ invocations:
   references in `<path>` against `references/config-changelog.md`.
 - `--json` for machine output; `--depth` for the bare depth probe.
 
-Use the `devcycle:doctor` skill. It starts no cycle and writes no state file.
+Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/profiling-sessions.md`. It starts no cycle and writes no state file.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

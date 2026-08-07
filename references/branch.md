@@ -16,12 +16,11 @@ refs/remotes/origin/HEAD`, then `gh repo view --json defaultBranchRef`, then fal
 to `main` or `master` if one of those branches exists and neither command is available.
 
 **Where this applies.** Every committing path, without exception — the full pipeline's
-pre-flight before wave 1, the fast path, the sweep path, re-entry via
-`/devcycle:continue` (which settles the branch off the recorded `branch:` line first,
-per `${CLAUDE_PLUGIN_ROOT}/references/resume.md`, and falls back to this rule only when
-no topic branch was ever recorded), and every standalone, side-effectful skill that
-writes and commits outside any cycle — `onboarding-a-repo` (the scaffold write) and
-`distilling-learnings` (promotion edits) among them. A standalone skill owns no
+pre-flight before wave 1, the fast path, the sweep path, re-entry via `/devcycle:continue`
+(per `${CLAUDE_PLUGIN_ROOT}/references/resume.md`, which settles the recorded branch first
+and falls back here only when no topic branch was ever recorded), and every standalone,
+side-effectful skill that writes and commits outside any cycle — `onboarding-a-repo` (the
+scaffold write) and `learning-from-sessions` (promotion edits) among them. A standalone skill owns no
 `.devcycle/state.md`, so it follows the rule above minus the `branch:`-line write: check
 the branch, create a topic branch off the default or an integration branch when needed,
 and commit there.
@@ -36,7 +35,7 @@ guarding against a concurrent session or worktree switching branches mid-cycle.
 ## Deriving a branch's file set
 
 Which files a branch-scoped stage reads, and where it reads them from.
-`devcycle:auditing-a-repo` and `devcycle:verifying-on-device` both run this derivation.
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` and `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` both run this derivation.
 What a stage then *does* with the file set is that stage's own — the audit expands it to a
 feature dependency graph, the verify stage traces it to routes and screens — and is
 described there, not here.
@@ -50,13 +49,13 @@ quote, `;`, `&`, `|`, `<`, `>`, or a newline: git accepts those in a ref name, t
 does not, and no `git rev-parse` check helps because the shell expands them before git is
 reached. Then spell each validated name the way this clone can resolve it: when `git
 rev-parse --verify --quiet "<name>"` finds nothing and `"origin/<name>"` resolves, use
-`origin/<name>`; when neither resolves, stop the run naming the unresolvable value. That
-holds for the branch exactly as it does for the base — a fetched PR branch nobody has
-checked out, and an integration branch on an ordinary clone, each exists only as
-`origin/<name>`, and passing either one bare to `git merge-base` fails and trips the stop
-below with a wrong diagnosis. Bind the two resolved names to shell variables and reference
-them quoted — `"$branch"`, `"$base"` — in every command below and in every other command a
-stage builds from them. Never splice a raw name into a command line.
+`origin/<name>`; when neither resolves, stop the run naming the unresolvable value. This
+holds for the base as much as the branch — a fetched PR branch nobody has checked out, and
+an integration branch on an ordinary clone, each exist only as `origin/<name>`, and passing
+one bare to `git merge-base` fails and trips the stop below with a wrong diagnosis. Bind both
+resolved names to shell variables and reference them quoted — `"$branch"`, `"$base"` — in
+every command below and every command a stage builds from them. Never splice a raw name into
+a command line.
 
 **Base**, in order: an explicitly supplied base; the repo's integration branch — the
 committing rule above holds that list — when one exists locally or on the remote; else the

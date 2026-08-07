@@ -1,83 +1,90 @@
 # Contributing
 
-devcycle's components are markdown instructions, so the test suite tests *behavior*, not
-code: scenario files that replay a prompt against a real model and grade the response.
+Most of devcycle is markdown instructions rather than code, so the suite that guards it is
+structural: it asserts that the instructions point at files that exist, agree with each
+other, and keep the invariants a run depends on. Everything under `tests/` is deterministic
+Node — no model call, no API key — and CI runs all of it on every PR.
 
-## The scenario harness
+## The golden-path fixture
 
-`tests/scenarios/<component>/<scenario>.md` — one structured markdown file per scenario,
-each with:
+`tests/unit/golden-path.test.mjs`, with its data in `tests/fixtures/golden-path/`, walks a
+synthetic `.devcycle/` tree through every stage transition and asserts the pipeline's wiring
+holds: the stage enum in `commands/cycle.md` is the single source of truth and
+`commands/continue.md` handles every stage in it; every
+`${CLAUDE_PLUGIN_ROOT}/playbooks/…` path named anywhere in the surface resolves to a file
+that ships; the state file and ledger fixtures parse at every stage; each bounded loop
+declares a cap; a `committed` ledger event carries the green gate's outcome; and no workflow
+pushes the release branch directly.
 
-- **Setup** — the sandbox repo to build (throwaway, in a temp directory) and how the skill
-  text is spliced into the prompt.
-- **Subagent prompt** — the exact prompt, with a marked slot for the skill/command text
-  under test.
-- **Pass criteria** — numbered, individually checkable assertions about the response's
-  shape and content.
-- **Baseline (red)** and **Result (green)** — dated evidence sections: the red run shows
-  the failure without the guidance text (proving the criteria catch real behavior), the
-  green run shows the committed text passing. Changes ship with both.
+**What it does not do:** it does not exercise model behaviour. Nothing in it proves a stage
+produces good output, that an interview actually batches its questions, or that a stop gate
+is honoured at runtime — only that the text and the artifacts that encode those rules are
+present and consistent. The fixture's own header says so; keep that boundary honest rather
+than writing a test whose name implies a behavioural claim it cannot make.
 
-Runs are fresh headless sessions — `claude -p`, an isolated config directory containing
-nothing but credentials (fresh `CLAUDE_CONFIG_DIR`; no installed plugins, no global user
-instructions) — so nothing on the runner's machine leaks into the result. **Never populate
-that config directory with a live production credential** pulled from wherever your own
-tooling normally keeps one. Provision a test-only credential for scenario runs, or skip
-the run if none is available; either way, delete any scratch credential files the run
-leaves behind before you're done.
+Assertions that cut across the surface — commands, playbooks, references, agents, workflows —
+belong in this file. That is deliberate: every other suite under `tests/unit/` is scoped to
+one script, and a parallel golden-path suite would just split the same subject in two. When
+you add a rule to a playbook that a file can be read to confirm, add the assertion here in
+the same change; a rule with no mechanism is the thing this fixture exists to prevent.
 
-**To re-run a scenario:** build the sandbox per its Setup, splice the current skill text
-into the prompt's marked slot, run it headless as above, and grade the response against
-the Pass criteria. **To add one:** copy an existing scenario in the same component
-directory (e.g. `tests/scenarios/scoping-interview/batched-questions.md`), write the
-criteria first, record the red baseline before touching the skill text, then the green
-run against your change — and append dated regression sections rather than overwriting
-old evidence.
+Behaviour that genuinely needs a model to judge has no runner in this repo, by choice: there
+is no model credential available to GitHub Actions, and a check that can only be run by hand
+gets skipped and then ignored. Verify that class of change locally by whatever means fits and
+say in the PR how you did; the prose scenario harness that used to hold it was retired
+2026-08-06 (see `docs/DECISIONS.md`).
 
-A few authoring pitfalls: copying an existing scenario carries over its Setup
-tool-permission clause verbatim — re-derive it for the new scenario, since a sandbox that
-forbids the reads its own Pass criteria need is grading a broken sandbox, not the skill
-under test. When spliced skill/command text points onward to another plugin file and a
-Pass criterion depends on it, the sandbox must place that file too — grep sibling
-scenarios for the same dangling reference before calling the fix done. When a scenario
-run can mutate the sandbox, snapshot the clean state after Setup and before the red run,
-and restore it before the green run. Verify any citations against the working tree or
-`git show <ref>:path`, never `${CLAUDE_PLUGIN_ROOT}` — the install cache is version-keyed
-and lags the branch, so an accurate citation against it can still look fabricated.
+## Deterministic tests for the scripts and workflows
 
-Scenario evidence is encouraged, best-effort — not a merge gate. Nothing in CI runs these
-(there is no model credential available to GitHub Actions); they're produced locally, by
-whoever is making the change, when it's practical to do so. Skipping them for a given
-change is fine — verify behavior by whatever local means fits, note in the PR that formal
-scenario evidence wasn't produced, and move on.
+The Node code under `scripts/` and `workflows/` has ordinary unit tests in `tests/unit/`, one
+suite per script. The two workflow engines are run end to end with fake `claude`/`codex`
+executables placed first on `PATH`, so a full pipeline is exercised without a model call. If
+you change `review-panel.js`, `mechanical-sweep.js`, or any `scripts/*.mjs`, extend that
+script's suite with the behavior you changed.
 
-## Deterministic tests for the workflow scripts
+## One owner per concept
 
-The two Node scripts under `workflows/` are ordinary deterministic code, and unlike the
-scenario harness they have real automated tests: `tests/unit/` runs them end to end with
-fake `claude`/`codex` executables placed first on `PATH` — no model call, no API key —
-so CI runs them on every PR. If you change `review-panel.js` or `mechanical-sweep.js`,
-extend these tests with the behavior you changed.
+A rule lives in exactly one file, and every other file that needs it names that file by path
+rather than restating it. For anything cross-cutting that owner is a `references/*.md` file;
+`references/quality-criteria.md` § Universal criteria states the criterion reviews measure
+against, as "duplication vs. reuse". Adding a pointer next to a retained copy is worse than
+either alone — the reader now has to work out which copy is authoritative — so a change that
+moves a rule deletes the prose it moved. `scripts/duplication-check.mjs` is the mechanized
+floor here, not the whole rule: it catches near-identical prose, and a second pass over content
+words catches a fair share of the same rule restated in different words, but neither pass
+judges whether the surviving copy is the right owner.
 
 ## Before opening a PR
 
-Run the validators and the workflow-script tests locally. CI (`.github/workflows/validate.yml`)
-runs the first four; `doctor.mjs` and the gitleaks scan are local-only — there's no CI step for
-either, so they're the two a reviewer won't catch for you:
+Run the validators and the unit suite locally. CI (`.github/workflows/validate.yml`)
+runs everything except `doctor.mjs` — that one is local-only, so it's the one a reviewer won't
+catch for you:
 
 ```
-node scripts/validate.mjs             # manifests, frontmatter, description budget, fences — CI
-node scripts/redaction-check.mjs      # no machine paths or deny-listed terms — CI
-node scripts/duplication-check.mjs    # cross-skill prose duplication — CI
-node --test tests/unit/*.test.mjs     # workflow-script tests (stubbed CLIs, keyless) — CI
+node scripts/validate.mjs             # manifests, command frontmatter, description budget, routing table, fences — CI
+node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-listed terms — CI
+node scripts/duplication-check.mjs    # duplicated prose across commands/playbooks/agents/references, and within a file — CI
+node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
+gitleaks git --no-banner --redact     # credentials, over the full history — CI
 node scripts/doctor.mjs               # token/context profile; --depth is the context gate's probe — local only
-git diff main...HEAD | gitleaks stdin --redact --no-banner  # secret scan over the branch; local only, skip if gitleaks isn't installed
 ```
+
+Pass the test files as a glob, exactly as above and as CI does: a bare `tests/unit/` directory
+argument fails spuriously.
+
+The two scanners divide the work and neither subsumes the other. gitleaks owns credentials and
+tokens: it is rule-maintained, and it reads **history**, so a secret that was committed and
+removed one commit later still fails the build. `redaction-check.mjs` owns the privacy classes
+that are specific to how devcycle runs and that no generic scanner knows about — absolute
+home-directory paths, session ids, and the escaped project-directory form that binds a
+transcript path to one person's machine. It reads the current tree only. Verbatim transcript
+*excerpts* are detected by neither; that class is held by review, and by keeping
+excerpt-carrying artifacts out of the tracked tree in the first place.
 
 The commands above use the repo-relative form (`node scripts/<engine>.mjs`), correct for
-running by hand against this checkout. An engine invocation written into skill or command
-markdown instead uses `${CLAUDE_PLUGIN_ROOT}/scripts/<engine>.mjs`, because that text runs
-from the installed plugin, not this repo.
+running by hand against this checkout. An engine invocation written into a command, playbook,
+reference or agent instead uses `${CLAUDE_PLUGIN_ROOT}/scripts/<engine>.mjs`, because that text
+runs from the installed plugin, not this repo.
 
 `scripts/doctor.mjs` prices what it measures against `scripts/pricing.mjs`, the data module
 that holds per-model dollar rates and context windows with no CLI of its own — update that
@@ -89,19 +96,20 @@ project-path escaping, and missing/unreadable-directory handling rather than
 reimplementing them.
 
 `plugin.json`'s `userConfig` descriptions are a third hand-kept copy of the config knobs,
-alongside README's config table and the owning skill's own explanation — update all three
-by hand together when one changes; `validate.mjs` checks only that the key exists, never
+alongside README's config table and `references/config.md`'s own explanation — update all
+three by hand together when one changes; `validate.mjs` checks only that the key exists, never
 that the description text is current.
 
-**PR titles must be Conventional Commits** (`type(scope)?!: subject`). PRs are
+**PR titles must be Conventional Commits** (`type(scope)?!: subject`), and so must every
+commit subject on the PR — CI checks both. PRs are
 squash-merged and the title becomes the squash subject, which drives the semver bump
 (`fix:`→patch, `feat:`→minor, `!`/`BREAKING CHANGE`→major), the changelog entry, and the
 release tag (`devcycle--vX.Y.Z`). Reserve `feat:` for substantial user-facing
 improvements; routine work — engine swaps, doc edits, refactors, small fixes — takes
 `refactor:`/`fix:`/`docs:`/`chore:` so the automated bump reflects real impact. A
-malformed title fails CI; one that slipped through would ship no release. Scenario
-evidence for behavior changes is encouraged per the harness above, but not required to
-merge.
+malformed title fails CI; one that slipped through would ship no release. Evidence for
+behavior changes goes in the PR description; the structural checks above are the only
+merge gate.
 
 ## What belongs in `docs/`
 
@@ -111,8 +119,8 @@ downloaded by every user who installs the plugin, which makes `docs/` a budget, 
 scratchpad.
 
 Commit a doc only if a future implementer needs it to make a correct change: the decision log,
-empirically verified platform behavior, the memos explaining why a skill diverges from its
-upstream, open defects. Keep run reports, benchmarks, dry runs, on-device checklists and
+empirically verified platform behavior, the memos explaining why a devcycle stage diverges from
+its superpowers upstream, open defects. Keep run reports, benchmarks, dry runs, on-device checklists and
 results, plans, and specs out of the repository — they are records of one run on one machine,
 they date immediately, and nobody installing the plugin has a use for them. `.devcycle/` is
 gitignored and is where those belong.

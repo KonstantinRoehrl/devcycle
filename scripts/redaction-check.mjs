@@ -1,26 +1,112 @@
 #!/usr/bin/env node
-// Fails if tracked files contain machine-specific paths or terms whose sha256 is deny-listed.
-// The deny-list stores hashes so the forbidden terms never appear in the public repo.
+// Fails if scanned files carry machine identity or a deny-listed term.
+//
+// Division of labour with CI's secret scanner: gitleaks owns credentials and tokens — it is
+// rule-maintained, and it reads history, which this script cannot. This script owns the
+// privacy classes that are specific to how devcycle runs and that no generic scanner knows
+// about: absolute home-directory paths, session ids, and the escaped project-directory form
+// that binds a transcript path to one person's machine.
+//
+// Known limit, stated rather than implied: verbatim transcript *excerpts* are not detected.
+// There is no reliable signature for "this prose was copied out of a session", so that class
+// is held by review and by keeping excerpt-carrying artifacts out of the tracked tree.
+//
+// The deny-list stores sha256 hashes so the forbidden terms never appear in the public repo.
+// No failure message ever reprints what it matched — a CI log is as public as the repo.
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
+
+const args = process.argv.slice(2);
+const flagValue = (name) => {
+  const i = args.indexOf(name);
+  return i === -1 ? null : args[i + 1];
+};
+const dir = flagValue("--dir");
+const hashesPath = flagValue("--hashes") ?? "scripts/redaction-hashes.txt";
 
 const SELF_EXEMPT = ["scripts/redaction-check.mjs", "scripts/redaction-hashes.txt"];
 const hashes = new Set(
-  readFileSync("scripts/redaction-hashes.txt", "utf8").split("\n").map((l) => l.trim()).filter(Boolean)
+  readFileSync(hashesPath, "utf8").split("\n").map((l) => l.trim()).filter(Boolean)
 );
 const sha = (s) => createHash("sha256").update(s).digest("hex");
-// Machine-path pattern assembled to avoid matching itself:
-const HOME_PATH = new RegExp("/" + "Users/" + "[A-Za-z0-9_.-]+");
-const files = execSync("git ls-files", { encoding: "utf8" }).split("\n").filter(Boolean);
+
+// Patterns are assembled from fragments so this file never matches itself — the self-exemption
+// above is a second line of defence, not the only one.
+const U = "Users";
+const H = "home";
+const PATTERNS = [
+  { class: "an absolute home-directory path", re: new RegExp("/" + U + "/" + "[A-Za-z0-9_.-]+") },
+  { class: "an absolute home-directory path", re: new RegExp("/" + H + "/" + "[a-z_][a-z0-9_.-]*") },
+  { class: "an absolute home-directory path", re: new RegExp("[A-Za-z]:\\\\" + U + "\\\\") },
+  {
+    class: "a session id",
+    re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
+  },
+  {
+    // The form Claude Code gives a transcript directory: the project's absolute path with
+    // every separator turned into a dash. It survives every slash-shaped pattern above.
+    class: "a local project directory",
+    re: new RegExp("projects/-(?:" + U + "|" + H + ")-[A-Za-z0-9_.-]+"),
+  },
+];
+
+function walk(root, base = root) {
+  const out = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.name === ".git" || entry.name === "node_modules") continue;
+    const full = join(root, entry.name);
+    if (entry.isDirectory()) out.push(...walk(full, base));
+    else if (entry.isFile()) out.push(relative(base, full));
+  }
+  return out;
+}
+
+// Git's own file list is the right corpus in a checkout: it respects .gitignore, so the scan
+// stays on what the repo actually publishes. Outside one — a `git archive` extraction, an
+// unpacked release tarball — there is no such list and `git ls-files` dies, so the working
+// tree stands in, minus the two directories a checkout would never publish anyway.
+function listFiles() {
+  if (dir) return walk(dir);
+  try {
+    return execSync("git ls-files", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    process.stderr.write(
+      "redaction-check: not a git checkout — scanning the working tree instead (.git and node_modules excluded)\n"
+    );
+    return walk(process.cwd());
+  }
+}
+
+const root = dir ?? process.cwd();
+const files = listFiles();
+// Scanning nothing is not a pass: an empty corpus would report the same `redaction: ok`
+// as a clean one.
+if (files.length === 0) {
+  console.error(`redaction-check: no files to scan under ${root}`);
+  process.exit(1);
+}
+
 const errors = [];
 for (const f of files) {
   if (SELF_EXEMPT.includes(f)) continue;
   let text;
-  try { text = readFileSync(f, "utf8"); } catch { continue; } // binary
-  if (HOME_PATH.test(text)) errors.push(`${f}: contains an absolute home-directory path`);
+  try {
+    text = readFileSync(join(root, f), "utf8");
+  } catch {
+    continue; // binary
+  }
+  for (const cls of new Set(PATTERNS.filter((p) => p.re.test(text)).map((p) => p.class)))
+    errors.push(`${f}: contains ${cls} (redact it)`);
   for (const token of new Set(text.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? []))
     if (hashes.has(sha(token))) errors.push(`${f}: contains a deny-listed term ("${token[0]}…", redact it)`);
 }
-if (errors.length) { console.error("REDACTION CHECK FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
+
+if (errors.length) {
+  console.error("REDACTION CHECK FAILED:\n" + errors.map((e) => " - " + e).join("\n"));
+  process.exit(1);
+}
 console.log("redaction: ok");

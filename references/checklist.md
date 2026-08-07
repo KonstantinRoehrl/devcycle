@@ -2,19 +2,19 @@
 
 The single owner of what an on-device checklist is: where it lives, what an item looks like,
 which dimensions it covers, and what may ever be checked off without a human.
-`devcycle:executing-waves` generates one mid-wave from the plan; `devcycle:verifying-on-device`
+`${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` generates one mid-wave from the plan; `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md`
 generates one from a branch diff and walks either. Both name this file and neither restates it.
 
 ## Paths
 
 - **Plan-derived (in-cycle)** — `docs/<feature>/on-device-checklist.md` in the target repo.
-  The path is pinned because `devcycle:reviewing-the-branch`'s handoff consumes it. Record it
+  The path is pinned because `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md`'s handoff consumes it. Record it
   in the `checklist:` field of `.devcycle/state.md`.
 - **Diff-derived (standalone `/devcycle:verify`)** — `.devcycle/on-device-checklist-<branch-slug>.md`,
   where `<branch-slug>` is the branch name with every character outside `[A-Za-z0-9._-]`
   replaced by `-` (`feat/csv export` → `feat-csv-export`). Scratch for the run: never
   committed. Where else a standalone run may record this path is
-  `devcycle:verifying-on-device`'s rule, not this file's.
+  `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md`'s rule, not this file's.
 
 ## Item shape
 
@@ -52,15 +52,14 @@ A SCRIPT OR SCREENSHOT NEVER CHECKS OFF A CHECKLIST ITEM.
 ```
 
 One exception, keyed to an observable predicate: an item asserting DOM structure, CSS values,
-or exact text that a structural browser check — via claude-in-chrome (the intended engine: it
-navigates, screenshots, and reads the DOM/CSS/text/network of a page in the user's own Chrome)
-or an equivalent structural check — has verified, fresh output in hand, may be checked off
-with the tag `(auto)`. claude-in-chrome is preferred because the user can open an
-authenticated page in their real Chrome and hand the agent that already-logged-in session to
-inspect — which a separate browser context (e.g. Playwright's) cannot do without
-re-authenticating. When claude-in-chrome is not available, nothing is auto-checked: every item
-stays a human item. Everything a browser check cannot structurally see (feel, smoothness,
-visual alignment, contrast, legibility) stays unchecked for the human.
+or exact text that a structural browser check has verified, fresh output in hand, may be
+checked off with the tag `(auto)`. The intended engine is claude-in-chrome — it navigates,
+screenshots, and reads the DOM/CSS/text/network of a page in the user's own Chrome, so the
+user can hand the agent an already-authenticated session, which a separate browser context
+(e.g. Playwright's) cannot do without re-authenticating. When claude-in-chrome is not
+available, nothing is auto-checked: every item stays a human item. Everything a browser check
+cannot structurally see (feel, smoothness, visual alignment, contrast, legibility) stays
+unchecked for the human.
 
 | Rationalization | Reality |
 |---|---|

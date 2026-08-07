@@ -1,6 +1,7 @@
 name: Validate
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   push:
     # `dev` is listed so every commit that lands there gets a check suite at push time,
     # including the ones GitHub's merge API creates on squash-merge. Without it nothing
@@ -16,20 +17,43 @@ concurrency:
   cancel-in-progress: true
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Validate manifests, skills, budget, fences
+        with:
+          # Full history: the secret scan below reads every commit, not just the tip. A secret
+          # committed and removed one commit later stays fetchable, so scanning the tip alone
+          # reports green on a repository that is still leaking.
+          fetch-depth: 0
+          # Nothing in this job writes to the repository, so the checkout credential has no
+          # reason to stay in .git/config where any later step could reach it.
+          persist-credentials: false
+      - name: Validate manifests, playbooks, budget, fences
         run: node scripts/validate.mjs
-      - name: Redaction guard
+      - name: Redaction guard (host paths, session ids, deny-listed terms)
         run: node scripts/redaction-check.mjs
-      - name: Duplication check
+      - name: Check for duplicated prose across the runtime surface
         run: node scripts/duplication-check.mjs
       - name: Workflow script tests (stubbed CLIs — no model call, no API key)
         run: node --test tests/unit/*.test.mjs
+      - name: Secret scan — full history
+        env:
+          # Pinned by version AND digest: a release asset is mutable, a checksum is not.
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          asset="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "$asset" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${asset}"
+          echo "${GITLEAKS_SHA256}  ${asset}" | sha256sum -c -
+          tar -xzf "$asset" gitleaks
+          ./gitleaks git --no-banner --redact --exit-code 1 .
   pr-title:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - name: PR title must be a Conventional Commit
         env:
@@ -40,3 +64,29 @@ jobs:
             echo "The squash-merge subject drives the release version bump; a malformed title ships no release."
             exit 1
           }
+  commit-convention:
+    name: Commit subjects are Conventional Commits
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check every commit subject on this PR
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          fail=0
+          while IFS= read -r subject; do
+            case "$subject" in
+              Merge\ *) continue ;;
+            esac
+            if ! printf '%s' "$subject" | grep -Eq '^(feat|fix|perf|docs|chore|ci|refactor|style|test|build)(\([a-z0-9./-]+\))?!?: .+'; then
+              echo "::error::not a Conventional Commit: $subject"
+              fail=1
+            fi
+          done < <(git log --format=%s "$BASE_SHA".."$HEAD_SHA")
+          exit "$fail"
