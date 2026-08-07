@@ -10,7 +10,7 @@ import {
   parseArgs, isDevcycleSession, contextDepth, costUSD, depthBand, median,
   summarizeSession, formatReport, budgetBand, resolveDepth,
   extractPluginVersion, emitCandidates, configDrift, findTranscriptFiles,
-  compareVersions, versionCohorts,
+  compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -927,4 +927,98 @@ test("a session with no detectable plugin version is bucketed as unknown, never 
   const cohorts = versionCohorts(summaries);
   assert.ok(cohorts.has("unknown"), "a null-version session was silently dropped");
   assert.strictEqual(cohorts.get("unknown").sessions, 1);
+});
+
+// --- in-flight sessions ---
+
+test("a session whose newest record is recent is marked in-flight", () => {
+  const now = Date.parse("2026-08-07T12:00:00Z");
+  assert.strictEqual(isInFlight(Date.parse("2026-08-07T11:50:00Z"), now), true);
+  assert.strictEqual(isInFlight(Date.parse("2026-08-07T11:00:00Z"), now), false);
+  // The boundary itself, from both sides.
+  assert.strictEqual(isInFlight(now - IN_FLIGHT_MS, now), false);
+  assert.strictEqual(isInFlight(now - IN_FLIGHT_MS + 1, now), true);
+});
+
+test("summarizeSession marks a session by the age of its newest record", () => {
+  const stale = summarizeSession("sess-abcdef123456", [turn({})]);
+  assert.strictEqual(stale.inFlight, false);
+  const live = summarizeSession("sess-abcdef123456", [
+    turn({ timestamp: new Date(Date.now() - 60_000).toISOString() }),
+  ]);
+  assert.strictEqual(live.inFlight, true);
+});
+
+test("a session with no readable timestamp is not called in-flight and is still summarised", () => {
+  const s = summarizeSession("sess-abcdef123456", [turn({ timestamp: undefined })]);
+  assert.strictEqual(s.inFlight, false);
+  assert.strictEqual(s.turns, 1);
+});
+
+test("in-flight sessions are excluded from cohort medians", () => {
+  const summaries = [
+    { pluginVersion: "0.9.2", costByStage: { s: 1.0 }, medianDepth: 10, inFlight: false },
+    { pluginVersion: "0.10.1", costByStage: { s: 1.0 }, medianDepth: 10, inFlight: false },
+    { pluginVersion: "0.10.1", costByStage: { s: 999.0 }, medianDepth: 10, inFlight: true },
+  ];
+  const cohorts = versionCohorts(summaries.filter((s) => !s.inFlight));
+  assert.strictEqual(cohorts.get("0.10.1").sessions, 1);
+  assert.ok(!cohorts.get("0.10.1").dollars.includes(999.0));
+  // The exclusion has to be doctor's, not the caller's: the half-written 999.0 must not
+  // reach the version-over-version median comparison.
+  const c = emitCandidates(summaries).find((x) => x.type === "version-regression");
+  assert.strictEqual(c, undefined, "an in-flight session's partial cost moved a cohort median");
+});
+
+test("the report states how many sessions were excluded as in-flight", () => {
+  const rendered = { costUSD: 1.0, models: {}, tools: {} };
+  const text = formatReport([
+    { ...rendered, pluginVersion: "0.10.1", costByStage: { s: 1.0 }, medianDepth: 10, inFlight: false },
+    { ...rendered, pluginVersion: "0.10.1", costByStage: { s: 999.0 }, medianDepth: 10, inFlight: true },
+  ]);
+  assert.match(text, /in-flight/i);
+  assert.match(text, /1 session\(s\) still in flight/);
+  // Excluded from the medians, still counted in the corpus.
+  assert.match(text, /over 2 session\(s\)/);
+});
+
+test("a single-session cohort is marked low confidence", () => {
+  const c = { type: "version-regression", skill: "s", delta_pct: 50, delta_dollars: 1,
+              from_dollars: 2, dollars: 3, sessions_sampled: 1 };
+  assert.match(formatCandidate(c), /low confidence/i);
+  const many = { ...c, sessions_sampled: 8 };
+  assert.doesNotMatch(formatCandidate(many), /low confidence/i);
+});
+
+test("the low-confidence marker reaches the machine shape, not the text report alone", () => {
+  const lone = emitCandidates([
+    { pluginVersion: "0.10.1", costByStage: {}, medianDepth: 900, startupFloor: { main: [100] } },
+  ]).find((x) => x.type === "depth-outlier");
+  assert.strictEqual(lone.sessions_sampled, 1);
+  assert.strictEqual(lone.low_confidence, true);
+  const sampled = emitCandidates([
+    { costByStage: { s: 1 } }, { costByStage: { s: 1 } }, { costByStage: { s: 100 } },
+  ]).find((x) => x.type === "cost-outlier");
+  assert.strictEqual(sampled.sessions_sampled, 3);
+  assert.strictEqual(sampled.low_confidence, false);
+});
+
+test("cli: --json labels the in-flight exclusion too, not the text report alone", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-inflight-"));
+  const proj = join(dir, "-some-project");
+  mkdirSync(proj, { recursive: true });
+  writeFileSync(
+    join(proj, "sess-aaaaaaaaaaaa.jsonl"),
+    JSON.stringify(turn({
+      sessionId: "sess-aaaaaaaaaaaa", attributionSkill: "devcycle:cycle",
+      timestamp: new Date(Date.now() - 60_000).toISOString(),
+    })) + "\n",
+  );
+  const res = run(["--dir", dir, "--json"]);
+  assert.equal(res.status, 0, res.stderr);
+  const parsed = JSON.parse(res.stdout);
+  assert.strictEqual(parsed.sessions.length, 1, "an in-flight session was dropped from the corpus");
+  assert.strictEqual(parsed.sessions[0].inFlight, true);
+  assert.strictEqual(parsed.inFlight.excluded, 1);
+  assert.match(parsed.inFlight.note, /approximation/i);
 });

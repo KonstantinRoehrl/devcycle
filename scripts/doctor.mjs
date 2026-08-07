@@ -213,8 +213,18 @@ export function versionCohorts(summaries) {
   return cohorts;
 }
 
+// A cohort of one is a sample, not a trend. Marked at every render site rather than left for
+// the reader to infer from sessions_sampled.
+const isLowConfidence = (c) => c.sessions_sampled === 1;
+
 export function emitCandidates(summaries) {
   const candidates = [];
+
+  // A session still being written has only part of its cost recorded, so it is excluded from
+  // every median-based comparison below: the same live session measured 15 minutes apart moved
+  // one cohort's regression from 6663.6% to 7317.9%. It stays in the corpus and is still counted
+  // and reported per session — only the medians ignore it.
+  const settled = summaries.filter((s) => !s.inFlight);
 
   // Unpriced-model usage — already computed per summary.
   for (const s of summaries) {
@@ -238,7 +248,7 @@ export function emitCandidates(summaries) {
   // ordering, so it is excluded here — but versionCohorts() above still buckets it, and the
   // cohort table (Task 16) still renders it, rather than dropping those sessions.
   const byVersion = new Map(); // version -> { skill -> [dollars] }
-  for (const [version, c] of versionCohorts(summaries)) byVersion.set(version, c.byStage);
+  for (const [version, c] of versionCohorts(settled)) byVersion.set(version, c.byStage);
   const versions = [...byVersion.keys()].filter((v) => v !== "unknown").sort(compareVersions);
   const versionCandidates = [];
   for (let i = 0; i + 1 < versions.length; i++) {
@@ -296,7 +306,7 @@ export function emitCandidates(summaries) {
   // of any version-cohort comparison (fires even with a single version observed, unlike
   // version-regression above, which needs two adjacent cohorts to compare).
   const costsBySkill = new Map(); // skill -> [dollars]
-  for (const s of summaries) {
+  for (const s of settled) {
     for (const [skill, dollars] of Object.entries(s.costByStage ?? {})) {
       if (!costsBySkill.has(skill)) costsBySkill.set(skill, []);
       costsBySkill.get(skill).push(dollars);
@@ -321,6 +331,7 @@ export function emitCandidates(summaries) {
     }
   }
 
+  for (const c of candidates) c.low_confidence = isLowConfidence(c);
   return candidates;
 }
 
@@ -447,6 +458,15 @@ function contentClasses(r) {
   return names.length ? names : ["prompt"];
 }
 
+// No transcript carries an explicit session-end marker — verified against the whole corpus, where
+// a finished session's tail is structurally identical to a live one's. Recency is therefore the
+// only available signal, and it is an approximation, disclosed as one in the output.
+export const IN_FLIGHT_MS = 30 * 60 * 1000;
+
+export function isInFlight(newestRecordMs, nowMs = Date.now()) {
+  return nowMs - newestRecordMs < IN_FLIGHT_MS;
+}
+
 export function summarizeSession(sessionId, records) {
   const turns = records.filter(isTurn);
   const depths = turns.map((r) => contextDepth(r.message.usage));
@@ -462,6 +482,15 @@ export function summarizeSession(sessionId, records) {
   const dispatches = { total: 0, withoutModel: 0 };
   let totalCost = 0;
   let pluginVersion = null;
+
+  // Measured over every record, not just turns: the newest thing written to the transcript is
+  // what says whether the session is still going. A record with no readable timestamp simply
+  // does not vote, and a session with none at all is treated as finished rather than dropped.
+  let newestRecordMs = null;
+  for (const r of records) {
+    const t = Date.parse(r?.timestamp ?? "");
+    if (Number.isFinite(t) && (newestRecordMs === null || t > newestRecordMs)) newestRecordMs = t;
+  }
 
   const effectiveSkills = attributeForwardFill(turns);
   turns.forEach((r, i) => {
@@ -534,6 +563,7 @@ export function summarizeSession(sessionId, records) {
     unpriced,
     models,
     pluginVersion,
+    inFlight: newestRecordMs !== null && isInFlight(newestRecordMs),
   };
 }
 
@@ -542,6 +572,11 @@ const DISCLOSURE =
   "explicit skill invocation through to that transcript's end (or the next invocation) — " +
   "genuinely unrelated work with no further skill call in the same transcript is still " +
   "counted under the earlier skill.";
+
+const IN_FLIGHT_NOTE =
+  "in-flight sessions have only part of their cost recorded, so they are excluded from the " +
+  "medians and still counted in the corpus. In-flight detection is a recency approximation: " +
+  "transcripts carry no end marker, so a finished session reads as live for 30 minutes.";
 
 const usd = (n) => "$" + (n >= 1 ? n.toFixed(2) : n.toFixed(4));
 
@@ -556,7 +591,7 @@ function ranked(map, render) {
 // One raw signal line per emitCandidates() entry — no severity, no ranking; that judgment
 // call stays at the playbook layer (playbooks/profiling-sessions.md), consistent with doctor's
 // existing division of labor (this script computes, the playbook interprets).
-function formatCandidate(c) {
+export function formatCandidate(c) {
   const parts = [c.type];
   if (c.skill) parts.push(`skill=${c.skill}`);
   if (c.model) parts.push(`model=${c.model}`);
@@ -567,6 +602,7 @@ function formatCandidate(c) {
   if (c.dollars != null) parts.push(`dollars=${usd(c.dollars)}`);
   if (c.count != null) parts.push(`count=${c.count}`);
   parts.push(`sessions=${c.sessions_sampled}`);
+  if (isLowConfidence(c)) parts.push("low confidence: n=1");
   return `CANDIDATE: ${parts.join(" ")}`;
 }
 
@@ -615,6 +651,12 @@ export function formatReport(summaries) {
   ];
   for (const [model, count] of Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]))
     lines.push(`UNPRICED MODEL: ${model} (${count} requests)`);
+  const inFlightCount = summaries.filter((s) => s.inFlight).length;
+  if (inFlightCount > 0)
+    lines.push(
+      `note: ${inFlightCount} session(s) still in flight (newest record < 30 min old) — ` +
+        IN_FLIGHT_NOTE,
+    );
   for (const c of emitCandidates(summaries)) lines.push(formatCandidate(c));
   lines.push("", vintage, DISCLOSURE, "");
   for (const s of summaries) {
@@ -623,7 +665,8 @@ export function formatReport(summaries) {
     lines.push(
       `session ${s.id} — turns ${s.turns} (main ${s.mainTurns}, subagent ${s.subagentTurns}), ` +
         `depth median ${s.medianDepth} max ${s.maxDepth}, cost ${usd(s.costUSD)}, ` +
-        `models [${modelList}], tools [${toolList}]`,
+        `models [${modelList}], tools [${toolList}]` +
+        (s.inFlight ? " [in flight — excluded from medians]" : ""),
     );
   }
   return lines.join("\n");
@@ -802,6 +845,11 @@ function main() {
           sessions: result.sessions,
           totals: result.totals,
           candidates: emitCandidates(result.sessions),
+          inFlight: {
+            excluded: result.sessions.filter((s) => s.inFlight).length,
+            thresholdMs: IN_FLIGHT_MS,
+            note: IN_FLIGHT_NOTE,
+          },
         },
         null,
         2,
