@@ -13,18 +13,18 @@ is a cache: every artifact is on disk, so the pipeline survives `/clear` and res
 - Knobs, the `profile`, model tiers, and the first-run configuration this command runs once per
   repo — after the state file, before triage: `${CLAUDE_PLUGIN_ROOT}/references/config.md`.
 - The state file's shape, lifecycle, ownership check: `${CLAUDE_PLUGIN_ROOT}/references/resume.md`.
-- Stage boundaries — handoff shape, context actions, the await gate:
-  `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`.
+- Stage boundaries — handoff shape, context actions, await gate: `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`.
 - Branch discipline before any stage that commits: `${CLAUDE_PLUGIN_ROOT}/references/branch.md`.
 - How this command and its agents report: `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
 ## Before the first confirmation
 
-Before the first user confirmation, this command may only read the repository and write `.devcycle/state.md`.
-It creates no branch and makes no commit. That write is the pipeline's first action, not a side effect of the
-first stage transition: a cycle interrupted mid-scoping must still leave something to resume from. An existing
-state file at `stage: done` is reused — carry `configured:` forward, reset the rest, ask nothing; a finished
-cycle is not a collision. At any other stage, surface the collision and ask — never overwrite it.
+Before the first user confirmation, this command may only read the repository, write `.devcycle/state.md`, and
+mint the run record — `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs new`, its id on the `run:` row. No
+branch, no commit. Both writes are the pipeline's first action, not a side effect of the first stage
+transition: a cycle interrupted mid-scoping must still leave something to resume from. A state file at `stage:
+done` is reused — carry `configured:`, mint a fresh `run:`, reset the rest, ask nothing; that is not a
+collision. At any other stage, surface the collision and ask — never overwrite it.
 
 ## Triage the input
 
