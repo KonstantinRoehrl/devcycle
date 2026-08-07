@@ -285,3 +285,36 @@ test("still flags a duplicated paragraph in two reference files that both open w
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A regression fixture drawn from the corpus, not invented for the test. Every other fixture
+// here is synthetic prose written to exercise a threshold, which shows the passes work on
+// contrived input but not that they would have caught anything real. This pair is the actual
+// violation this cycle's widened checker found: `commands/learn.md` restated the mode list
+// that `playbooks/learning-from-sessions.md` owns, at `ba48a46`, measured at content-word
+// 0.783 — the highest real score in the corpus and the reason the threshold stays at 0.55.
+// Both sides are verbatim from that commit. If a future change stops flagging this, the
+// checker has stopped catching the class of violation it was widened to catch.
+const REAL_LEARN_COMMAND =
+  "- `/devcycle:learn` — the whole loop. Every promotion is batched for confirmation before it\n" +
+  "  lands; each memory is deleted only once its promotion has landed.\n" +
+  "- `/devcycle:learn --preview` — mine and propose, write the dated artifact, land nothing,\n" +
+  "  delete no memory.";
+
+const REAL_LEARN_PLAYBOOK =
+  "- default — the whole loop; every promotion is batched for confirmation before it lands.\n" +
+  "- `--preview` — mine and propose, write the dated artifact, land nothing, delete no memory.";
+
+test("flags the real learn.md/learning-from-sessions.md restatement the audit found", () => {
+  const dir = makeFixture({
+    "commands/learn.md": `# /devcycle:learn\n\n${REAL_LEARN_COMMAND}\n`,
+    "playbooks/learning-from-sessions.md": `# Learning from sessions\n\n## Modes\n\n${REAL_LEARN_PLAYBOOK}\n`,
+  });
+  try {
+    assert.throws(
+      () => execFileSync(process.execPath, [SCRIPT, "--dir", dir], { ...PIPE, cwd: dir }),
+      /DUPLICATION CHECK FAILED[\s\S]*commands\/learn\.md[\s\S]*playbooks\/learning-from-sessions\.md/
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

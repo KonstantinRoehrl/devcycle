@@ -17,14 +17,94 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 
 const stages = (read("commands/cycle.md").match(/stage:\s*<([a-z|-]+)>/)?.[1] ?? "").split("|").filter(Boolean);
 
+// --- deriving a matcher from a documented template -------------------------------------
+// Several formats in this surface are pinned as one literal template line in the reference
+// that owns them (the ledger's event line, the loop-status line). Tests below derive their
+// matcher from that line rather than restating it, so deleting or editing the template is a
+// test failure instead of a silent divergence.
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// A `<...>` placeholder is either an enum of literal values (`<dispatched|committed>`) or the
+// *kind* of value that goes there (`<commit-sha|file|none>` — a sha, a path, or `none`). A
+// placeholder naming any of these kinds matches a token rather than the kind's own name.
+const KIND_WORDS = new Set(["commit-sha", "file", "id", "short", "destination", "count", "n", "cap", "sha", "path"]);
+
+const atom = (name) => {
+  const n = name.trim();
+  if (/ISO-8601/.test(n)) return "\\d{4}-\\d{2}-\\d{2}T[\\d:]+Z";
+  if (/ or none$/.test(n)) return `(?:${atom(n.replace(/ or none$/, ""))}|none)`;
+  if (n === "n" || n === "cap" || n === "count") return "\\d+";
+  if (n === "short") return ".+"; // a one-line outcome, which may carry spaces
+  const parts = n.split("|");
+  if (parts.length > 1 && !parts.some((p) => KIND_WORDS.has(p))) return `(?:${parts.map(esc).join("|")})`;
+  return "\\S+";
+};
+
+const shapeFromTemplate = (template) =>
+  new RegExp("^" + template.split(/<([^>]+)>/).map((part, i) => (i % 2 ? atom(part) : esc(part))).join("") + "$");
+
 test("the stage enum is non-empty and every stage is lowercase-kebab", () => {
   assert.ok(stages.length > 0, "no stage enum found in commands/cycle.md");
   for (const s of stages) assert.match(s, /^[a-z][a-z-]*$/);
 });
 
-test("continue's stage table covers every stage in the enum", () => {
-  const table = read("commands/continue.md");
-  for (const s of stages) assert.match(table, new RegExp(`\\b${s}\\b`), `continue.md does not handle stage "${s}"`);
+// `done` is the closed state: no playbook resumes it, and cycle.md closes the state file at
+// it. Every other stage in the enum must route somewhere real from both entry points.
+const TERMINAL = "done";
+
+// Where a stage's text says the run goes next: a playbook file that exists on disk, or an
+// upstream skill devcycle delegates the stage to wholesale.
+const routesSomewhere = (text) => {
+  const paths = [...text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(playbooks\/[A-Za-z0-9._-]+\.md)/g)].map((m) => m[1]);
+  return {
+    ok: paths.some((p) => existsSync(join(root, p))) || /superpowers:[a-z-]+/.test(text),
+    paths,
+  };
+};
+
+// Each stage, as `/devcycle:cycle` itself resolves it: an entry in the stage walk, or one of
+// the two short paths the triage section hands straight to a playbook.
+const cycleRoutes = () => {
+  const text = read("commands/cycle.md");
+  const routes = new Map();
+  for (const [, stage, path] of text.replace(/\n/g, " ").matchAll(
+    /`([a-z-]+)`\s*→\s*`(\$\{CLAUDE_PLUGIN_ROOT\}\/playbooks\/[A-Za-z0-9._-]+\.md)`/g
+  ))
+    routes.set(stage, path);
+  const walk = text.split("\n## Stage walk\n")[1] ?? "";
+  for (const item of walk.split(/\n(?=\d+\. )/)) {
+    const stage = item.match(/^\d+\. \*\*([a-z-]+)\*\*/)?.[1];
+    if (stage) routes.set(stage, item);
+  }
+  return routes;
+};
+
+test("cycle.md itself routes every stage in its enum to a playbook that exists", () => {
+  const routes = cycleRoutes();
+  assert.ok(read("commands/cycle.md").includes("`stage: done`"), "cycle.md no longer names the terminal stage");
+  for (const s of stages) {
+    if (s === TERMINAL) continue;
+    const text = routes.get(s);
+    assert.ok(text, `commands/cycle.md names stage "${s}" in its enum but routes it nowhere`);
+    const { ok, paths } = routesSomewhere(text);
+    assert.ok(ok, `commands/cycle.md routes stage "${s}" to no playbook that exists (found: ${paths.join(", ") || "none"})`);
+  }
+});
+
+test("continue's resume table routes every resumable stage to a playbook that exists", () => {
+  const rows = new Map(
+    [...read("commands/continue.md").matchAll(/^\| ([a-z-]+) \| (.+) \|$/gm)].map((m) => [m[1], m[2]])
+  );
+  for (const s of stages) {
+    if (s === TERMINAL) {
+      assert.ok(!rows.has(s), `continue.md offers to resume the terminal stage "${s}"`);
+      continue;
+    }
+    const row = rows.get(s);
+    assert.ok(row, `continue.md's resume table has no row for stage "${s}"`);
+    const { ok, paths } = routesSomewhere(row);
+    assert.ok(ok, `continue.md resumes stage "${s}" into no playbook that exists (found: ${paths.join(", ") || "none"})`);
+  }
 });
 
 test("every playbook path referenced anywhere in the surface resolves", () => {
@@ -48,18 +128,51 @@ test("the state fixture round-trips through every stage", () => {
   }
 });
 
-test("the loop-status line format parses for all three statuses", () => {
-  const shape = /^status: (resolved|exhausted-with-residue|exhausted-unresolved) rounds: \d+\/\d+ residue: (\d+|none) carried-to: \S+$/;
-  assert.match("status: resolved rounds: 1/3 residue: none carried-to: none", shape);
+test("the loop-status line is the one references/loops.md documents, for all three statuses", () => {
+  const loops = read("references/loops.md");
+  const template = loops.match(/^\s*status: <.*$/m)?.[0].trim();
+  assert.ok(template, "references/loops.md no longer carries the status-line template");
+  const documented = [...loops.matchAll(/^- `([a-z-]+)` — /gm)].map((m) => m[1]);
+  assert.deepEqual(
+    template.match(/<([a-z|-]+)>/)?.[1].split("|"),
+    documented,
+    "the status-line template and the documented status list name different statuses"
+  );
+  const shape = shapeFromTemplate(template);
+  for (const s of documented)
+    assert.match(`status: ${s} rounds: 1/3 residue: none carried-to: none`, shape, `the template rejects status "${s}"`);
   assert.match("status: exhausted-with-residue rounds: 3/3 residue: 4 carried-to: docs/audits/2026-08-06-disposition-register.md", shape);
-  assert.match("status: exhausted-unresolved rounds: 2/2 residue: 1 carried-to: none", shape);
-  assert.ok(read("references/loops.md").includes("exhausted-with-residue"), "references/loops.md must own the status vocabulary");
+  // A line missing the fields the template pins is malformed, whatever it says about its cap.
+  assert.doesNotMatch("status: resolved rounds: 1/3", shape);
+  assert.doesNotMatch("status: cap reached rounds: 3/3 residue: none carried-to: none", shape);
 });
 
-test("the ledger fixture's every line parses as a ledger event", () => {
-  const shape = /^- \[\d{4}-\d{2}-\d{2}T[\d:]+Z\] task=\S+ event=\S+ outcome=.* ref=\S+$/;
-  for (const line of readFileSync(join(root, "tests/fixtures/golden-path/ledger.md"), "utf8").split("\n"))
-    if (line.startsWith("- [")) assert.match(line, shape);
+const ledgerLines = () =>
+  readFileSync(join(root, "tests/fixtures/golden-path/ledger.md"), "utf8")
+    .split("\n")
+    .filter((l) => l.startsWith("- ["));
+
+const ledgerEvents = () =>
+  ledgerLines().map((line) => ({
+    line,
+    at: line.match(/^- \[([^\]]+)\]/)?.[1] ?? "",
+    task: line.match(/ task=(\S+)/)?.[1] ?? "",
+    event: line.match(/ event=(\S+)/)?.[1] ?? "",
+    outcome: line.match(/ outcome=(.*) ref=/)?.[1] ?? "",
+  }));
+
+test("the ledger fixture parses against the event line references/ledger.md owns", () => {
+  const template = read("references/ledger.md").match(/^- \[<ISO-8601 UTC>\].*$/m)?.[0];
+  assert.ok(template, "references/ledger.md no longer states the per-event line shape");
+  const vocabulary = template.match(/event=<([a-z|-]+)>/)?.[1].split("|") ?? [];
+  assert.ok(vocabulary.length > 1, "the ledger's event vocabulary is no longer an enum");
+  const shape = shapeFromTemplate(template);
+  const events = ledgerEvents();
+  assert.ok(events.length > 0, "the ledger fixture records no events — every assertion over it would run over nothing");
+  for (const e of events) {
+    assert.match(e.line, shape);
+    assert.ok(vocabulary.includes(e.event), `the fixture uses event "${e.event}", which references/ledger.md does not list`);
+  }
 });
 
 test("scoping states the batched-questions contract", () => {
@@ -71,22 +184,84 @@ test("every bounded loop names a cap", () => {
     assert.match(read(`playbooks/${f}.md`), /Cap: \d+/, `playbooks/${f}.md declares no cap`);
 });
 
-// The green-gate invariant: a `committed` ledger event must carry the gate's outcome, so a
-// commit can never be recorded without the gate having been read.
-test("a committed ledger event carries the green-gate outcome", () => {
-  const ledger = readFileSync(join(root, "tests/fixtures/golden-path/ledger.md"), "utf8");
-  for (const line of ledger.split("\n"))
-    if (line.includes("event=committed")) assert.match(line, /outcome=green gate passed/);
-  assert.match(read("playbooks/executing-waves.md"), /green gate/i);
+// The green-gate invariant: a commit is recorded only after the gate ran, so the fixture must
+// carry a commit to judge, that commit must name the gate's outcome, and the events that gate
+// it — the report and the accepted verdict — must precede it for the same task.
+test("the ledger fixture records a gated commit, never a bare one", () => {
+  const events = ledgerEvents();
+  const committed = events.filter((e) => e.event === "committed");
+  assert.ok(committed.length > 0, "the ledger fixture records no `event=committed` — the green-gate assertions would run over nothing");
+  for (const c of committed) {
+    assert.match(c.outcome, /green gate passed/, `a commit was recorded with outcome "${c.outcome}", which does not name the gate`);
+    const before = events.filter((e) => e.task === c.task && e.at < c.at);
+    assert.ok(
+      before.some((e) => e.event === "report-received"),
+      `task=${c.task} was committed with no report-received event before it`
+    );
+    assert.ok(
+      before.some((e) => e.event === "review-verdict" && e.outcome === "accepted"),
+      `task=${c.task} was committed with no accepted review verdict before it`
+    );
+  }
 });
 
-// The no-direct-push invariant: no workflow may push to the release branch.
-test("no workflow pushes to the release branch", () => {
-  for (const f of readdirSync(join(root, ".github/workflows"))) {
-    const text = read(`.github/workflows/${f}`);
-    assert.doesNotMatch(text, /git push\s+\S*origin\s+main\b/, `${f} pushes main directly`);
-    assert.doesNotMatch(text, /branch:\s*main\b/, `${f} targets main directly`);
+test("executing-waves runs the green gate before the commit step, not after it", () => {
+  const t = read("playbooks/executing-waves.md");
+  const gate = t.indexOf("**Green gate (REQUIRED, deterministic).**");
+  const commit = t.indexOf("**Branch re-check, then commit.**");
+  assert.ok(gate > -1, "executing-waves.md has no green-gate step");
+  assert.ok(commit > -1, "executing-waves.md has no commit step");
+  assert.ok(gate < commit, "the commit step precedes the green gate");
+  assert.match(t.slice(gate, commit), /On failure, acceptance is blocked: no commit/);
+  assert.match(t.slice(commit), /on acceptance: a local commit/);
+});
+
+// The no-direct-push invariant: no workflow may push to the release branch. `main` is the
+// release branch — `.github/workflows/prepare-release.yml` states that nothing may push
+// straight to it, and the version bump travels in the dev → main PR instead.
+const RELEASE_BRANCH = "main";
+
+// Every `git push` in a shell snippet, reduced to the branches it would write. What matters is
+// each refspec's destination: `origin main`, `-u origin main`, `HEAD:main` and `"$REMOTE" main`
+// all write main, while `origin "devcycle--v$V"` writes a tag and `origin dev` writes dev.
+function pushTargets(text) {
+  const targets = [];
+  for (const line of text.split("\n")) {
+    // A `#` comment is prose, not a command. Without this, a workflow that merely mentions
+    // `git push origin main` in a comment reads as one that does it, and every following word
+    // on the line is parsed as a refspec. `#` only opens a comment at a line or word boundary,
+    // so it does not truncate a refspec that happens to contain one.
+    const code = line.replace(/(^|\s)#.*$/, "$1");
+    for (const [, rest] of code.matchAll(/\bgit push\b([^\n;&|]*)/g)) {
+      const positional = rest.trim().split(/\s+/).filter((t) => t && !t.startsWith("-"));
+      for (const spec of positional.slice(1)) {
+        // slice(1) drops the remote, which is never a refspec
+        const dest = spec.replace(/["']/g, "").replace(/^\+/, "").split(":").pop();
+        targets.push(dest.replace(/^refs\/heads\//, ""));
+      }
+    }
   }
+  return targets;
+}
+
+test("the push guard reads a refspec's destination, whatever form the push takes", () => {
+  const flagged = pushTargets(read("tests/fixtures/push-guard/pushes-main.yml"));
+  assert.equal(flagged.length, 5, `expected five pushes in the fixture, saw ${flagged.length}`);
+  for (const t of flagged) assert.equal(t, RELEASE_BRANCH, `an evasive push to main read as "${t}"`);
+  const allowed = pushTargets(read("tests/fixtures/push-guard/pushes-elsewhere.yml"));
+  assert.ok(allowed.length > 0, "the allowed-pushes fixture has no pushes in it");
+  for (const t of allowed) assert.notEqual(t, RELEASE_BRANCH, "a push that does not target main read as one");
+});
+
+test("no workflow pushes to the release branch", () => {
+  let pushes = 0;
+  for (const f of readdirSync(join(root, ".github/workflows"))) {
+    for (const target of pushTargets(read(`.github/workflows/${f}`))) {
+      pushes++;
+      assert.notEqual(target, RELEASE_BRANCH, `${f} pushes ${RELEASE_BRANCH} directly`);
+    }
+  }
+  assert.ok(pushes > 0, "no `git push` was found in any workflow — this guard would assert nothing");
 });
 
 // ---------------------------------------------------------------------------
@@ -127,8 +302,13 @@ test("harvested: auditing-a-repo/finding-format — every contract field, value 
   const t = read("references/findings.md");
   for (const field of ["Title", "Severity", "Location(s)", "What's wrong", "Why it's wrong", "Confidence", "Measured against"])
     assert.ok(t.includes(`| ${field} |`), `core field missing: ${field}`);
+  // Scoped to the document-fields list itself. A bare `t.includes(field)` passed on prose
+  // elsewhere in the file — "Impact" is satisfied by the sentence at :52 and "Complexity" by
+  // :53 — so deleting the list left the assertion green.
+  const docFields = t.match(/\*\*Document fields[^*]*\*\*\n\n([\s\S]*?)\n\n/)?.[1];
+  assert.ok(docFields, "references/findings.md no longer carries the document-fields list");
   for (const field of ["Category", "Impact", "Complexity", "Impact if unaddressed", "How to verify/reproduce", "Suggested fix direction", "Effort estimate"])
-    assert.ok(t.includes(field), `document-tier field missing: ${field}`);
+    assert.ok(docFields.includes(field), `document-tier field missing: ${field}`);
   assert.match(t, /T-shirt size \(S \/ M \/ L \/ XL\)/);
   assert.match(t, /Severity \(desc\) → Impact \(desc\) →\s+Complexity \(asc\)/);
 });
