@@ -290,7 +290,8 @@ Names are the shipped `playbooks/` files (§3); the ordering is the historical p
 
 ## 12. Migration Sequence
 
-Governing rule: **when a skill ships, the corresponding global-CLAUDE.md section is deleted in the same step** —
+Governing rule: **when a skill ships (historical: devcycle ships playbooks, not skills — this section records the migration as it was
+planned, not the surface as it stands), the corresponding global-CLAUDE.md section is deleted in the same step** —
 no phase is ever double-defined.
 
 1. Create the public repo: manifest + marketplace + README skeleton; declare superpowers dependency; install via

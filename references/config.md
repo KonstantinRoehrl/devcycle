@@ -66,12 +66,12 @@ by choice from one inherited from an older version.
 | evidence tail in reports | 10 lines | 20 lines | 50 lines |
 | branch-review round cap | 2 | 3 | 5 |
 | audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
-| dreaming depth | memory store only | + archives / findings / ledgers + user-correction turns | + raw transcripts |
+| learn depth | memory store only | + archives / findings / ledgers + user-correction turns | + raw transcripts |
 
 Which column applies, and when a knob overrides it, is the resolution order above —
 this table supplies the values, not the rule for choosing them.
 
-The dreaming depth column controls how deep into the corpus a run mines, staged densest signal
+The learn depth column controls how deep into the corpus a run mines, staged densest signal
 first: **memory → archives/findings/ledgers → user-correction turns → raw transcript text**.
 Gating is by profile, never by token budget or a signal heuristic — a budget gate would make
 coverage nondeterministic and destroy the marginal-vs-first-run comparison the measurement gate

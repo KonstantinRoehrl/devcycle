@@ -12,7 +12,7 @@ Announce the mode and the scope this run covers; report per `${CLAUDE_PLUGIN_ROO
 
 ## Profile, instructions, checkpoints
 
-Resolve `profile` per `${CLAUDE_PLUGIN_ROOT}/references/config.md` (dreaming depth row); the slice
+Resolve `profile` per `${CLAUDE_PLUGIN_ROOT}/references/config.md` (learn depth row); the slice
 table below carries which slices each profile admits, `lean` — the memory store alone — included, so
 the checkpoint always advances. A free-text `instructions` argument steers *what the run looks for*:
 a synthesis pass, not an editor, so a line-targeted imperative is a no-op.
