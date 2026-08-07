@@ -11,6 +11,7 @@ import {
   summarizeSession, formatReport, budgetBand, resolveDepth,
   extractPluginVersion, emitCandidates, configDrift, findTranscriptFiles,
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
+  cohortTable,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -1021,4 +1022,50 @@ test("cli: --json labels the in-flight exclusion too, not the text report alone"
   assert.strictEqual(parsed.sessions[0].inFlight, true);
   assert.strictEqual(parsed.inFlight.excluded, 1);
   assert.match(parsed.inFlight.note, /approximation/i);
+});
+
+test("cohortTable carries n, total, median $/session and median depth per version", () => {
+  const rows = cohortTable([
+    { pluginVersion: "0.9.2", costByStage: { a: 1.0, b: 1.0 }, medianDepth: 10 },
+    { pluginVersion: "0.9.2", costByStage: { a: 3.0, b: 1.0 }, medianDepth: 20 },
+    { pluginVersion: "0.10.1", costByStage: { a: 5.0 }, medianDepth: 30 },
+  ]);
+  const v092 = rows.find((r) => r.version === "0.9.2");
+  assert.strictEqual(v092.sessions, 2);
+  assert.strictEqual(v092.total, 6.0);
+  assert.strictEqual(v092.medianPerSession, 3.0);
+  assert.strictEqual(v092.medianDepth, 15);
+});
+
+test("cohortTable orders versions numerically with unknown last", () => {
+  const rows = cohortTable([
+    { pluginVersion: "0.10.1", costByStage: { a: 1 }, medianDepth: 1 },
+    { pluginVersion: null, costByStage: { a: 1 }, medianDepth: 1 },
+    { pluginVersion: "0.4.0", costByStage: { a: 1 }, medianDepth: 1 },
+    { pluginVersion: "0.9.2", costByStage: { a: 1 }, medianDepth: 1 },
+  ]);
+  assert.deepStrictEqual(rows.map((r) => r.version), ["0.4.0", "0.9.2", "0.10.1", "unknown"]);
+});
+
+test("the default text report renders the cohort table", () => {
+  const rendered = { costUSD: 1.0, models: {}, tools: {} };
+  const text = formatReport([
+    { ...rendered, pluginVersion: "0.9.2", costByStage: { a: 1.0 }, medianDepth: 10 },
+    { ...rendered, pluginVersion: "0.10.1", costByStage: { a: 2.0 }, medianDepth: 20 },
+  ]);
+  assert.match(text, /0\.9\.2/);
+  assert.match(text, /0\.10\.1/);
+  // The version strings alone are already printed by the version-regression candidate line, so
+  // pin the table itself: a row per cohort carrying its n.
+  assert.match(text, /Per-version cohorts:/);
+  assert.match(text, /0\.9\.2\s+n=\s*1/);
+  assert.match(text, /0\.10\.1\s+n=\s*1/);
+});
+
+test("the report prints the depth-band fraction-of-window caveat", () => {
+  const rendered = { costUSD: 1.0, models: {}, tools: {} };
+  const text = formatReport([
+    { ...rendered, pluginVersion: "0.10.1", costByStage: { a: 1.0 }, medianDepth: 10 },
+  ]);
+  assert.match(text, /fraction of the .*window/i);
 });

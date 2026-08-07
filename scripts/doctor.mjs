@@ -213,6 +213,25 @@ export function versionCohorts(summaries) {
   return cohorts;
 }
 
+// The per-version comparison table: one row per cohort, ordered oldest to newest with the
+// undetectable-version bucket last so it never sits between two real versions.
+export function cohortTable(summaries) {
+  const cohorts = versionCohorts(summaries);
+  const known = [...cohorts.keys()].filter((v) => v !== "unknown").sort(compareVersions);
+  const order = cohorts.has("unknown") ? [...known, "unknown"] : known;
+  return order.map((version) => {
+    const c = cohorts.get(version);
+    return {
+      version,
+      sessions: c.sessions,
+      total: c.dollars.reduce((a, b) => a + b, 0),
+      medianPerSession: median(c.dollars),
+      medianDepth: c.depths.length ? median(c.depths) : null,
+      inferred: version === "unknown" ? "no version detectable" : null,
+    };
+  });
+}
+
 // A cohort of one is a sample, not a trend. Marked at every render site rather than left for
 // the reader to infer from sessions_sampled.
 const isLowConfidence = (c) => c.sessions_sampled === 1;
@@ -578,6 +597,10 @@ const IN_FLIGHT_NOTE =
   "medians and still counted in the corpus. In-flight detection is a recency approximation: " +
   "transcripts carry no end marker, so a finished session reads as live for 30 minutes.";
 
+const DEPTH_DISCLOSURE =
+  "Depth bands are a fraction of the model's context window, not an absolute token count: " +
+  "the same depth reads as a different band on a different model.";
+
 const usd = (n) => "$" + (n >= 1 ? n.toFixed(2) : n.toFixed(4));
 
 // Largest first, so each section leads with what actually costs money.
@@ -657,8 +680,17 @@ export function formatReport(summaries) {
       `note: ${inFlightCount} session(s) still in flight (newest record < 30 min old) — ` +
         IN_FLIGHT_NOTE,
     );
+  lines.push("", "Per-version cohorts:");
+  for (const r of cohortTable(summaries))
+    lines.push(
+      `  ${r.version.padEnd(10)} n=${String(r.sessions).padStart(3)}  ` +
+      `total=$${r.total.toFixed(2).padStart(9)}  median/session=$${r.medianPerSession.toFixed(2).padStart(7)}  ` +
+      `median depth=${r.medianDepth === null ? "n/a" : r.medianDepth}` +
+      (r.version === "unknown" ? "   (inferred: no version detectable)" : "")
+    );
+  lines.push("");
   for (const c of emitCandidates(summaries)) lines.push(formatCandidate(c));
-  lines.push("", vintage, DISCLOSURE, "");
+  lines.push("", vintage, DISCLOSURE, DEPTH_DISCLOSURE, "");
   for (const s of summaries) {
     const modelList = Object.keys(s.models).join(", ") || "none";
     const toolList = Object.entries(s.tools).map(([k, v]) => `${k}:${v}`).join(", ") || "none";
@@ -845,6 +877,7 @@ function main() {
           sessions: result.sessions,
           totals: result.totals,
           candidates: emitCandidates(result.sessions),
+          version_cohorts: cohortTable(result.sessions),
           inFlight: {
             excluded: result.sessions.filter((s) => s.inFlight).length,
             thresholdMs: IN_FLIGHT_MS,
