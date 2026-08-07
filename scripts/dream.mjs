@@ -305,13 +305,18 @@ const normalizePhrase = (s) =>
 // later run — so a signature could otherwise match the very run that reported it.
 // Excluded from the recurrence corpus only; --plan's mining corpus still sees them.
 // The ids are the commands that run these two scripts. `dreaming-across-sessions` is the
-// pre-v0.12 id for what is now `learn`, kept because the corpus is historical transcripts
-// that still carry it — dropping it would re-admit every dream recorded before the rename.
+// pre-v0.12 id for what is now `learn`, kept for transcripts that may carry it: this is a
+// shipped plugin, so v0.11-era transcripts exist on installed machines even though none of
+// the transcripts readable here carry the id. Dropping it would re-admit every dream
+// recorded before the rename.
 const SELF_ATTRIBUTION_RE = /^devcycle:(learn|dreaming-across-sessions|doctor)$/;
 function isSelfRecord(r) {
   if (SELF_ATTRIBUTION_RE.test(r.attributionSkill ?? "")) return true;
   const content = r.message?.content;
   if (!Array.isArray(content)) return false;
+  // Nothing devcycle emits today reaches this arm — the plugin ships no skills, and
+  // validate.mjs check 3 forbids naming a playbook by a `devcycle:` id — so it is here for
+  // pre-v0.12 transcripts alone, on the same reasoning as the retired id above.
   for (const item of content)
     if (
       item &&

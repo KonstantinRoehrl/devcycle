@@ -4,9 +4,17 @@
 // Read-only. Emits counts, dollars, model ids, tool names, and skill names only.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { basename, dirname, join, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { PRICING, priceFor } from "./pricing.mjs";
+
+// The plugin root, derived from this script's own location (scripts/ is a sibling of
+// references/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
+// not in a script's own environment, and the documented `--drift` invocation runs from the
+// target repo — so reading it from process.env resolved the changelog against the wrong
+// tree. See docs/platform-notes.md section (c).
+const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const CHANGELOG_PATH = join(PLUGIN_ROOT, "references", "config-changelog.md");
 
 const DEVCYCLE_PREFIX = /^devcycle:/;
 const PLUGIN_VERSION_RE = /devcycle\/devcycle\/(\d+\.\d+\.\d+)\//;
@@ -52,6 +60,9 @@ export function isDevcycleSession(records) {
     if (DEVCYCLE_PREFIX.test(r.attributionSkill ?? "")) return true;
     const content = r.message?.content;
     if (!Array.isArray(content)) continue;
+    // Nothing devcycle emits today reaches this arm — the plugin ships no skills, and
+    // validate.mjs check 3 forbids naming a playbook by a `devcycle:` id. It stays for
+    // pre-v0.12 transcripts, which are the corpus on any machine that ran an earlier release.
     for (const item of content) {
       if (
         item &&
@@ -272,14 +283,19 @@ export function emitCandidates(summaries) {
   return candidates;
 }
 
-export function configDrift(targetPath, changelogPath) {
-  const changelogText = readFileSync(changelogPath, "utf8");
+// Returns what it checked, not just what it found: `findings` alone cannot tell a target
+// with no stale references apart from a changelog that yielded no stale keys to look for.
+// Every input failure throws — a changelog it could not read or parse is a broken run, and
+// reporting that as an empty findings list is the same as reporting the target clean.
+export function configDrift(targetPath, changelogPath = CHANGELOG_PATH) {
+  const changelogText = read(changelogPath, "config changelog");
   const yamlMatch = changelogText.match(/```yaml\n([\s\S]*?)```/);
-  if (!yamlMatch) return [];
-  const records = parseChangelogYaml(yamlMatch[1]);
+  const records = yamlMatch ? parseChangelogYaml(yamlMatch[1]) : [];
+  if (records.length === 0)
+    throw new Error(`no records parsed from the config changelog at ${changelogPath} — expected a yaml block of \`- version:\` records`);
   const stale = records.filter((r) => r.change === "deprecated" || r.change === "renamed" || r.change === "removed");
 
-  const targetLines = readFileSync(targetPath, "utf8").split("\n");
+  const targetLines = read(targetPath, "drift target").split("\n");
   const findings = [];
   targetLines.forEach((line, i) => {
     for (const r of stale) {
@@ -295,7 +311,17 @@ export function configDrift(targetPath, changelogPath) {
       }
     }
   });
-  return findings;
+  return { findings, recordsParsed: records.length, staleKeys: stale.length };
+}
+
+// Reads a file the caller named, turning the raw errno into a message that says which input
+// failed — the drift path reports these as `doctor: <message>`, never as a stack trace.
+function read(path, label) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (err) {
+    throw new Error(`cannot read the ${label} at ${path} (${err.code ?? err.message})`);
+  }
 }
 
 // Minimal indented-list YAML parser for config-changelog.md's fixed record shape —
@@ -560,13 +586,16 @@ export function formatReport(summaries) {
   return lines.join("\n");
 }
 
-// Recursively collects .jsonl transcript files under dir. Returns null when dir
-// cannot be read at all (missing or not a directory).
+// Recursively collects .jsonl transcript files under dir. Returns null when dir is simply
+// not there (missing, or a path that is not a directory).
 export function findTranscriptFiles(dir) {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
+  } catch (err) {
+    // Same rule as readRecords below: an absent path is "nothing here", but a permissions
+    // or I/O failure is a real fault and must not read as a directory holding no transcripts.
+    if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
     return null;
   }
   const files = [];
@@ -663,15 +692,27 @@ function run(args) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.drift) {
-    const changelogPath = join(
-      process.env.CLAUDE_PLUGIN_ROOT ?? ".",
-      "references/config-changelog.md"
-    );
-    const findings = configDrift(args.drift, changelogPath);
+    let result;
+    try {
+      result = configDrift(args.drift, CHANGELOG_PATH);
+    } catch (e) {
+      console.error(`doctor: ${e.message}`);
+      process.exit(1);
+    }
+    const { findings, recordsParsed, staleKeys } = result;
     if (args.json) {
-      console.log(JSON.stringify(findings, null, 2));
+      console.log(JSON.stringify({ findings, recordsParsed, staleKeys }, null, 2));
+    } else if (staleKeys === 0) {
+      // Not the same result as a clean target: there was nothing to match against.
+      console.log(
+        `config-drift: nothing to check — the changelog carries no deprecated/renamed/removed keys ` +
+          `(${recordsParsed} record(s) parsed), so no reference in ${args.drift} can be flagged stale`
+      );
     } else if (findings.length === 0) {
-      console.log(`config-drift: ok (no stale references found in ${args.drift})`);
+      console.log(
+        `config-drift: ok — no stale references in ${args.drift} ` +
+          `(${staleKeys} stale key(s) checked, from ${recordsParsed} changelog record(s))`
+      );
     } else {
       console.log(
         findings
@@ -697,7 +738,14 @@ function main() {
     }
     return;
   }
-  const result = run(args);
+  let result;
+  try {
+    result = run(args);
+  } catch (e) {
+    // An unreadable transcript directory reaches here rather than being counted as empty.
+    console.error(`doctor: ${e.message}`);
+    process.exit(1);
+  }
   if (!result.ok) {
     console.error("SESSION METRICS FAILED:\n" + result.reasons.map((r) => ` - ${r}`).join("\n"));
     process.exit(1);

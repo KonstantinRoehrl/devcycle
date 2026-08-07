@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 const SCRIPT = join(process.cwd(), "scripts/duplication-check.mjs");
 
@@ -194,6 +194,74 @@ test("exempts the declared shared-preamble convention on both sides of a pair", 
   try {
     const out = execFileSync(process.execPath, [SCRIPT], { ...PIPE, cwd: dir });
     assert.match(out, /duplication-check: ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A corpus this run never read is not a clean corpus. Each case below would have printed
+// `duplication-check: ok` and exited 0 while comparing nothing.
+const runCheck = (args, cwd) =>
+  spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", cwd });
+
+test("a --dir that does not exist fails instead of reporting a clean corpus", () => {
+  const dir = makeFixture({ "a.md": "# A\n" });
+  try {
+    const res = runCheck(["--dir", join(dir, "typo")], dir);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.doesNotMatch(res.stdout, /duplication-check: ok/);
+    assert.match(res.stderr, /duplication-check: cannot scan/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a --dir with no value fails instead of reporting a clean corpus", () => {
+  const dir = makeFixture({ "a.md": "# A\n" });
+  try {
+    const res = runCheck(["--dir"], dir);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.doesNotMatch(res.stdout, /duplication-check: ok/);
+    assert.match(res.stderr, /--dir needs a directory path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an unreadable subdirectory fails instead of being skipped in silence", () => {
+  const dir = makeFixture({ "a.md": "# A\n", "sub/b.md": "# B\n" });
+  chmodSync(join(dir, "sub"), 0o000);
+  try {
+    const res = runCheck(["--dir", dir], dir);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /duplication-check: cannot scan/);
+  } finally {
+    chmodSync(join(dir, "sub"), 0o755);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a corpus with no markdown in it fails instead of passing on nothing", () => {
+  const dir = makeFixture({ "notes.txt": "not markdown\n" });
+  try {
+    const res = runCheck(["--dir", dir], dir);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /no \.md files/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the ok line states how much was actually compared", () => {
+  const dir = makeFixture({
+    "a.md":
+      "# A\n\nThis paragraph is entirely about how a wave's tasks are dispatched in one " +
+      "message so that they all run at the same time, and it shares no real overlap with " +
+      "the next file.\n",
+  });
+  try {
+    const out = execFileSync(process.execPath, [SCRIPT, "--dir", dir], { ...PIPE, cwd: dir });
+    assert.match(out, /duplication-check: ok \(1 paragraph\(s\) across 1 file\(s\)\)/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

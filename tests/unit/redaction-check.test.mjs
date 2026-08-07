@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { makeRepo, sh } from "./helpers.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/redaction-check.mjs");
+const HASHES = join(process.cwd(), "scripts/redaction-hashes.txt");
 
 // Every leaky fixture below is assembled from fragments so this file — which is itself
 // tracked and scanned by the real run — never carries a literal a pattern would match.
@@ -103,6 +105,67 @@ test("passes hex strings that are not session ids", () => {
     "a.md": "Pinned to 3d3c42e5aac5ba805825da76410c181273ba90b1 (v7.0.1), released 2026-08-06.\n",
     "b.md": "Version 0.11.1 shipped; the tag is devcycle--v0.11.1.\n",
   });
+});
+
+// The no-argument path: a `git archive` extraction or an unpacked tarball is not a git
+// checkout, and the gate has to keep working there rather than dying on `git ls-files`.
+const runInCwd = (cwd) =>
+  spawnSync(process.execPath, [SCRIPT, "--hashes", HASHES], { encoding: "utf8", cwd });
+
+test("scans the working tree when run outside a git checkout, and still catches a leak", () => {
+  const dir = makeFixture({ "a.md": `See ${MAC_HOME}/Programming/thing for details.\n` });
+  try {
+    const res = runInCwd(dir);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.doesNotMatch(res.stderr, /not a git repository/);
+    assert.match(res.stderr, /home-directory path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("outside a git checkout it discloses the fallback and still skips node_modules", () => {
+  const dir = makeFixture({ "a.md": "Run it from ~/.claude/plugins.\n" });
+  mkdirSync(join(dir, "node_modules"));
+  writeFileSync(join(dir, "node_modules", "leaky.md"), `Session ${SESSION_ID}\n`, "utf8");
+  try {
+    const res = runInCwd(dir);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout, /redaction: ok/);
+    assert.match(res.stderr, /not a git checkout/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("inside a git checkout it still scans git's file list, not the whole tree", () => {
+  const repo = makeRepo();
+  writeFileSync(join(repo, "tracked.md"), "Nothing sensitive here at all.\n", "utf8");
+  sh("git", ["add", "tracked.md"], { cwd: repo });
+  // Untracked, so git's own file list excludes it: a tree walk would flag it.
+  writeFileSync(join(repo, "untracked.md"), `Session ${SESSION_ID}\n`, "utf8");
+  try {
+    const res = runInCwd(repo);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout, /redaction: ok/);
+    assert.doesNotMatch(res.stderr, /not a git checkout/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a run that scanned no file at all fails instead of reporting ok", () => {
+  const dir = makeFixture({});
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--dir", dir, "--hashes", HASHES], {
+      encoding: "utf8",
+      cwd: dir,
+    });
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /no files to scan/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("still flags a deny-listed term, read from the hashes file", () => {

@@ -37,17 +37,22 @@ const targetDir = dirFlagIdx === -1 ? root : args[dirFlagIdx + 1];
 
 const errors = [];
 const fail = (m) => errors.push(m);
+// A corpus this run could not read is not a clean corpus: every abort below would otherwise
+// have printed `duplication-check: ok` in CI while comparing nothing.
+const abort = (m) => {
+  console.error(`duplication-check: ${m}`);
+  process.exit(1);
+};
 
+if (dirFlagIdx !== -1 && !targetDir) abort("--dir needs a directory path");
+
+// Read errors propagate: a directory that cannot be listed is reported, never skipped.
 function collectFiles(dir) {
   const out = [];
-  try {
-    for (const name of [...readdirSync(dir)].sort()) {
-      const p = join(dir, name);
-      if (statSync(p).isDirectory()) out.push(...collectFiles(p));
-      else if (p.endsWith(".md")) out.push(p);
-    }
-  } catch {
-    // ignore permission errors
+  for (const name of [...readdirSync(dir)].sort()) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) out.push(...collectFiles(p));
+    else if (p.endsWith(".md")) out.push(p);
   }
   return out;
 }
@@ -138,7 +143,14 @@ function jaccard(a, b) {
   return union === 0 ? 0 : intersection / union;
 }
 
-const files = targetFiles();
+let files;
+try {
+  files = targetFiles();
+} catch (e) {
+  abort(`cannot scan ${targetDir}: ${e.message}`);
+}
+if (files.length === 0) abort(`no .md files under ${targetDir} — nothing was compared`);
+
 const entries = [];
 for (const f of files) {
   paragraphs(f).forEach((text, idx) => {
@@ -174,4 +186,4 @@ if (errors.length) {
   console.error("DUPLICATION CHECK FAILED:\n" + errors.map((e) => " - " + e).join("\n"));
   process.exit(1);
 }
-console.log("duplication-check: ok");
+console.log(`duplication-check: ok (${entries.length} paragraph(s) across ${files.length} file(s))`);
