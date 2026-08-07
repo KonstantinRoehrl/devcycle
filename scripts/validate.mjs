@@ -52,6 +52,7 @@ function frontmatter(path) {
 let budget = 0;
 if (existsSync(join(root, "commands")))
   for (const f of readdirSync(join(root, "commands"))) {
+    if (!f.endsWith(".md")) continue; // a stray .DS_Store is not a command
     const fm = frontmatter(join(root, "commands", f));
     if (!fm?.description) fail(`commands/${f}: frontmatter needs description`);
     else budget += fm.description.length;
@@ -127,12 +128,19 @@ for (const p of surface) {
 }
 
 // 5. A playbook that emits a handoff block must name the reference that owns its shape.
+//    The tree spells the same act three ways, so all three count: a heading naming the
+//    handoff (`## Handoff`, `## Output and handoff`), a bold run-in step label
+//    (`6. **Handoff.**`), and the inline instruction "emit the handoff block". Prose that
+//    denies emitting one ("emits no handoff block") describes a non-emitter and is
+//    deliberately not matched — three playbooks say exactly that and owe no reference.
+const EMITS_HANDOFF = [/^#{1,6}\s.*handoff/i, /\*\*handoff\b/i, /\bemit the handoff\b/i];
 if (existsSync(join(root, "playbooks")))
   for (const f of readdirSync(join(root, "playbooks"))) {
     if (!f.endsWith(".md")) continue;
     const text = readFileSync(join(root, "playbooks", f), "utf8");
-    if (text.includes("## Handoff") && !text.includes("references/handoff.md"))
-      fail(`playbooks/${f}: emits "## Handoff" without referencing references/handoff.md`);
+    if (text.includes("references/handoff.md")) continue;
+    const at = text.split("\n").findIndex((l) => EMITS_HANDOFF.some((p) => p.test(l)));
+    if (at !== -1) fail(`playbooks/${f}:${at + 1}: emits a handoff block without referencing references/handoff.md`);
   }
 
 // 6. Every command appears exactly once in the routing table, and its declared consequence
@@ -147,6 +155,17 @@ else if (existsSync(join(root, "commands"))) {
     rows.set(name, consequence);
   }
   const GUARD_REQUIRED = new Set(["side-effectful", "resume"]);
+  // `confirm-first` is the deliberate exception class, so each member names its
+  // justification inline — as prose, since the table has no column for one. A bare label
+  // ("**`cycle`'s justification.**" with nothing behind it) is not a justification, which
+  // is what the character floor rules out.
+  const JUSTIFICATION_MIN_CHARS = 80;
+  const prose = routing.split(/\n[ \t]*\n/).filter((b) => !b.trimStart().startsWith("|"));
+  const justifies = (name) =>
+    prose.some(
+      (b) =>
+        b.includes(`\`${name}\``) && /justif/i.test(b) && b.replace(/\s+/g, " ").trim().length >= JUSTIFICATION_MIN_CHARS
+    );
   for (const f of readdirSync(join(root, "commands"))) {
     if (!f.endsWith(".md")) continue;
     const name = f.replace(/\.md$/, "");
@@ -157,6 +176,8 @@ else if (existsSync(join(root, "commands"))) {
       fail(`commands/${f}: consequence "${consequence}" requires disable-model-invocation: true`);
     if (consequence === "read-only" && guarded)
       fail(`commands/${f}: consequence "read-only" forbids disable-model-invocation`);
+    if (consequence === "confirm-first" && !justifies(name))
+      fail(`references/routing.md: \`${name}\` is confirm-first but names no justification — the exception class requires one inline`);
   }
   for (const name of rows.keys())
     if (!existsSync(join(root, `commands/${name}.md`)))
@@ -220,6 +241,38 @@ for (const f of namesIn("references")) {
     (p) => !rel(p).endsWith(needle) && readFileSync(p, "utf8").includes(needle)
   );
   if (!consumed) fail(`references/${f}: no consumer — every reference must be loaded by something`);
+}
+
+// 12. The state file's shape is declared once and carried by a fixture, and the two agree —
+//     the guard on resumability after `/clear`, which nothing else checks. The declaration is
+//     the `# devcycle state` template in references/resume.md; the fixture is any .md under
+//     tests/fixtures/ whose first line is that same header. A row the declaration names must
+//     be present and carry a value; an extra row is not drift (references/resume.md lets a
+//     stage add evidence rows of its own). A declaration with no fixture is the failure this
+//     check exists to prevent, so it fails rather than passing on an empty subject.
+const STATE_HEADER = "# devcycle state";
+const resumePath = join(root, "references/resume.md");
+const stateTemplate = existsSync(resumePath)
+  ? readFileSync(resumePath, "utf8").match(new RegExp(`^${STATE_HEADER}\\n(?:- .*\\n)+`, "m"))?.[0] ?? ""
+  : "";
+const stateFields = [...stateTemplate.matchAll(/^- ([A-Za-z][A-Za-z0-9_-]*):/gm)].map((m) => m[1]);
+const fixturesDir = join(root, "tests/fixtures");
+const stateFixtures = (existsSync(fixturesDir) ? [...walk(fixturesDir)] : []).filter(
+  (p) => p.endsWith(".md") && readFileSync(p, "utf8").startsWith(STATE_HEADER)
+);
+if (stateFields.length && !stateFixtures.length)
+  fail(
+    `tests/fixtures/: references/resume.md declares the state file's ${stateFields.length} fields and no fixture carries them — the resume invariant has no guard`
+  );
+for (const p of stateFixtures) {
+  if (!stateFields.length) {
+    fail(`${rel(p)}: state-file shape unverifiable — references/resume.md declares no "${STATE_HEADER}" template`);
+    continue;
+  }
+  const text = readFileSync(p, "utf8");
+  const missing = stateFields.filter((f) => !new RegExp(`^- ${f}:[ \\t]*\\S`, "m").test(text));
+  if (missing.length)
+    fail(`${rel(p)}: state file drifted from references/resume.md — no value for: ${missing.join(", ")}`);
 }
 
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
