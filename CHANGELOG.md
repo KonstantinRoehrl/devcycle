@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.0
+
+- feat(surface): collapse to seven commands and rename audit, dream and distill
+
 devcycle's command surface is now seven verbs, and the plugin ships no skill ids at all —
 playbooks are loaded by path from the command that runs them. Three entry points were renamed.
 Pre-1.0, so there are no aliases and no deprecation period: **update any saved prompt, wrapper
