@@ -43,8 +43,14 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
 - When the verification command chains multiple steps with `&&`, brace-group them before
   redirecting — `{ c1 && c2; } > file 2>&1` — never the bare `c1 && c2 > file 2>&1` form,
   which redirects only the last command and silently drops every earlier command's output.
-- The captured command is the repo's whole verification gate, not a subset of it; capturing
-  fewer commands than the gate runs is a declared deviation.
+- The captured command for `-before.txt` and `-after.txt` is always the repo's whole
+  verification gate; capturing fewer commands than the gate runs in either file is a
+  declared deviation. The normal `red-green` case is a task whose own new tests fail that
+  whole gate, so `-before.txt` exits non-zero honestly. When a task's red is instead a
+  subset inside an otherwise-green suite — new tests added to a file that's part of a
+  green whole — the whole-gate `-before.txt` legitimately exits 0; capture the honest
+  subset red as a third file, `.devcycle/evidence/<task-id>-red.txt`, running just the
+  subset command, before any implementation code is written.
 
 The report itself is a file on the same principle: the implementer writes it to
 `.devcycle/reports/<task-id>.md` in the shape below, and the dispatch returns only the short
@@ -73,23 +79,15 @@ an inlined evidence tail.
   invoked, and `sweep-after.txt` from step 5's real-tree verify; `.devcycle/sweep-report.json`
   keeps the per-file detail.
 
-## Scenario evidence
-
-`CONTRIBUTING.md`'s "The scenario harness" section owns the scenario file shape and its
-`## Baseline (red)` / `## Result (green)` sections; this settles one contested point about
-them. Both sections are **required** in every scenario file, including `Type: discipline`
-scenarios — never omitted. When a scenario is authored without a run having been executed,
-the sections carry honest "Not yet run" placeholders instead. (Two reviewers previously
-ruled opposite ways on this; the omission side is rejected and must not be reintroduced.)
-
 ## Reviewer verdicts
 
 The reviewer reads the named evidence files directly rather than trusting the tail in the
 report. Reject when:
 
 - a named evidence file is missing or empty;
-- an exit status contradicts the declared class — a `red-green` "before" that exited 0, or
-  a `green-green` "before" that did not exit 0;
+- an exit status contradicts the declared class with no explanation for it — a `red-green`
+  "before" that exited 0 without an accompanying `<task-id>-red.txt` subset-red file, or a
+  `green-green` "before" that did not exit 0;
 - the class mismatches the diff.
 
 ## Why the evidence lives in files
