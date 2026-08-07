@@ -2,7 +2,7 @@
 
 Produce an implementation plan that wave-based parallel execution can consume. Report per
 `${CLAUDE_PLUGIN_ROOT}/references/output.md`. **Announce at start:** "I'm using the planning-waves
-skill to create the implementation plan."
+playbook to create the implementation plan."
 
 ## Engine selection (keyed to `profile`)
 

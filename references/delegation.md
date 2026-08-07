@@ -78,7 +78,7 @@ The procedure, named rather than restated by the stages that run it:
 
 The coordinator never tells a subagent to go invoke graphify: a subagent's skill list may
 differ from the coordinator's, and content a subagent must fetch can be silently skipped while
-injected content cannot (`${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`).
+injected content cannot (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Preloading a class into a brief).
 
 Each caller supplies its own relevance filter — `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` judges against
 the request itself, since scope is not yet confirmed; `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` against the

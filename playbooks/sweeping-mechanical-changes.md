@@ -8,7 +8,7 @@ one supervised pass: derive the sweep parameters from the repo, confirm the exac
 reviewer pass, hand to finish. Subagent implementers, the plan file, and the wave ledger are dropped;
 nothing in the steps below is.
 
-**Announce at start:** "I'm using the sweeping-mechanical-changes skill to run this as a supervised sweep."
+**Announce at start:** "I'm using the sweeping-mechanical-changes playbook to run this as a supervised sweep."
 
 ## The sweep walk
 

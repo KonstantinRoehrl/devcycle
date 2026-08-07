@@ -152,8 +152,9 @@ conversation that produced it is then expendable. Each boundary picks the cheape
 
 Mechanics:
 
-- **Handoff block** — every stage skill's required final output: artifact paths, pinned carry-overs (interfaces,
-  open decisions), and a ready-made compaction hint for the user (skills cannot invoke /compact themselves).
+- **Handoff block** — every stage playbook's required final output: artifact paths, pinned carry-overs
+  (interfaces, open decisions), and a ready-made compaction hint for the user (playbooks cannot invoke
+  /compact themselves).
 - **State file** — `.devcycle/state.md`: current stage, artifact paths, branch. `/devcycle:continue`
   re-derives pipeline position from state + ledger + plan, making **clear-and-resume** viable (cheaper and
   cleaner than compaction).

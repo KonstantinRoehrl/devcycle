@@ -127,8 +127,8 @@ Follow `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s Committing rule first (a t
 default or integration branch), minus its `branch:`-line write. Then, per adopted candidate:
 
 1. **Apply the edit** and commit it scoped per
-   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit". Any skill or
-   playbook file touched here gets `superpowers:writing-skills`-style scenario testing first.
+   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit". Any playbook
+   file touched here is checked first against `tests/unit/golden-path.test.mjs`, `scripts/validate.mjs`, `scripts/redaction-check.mjs`, and `scripts/duplication-check.mjs`.
 2. **Record the promotion** once that commit lands: write the JSON (`title`, `promotionType`,
    `clusterSignature`, `filesTouched`, `landed`, `commit`) to a scratch file and pass it with the
    double-quoted `$(cat …)` form, never inline single quotes, which an apostrophe in

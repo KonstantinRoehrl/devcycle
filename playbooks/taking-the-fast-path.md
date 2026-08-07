@@ -8,7 +8,7 @@ in-session pass: implement, commit, one reviewer pass, hand to finish. The cerem
 (subagents, plan file, ledger events) is what gets dropped; every guardrail in the steps below
 still binds.
 
-**Announce at start:** "I'm using the fast-path skill to implement this in-session."
+**Announce at start:** "I'm using the taking-the-fast-path playbook to implement this in-session."
 
 Report as `${CLAUDE_PLUGIN_ROOT}/references/output.md` requires.
 

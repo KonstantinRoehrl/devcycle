@@ -38,7 +38,7 @@ unreadable.
 | What's wrong | symptom-first, plain language |
 | Why it's wrong | the mechanism / root cause |
 | Confidence | `verified` or `suspected` — never omitted, never upgraded because the pattern is familiar |
-| Measured against | a named repo convention, or a named external source, per `quality-criteria.md` § Precedence — a finding measured against neither is not reported |
+| Measured against | a named repo convention, or a named external source, per `quality-criteria.md` § Precedence |
 
 A surface with a compact output shape (a verdict list, the panel's JSON) carries these
 fields in its own shape rather than as headed prose; the fields themselves are not
