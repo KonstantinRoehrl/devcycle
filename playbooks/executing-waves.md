@@ -71,15 +71,17 @@ file conflicts these invariants already preserve.)
      `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Preloading a class into a brief names.
 3. **Dispatch devcycle:implementer** with that brief only, never accumulated session history or other
    tasks' reports, on the model `references/config.md` resolves. The dispatch prompt must NEVER
-   instruct the implementer to commit, stage, or push. Ledger `event=dispatched`. It returns the
-   implementer envelope `references/delegation.md` defines — never the report body — and that
-   envelope's on-device count is what triggers the checklist below.
-4. **Confirm the report file exists** at the envelope's named path before logging
-   `event=report-received` with `ref=` that path: the envelope's `report:` field is the implementer's
-   claim, not proof. A missing file is treated the way step 6 treats a failed green gate — ledger
-   `event=report-received outcome=rejected (missing report file)` with `ref=` the named path, then
-   back to the implementer, no reviewer dispatch. The coordinator neither produces nor reads the task
-   diff; step 5 does both.
+   instruct the implementer to commit, stage, or push. Ledger `event=dispatched`, then a `dispatch` line
+   via `run-record.mjs append`. It returns the implementer envelope `references/delegation.md` defines —
+   never the report body — and that envelope's on-device count is what triggers the checklist below.
+4. **Confirm the report file exists** at the envelope's named path, **and that it carries the fields
+   its declared evidence class requires** (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` owns the
+   classes), before logging `event=report-received` with `ref=` that path: the envelope's `report:`
+   field is the implementer's claim, not proof. Append `run-record.mjs append --kind verdict`. A
+   missing file, or a missing or mismatched field, is treated the way step 6 treats a failed green
+   gate — ledger `event=report-received outcome=rejected (missing report file)` with `ref=` the named
+   path, then back to the implementer, no reviewer dispatch, and `conformance=fail` on the verdict
+   line. The coordinator neither produces nor reads the task diff; step 5 does both.
 5. **Dispatch devcycle:task-reviewer** (read-only) with the brief, the report path, the task's file
    list, the two evidence-file paths the report names, and the task's constraints block, instructing
    it to produce the diff itself: `git add -N <new files>` first, or they are invisible to diff, then
@@ -105,7 +107,7 @@ file conflicts these invariants already preserve.)
    rather than committing to the wrong branch. Then, on acceptance: a local commit with a
    Conventional Commit subject, scoped per
    `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit". Ledger
-   `event=committed` with the sha.
+   `event=committed` with the sha, then `run-record.mjs append --kind commit` with the task id and sha.
 
 **Trigger: this commit closes the wave.** When no task in the current wave remains undispatched, in
 review, or uncommitted, stop here — before forming the next wave — and follow ## Wave boundaries and
