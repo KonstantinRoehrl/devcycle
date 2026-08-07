@@ -13,7 +13,7 @@ The coordinator does exactly these things itself, and delegates everything else 
 - run the green gate and read its exit status;
 - create commits;
 - append the ledger;
-- append the run record (`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` § The run record);
+- append the run record, always via `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append`;
 - update `.devcycle/state.md`;
 - emit handoff blocks.
 
