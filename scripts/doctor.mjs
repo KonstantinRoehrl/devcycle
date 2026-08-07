@@ -175,6 +175,44 @@ export function median(numbers) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+// Versions are compared numerically, never lexicographically. The default Array.sort() put
+// "0.10.1" before "0.4.0", so the 0.9.2 -> 0.10.1 comparison was never made (four real
+// regressions lost) and 0.11.1 -> 0.4.0 ran backwards in time.
+export function compareVersions(a, b) {
+  const pa = String(a).split(".").map(Number);
+  const pb = String(b).split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0, y = pb[i] ?? 0;
+    if (Number.isNaN(x) || Number.isNaN(y)) return String(a).localeCompare(String(b));
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
+// A session whose plugin version cannot be read is bucketed as "unknown" and reported, never
+// dropped. extractPluginVersion regexes the version out of transcript JSON, so dev-checkout
+// sessions — the ones that built devcycle — yielded null and were invisible to devcycle's own
+// trend analysis.
+export function versionCohorts(summaries) {
+  const cohorts = new Map();
+  for (const s of summaries) {
+    const key = s.pluginVersion ?? "unknown";
+    if (!cohorts.has(key))
+      cohorts.set(key, { sessions: 0, dollars: [], depths: [], byStage: new Map() });
+    const c = cohorts.get(key);
+    c.sessions++;
+    let sessionTotal = 0;
+    for (const [skill, d] of Object.entries(s.costByStage ?? {})) {
+      if (!c.byStage.has(skill)) c.byStage.set(skill, []);
+      c.byStage.get(skill).push(d);
+      sessionTotal += d;
+    }
+    c.dollars.push(sessionTotal);
+    if (typeof s.medianDepth === "number") c.depths.push(s.medianDepth);
+  }
+  return cohorts;
+}
+
 export function emitCandidates(summaries) {
   const candidates = [];
 
@@ -195,18 +233,14 @@ export function emitCandidates(summaries) {
     }
   }
 
-  // Version-over-version regression — same skill, cost moved between two version cohorts.
+  // Version-over-version regression/improvement — same skill, cost moved between two adjacent
+  // version cohorts. "unknown" (no detectable plugin version) has no position in a version
+  // ordering, so it is excluded here — but versionCohorts() above still buckets it, and the
+  // cohort table (Task 16) still renders it, rather than dropping those sessions.
   const byVersion = new Map(); // version -> { skill -> [dollars] }
-  for (const s of summaries) {
-    if (!s.pluginVersion) continue;
-    if (!byVersion.has(s.pluginVersion)) byVersion.set(s.pluginVersion, new Map());
-    const bySkill = byVersion.get(s.pluginVersion);
-    for (const [skill, dollars] of Object.entries(s.costByStage ?? {})) {
-      if (!bySkill.has(skill)) bySkill.set(skill, []);
-      bySkill.get(skill).push(dollars);
-    }
-  }
-  const versions = [...byVersion.keys()].sort();
+  for (const [version, c] of versionCohorts(summaries)) byVersion.set(version, c.byStage);
+  const versions = [...byVersion.keys()].filter((v) => v !== "unknown").sort(compareVersions);
+  const versionCandidates = [];
   for (let i = 0; i + 1 < versions.length; i++) {
     const from = versions[i];
     const to = versions[i + 1];
@@ -219,19 +253,26 @@ export function emitCandidates(summaries) {
       const toMedian = median(toDollars);
       if (fromMedian <= 0) continue;
       const delta_pct = ((toMedian - fromMedian) / fromMedian) * 100;
-      if (delta_pct > 20) {
-        candidates.push({
-          type: "version-regression",
+      const delta_dollars = toMedian - fromMedian;
+      if (Math.abs(delta_pct) > 20) {
+        versionCandidates.push({
+          type: delta_pct > 0 ? "version-regression" : "version-improvement",
           skill,
           version_from: from,
           version_to: to,
           delta_pct,
+          from_dollars: fromMedian,
           dollars: toMedian,
+          delta_dollars,
           sessions_sampled: toDollars.length,
         });
       }
     }
   }
+  // Ranked by absolute dollar impact, not percentage: a +18013.6% move off a $0.18 median is
+  // a $33 move and must not outrank a larger absolute one.
+  versionCandidates.sort((a, b) => Math.abs(b.delta_dollars) - Math.abs(a.delta_dollars));
+  candidates.push(...versionCandidates);
 
   // Depth-vs-startup-floor outliers. startupFloor is agent-type-keyed ({main: [...],
   // subagent: [...]}), not a scalar, so it is reduced to the median across every agent
@@ -520,7 +561,9 @@ function formatCandidate(c) {
   if (c.skill) parts.push(`skill=${c.skill}`);
   if (c.model) parts.push(`model=${c.model}`);
   if (c.version_from) parts.push(`${c.version_from}->${c.version_to}`);
-  if (c.delta_pct != null) parts.push(`delta=${c.delta_pct.toFixed(1)}%`);
+  if (c.delta_dollars !== undefined)
+    parts.push(`delta=${c.delta_dollars >= 0 ? "+" : "-"}$${Math.abs(c.delta_dollars).toFixed(2)} (${c.delta_pct.toFixed(1)}%)`);
+  else if (c.delta_pct != null) parts.push(`delta=${c.delta_pct.toFixed(1)}%`);
   if (c.dollars != null) parts.push(`dollars=${usd(c.dollars)}`);
   if (c.count != null) parts.push(`count=${c.count}`);
   parts.push(`sessions=${c.sessions_sampled}`);

@@ -10,6 +10,7 @@ import {
   parseArgs, isDevcycleSession, contextDepth, costUSD, depthBand, median,
   summarizeSession, formatReport, budgetBand, resolveDepth,
   extractPluginVersion, emitCandidates, configDrift, findTranscriptFiles,
+  compareVersions, versionCohorts,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -846,4 +847,84 @@ test("doctor.mjs is importable when process.argv[1] is undefined", () => {
     'import("./scripts/doctor.mjs").then(() => process.exit(0), () => process.exit(1))',
   ], { cwd: new URL("../../", import.meta.url).pathname, encoding: "utf8" });
   assert.equal(r.status, 0, "importing must not throw when argv[1] is undefined");
+});
+
+test("compareVersions orders numerically, not lexicographically", () => {
+  assert.ok(compareVersions("0.9.2", "0.10.1") < 0);
+  assert.ok(compareVersions("0.10.1", "0.4.0") > 0);
+  assert.strictEqual(compareVersions("1.2.3", "1.2.3"), 0);
+  assert.deepStrictEqual(
+    ["0.10.1", "0.4.0", "0.9.2", "0.11.1"].sort(compareVersions),
+    ["0.4.0", "0.9.2", "0.10.1", "0.11.1"]
+  );
+});
+
+test("emitCandidates compares the adjacent pair lexicographic sort skipped", () => {
+  // 0.9.2 -> 0.10.1 is precisely the comparison the real corpus lost: lexicographically
+  // "0.10.1" < "0.9.2", so this pair was never adjacent and four real regressions vanished.
+  const summaries = [
+    { pluginVersion: "0.9.2", costByStage: { "devcycle:cycle": 1.0 }, medianDepth: 10 },
+    { pluginVersion: "0.9.2", costByStage: { "devcycle:cycle": 1.0 }, medianDepth: 10 },
+    { pluginVersion: "0.10.1", costByStage: { "devcycle:cycle": 4.0 }, medianDepth: 10 },
+    { pluginVersion: "0.10.1", costByStage: { "devcycle:cycle": 4.0 }, medianDepth: 10 },
+  ];
+  const c = emitCandidates(summaries).find(
+    (x) => x.type === "version-regression" && x.version_from === "0.9.2"
+  );
+  assert.ok(c, "no regression candidate produced for 0.9.2 -> 0.10.1");
+  assert.strictEqual(c.version_to, "0.10.1");
+});
+
+test("emitCandidates reports improvements, not only regressions", () => {
+  const summaries = [
+    { pluginVersion: "0.9.2", costByStage: { "devcycle:cycle": 4.0 }, medianDepth: 10 },
+    { pluginVersion: "0.9.2", costByStage: { "devcycle:cycle": 4.0 }, medianDepth: 10 },
+    { pluginVersion: "0.10.1", costByStage: { "devcycle:cycle": 1.0 }, medianDepth: 10 },
+    { pluginVersion: "0.10.1", costByStage: { "devcycle:cycle": 1.0 }, medianDepth: 10 },
+  ];
+  const c = emitCandidates(summaries).find((x) => x.type === "version-improvement");
+  assert.ok(c, "no version-improvement candidate exists");
+  assert.strictEqual(c.version_from, "0.9.2");
+  assert.strictEqual(c.version_to, "0.10.1");
+  assert.ok(c.delta_dollars < 0, "an improvement must carry a negative dollar delta");
+});
+
+test("a candidate carries the absolute dollar move, not only the percentage", () => {
+  const summaries = [
+    { pluginVersion: "0.9.2", costByStage: { "devcycle:cycle": 0.18 }, medianDepth: 10 },
+    { pluginVersion: "0.9.2", costByStage: { "devcycle:cycle": 0.18 }, medianDepth: 10 },
+    { pluginVersion: "0.10.1", costByStage: { "devcycle:cycle": 33.2 }, medianDepth: 10 },
+    { pluginVersion: "0.10.1", costByStage: { "devcycle:cycle": 33.2 }, medianDepth: 10 },
+  ];
+  const c = emitCandidates(summaries).find((x) => x.type === "version-regression");
+  assert.strictEqual(c.from_dollars, 0.18);
+  assert.ok(Math.abs(c.delta_dollars - 33.02) < 0.001);
+});
+
+test("version candidates rank by absolute dollar impact, not by percentage", () => {
+  // A +18013% move off a $0.18 median is a $33 move. A +50% move off a $200 median is $100.
+  // Percentage ranking puts the $33 move first; dollar ranking must not.
+  const summaries = [
+    { pluginVersion: "0.9.2", costByStage: { tiny: 0.18, big: 200 }, medianDepth: 10 },
+    { pluginVersion: "0.9.2", costByStage: { tiny: 0.18, big: 200 }, medianDepth: 10 },
+    { pluginVersion: "0.10.1", costByStage: { tiny: 33.2, big: 300 }, medianDepth: 10 },
+    { pluginVersion: "0.10.1", costByStage: { tiny: 33.2, big: 300 }, medianDepth: 10 },
+  ];
+  const versionCandidates = emitCandidates(summaries).filter((c) =>
+    c.type === "version-regression" || c.type === "version-improvement"
+  );
+  assert.strictEqual(versionCandidates[0].skill, "big");
+  assert.ok(
+    Math.abs(versionCandidates[0].delta_dollars) >= Math.abs(versionCandidates[1].delta_dollars)
+  );
+});
+
+test("a session with no detectable plugin version is bucketed as unknown, never dropped", () => {
+  const summaries = [
+    { pluginVersion: null, costByStage: { "devcycle:cycle": 5.0 }, medianDepth: 10 },
+    { pluginVersion: "0.10.1", costByStage: { "devcycle:cycle": 1.0 }, medianDepth: 10 },
+  ];
+  const cohorts = versionCohorts(summaries);
+  assert.ok(cohorts.has("unknown"), "a null-version session was silently dropped");
+  assert.strictEqual(cohorts.get("unknown").sessions, 1);
 });
