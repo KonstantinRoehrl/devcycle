@@ -232,20 +232,46 @@ function pushTargets(text) {
   const targets = [];
   // Order matters, and getting it wrong loses real pushes both ways.
   //
-  // Comments are stripped FIRST, per physical line. A `#` comment is prose, not a command:
-  // without this, a workflow that merely mentions `git push origin main` in a comment reads as
-  // one that does it, and every following word is parsed as a refspec. `#` only opens a comment
-  // at a line or word boundary, so it cannot truncate a refspec containing one.
-  //
-  // Continuations are joined SECOND, after the comments are already gone. `git push \` with
-  // `origin main` on the next physical line is a routine `run: |` idiom that a per-line parser
-  // misses entirely — it sees a push with no refspec, then a line with no push. Joining before
-  // stripping instead would let a comment ending in a backslash swallow the next line whole,
-  // taking a real push down with it.
-  const stripped = text.split(/\r?\n/).map((l) => l.replace(/(^|\s)#.*$/, "$1"));
-  for (const line of stripped.join("\n").replace(/\\\n\s*/g, " ").split("\n")) {
-    const code = line;
-    for (const [, rest] of code.matchAll(/\bgit push\b([^\n;&|]*)/g)) {
+  // Comments are stripped FIRST, per physical line, quote-aware. A `#` comment is prose, not a
+  // command: without this, a workflow that merely mentions `git push origin main` in a comment
+  // reads as one that does it, and every following word is parsed as a refspec. But a `#` inside
+  // a quoted string is data, not a comment — a quote-unaware strip ate to end of line and dropped
+  // a real push that happened to follow one on the same line.
+  const stripped = text.split(/\r?\n/).map((line) => {
+    let code = "", quote = null;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (quote) {
+        if (ch === "\\" && quote === '"') { code += ch + (line[++i] ?? ""); continue; }
+        if (ch === quote) quote = null;
+        code += ch;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+        code += ch;
+      } else if (ch === "#" && (i === 0 || /\s/.test(line[i - 1]))) {
+        break;
+      } else {
+        code += ch;
+      }
+    }
+    return code;
+  });
+  // Continuations are joined SECOND, after the comments are already gone, and only to the
+  // immediately following line. `git push \` with `origin main` on the next physical line is a
+  // routine `run: |` idiom that a per-line parser misses entirely — it sees a push with no
+  // refspec, then a line with no push. Joining before stripping instead would let a comment
+  // ending in a backslash swallow the next line whole, taking a real push down with it. A blank
+  // line ends a continuation instead of bridging it — bridging merged unrelated statements onto
+  // one physical line and let the greedy scan read the second statement's words as refspecs.
+  const lines = [];
+  for (let i = 0; i < stripped.length; i++) {
+    let line = stripped[i];
+    while (/\\\s*$/.test(line) && i + 1 < stripped.length && stripped[i + 1].trim() !== "")
+      line = line.replace(/\\\s*$/, " ") + stripped[++i].replace(/^\s+/, "");
+    lines.push(line.replace(/\\\s*$/, " "));
+  }
+  for (const line of lines)
+    for (const [, rest] of line.matchAll(/\bgit push\b([^\n;&|]*)/g)) {
       const positional = rest.trim().split(/\s+/).filter((t) => t && !t.startsWith("-"));
       for (const spec of positional.slice(1)) {
         // slice(1) drops the remote, which is never a refspec
@@ -253,7 +279,6 @@ function pushTargets(text) {
         targets.push(dest.replace(/^refs\/heads\//, ""));
       }
     }
-  }
   return targets;
 }
 
@@ -282,6 +307,33 @@ test("the push guard survives the shapes that previously blinded it", () => {
 
   // A comment that merely names a push is prose, not a push.
   assert.deepEqual(pushTargets("        # git push origin main is forbidden\n"), []);
+});
+
+test("the push guard sees a push that follows a quoted # on the same line", () => {
+  // The quote-unaware strip ate to end of line, dropping this push entirely: a workflow could
+  // push main and the guard would report zero destinations.
+  assert.deepStrictEqual(
+    pushTargets('      - run: echo "note #foo" && git push origin main\n'),
+    ["main"]
+  );
+  assert.deepStrictEqual(
+    pushTargets("      - run: echo 'note #foo' && git push origin main\n"),
+    ["main"]
+  );
+});
+
+test("a real comment is still stripped when the # is outside quotes", () => {
+  assert.deepStrictEqual(pushTargets("# git push origin main\n"), []);
+  assert.deepStrictEqual(pushTargets("echo hi # git push origin main\n"), []);
+});
+
+test("a blank line ends a continuation instead of merging two pushes", () => {
+  // The `\s*` in the continuation join bridged the blank line, collapsing two statements onto one
+  // physical line; the greedy scan then read the second statement's words as refspecs.
+  assert.deepStrictEqual(
+    pushTargets("git push origin main \\\n\ngit push origin dev\n"),
+    ["main", "dev"]
+  );
 });
 
 test("no workflow pushes to the release branch", () => {
