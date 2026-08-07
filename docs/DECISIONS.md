@@ -507,6 +507,13 @@ than trusting the tail, and rejects when a named file is missing or empty, when 
 contradicts the declared class (a `red-green` "before" that exited 0, a `green-green` "before"
 that did not exit 0), or when the class mismatches the diff. On the sweep path, where no
 implementer exists, the coordinator writes the two files itself.
+**Amended 2026-08-07.** The `red-green` before-exit-0 rejection above is no longer
+unconditional. A task whose red is a subset run inside an otherwise-green suite has a
+before-capture that exits 0 by design, since the captured command is the whole gate — so the
+rule as written rejected the honest artifact and two tasks hit it independently. It now
+rejects a before-exit-0 only when no supplementary `<task-id>-red.txt` accompanies it. See
+`references/evidence.md` § File-backed evidence and § Reviewer verdicts, which own the current
+rule.
 **Why:** The coordinator's green gate re-runs the task's command and reads the exit status, so
 the coordinator already holds ground truth — the inlined copy duplicated it at the price of a
 whole suite's output per task per review round, carried through the implementer's report, the

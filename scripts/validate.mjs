@@ -252,8 +252,12 @@ for (const f of namesIn("references")) {
 //     check exists to prevent, so it fails rather than passing on an empty subject.
 const STATE_HEADER = "# devcycle state";
 const resumePath = join(root, "references/resume.md");
+// Take the whole fenced block the header opens, not a run of consecutive `- ` lines: a run
+// stops dead at the first line that is not a field — a blank line, a comment, an inserted
+// note — and every field after that point would silently vanish from the check, which would
+// then pass while the fixture had genuinely drifted.
 const stateTemplate = existsSync(resumePath)
-  ? readFileSync(resumePath, "utf8").match(new RegExp(`^${STATE_HEADER}\\n(?:- .*\\n)+`, "m"))?.[0] ?? ""
+  ? readFileSync(resumePath, "utf8").match(new RegExp("```[a-z]*\\n" + STATE_HEADER + "\\n[\\s\\S]*?```", "m"))?.[0] ?? ""
   : "";
 const stateFields = [...stateTemplate.matchAll(/^- ([A-Za-z][A-Za-z0-9_-]*):/gm)].map((m) => m[1]);
 const fixturesDir = join(root, "tests/fixtures");

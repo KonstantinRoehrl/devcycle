@@ -1,5 +1,5 @@
-# Not a workflow this repo runs: the five forms of a direct push to the release branch that
-# `tests/unit/golden-path.test.mjs` must recognise. A guard that matches only the literal
+# Not a workflow this repo runs: the six forms of a direct push to the release branch that
+# `tests/unit/golden-path.test.mjs` must recognise (the last wraps across two physical lines). A guard that matches only the literal
 # `git push origin main` lets every other line here through.
 name: pushes-main (fixture)
 on: workflow_dispatch
@@ -12,3 +12,6 @@ jobs:
       - run: git push origin HEAD:main
       - run: git push "$REMOTE" main
       - run: git push --force-with-lease origin refs/heads/main
+      - run: |
+          git push \
+            origin main

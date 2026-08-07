@@ -224,9 +224,16 @@ const RELEASE_BRANCH = "main";
 // Every `git push` in a shell snippet, reduced to the branches it would write. What matters is
 // each refspec's destination: `origin main`, `-u origin main`, `HEAD:main` and `"$REMOTE" main`
 // all write main, while `origin "devcycle--v$V"` writes a tag and `origin dev` writes dev.
+// The guard deliberately errs toward flagging. A false positive fails CI and gets a human
+// look; a false negative ships a direct push to the release branch. So `git push` inside an
+// `echo` or a quoted string is still counted — the parser does not model shell context, and
+// making it do so would trade the safe error for the unsafe one.
 function pushTargets(text) {
   const targets = [];
-  for (const line of text.split("\n")) {
+  // Join backslash continuations first: `git push \` with `origin main` on the next physical
+  // line is a routine `run: |` idiom, and a per-line parser sees a push with no refspec
+  // followed by a line with no push — recording nothing, and missing a real push to main.
+  for (const line of text.replace(/\\\n\s*/g, " ").split("\n")) {
     // A `#` comment is prose, not a command. Without this, a workflow that merely mentions
     // `git push origin main` in a comment reads as one that does it, and every following word
     // on the line is parsed as a refspec. `#` only opens a comment at a line or word boundary,
@@ -246,7 +253,7 @@ function pushTargets(text) {
 
 test("the push guard reads a refspec's destination, whatever form the push takes", () => {
   const flagged = pushTargets(read("tests/fixtures/push-guard/pushes-main.yml"));
-  assert.equal(flagged.length, 5, `expected five pushes in the fixture, saw ${flagged.length}`);
+  assert.equal(flagged.length, 6, `expected six pushes in the fixture, saw ${flagged.length}`);
   for (const t of flagged) assert.equal(t, RELEASE_BRANCH, `an evasive push to main read as "${t}"`);
   const allowed = pushTargets(read("tests/fixtures/push-guard/pushes-elsewhere.yml"));
   assert.ok(allowed.length > 0, "the allowed-pushes fixture has no pushes in it");
