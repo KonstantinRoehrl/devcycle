@@ -3,6 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, chmodSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -11,7 +12,7 @@ import {
   summarizeSession, formatReport, budgetBand, resolveDepth,
   extractPluginVersion, emitCandidates, configDrift, findTranscriptFiles,
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
-  cohortTable,
+  cohortTable, readRunRecords, attributeFromRecord,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -125,6 +126,86 @@ test("summarizeSession: no explicit attribution anywhere in the transcript stays
 test("formatReport: discloses the forward-fill attribution caveat", () => {
   const out = formatReport([summarizeSession("sess-abcdef123456", [turn({ attributionSkill: "devcycle:cycle" })])]);
   assert.match(out, /forward-filled/i);
+});
+
+// --- readRunRecords / attributeFromRecord: the preferred read-path over the run-record log ---
+
+test("readRunRecords returns an empty map when the runs directory does not exist", () => {
+  assert.strictEqual(readRunRecords(join(tmpdir(), "definitely-absent-runs")).size, 0);
+});
+
+test("readRunRecords indexes a record by its hashed session id", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runs-read-"));
+  const slug = mkdtempSync(join(dir, "repo-"));
+  const hash = createHash("sha256").update("sess-1").digest("hex");
+  writeFileSync(join(slug, "abc.jsonl"),
+    [
+      { kind: "run", runId: "abc", schemaVersion: 1, pluginVersion: "0.13.0" },
+      { kind: "session", runId: "abc", sessionHash: hash,
+        firstSeen: "2026-08-07T10:00:00Z", lastSeen: "2026-08-07T11:00:00Z" },
+      { kind: "stage", runId: "abc", stage: "planning", startedAt: "2026-08-07T10:00:00Z",
+        endedAt: "2026-08-07T10:30:00Z", outcome: "complete" },
+    ].map((o) => JSON.stringify(o)).join("\n") + "\n");
+  const records = readRunRecords(dir);
+  assert.ok(records.has(hash));
+  assert.strictEqual(records.get(hash).pluginVersion, "0.13.0");
+  assert.strictEqual(records.get(hash).stages.length, 1);
+});
+
+test("a turn inside a stage window is attributed to that stage, not to the last skill tag", () => {
+  const record = {
+    runId: "abc",
+    stages: [
+      { stage: "planning", startedAt: "2026-08-07T10:00:00Z", endedAt: "2026-08-07T10:30:00Z" },
+      { stage: "execution", startedAt: "2026-08-07T10:30:00Z", endedAt: "2026-08-07T11:00:00Z" },
+    ],
+    dispatches: [],
+  };
+  const turns = [
+    { timestamp: "2026-08-07T10:10:00Z", attributionSkill: "devcycle:cycle" },
+    { timestamp: "2026-08-07T10:45:00Z", attributionSkill: undefined },
+  ];
+  const attributed = attributeFromRecord(turns, record);
+  assert.strictEqual(attributed[0].stage, "planning");
+  assert.strictEqual(attributed[1].stage, "execution");
+  assert.strictEqual(attributed[1].attributionSource, "record");
+});
+
+test("stage windows leave nothing unattributed for a recorded session", () => {
+  const record = {
+    runId: "abc",
+    stages: [{ stage: "planning", startedAt: "2026-08-07T10:00:00Z", endedAt: "2026-08-07T11:00:00Z" }],
+    dispatches: [],
+  };
+  const turns = [{ timestamp: "2026-08-07T10:30:00Z", attributionSkill: undefined }];
+  const attributed = attributeFromRecord(turns, record);
+  assert.notStrictEqual(attributed[0].stage, "unattributed");
+});
+
+test("a session with no run record still attributes, labelled forward-filled", () => {
+  const turns = [{ timestamp: "2026-08-07T10:30:00Z", attributionSkill: "devcycle:cycle" }];
+  assert.strictEqual(attributeFromRecord(turns, null), null);
+});
+
+test("a dispatch window attributes a sidechain to its task by agentId", () => {
+  const record = {
+    runId: "abc",
+    stages: [{ stage: "execution", startedAt: "2026-08-07T10:00:00Z", endedAt: "2026-08-07T11:00:00Z" }],
+    dispatches: [
+      { taskId: "3", agentId: "a7291986a2b97fcd8",
+        startedAt: "2026-08-07T10:10:00Z", endedAt: "2026-08-07T10:20:00Z" },
+      { taskId: "4", agentId: "a6d5650949c386201",
+        startedAt: "2026-08-07T10:12:00Z", endedAt: "2026-08-07T10:25:00Z" },
+    ],
+  };
+  // The two dispatches overlap in time; agentId is what separates them, not the timestamps.
+  const turns = [
+    { timestamp: "2026-08-07T10:15:00Z", agentId: "a7291986a2b97fcd8" },
+    { timestamp: "2026-08-07T10:15:00Z", agentId: "a6d5650949c386201" },
+  ];
+  const attributed = attributeFromRecord(turns, record);
+  assert.strictEqual(attributed[0].taskId, "3");
+  assert.strictEqual(attributed[1].taskId, "4");
 });
 
 // --- end to end over a synthetic transcript directory ---

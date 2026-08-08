@@ -2,6 +2,7 @@
 // Re-measures devcycle's token cost from session transcripts: turn counts, main-thread
 // vs subagent split, context depth, tool mix, and dollar cost by model, stage, and agent.
 // Read-only. Emits counts, dollars, model ids, tool names, and skill names only.
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
@@ -18,6 +19,11 @@ const CHANGELOG_PATH = join(PLUGIN_ROOT, "references", "config-changelog.md");
 
 const DEVCYCLE_PREFIX = /^devcycle:/;
 const PLUGIN_VERSION_RE = /devcycle\/devcycle\/(\d+\.\d+\.\d+)\//;
+
+// hashSession from scripts/run-record.mjs, reimplemented in one line rather than imported, so
+// the reader keeps no dependency on the writer. The algorithm, encoding and digest form must
+// stay byte-identical to the writer's or the join silently misses every session.
+const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
 export function extractPluginVersion(record) {
   const text = JSON.stringify(record ?? {});
@@ -462,6 +468,59 @@ function attributeForwardFill(turns) {
   return effective;
 }
 
+// The run record is the machine-readable telemetry log; the ledger is the human-readable progress
+// log. Neither reads the other — see references/ledger.md.
+export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
+  join(homedir(), ".claude", "devcycle", "runs")) {
+  const bySession = new Map();
+  let repos;
+  try {
+    repos = readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    // A missing runs directory is the normal case for every session predating this cycle.
+    // Any other error is a real fault and must not read as "no records".
+    if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
+    return bySession;
+  }
+  for (const repo of repos.filter((e) => e.isDirectory()))
+    for (const f of readdirSync(join(dir, repo.name)).filter((n) => n.endsWith(".jsonl"))) {
+      const rec = { runId: null, pluginVersion: null, profile: null, stages: [], dispatches: [] };
+      const hashes = [];
+      for (const line of readFileSync(join(dir, repo.name, f), "utf8").split("\n").filter(Boolean)) {
+        let o;
+        try { o = JSON.parse(line); } catch { continue; } // a torn trailing line is normal
+        if (o.kind === "run") { rec.runId = o.runId; rec.pluginVersion = o.pluginVersion; rec.profile = o.profile; }
+        else if (o.kind === "session") hashes.push(o.sessionHash);
+        else if (o.kind === "stage") rec.stages.push(o);
+        else if (o.kind === "dispatch") rec.dispatches.push(o);
+      }
+      for (const h of hashes) bySession.set(h, rec);
+    }
+  return bySession;
+}
+
+// Cost lands on a stage because the record says so, not because a skill tag earlier in the
+// transcript happened to still be the most recent one. Returns null when no record covers this
+// session, so the caller falls back to attributeForwardFill for the 77 historical sessions.
+export function attributeFromRecord(turns, record) {
+  if (!record || !record.stages?.length) return null;
+  const within = (t, a, b) => t >= Date.parse(a) && t < Date.parse(b);
+  return turns.map((turn) => {
+    const t = Date.parse(turn.timestamp);
+    const stage = record.stages.find((s) => within(t, s.startedAt, s.endedAt));
+    // agentId is what separates concurrent dispatches; timestamps alone cannot.
+    const dispatch = turn.agentId
+      ? record.dispatches.find((d) => d.agentId === turn.agentId)
+      : record.dispatches.find((d) => within(t, d.startedAt, d.endedAt) && !d.agentId);
+    return {
+      ...turn,
+      stage: stage ? stage.stage : "unattributed",
+      taskId: dispatch ? dispatch.taskId : null,
+      attributionSource: "record",
+    };
+  });
+}
+
 function bump(map, key, amount) {
   map[key] = (map[key] ?? 0) + amount;
 }
@@ -486,7 +545,7 @@ export function isInFlight(newestRecordMs, nowMs = Date.now()) {
   return nowMs - newestRecordMs < IN_FLIGHT_MS;
 }
 
-export function summarizeSession(sessionId, records) {
+export function summarizeSession(sessionId, records, runRecords = new Map()) {
   const turns = records.filter(isTurn);
   const depths = turns.map((r) => contextDepth(r.message.usage));
   const tools = {};
@@ -511,7 +570,12 @@ export function summarizeSession(sessionId, records) {
     if (Number.isFinite(t) && (newestRecordMs === null || t > newestRecordMs)) newestRecordMs = t;
   }
 
-  const effectiveSkills = attributeForwardFill(turns);
+  // The run record is the preferred source: it joins cost to a stage window (and a dispatch's
+  // taskId) directly, rather than inferring it from the last skill tag seen in the transcript.
+  // Falls back to forward-fill for the 77 sessions written before this cycle had a record to join.
+  const record = runRecords.get(sha256(sessionId));
+  const attributed = attributeFromRecord(turns, record) ??
+    attributeForwardFill(turns).map((skill, i) => ({ ...turns[i], stage: skill, attributionSource: "forward-filled" }));
   turns.forEach((r, i) => {
     const model = r.message.model;
     if (model) models[model] = (models[model] ?? 0) + 1;
@@ -521,7 +585,7 @@ export function summarizeSession(sessionId, records) {
     } else {
       totalCost += dollars;
       bump(costByModel, model, dollars);
-      bump(costByStage, effectiveSkills[i] ?? "unattributed", dollars);
+      bump(costByStage, attributed[i].stage ?? "unattributed", dollars);
       bump(costByAgentType, agentTypeOf(r), dollars);
     }
     bandCounts[depthBand(contextDepth(r.message.usage))] += 1;
@@ -782,6 +846,7 @@ function run(args) {
     groups.get(key).push(...readRecords(file));
   }
 
+  const runRecords = readRunRecords();
   const sessions = [];
   for (const [key, records] of groups) {
     // Membership is a session-level property, so it is decided over every record;
@@ -790,7 +855,7 @@ function run(args) {
     const windowed = records.filter((r) => inWindow(r.timestamp, args.since, args.until));
     if (windowed.length === 0) continue;
     const sessionId = records.find((r) => r.sessionId)?.sessionId ?? key;
-    sessions.push(summarizeSession(sessionId, windowed));
+    sessions.push(summarizeSession(sessionId, windowed, runRecords));
   }
 
   const totals = { turns: 0, mainTurns: 0, subagentTurns: 0, costUSD: 0, tools: {}, models: {} };
