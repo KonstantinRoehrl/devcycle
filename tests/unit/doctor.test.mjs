@@ -13,6 +13,7 @@ import {
   extractPluginVersion, emitCandidates, configDrift, findTranscriptFiles,
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
+  emitComplianceCandidates,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -861,6 +862,53 @@ test("emitCandidates does not flag a cost-outlier when costs are uniform across 
   const candidates = emitCandidates(summaries);
   const outlier = candidates.find((c) => c.type === "cost-outlier");
   assert.equal(outlier, undefined);
+});
+
+test("a main-thread browser call is flagged unconditionally", () => {
+  const c = emitComplianceCandidates([
+    { isSidechain: false, toolName: "computer" },
+    { isSidechain: false, toolName: "javascript_tool" },
+    { isSidechain: true, toolName: "computer" },
+  ], { stages: [], dispatches: [] });
+  const flag = c.find((x) => x.type === "main-thread-browser");
+  assert.ok(flag, "no main-thread browser candidate produced");
+  assert.strictEqual(flag.calls, 2, "sidechain browser calls must not be counted");
+});
+
+test("no main-thread browser calls produces no candidate", () => {
+  const c = emitComplianceCandidates([{ isSidechain: true, toolName: "computer" }],
+    { stages: [], dispatches: [] });
+  assert.strictEqual(c.find((x) => x.type === "main-thread-browser"), undefined);
+});
+
+test("dispatches that inherited their model are counted and reported", () => {
+  const c = emitComplianceCandidates([], {
+    stages: [],
+    dispatches: [
+      { taskId: "1", modelSource: "inherited", agentType: "devcycle:implementer" },
+      { taskId: "2", modelSource: "explicit", agentType: "devcycle:implementer" },
+      { taskId: "3", modelSource: "inherited", agentType: "devcycle:implementer" },
+    ],
+  });
+  const flag = c.find((x) => x.type === "inherited-model");
+  assert.strictEqual(flag.inherited, 2);
+  assert.strictEqual(flag.total, 3);
+});
+
+test("read-only search routed to general-purpose is flagged", () => {
+  const c = emitComplianceCandidates([], {
+    stages: [],
+    dispatches: [
+      { taskId: "1", agentType: "general-purpose", modelSource: "explicit" },
+      { taskId: "2", agentType: "Explore", modelSource: "explicit" },
+    ],
+  });
+  const flag = c.find((x) => x.type === "general-purpose-search");
+  assert.strictEqual(flag.count, 1);
+});
+
+test("compliance candidates are absent, not zero, for a record-less session", () => {
+  assert.deepStrictEqual(emitComplianceCandidates([], null), []);
 });
 
 test("configDrift flags a stale superseded key with its exact line and replacement", () => {

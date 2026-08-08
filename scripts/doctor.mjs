@@ -408,6 +408,39 @@ export function emitCandidates(summaries) {
   return candidates;
 }
 
+// These three measure rules that already exist in references/delegation.md but had no enforcement.
+// A record-less session yields nothing at all rather than a misleading zero — absence of evidence.
+export function emitComplianceCandidates(turns, record) {
+  if (!record) return [];
+  const out = [];
+
+  // C1: playbooks/verifying-on-device.md dispatches agents/on-device-driver.md; driving a browser
+  // is never the coordinator's. The most expensive session in the corpus cost $271.24 with
+  // 103 computer and 38 javascript_tool calls on the main thread.
+  const browser = turns.filter(
+    (t) => !t.isSidechain && (t.toolName === "computer" || t.toolName === "javascript_tool")
+  ).length;
+  if (browser > 0)
+    out.push({
+      type: "main-thread-browser",
+      calls: browser,
+      onDevicePath: record.stages?.find((s) => s.stage === "on-device")?.path ?? null,
+      note: "no path permits the coordinator to drive a browser — dispatch on-device-driver",
+    });
+
+  // C2: the rule exists at references/delegation.md:59; this makes the gap measurable.
+  const dispatches = record.dispatches ?? [];
+  const inherited = dispatches.filter((d) => d.modelSource === "inherited").length;
+  if (inherited > 0)
+    out.push({ type: "inherited-model", inherited, total: dispatches.length });
+
+  // C3: Explore's startup floor is 13955 against a 32711 median, ~2.3x per dispatch.
+  const gp = dispatches.filter((d) => d.agentType === "general-purpose").length;
+  if (gp > 0) out.push({ type: "general-purpose-search", count: gp, total: dispatches.length });
+
+  return out;
+}
+
 // Returns what it checked, not just what it found: `findings` alone cannot tell a target
 // with no stale references apart from a changelog that yielded no stale keys to look for.
 // Every input failure throws — a changelog it could not read or parse is a broken run, and
@@ -631,6 +664,9 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   // (`if (!record || !record.stages?.length) return null;`) — otherwise every turn fell back to
   // attributeForwardFill uniformly, so "forward-filled" is never a per-turn mix at this level.
   const attributionSource = record && record.stages?.length ? "record" : "forward-filled";
+  // One entry per tool call (not per turn — a turn can carry several), the shape
+  // emitComplianceCandidates' C1 check needs.
+  const toolCallEvents = [];
   turns.forEach((r, i) => {
     const model = r.message.model;
     if (model) models[model] = (models[model] ?? 0) + 1;
@@ -654,6 +690,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     for (const item of content) {
       if (!item || item.type !== "tool_use" || typeof item.name !== "string") continue;
       tools[item.name] = (tools[item.name] ?? 0) + 1;
+      toolCallEvents.push({ isSidechain: r.isSidechain, toolName: item.name });
       if (DISPATCH_TOOLS.has(item.name)) {
         dispatches.total += 1;
         if (!item.input?.model) dispatches.withoutModel += 1;
@@ -704,6 +741,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     models,
     pluginVersion,
     attributionSource,
+    complianceCandidates: emitComplianceCandidates(toolCallEvents, record),
     inFlight: newestRecordMs !== null && isInFlight(newestRecordMs),
   };
 }
@@ -749,6 +787,27 @@ export function formatCandidate(c) {
   parts.push(`sessions=${c.sessions_sampled}`);
   if (isLowConfidence(c)) parts.push("low confidence: n=1");
   return `CANDIDATE: ${parts.join(" ")}`;
+}
+
+// Every session's own emitComplianceCandidates() output, gathered corpus-wide — same one-entry-
+// per-source-session convention emitCandidates already uses for unpriced-model, above. QC5: a
+// null onDevicePath (always null until Task 11 lands in cycle 3) is labelled "unrecorded" here
+// so both render sites below show a labelled value, never a bare null.
+function complianceCandidatesOf(summaries) {
+  return summaries.flatMap((s) => s.complianceCandidates ?? []).map((c) =>
+    c.type === "main-thread-browser" ? { ...c, onDevicePath: c.onDevicePath ?? "unrecorded" } : c
+  );
+}
+
+// Distinct from formatCandidate: these three carry their own fields (calls/inherited/count,
+// no sessions_sampled or dollars), so reusing formatCandidate's field set would print a
+// meaningless "sessions=undefined" line rather than nothing.
+function formatComplianceCandidate(c) {
+  if (c.type === "main-thread-browser")
+    return `CANDIDATE: main-thread-browser calls=${c.calls} onDevicePath=${c.onDevicePath} — ${c.note}`;
+  if (c.type === "inherited-model")
+    return `CANDIDATE: inherited-model inherited=${c.inherited}/${c.total}`;
+  return `CANDIDATE: general-purpose-search count=${c.count}/${c.total}`;
 }
 
 // Combines every session's cacheBand into one corpus-wide figure. Dollar edges (point/low/high)
@@ -850,6 +909,7 @@ export function formatReport(summaries) {
     );
   lines.push("");
   for (const c of emitCandidates(summaries)) lines.push(formatCandidate(c));
+  for (const c of complianceCandidatesOf(summaries)) lines.push(formatComplianceCandidate(c));
   lines.push("", vintage, DISCLOSURE, DEPTH_DISCLOSURE, "");
   for (const s of summaries) {
     // `?? {}` / `?? 0`: a summary built for a report-level assertion (as in the cost-band and
@@ -942,7 +1002,7 @@ export function buildJsonReport(summaries) {
       ...s,
       inferred: s.attributionSource === "forward-filled" ? "forward-filled" : null,
     })),
-    candidates: emitCandidates(summaries),
+    candidates: [...emitCandidates(summaries), ...complianceCandidatesOf(summaries)],
     version_cohorts: cohortTable(summaries),
     inFlight: {
       excluded: summaries.filter((s) => s.inFlight).length,
