@@ -141,6 +141,11 @@ Squash-merge it **with that same title** once checks pass. `Release` then tags
 `devcycle--vX.Y.Z` and publishes the GitHub release from that version's CHANGELOG section.
 After every release, merge `main` back into `dev`.
 
+`Prepare release` opens its own PR, which requires **Settings → Actions → General → Allow GitHub
+Actions to create and approve pull requests** to be enabled. Without it the workflow fails after
+pushing the bump, with that instruction in its log; re-running it once the setting is on opens the
+missing PR without bumping again.
+
 **Nothing pushes to `main`.** The version bump arrives inside the release PR, so `main` only
 ever changes through a checked pull request — which is what lets a ruleset require exactly
 that. Never hand-edit the version.

@@ -50,6 +50,7 @@ jobs:
         run: echo "version=$(node scripts/bump-version.mjs --subject "$TITLE")" >> "$GITHUB_OUTPUT"
 
       - name: Refuse to reuse a released version
+        id: guard
         env:
           V: ${{ steps.bump.outputs.version }}
         run: |
@@ -59,18 +60,31 @@ jobs:
             echo "tag devcycle--v$V already exists — dev's plugin.json is behind main"
             exit 1
           fi
+          # The tag check alone cannot see "already bumped, PR not opened" — the state a
+          # failed `gh pr create` leaves behind. Detect it so a re-run opens the missing PR
+          # instead of bumping a second time.
+          if git log -1 --pretty=%s | grep -q "^chore(release): prepare v$V$"; then
+            echo "already-bumped=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Commit the bump to dev and open the release PR
+      - name: Commit the version bump
+        if: steps.guard.outputs.already-bumped != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          TITLE: ${{ inputs.title }}
           V: ${{ steps.bump.outputs.version }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .claude-plugin/plugin.json CHANGELOG.md
           git commit -m "chore(release): prepare v$V"
+
+      - name: Push the bump to dev
+        if: steps.guard.outputs.already-bumped != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
           # persist-credentials: false above means the checkout left no push credential in
           # .git/config, so authenticate the push explicitly right before it.
           git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
@@ -83,11 +97,28 @@ jobs:
             fi
             git pull --rebase origin dev
           done
-          gh pr create --base main --head dev --title "$TITLE" \
-            --body "Release **v$V**, staged by \`Prepare release\`.
+
+      - name: Open the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ inputs.title }}
+          V: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh pr list --base main --head dev --state open --json number \
+               --jq 'length' | grep -qv '^0$'; then
+            echo "Release PR already open."; exit 0
+          fi
+          if ! gh pr create --base main --head dev --title "$TITLE" \
+                 --body "Release **v$V**, staged by \`Prepare release\`.
 
           \`.claude-plugin/plugin.json\` and \`CHANGELOG.md\` are already bumped in this PR, so
           merging it needs no push to \`main\`. On merge, \`Release\` tags \`devcycle--v$V\` and
           publishes the GitHub release from the CHANGELOG section.
 
-          Squash-merge with this exact title — it becomes main's commit subject."
+          Squash-merge with this exact title — it becomes main's commit subject."; then
+            echo "::error::Could not create the release PR. Enable it in the repository settings:"
+            echo "::error::Settings -> Actions -> General -> Allow GitHub Actions to create and approve pull requests"
+            echo "::error::The version bump is committed and pushed to dev; re-run this workflow after enabling it."
+            exit 1
+          fi
