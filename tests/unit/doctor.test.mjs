@@ -12,7 +12,7 @@ import {
   summarizeSession, formatReport, budgetBand, resolveDepth,
   extractPluginVersion, emitCandidates, configDrift, findTranscriptFiles,
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
-  cohortTable, readRunRecords, attributeFromRecord,
+  cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -22,6 +22,30 @@ const usage = (i, cw, cr, o) => ({
   input_tokens: i, cache_creation_input_tokens: cw,
   cache_read_input_tokens: cr, output_tokens: o,
 });
+
+// costBand fixtures. Both default to claude-opus-5 ($5/M input, matching turn()'s default
+// below), overridable via `model` so the per-model price cancels out of every ratio the
+// costBand tests compare, while still being a known, fixed value for the one test that pins
+// a dollar amount directly.
+const usageWithSplit = ({ h1, m5, model = "claude-opus-5" } = {}) => ({
+  message: {
+    model,
+    usage: {
+      input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0,
+      cache_creation: { ephemeral_1h_input_tokens: h1, ephemeral_5m_input_tokens: m5 },
+    },
+  },
+});
+const usageFlatOnly = ({ cacheCreation, model = "claude-opus-5" } = {}) => ({
+  message: {
+    model,
+    usage: {
+      input_tokens: 0, cache_creation_input_tokens: cacheCreation,
+      cache_read_input_tokens: 0, output_tokens: 0,
+    },
+  },
+});
+
 const turn = (over = {}) => ({
   sessionId: "sess-abcdef123456", isSidechain: false, type: "assistant",
   timestamp: "2026-07-20T10:00:00.000Z", cwd: "/secret/project/path",
@@ -351,6 +375,115 @@ test("costUSD: fable costs double opus for identical usage, not a fifth", () => 
 
 test("costUSD: an unpriced model returns null rather than a defaulted price", () => {
   assert.equal(costUSD({ input_tokens: 1_000_000 }, "claude-opus-9"), null);
+});
+
+// --- costBand: the error-bar cost band over cache-write TTL-split coverage ---
+
+test("costBand collapses to zero over 3500 split-priced cache-write tokens, not over 2 records", () => {
+  const band = costBand([
+    usageWithSplit({ h1: 1000, m5: 500 }),
+    usageWithSplit({ h1: 2000, m5: 0 }),
+  ]);
+  // 3000 tokens at 1h (2.00x) + 500 at 5m (1.25x) = 6625 price-weighted tokens — the same figure
+  // as 5300 tokens priced entirely at 5m. Equality pins both multipliers without pinning a price.
+  const equivalent = costBand([usageWithSplit({ h1: 0, m5: 5300 })]);
+  assert.ok(Math.abs(band.point - equivalent.point) < 1e-9,
+    "1h at 2.00x and 5m at 1.25x: 1000/500 + 2000 must price identically to 5300 at 5m");
+  // Same 6625 price-weighted tokens against opus-5's $5/M input price is 33125, $0.033125 once
+  // divided by 1e6 like costUSD (:98-103). A missing divide renders $33,125 — six orders of
+  // magnitude too large but still a plausible-looking figure, the exact defect this pins.
+  assert.ok(Math.abs(band.point - 0.033125) < 1e-9,
+    "costBand must divide by 1e6 like costUSD, not report price-weighted token units as dollars");
+  // 0 unsplit tokens out of 3500 cache-write tokens. The denominator must be the token total;
+  // a record-count denominator (0 / 2) is also 0 here, so `low === high` and the equality above
+  // are what keep this case honest.
+  assert.equal(band.fallbackShare, 0);
+  assert.equal(band.collapsed, true);
+  assert.equal(band.low, band.high);
+});
+
+test("an unpriced-model record is excluded from the band and its denominator, not thrown on or zero-priced", () => {
+  const priced = usageWithSplit({ h1: 1000, m5: 500 });
+  const unpriced = usageWithSplit({ h1: 2000, m5: 0, model: "claude-opus-9" }); // not in PRICING
+  const band = costBand([priced, unpriced]);
+  const pricedOnly = costBand([priced]);
+  // The unpriced record's 2000 tokens must not reach totalTokens either — if they did, fallbackShare
+  // and the band would both be wrong even though nothing threw. Exact equality with the priced-only
+  // band is the only assertion that can't be satisfied by a record that silently prices at zero.
+  assert.deepStrictEqual(band, pricedOnly,
+    "an unpriced record must match the priced-only band exactly, not merely avoid throwing");
+});
+
+test("costBand reports 3000 of 4000 cache-write tokens unsplit, not 3000 of 2 records", () => {
+  const band = costBand([
+    usageWithSplit({ h1: 0, m5: 1000 }),
+    usageFlatOnly({ cacheCreation: 3000 }),
+  ]);
+  // 3000 unsplit of 4000 total cache-write tokens = 0.75 exactly. A record-count denominator
+  // yields 3000 / 3002 = 0.9993 — which a bare `> 0` assertion would happily accept.
+  assert.ok(Math.abs(band.fallbackShare - 0.75) < 1e-9,
+    "fallbackShare is unsplit cache-write tokens over all cache-write tokens");
+  assert.equal(band.collapsed, false);
+  // low prices the 3000 fallback tokens at 5m, high at 1h: (1250 + 3750) against (1250 + 6000)
+  // price-weighted tokens — a 1.45x spread, again independent of the model's price.
+  assert.ok(Math.abs(band.high / band.low - 1.45) < 1e-9,
+    "an unpriced-TTL write must widen the band by exactly the 2.00x/1.25x ratio");
+  assert.ok(band.point >= band.low && band.point <= band.high);
+});
+
+test("the report says the band collapsed rather than printing a meaningless zero", () => {
+  const text = formatReport([
+    { pluginVersion: "0.10.1", costByStage: { a: 1.0 }, medianDepth: 10,
+      cacheBand: { point: 1.0, low: 1.0, high: 1.0, fallbackShare: 0, collapsed: true } },
+  ]);
+  assert.match(text, /every cache write carries its TTL|band collapses|exact/i);
+  assert.doesNotMatch(text, /±\$0\.00/);
+});
+
+// The test above feeds formatReport a hand-built cacheBand literal, so it stays green even if
+// summarizeSession never produces one — it pins the render, not the wiring. This one goes through
+// summarizeSession on real turns instead, so it fails if the producer is orphaned.
+test("summarizeSession: cacheBand covers only the priced turns, and an unpriced model still lands in the unpriced tally", () => {
+  const splitUsage = {
+    input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0,
+    cache_creation: { ephemeral_1h_input_tokens: 1000, ephemeral_5m_input_tokens: 500 },
+  };
+  const recs = [
+    turn({ message: { model: "claude-opus-5", usage: splitUsage } }),
+    turn({ message: { model: "claude-opus-9", usage: splitUsage } }), // not in PRICING
+  ];
+  const s = summarizeSession("sess-abcdef123456", recs);
+  // costBand computed directly over the one priced turn is the only value the wiring may produce;
+  // a summary that fed both turns in, or none, would diverge from this exactly.
+  assert.deepStrictEqual(s.cacheBand, costBand([recs[0]]));
+  assert.equal(s.unpriced["claude-opus-9"], 1);
+});
+
+test("a forward-filled session is labelled inferred in text AND in --json", () => {
+  const summaries = [
+    { pluginVersion: "0.10.1", costByStage: { a: 1.0 }, medianDepth: 10,
+      attributionSource: "forward-filled" },
+  ];
+  assert.match(formatReport(summaries), /inferred/i);
+  const json = buildJsonReport(summaries);
+  assert.strictEqual(json.sessions[0].inferred, "forward-filled");
+});
+
+// The test above hand-builds its summary literal, so it stays green even if summarizeSession
+// never rolls attributionSource up to the session level and even if the render line names a
+// field that does not exist — it pins the render, not the wiring or the field name. This one
+// runs a real record-less session through summarizeSession and both render sites, so it fails
+// on either bug: an unset s.attributionSource (json.inferred stays null, the text line never
+// fires) or a render line naming a nonexistent field (the text line prints "undefined" instead
+// of the session's real id).
+test("a record-less session's forward-filled attribution reaches the real rendered text and --json output, not a hand-built literal", () => {
+  const s = summarizeSession("sess-abcdef123456", [turn({ attributionSkill: "devcycle:cycle" })]);
+  assert.strictEqual(s.attributionSource, "forward-filled");
+  const text = formatReport([s]);
+  assert.match(text, new RegExp(`${s.id}: stage costs are inferred \\(forward-filled`));
+  assert.doesNotMatch(text, /undefined: stage costs are inferred/);
+  const json = buildJsonReport([s]);
+  assert.strictEqual(json.sessions[0].inferred, "forward-filled");
 });
 
 test("depthBand: the six measured bands, at their boundaries", () => {

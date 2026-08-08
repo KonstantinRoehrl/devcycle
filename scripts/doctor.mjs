@@ -87,6 +87,11 @@ export function contextDepth(usage) {
   return (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
 }
 
+// A 1h cache write costs 2.00x the input price, a 5m write 1.25x. Named once, beside the other
+// module-level constants, because the same two numbers price the exact path and both band edges.
+const CACHE_WRITE_1H_MULTIPLIER = 2.0;
+const CACHE_WRITE_5M_MULTIPLIER = 1.25;
+
 // Dollars for one request. Returns null when the model is not in the pricing table, so the
 // caller can report it and exclude it instead of silently defaulting to a price.
 export function costUSD(usage, model) {
@@ -99,14 +104,57 @@ export function costUSD(usage, model) {
   // the flat counter stand in, billed at the 5m rate.
   const write =
     h1 + m5 > 0
-      ? h1 * p.in * 2.0 + m5 * p.in * 1.25
-      : (usage.cache_creation_input_tokens ?? 0) * p.in * 1.25;
+      ? h1 * p.in * CACHE_WRITE_1H_MULTIPLIER + m5 * p.in * CACHE_WRITE_5M_MULTIPLIER
+      : (usage.cache_creation_input_tokens ?? 0) * p.in * CACHE_WRITE_5M_MULTIPLIER;
   const perMillion =
     (usage.input_tokens ?? 0) * p.in +
     write +
     (usage.cache_read_input_tokens ?? 0) * p.in * 0.1 +
     (usage.output_tokens ?? 0) * p.out;
   return perMillion / 1e6;
+}
+
+// Cache-write pricing is the one genuinely unrecoverable number. A record carrying the 1h/5m split
+// is priced exactly; one carrying only the flat counter is priced at the 5m rate and is understated
+// by up to 60%. The band is bounded below by pricing every fallback-priced write at 5m and above by
+// pricing them all at 1h.
+export function costBand(records) {
+  let exact = 0, exactTokens = 0, fallbackTokens = 0, fallbackDollarsAt5m = 0, fallbackDollarsAt1h = 0;
+  for (const r of records) {
+    const u = r.message?.usage ?? r.usage ?? {};
+    const model = r.message?.model ?? r.model;
+    const p = priceFor(model);
+    // An unpriced model must not throw on `p.in` (costUSD guards the same way with `if (!p)` at
+    // :88, resolveDepth with `?.` at :166) and must not enter the band's numerator OR its
+    // totalTokens denominator — leaving it in the denominator while it prices at nothing would
+    // understate cost-per-token by exactly the unpriced share, the same plausible-and-wrong shape
+    // the /1e6 fix above corrects. `costBand` has no reference to the per-session `unpriced` tally
+    // (`:458`) to bump — the real partition happens one level up, in Step 5.
+    if (!p) continue;
+    const h1 = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+    const m5 = u.cache_creation?.ephemeral_5m_input_tokens ?? 0;
+    if (h1 + m5 > 0) {
+      exact += h1 * p.in * CACHE_WRITE_1H_MULTIPLIER + m5 * p.in * CACHE_WRITE_5M_MULTIPLIER;
+      exactTokens += h1 + m5;
+    } else {
+      const flat = u.cache_creation_input_tokens ?? 0;
+      fallbackTokens += flat;
+      fallbackDollarsAt5m += flat * p.in * CACHE_WRITE_5M_MULTIPLIER;
+      fallbackDollarsAt1h += flat * p.in * CACHE_WRITE_1H_MULTIPLIER;
+    }
+  }
+  // Every cache-write token seen, split-priced or not — this is the denominator the report renders
+  // as "% of cache-write tokens lack a TTL split", so it must be tokens, never a record count.
+  const totalTokens = exactTokens + fallbackTokens;
+  // p.in is dollars per MILLION tokens, same as costUSD (:98-103) — every dollar figure below must
+  // divide by 1e6 or the report renders a figure six orders of magnitude too large.
+  return {
+    point: (exact + fallbackDollarsAt5m) / 1e6,
+    low: (exact + fallbackDollarsAt5m) / 1e6,
+    high: (exact + fallbackDollarsAt1h) / 1e6,
+    fallbackShare: totalTokens === 0 ? 0 : fallbackTokens / totalTokens,
+    collapsed: fallbackTokens === 0,
+  };
 }
 
 const BANDS = [
@@ -554,6 +602,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   const costByStage = {};
   const costByAgentType = {};
   const unpriced = {};
+  const priced = [];
   const bandCounts = Object.fromEntries(BAND_LABELS.map((l) => [l, 0]));
   const startupFloor = {};
   const carryWeighted = {};
@@ -576,6 +625,12 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   const record = runRecords.get(sha256(sessionId));
   const attributed = attributeFromRecord(turns, record) ??
     attributeForwardFill(turns).map((skill, i) => ({ ...turns[i], stage: skill, attributionSource: "forward-filled" }));
+  // Session-level rollup of the same source attributeFromRecord already decided per turn: this
+  // session's whole attribution came from the run record only when one was found and it actually
+  // covered the session with stages — the exact condition attributeFromRecord itself guards on
+  // (`if (!record || !record.stages?.length) return null;`) — otherwise every turn fell back to
+  // attributeForwardFill uniformly, so "forward-filled" is never a per-turn mix at this level.
+  const attributionSource = record && record.stages?.length ? "record" : "forward-filled";
   turns.forEach((r, i) => {
     const model = r.message.model;
     if (model) models[model] = (models[model] ?? 0) + 1;
@@ -587,6 +642,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
       bump(costByModel, model, dollars);
       bump(costByStage, attributed[i].stage ?? "unattributed", dollars);
       bump(costByAgentType, agentTypeOf(r), dollars);
+      priced.push(r);
     }
     bandCounts[depthBand(contextDepth(r.message.usage))] += 1;
     if (!pluginVersion) {
@@ -644,8 +700,10 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     carryWeighted,
     dispatches,
     unpriced,
+    cacheBand: costBand(priced),
     models,
     pluginVersion,
+    attributionSource,
     inFlight: newestRecordMs !== null && isInFlight(newestRecordMs),
   };
 }
@@ -693,6 +751,27 @@ export function formatCandidate(c) {
   return `CANDIDATE: ${parts.join(" ")}`;
 }
 
+// Combines every session's cacheBand into one corpus-wide figure. Dollar edges (point/low/high)
+// are additive across sessions. "collapsed" is the logical AND of every session's own collapsed
+// flag — exactly equivalent to "the corpus's total fallback-priced tokens are zero", since that
+// total is a sum of non-negative per-session fallback-token counts and such a sum is zero only
+// when every term is. fallbackShare has no exact aggregate (per-session token counts are not
+// carried on the summary, only the ratio), so it is weighted by each band's own dollar spread —
+// collapsed sessions (spread 0) drop out of the weighting entirely, matching a fully-collapsed
+// corpus reporting share 0.
+function aggregateCacheBand(summaries) {
+  const bands = summaries.map((s) => s.cacheBand).filter(Boolean);
+  if (!bands.length) return { point: 0, low: 0, high: 0, fallbackShare: 0, collapsed: true };
+  const point = bands.reduce((sum, b) => sum + b.point, 0);
+  const low = bands.reduce((sum, b) => sum + b.low, 0);
+  const high = bands.reduce((sum, b) => sum + b.high, 0);
+  const collapsed = bands.every((b) => b.collapsed);
+  const spread = bands.reduce((sum, b) => sum + (b.high - b.low), 0);
+  const fallbackShare =
+    spread === 0 ? 0 : bands.reduce((sum, b) => sum + b.fallbackShare * (b.high - b.low), 0) / spread;
+  return { point, low, high, fallbackShare, collapsed };
+}
+
 function aggregate(summaries) {
   const agg = {
     costUSD: 0,
@@ -714,6 +793,7 @@ function aggregate(summaries) {
     agg.dispatches.total += s.dispatches?.total ?? 0;
     agg.dispatches.withoutModel += s.dispatches?.withoutModel ?? 0;
   }
+  agg.cacheBand = aggregateCacheBand(summaries);
   return agg;
 }
 
@@ -738,6 +818,22 @@ export function formatReport(summaries) {
   ];
   for (const [model, count] of Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]))
     lines.push(`UNPRICED MODEL: ${model} (${count} requests)`);
+  // QC5: any value that remains inferred is labelled inferred at every render site (text and
+  // --json alike), never left to read as exact. Two classes remain — cache-write TTL pricing
+  // (costBand, above) and forward-filled stage attribution (no run record for the session) —
+  // there is no third, since Task 17 established that concurrent-wave attribution is exact.
+  const band = agg.cacheBand;
+  if (band.collapsed)
+    lines.push("Cost is exact: every cache write in this corpus carries its TTL split.");
+  else
+    lines.push(
+      `Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
+        `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
+        `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`,
+    );
+  for (const s of summaries)
+    if (s.attributionSource === "forward-filled")
+      lines.push(`  ${s.id}: stage costs are inferred (forward-filled — no run record).`);
   const inFlightCount = summaries.filter((s) => s.inFlight).length;
   if (inFlightCount > 0)
     lines.push(
@@ -756,11 +852,14 @@ export function formatReport(summaries) {
   for (const c of emitCandidates(summaries)) lines.push(formatCandidate(c));
   lines.push("", vintage, DISCLOSURE, DEPTH_DISCLOSURE, "");
   for (const s of summaries) {
-    const modelList = Object.keys(s.models).join(", ") || "none";
-    const toolList = Object.entries(s.tools).map(([k, v]) => `${k}:${v}`).join(", ") || "none";
+    // `?? {}` / `?? 0`: a summary built for a report-level assertion (as in the cost-band and
+    // forward-filled tests above) may carry only the fields its own test cares about — this loop
+    // must render *something* for it rather than throwing on a session-detail field it omitted.
+    const modelList = Object.keys(s.models ?? {}).join(", ") || "none";
+    const toolList = Object.entries(s.tools ?? {}).map(([k, v]) => `${k}:${v}`).join(", ") || "none";
     lines.push(
       `session ${s.id} — turns ${s.turns} (main ${s.mainTurns}, subagent ${s.subagentTurns}), ` +
-        `depth median ${s.medianDepth} max ${s.maxDepth}, cost ${usd(s.costUSD)}, ` +
+        `depth median ${s.medianDepth} max ${s.maxDepth}, cost ${usd(s.costUSD ?? 0)}, ` +
         `models [${modelList}], tools [${toolList}]` +
         (s.inFlight ? " [in flight — excluded from medians]" : ""),
     );
@@ -831,6 +930,27 @@ export function inWindow(timestamp, since, until) {
 
 function mergeCounts(target, source) {
   for (const [k, v] of Object.entries(source)) target[k] = (target[k] ?? 0) + v;
+}
+
+// The --json counterpart of formatReport: same corpus, same QC5 labelling (every session
+// carries `inferred`, the report carries `cost_band`) — never left implicit the way a
+// human reader could infer from prose but a machine consumer of the JSON could not.
+export function buildJsonReport(summaries) {
+  return {
+    pricesAsOf: PRICING.asOf,
+    sessions: summaries.map((s) => ({
+      ...s,
+      inferred: s.attributionSource === "forward-filled" ? "forward-filled" : null,
+    })),
+    candidates: emitCandidates(summaries),
+    version_cohorts: cohortTable(summaries),
+    inFlight: {
+      excluded: summaries.filter((s) => s.inFlight).length,
+      thresholdMs: IN_FLIGHT_MS,
+      note: IN_FLIGHT_NOTE,
+    },
+    cost_band: aggregateCacheBand(summaries),
+  };
 }
 
 function run(args) {
@@ -936,19 +1056,7 @@ function main() {
   if (args.json) {
     console.log(
       JSON.stringify(
-        {
-          window: result.window,
-          pricesAsOf: PRICING.asOf,
-          sessions: result.sessions,
-          totals: result.totals,
-          candidates: emitCandidates(result.sessions),
-          version_cohorts: cohortTable(result.sessions),
-          inFlight: {
-            excluded: result.sessions.filter((s) => s.inFlight).length,
-            thresholdMs: IN_FLIGHT_MS,
-            note: IN_FLIGHT_NOTE,
-          },
-        },
+        { window: result.window, totals: result.totals, ...buildJsonReport(result.sessions) },
         null,
         2,
       ),
