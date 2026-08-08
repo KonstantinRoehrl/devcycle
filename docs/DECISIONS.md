@@ -5,6 +5,28 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-08 — Surface accounting after cycle 2 (block E)
+
+`SURFACE_LINE_BUDGET = 3500` stands. The surface moved from **3,407** (v0.12.0, 36 files) to
+**3,486** across 39 files, leaving **14** lines of headroom.
+
+**The plan's own projection was wrong, and that is the entry's point.** Planning estimated ~+64 net
+for the whole cycle, landing near 3,471. Wave 1 alone spent +67; measured after it, the surface
+stood at **3,474 — 26 lines of headroom** against a remaining need of **~+92**. Three tasks were
+cut to fit and are deferred to cycle 3: the ledger's run-record section (+33), the on-device
+three-path resolution (+32), and the finish stage's local privacy screen (+17). A ~2-line stub kept
+`agents/on-device-driver.md` dispatched rather than orphaned. **The lesson is to re-measure the
+surface at every wave boundary, not once at planning.**
+
+The binding constraint was never the aggregate alone. `commands/cycle.md` sat at exactly
+`COMMAND_LINE_MAX` and ends at exactly 100; `playbooks/executing-waves.md` was 2 lines under
+`PLAYBOOK_LINE_MAX` and ends at exactly 150; `playbooks/reviewing-the-branch.md` had 1. What fit,
+fit because the run record is written by `scripts/run-record.mjs` — scripts are not counted surface,
+so each instruction site costs about one line (the call) rather than a field-by-field specification
+in prose. A future block adding runtime prose to any of those three files must pay for it with a cut
+in the same file; the aggregate headroom does not help there, and cycle 3 starts with ~+82 of
+deferred surface already owed.
+
 ## 2026-08-06 — the runtime surface budget is 3,500 lines, not 2,600
 
 **Decision:** `scripts/validate.mjs` enforces `SURFACE_LINE_BUDGET = 3500` across
