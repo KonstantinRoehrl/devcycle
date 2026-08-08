@@ -71,7 +71,7 @@ test("parseArgs: every flag is read", () => {
 });
 
 test("isDevcycleSession: a devcycle attributionSkill includes the session", () => {
-  assert.equal(isDevcycleSession([turn({ attributionSkill: "devcycle:executing-waves" })]), true);
+  assert.equal(isDevcycleSession([turn({ attributionSkill: "devcycle:cycle" })]), true);
 });
 
 test("isDevcycleSession: another plugin's bare skill name does not include it", () => {
@@ -81,7 +81,7 @@ test("isDevcycleSession: another plugin's bare skill name does not include it", 
 
 test("isDevcycleSession: a Skill tool call naming a devcycle skill includes the session", () => {
   const rec = turn({ message: { model: "claude-opus-5", usage: usage(1, 1, 1, 1),
-    content: [{ type: "tool_use", name: "Skill", input: { skill: "devcycle:fast-path" } }] } });
+    content: [{ type: "tool_use", name: "Skill", input: { skill: "devcycle:cycle" } }] } });
   assert.equal(isDevcycleSession([rec]), true);
 });
 
@@ -97,7 +97,7 @@ test("median: odd and even lengths", () => {
 
 test("summarizeSession: splits main thread from subagents and counts the tool mix", () => {
   const recs = [
-    turn({ attributionSkill: "devcycle:executing-waves" }),
+    turn({ attributionSkill: "devcycle:cycle" }),
     turn({ isSidechain: true }),
     turn({ isSidechain: true }),
     turn({ message: { model: "claude-opus-5", usage: usage(0, 0, 0, 0),
@@ -122,24 +122,24 @@ test("summarizeSession: identifies the session by id prefix only", () => {
 
 test("summarizeSession: forward-fills attribution onto trailing untagged turns in the same transcript", () => {
   const recs = [
-    turn({ attributionSkill: "devcycle:executing-waves" }),
+    turn({ attributionSkill: "devcycle:cycle" }),
     turn({}),
     turn({}),
   ];
   const s = summarizeSession("sess-abcdef123456", recs);
   assert.equal(s.costByStage.unattributed, undefined);
-  assert.equal(s.costByStage["devcycle:executing-waves"] > 0, true);
+  assert.equal(s.costByStage["devcycle:cycle"] > 0, true);
 });
 
 test("summarizeSession: forward-fill does not cross transcripts", () => {
   const recs = [
-    turn({ attributionSkill: "devcycle:executing-waves" }),
+    turn({ attributionSkill: "devcycle:cycle" }),
     turn({}),
     turn({ isSidechain: true, agentId: "agent-1" }),
   ];
   const s = summarizeSession("sess-abcdef123456", recs);
   assert.equal(s.costByStage.unattributed > 0, true);
-  assert.equal(s.costByStage["devcycle:executing-waves"] > s.costByStage.unattributed, true);
+  assert.equal(s.costByStage["devcycle:cycle"] > s.costByStage.unattributed, true);
 });
 
 test("summarizeSession: no explicit attribution anywhere in the transcript stays unattributed", () => {
@@ -240,7 +240,7 @@ function fixtureDir() {
   const proj = join(dir, "-some-project");
   mkdirSync(proj, { recursive: true });
   const lines = [
-    turn({ attributionSkill: "devcycle:executing-waves",
+    turn({ attributionSkill: "devcycle:cycle",
       message: { model: "claude-opus-5", usage: usage(10, 100, 1000, 20),
         content: [{ type: "text", text: "SECRETMESSAGEBODY" }] } }),
     turn({ isSidechain: true, timestamp: "2026-07-20T11:00:00.000Z" }),
@@ -318,7 +318,7 @@ function markerBeforeWindowDir() {
   const proj = join(dir, "-some-project");
   mkdirSync(proj, { recursive: true });
   const lines = [
-    turn({ timestamp: "2026-07-01T09:00:00.000Z", attributionSkill: "devcycle:executing-waves" }),
+    turn({ timestamp: "2026-07-01T09:00:00.000Z", attributionSkill: "devcycle:cycle" }),
     turn({ timestamp: "2026-07-20T10:00:00.000Z" }),
     turn({ timestamp: "2026-07-31T10:00:00.000Z" }),
   ];
@@ -503,7 +503,7 @@ test("cli: a transcript under subagents/ is walked and attributed to its owning 
   mkdirSync(join(slug, "sess-aaaa", "subagents"), { recursive: true });
   writeFileSync(
     join(slug, "sess-aaaa.jsonl"),
-    JSON.stringify(turn({ attributionSkill: "devcycle:executing-waves" })) + "\n",
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) + "\n",
   );
   writeFileSync(
     join(slug, "sess-aaaa", "subagents", "agent-bbbb.jsonl"),
@@ -522,7 +522,7 @@ test("cli: a <synthetic> record is skipped, not reported as an unpriced model", 
   mkdirSync(slug, { recursive: true });
   writeFileSync(
     join(slug, "sess-cccc.jsonl"),
-    JSON.stringify(turn({ attributionSkill: "devcycle:executing-waves" })) +
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) +
       "\n" +
       JSON.stringify({
         type: "assistant",
@@ -545,7 +545,7 @@ test("cli: an unpriced model gets its own line and is excluded from the dollar t
   mkdirSync(slug, { recursive: true });
   writeFileSync(
     join(slug, "sess-dddd.jsonl"),
-    JSON.stringify(turn({ attributionSkill: "devcycle:executing-waves" })) +
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) +
       "\n" +
       JSON.stringify({
         type: "assistant",
@@ -571,7 +571,7 @@ test("cli: --json emits a candidates array carrying emitCandidates' signals", ()
   mkdirSync(slug, { recursive: true });
   writeFileSync(
     join(slug, "sess-ffff.jsonl"),
-    JSON.stringify(turn({ attributionSkill: "devcycle:executing-waves" })) +
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) +
       "\n" +
       JSON.stringify({
         type: "assistant",
@@ -593,7 +593,7 @@ test("cli: the plain-text report surfaces candidate signals, not just the raw ag
   mkdirSync(slug, { recursive: true });
   writeFileSync(
     join(slug, "sess-gggg.jsonl"),
-    JSON.stringify(turn({ attributionSkill: "devcycle:executing-waves" })) +
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) +
       "\n" +
       JSON.stringify({
         type: "assistant",
@@ -612,7 +612,7 @@ test("cli: a malformed trailing line is skipped rather than fatal", () => {
   mkdirSync(slug, { recursive: true });
   writeFileSync(
     join(slug, "sess-eeee.jsonl"),
-    JSON.stringify(turn({ attributionSkill: "devcycle:executing-waves" })) +
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) +
       "\n" +
       '{"type":"assistant","message":{"mod',
   );
@@ -839,14 +839,14 @@ test("emitCandidates does not flag a depth-outlier when medianDepth is within 3x
 // two adjacent cohorts to compare.
 test("emitCandidates flags a cost-outlier for a skill whose cost is far above its peers, with a single version cohort", () => {
   const summaries = [
-    { id: "s1", costByStage: { "devcycle:executing-waves": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s2", costByStage: { "devcycle:executing-waves": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s3", costByStage: { "devcycle:executing-waves": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s4", costByStage: { "devcycle:executing-waves": 5.0 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s1", costByStage: { "devcycle:cycle": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s2", costByStage: { "devcycle:cycle": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s3", costByStage: { "devcycle:cycle": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s4", costByStage: { "devcycle:cycle": 5.0 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
   ];
   const candidates = emitCandidates(summaries);
   const outlier = candidates.find(
-    (c) => c.type === "cost-outlier" && c.skill === "devcycle:executing-waves"
+    (c) => c.type === "cost-outlier" && c.skill === "devcycle:cycle"
   );
   assert.ok(outlier, "expected a cost-outlier candidate");
   assert.strictEqual(outlier.dollars, 5.0);
@@ -854,10 +854,10 @@ test("emitCandidates flags a cost-outlier for a skill whose cost is far above it
 
 test("emitCandidates does not flag a cost-outlier when costs are uniform across runs", () => {
   const summaries = [
-    { id: "s1", costByStage: { "devcycle:executing-waves": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s2", costByStage: { "devcycle:executing-waves": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s3", costByStage: { "devcycle:executing-waves": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s4", costByStage: { "devcycle:executing-waves": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s1", costByStage: { "devcycle:cycle": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s2", costByStage: { "devcycle:cycle": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s3", costByStage: { "devcycle:cycle": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
+    { id: "s4", costByStage: { "devcycle:cycle": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
   ];
   const candidates = emitCandidates(summaries);
   const outlier = candidates.find((c) => c.type === "cost-outlier");
