@@ -252,7 +252,7 @@ export function versionCohorts(summaries) {
   for (const s of summaries) {
     const key = s.pluginVersion ?? "unknown";
     if (!cohorts.has(key))
-      cohorts.set(key, { sessions: 0, dollars: [], depths: [], byStage: new Map() });
+      cohorts.set(key, { sessions: 0, dollars: [], depths: [], byStage: new Map(), qualities: [] });
     const c = cohorts.get(key);
     c.sessions++;
     let sessionTotal = 0;
@@ -263,8 +263,31 @@ export function versionCohorts(summaries) {
     }
     c.dollars.push(sessionTotal);
     if (typeof s.medianDepth === "number") c.depths.push(s.medianDepth);
+    c.qualities.push(s.quality ?? null);
   }
   return cohorts;
+}
+
+// Rolls up several sessions' quality signals into one cohort-level figure — sums across every
+// session that carries one, so a cohort with a mix of recorded and record-less sessions still
+// reports on the recorded subset rather than going null on the first gap. Null only when the
+// whole cohort has no run record, same "absent, not zero" rule as qualitySignals itself.
+function aggregateQuality(qualities) {
+  const present = qualities.filter(Boolean);
+  if (!present.length) return null;
+  const tasks = present.reduce((n, q) => n + q.tasks, 0);
+  const reviewRounds = present.reduce((n, q) => n + q.reviewRounds, 0);
+  const retries = present.reduce((n, q) => n + q.retries, 0);
+  const blockingFindings = present.reduce((n, q) => n + q.blockingFindings, 0);
+  const conformanceFailures = present.reduce((n, q) => n + q.conformanceFailures, 0);
+  return {
+    tasks,
+    reviewRounds,
+    retries,
+    blockingFindings,
+    conformanceFailures,
+    roundsPerTask: tasks === 0 ? 0 : reviewRounds / tasks,
+  };
 }
 
 // The per-version comparison table: one row per cohort, ordered oldest to newest with the
@@ -281,6 +304,7 @@ export function cohortTable(summaries) {
       total: c.dollars.reduce((a, b) => a + b, 0),
       medianPerSession: median(c.dollars),
       medianDepth: c.depths.length ? median(c.depths) : null,
+      quality: aggregateQuality(c.qualities),
       inferred: version === "unknown" ? "no version detectable" : null,
     };
   });
@@ -565,7 +589,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
   }
   for (const repo of repos.filter((e) => e.isDirectory()))
     for (const f of readdirSync(join(dir, repo.name)).filter((n) => n.endsWith(".jsonl"))) {
-      const rec = { runId: null, pluginVersion: null, profile: null, stages: [], dispatches: [] };
+      const rec = { runId: null, pluginVersion: null, profile: null, stages: [], dispatches: [], verdicts: [] };
       const hashes = [];
       for (const line of readFileSync(join(dir, repo.name, f), "utf8").split("\n").filter(Boolean)) {
         let o;
@@ -574,6 +598,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         else if (o.kind === "session") hashes.push(o.sessionHash);
         else if (o.kind === "stage") rec.stages.push(o);
         else if (o.kind === "dispatch") rec.dispatches.push(o);
+        else if (o.kind === "verdict") rec.verdicts.push(o);
       }
       for (const h of hashes) bySession.set(h, rec);
     }
@@ -600,6 +625,25 @@ export function attributeFromRecord(turns, record) {
       attributionSource: "record",
     };
   });
+}
+
+// Every token metric is paired with a quality signal, so a change that halves cost while doubling
+// review rounds is visible as such. Absent for a record-less run — zero rounds would read as
+// flawless work rather than as no data.
+export function qualitySignals(record) {
+  if (!record) return null;
+  const dispatches = record.dispatches ?? [];
+  const verdicts = record.verdicts ?? [];
+  const tasks = new Set([...dispatches, ...verdicts].map((d) => d.taskId)).size;
+  const reviewRounds = verdicts.length;
+  return {
+    tasks,
+    reviewRounds,
+    retries: dispatches.filter((d) => (d.retryIndex ?? 0) > 0).length,
+    blockingFindings: verdicts.reduce((n, v) => n + (v.blockingCount ?? 0), 0),
+    conformanceFailures: verdicts.filter((v) => v.conformance === "fail").length,
+    roundsPerTask: tasks === 0 ? 0 : reviewRounds / tasks,
+  };
 }
 
 function bump(map, key, amount) {
@@ -743,6 +787,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     attributionSource,
     complianceCandidates: emitComplianceCandidates(toolCallEvents, record),
     inFlight: newestRecordMs !== null && isInFlight(newestRecordMs),
+    quality: qualitySignals(record),
   };
 }
 
@@ -762,6 +807,16 @@ const DEPTH_DISCLOSURE =
   "the same depth reads as a different band on a different model.";
 
 const usd = (n) => "$" + (n >= 1 ? n.toFixed(2) : n.toFixed(4));
+
+// QC4/QC5: absent, not zero — a record-less run's "0 review rounds" would read as flawless work
+// rather than as no data, so the missing case renders its own label instead of a zero figure.
+function qualityText(q) {
+  if (q === null || q === undefined) return "unavailable (no run record)";
+  return (
+    `${q.roundsPerTask.toFixed(1)} rounds/task (${q.tasks} tasks, ${q.retries} retries, ` +
+    `${q.blockingFindings} blocking, ${q.conformanceFailures} conformance fail)`
+  );
+}
 
 // Largest first, so each section leads with what actually costs money.
 function ranked(map, render) {
@@ -904,7 +959,8 @@ export function formatReport(summaries) {
     lines.push(
       `  ${r.version.padEnd(10)} n=${String(r.sessions).padStart(3)}  ` +
       `total=$${r.total.toFixed(2).padStart(9)}  median/session=$${r.medianPerSession.toFixed(2).padStart(7)}  ` +
-      `median depth=${r.medianDepth === null ? "n/a" : r.medianDepth}` +
+      `median depth=${r.medianDepth === null ? "n/a" : r.medianDepth}  ` +
+      `quality: ${qualityText(r.quality)}` +
       (r.version === "unknown" ? "   (inferred: no version detectable)" : "")
     );
   lines.push("");
@@ -920,7 +976,7 @@ export function formatReport(summaries) {
     lines.push(
       `session ${s.id} — turns ${s.turns} (main ${s.mainTurns}, subagent ${s.subagentTurns}), ` +
         `depth median ${s.medianDepth} max ${s.maxDepth}, cost ${usd(s.costUSD ?? 0)}, ` +
-        `models [${modelList}], tools [${toolList}]` +
+        `models [${modelList}], tools [${toolList}], quality: ${qualityText(s.quality)}` +
         (s.inFlight ? " [in flight — excluded from medians]" : ""),
     );
   }
@@ -1001,6 +1057,7 @@ export function buildJsonReport(summaries) {
     sessions: summaries.map((s) => ({
       ...s,
       inferred: s.attributionSource === "forward-filled" ? "forward-filled" : null,
+      quality: s.quality ?? null,
     })),
     candidates: [...emitCandidates(summaries), ...complianceCandidatesOf(summaries)],
     version_cohorts: cohortTable(summaries),

@@ -13,7 +13,7 @@ import {
   extractPluginVersion, emitCandidates, configDrift, findTranscriptFiles,
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
-  emitComplianceCandidates,
+  emitComplianceCandidates, qualitySignals,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -1299,6 +1299,30 @@ test("cohortTable carries n, total, median $/session and median depth per versio
   assert.strictEqual(v092.medianDepth, 15);
 });
 
+test("cohortTable aggregates quality per cohort, absent when no session carries one", () => {
+  const rows = cohortTable([
+    { pluginVersion: "0.9.2", costByStage: { a: 1.0 }, medianDepth: 10,
+      quality: { tasks: 2, reviewRounds: 3, retries: 1, blockingFindings: 1,
+                 conformanceFailures: 0, roundsPerTask: 1.5 } },
+    { pluginVersion: "0.9.2", costByStage: { a: 1.0 }, medianDepth: 10,
+      quality: { tasks: 1, reviewRounds: 1, retries: 0, blockingFindings: 0,
+                 conformanceFailures: 1, roundsPerTask: 1 } },
+    { pluginVersion: "0.10.1", costByStage: { a: 1.0 }, medianDepth: 10, quality: null },
+  ]);
+  const v092 = rows.find((r) => r.version === "0.9.2");
+  // Summed across every session in the cohort that carries a quality record, not overwritten
+  // or averaged away by the session that doesn't.
+  assert.strictEqual(v092.quality.tasks, 3);
+  assert.strictEqual(v092.quality.reviewRounds, 4);
+  assert.strictEqual(v092.quality.retries, 1);
+  assert.strictEqual(v092.quality.blockingFindings, 1);
+  assert.strictEqual(v092.quality.conformanceFailures, 1);
+  // A cohort with no quality-bearing session at all reports absent, never a zeroed-out object
+  // that would read as flawless work.
+  const v0101 = rows.find((r) => r.version === "0.10.1");
+  assert.strictEqual(v0101.quality, null);
+});
+
 test("cohortTable orders versions numerically with unknown last", () => {
   const rows = cohortTable([
     { pluginVersion: "0.10.1", costByStage: { a: 1 }, medianDepth: 1 },
@@ -1324,10 +1348,98 @@ test("the default text report renders the cohort table", () => {
   assert.match(text, /0\.10\.1\s+n=\s*1/);
 });
 
+test("the text report's cohort table pairs each cohort's cost with its quality", () => {
+  const text = formatReport([
+    { pluginVersion: "0.9.2", costByStage: { a: 1.0 }, medianDepth: 10,
+      quality: { tasks: 2, reviewRounds: 3, retries: 1, blockingFindings: 1,
+                 conformanceFailures: 0, roundsPerTask: 1.5 } },
+    { pluginVersion: "0.10.1", costByStage: { a: 2.0 }, medianDepth: 20, quality: null },
+  ]);
+  const cohortLines = text.split("\n").filter((l) => /^\s*0\.\d/.test(l));
+  const v092Line = cohortLines.find((l) => l.includes("0.9.2"));
+  const v0101Line = cohortLines.find((l) => l.includes("0.10.1"));
+  assert.match(v092Line, /quality: 1\.5 rounds\/task/);
+  // Absent quality on a cohort row must render its own label, not read as zero rounds.
+  assert.match(v0101Line, /quality: (unavailable|no run record)/i);
+  assert.doesNotMatch(v0101Line, /0 review rounds/);
+});
+
 test("the report prints the depth-band fraction-of-window caveat", () => {
   const rendered = { costUSD: 1.0, models: {}, tools: {} };
   const text = formatReport([
     { ...rendered, pluginVersion: "0.10.1", costByStage: { a: 1.0 }, medianDepth: 10 },
   ]);
   assert.match(text, /fraction of the .*window/i);
+});
+
+// --- qualitySignals: every cost figure is paired with a quality signal (A6) ---
+
+test("qualitySignals aggregates rounds, retries and blocking findings per run", () => {
+  const q = qualitySignals({
+    dispatches: [
+      { taskId: "1", reviewRound: 0, retryIndex: 0 },
+      { taskId: "1", reviewRound: 1, retryIndex: 1 },
+      { taskId: "2", reviewRound: 0, retryIndex: 0 },
+    ],
+    verdicts: [
+      { taskId: "1", round: 1, blockingCount: 2, conformance: "fail" },
+      { taskId: "1", round: 2, blockingCount: 0, conformance: "pass" },
+      { taskId: "2", round: 1, blockingCount: 0, conformance: "pass" },
+    ],
+  });
+  assert.strictEqual(q.tasks, 2);
+  assert.strictEqual(q.reviewRounds, 3);
+  assert.strictEqual(q.retries, 1);
+  assert.strictEqual(q.blockingFindings, 2);
+  assert.strictEqual(q.conformanceFailures, 1);
+  assert.strictEqual(q.roundsPerTask, 1.5);
+});
+
+test("a record-less run reports quality as absent, never as zero", () => {
+  assert.strictEqual(qualitySignals(null), null);
+  const text = formatReport([
+    { pluginVersion: "0.10.1", costByStage: { a: 1.0 }, medianDepth: 10,
+      attributionSource: "forward-filled", quality: null },
+  ]);
+  // "0 review rounds" would read as flawless work rather than as no data.
+  assert.doesNotMatch(text, /0 review rounds/);
+  assert.match(text, /quality: (unavailable|no run record)/i);
+});
+
+test("the report pairs cost with rounds per task so a cheaper-but-worse run is visible", () => {
+  const text = formatReport([
+    { pluginVersion: "0.13.0", costByStage: { a: 5.0 }, medianDepth: 10,
+      quality: { tasks: 4, reviewRounds: 12, retries: 5, blockingFindings: 9,
+                 conformanceFailures: 2, roundsPerTask: 3 } },
+  ]);
+  assert.match(text, /rounds\/task/i);
+  assert.match(text, /3/);
+});
+
+test("--json carries the quality signals beside the cost", () => {
+  const json = buildJsonReport([
+    { pluginVersion: "0.13.0", costByStage: { a: 5.0 }, medianDepth: 10,
+      quality: { tasks: 4, reviewRounds: 12, retries: 5, blockingFindings: 9,
+                 conformanceFailures: 2, roundsPerTask: 3 } },
+  ]);
+  assert.strictEqual(json.sessions[0].quality.roundsPerTask, 3);
+  const bare = buildJsonReport([
+    { pluginVersion: "0.13.0", costByStage: { a: 5.0 }, medianDepth: 10, quality: null },
+  ]);
+  assert.strictEqual(bare.sessions[0].quality, null);
+});
+
+test("--json's version_cohorts carry each cohort's quality beside its cost", () => {
+  const json = buildJsonReport([
+    { pluginVersion: "0.13.0", costByStage: { a: 5.0 }, medianDepth: 10,
+      quality: { tasks: 4, reviewRounds: 12, retries: 5, blockingFindings: 9,
+                 conformanceFailures: 2, roundsPerTask: 3 } },
+    { pluginVersion: "0.14.0", costByStage: { a: 1.0 }, medianDepth: 10, quality: null },
+  ]);
+  const withQuality = json.version_cohorts.find((r) => r.version === "0.13.0");
+  const withoutQuality = json.version_cohorts.find((r) => r.version === "0.14.0");
+  assert.strictEqual(withQuality.quality.roundsPerTask, 3);
+  assert.strictEqual(withQuality.quality.blockingFindings, 9);
+  // No quality-bearing session in the cohort means absent, never a zeroed-out object.
+  assert.strictEqual(withoutQuality.quality, null);
 });
