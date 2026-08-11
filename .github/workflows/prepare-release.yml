@@ -14,12 +14,7 @@ concurrency:
   group: prepare-release
   cancel-in-progress: false
 jobs:
-  # Run the suite before the bump is pushed: the push below uses the implicit token, which
-  # triggers no workflow, so this call is the release commit's only check.
-  validate:
-    uses: ./.github/workflows/validate.yml
   prepare:
-    needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -31,6 +26,10 @@ jobs:
           ref: dev
           fetch-depth: 0
           persist-credentials: false
+
+      - uses: actions/setup-node@00cda2d0920b135ce8d7e1a1d3ca379b1a19c1e7 # v4.0.0
+        with:
+          node-version: lts/*
 
       - name: Refuse to prepare a release from anything but dev
         env:
@@ -49,22 +48,17 @@ jobs:
           TITLE: ${{ inputs.title }}
         run: echo "version=$(node scripts/bump-version.mjs --subject "$TITLE")" >> "$GITHUB_OUTPUT"
 
-      - name: Refuse to reuse a released version
+      - name: Check whether the bump already landed
         id: guard
-        env:
-          V: ${{ steps.bump.outputs.version }}
         run: |
-          # An already-published tag means the bump landed on a stale plugin.json; pushing
-          # on would open a PR whose merge could never be tagged.
-          if git rev-parse -q --verify "refs/tags/devcycle--v$V" >/dev/null; then
-            echo "tag devcycle--v$V already exists — dev's plugin.json is behind main"
-            exit 1
-          fi
-          # The tag check alone cannot see "already bumped, PR not opened" — the state a
-          # failed `gh pr create` leaves behind. Detect it so a re-run opens the missing PR
-          # instead of bumping a second time.
-          if git log -1 --pretty=%s | grep -q "^chore(release): prepare v$V$"; then
+          set -euo pipefail
+          COMMITTED=$(git log -1 --format=%s -- .claude-plugin/plugin.json | grep -oP '(?<=prepare v)\S+' || echo "")
+          CURRENT=$(node -p "require('./.claude-plugin/plugin.json').version")
+          if [ "$COMMITTED" = "$CURRENT" ] && git log -1 --format=%s | grep -q "^chore(release): prepare v$CURRENT$"; then
             echo "already-bumped=true" >> "$GITHUB_OUTPUT"
+            echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          else
+            echo "already-bumped=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Commit the version bump
@@ -98,11 +92,14 @@ jobs:
             git pull --rebase origin dev
           done
 
+      - name: Validate the release commit
+        uses: ./.github/workflows/validate.yml
+
       - name: Open the release PR
         env:
           GH_TOKEN: ${{ github.token }}
           TITLE: ${{ inputs.title }}
-          V: ${{ steps.bump.outputs.version }}
+          V: ${{ steps.guard.outputs.already-bumped == 'true' && steps.guard.outputs.version || steps.bump.outputs.version }}
         run: |
           set -euo pipefail
           if gh pr list --base main --head dev --state open --json number \
