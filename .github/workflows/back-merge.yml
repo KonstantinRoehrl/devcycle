@@ -49,6 +49,9 @@ jobs:
                | grep -qv '^0$'; then
             echo "Back-merge PR already open."; exit 0
           fi
-          gh pr create --base dev --head main \
+          if ! gh pr create --base dev --head main \
             --title "chore: merge the release back into dev" \
-            --body "Opened automatically after a release. CONTRIBUTING.md requires main to be merged back into dev after every release; skipping it is what left the 0.12.0 release PR conflicting across four files."
+            --body "Opened automatically after a release. CONTRIBUTING.md requires main to be merged back into dev after every release; skipping it is what left the 0.12.0 release PR conflicting across four files."; then
+            echo "::error::Settings -> Actions -> General -> Allow GitHub Actions to create and approve pull requests"
+            exit 1
+          fi
