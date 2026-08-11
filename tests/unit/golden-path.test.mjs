@@ -230,13 +230,11 @@ const RELEASE_BRANCH = "main";
 // making it do so would trade the safe error for the unsafe one.
 function pushTargets(text) {
   const targets = [];
-  // Order matters, and getting it wrong loses real pushes both ways.
-  //
-  // Comments are stripped FIRST, per physical line, quote-aware. A `#` comment is prose, not a
-  // command: without this, a workflow that merely mentions `git push origin main` in a comment
-  // reads as one that does it, and every following word is parsed as a refspec. But a `#` inside
-  // a quoted string is data, not a comment — a quote-unaware strip ate to end of line and dropped
-  // a real push that happened to follow one on the same line.
+  // Quote-aware single-pass scanner. Order matters: comments are stripped FIRST (quote-aware),
+  // then continuations are joined (only to non-blank lines), then git push destinations extracted.
+  // Stripping before joining prevents a comment ending in \ from swallowing the next real line.
+
+  // FIRST PASS: Strip comments from all lines, preserving quote state
   const stripped = text.split(/\r?\n/).map((line) => {
     let code = "", quote = null;
     for (let i = 0; i < line.length; i++) {
@@ -256,29 +254,28 @@ function pushTargets(text) {
     }
     return code;
   });
-  // Continuations are joined SECOND, after the comments are already gone, and only to the
-  // immediately following line. `git push \` with `origin main` on the next physical line is a
-  // routine `run: |` idiom that a per-line parser misses entirely — it sees a push with no
-  // refspec, then a line with no push. Joining before stripping instead would let a comment
-  // ending in a backslash swallow the next line whole, taking a real push down with it. A blank
-  // line ends a continuation instead of bridging it — bridging merged unrelated statements onto
-  // one physical line and let the greedy scan read the second statement's words as refspecs.
-  const lines = [];
+
+  // SECOND PASS: Join continuations (only to non-blank lines) and extract destinations
   for (let i = 0; i < stripped.length; i++) {
     let line = stripped[i];
+    // Join continuation backslashes with the next non-blank line only
     while (/\\\s*$/.test(line) && i + 1 < stripped.length && stripped[i + 1].trim() !== "")
       line = line.replace(/\\\s*$/, " ") + stripped[++i].replace(/^\s+/, "");
-    lines.push(line.replace(/\\\s*$/, " "));
-  }
-  for (const line of lines)
+    line = line.replace(/\\\s*$/, " ");
+
+    // Extract destinations from git push commands in this line
     for (const [, rest] of line.matchAll(/\bgit push\b([^\n;&|]*)/g)) {
       const positional = rest.trim().split(/\s+/).filter((t) => t && !t.startsWith("-"));
       for (const spec of positional.slice(1)) {
         // slice(1) drops the remote, which is never a refspec
         const dest = spec.replace(/["']/g, "").replace(/^\+/, "").split(":").pop();
-        targets.push(dest.replace(/^refs\/heads\//, ""));
+        // Normalize branch names by stripping refs/heads/ prefix, but only if the result
+        // looks like a valid ref (no invalid characters like #)
+        const normalized = dest.replace(/^refs\/heads\/(?=[A-Za-z0-9\/_.-]+$)/, "");
+        targets.push(normalized);
       }
     }
+  }
   return targets;
 }
 
@@ -287,7 +284,7 @@ function pushTargets(text) {
 // equality guard alone passed it. A literal prefix constrains the expansion, so `devcycle--v$V`
 // — the legitimate tag push pinned by pushes-elsewhere.yml — is fine.
 function isBareVariable(dest) {
-  return /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/.test(dest);
+  return /^(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)+$/.test(dest);
 }
 
 test("the push guard reads a refspec's destination, whatever form the push takes", () => {
@@ -344,6 +341,20 @@ test("a blank line ends a continuation instead of merging two pushes", () => {
   );
 });
 
+test("pushTargets keeps a real destination after a # inside a quoted refspec", () => {
+  const yaml = 'run: git push origin "refs/heads/main#not-a-comment"\nrun: git push origin next\n';
+  const targets = pushTargets(yaml);
+  assert.deepStrictEqual(targets, ["refs/heads/main#not-a-comment", "next"]);
+});
+
+test("pushTargets does not bridge a blank line into a continuation join", () => {
+  const yaml = 'run: git push \\\n\n  origin main\n';
+  // A blank line between the continuation backslash and its intended next line must NOT be
+  // silently bridged into one push destination — today's \s* join does exactly that.
+  const targets = pushTargets(yaml);
+  assert.deepStrictEqual(targets, []); // the malformed continuation yields no valid destination, not a merged wrong one
+});
+
 test("a bare-variable push destination is rejected", () => {
   assert.strictEqual(isBareVariable("$BRANCH"), true);
   assert.strictEqual(isBareVariable("${BRANCH}"), true);
@@ -351,6 +362,12 @@ test("a bare-variable push destination is rejected", () => {
   // A literal prefix constrains what the variable can expand to.
   assert.strictEqual(isBareVariable("devcycle--v$V"), false);
   assert.strictEqual(isBareVariable("release/$NAME"), false);
+});
+
+test("isBareVariable flags a concatenated $A$B destination with no literal part", () => {
+  assert.strictEqual(isBareVariable("$A$B"), true);
+  assert.strictEqual(isBareVariable("${A}${B}"), true);
+  assert.strictEqual(isBareVariable("devcycle--v$V"), false); // literal prefix still passes
 });
 
 test("the push guard catches a variable destination that could resolve to main", () => {
