@@ -596,7 +596,7 @@ function attributeForwardFill(turns) {
 const CURRENT_SCHEMA_VERSION = 1;
 
 // The run record is the machine-readable telemetry log; the ledger is the human-readable progress
-// log. Neither reads the other — see references/ledger.md.
+// log. Neither reads the other — see references/ledger.md § The run record.
 export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
   join(homedir(), ".claude", "devcycle", "runs")) {
   const bySession = new Map();

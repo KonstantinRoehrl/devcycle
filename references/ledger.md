@@ -26,3 +26,19 @@ appended line per event, all four fields REQUIRED, exactly this shape:
 ```
 
 After any compaction or resume, trust the ledger and `git log` over conversation memory.
+
+## The run record
+
+A second, machine-readable log of the same run — `scripts/run-record.mjs`'s append-only JSONL,
+never read by this file's own reader (`references/resume.md`) and never reading the ledger back.
+`references/evidence.md` § Why the evidence lives in files gives the same reasoning for why these
+two logs never merge. One row per write site, not a restatement of `tests/fixtures/run-record.schema.json`'s field shapes:
+
+| kind | written | by |
+| --- | --- | --- |
+| `run` | once, after config resolution, before the first confirmation | `commands/cycle.md` |
+| `session` | once per real Claude Code session — cycle start, and the top of every `/devcycle:continue` | `commands/cycle.md`, `commands/continue.md` |
+| `stage` | at every stage boundary | `references/handoff.md` |
+| `dispatch` | once per implementer dispatch, at step 4 (report received) — never at step 3 (dispatch), since `endedAt`/`outcome`/round/retry are unknown until the envelope returns | `playbooks/executing-waves.md` |
+| `verdict` | once per review round, at step 5 (after `event=review-verdict`) — never at step 4, since `round`/`blockingCount`/`conformance` are unknown until review runs | `playbooks/executing-waves.md` |
+| `commit` | once per task commit, at step 7 | `playbooks/executing-waves.md` |
