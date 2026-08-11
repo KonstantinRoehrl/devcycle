@@ -12,7 +12,10 @@ recollection, including the user's.
 
 ## Re-derive position from files
 
-1. Find every resumable cycle: each `.devcycle/state.md` under this repo root.
+1. Find every resumable cycle: each `.devcycle/state.md` under this repo root, searched with
+   gitignore filtering disabled — `.devcycle/` is itself gitignored by convention, so a
+   default-gitignore-aware search tool (a shell hook rewriting `find`, `rg` without
+   `--no-ignore`) can silently report none found even when a state file exists.
    List them with branch, stage, last ledger event, and age, and **ask which
    one** — never pick. Resuming the wrong cycle silently is the failure this
    enumeration exists to prevent. With exactly one candidate, still name it
@@ -21,7 +24,11 @@ recollection, including the user's.
    `/devcycle:cycle <description>` to start one. Stop there.
 2. Run the ownership check on the chosen file before trusting anything in it, per
    `${CLAUDE_PLUGIN_ROOT}/references/resume.md`. A `root:` mismatch stops the
-   resume and goes to the user; it is never resolved silently.
+   resume and goes to the user; it is never resolved silently. Once it passes, append this
+   session's line to the run record the state file's `run:` row names — `node
+   ${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append --run <that id> --kind session
+   --sessionId "$CLAUDE_CODE_SESSION_ID"` — one append per real session, never a merge or
+   update of a prior line, since a `/clear` always mints a new `$CLAUDE_CODE_SESSION_ID`.
 3. Read the ledger it names (`.devcycle/ledger.md`) and the plan/spec/
    checklist paths it records, where present.
 4. Settle the branch and derive position from git evidence per
