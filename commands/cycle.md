@@ -19,16 +19,16 @@ is a cache: every artifact is on disk, so the pipeline survives `/clear` and res
 
 ## Before the first confirmation
 
-Before the first user confirmation, this command may only read the repository, write `.devcycle/state.md`,
-resolve config, then mint the run record and append its `session` line — both after config resolution, so
-`--profile` is already known. Mint: `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs new --plugin-version
-<this plugin's plugin.json version> --plugin-sha <git -C ${CLAUDE_PLUGIN_ROOT} rev-parse HEAD> --profile
-<the resolved profile>`, its id on the `run:` row. Then: `run-record.mjs append --run <that id> --kind
-session --sessionId "$CLAUDE_CODE_SESSION_ID"`. No branch, no commit. These are the pipeline's first
-actions, not a side effect of the first stage transition: a cycle interrupted mid-scoping still leaves
-something to resume from. A state file at `stage: done` is reused — carry `configured:`, mint a fresh `run:`
-and `session` line, reset the rest, ask nothing; not a collision. At any other stage, surface the collision
-and ask — never overwrite it.
+Before the first user confirmation, this command may only read the repository, write `.devcycle/state.md`, resolve config, then
+mint the run record and append its `session` line — both after config resolution, so `--profile` is already known. Mint: `node
+${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs new --plugin-version <this plugin's plugin.json version> --plugin-sha <git -C
+${CLAUDE_PLUGIN_ROOT} rev-parse HEAD> --profile <the resolved profile> --knob gitPolicy=<value> --knob reviewDepth=<value>
+--knob crossModelReview=<value> --knob onDeviceGate=<value> --knob implementerModel=<value> --knob taskReviewerModel=<value>
+--knob branchReviewModel=<value> --knob walkthroughModel=<value>`, its id on the `run:` row. Then: `run-record.mjs append --run
+<that id> --kind session --sessionId "$CLAUDE_CODE_SESSION_ID"`. No branch, no commit. These are the pipeline's first actions,
+not a side effect of the first stage transition: a cycle interrupted mid-scoping still leaves something to resume from. A state
+file at `stage: done` is reused — carry `configured:`, mint a fresh `run:` and `session` line, reset the rest, ask nothing; not
+a collision. At any other stage, surface the collision and ask — never overwrite it.
 
 ## Triage the input
 

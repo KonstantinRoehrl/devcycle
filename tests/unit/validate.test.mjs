@@ -591,3 +591,20 @@ test("check 13 rule 2 fails when the schema declares a field no surface file's r
   assert.notStrictEqual(r.status, 0);
   assert.match(r.stdout + r.stderr, /orphanField/);
 });
+
+test("check 13 rule 2 fails when no surface instruction names --knob for the knobs field, and passes once commands/cycle.md does", () => {
+  // Failing half: a surface stripped of every --knob mention must not be waved through.
+  const failDir = mkdtempSync(join(tmpdir(), "validate13e-fail-"));
+  cpSync(REPO_ROOT, failDir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  const cyclePath = join(failDir, "commands/cycle.md");
+  writeFileSync(cyclePath, readFileSync(cyclePath, "utf8").replaceAll("--knob ", ""));
+  const rFail = spawnSync(process.execPath, [join(failDir, "scripts/validate.mjs")], { cwd: failDir, encoding: "utf8" });
+  assert.notStrictEqual(rFail.status, 0);
+  assert.match(rFail.stdout + rFail.stderr, /knobs/);
+
+  // Passing half: the real, unmodified tree wires --knob into commands/cycle.md's mint command.
+  const passDir = mkdtempSync(join(tmpdir(), "validate13e-pass-"));
+  cpSync(REPO_ROOT, passDir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  const rPass = spawnSync(process.execPath, [join(passDir, "scripts/validate.mjs")], { cwd: passDir, encoding: "utf8" });
+  assert.strictEqual(rPass.status, 0, rPass.stdout + rPass.stderr);
+});

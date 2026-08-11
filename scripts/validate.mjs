@@ -375,15 +375,15 @@ if (existsSync(schemaPath)) {
       // literal `--flag`, so this grep-for-`--flag` rule cannot pass against that prose style no
       // matter how complete it is. Those other kinds keep their protection at the kind level via
       // the exercised-kind check above (existing, unchanged) rather than per field.
-      // "knobs" is produced by a repeated `--knob key=value` flag, not a literal `--knobs`
-      // occurrence — forcing that string match would be a false-negative risk in the other
-      // direction, so it is structural like the id/version fields below (verified against real
-      // surface prose at dispatch time: see task 37's report for the full real-tree finding).
+      // "knobs" is no longer structurally exempt: it is produced by repeated `--knob key=value`
+      // flags, so FLAG_NAME below points it at the literal `--knob` substring (singular, not the
+      // nonexistent `--knobs`) and it is checked for real, live, every run, same as any other
+      // renamed field.
       // "startedAt" is always computed by the script itself (`flags.startedAt ?? new
       // Date().toISOString()...`, scripts/run-record.mjs:114) — no surface instruction ever
       // needs to name `--started-at`.
-      const STRUCTURAL_FIELDS = new Set(["kind", "runId", "repoSlug", "schemaVersion", "knobs", "startedAt"]);
-      const FLAG_NAME = { pluginVersion: "plugin-version", pluginSha: "plugin-sha", sessionHash: "sessionId" };
+      const STRUCTURAL_FIELDS = new Set(["kind", "runId", "repoSlug", "schemaVersion", "startedAt"]);
+      const FLAG_NAME = { pluginVersion: "plugin-version", pluginSha: "plugin-sha", sessionHash: "sessionId", knobs: "knob" };
       const RULE2_KINDS = new Set(["run", "session"]);
       for (const sub of subs.filter((s) => RULE2_KINDS.has(s.properties?.kind?.const)))
         for (const field of Object.keys(sub.properties ?? {})) {
