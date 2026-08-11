@@ -51,8 +51,7 @@
         },
         "startedAt": { "type": "string", "format": "date-time" },
         "endedAt": { "type": "string", "format": "date-time" },
-        "outcome": { "enum": ["complete", "blocked", "skipped"] },
-        "path": { "enum": ["driven", "manual", "skipped"] }
+        "outcome": { "enum": ["complete", "blocked", "skipped"] }
       },
       "required": ["kind", "runId", "stage", "startedAt", "endedAt", "outcome"],
       "additionalProperties": false
@@ -64,20 +63,18 @@
         "kind": { "const": "dispatch" },
         "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
         "taskId": { "type": "string" },
-        "agentId": { "type": "string" },
         "agentType": { "type": "string" },
         "model": { "type": "string" },
         "modelSource": { "enum": ["explicit", "inherited"] },
         "startedAt": { "type": "string", "format": "date-time" },
         "endedAt": { "type": "string", "format": "date-time" },
-        "toolCalls": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
         "outcome": { "enum": ["complete", "blocked", "rejected"] },
         "reviewRound": { "type": "integer", "minimum": 0 },
         "retryIndex": { "type": "integer", "minimum": 0 }
       },
       "required": [
         "kind", "runId", "taskId", "agentType", "model", "modelSource",
-        "startedAt", "endedAt", "toolCalls", "outcome", "reviewRound", "retryIndex"
+        "startedAt", "endedAt", "outcome", "reviewRound", "retryIndex"
       ],
       "additionalProperties": false
     },

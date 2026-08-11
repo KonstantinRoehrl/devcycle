@@ -8,6 +8,7 @@ import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createHash, randomBytes } from "node:crypto";
+import { spawnSync } from "node:child_process";
 
 const SCHEMA_PATH = new URL("../tests/fixtures/run-record.schema.json", import.meta.url).pathname;
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
@@ -35,7 +36,7 @@ function schemaFor(kind) {
 function validate(obj, sub) {
   const errors = [];
   for (const req of sub.required ?? [])
-    if (!(req in obj)) errors.push(`missing required field "${req}"`);
+    if (!(req in obj) || obj[req] === undefined) errors.push(`missing required field "${req}"`);
   for (const [key, value] of Object.entries(obj)) {
     const prop = sub.properties?.[key];
     if (!prop) {
@@ -74,12 +75,12 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     if (!argv[i].startsWith("--")) continue;
     const name = argv[i].slice(2), value = argv[i + 1];
-    if (name === "knob") {
-      const eq = value.indexOf("=");
-      knobs[value.slice(0, eq)] = value.slice(eq + 1);
-    } else if (name === "json") {
-      const eq = value.indexOf("=");
-      objects[value.slice(0, eq)] = JSON.parse(value.slice(eq + 1));
+    if (name === "knob" || name === "json") {
+      const eq = value?.indexOf("=") ?? -1;
+      if (eq < 1) die(`--${name} requires KEY=VALUE, got "${value ?? ""}"`);
+      const key = value.slice(0, eq), raw = value.slice(eq + 1);
+      if (name === "knob") knobs[key] = raw;
+      else objects[key] = JSON.parse(raw);
     } else {
       flags[name] = value;
     }
@@ -88,10 +89,15 @@ function parseArgs(argv) {
   return { flags, knobs, objects };
 }
 
+function gitToplevel(cwd) {
+  const r = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : cwd;
+}
+
 function main() {
   const [sub, ...rest] = process.argv.slice(2);
   const { flags, knobs, objects } = parseArgs(rest);
-  const toplevel = flags.repo ?? process.cwd();
+  const toplevel = flags.repo ?? gitToplevel(process.cwd());
   const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex"]);
 
   if (sub === "new") {

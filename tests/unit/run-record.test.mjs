@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, realpathSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -106,6 +106,35 @@ test("append rejects a missing required field before writing anything", () => {
   assert.strictEqual(lines.length, 1);
 });
 
+test("new rejects a required field that is present but explicitly undefined", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  // --plugin-sha is omitted entirely, so flags["plugin-sha"] is JS `undefined`, and the object
+  // literal in main() still sets pluginSha: undefined — "pluginSha" in obj is true even though
+  // no real value exists. The pattern check on pluginSha (a controlled regex) would still catch
+  // this by accident; profile has no pattern, so route the assertion through the field with no
+  // pattern/enum guard to isolate the definedness bug specifically.
+  const r = run(
+    ["new", "--repo", "/tmp/demo6", "--plugin-sha", "ded29c6", "--profile", "thorough"],
+    runs
+  );
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /pluginVersion/);
+});
+
+test("a --knob or --json flag with no = does not crash the process", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const r = run(
+    ["new", "--repo", "/tmp/demo7", "--plugin-version", "0.13.0", "--plugin-sha", "ded29c6",
+     "--profile", "thorough", "--knob", "malformed-no-equals"],
+    runs
+  );
+  // Today: value.indexOf("=") returns -1, so value.slice(0, -1) and value.slice(0) silently
+  // produce a garbage key/value pair instead of failing loudly — the real bug is that this
+  // exits 0 with corrupted data rather than exit 1 with a clear message.
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /--knob/);
+});
+
 test("append rejects an enum value the schema does not permit", () => {
   const runs = mkdtempSync(join(tmpdir(), "runs-"));
   const runId = run(
@@ -117,7 +146,7 @@ test("append rejects an enum value the schema does not permit", () => {
     ["append", "--run", runId, "--repo", "/tmp/demo4", "--kind", "dispatch",
      "--taskId", "1", "--agentType", "devcycle:implementer", "--model", "claude-sonnet-5",
      "--modelSource", "guessed", "--startedAt", "2026-08-07T10:00:00Z",
-     "--endedAt", "2026-08-07T10:01:00Z", "--json", "toolCalls={}",
+     "--endedAt", "2026-08-07T10:01:00Z",
      "--outcome", "complete", "--reviewRound", "0", "--retryIndex", "0"],
     runs
   );
@@ -142,4 +171,33 @@ test("append writes a session line carrying only a hash, never a raw session id"
   const text = readFileSync(recordPath("/tmp/demo5", runId), "utf8");
   assert.doesNotMatch(text, SESSION_HEAD);
   assert.match(text, new RegExp(hashSession(SESSION_ID)));
+});
+
+test("new derives repoSlug from the real git toplevel, not the invoking cwd", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  // Create a temporary git repo and spawn from a nested subdirectory inside it (not the root).
+  // Without --repo, the script should derive repoSlug from the real git toplevel, not the
+  // nested subdir's path.
+  const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-")));
+  // Initialize git repo in temp directory
+  spawnSync("git", ["init", "-q"], { cwd: tempRepo });
+  // Create nested subdirectory and spawn from there
+  const nestedDir = join(tempRepo, "nested", "subdir");
+  mkdirSync(nestedDir, { recursive: true });
+
+  const r = spawnSync(process.execPath, [SCRIPT, "new", "--plugin-version", "0.13.0",
+    "--plugin-sha", "ded29c6", "--profile", "thorough"], {
+    encoding: "utf8", cwd: nestedDir,
+    env: { ...process.env, DEVCYCLE_RUNS_DIR: runs },
+  });
+  assert.strictEqual(r.status, 0, r.stderr);
+  const runId = r.stdout.trim();
+  process.env.DEVCYCLE_RUNS_DIR = runs;
+  // Script invoked from nestedDir, but gitToplevel should resolve to tempRepo (the real toplevel)
+  const written = JSON.parse(
+    readFileSync(recordPath(tempRepo, runId), "utf8").split("\n")[0]
+  );
+  // Verify the slug is derived from the real git toplevel (tempRepo), not the nested dir
+  assert.notStrictEqual(written.repoSlug, repoSlug(nestedDir));
+  assert.strictEqual(written.repoSlug, repoSlug(tempRepo));
 });
