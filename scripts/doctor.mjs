@@ -293,7 +293,8 @@ function aggregateQuality(qualities) {
 // The per-version comparison table: one row per cohort, ordered oldest to newest with the
 // undetectable-version bucket last so it never sits between two real versions.
 export function cohortTable(summaries) {
-  const cohorts = versionCohorts(summaries);
+  const settled = summaries.filter((s) => !s.inFlight);
+  const cohorts = versionCohorts(settled);
   const known = [...cohorts.keys()].filter((v) => v !== "unknown").sort(compareVersions);
   const order = cohorts.has("unknown") ? [...known, "unknown"] : known;
   return order.map((version) => {
@@ -600,7 +601,12 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         else if (o.kind === "dispatch") rec.dispatches.push(o);
         else if (o.kind === "verdict") rec.verdicts.push(o);
       }
-      for (const h of hashes) bySession.set(h, rec);
+      for (const h of hashes) {
+        const prior = bySession.get(h);
+        bySession.set(h, prior
+          ? { ...rec, stages: [...prior.stages, ...rec.stages], dispatches: [...prior.dispatches, ...rec.dispatches], verdicts: [...prior.verdicts, ...rec.verdicts] }
+          : rec);
+      }
     }
   return bySession;
 }
@@ -685,7 +691,6 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   const carryWeighted = {};
   const dispatches = { total: 0, withoutModel: 0 };
   let totalCost = 0;
-  let pluginVersion = null;
 
   // Measured over every record, not just turns: the newest thing written to the transcript is
   // what says whether the session is still going. A record with no readable timestamp simply
@@ -700,6 +705,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   // taskId) directly, rather than inferring it from the last skill tag seen in the transcript.
   // Falls back to forward-fill for the 77 sessions written before this cycle had a record to join.
   const record = runRecords.get(sha256(sessionId));
+  let pluginVersion = record?.pluginVersion ?? null;
   const attributed = attributeFromRecord(turns, record) ??
     attributeForwardFill(turns).map((skill, i) => ({ ...turns[i], stage: skill, attributionSource: "forward-filled" }));
   // Session-level rollup of the same source attributeFromRecord already decided per turn: this

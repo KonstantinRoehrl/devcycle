@@ -1286,6 +1286,59 @@ test("cli: --json labels the in-flight exclusion too, not the text report alone"
   assert.match(parsed.inFlight.note, /approximation/i);
 });
 
+test("the per-version cohort table excludes in-flight sessions from its median, matching the regression detector", () => {
+  const settled = { pluginVersion: "0.13.0", costUSD: 1, costByStage: { a: 1.0 }, medianDepth: 10, inFlight: false };
+  const inFlight = { pluginVersion: "0.13.0", costUSD: 1000, costByStage: { a: 1000.0 }, medianDepth: 10, inFlight: true };
+  // cohortTable must compute its median over [settled] only, not [settled, inFlight].
+  const table = cohortTable([settled, inFlight]);
+  assert.strictEqual(table[0].sessions, 1);
+  assert.strictEqual(table[0].medianPerSession, 1);
+});
+
+test("readRunRecords does not silently drop a run record on a session-hash collision", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runs-collision-"));
+  const slug = mkdtempSync(join(dir, "repo-"));
+  const hash = createHash("sha256").update("sess-1").digest("hex");
+  // Two separate run-record files under two different run-id subdirectories that both
+  // carry a `session` line hashing to the SAME sessionHash.
+  writeFileSync(join(slug, "abc.jsonl"),
+    [
+      { kind: "run", runId: "abc", schemaVersion: 1, pluginVersion: "0.13.0" },
+      { kind: "session", runId: "abc", sessionHash: hash,
+        firstSeen: "2026-08-07T10:00:00Z", lastSeen: "2026-08-07T10:30:00Z" },
+      { kind: "stage", runId: "abc", stage: "planning", startedAt: "2026-08-07T10:00:00Z",
+        endedAt: "2026-08-07T10:30:00Z", outcome: "complete" },
+    ].map((o) => JSON.stringify(o)).join("\n") + "\n");
+  writeFileSync(join(slug, "def.jsonl"),
+    [
+      { kind: "run", runId: "def", schemaVersion: 1, pluginVersion: "0.13.0" },
+      { kind: "session", runId: "def", sessionHash: hash,
+        firstSeen: "2026-08-07T10:30:00Z", lastSeen: "2026-08-07T11:00:00Z" },
+      { kind: "dispatch", runId: "def", taskId: "1", agentType: "devcycle:implementer" },
+    ].map((o) => JSON.stringify(o)).join("\n") + "\n");
+  const records = readRunRecords(dir);
+  // A collision is merged (both runs' stages/dispatches combined), never silently overwritten with no trace.
+  const record = records.get(hash);
+  assert.strictEqual(record.stages.length, 1);
+  assert.strictEqual(record.dispatches.length, 1);
+  assert.strictEqual(record.stages[0].stage, "planning");
+  assert.strictEqual(record.dispatches[0].taskId, "1");
+});
+
+test("summarizeSession prefers the run record's stamped pluginVersion over transcript extraction", () => {
+  const sessionId = "session-x";
+  const hash = createHash("sha256").update(sessionId).digest("hex");
+  const record = { runId: "abc", pluginVersion: "0.13.0", profile: "thorough", stages: [], dispatches: [], verdicts: [] };
+  const runRecords = new Map([[hash, record]]);
+  // turns carry NO extractable plugin version in their transcript content — extractPluginVersion
+  // would return null for every one of them.
+  const turnsWithNoExtractableVersion = [
+    turn({ message: { model: "claude-opus-5", usage: usage(10, 100, 1000, 20), content: [] } }),
+  ];
+  const summary = summarizeSession(sessionId, turnsWithNoExtractableVersion, runRecords);
+  assert.strictEqual(summary.pluginVersion, "0.13.0");
+});
+
 test("cohortTable carries n, total, median $/session and median depth per version", () => {
   const rows = cohortTable([
     { pluginVersion: "0.9.2", costByStage: { a: 1.0, b: 1.0 }, medianDepth: 10 },
