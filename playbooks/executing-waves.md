@@ -100,11 +100,11 @@ file conflicts these invariants already preserve.)
    that reaches round 3 without acceptance exits `exhausted-unresolved` and is surfaced to the user
    as a decision, never committed as if it had passed.
 6. **Green gate (REQUIRED, deterministic).** Before accepting, re-run the task's test command
-   yourself and read the exit status — the implementer's claimed output and the reviewer's accept
-   verdict both judge a report, not the repo, and neither is sufficient. A repo with no test suite
-   but a documented verification convention runs that convention's command instead; never bolt a new
-   test framework onto the repo to create one. On failure, acceptance is blocked: no commit, ledger
-   `event=review-verdict outcome=rejected (green gate: <symptom>)`, back to the implementer.
+   yourself and read the exit status. A repo with no test suite runs its documented convention
+   instead. On failure, acceptance is blocked: no commit, ledger
+   `event=review-verdict outcome=rejected (green gate: <symptom>)`, back to the implementer; if
+   this round's own reviewer wrote `conformance=pass`, also append a `verdict` line with
+   `conformance=fail` for this round — a reviewer-rejected round never wrote `conformance=pass`.
 7. **Branch re-check, then commit.** Immediately before the commit, re-run
    `git rev-parse --abbrev-ref HEAD` against the recorded `branch:` line, per
    `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s per-commit re-check; a mismatch stops the run
