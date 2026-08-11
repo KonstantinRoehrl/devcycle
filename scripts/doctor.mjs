@@ -311,6 +311,21 @@ export function cohortTable(summaries) {
   });
 }
 
+// One aggregate statement of where the corpus is headed, oldest known version to newest,
+// reusing versionCohorts' own grouping and compareVersions' own sort rather than
+// re-implementing either (per-version/per-skill deltas already exist in emitCandidates below;
+// this is the roll-up neither of those provides).
+export function corpusDirectionOfTravel(settled) {
+  const cohorts = versionCohorts(settled);
+  const known = [...cohorts.keys()].filter((v) => v !== "unknown").sort(compareVersions);
+  if (known.length < 2) return { direction: "insufficient-data", deltaPct: null };
+  const first = median(cohorts.get(known[0]).dollars);
+  const last = median(cohorts.get(known[known.length - 1]).dollars);
+  if (first === 0) return { direction: "insufficient-data", deltaPct: null };
+  const deltaPct = ((last - first) / first) * 100;
+  return { direction: deltaPct > 1 ? "up" : deltaPct < -1 ? "down" : "flat", deltaPct };
+}
+
 // A cohort of one is a sample, not a trend. Marked at every render site rather than left for
 // the reader to infer from sessions_sampled.
 const isLowConfidence = (c) => c.sessions_sampled === 1;
@@ -442,9 +457,11 @@ export function emitComplianceCandidates(turns, record) {
   // C1: playbooks/verifying-on-device.md dispatches agents/on-device-driver.md; driving a browser
   // is never the coordinator's. The most expensive session in the corpus cost $271.24 with
   // 103 computer and 38 javascript_tool calls on the main thread.
-  const browser = turns.filter(
-    (t) => !t.isSidechain && (t.toolName === "computer" || t.toolName === "javascript_tool")
-  ).length;
+  const BROWSER_TOOLS = new Set([
+    "computer", "javascript_tool",
+    "mcp__claude-in-chrome__computer", "mcp__claude-in-chrome__javascript_tool",
+  ]);
+  const browser = turns.filter((t) => !t.isSidechain && BROWSER_TOOLS.has(t.toolName)).length;
   if (browser > 0)
     out.push({
       type: "main-thread-browser",
@@ -574,6 +591,10 @@ function attributeForwardFill(turns) {
   return effective;
 }
 
+// Bumped only when a run-record writer changes the shape this reader depends on — kept in step
+// with tests/fixtures/run-record.schema.json's own `schemaVersion` const.
+const CURRENT_SCHEMA_VERSION = 1;
+
 // The run record is the machine-readable telemetry log; the ledger is the human-readable progress
 // log. Neither reads the other — see references/ledger.md.
 export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
@@ -595,7 +616,13 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
       for (const line of readFileSync(join(dir, repo.name, f), "utf8").split("\n").filter(Boolean)) {
         let o;
         try { o = JSON.parse(line); } catch { continue; } // a torn trailing line is normal
-        if (o.kind === "run") { rec.runId = o.runId; rec.pluginVersion = o.pluginVersion; rec.profile = o.profile; }
+        if (o.kind === "run") {
+          rec.runId = o.runId; rec.pluginVersion = o.pluginVersion; rec.profile = o.profile;
+          // Degrade, never error, never silently drop: a record from an unrecognized
+          // schemaVersion is still read and returned, just flagged — summarizeSession decides
+          // whether to trust it (falls back to forward-fill when schemaMismatch is set).
+          if (o.schemaVersion !== CURRENT_SCHEMA_VERSION) rec.schemaMismatch = true;
+        }
         else if (o.kind === "session") hashes.push(o.sessionHash);
         else if (o.kind === "stage") rec.stages.push(o);
         else if (o.kind === "dispatch") rec.dispatches.push(o);
@@ -620,17 +647,36 @@ export function attributeFromRecord(turns, record) {
   return turns.map((turn) => {
     const t = Date.parse(turn.timestamp);
     const stage = record.stages.find((s) => within(t, s.startedAt, s.endedAt));
-    // agentId is what separates concurrent dispatches; timestamps alone cannot.
-    const dispatch = turn.agentId
-      ? record.dispatches.find((d) => d.agentId === turn.agentId)
-      : record.dispatches.find((d) => within(t, d.startedAt, d.endedAt) && !d.agentId);
+    // dispatch.agentId is never populated by any writer — a per-agentId turn can never resolve
+    // here and always falls through to the inferred label below. Kept as a window-only match,
+    // not removed, because a NON-agentId turn (the common case) still resolves exactly via
+    // timestamp windowing.
+    const dispatch = record.dispatches.find((d) => within(t, d.startedAt, d.endedAt) && !turn.agentId);
     return {
       ...turn,
       stage: stage ? stage.stage : "unattributed",
       taskId: dispatch ? dispatch.taskId : null,
-      attributionSource: "record",
+      attributionSource: dispatch || !turn.agentId ? "record" : "inferred",
     };
   });
+}
+
+// Task 36 dropped the writer-side dispatch.toolCalls field (self-reported, never trustworthy);
+// this derives the same figure from the transcript instead, reusing attributeFromRecord's own
+// within() windowing pattern rather than a second implementation of it.
+export function toolCallsForDispatch(turns, dispatch) {
+  const within = (t, a, b) => t >= Date.parse(a) && t < Date.parse(b);
+  const counts = {};
+  for (const turn of turns) {
+    const t = Date.parse(turn.timestamp);
+    if (!within(t, dispatch.startedAt, dispatch.endedAt)) continue;
+    const content = turn.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const item of content)
+      if (item?.type === "tool_use" && typeof item.name === "string")
+        counts[item.name] = (counts[item.name] ?? 0) + 1;
+  }
+  return counts;
 }
 
 // Every token metric is paired with a quality signal, so a change that halves cost while doubling
@@ -703,17 +749,20 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
 
   // The run record is the preferred source: it joins cost to a stage window (and a dispatch's
   // taskId) directly, rather than inferring it from the last skill tag seen in the transcript.
-  // Falls back to forward-fill for the 77 sessions written before this cycle had a record to join.
+  // Falls back to forward-fill for the 77 sessions written before this cycle had a record to join,
+  // and for a record whose schemaVersion this reader does not recognize — treated the same as
+  // "no record" rather than trusted or rejected outright (see readRunRecords' schemaMismatch tag).
   const record = runRecords.get(sha256(sessionId));
+  const attributionRecord = record?.schemaMismatch ? null : record;
   let pluginVersion = record?.pluginVersion ?? null;
-  const attributed = attributeFromRecord(turns, record) ??
+  const attributed = attributeFromRecord(turns, attributionRecord) ??
     attributeForwardFill(turns).map((skill, i) => ({ ...turns[i], stage: skill, attributionSource: "forward-filled" }));
   // Session-level rollup of the same source attributeFromRecord already decided per turn: this
   // session's whole attribution came from the run record only when one was found and it actually
   // covered the session with stages — the exact condition attributeFromRecord itself guards on
   // (`if (!record || !record.stages?.length) return null;`) — otherwise every turn fell back to
   // attributeForwardFill uniformly, so "forward-filled" is never a per-turn mix at this level.
-  const attributionSource = record && record.stages?.length ? "record" : "forward-filled";
+  const attributionSource = attributionRecord && attributionRecord.stages?.length ? "record" : "forward-filled";
   // One entry per tool call (not per turn — a turn can carry several), the shape
   // emitComplianceCandidates' C1 check needs.
   const toolCallEvents = [];
@@ -939,9 +988,12 @@ export function formatReport(summaries) {
   for (const [model, count] of Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]))
     lines.push(`UNPRICED MODEL: ${model} (${count} requests)`);
   // QC5: any value that remains inferred is labelled inferred at every render site (text and
-  // --json alike), never left to read as exact. Two classes remain — cache-write TTL pricing
-  // (costBand, above) and forward-filled stage attribution (no run record for the session) —
-  // there is no third, since Task 17 established that concurrent-wave attribution is exact.
+  // --json alike), never left to read as exact. Classes rendered here: cache-write TTL pricing
+  // (costBand, above) and forward-filled stage attribution (no run record for the session). A
+  // third exists at the per-turn level but is not surfaced in this session-level rollup: a
+  // concurrent-wave turn whose agentId matches no dispatch renders `attributionSource: "inferred"`
+  // in attributeFromRecord's own output — permanent, not conditional on any later dispatch
+  // eventually being recorded.
   const band = agg.cacheBand;
   if (band.collapsed)
     lines.push("Cost is exact: every cache write in this corpus carries its TTL split.");
@@ -961,6 +1013,12 @@ export function formatReport(summaries) {
         IN_FLIGHT_NOTE,
     );
   lines.push("", "Per-version cohorts:");
+  const direction = corpusDirectionOfTravel(summaries.filter((s) => !s.inFlight));
+  lines.push(
+    direction.direction === "insufficient-data"
+      ? "direction of travel: insufficient data (need at least two known versions)"
+      : `direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median cost, oldest to newest known version)`
+  );
   for (const r of cohortTable(summaries))
     lines.push(
       `  ${r.version.padEnd(10)} n=${String(r.sessions).padStart(3)}  ` +
@@ -1067,6 +1125,7 @@ export function buildJsonReport(summaries) {
     })),
     candidates: [...emitCandidates(summaries), ...complianceCandidatesOf(summaries)],
     version_cohorts: cohortTable(summaries),
+    direction_of_travel: corpusDirectionOfTravel(summaries.filter((s) => !s.inFlight)),
     inFlight: {
       excluded: summaries.filter((s) => s.inFlight).length,
       thresholdMs: IN_FLIGHT_MS,

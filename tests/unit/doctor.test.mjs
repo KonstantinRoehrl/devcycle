@@ -13,7 +13,7 @@ import {
   extractPluginVersion, emitCandidates, configDrift, findTranscriptFiles,
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
-  emitComplianceCandidates, qualitySignals,
+  emitComplianceCandidates, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -207,12 +207,59 @@ test("stage windows leave nothing unattributed for a recorded session", () => {
   assert.notStrictEqual(attributed[0].stage, "unattributed");
 });
 
+test("readRunRecords tags a record from an unrecognized schemaVersion as mismatched, rather than silently misreading it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runs-schema-"));
+  const slug = mkdtempSync(join(dir, "repo-"));
+  const hash = createHash("sha256").update("sess-1").digest("hex");
+  writeFileSync(join(slug, "abc.jsonl"),
+    [
+      { kind: "run", runId: "abc", schemaVersion: 2, pluginVersion: "0.99.0" },
+      { kind: "session", runId: "abc", sessionHash: hash,
+        firstSeen: "2026-08-07T10:00:00Z", lastSeen: "2026-08-07T11:00:00Z" },
+      { kind: "stage", runId: "abc", stage: "planning", startedAt: "2026-08-07T10:00:00Z",
+        endedAt: "2026-08-07T10:30:00Z", outcome: "complete" },
+    ].map((o) => JSON.stringify(o)).join("\n") + "\n");
+  const records = readRunRecords(dir);
+  const record = records.get(hash);
+  assert.ok(record, "a record from an unrecognized schemaVersion must still be readable, not dropped");
+  assert.strictEqual(record.schemaMismatch, true);
+});
+
+test("readRunRecords does not tag a record at the current schemaVersion as mismatched", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runs-schema-ok-"));
+  const slug = mkdtempSync(join(dir, "repo-"));
+  const hash = createHash("sha256").update("sess-1").digest("hex");
+  writeFileSync(join(slug, "abc.jsonl"),
+    [{ kind: "run", runId: "abc", schemaVersion: 1, pluginVersion: "0.13.0" }]
+      .map((o) => JSON.stringify(o)).join("\n") + "\n");
+  const records = readRunRecords(dir);
+  assert.strictEqual(records.get(hash), undefined,
+    "no session line means no session to index — sanity check on the fixture");
+});
+
+test("summarizeSession degrades to forward-fill attribution when the run record's schemaVersion is mismatched", () => {
+  const sessionId = "session-schema-mismatch";
+  const hash = createHash("sha256").update(sessionId).digest("hex");
+  const record = {
+    runId: "abc", pluginVersion: "0.99.0", schemaMismatch: true,
+    stages: [{ stage: "execution", startedAt: "2026-08-07T10:00:00Z", endedAt: "2026-08-07T11:00:00Z" }],
+    dispatches: [], verdicts: [],
+  };
+  const runRecords = new Map([[hash, record]]);
+  const summary = summarizeSession(sessionId, [turn({ timestamp: "2026-08-07T10:15:00Z" })], runRecords);
+  assert.strictEqual(summary.attributionSource, "forward-filled");
+});
+
 test("a session with no run record still attributes, labelled forward-filled", () => {
   const turns = [{ timestamp: "2026-08-07T10:30:00Z", attributionSkill: "devcycle:cycle" }];
   assert.strictEqual(attributeFromRecord(turns, null), null);
 });
 
-test("a dispatch window attributes a sidechain to its task by agentId", () => {
+// M3: dispatch.agentId is never populated by any writer, so a per-agentId turn can never
+// resolve to a specific dispatch by that field — updated from this test's pre-M3 assertion
+// that overlapping concurrent dispatches were separated by agentId matching (they no longer
+// are; that branch was dead code, per Step 7 of task 46).
+test("a dispatch window cannot resolve an agentId-carrying turn to either of two overlapping dispatches, and labels it inferred", () => {
   const record = {
     runId: "abc",
     stages: [{ stage: "execution", startedAt: "2026-08-07T10:00:00Z", endedAt: "2026-08-07T11:00:00Z" }],
@@ -223,14 +270,16 @@ test("a dispatch window attributes a sidechain to its task by agentId", () => {
         startedAt: "2026-08-07T10:12:00Z", endedAt: "2026-08-07T10:25:00Z" },
     ],
   };
-  // The two dispatches overlap in time; agentId is what separates them, not the timestamps.
+  // The two dispatches overlap in time; agentId no longer separates them (dead code removed).
   const turns = [
     { timestamp: "2026-08-07T10:15:00Z", agentId: "a7291986a2b97fcd8" },
     { timestamp: "2026-08-07T10:15:00Z", agentId: "a6d5650949c386201" },
   ];
   const attributed = attributeFromRecord(turns, record);
-  assert.strictEqual(attributed[0].taskId, "3");
-  assert.strictEqual(attributed[1].taskId, "4");
+  assert.strictEqual(attributed[0].taskId, null);
+  assert.strictEqual(attributed[1].taskId, null);
+  assert.strictEqual(attributed[0].attributionSource, "inferred");
+  assert.strictEqual(attributed[1].attributionSource, "inferred");
 });
 
 // --- end to end over a synthetic transcript directory ---
@@ -1495,4 +1544,74 @@ test("--json's version_cohorts carry each cohort's quality beside its cost", () 
   assert.strictEqual(withQuality.quality.blockingFindings, 9);
   // No quality-bearing session in the cohort means absent, never a zeroed-out object.
   assert.strictEqual(withoutQuality.quality, null);
+});
+
+// --- C1: agents/on-device-driver.md dispatches its browser tools MCP-prefixed ---
+
+test("emitComplianceCandidates catches MCP-prefixed on-device-driver tool calls, not just bare names", () => {
+  const turns = [{ isSidechain: false, toolName: "mcp__claude-in-chrome__computer" }];
+  const record = { stages: [{ stage: "on-device", startedAt: "2026-01-01T00:00:00Z", endedAt: "2026-01-01T00:05:00Z", outcome: "complete", path: null }], dispatches: [], verdicts: [] };
+  const candidates = emitComplianceCandidates(turns, record);
+  assert.strictEqual(candidates.some((c) => c.type === "main-thread-browser"), true);
+});
+
+// --- corpus-level direction of travel: one aggregate statement across all versions ---
+
+test("a corpus-level direction-of-travel statistic is computed across all versions, not just per-version deltas", () => {
+  // versionCohorts' dollars-per-session figure is summed from costByStage (not a bare costUSD
+  // field) — confirmed live at scripts/doctor.mjs:250-269 before writing this test.
+  const settled = [
+    { pluginVersion: "0.1.0", costByStage: { "devcycle:cycle": 10 }, inFlight: false },
+    { pluginVersion: "0.2.0", costByStage: { "devcycle:cycle": 6 }, inFlight: false },
+  ];
+  const direction = corpusDirectionOfTravel(settled);
+  assert.strictEqual(direction.direction, "down"); // median cost fell version-over-version
+  assert.ok(typeof direction.deltaPct === "number");
+});
+
+test("corpusDirectionOfTravel reports insufficient-data for a corpus with only one known version", () => {
+  const settled = [{ pluginVersion: "0.1.0", costByStage: { "devcycle:cycle": 10 }, inFlight: false }];
+  const direction = corpusDirectionOfTravel(settled);
+  assert.strictEqual(direction.direction, "insufficient-data");
+  assert.strictEqual(direction.deltaPct, null);
+});
+
+test("the text report renders the corpus direction of travel beside the cohort table", () => {
+  const rendered = { costUSD: 1.0, models: {}, tools: {} };
+  const text = formatReport([
+    { ...rendered, pluginVersion: "0.1.0", costByStage: { "devcycle:cycle": 10 }, medianDepth: 10, inFlight: false },
+    { ...rendered, pluginVersion: "0.2.0", costByStage: { "devcycle:cycle": 6 }, medianDepth: 10, inFlight: false },
+  ]);
+  assert.match(text, /direction of travel: down/i);
+});
+
+test("--json carries direction_of_travel as a top-level field", () => {
+  const json = buildJsonReport([
+    { pluginVersion: "0.1.0", costByStage: { "devcycle:cycle": 10 }, medianDepth: 10, inFlight: false, models: {}, tools: {} },
+    { pluginVersion: "0.2.0", costByStage: { "devcycle:cycle": 6 }, medianDepth: 10, inFlight: false, models: {}, tools: {} },
+  ]);
+  assert.strictEqual(json.direction_of_travel.direction, "down");
+  assert.ok(typeof json.direction_of_travel.deltaPct === "number");
+});
+
+// --- toolCallsForDispatch: per-dispatch tool-call counts derived from the transcript window ---
+
+test("toolCallsForDispatch counts tool_use calls within a dispatch's time window, derived from the transcript", () => {
+  const turns = [
+    { timestamp: "2026-01-01T00:00:30Z", message: { content: [{ type: "tool_use", name: "Read" }] } },
+    { timestamp: "2026-01-01T00:05:00Z", message: { content: [{ type: "tool_use", name: "Edit" }] } }, // outside window
+  ];
+  const dispatch = { startedAt: "2026-01-01T00:00:00Z", endedAt: "2026-01-01T00:01:00Z" };
+  const counts = toolCallsForDispatch(turns, dispatch);
+  assert.deepStrictEqual(counts, { Read: 1 });
+});
+
+// --- M3: a concurrent-wave turn whose agentId matches no dispatch is inferred, not "record" ---
+
+test("an unresolved concurrent-wave turn (agentId set, no matching dispatch) is labelled inferred, not silently null", () => {
+  const turns = [{ timestamp: "2026-01-01T00:00:30Z", agentId: "agent-nobody-recorded" }];
+  const record = { stages: [{ stage: "planning", startedAt: "2026-01-01T00:00:00Z", endedAt: "2026-01-01T00:01:00Z" }], dispatches: [], verdicts: [] };
+  const [attributed] = attributeFromRecord(turns, record);
+  assert.strictEqual(attributed.taskId, null);
+  assert.strictEqual(attributed.attributionSource, "inferred"); // was "record" — the live M3 bug
 });
