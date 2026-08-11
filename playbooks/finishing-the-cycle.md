@@ -45,6 +45,16 @@ regardless of the configured value; otherwise effective equals configured. The c
   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md` derived for this run, recorded at
   the top of `.devcycle/ledger.md`.
 
+**Screen this cycle's real artifacts for privacy.** Constraint 4 (`.devcycle/scope.md`) is a
+hard gate: `redaction-check.mjs` defaults to `git ls-files`, so gitignored `.devcycle/` has
+never been screened by CI. Run it directly against what actually exists on this machine —
+`node ${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir .devcycle` and `node
+${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir <this cycle's slice of
+~/.claude/devcycle/runs/>`. A non-zero exit stops the finish stage — surface the specific
+finding to the user rather than silently continuing; this screen exists because the CI screen
+(which covers only the committed schema and golden fixture) structurally cannot see either
+directory.
+
 As this stage's final state-file write, set `stage: done` and a fresh `updated:` timestamp —
 nothing remains to resume.
 
