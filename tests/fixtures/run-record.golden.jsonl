@@ -1,5 +1,5 @@
 {"kind":"run","runId":"0f1e2d3c4b5a6978","schemaVersion":1,"pluginVersion":"0.13.0","pluginSha":"ded29c6","repoSlug":"devcycle-1a2b3c4d","profile":"thorough","knobs":{"gitPolicy":"open-pr","reviewDepth":"auto"},"startedAt":"2026-08-07T10:00:00Z"}
-{"kind":"session","runId":"0f1e2d3c4b5a6978","sessionHash":"3b1f8c0d2e4a6b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e","firstSeen":"2026-08-07T10:00:00Z","lastSeen":"2026-08-07T10:45:00Z"}
+{"kind":"session","runId":"0f1e2d3c4b5a6978","sessionHash":"3b1f8c0d2e4a6b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e"}
 {"kind":"stage","runId":"0f1e2d3c4b5a6978","stage":"planning","startedAt":"2026-08-07T10:00:00Z","endedAt":"2026-08-07T10:20:00Z","outcome":"complete"}
 {"kind":"stage","runId":"0f1e2d3c4b5a6978","stage":"on-device","startedAt":"2026-08-07T10:40:00Z","endedAt":"2026-08-07T10:45:00Z","outcome":"complete"}
 {"kind":"dispatch","runId":"0f1e2d3c4b5a6978","taskId":"3","agentType":"devcycle:implementer","model":"claude-sonnet-5","modelSource":"explicit","startedAt":"2026-08-07T10:21:00Z","endedAt":"2026-08-07T10:29:00Z","outcome":"complete","reviewRound":0,"retryIndex":0}

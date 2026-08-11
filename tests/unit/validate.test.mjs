@@ -516,3 +516,78 @@ test("check 13 fails when the schema declares a kind the golden record never exe
   assert.notStrictEqual(r.status, 0);
   assert.match(r.stdout + r.stderr, /phantom/);
 });
+
+// check 13's "missing required field" arm used `!(req in obj)` alone, which JSON.parse can
+// never distinguish from "present as JS-undefined" — that shape only exists in-memory (e.g.
+// run-record.mjs's own writeLine() building `{ pluginVersion: flags["plugin-version"] }` when
+// the flag is absent), and collapses to a truly-absent key the instant it round-trips through
+// JSON.stringify (which drops undefined-valued keys) and back through JSON.parse from disk —
+// the only way check 13 ever sees a golden line. Confirmed live (see task 37's report): this
+// reproduction is already rejected by the pre-fix `!(req in obj)` check, so it is not a
+// red-green pair for the added `|| obj[req] === undefined` arm — kept as a regression test for
+// the missing-field message, with the finding disclosed rather than a fabricated red.
+test("check 13 rejects a golden line missing a required field via JSON.stringify's undefined-drop", () => {
+  const dir = mkdtempSync(join(tmpdir(), "validate13-"));
+  cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  const golden = readFileSync(join(dir, "tests/fixtures/run-record.golden.jsonl"), "utf8").trim().split("\n");
+  const runLine = JSON.parse(golden[0]);
+  const broken = [JSON.stringify({ ...runLine, pluginVersion: undefined }), ...golden.slice(1)].join("\n") + "\n";
+  writeFileSync(join(dir, "tests/fixtures/run-record.golden.jsonl"), broken);
+  const r = spawnSync(process.execPath, [join(dir, "scripts/validate.mjs")], { cwd: dir, encoding: "utf8" });
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /pluginVersion/);
+});
+
+test("check 13 rejects a golden line whose integer field violates the schema's minimum", () => {
+  const dir = mkdtempSync(join(tmpdir(), "validate13b-"));
+  cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  const golden = readFileSync(join(dir, "tests/fixtures/run-record.golden.jsonl"), "utf8").trim().split("\n");
+  const verdictLine = JSON.parse(golden.find((l) => JSON.parse(l).kind === "verdict"));
+  verdictLine.round = -1; // schema declares "round": { "type": "integer", "minimum": 1 }
+  const lines = golden.map((l) => (JSON.parse(l).kind === "verdict" ? JSON.stringify(verdictLine) : l));
+  writeFileSync(join(dir, "tests/fixtures/run-record.golden.jsonl"), lines.join("\n") + "\n");
+  const r = spawnSync(process.execPath, [join(dir, "scripts/validate.mjs")], { cwd: dir, encoding: "utf8" });
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /round/);
+});
+
+test("check 13 fails when a declared optional schema field is never exercised by the golden fixture", () => {
+  const dir = mkdtempSync(join(tmpdir(), "validate13c-"));
+  cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  const schemaPath = join(dir, "tests/fixtures/run-record.schema.json");
+  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+  // Add a field nothing in the (post-Task-36) golden fixture carries.
+  const dispatchSub = schema.oneOf.find((s) => s.properties?.kind?.const === "dispatch");
+  dispatchSub.properties.neverExercised = { type: "string" };
+  writeFileSync(schemaPath, JSON.stringify(schema));
+  // golden.jsonl copied unchanged — it never mentions "neverExercised".
+  const r = spawnSync(process.execPath, [join(dir, "scripts/validate.mjs")], { cwd: dir, encoding: "utf8" });
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /neverExercised/);
+});
+
+test("check 13 rule 2 fails when the schema declares a field no surface file's run-record.mjs append instruction names", () => {
+  const dir = mkdtempSync(join(tmpdir(), "validate13d-"));
+  cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  const schemaPath = join(dir, "tests/fixtures/run-record.schema.json");
+  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+  // Rule 2 is scoped to "run"/"session" kinds only (2026-08-11 decision, docs/DECISIONS.md) —
+  // "session" carries the fewest fields, so it is the simplest kind to inject an orphan into.
+  const sessionSub = schema.oneOf.find((s) => s.properties?.kind?.const === "session");
+  sessionSub.properties.orphanField = { type: "string" };
+  sessionSub.required.push("orphanField");
+  writeFileSync(schemaPath, JSON.stringify(schema));
+  // Satisfy the required-field check so only rule 2 (no surface instruction names
+  // --orphanField) can fail this — the real commands/playbooks/agents/references tree, copied
+  // unmodified above, names neither "orphanField" nor "--orphanField" anywhere.
+  const goldenPath = join(dir, "tests/fixtures/run-record.golden.jsonl");
+  const lines = readFileSync(goldenPath, "utf8").trim().split("\n").map((l) => {
+    const o = JSON.parse(l);
+    if (o.kind === "session") o.orphanField = "x";
+    return JSON.stringify(o);
+  });
+  writeFileSync(goldenPath, lines.join("\n") + "\n");
+  const r = spawnSync(process.execPath, [join(dir, "scripts/validate.mjs")], { cwd: dir, encoding: "utf8" });
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /orphanField/);
+});

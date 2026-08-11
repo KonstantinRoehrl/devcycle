@@ -30,11 +30,9 @@
       "properties": {
         "kind": { "const": "session" },
         "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
-        "sessionHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "firstSeen": { "type": "string", "format": "date-time" },
-        "lastSeen": { "type": "string", "format": "date-time" }
+        "sessionHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       },
-      "required": ["kind", "runId", "sessionHash", "firstSeen", "lastSeen"],
+      "required": ["kind", "runId", "sessionHash"],
       "additionalProperties": false
     },
     {

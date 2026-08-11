@@ -329,7 +329,7 @@ if (existsSync(schemaPath)) {
           continue;
         }
         for (const req of sub.required ?? [])
-          if (!(req in obj))
+          if (!(req in obj) || obj[req] === undefined)
             fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: missing required field "${req}"`);
         for (const key of Object.keys(obj)) {
           const prop = sub.properties?.[key];
@@ -343,8 +343,56 @@ if (existsSync(schemaPath)) {
             fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be ${JSON.stringify(prop.const)}`);
           if (prop.pattern && !new RegExp(prop.pattern).test(String(obj[key])))
             fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" does not match ${prop.pattern}`);
+          if (prop.type === "integer" && !Number.isInteger(obj[key]))
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be an integer`);
+          if (typeof prop.minimum === "number" && obj[key] < prop.minimum)
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be >= ${prop.minimum}`);
         }
       }
+      for (const sub of subs) {
+        const exercisedFields = new Set(
+          parsed.filter((o) => o.kind === sub.properties?.kind?.const).flatMap((o) => Object.keys(o))
+        );
+        for (const field of Object.keys(sub.properties ?? {}))
+          if (!exercisedFields.has(field))
+            fail(`tests/fixtures/run-record.golden.jsonl: schema declares "${sub.title}.${field}" that no golden line for kind "${sub.title}" exercises`);
+      }
+
+      // Rule 2 (§10.5): the schema declares no field the writing instructions cannot produce —
+      // the same reason stage.path and dispatch.agentId were removed rather than half-wired.
+      // A field is "producible" when some counted-surface file's prose names it as a
+      // run-record.mjs append/new argument. Most fields pass through run-record.mjs's generic
+      // append loop unrenamed (camelCase flag === camelCase key), so `--<field>` is the right
+      // literal to search for — EXCEPT the cases below, verified against scripts/run-record.mjs's
+      // actual field-sourcing code (main()) rather than assumed: kebab-case `new`-subcommand
+      // flags, one explicit rename, and fields the script computes itself rather than ever
+      // reading from a flag.
+      //
+      // Scoped to "run" and "session" kinds only (2026-08-11 decision, docs/DECISIONS.md): those
+      // are the only two kinds whose writing instructions are literal CLI documentation (the
+      // mint/session-append sites) — every other kind's write instructions are documented
+      // conceptually in this codebase's prose (e.g. "with the task id and sha"), never as a
+      // literal `--flag`, so this grep-for-`--flag` rule cannot pass against that prose style no
+      // matter how complete it is. Those other kinds keep their protection at the kind level via
+      // the exercised-kind check above (existing, unchanged) rather than per field.
+      // "knobs" is produced by a repeated `--knob key=value` flag, not a literal `--knobs`
+      // occurrence — forcing that string match would be a false-negative risk in the other
+      // direction, so it is structural like the id/version fields below (verified against real
+      // surface prose at dispatch time: see task 37's report for the full real-tree finding).
+      // "startedAt" is always computed by the script itself (`flags.startedAt ?? new
+      // Date().toISOString()...`, scripts/run-record.mjs:114) — no surface instruction ever
+      // needs to name `--started-at`.
+      const STRUCTURAL_FIELDS = new Set(["kind", "runId", "repoSlug", "schemaVersion", "knobs", "startedAt"]);
+      const FLAG_NAME = { pluginVersion: "plugin-version", pluginSha: "plugin-sha", sessionHash: "sessionId" };
+      const RULE2_KINDS = new Set(["run", "session"]);
+      for (const sub of subs.filter((s) => RULE2_KINDS.has(s.properties?.kind?.const)))
+        for (const field of Object.keys(sub.properties ?? {})) {
+          if (STRUCTURAL_FIELDS.has(field)) continue; // computed by the script, never a flag
+          const flag = FLAG_NAME[field] ?? field;
+          const named = [...surface].some((p) => readFileSync(p, "utf8").includes(`--${flag}`));
+          if (!named)
+            fail(`tests/fixtures/run-record.schema.json: "${sub.title}.${field}" is declared but no surface instruction names --${flag}`);
+        }
     }
   }
 }

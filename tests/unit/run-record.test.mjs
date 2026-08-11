@@ -163,8 +163,7 @@ test("append writes a session line carrying only a hash, never a raw session id"
   ).stdout.trim();
   const r = run(
     ["append", "--run", runId, "--repo", "/tmp/demo5", "--kind", "session",
-     "--sessionId", SESSION_ID, "--firstSeen", "2026-08-07T10:00:00Z",
-     "--lastSeen", "2026-08-07T10:05:00Z"],
+     "--sessionId", SESSION_ID],
     runs
   );
   assert.strictEqual(r.status, 0, r.stderr);

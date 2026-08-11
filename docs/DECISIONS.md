@@ -53,6 +53,33 @@ never got its own `docs/DECISIONS.md` entry, unlike G1's two — round 1 flagged
 same reason G1's two do — a per-cycle on-device checklist directory is exactly the class of
 working artifact G1 already established should not be committed.
 
+## 2026-08-11 — `session.firstSeen`/`lastSeen` dropped; `validate.mjs`'s new schema-vs-surface
+rule scoped to `run` and `session` kinds only
+
+**Decision:** `tests/fixtures/run-record.schema.json`'s `session` sub-schema drops
+`firstSeen`/`lastSeen` from both `properties` and `required` (and the golden fixture's `session`
+line drops the matching keys) — the same class of removal Task 36 already made for
+`dispatch.toolCalls`, `stage.path`, and `dispatch.agentId`. Separately, `scripts/validate.mjs`
+check 13's new rule 2 (the schema-vs-surface cross-check added by Task 37, "the schema declares
+no field the writing instructions cannot produce") is scoped to iterate only the `run` and
+`session` kinds, not all six.
+**Why:** `firstSeen`/`lastSeen` are produced and consumed by nothing anywhere in the codebase —
+confirmed by grepping `scripts/` and every counted-surface file, same dead-field class as Task
+36's three. Rule 2's mechanism — grepping surface prose for a literal `--<flag>` naming a schema
+field — structurally cannot pass for `stage`, `dispatch`, `verdict`, or `commit`: this codebase
+documents those kinds' writing instructions conceptually (e.g. "with the task id and sha"), never
+as literal CLI invocations, confirmed live at `references/handoff.md:27` and the dispatch/
+verdict/commit sites in `playbooks/executing-waves.md`. Applying rule 2 to those four kinds would
+fail against any amount of real, correct surface prose, which is not a defect the rule should
+report. `run` and `session` are different: their writing instructions genuinely are literal CLI
+documentation (the mint and session-append sites Tasks 38/39 own), so rule 2's literal-flag check
+is meaningful there. The other four kinds keep their existing protection at the kind level —
+check 13's pre-existing "every declared kind must be exercised by the golden fixture" check,
+unchanged — just not per field.
+**Supersedes:** Nothing reversed for the kind-level check (unchanged); this narrows Task 37's own
+rule 2 before it ever shipped un-scoped, and extends Task 36's dead-field-removal precedent to a
+fourth field pair found during Task 37's real-tree verification.
+
 ## 2026-08-08 — Surface accounting after cycle 2 (block E)
 
 `SURFACE_LINE_BUDGET = 3500` stands. The surface moved from **3,407** (v0.12.0, 36 files) to
