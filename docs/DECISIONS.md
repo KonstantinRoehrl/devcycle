@@ -33,6 +33,26 @@ spec §10.
 
 **Measured:** surface moved from 3,486 to **3,485** after the config.md compression, before this plan's remaining tasks land; against the new 3,550 budget that leaves **65** lines of headroom for Tasks 38–42 below.
 
+## 2026-08-11 — E2 (Node version pinning) re-enters the plan; corrects a silent drop
+
+Task 22 (`.nvmrc` + `actions/setup-node`, per spec §5.3) was planned into Wave 1 of the original
+block-E plan, moved to Wave 3 by an in-session patch, marked "never dispatched," and then never
+re-entered. `.devcycle/ledger.md:142` (Wave 3 formation, 2026-08-07) incorrectly records it as
+carrying `event=committed` — no dispatch, report, verdict, or commit event for task 22 exists
+anywhere in that ledger. Branch-review round 1 caught this (`.devcycle/ledger.md`,
+2026-08-08T09:55:00Z). This entry is the decision record §10.7 requires: the ledger's historical
+lines are not edited (append-only), but this task genuinely lands now, closing the gap.
+
+## 2026-08-11 — `.gitignore`'s third entry, recorded
+
+`docs/block-e-instrumentation/` (`.gitignore:11`) was added during this cycle's execution
+(`.devcycle/state.md`'s Wave 7 rulings: "a per-cycle working artifact lives only on this machine,
+consistent with A45 and `.gitignore:6`'s `docs/superpowers*`," applied by Task 34, `399f20c`) but
+never got its own `docs/DECISIONS.md` entry, unlike G1's two — round 1 flagged the gap
+(`.devcycle/ledger.md`, 2026-08-08T09:55:00Z). This entry closes it: the addition stands, for the
+same reason G1's two do — a per-cycle on-device checklist directory is exactly the class of
+working artifact G1 already established should not be committed.
+
 ## 2026-08-08 — Surface accounting after cycle 2 (block E)
 
 `SURFACE_LINE_BUDGET = 3500` stands. The surface moved from **3,407** (v0.12.0, 36 files) to
