@@ -14,7 +14,11 @@ const SCHEMA_PATH = new URL("../tests/fixtures/run-record.schema.json", import.m
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
 export function repoSlug(toplevel) {
-  return `${basename(toplevel)}-${sha256(toplevel).slice(0, 8)}`;
+  const sanitized = basename(toplevel)
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `${sanitized || "repo"}-${sha256(toplevel).slice(0, 8)}`;
 }
 
 export function hashSession(sessionId) {
@@ -51,6 +55,8 @@ function validate(obj, sub) {
       errors.push(`"${key}" does not match ${prop.pattern}`);
     if (prop.type === "integer" && !Number.isInteger(value))
       errors.push(`"${key}" must be an integer`);
+    if (prop.minimum !== undefined && Number(value) < prop.minimum)
+      errors.push(`"${key}" must be >= ${prop.minimum}, got ${value}`);
   }
   return errors;
 }

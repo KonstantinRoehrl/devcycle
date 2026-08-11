@@ -172,6 +172,95 @@ test("append writes a session line carrying only a hash, never a raw session id"
   assert.match(text, new RegExp(hashSession(SESSION_ID)));
 });
 
+test("append rejects a dispatch reviewRound below the schema's minimum", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runId = run(
+    ["new", "--repo", "/tmp/demo8", "--plugin-version", "0.13.0",
+     "--plugin-sha", "ded29c6", "--profile", "lean"],
+    runs
+  ).stdout.trim();
+  const r = run(
+    ["append", "--run", runId, "--repo", "/tmp/demo8", "--kind", "dispatch",
+     "--taskId", "1", "--agentType", "devcycle:implementer", "--model", "claude-sonnet-5",
+     "--modelSource", "explicit", "--startedAt", "2026-08-07T10:00:00Z",
+     "--endedAt", "2026-08-07T10:01:00Z",
+     "--outcome", "complete", "--reviewRound", "-1", "--retryIndex", "0"],
+    runs
+  );
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /reviewRound/);
+  const lines = readFileSync(recordPath("/tmp/demo8", runId), "utf8").split("\n").filter(Boolean);
+  assert.strictEqual(lines.length, 1);
+});
+
+test("append rejects a dispatch retryIndex below the schema's minimum", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runId = run(
+    ["new", "--repo", "/tmp/demo9", "--plugin-version", "0.13.0",
+     "--plugin-sha", "ded29c6", "--profile", "lean"],
+    runs
+  ).stdout.trim();
+  const r = run(
+    ["append", "--run", runId, "--repo", "/tmp/demo9", "--kind", "dispatch",
+     "--taskId", "1", "--agentType", "devcycle:implementer", "--model", "claude-sonnet-5",
+     "--modelSource", "explicit", "--startedAt", "2026-08-07T10:00:00Z",
+     "--endedAt", "2026-08-07T10:01:00Z",
+     "--outcome", "complete", "--reviewRound", "0", "--retryIndex", "-1"],
+    runs
+  );
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /retryIndex/);
+});
+
+test("append rejects a verdict round below the schema's minimum", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runId = run(
+    ["new", "--repo", "/tmp/demo10", "--plugin-version", "0.13.0",
+     "--plugin-sha", "ded29c6", "--profile", "lean"],
+    runs
+  ).stdout.trim();
+  const r = run(
+    ["append", "--run", runId, "--repo", "/tmp/demo10", "--kind", "verdict",
+     "--taskId", "1", "--round", "0", "--blockingCount", "0",
+     "--evidenceClass", "red-green", "--conformance", "pass"],
+    runs
+  );
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /round/);
+});
+
+test("append rejects a verdict blockingCount below the schema's minimum", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runId = run(
+    ["new", "--repo", "/tmp/demo11", "--plugin-version", "0.13.0",
+     "--plugin-sha", "ded29c6", "--profile", "lean"],
+    runs
+  ).stdout.trim();
+  const r = run(
+    ["append", "--run", runId, "--repo", "/tmp/demo11", "--kind", "verdict",
+     "--taskId", "1", "--round", "1", "--blockingCount", "-1",
+     "--evidenceClass", "red-green", "--conformance", "pass"],
+    runs
+  );
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /blockingCount/);
+});
+
+test("repoSlug sanitizes a basename containing spaces and non-ASCII characters", () => {
+  const weird = `${SLASH}Users${SLASH}someone${SLASH}My Projects${SLASH}dévcyclé ☂`;
+  const slug = repoSlug(weird);
+  const expectedHash = createHash("sha256").update(weird).digest("hex").slice(0, 8);
+  assert.match(slug, /^[A-Za-z0-9._-]+-[0-9a-f]{8}$/);
+  assert.ok(slug.endsWith(`-${expectedHash}`));
+});
+
+test("repoSlug falls back to a fixed literal when sanitizing empties the basename", () => {
+  const allSymbols = `${SLASH}Users${SLASH}someone${SLASH}☂☂☂`;
+  const slug = repoSlug(allSymbols);
+  const expectedHash = createHash("sha256").update(allSymbols).digest("hex").slice(0, 8);
+  assert.strictEqual(slug, `repo-${expectedHash}`);
+});
+
 test("new derives repoSlug from the real git toplevel, not the invoking cwd", () => {
   const runs = mkdtempSync(join(tmpdir(), "runs-"));
   // Create a temporary git repo and spawn from a nested subdirectory inside it (not the root).
