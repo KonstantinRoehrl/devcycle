@@ -311,6 +311,42 @@ export function cohortTable(summaries) {
   });
 }
 
+// The reviewDepth-cohort counterpart to versionCohorts/cohortTable above: same shape, grouped
+// by the resolved value of the `reviewDepth` knob (the knob most directly tied to review rigor,
+// and the one already exercised by this cycle's single/panel distinction) instead of
+// pluginVersion, so a knob's effect on review rounds/cost is visible the same way a version's
+// is. Reuses aggregateQuality rather than re-deriving its arithmetic. A session with no knob
+// data (pre branch-fix-2-3's --knob wiring, or a run that never resolved the knob) buckets
+// under "unknown" — same convention cohortTable's own "unknown" version bucket already uses,
+// never dropped silently.
+export function reviewDepthCohortTable(summaries) {
+  const settled = summaries.filter((s) => !s.inFlight);
+  const cohorts = new Map();
+  for (const s of settled) {
+    const key = s.knobs?.reviewDepth ?? "unknown";
+    if (!cohorts.has(key)) cohorts.set(key, { sessions: 0, dollars: [], depths: [], qualities: [] });
+    const c = cohorts.get(key);
+    c.sessions++;
+    c.dollars.push(Object.values(s.costByStage ?? {}).reduce((a, b) => a + b, 0));
+    if (typeof s.medianDepth === "number") c.depths.push(s.medianDepth);
+    c.qualities.push(s.quality ?? null);
+  }
+  const known = [...cohorts.keys()].filter((v) => v !== "unknown").sort();
+  const order = cohorts.has("unknown") ? [...known, "unknown"] : known;
+  return order.map((reviewDepth) => {
+    const c = cohorts.get(reviewDepth);
+    return {
+      reviewDepth,
+      sessions: c.sessions,
+      total: c.dollars.reduce((a, b) => a + b, 0),
+      medianPerSession: median(c.dollars),
+      medianDepth: c.depths.length ? median(c.depths) : null,
+      quality: aggregateQuality(c.qualities),
+      inferred: reviewDepth === "unknown" ? "no reviewDepth knob recorded" : null,
+    };
+  });
+}
+
 // One aggregate statement of where the corpus is headed, oldest known version to newest,
 // reusing versionCohorts' own grouping and compareVersions' own sort rather than
 // re-implementing either (per-version/per-skill deltas already exist in emitCandidates below;
@@ -611,24 +647,34 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
   }
   for (const repo of repos.filter((e) => e.isDirectory()))
     for (const f of readdirSync(join(dir, repo.name)).filter((n) => n.endsWith(".jsonl"))) {
-      const rec = { runId: null, pluginVersion: null, profile: null, stages: [], dispatches: [], verdicts: [] };
-      const hashes = [];
+      // Sequential per-file windowing: a run spanning several /devcycle:continue sessions
+      // writes several `session` lines into one file, and each stage/dispatch/verdict line
+      // belongs to whichever session line most recently preceded it — file order is the only
+      // correlation the schema supports (session lines carry no timestamp; Task 37 dropped
+      // firstSeen/lastSeen as dead fields). The run line's runId/pluginVersion/profile/knobs/
+      // schemaMismatch are file-scoped, not window-scoped: they apply to every window in the
+      // file and do not reset on a `session` line.
+      let runId = null, pluginVersion = null, profile = null, knobs = null, schemaMismatch;
+      let current = null;
+      const windows = new Map(); // sessionHash -> { stages, dispatches, verdicts }, file order
       for (const line of readFileSync(join(dir, repo.name, f), "utf8").split("\n").filter(Boolean)) {
         let o;
         try { o = JSON.parse(line); } catch { continue; } // a torn trailing line is normal
         if (o.kind === "run") {
-          rec.runId = o.runId; rec.pluginVersion = o.pluginVersion; rec.profile = o.profile;
+          runId = o.runId; pluginVersion = o.pluginVersion; profile = o.profile; knobs = o.knobs;
           // Degrade, never error, never silently drop: a record from an unrecognized
           // schemaVersion is still read and returned, just flagged — summarizeSession decides
           // whether to trust it (falls back to forward-fill when schemaMismatch is set).
-          if (o.schemaVersion !== CURRENT_SCHEMA_VERSION) rec.schemaMismatch = true;
-        }
-        else if (o.kind === "session") hashes.push(o.sessionHash);
-        else if (o.kind === "stage") rec.stages.push(o);
-        else if (o.kind === "dispatch") rec.dispatches.push(o);
-        else if (o.kind === "verdict") rec.verdicts.push(o);
+          if (o.schemaVersion !== CURRENT_SCHEMA_VERSION) schemaMismatch = true;
+        } else if (o.kind === "session") {
+          current = o.sessionHash;
+          if (!windows.has(current)) windows.set(current, { stages: [], dispatches: [], verdicts: [] });
+        } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
+        else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
+        else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
       }
-      for (const h of hashes) {
+      for (const [h, w] of windows) {
+        const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, ...w };
         const prior = bySession.get(h);
         bySession.set(h, prior
           ? { ...rec, stages: [...prior.stages, ...rec.stages], dispatches: [...prior.dispatches, ...rec.dispatches], verdicts: [...prior.verdicts, ...rec.verdicts] }
@@ -755,6 +801,10 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   const record = runRecords.get(sha256(sessionId));
   const attributionRecord = record?.schemaMismatch ? null : record;
   let pluginVersion = record?.pluginVersion ?? null;
+  // No transcript-side fallback for knobs (unlike pluginVersion, above) — a session with no
+  // knob data (pre branch-fix-2-3's --knob wiring, or a run that never resolved the knob)
+  // reads as absent, never an error.
+  const knobs = record?.knobs ?? null;
   const attributed = attributeFromRecord(turns, attributionRecord) ??
     attributeForwardFill(turns).map((skill, i) => ({ ...turns[i], stage: skill, attributionSource: "forward-filled" }));
   // Session-level rollup of the same source attributeFromRecord already decided per turn: this
@@ -839,6 +889,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     cacheBand: costBand(priced),
     models,
     pluginVersion,
+    knobs,
     attributionSource,
     complianceCandidates: emitComplianceCandidates(toolCallEvents, record),
     inFlight: newestRecordMs !== null && isInFlight(newestRecordMs),
@@ -1027,6 +1078,14 @@ export function formatReport(summaries) {
       `quality: ${qualityText(r.quality)}` +
       (r.version === "unknown" ? "   (inferred: no version detectable)" : "")
     );
+  lines.push("", "Per-reviewDepth cohorts:");
+  for (const r of reviewDepthCohortTable(summaries))
+    lines.push(
+      `  ${r.reviewDepth.padEnd(10)} n=${String(r.sessions).padStart(3)}  ` +
+      `total=$${r.total.toFixed(2).padStart(9)}  median/session=$${r.medianPerSession.toFixed(2).padStart(7)}  ` +
+      `quality: ${qualityText(r.quality)}` +
+      (r.reviewDepth === "unknown" ? "   (inferred: no reviewDepth knob recorded)" : "")
+    );
   lines.push("");
   for (const c of emitCandidates(summaries)) lines.push(formatCandidate(c));
   for (const c of complianceCandidatesOf(summaries)) lines.push(formatComplianceCandidate(c));
@@ -1125,6 +1184,7 @@ export function buildJsonReport(summaries) {
     })),
     candidates: [...emitCandidates(summaries), ...complianceCandidatesOf(summaries)],
     version_cohorts: cohortTable(summaries),
+    review_depth_cohorts: reviewDepthCohortTable(summaries),
     direction_of_travel: corpusDirectionOfTravel(summaries.filter((s) => !s.inFlight)),
     inFlight: {
       excluded: summaries.filter((s) => s.inFlight).length,

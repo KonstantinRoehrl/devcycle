@@ -14,6 +14,7 @@ import {
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
   emitComplianceCandidates, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
+  reviewDepthCohortTable,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -235,6 +236,61 @@ test("readRunRecords does not tag a record at the current schemaVersion as misma
   const records = readRunRecords(dir);
   assert.strictEqual(records.get(hash), undefined,
     "no session line means no session to index — sanity check on the fixture");
+});
+
+// branch-fix-2-2 Part 1: a run spanning multiple /devcycle:continue sessions writes several
+// `session` lines into one file — windowing must be by file position (which session line came
+// last), not by merging the whole file's stages/dispatches/verdicts into every session hash.
+test("readRunRecords windows a multi-session file by file position, not by merging the whole file into every session", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runs-multisession-"));
+  const slug = mkdtempSync(join(dir, "repo-"));
+  const hashA = createHash("sha256").update("sess-a").digest("hex");
+  const hashB = createHash("sha256").update("sess-b").digest("hex");
+  writeFileSync(join(slug, "abc.jsonl"),
+    [
+      { kind: "run", runId: "abc", schemaVersion: 1, pluginVersion: "0.13.0" },
+      { kind: "session", runId: "abc", sessionHash: hashA },
+      { kind: "stage", runId: "abc", stage: "planning", startedAt: "2026-08-07T10:00:00Z",
+        endedAt: "2026-08-07T10:30:00Z", outcome: "complete" },
+      { kind: "dispatch", runId: "abc", taskId: "1", agentType: "devcycle:implementer" },
+      { kind: "session", runId: "abc", sessionHash: hashB },
+      { kind: "stage", runId: "abc", stage: "execution", startedAt: "2026-08-07T11:00:00Z",
+        endedAt: "2026-08-07T11:30:00Z", outcome: "complete" },
+      { kind: "verdict", runId: "abc", taskId: "1", round: 1 },
+    ].map((o) => JSON.stringify(o)).join("\n") + "\n");
+  const records = readRunRecords(dir);
+  const recA = records.get(hashA);
+  const recB = records.get(hashB);
+  assert.strictEqual(recA.stages.length, 1);
+  assert.strictEqual(recA.stages[0].stage, "planning");
+  assert.strictEqual(recA.dispatches.length, 1);
+  assert.strictEqual(recA.verdicts.length, 0, "session A must not inherit session B's verdict");
+  assert.strictEqual(recB.stages.length, 1);
+  assert.strictEqual(recB.stages[0].stage, "execution");
+  assert.strictEqual(recB.dispatches.length, 0, "session B must not inherit session A's dispatch");
+  assert.strictEqual(recB.verdicts.length, 1);
+  // The run line's runId/pluginVersion apply to every window in the file — they don't reset
+  // on a `session` line.
+  assert.strictEqual(recA.pluginVersion, "0.13.0");
+  assert.strictEqual(recB.pluginVersion, "0.13.0");
+});
+
+// branch-fix-2-2 Part 2: the `run` line's `knobs` field, never read before, now lands on the
+// per-session record alongside runId/pluginVersion/profile.
+test("readRunRecords captures the run line's knobs onto the per-session record", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runs-knobs-"));
+  const slug = mkdtempSync(join(dir, "repo-"));
+  const hash = createHash("sha256").update("sess-knobs").digest("hex");
+  writeFileSync(join(slug, "abc.jsonl"),
+    [
+      { kind: "run", runId: "abc", schemaVersion: 1, pluginVersion: "0.13.0",
+        knobs: { reviewDepth: "panel" } },
+      { kind: "session", runId: "abc", sessionHash: hash },
+      { kind: "stage", runId: "abc", stage: "planning", startedAt: "2026-08-07T10:00:00Z",
+        endedAt: "2026-08-07T10:30:00Z", outcome: "complete" },
+    ].map((o) => JSON.stringify(o)).join("\n") + "\n");
+  const records = readRunRecords(dir);
+  assert.deepStrictEqual(records.get(hash).knobs, { reviewDepth: "panel" });
 });
 
 test("summarizeSession degrades to forward-fill attribution when the run record's schemaVersion is mismatched", () => {
@@ -1388,6 +1444,28 @@ test("summarizeSession prefers the run record's stamped pluginVersion over trans
   assert.strictEqual(summary.pluginVersion, "0.13.0");
 });
 
+// branch-fix-2-2 Part 2: knobs propagate to the per-session summary the same way pluginVersion
+// already does — read-path plumbing for the reviewDepth-cohort correlation below.
+test("summarizeSession propagates the run record's knobs onto the session summary, the same way pluginVersion is", () => {
+  const sessionId = "session-knobs";
+  const hash = createHash("sha256").update(sessionId).digest("hex");
+  const record = {
+    runId: "abc", pluginVersion: "0.13.0", knobs: { reviewDepth: "panel" },
+    stages: [], dispatches: [], verdicts: [],
+  };
+  const runRecords = new Map([[hash, record]]);
+  const summary = summarizeSession(sessionId, [turn({ timestamp: "2026-08-07T10:15:00Z" })], runRecords);
+  assert.deepStrictEqual(summary.knobs, { reviewDepth: "panel" });
+});
+
+// Sibling task branch-fix-2-3 wires real --knob flags independently and may land in either
+// order — a session with no knob data (pre-2-3, or a run that never resolved the knob) must
+// read as "no knob data", never throw or silently coerce to some other shape.
+test("summarizeSession reads knobs as absent, not an error, when the run record carries none", () => {
+  const summary = summarizeSession("session-no-knobs", [turn({ timestamp: "2026-08-07T10:15:00Z" })]);
+  assert.strictEqual(summary.knobs, null);
+});
+
 test("cohortTable carries n, total, median $/session and median depth per version", () => {
   const rows = cohortTable([
     { pluginVersion: "0.9.2", costByStage: { a: 1.0, b: 1.0 }, medianDepth: 10 },
@@ -1544,6 +1622,75 @@ test("--json's version_cohorts carry each cohort's quality beside its cost", () 
   assert.strictEqual(withQuality.quality.blockingFindings, 9);
   // No quality-bearing session in the cohort means absent, never a zeroed-out object.
   assert.strictEqual(withoutQuality.quality, null);
+});
+
+// --- branch-fix-2-2 Part 2: the other quality/cost correlation — by the reviewDepth knob ---
+// Same shape as versionCohorts/cohortTable above, grouped by the resolved reviewDepth knob
+// instead of pluginVersion, reusing aggregateQuality rather than re-deriving its arithmetic.
+
+test("reviewDepthCohortTable groups settled sessions by the resolved reviewDepth knob", () => {
+  const rows = reviewDepthCohortTable([
+    { knobs: { reviewDepth: "panel" }, costByStage: { a: 1.0 }, medianDepth: 10 },
+    { knobs: { reviewDepth: "panel" }, costByStage: { a: 3.0 }, medianDepth: 20 },
+    { knobs: { reviewDepth: "single" }, costByStage: { a: 5.0 }, medianDepth: 30 },
+  ]);
+  const panel = rows.find((r) => r.reviewDepth === "panel");
+  assert.strictEqual(panel.sessions, 2);
+  assert.strictEqual(panel.total, 4.0);
+  assert.strictEqual(panel.medianPerSession, 2.0);
+});
+
+test("reviewDepthCohortTable buckets sessions with no knob data as unknown, never dropped", () => {
+  const rows = reviewDepthCohortTable([
+    { knobs: { reviewDepth: "panel" }, costByStage: { a: 1.0 }, medianDepth: 10 },
+    { costByStage: { a: 2.0 }, medianDepth: 10 }, // no knobs at all — pre-2-3, or unresolved
+  ]);
+  const unknown = rows.find((r) => r.reviewDepth === "unknown");
+  assert.ok(unknown, "a session with no knob data must still be represented, not dropped");
+  assert.strictEqual(unknown.sessions, 1);
+  assert.strictEqual(unknown.inferred, "no reviewDepth knob recorded");
+});
+
+test("reviewDepthCohortTable excludes in-flight sessions from its medians, same as cohortTable", () => {
+  const settled = { knobs: { reviewDepth: "single" }, costByStage: { a: 1.0 }, medianDepth: 10, inFlight: false };
+  const inFlight = { knobs: { reviewDepth: "single" }, costByStage: { a: 1000.0 }, medianDepth: 10, inFlight: true };
+  const rows = reviewDepthCohortTable([settled, inFlight]);
+  assert.strictEqual(rows[0].sessions, 1);
+  assert.strictEqual(rows[0].medianPerSession, 1);
+});
+
+test("reviewDepthCohortTable aggregates quality per cohort via aggregateQuality, absent when no session carries one", () => {
+  const rows = reviewDepthCohortTable([
+    { knobs: { reviewDepth: "panel" }, costByStage: { a: 1.0 }, medianDepth: 10,
+      quality: { tasks: 2, reviewRounds: 3, retries: 1, blockingFindings: 1,
+                 conformanceFailures: 0, roundsPerTask: 1.5 } },
+    { knobs: { reviewDepth: "single" }, costByStage: { a: 1.0 }, medianDepth: 10, quality: null },
+  ]);
+  const panel = rows.find((r) => r.reviewDepth === "panel");
+  assert.strictEqual(panel.quality.roundsPerTask, 1.5);
+  const single = rows.find((r) => r.reviewDepth === "single");
+  assert.strictEqual(single.quality, null);
+});
+
+test("the default text report renders the reviewDepth cohort table", () => {
+  const text = formatReport([
+    { knobs: { reviewDepth: "panel" }, costByStage: { a: 1.0 }, medianDepth: 10, models: {}, tools: {} },
+    { costByStage: { a: 2.0 }, medianDepth: 10, models: {}, tools: {} }, // no knobs => unknown
+  ]);
+  assert.match(text, /Per-reviewDepth cohorts:/);
+  assert.match(text, /panel\s+n=\s*1/);
+  assert.match(text, /unknown\s+n=\s*1/);
+});
+
+test("--json carries review_depth_cohorts alongside version_cohorts", () => {
+  const json = buildJsonReport([
+    { knobs: { reviewDepth: "panel" }, costByStage: { a: 1.0 }, medianDepth: 10,
+      quality: { tasks: 1, reviewRounds: 1, retries: 0, blockingFindings: 0,
+                 conformanceFailures: 0, roundsPerTask: 1 } },
+  ]);
+  const panel = json.review_depth_cohorts.find((r) => r.reviewDepth === "panel");
+  assert.strictEqual(panel.sessions, 1);
+  assert.strictEqual(panel.quality.roundsPerTask, 1);
 });
 
 // --- C1: agents/on-device-driver.md dispatches its browser tools MCP-prefixed ---
