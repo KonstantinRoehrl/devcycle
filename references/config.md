@@ -48,9 +48,9 @@ One form per outcome, and this is the list that decides between them:
   which asserts the opposite.
 
 The `· profile-asked` marker rides on any of the last three. **Its only producer is
-first-run configuration below** — every completion of either offer there writes it,
-whichever offer ran and whatever the answer wrote — **and its only consumer is that
-section's path 2**, which is what stops the configuration question being put twice to
+first-run configuration below** — every completion of either offer writes it — **and
+its only consumer is that section's path 2**, which is what stops the configuration
+question being put twice to
 the same user in the same repo. Nothing else on the line distinguishes a knob pinned
 by choice from one inherited from an older version.
 
@@ -186,10 +186,9 @@ for the reason the *adopt* answer above gives.
 Ask the four knobs in one AskUserQuestion batch — one line of meaning each, the default
 marked "(recommended)" — then write ONLY the knobs whose answer differs from the offered
 default, one `--config` per changed knob. A knob the user simply accepted at its
-"(recommended)" value is left unwritten, for the same reason the profile branch writes
-nothing but the profile: writing it would make that knob explicitly configured, and an
-explicit knob wins over the profile forever, so a later `profile: thorough` would never
-move it. If every answer matches its default, nothing is written. The four:
+"(recommended)" value is left unwritten — same rationale as the *Adopt* answer above
+(lines 142–146): writing it would make that knob explicitly configured forever. If every
+answer matches its default, nothing is written. The four:
 
 - `gitPolicy` — what the finish stage may do with the branch (`local-commits-only`
   recommended · `push-allowed` · `open-pr`).

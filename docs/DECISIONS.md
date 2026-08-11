@@ -5,6 +5,34 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-11 — Surface budget raised to 3,550; the "do not raise" ruling superseded
+
+`SURFACE_LINE_BUDGET` moves from **3,500 to 3,550**; `COMMAND_LINE_MAX` from 100 to 104;
+`PLAYBOOK_LINE_MAX` from 150 to 154. This supersedes the standing prohibition recorded during
+cycle 2's original execution (`.devcycle/briefs/4.md:41`, `28.md:65`: "Do not raise
+`SURFACE_LINE_BUDGET`"; `.devcycle/ledger.md`, 2026-08-07T18:09:34Z: "the binding cycle-1 ruling
+against relitigating it was not disturbed") — a deliberate, user-confirmed reversal, not an
+oversight.
+
+**Why now, and why not another descope instead.** Branch-review round 1 found the run-record
+write sequencing does not work as shipped and required a redesign (spec §10), which reopens two
+items this cycle had already deferred once for budget reasons: the ledger's compact run-record
+table and the finish-stage privacy screen (§10.6, §10.8 — both already user-approved as shipping
+this cycle, not deferred again). Between them and three smaller prose sites (mint reordering,
+session-line instructions, dispatch/verdict resequencing), the real need is ~35–45 lines against
+14 lines of headroom. A dedicated compression pass across the ten highest-content surface files
+(`config.md`, `quality-criteria.md`, `delegation.md`, `reviewing-the-branch.md`,
+`scoping-the-request.md`, `profiling-sessions.md`, `resume.md`, `handoff.md`, `evidence.md`,
+`finishing-the-cycle.md`) found exactly 2 safe lines, both in `config.md` — restated rationale,
+applied in this same change. This is the same finding the 2026-08-06 entry already made for the
+same root cause ("two independent reviewers established the residual is not cuttable without
+behaviour loss") — hitting it a second time in the same cycle is a signal about this codebase's
+prose density, not a one-off. Deferring the two already-approved items again was offered to the
+user as an alternative and declined, since it would reopen decisions made after their approval of
+spec §10.
+
+**Measured:** surface moved from 3,486 to **3,485** after the config.md compression, before this plan's remaining tasks land; against the new 3,550 budget that leaves **65** lines of headroom for Tasks 38–42 below.
+
 ## 2026-08-08 — Surface accounting after cycle 2 (block E)
 
 `SURFACE_LINE_BUDGET = 3500` stands. The surface moved from **3,407** (v0.12.0, 36 files) to

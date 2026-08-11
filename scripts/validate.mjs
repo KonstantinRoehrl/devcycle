@@ -211,7 +211,7 @@ for (const f of namesIn("playbooks")) {
 
 // 9. Line budgets, as numbers. Counted the way `wc -l` counts: a file's closing
 //    newline terminates its last line rather than starting an empty one.
-const SURFACE_LINE_BUDGET = 3500, COMMAND_LINE_MAX = 100, PLAYBOOK_LINE_MAX = 150;
+const SURFACE_LINE_BUDGET = 3550, COMMAND_LINE_MAX = 104, PLAYBOOK_LINE_MAX = 154;
 const lines = (p) => {
   const text = readFileSync(p, "utf8");
   return text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;

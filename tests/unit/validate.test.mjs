@@ -296,7 +296,7 @@ test("budget check: a command over 100 lines fails", () => {
   writeInto(dir, "commands/cycle.md", '---\ndescription: "c"\n---\n' + "x\n".repeat(120));
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
-  assert.match(stderr, /commands\/cycle\.md: \d+ lines > 100/);
+  assert.match(stderr, /commands\/cycle\.md: \d+ lines > 104/);
 });
 
 // Pads the surface with `count` gerund-named playbooks of 100 lines each — each
@@ -310,8 +310,8 @@ test("budget check: a surface over 3500 lines in total fails", () => {
   padSurface(dir, 40); // 4000 lines
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
-  assert.match(stderr, /runtime surface \d+ lines > 3500/);
-  assert.doesNotMatch(stderr, /lines > 150/); // the total arm fired, not the per-file arm
+  assert.match(stderr, /runtime surface \d+ lines > 3550/);
+  assert.doesNotMatch(stderr, /lines > 154/); // the total arm fired, not the per-file arm
 });
 
 test("budget check: the same surface under 3500 lines in total passes", () => {
@@ -325,7 +325,7 @@ test("budget check: a playbook over 150 lines fails", () => {
   writeInto(dir, "playbooks/padding-things.md", "x\n".repeat(160));
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
-  assert.match(stderr, /playbooks\/padding-things\.md: \d+ lines > 150/);
+  assert.match(stderr, /playbooks\/padding-things\.md: \d+ lines > 154/);
   assert.doesNotMatch(stderr, /runtime surface/); // the per-file arm fired, not the total arm
 });
 
