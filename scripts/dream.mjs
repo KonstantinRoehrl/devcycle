@@ -262,7 +262,9 @@ export function recordPromotion(repoRoot, rec) {
       `- cluster-signature: ${oneLine(rec.clusterSignature)}\n` +
       `- files-touched: ${filesTouched}\n` +
       `- landed: ${oneLine(rec.landed)}\n` +
-      `- commit: ${oneLine(rec.commit)}\n`,
+      `- commit: ${oneLine(rec.commit)}\n` +
+      `- plugin-version: ${oneLine(rec.pluginVersion)}\n` +
+      `- sourced-from-memory: ${rec.sourcedFromMemory === true}\n`,
   );
   return path;
 }
@@ -282,6 +284,11 @@ export function readPromotions(repoRoot) {
         filesTouched: field(text, "files-touched").split(",").map((s) => s.trim()).filter(Boolean),
         landed: field(text, "landed"),
         commit: field(text, "commit"),
+        pluginVersion: field(text, "plugin-version") || null,
+        sourcedFromMemory:
+          field(text, "sourced-from-memory") === ""
+            ? null
+            : field(text, "sourced-from-memory") === "true",
       };
     });
 }
