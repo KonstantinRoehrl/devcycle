@@ -980,7 +980,7 @@ const runlessSurfaces = () => {
 // let in-cycle surfaces that ask the user in their own words pass while citing nothing, so the
 // detector below is a vocabulary rather than one token. It is a heuristic over prose, and its
 // limits are the written-down kind rather than the implied kind:
-//   - it matches phrasings, not intent, so a gate worded in a way nobody has used yet reads as
+//   - it matches phrasings, not intent, so a gate worded outside the families below reads as
 //     no gate at all — which is exactly why the guards below exist;
 //   - it deliberately excludes a stage that stops and reports for a decision taken outside the
 //     run (`planning-waves.md`'s NO-GO verdict): that presents no options, so it has no "Other"
@@ -988,22 +988,35 @@ const runlessSurfaces = () => {
 //     text carries;
 //   - every phrase is `\s+`-joined, because this surface is hard-wrapped and one of the
 //     phrasings below ("ask for\n   confirmation") straddles a line break.
-// The defect being fixed is a check that went quiet, so the vocabulary is guarded twice: every
-// phrase must still match some surface, and every surface known to gate without the literal
-// token must still be detected. A rewording then fails a test instead of shrinking the rule.
+// Families, not fingerprints. Each entry below used to match exactly one file, which meant the
+// check recognised today's three token-free gates rather than gate-shaped prose — a rewording
+// anywhere would have quietly dropped a surface out of the check instead of failing it. The
+// families are still a heuristic over prose, and the two guards below still constrain them from
+// both sides: every family must match some surface (dead vocabulary fails), and every surface in
+// GATES_WITHOUT_THE_TOKEN must still be detected.
 const GATE_PHRASES = [
   /AskUserQuestion/,
-  /\bask(?:s|ing|ed)?\s+(?:the\s+user\s+)?for\s+(?:an?\s+)?confirmation\b/i,
-  /\bONE\s+question\s+per\b/,
+  // asking the user, in any of its inflections, for a decision or a confirmation
+  /\bask(?:s|ing|ed)?\b[^.]{0,40}?\b(?:the\s+user|for\s+(?:an?\s+)?confirmation|which|whether|before)\b/i,
+  // confirming with the user before acting
+  /\bconfirm(?:s|ing|ed)?\b[^.]{0,30}?\b(?:with\s+the\s+user|before)\b/i,
+  // the user's assent as a precondition
   /\bonly\s+the\s+user\s+may\b/i,
   /\bon\s+an\s+explicit\s+yes\b/i,
+  /\bthe\s+user'?s?\s+explicit\s+(?:approval|call|decision|permission)\b/i,
+  // presenting options for the user to pick from
+  /\blet\s+the\s+user\s+(?:choose|decide|pick)\b/i,
+  /\bONE\s+question\s+per\b/,
 ];
 // A denial contains the gate phrasing by construction ("never asks for confirmation"), so matching
 // the phrase alone counted a surface that states it gates nothing as a gate, and then demanded a
 // citation for a journal entry it never writes. Same defect, and same fix, as NEGATES_APPEND below:
 // decide by the sentence's polarity rather than by whether the words occur. Sentence-scoped on
-// purpose — a denial in one sentence must not silence a real gate in the next.
-const NEGATES_GATE = /\b(?:never|not|no|none|nothing|nor|doesn't|does\s+not|won't|will\s+not)\b[^.]{0,60}?\b(?:ask|asks|asking|asked|question|confirmation|AskUserQuestion)\b/i;
+// purpose — a denial in one sentence must not silence a real gate in the next — and clause-scoped
+// within the sentence: the window stops at `,`, `;` and `:` as well as `.`, because a negation
+// belonging to an earlier clause ("No prior scaffold exists, so ask ...") does not govern the ask
+// that follows it, and reading it as one silenced real gates.
+const NEGATES_GATE = /\b(?:never|not|no|none|nothing|nor|doesn't|does\s+not|won't|will\s+not)\b[^.,;:]{0,60}?\b(?:ask|asks|asking|asked|question|confirmation|AskUserQuestion)\b/i;
 const gatesUser = (text) =>
   text
     .split(/(?<=\.)\s+/)
@@ -1297,4 +1310,37 @@ test("the gate vocabulary reads a denial as no gate, the way the citation check 
     gatesUser("This stage never asks for confirmation. A later step does ask the user for confirmation."),
     true
   );
+});
+
+test("the gate vocabulary recognises gate-shaped prose, not only the three phrasings in use today", () => {
+  // The carry-over: every phrase matched exactly one file, so the check recognised today's gates
+  // rather than gates. These are phrasings no surface uses yet; each must still read as a gate.
+  for (const phrasing of [
+    "Ask the user which one before resuming.",
+    "Confirm with the user before any edit.",
+    "This requires the user's explicit approval.",
+    "Present the options and let the user choose.",
+    "Stop and ask before overwriting it.",
+  ])
+    assert.equal(gatesUser(phrasing), true, `gate-shaped prose read as no gate: ${phrasing}`);
+
+  // And the other side: prose that merely mentions users or decisions is not a gate.
+  for (const phrasing of [
+    "The user's recollection is not evidence.",
+    "This stage writes the report and moves on.",
+    "The coordinator decides which lens applies.",
+  ])
+    assert.equal(gatesUser(phrasing), false, `non-gating prose read as a gate: ${phrasing}`);
+});
+
+test("a negation governing a different clause does not silence a gate in the same sentence", () => {
+  // The carry-over: the negation window ran to the end of the sentence, so a "No" belonging to an
+  // unrelated clause silenced a real gate standing after it. The window stops at a clause boundary
+  // instead, which is what "the negation governs the ask" means in prose this check can read.
+  assert.equal(gatesUser("No prior scaffold exists, so ask ONE AskUserQuestion before continuing."), true);
+  assert.equal(gatesUser("Drift findings are not candidates: they keep their own AskUserQuestion batching."), true);
+
+  // The denials the guard exists for are unaffected — there the negation does govern the ask.
+  assert.equal(gatesUser("This stage never asks the user for confirmation."), false);
+  assert.equal(gatesUser("No confirmation is asked for here."), false);
 });

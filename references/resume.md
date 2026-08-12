@@ -44,9 +44,11 @@ its own `git rev-parse --show-toplevel` first. A differing `root:` means the fil
 belongs to another checkout or leaked from another project: never resume it and never
 silently reset it — report what its `root:` and `request:` say versus where you are,
 and let the user choose between adopting it (the repo genuinely moved: rewrite `root:`,
-keep everything else) and leaving it alone. A file with no `root:` line predates this
-format and is not foreign: adopt it by writing `root:` and `request:` at the next
-rewrite.
+keep everything else) and leaving it alone. The adopt-or-leave answer is the user's to
+give, and an Other answer to it appends `user-correction-at-gate` to the run record a
+resume already carries; `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that rule. A
+file with no `root:` line predates this format and is not foreign: adopt it by writing
+`root:` and `request:` at the next rewrite.
 
 ## Settle the branch first, before reading anything else
 
