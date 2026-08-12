@@ -77,6 +77,7 @@ Continue at the recorded stage via its playbook:
 | sweep | `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md` (its Resume section, which follows `${CLAUDE_PLUGIN_ROOT}/references/resume.md`) |
 | finish | `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
 
-From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file
-updates and a handoff block at every stage boundary, per
-`${CLAUDE_PLUGIN_ROOT}/references/handoff.md`.
+From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file updates and a
+handoff block at every stage boundary, per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` — and,
+step 2 having put this session on a live run record, an Other answer at any gate of a resumed
+stage appends `user-correction-at-gate`, whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.

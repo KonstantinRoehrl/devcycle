@@ -30,6 +30,13 @@ pays none of a dream's cost.
   with `", "` when writing the record line above.
 - `landed` — `YYYY-MM-DD`.
 - `commit` — the sha the promotion landed in.
+- `plugin-version` — the plugin's own `.claude-plugin/plugin.json` version at landing time,
+  from the `--record-promotion` JSON payload's `pluginVersion` field. Empty when the caller
+  did not supply it, read back as `null`, never defaulted to a value.
+- `sourced-from-memory` — `true` or `false`, from the payload's `sourcedFromMemory` field:
+  whether this promotion's candidate came from a memory entry rather than a transcript. Empty
+  when the caller did not supply it, read back as `null` — never defaulted to `false`, which
+  would misrecord "unknown" as a definite "not sourced from memory".
 
 ## Example
 
@@ -39,3 +46,5 @@ pays none of a dream's cost.
     - files-touched: agents/task-reviewer.md
     - landed: 2026-08-04
     - commit: 0000000
+    - plugin-version: 0.12.0
+    - sourced-from-memory: false

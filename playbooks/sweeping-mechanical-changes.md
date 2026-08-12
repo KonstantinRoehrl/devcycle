@@ -38,7 +38,7 @@ nothing in the steps below is.
    defines or this path's own `model unset (auto: no fast-tier id resolved; CLI default applies)`, since a bare
    name hides which path chose it. Then ask ONE AskUserQuestion presenting exactly that blast radius, model
    included: confirm / adjust (re-run the clean-targets check over the adjusted list, rewrite the plan
-   file, re-present) / abort (closed out per **State file** below). Nothing runs and no agent edits anything
+   file, re-present) / abort (closed out per **State file** below); an Other answer appends `user-correction-at-gate`, the rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns. Nothing runs and no agent edits anything
    until this gate passes. On confirm, write `{"files": [...], "instruction": "...", "verifyCommand":
    "..."}` to `.devcycle/sweep-args.json`.
 4. **Capture the baseline, then run the sweep.** BEFORE invoking anything, run the confirmed verifyCommand in

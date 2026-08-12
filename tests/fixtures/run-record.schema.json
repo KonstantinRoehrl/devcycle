@@ -104,6 +104,26 @@
       },
       "required": ["kind", "runId", "taskId", "sha"],
       "additionalProperties": false
+    },
+    {
+      "title": "event",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "event" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "event": { "enum": ["gate-fail", "gate-pass-clean", "user-correction-at-gate"] },
+        "stage": {
+          "enum": [
+            "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
+            "branch-review", "on-device", "fast-path", "sweep", "finish"
+          ]
+        },
+        "task": { "type": "string" },
+        "culprit": { "type": ["string", "null"] },
+        "ts": { "type": "string", "format": "date-time" }
+      },
+      "required": ["kind", "runId", "event", "stage", "ts"],
+      "additionalProperties": false
     }
   ]
 }

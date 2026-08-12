@@ -14,7 +14,7 @@ import {
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
   emitComplianceCandidates, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
-  reviewDepthCohortTable,
+  reviewDepthCohortTable, deriveEvents, attributedCost, impactScores,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -1778,4 +1778,105 @@ test("an unresolved concurrent-wave turn (agentId set, no matching dispatch) is 
   const [attributed] = attributeFromRecord(turns, record);
   assert.strictEqual(attributed.taskId, null);
   assert.strictEqual(attributed.attributionSource, "inferred"); // was "record" — the live M3 bug
+});
+
+// --- the friction journal's `event` lines, read back per session ---
+
+test("readRunRecords collects event lines and merges them across session windows", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rr-events-"));
+  mkdirSync(join(dir, "repo-1a2b3c4d"), { recursive: true });
+  writeFileSync(join(dir, "repo-1a2b3c4d", "aaaa.jsonl"), [
+    JSON.stringify({ kind: "run", runId: "a".repeat(16), schemaVersion: 1, pluginVersion: "0.13.0",
+      pluginSha: "abc1234", repoSlug: "repo-1a2b3c4d", profile: "lean", knobs: {},
+      startedAt: "2026-08-12T10:00:00Z" }),
+    JSON.stringify({ kind: "session", runId: "a".repeat(16), sessionHash: "b".repeat(64) }),
+    JSON.stringify({ kind: "event", runId: "a".repeat(16), event: "gate-fail",
+      stage: "execution", task: "1", culprit: null, ts: "2026-08-12T10:05:00Z" }),
+    JSON.stringify({ kind: "session", runId: "a".repeat(16), sessionHash: "b".repeat(64) }),
+    JSON.stringify({ kind: "event", runId: "a".repeat(16), event: "gate-pass-clean",
+      stage: "execution", task: "1", culprit: null, ts: "2026-08-12T10:15:00Z" }),
+  ].join("\n") + "\n");
+
+  const rec = readRunRecords(dir).get("b".repeat(64));
+  assert.equal(rec.events.length, 2, "events from both session windows must survive the merge");
+  assert.deepEqual(rec.events.map((e) => e.event), ["gate-fail", "gate-pass-clean"]);
+  assert.equal(rec.profile, "lean");
+});
+
+test("a session with no run record reports profile unknown rather than erroring", () => {
+  // An empty runRecords map is exactly the historical case: transcripts written before the run
+  // record existed. summarizeSession must degrade, not throw.
+  const turns = [turn({
+    timestamp: "2026-08-12T10:00:00Z",
+    message: { model: "claude-sonnet-5", usage: { input_tokens: 10, output_tokens: 5 }, content: [] },
+  })];
+  const summary = summarizeSession("no-record-session", turns, new Map());
+  assert.equal(summary.profile, "unknown");
+  assert.equal(summary.pluginVersion, "unknown");
+});
+
+// --- impact scoring: references/impact-scoring.md owns the formula ---
+
+const impactFixture = () => ({
+  stages: [
+    { stage: "execution", startedAt: "2026-08-12T10:00:00Z", endedAt: "2026-08-12T11:00:00Z" },
+    { stage: "planning", startedAt: "2026-08-12T09:00:00Z", endedAt: "2026-08-12T09:30:00Z" },
+  ],
+  dispatches: [
+    { taskId: "1", startedAt: "2026-08-12T10:05:00Z", retryIndex: 0, model: "m" },
+    { taskId: "1", startedAt: "2026-08-12T10:20:00Z", retryIndex: 1, model: "m" },
+    { taskId: "2", startedAt: "2026-08-12T10:40:00Z", retryIndex: 0, model: "m" },
+  ],
+  verdicts: [],
+  events: [
+    { event: "gate-fail", stage: "execution", task: "1", ts: "2026-08-12T10:10:00Z" },
+    { event: "gate-fail", stage: "execution", task: "2", ts: "2026-08-12T10:45:00Z" },
+    { event: "user-correction-at-gate", stage: "planning", ts: "2026-08-12T09:10:00Z" },
+  ],
+});
+
+test("impact is the summed per-occurrence attributed cost, in dollars", () => {
+  const scores = impactScores(impactFixture(), { execution: 6.0, planning: 1.0 });
+  const gateFail = scores.find((s) => s.key === "gate-fail:execution");
+  assert.equal(gateFail.frequency, 2);
+  // $6.00 over 3 dispatches = $2.00 per occurrence; 2 occurrences = $4.00.
+  assert.equal(gateFail.impact, 4.0);
+});
+
+test("a stage with no dispatches in the window yields no score, not zero and not a divide error", () => {
+  const scores = impactScores(impactFixture(), { execution: 6.0, planning: 1.0 });
+  const correction = scores.find((s) => s.key === "user-correction-at-gate:planning");
+  assert.equal(correction.frequency, 1);
+  assert.equal(correction.impact, null, "planning has cost but zero dispatches — unmeasurable");
+});
+
+test("the four derivable events are derived from verdict and dispatch lines", () => {
+  const record = {
+    stages: [{ stage: "execution", startedAt: "2026-08-12T10:00:00Z", endedAt: "2026-08-12T11:00:00Z" }],
+    dispatches: [
+      { taskId: "1", startedAt: "2026-08-12T10:05:00Z", retryIndex: 0, model: "fast" },
+      { taskId: "1", startedAt: "2026-08-12T10:20:00Z", retryIndex: 1, model: "session" },
+    ],
+    verdicts: [
+      { taskId: "1", round: 1, blockingCount: 2, conformance: "fail" },
+      { taskId: "2", round: 1, blockingCount: 0, conformance: "pass" },
+    ],
+    events: [],
+  };
+  const derived = deriveEvents(record).map((e) => e.event).sort();
+  assert.deepEqual(derived, ["escalation", "first-round-accept", "re-dispatch", "review-reject"]);
+});
+
+test("a round the green gate rejects after the reviewer passed it scores as a reject, not a win", () => {
+  const record = {
+    stages: [{ stage: "execution", startedAt: "2026-08-12T10:00:00Z", endedAt: "2026-08-12T11:00:00Z" }],
+    dispatches: [],
+    verdicts: [
+      { taskId: "1", round: 1, blockingCount: 0, conformance: "pass" },
+      { taskId: "1", round: 1, blockingCount: 0, conformance: "fail" },
+    ],
+    events: [],
+  };
+  const derived = deriveEvents(record).map((e) => e.event);
+  assert.deepEqual(derived, ["review-reject"]);
 });

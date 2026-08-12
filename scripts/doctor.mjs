@@ -656,7 +656,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
       // file and do not reset on a `session` line.
       let runId = null, pluginVersion = null, profile = null, knobs = null, schemaMismatch;
       let current = null;
-      const windows = new Map(); // sessionHash -> { stages, dispatches, verdicts }, file order
+      const windows = new Map(); // sessionHash -> { stages, dispatches, verdicts, events }, file order
       for (const line of readFileSync(join(dir, repo.name, f), "utf8").split("\n").filter(Boolean)) {
         let o;
         try { o = JSON.parse(line); } catch { continue; } // a torn trailing line is normal
@@ -668,16 +668,22 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
           if (o.schemaVersion !== CURRENT_SCHEMA_VERSION) schemaMismatch = true;
         } else if (o.kind === "session") {
           current = o.sessionHash;
-          if (!windows.has(current)) windows.set(current, { stages: [], dispatches: [], verdicts: [] });
+          if (!windows.has(current))
+            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [] });
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
+        else if (o.kind === "event") { if (current) windows.get(current).events.push(o); }
       }
       for (const [h, w] of windows) {
         const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, ...w };
         const prior = bySession.get(h);
         bySession.set(h, prior
-          ? { ...rec, stages: [...prior.stages, ...rec.stages], dispatches: [...prior.dispatches, ...rec.dispatches], verdicts: [...prior.verdicts, ...rec.verdicts] }
+          ? { ...rec,
+              stages: [...prior.stages, ...rec.stages],
+              dispatches: [...prior.dispatches, ...rec.dispatches],
+              verdicts: [...prior.verdicts, ...rec.verdicts],
+              events: [...prior.events, ...rec.events] }
           : rec);
       }
     }
@@ -725,21 +731,25 @@ export function toolCallsForDispatch(turns, dispatch) {
   return counts;
 }
 
+// executing-waves.md step 6 legitimately appends a SECOND verdict line for the same
+// taskId+round when the green gate rejects a round the reviewer already accepted — the
+// run record stays append-only (both lines genuinely happened), so every read side collapses
+// same-round verdicts to one outcome before counting anything. File order is chronological,
+// so a later entry naturally overwrites an earlier one in the map, keeping the authoritative
+// (latest) verdict for that round.
+function collapseVerdicts(verdicts) {
+  return [...new Map(
+    (verdicts ?? []).map((v) => [`${v.taskId}:${v.round}`, v]),
+  ).values()];
+}
+
 // Every token metric is paired with a quality signal, so a change that halves cost while doubling
 // review rounds is visible as such. Absent for a record-less run — zero rounds would read as
 // flawless work rather than as no data.
 export function qualitySignals(record) {
   if (!record) return null;
   const dispatches = record.dispatches ?? [];
-  // executing-waves.md step 6 legitimately appends a SECOND verdict line for the same
-  // taskId+round when the green gate rejects a round the reviewer already accepted — the
-  // run record stays append-only (both lines genuinely happened), so the read side collapses
-  // same-round verdicts to one outcome before counting anything. File order is chronological,
-  // so a later entry naturally overwrites an earlier one in the map, keeping the authoritative
-  // (latest) verdict for that round.
-  const verdicts = [...new Map(
-    (record.verdicts ?? []).map((v) => [`${v.taskId}:${v.round}`, v]),
-  ).values()];
+  const verdicts = collapseVerdicts(record.verdicts);
   const tasks = new Set([...dispatches, ...verdicts].map((d) => d.taskId)).size;
   const reviewRounds = verdicts.length;
   return {
@@ -809,6 +819,10 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   const record = runRecords.get(sha256(sessionId));
   const attributionRecord = record?.schemaMismatch ? null : record;
   let pluginVersion = record?.pluginVersion ?? null;
+  // Already recorded per run (run-record.schema.json's `run` kind) and already parsed by
+  // readRunRecords; this is the first consumer. No transcript-side fallback exists for
+  // profile — a session with no record simply has none.
+  const profile = record?.profile ?? null;
   // No transcript-side fallback for knobs (unlike pluginVersion, above) — a session with no
   // knob data (pre branch-fix-2-3's --knob wiring, or a run that never resolved the knob)
   // reads as absent, never an error.
@@ -896,7 +910,8 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     unpriced,
     cacheBand: costBand(priced),
     models,
-    pluginVersion,
+    profile: profile ?? "unknown",
+    pluginVersion: pluginVersion ?? "unknown",
     knobs,
     attributionSource,
     complianceCandidates: emitComplianceCandidates(toolCallEvents, record),
@@ -1314,6 +1329,69 @@ function main() {
   } else {
     console.log(formatReport(result.sessions));
   }
+}
+
+// references/impact-scoring.md owns this formula; this is its only implementation. Four of the
+// eight signals the design names are not written to the journal at all — they are already
+// reconstructible from verdict and dispatch lines, so writing them too would be a second source
+// of the same truth.
+export function deriveEvents(record) {
+  const out = [];
+  const stageOf = (ts) =>
+    (record.stages ?? []).find((s) => ts >= Date.parse(s.startedAt) && ts < Date.parse(s.endedAt))?.stage
+    ?? "unattributed";
+  for (const v of collapseVerdicts(record.verdicts)) {
+    if (v.blockingCount > 0 || v.conformance === "fail")
+      out.push({ event: "review-reject", stage: "execution", task: v.taskId, ts: null });
+    else if (v.round === 1 && v.blockingCount === 0 && v.conformance === "pass")
+      out.push({ event: "first-round-accept", stage: "execution", task: v.taskId, ts: null });
+  }
+  const byTask = new Map();
+  for (const d of record.dispatches ?? []) {
+    if (d.retryIndex > 0)
+      out.push({ event: "re-dispatch", stage: stageOf(Date.parse(d.startedAt)), task: d.taskId, ts: d.startedAt });
+    if (!byTask.has(d.taskId)) byTask.set(d.taskId, []);
+    byTask.get(d.taskId).push(d);
+  }
+  for (const [taskId, ds] of byTask) {
+    const models = new Set(ds.map((d) => d.model));
+    if (ds.length > 1 && models.size > 1)
+      out.push({ event: "escalation", stage: stageOf(Date.parse(ds[0].startedAt)), task: taskId, ts: ds[0].startedAt });
+  }
+  return out;
+}
+
+// Mean per-dispatch cost of the stage the event occurred in. Returns null — never 0 — when the
+// stage has no dispatches in the window or no cost recorded: unmeasurable is not free.
+export function attributedCost(stage, record, costByStage) {
+  const occurrences = (record.stages ?? []).filter((s) => s.stage === stage);
+  if (!occurrences.length) return null;
+  const within = (t, a, b) => t >= Date.parse(a) && t < Date.parse(b);
+  const n = (record.dispatches ?? []).filter((d) =>
+    occurrences.some((s) => within(Date.parse(d.startedAt), s.startedAt, s.endedAt))
+  ).length;
+  const cost = costByStage?.[stage];
+  if (n === 0 || cost === undefined) return null;
+  return cost / n;
+}
+
+export function impactScores(record, costByStage) {
+  const all = [...(record.events ?? []), ...deriveEvents(record)];
+  const byKey = new Map();
+  for (const e of all) {
+    const key = `${e.event}:${e.stage}`;
+    if (!byKey.has(key))
+      byKey.set(key, { key, event: e.event, stage: e.stage, frequency: 0, impact: 0, measurable: true });
+    const agg = byKey.get(key);
+    agg.frequency += 1;
+    const c = attributedCost(e.stage, record, costByStage);
+    if (c === null) agg.measurable = false;
+    else agg.impact += c;
+  }
+  return [...byKey.values()].map(({ measurable, ...rest }) => ({
+    ...rest,
+    impact: measurable ? rest.impact : null,
+  }));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

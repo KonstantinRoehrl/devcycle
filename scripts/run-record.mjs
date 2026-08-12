@@ -11,7 +11,27 @@ import { createHash, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 const SCHEMA_PATH = new URL("../tests/fixtures/run-record.schema.json", import.meta.url).pathname;
+const CULPRITS_PATH = new URL("../references/culprits.json", import.meta.url).pathname;
+const NOVEL_RE = /^novel:[a-z0-9]+(-[a-z0-9]+){0,5}$/;
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
+
+// Read lazily: the vocabulary file is only touched when a line actually carries a culprit, so
+// the common append path does no extra I/O. Phase 1 writes null here, Phase 3 populates it.
+function validateCulprit(value) {
+  if (value === null || value === undefined) return [];
+  if (NOVEL_RE.test(value)) return [];
+  let vocab;
+  try {
+    vocab = JSON.parse(readFileSync(CULPRITS_PATH, "utf8"));
+  } catch (err) {
+    return [`culprit "${value}" cannot be checked — references/culprits.json unreadable: ${err.message}`];
+  }
+  if (!Array.isArray(vocab))
+    return [`culprit "${value}" cannot be checked — references/culprits.json must be an array`];
+  return vocab.some((e) => e && typeof e === "object" && typeof e.slug === "string" && e.slug === value)
+    ? []
+    : [`culprit "${value}" is neither a culprits.json slug nor a novel: slug`];
+}
 
 export function repoSlug(toplevel) {
   const sanitized = basename(toplevel)
@@ -64,7 +84,7 @@ function validate(obj, sub) {
 function writeLine(toplevel, runId, obj) {
   const sub = schemaFor(obj.kind);
   if (!sub) die(`unknown kind "${obj.kind}"`);
-  const errors = validate(obj, sub);
+  const errors = [...validate(obj, sub), ...validateCulprit(obj.culprit)];
   if (errors.length) die(errors.join("; "));
   const p = recordPath(toplevel, runId);
   mkdirSync(dirname(p), { recursive: true });
@@ -131,6 +151,8 @@ function main() {
     }
     for (const [k, v] of Object.entries(objects)) obj[k] = v;
     if (Object.keys(knobs).length) obj.knobs = knobs;
+    if (obj.kind === "event" && obj.ts === undefined)
+      obj.ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
     writeLine(toplevel, runId, obj);
   } else {
     die("usage: run-record.mjs <new|append> [flags]");

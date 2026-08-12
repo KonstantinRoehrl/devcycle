@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -1294,4 +1294,104 @@ test("messageText: decodes string and text-block content, ignores tool blocks", 
   );
   assert.equal(messageText({ message: {} }), "");
   assert.equal(messageText({}), "");
+});
+
+test("a promotion record round-trips the two provenance fields", () => {
+  const root = repo();
+  const path = recordPromotion(root, {
+    title: "Example promotion",
+    promotionType: "doc-edit",
+    clusterSignature: "example signature",
+    filesTouched: ["references/example.md"],
+    landed: "2026-08-12",
+    commit: "abc1234",
+    pluginVersion: "0.13.0",
+    sourcedFromMemory: true,
+  });
+  const text = readFileSync(path, "utf8");
+  assert.match(text, /^- plugin-version: 0\.13\.0$/m);
+  assert.match(text, /^- sourced-from-memory: true$/m);
+
+  const [rec] = readPromotions(root);
+  assert.equal(rec.pluginVersion, "0.13.0");
+  assert.equal(rec.sourcedFromMemory, true);
+});
+
+test("a promotion recorded without either provenance key round-trips both as absent, not false", () => {
+  const root = repo();
+  const path = recordPromotion(root, {
+    title: "No provenance supplied",
+    promotionType: "doc-edit",
+    clusterSignature: "no provenance",
+    filesTouched: ["a.md"],
+    landed: "2026-08-12",
+    commit: "abc1234",
+  });
+  const text = readFileSync(path, "utf8");
+  assert.match(text, /^- plugin-version: $/m);
+  assert.match(text, /^- sourced-from-memory: $/m);
+
+  const [rec] = readPromotions(root);
+  assert.equal(rec.pluginVersion, null);
+  assert.equal(rec.sourcedFromMemory, null);
+});
+
+test("a promotion recorded with sourcedFromMemory explicitly false round-trips as false, not absent", () => {
+  const root = repo();
+  const path = recordPromotion(root, {
+    title: "Explicit false provenance",
+    promotionType: "doc-edit",
+    clusterSignature: "explicit false",
+    filesTouched: ["a.md"],
+    landed: "2026-08-12",
+    commit: "abc1234",
+    sourcedFromMemory: false,
+  });
+  assert.match(readFileSync(path, "utf8"), /^- sourced-from-memory: false$/m);
+
+  const [rec] = readPromotions(root);
+  assert.equal(rec.sourcedFromMemory, false);
+});
+
+test("a non-boolean sourcedFromMemory (a hand-authored \"true\" string) is refused, not silently written as false", () => {
+  const root = repo();
+  assert.throws(
+    () =>
+      recordPromotion(root, {
+        title: "String provenance",
+        promotionType: "doc-edit",
+        clusterSignature: "string provenance",
+        filesTouched: ["a.md"],
+        landed: "2026-08-12",
+        commit: "abc1234",
+        sourcedFromMemory: "true",
+      }),
+    /sourced-from-memory must be a boolean or absent/,
+  );
+});
+
+test("a record written before these fields existed parses with both absent, not defaulted", () => {
+  const root = repo();
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-05-legacy.md"),
+    "# Legacy\n- promotion-type: doc-edit\n- cluster-signature: old\n" +
+    "- files-touched: a.md\n- landed: 2026-08-05\n- commit: abc1234\n");
+  const [rec] = readPromotions(root);
+  assert.equal(rec.pluginVersion, null);
+  assert.equal(rec.sourcedFromMemory, null);
+});
+
+test("a newline inside a provenance value cannot forge a second field line", () => {
+  const root = repo();
+  const path = recordPromotion(root, {
+    title: "Injection attempt",
+    promotionType: "doc-edit",
+    clusterSignature: "sig",
+    filesTouched: ["a.md"],
+    landed: "2026-08-12",
+    commit: "abc1234",
+    pluginVersion: "0.13.0\n- landed: 1999-01-01",
+    sourcedFromMemory: false,
+  });
+  assert.equal(readFileSync(path, "utf8").match(/^- landed:/gm).length, 1);
 });

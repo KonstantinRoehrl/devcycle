@@ -238,6 +238,14 @@ function validatePromotion(rec) {
   // invisible to the recurrence metric with nothing anywhere reporting it.
   if (!String(rec.clusterSignature ?? "").trim())
     throw new Error("cluster-signature is required and cannot be empty");
+  // Accepted shape: a real boolean, or absent (null/undefined). Anything else — most
+  // plausibly the string "true" from a hand-built JSON scratch file — is refused here
+  // rather than silently coerced, so it can never fall through the writer's `=== true`
+  // check below and land as a definite (and wrong) "false".
+  if (rec.sourcedFromMemory != null && typeof rec.sourcedFromMemory !== "boolean")
+    throw new Error(
+      `sourced-from-memory must be a boolean or absent, got ${JSON.stringify(rec.sourcedFromMemory)}`,
+    );
 }
 
 export function recordPromotion(repoRoot, rec) {
@@ -262,7 +270,12 @@ export function recordPromotion(repoRoot, rec) {
       `- cluster-signature: ${oneLine(rec.clusterSignature)}\n` +
       `- files-touched: ${filesTouched}\n` +
       `- landed: ${oneLine(rec.landed)}\n` +
-      `- commit: ${oneLine(rec.commit)}\n`,
+      `- commit: ${oneLine(rec.commit)}\n` +
+      `- plugin-version: ${oneLine(rec.pluginVersion)}\n` +
+      // Accepted shape for sourced-from-memory (validatePromotion above rejects anything
+      // else): a real boolean, written as the literal "true"/"false", or absent
+      // (null/undefined), written empty. No other type reaches here.
+      `- sourced-from-memory: ${rec.sourcedFromMemory == null ? "" : rec.sourcedFromMemory === true}\n`,
   );
   return path;
 }
@@ -282,6 +295,11 @@ export function readPromotions(repoRoot) {
         filesTouched: field(text, "files-touched").split(",").map((s) => s.trim()).filter(Boolean),
         landed: field(text, "landed"),
         commit: field(text, "commit"),
+        pluginVersion: field(text, "plugin-version") || null,
+        sourcedFromMemory:
+          field(text, "sourced-from-memory") === ""
+            ? null
+            : field(text, "sourced-from-memory") === "true",
       };
     });
 }

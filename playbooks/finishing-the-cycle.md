@@ -91,7 +91,8 @@ files whose only purpose was to pass content between this cycle's dispatches.
    any generated per-task brief files. Nothing else is a candidate. Archiving above has
    already copied this set, so a confirmed removal costs nothing that a later dream needs.
 2. **Show and ask.** Present the list and what it totals — file count and size — and ask for
-   confirmation in one question.
+   confirmation in one question, answered inside a cycle run: an Other answer appends
+   `user-correction-at-gate`, whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
 3. **Remove only on an explicit yes.** Anything short of that leaves every file in place.
 
 **Never removed, whatever the answer:** `.devcycle/state.md`, `.devcycle/ledger.md`,

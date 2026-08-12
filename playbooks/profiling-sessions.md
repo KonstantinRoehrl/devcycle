@@ -97,7 +97,7 @@ zero findings need not write the file.
 ## Actionability (optional)
 
 Every step here is skippable — the ranked report stands alone. If findings exist and are worth
-acting on, offer one batched `AskUserQuestion` (multi-select) letting the user choose, per
+acting on, offer one batched `AskUserQuestion` (multi-select), letting the user choose, per
 finding, among:
 
 - **skip** — no action;

@@ -85,7 +85,7 @@ never fakes one and never reports a gate as passed that did not run.
 ## First-run configuration
 
 `/devcycle:cycle` runs this once per repo, after it writes the state file and before
-triage; no other command offers configuration. Nothing here is profile-conditional.
+triage; no other command offers configuration. Nothing here is profile-conditional. Every question below takes an Other answer, and none of them journals one: `user-correction-at-gate` needs a run record, and this walkthrough runs before `/devcycle:cycle` mints it — `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that condition.
 
 Read five knobs as they render in THIS text — `${user_config.profile}`,
 `${user_config.gitPolicy}`, `${user_config.reviewDepth}`,

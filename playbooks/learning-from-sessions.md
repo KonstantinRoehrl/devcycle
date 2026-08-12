@@ -130,7 +130,9 @@ default or integration branch), minus its `branch:`-line write. Then, per adopte
    `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit". Any playbook
    file touched here is checked first against `tests/unit/golden-path.test.mjs`, `scripts/validate.mjs`, `scripts/redaction-check.mjs`, and `scripts/duplication-check.mjs`.
 2. **Record the promotion** once that commit lands: write the JSON (`title`, `promotionType`,
-   `clusterSignature`, `filesTouched`, `landed`, `commit`) to a scratch file and pass it with the
+   `clusterSignature`, `filesTouched`, `landed`, `commit`, `pluginVersion` — the plugin's own
+   `.claude-plugin/plugin.json` version — and `sourcedFromMemory`, whether this candidate came from
+   a memory entry, which step 3 below already knows) to a scratch file and pass it with the
    double-quoted `$(cat …)` form, never inline single quotes, which an apostrophe in
    `clusterSignature` breaks outright:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --record-promotion "$(cat <scratch-file>)"`. The

@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync, realpathSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync, copyFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { repoSlug, hashSession, recordPath, gitToplevel } from "../../scripts/run-record.mjs";
 
 const SCRIPT = new URL("../../scripts/run-record.mjs", import.meta.url).pathname;
+const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
 // Both fixtures below are assembled from fragments so this file — which is tracked and so
 // scanned by scripts/redaction-check.mjs — carries no literal the check matches. Same idiom as
@@ -298,4 +299,81 @@ test("gitToplevel resolves a nested subdirectory to the real git repo root", () 
 
   assert.strictEqual(gitToplevel(nestedDir), tempRepo);
   assert.notStrictEqual(gitToplevel(nestedDir), nestedDir);
+});
+
+// Same spawn helper as `run` above, under the name the event-kind cases read best with.
+const runRecord = run;
+
+test("the event kind accepts a full line and rejects a bad enum value", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-event-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const ok = runRecord(["append", "--run", runId, "--kind", "event", "--event", "gate-fail",
+    "--stage", "execution", "--task", "3", "--ts", "2026-08-12T10:00:00Z"], runs);
+  assert.equal(ok.status, 0, ok.stderr);
+
+  const bad = runRecord(["append", "--run", runId, "--kind", "event", "--event", "not-an-event",
+    "--stage", "execution", "--ts", "2026-08-12T10:00:00Z"], runs);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /is not one of/);
+});
+
+test("an event omitting --ts is stamped rather than rejected as missing a required field", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-ts-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const r = runRecord(["append", "--run", runId, "--kind", "event",
+    "--event", "gate-pass-clean", "--stage", "execution"], runs);
+  assert.equal(r.status, 0, r.stderr);
+  // recordPath() reads DEVCYCLE_RUNS_DIR from *this* process, which the runRecord helper only
+  // sets for the child — so build the path from the same two parts recordPath composes.
+  const file = join(runs, repoSlug(gitToplevel(process.cwd())), `${runId}.jsonl`);
+  const line = JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1));
+  assert.match(line.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+});
+
+test("culprit accepts null, a vocabulary slug and a novel: slug, and rejects anything else", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-culprit-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const base = ["append", "--run", runId, "--kind", "event", "--event", "gate-fail",
+    "--stage", "execution", "--ts", "2026-08-12T10:00:00Z"];
+
+  assert.equal(runRecord([...base, "--culprit", "partial-evidence-capture"], runs).status, 0);
+  assert.equal(runRecord([...base, "--culprit", "novel:some-new-pattern"], runs).status, 0);
+
+  const bad = runRecord([...base, "--culprit", "not-in-the-vocabulary"], runs);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /neither a culprits\.json slug nor a novel: slug/);
+});
+
+test("culprit lookup fails cleanly, not with a stack trace, when culprits.json is valid JSON but not an array", () => {
+  // validateCulprit() resolves both tests/fixtures/run-record.schema.json and
+  // references/culprits.json relative to the script's own location, so the script needs to run
+  // from a tree shaped like the repo's — but only those two files plus the script itself, not a
+  // full copy of the working tree (which would drag gitignored local files into /tmp and leave
+  // them there).
+  const treeDir = realpathSync(mkdtempSync(join(tmpdir(), "rr-vocab-tree-")));
+  try {
+    mkdirSync(join(treeDir, "scripts"), { recursive: true });
+    mkdirSync(join(treeDir, "tests/fixtures"), { recursive: true });
+    mkdirSync(join(treeDir, "references"), { recursive: true });
+    copyFileSync(join(REPO_ROOT, "scripts/run-record.mjs"), join(treeDir, "scripts/run-record.mjs"));
+    copyFileSync(
+      join(REPO_ROOT, "tests/fixtures/run-record.schema.json"),
+      join(treeDir, "tests/fixtures/run-record.schema.json")
+    );
+    writeFileSync(join(treeDir, "references/culprits.json"), JSON.stringify({ not: "an array" }));
+
+    const runs = mkdtempSync(join(tmpdir(), "rr-vocab-runs-"));
+    const runId = "0f1e2d3c4b5a6978";
+    const r = spawnSync(process.execPath, [
+      join(treeDir, "scripts/run-record.mjs"), "append", "--run", runId, "--kind", "event",
+      "--event", "gate-fail", "--stage", "execution", "--ts", "2026-08-12T10:00:00Z",
+      "--culprit", "partial-evidence-capture",
+    ], { cwd: treeDir, encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: runs } });
+
+    assert.equal(r.status, 1);
+    assert.doesNotMatch(r.stderr, /TypeError|at Object|at file:/);
+    assert.match(r.stderr, /culprits\.json/);
+  } finally {
+    rmSync(treeDir, { recursive: true, force: true });
+  }
 });

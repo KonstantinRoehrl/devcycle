@@ -63,3 +63,51 @@ test("a real run/session/dispatch/verdict/commit chain, written via the real CLI
   assert.strictEqual(summary.attributionSource, "record");
   assert.strictEqual(summary.pluginVersion, "0.13.0");
 });
+
+test("event lines written by the real CLI survive into doctor's read path, across two sessions", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-e2e-"));
+  const sessionA = "session-a", sessionB = "session-b";
+  const runId = runRecord(["new", "--plugin-version", "0.13.0", "--plugin-sha", "abc1234",
+    "--profile", "thorough"], runs).stdout.trim();
+
+  runRecord(["append", "--run", runId, "--kind", "session", "--sessionId", sessionA], runs);
+  runRecord(["append", "--run", runId, "--kind", "event", "--event", "gate-fail",
+    "--stage", "execution", "--task", "1", "--ts", "2026-08-12T10:05:00Z"], runs);
+  runRecord(["append", "--run", runId, "--kind", "session", "--sessionId", sessionB], runs);
+  runRecord(["append", "--run", runId, "--kind", "event", "--event", "gate-pass-clean",
+    "--stage", "execution", "--task", "1", "--ts", "2026-08-12T10:25:00Z"], runs);
+
+  const records = readRunRecords(runs);
+  const a = records.get(hashSession(sessionA));
+  const b = records.get(hashSession(sessionB));
+  assert.equal(a.events.length, 1, "session A keeps its own event");
+  assert.equal(b.events.length, 1, "session B keeps its own event");
+  assert.equal(a.profile, "thorough");
+  assert.equal(b.pluginVersion, "0.13.0");
+});
+
+// The events of one session split across two run files — what a cycle resumed under a fresh
+// run id writes — merge into a single entry. Only two separate .jsonl files make readRunRecords'
+// `prior` defined; two sessions inside one file (the test above) never reach that branch.
+test("a session written into two run files keeps the events of both after the cross-file merge", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-merge-"));
+  const sessionId = "session-resumed-under-a-second-run";
+  const newRun = () => runRecord(["new", "--plugin-version", "0.13.0", "--plugin-sha", "abc1234",
+    "--profile", "thorough"], runs).stdout.trim();
+
+  for (const [runId, event, ts] of [
+    [newRun(), "gate-fail", "2026-08-12T11:00:00Z"],
+    [newRun(), "gate-pass-clean", "2026-08-12T12:00:00Z"],
+  ]) {
+    runRecord(["append", "--run", runId, "--kind", "session", "--sessionId", sessionId], runs);
+    runRecord(["append", "--run", runId, "--kind", "event", "--event", event,
+      "--stage", "execution", "--task", "1", "--ts", ts], runs);
+  }
+
+  const record = readRunRecords(runs).get(hashSession(sessionId));
+  assert.ok(record, "the session must be readable back under its single hash");
+  // Sorted by value, not by file: readdirSync order over two random run ids is arbitrary.
+  assert.deepStrictEqual(record.events.map((e) => e.event).sort(),
+    ["gate-fail", "gate-pass-clean"],
+    "both files' events survive the merge — the later file must not replace the earlier one's");
+});

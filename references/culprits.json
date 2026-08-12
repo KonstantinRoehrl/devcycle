@@ -1,0 +1,86 @@
+[
+  {
+    "slug": "action-outside-task-scope",
+    "kind": "rule-violation",
+    "phase": ["execution", "sweep", "fast-path"],
+    "desc": "A command touched paths or state outside the task's declared file list.",
+    "since": "0.13.0"
+  },
+  {
+    "slug": "boundary-handoff-skipped",
+    "kind": "friction",
+    "phase": ["execution", "on-device", "finish"],
+    "desc": "A stage or wave boundary was crossed without emitting its handoff block.",
+    "since": "0.13.0"
+  },
+  {
+    "slug": "first-round-clean-accept",
+    "kind": "win",
+    "phase": ["execution"],
+    "desc": "A task passed review and the green gate on its first round, with no rework.",
+    "since": "0.13.0"
+  },
+  {
+    "slug": "fix-misses-the-convention",
+    "kind": "correction",
+    "phase": ["execution", "branch-review"],
+    "desc": "A fix satisfied the finding's wording while missing the convention behind it.",
+    "since": "0.13.0"
+  },
+  {
+    "slug": "gate-caught-regression",
+    "kind": "win",
+    "phase": ["execution"],
+    "desc": "The green gate caught a regression that the review round had already accepted.",
+    "since": "0.13.0"
+  },
+  {
+    "slug": "incomplete-dispatch-brief",
+    "kind": "friction",
+    "phase": ["execution"],
+    "desc": "A dispatch brief omitted or misstated a field its executor requires.",
+    "since": "0.13.0"
+  },
+  {
+    "slug": "partial-evidence-capture",
+    "kind": "friction",
+    "phase": ["execution", "sweep", "fast-path"],
+    "desc": "Captured evidence covered less than the whole verification gate command.",
+    "since": "0.13.0"
+  },
+  {
+    "slug": "restated-instead-of-cited",
+    "kind": "rule-violation",
+    "phase": ["planning", "execution", "branch-review"],
+    "desc": "Content was copied into a second file instead of citing its single owner.",
+    "since": "0.13.0"
+  },
+  {
+    "slug": "reviewer-role-confusion",
+    "kind": "friction",
+    "phase": ["execution", "branch-review"],
+    "desc": "A reviewer's own judgment, tools, or output shape was conflated with another role's.",
+    "since": "0.13.0"
+  },
+  {
+    "slug": "undeclared-contract-change",
+    "kind": "rule-violation",
+    "phase": ["execution"],
+    "desc": "A pinned interface or a side effect changed without being reported first.",
+    "since": "0.13.0"
+  },
+  {
+    "slug": "unscreened-secret-exposure",
+    "kind": "rule-violation",
+    "phase": ["execution", "finish"],
+    "desc": "A credential reached a file, or the gate that would have caught one never ran.",
+    "since": "0.13.0"
+  },
+  {
+    "slug": "unverified-authored-claim",
+    "kind": "rule-violation",
+    "phase": ["planning", "branch-review", "audit"],
+    "desc": "Authored text stated a fact about the repo that was never checked against it.",
+    "since": "0.13.0"
+  }
+]

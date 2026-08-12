@@ -211,7 +211,9 @@ for (const f of namesIn("playbooks")) {
 
 // 9. Line budgets, as numbers. Counted the way `wc -l` counts: a file's closing
 //    newline terminates its last line rather than starting an empty one.
-const SURFACE_LINE_BUDGET = 3550, COMMAND_LINE_MAX = 104, PLAYBOOK_LINE_MAX = 154;
+// The surface budget was raised 3550 -> 3620 once, deliberately, to admit
+// references/impact-scoring.md; it is an auditable guard change, not a licence to grow.
+const SURFACE_LINE_BUDGET = 3620, COMMAND_LINE_MAX = 104, PLAYBOOK_LINE_MAX = 154;
 const lines = (p) => {
   const text = readFileSync(p, "utf8");
   return text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
@@ -394,6 +396,76 @@ if (existsSync(schemaPath)) {
             fail(`tests/fixtures/run-record.schema.json: "${sub.title}.${field}" is declared but no surface instruction names --${flag}`);
         }
     }
+  }
+}
+
+// 14. The culprit vocabulary (references/culprits.json) is well-formed: sorted, unique,
+//     lowercase-hyphen slugs of at most 6 words, kinds from the enum, phases from
+//     commands/cycle.md's stage enum, semver since/resolved-in, resolved-in never earlier
+//     than since. The file is part of the shipped surface, so absence is a failure.
+const culpritsPath = join(root, "references/culprits.json");
+const CULPRIT_KINDS = new Set([
+  "friction", "correction", "rule-violation", "decision", "contradiction", "win",
+]);
+const CULPRIT_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+){0,5}$/;
+const SEMVER_RE = /^\d+\.\d+\.\d+$/;
+const cmpSemver = (a, b) => {
+  const [A, B] = [a.split(".").map(Number), b.split(".").map(Number)];
+  return A[0] - B[0] || A[1] - B[1] || A[2] - B[2];
+};
+if (!existsSync(culpritsPath)) {
+  fail("references/culprits.json: missing — the culprit vocabulary is part of the shipped surface");
+} else {
+  // `parsed` tracks whether JSON.parse succeeded — it cannot be impersonated by a legitimate
+  // parse result the way a `vocab === null` sentinel can, since the file's whole content may
+  // itself legally parse to `null` (or any other non-array value).
+  let vocab, parsed = true;
+  try {
+    vocab = JSON.parse(readFileSync(culpritsPath, "utf8"));
+  } catch (e) {
+    parsed = false;
+    fail(`references/culprits.json: not valid JSON — ${e.message}`);
+  }
+  if (parsed && !Array.isArray(vocab)) {
+    fail("references/culprits.json: must be an array");
+    parsed = false;
+  }
+  if (parsed) {
+    const slugs = [];
+    for (const [i, e] of vocab.entries()) {
+      const at = `references/culprits.json[${i}]`;
+      if (typeof e !== "object" || e === null || Array.isArray(e)) {
+        fail(`${at}: entry must be an object, got ${JSON.stringify(e)}`);
+        continue;
+      }
+      for (const f of ["slug", "kind", "phase", "desc", "since"])
+        if (!(f in e)) fail(`${at}: missing "${f}"`);
+      if (typeof e.slug === "string") {
+        slugs.push(e.slug);
+        if (!CULPRIT_SLUG_RE.test(e.slug))
+          fail(`${at}: slug "${e.slug}" is not lowercase-hyphen of at most 6 words`);
+      }
+      if (!CULPRIT_KINDS.has(e.kind))
+        fail(`${at}: kind "${e.kind}" is not one of ${[...CULPRIT_KINDS].join(" | ")}`);
+      if (!Array.isArray(e.phase) || e.phase.length === 0)
+        fail(`${at}: phase must be a non-empty array`);
+      else
+        for (const p of e.phase) {
+          if (!stages.size) fail(`${at}: phase "${p}" unverifiable — no stage enum in commands/cycle.md`);
+          else if (!stages.has(p)) fail(`${at}: phase "${p}" is not in commands/cycle.md's stage enum`);
+        }
+      if (!SEMVER_RE.test(e.since ?? "")) fail(`${at}: since "${e.since}" is not semver`);
+      if ("resolved-in" in e) {
+        if (!SEMVER_RE.test(e["resolved-in"]))
+          fail(`${at}: resolved-in "${e["resolved-in"]}" is not semver`);
+        else if (SEMVER_RE.test(e.since ?? "") && cmpSemver(e["resolved-in"], e.since) < 0)
+          fail(`${at}: resolved-in ${e["resolved-in"]} precedes since ${e.since}`);
+      }
+    }
+    if (slugs.join("\n") !== [...slugs].sort().join("\n"))
+      fail("references/culprits.json: entries must be sorted by slug");
+    const dupes = [...new Set(slugs.filter((s, i) => slugs.indexOf(s) !== i))];
+    if (dupes.length) fail(`references/culprits.json: duplicate slug(s) ${dupes.join(", ")}`);
   }
 }
 

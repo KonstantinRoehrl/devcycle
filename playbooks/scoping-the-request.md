@@ -50,7 +50,7 @@ Whenever scope, intent, architecture, data, or user preference is uncertain:
 **interview, never guess.**
 
 Questions go through AskUserQuestion in batches of 1–4, each with concrete options plus Other.
-Never one question per message.
+Never one question per message. A question answered via Other appends `user-correction-at-gate`; `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns the rule.
 
 1. **Research BEFORE questions.** Read the relevant code and docs first, so every
    question is informed by what the repo already shows. Never ask what the repo can
