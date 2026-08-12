@@ -302,8 +302,15 @@ test("budget check: a command over 100 lines fails", () => {
 
 // Pads the surface with `count` gerund-named playbooks of 100 lines each — each
 // one under the 150-line per-file ceiling, so only the total arm can fire.
+// Each padding playbook also gets a context-budget entry, generous enough never to fire:
+// check 15 requires every playbook to declare one, and these exist to move the line total.
 const padSurface = (dir, count) => {
-  for (let i = 0; i < count; i++) writeInto(dir, `playbooks/padding-${i}.md`, "x\n".repeat(100));
+  const context = { "playbooks/demoing-things.md": 999999 };
+  for (let i = 0; i < count; i++) {
+    writeInto(dir, `playbooks/padding-${i}.md`, "x\n".repeat(100));
+    context[`playbooks/padding-${i}.md`] = 999999;
+  }
+  writeInto(dir, CONTEXT_PATH, JSON.stringify(context, null, 2) + "\n");
 };
 
 test("budget check: a surface over 3500 lines in total fails", () => {
@@ -738,4 +745,70 @@ test("budget baseline: a non-integer baseline value fails rather than coercing",
   const dir = makePluginFixture();
   writeInto(dir, BUDGET_PATH, JSON.stringify({ surfaceTotal: "3620", commandMax: 104, playbookMax: 154 }) + "\n");
   assert.match(runValidate(dir).stderr, /surfaceTotal.*integer/);
+});
+
+// --- check 15: each stage's transitive context cost against a committed baseline ---
+
+const CONTEXT_PATH = "tests/fixtures/context-budget.json";
+
+test("context budget: a playbook missing from the baseline fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({}, null, 2) + "\n");
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /playbooks\/demoing-things\.md.*no entry in/);
+});
+
+test("context budget: growth past a playbook's baseline fails and names both numbers", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": 1 }, null, 2) + "\n");
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /playbooks\/demoing-things\.md: \d+ bytes > baseline 1/);
+  assert.match(stderr, /raise the baseline in this same commit/);
+});
+
+test("context budget: a baseline entry for a playbook that no longer exists fails", () => {
+  const dir = makePluginFixture();
+  writeInto(
+    dir,
+    CONTEXT_PATH,
+    JSON.stringify({ "playbooks/demoing-things.md": 999999, "playbooks/gone-away.md": 10 }, null, 2) + "\n"
+  );
+  assert.match(runValidate(dir).stderr, /playbooks\/gone-away\.md.*no such playbook/);
+});
+
+test("context budget: the total counts a cited reference, and counts it once when two cite each other", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/alpha.md", "# Alpha\n\nSee ${CLAUDE_PLUGIN_ROOT}/references/beta.md.\n");
+  writeInto(dir, "references/beta.md", "# Beta\n\nSee ${CLAUDE_PLUGIN_ROOT}/references/alpha.md.\n");
+  writeInto(
+    dir,
+    "playbooks/demoing-things.md",
+    FIXTURE_PLAYBOOK_HEAD + "\nLoad ${CLAUDE_PLUGIN_ROOT}/references/alpha.md.\n"
+  );
+  // A cycle must terminate, and the two references must be counted once each, not repeatedly.
+  const playbookBytes = Buffer.byteLength(readFileSync(join(dir, "playbooks/demoing-things.md"), "utf8"));
+  const alphaBytes = Buffer.byteLength(readFileSync(join(dir, "references/alpha.md"), "utf8"));
+  const betaBytes = Buffer.byteLength(readFileSync(join(dir, "references/beta.md"), "utf8"));
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": playbookBytes + alphaBytes + betaBytes }, null, 2) + "\n");
+  const res = runValidate(dir);
+  assert.equal(res.status, 0, res.stderr);
+});
+
+test("context budget: one byte less than the transitive total fails, proving the closure is followed", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/alpha.md", "# Alpha\n\nA reference the playbook loads.\n");
+  writeInto(
+    dir,
+    "playbooks/demoing-things.md",
+    FIXTURE_PLAYBOOK_HEAD + "\nLoad ${CLAUDE_PLUGIN_ROOT}/references/alpha.md.\n"
+  );
+  const playbookBytes = Buffer.byteLength(readFileSync(join(dir, "playbooks/demoing-things.md"), "utf8"));
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": playbookBytes }, null, 2) + "\n");
+  assert.match(runValidate(dir).stderr, /playbooks\/demoing-things\.md: \d+ bytes > baseline/);
+});
+
+test("context budget: a missing baseline file fails", () => {
+  const dir = makePluginFixture();
+  rmSync(join(dir, CONTEXT_PATH), { force: true });
+  assert.match(runValidate(dir).stderr, /context-budget\.json: missing/);
 });

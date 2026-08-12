@@ -490,5 +490,65 @@ if (!existsSync(culpritsPath)) {
   }
 }
 
+// 15. Per-stage context budget: a playbook's own bytes plus every reference reachable from it
+//     through ${CLAUDE_PLUGIN_ROOT} citations, against a committed baseline. Bytes, not lines:
+//     a context window is spent in bytes, and a long line costs what it costs. Growth is a
+//     reviewed decision, same rule as check 9.
+const CONTEXT_BUDGET_PATH = "tests/fixtures/context-budget.json";
+const contextFile = join(root, CONTEXT_BUDGET_PATH);
+if (!existsSync(contextFile)) {
+  fail(`${CONTEXT_BUDGET_PATH}: missing — no stage declares its context cost, so growth could not be reviewed`);
+} else {
+  let contextBaseline = null;
+  try {
+    contextBaseline = JSON.parse(readFileSync(contextFile, "utf8"));
+  } catch (e) {
+    fail(`${CONTEXT_BUDGET_PATH}: not valid JSON — ${e.message}`);
+  }
+  if (contextBaseline) {
+    // Citations are followed to a fixed point; `seen` makes a citation cycle terminate and
+    // counts each file exactly once, which is also what the reader's context actually pays.
+    const citationsIn = (text) =>
+      [...text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(references\/[A-Za-z0-9._-]+\.md)/g)].map((m) => m[1]);
+    const transitiveBytes = (startRel) => {
+      const seen = new Set();
+      const queue = [startRel];
+      let total = 0;
+      while (queue.length) {
+        const relPath = queue.shift();
+        if (seen.has(relPath)) continue;
+        seen.add(relPath);
+        const abs = join(root, relPath);
+        if (!existsSync(abs)) continue;
+        const text = readFileSync(abs, "utf8");
+        total += Buffer.byteLength(text);
+        queue.push(...citationsIn(text));
+      }
+      return total;
+    };
+    const playbookNames = namesIn("playbooks").map((f) => `playbooks/${f}`);
+    for (const p of playbookNames) {
+      if (!(p in contextBaseline)) {
+        fail(`${p}: no entry in ${CONTEXT_BUDGET_PATH} — a stage must declare its context budget`);
+        continue;
+      }
+      const limit = contextBaseline[p];
+      if (!Number.isInteger(limit)) {
+        fail(`${CONTEXT_BUDGET_PATH}: ${p} must be an integer, got ${JSON.stringify(limit)}`);
+        continue;
+      }
+      const bytes = transitiveBytes(p);
+      if (bytes > limit)
+        fail(
+          `${p}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, playbook plus its cited references) — ` +
+            `raise the baseline in this same commit if the growth is intended`
+        );
+    }
+    for (const p of Object.keys(contextBaseline))
+      if (!playbookNames.includes(p))
+        fail(`${CONTEXT_BUDGET_PATH}: entry "${p}" names no such playbook — remove it or restore the file`);
+  }
+}
+
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
 console.log("validate: ok");
