@@ -99,6 +99,12 @@ export function makePluginFixture() {
       2
     ) + "\n"
   );
+  // Check 9 reads its limits from a committed baseline, so every fixture tree ships one.
+  writeInto(
+    dir,
+    "tests/fixtures/surface-budget.json",
+    JSON.stringify({ surfaceTotal: 3620, commandMax: 104, playbookMax: 154 }, null, 2) + "\n"
+  );
   return dir;
 }
 

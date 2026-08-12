@@ -209,11 +209,26 @@ for (const f of namesIn("playbooks")) {
     fail(`playbooks/${f}: playbook names are gerunds ("${name}" contains no -ing word)`);
 }
 
-// 9. Line budgets, as numbers. Counted the way `wc -l` counts: a file's closing
-//    newline terminates its last line rather than starting an empty one.
-// The surface budget was raised 3550 -> 3620 once, deliberately, to admit
-// references/impact-scoring.md; it is an auditable guard change, not a licence to grow.
-const SURFACE_LINE_BUDGET = 3620, COMMAND_LINE_MAX = 104, PLAYBOOK_LINE_MAX = 154;
+// 9. Line budgets, as numbers, read from a committed baseline rather than hardcoded here.
+//    Counted the way `wc -l` counts: a file's closing newline terminates its last line
+//    rather than starting an empty one. Growth is not forbidden — it must be a reviewed
+//    decision, so it fails unless the same commit raises the baseline.
+const BUDGET_PATH = "tests/fixtures/surface-budget.json";
+const budgetFile = join(root, BUDGET_PATH);
+let budgets = null;
+if (!existsSync(budgetFile)) {
+  fail(`${BUDGET_PATH}: missing — the line budgets have no baseline, so no growth could be reviewed`);
+} else {
+  try {
+    budgets = JSON.parse(readFileSync(budgetFile, "utf8"));
+  } catch (e) {
+    fail(`${BUDGET_PATH}: not valid JSON — ${e.message}`);
+  }
+}
+for (const key of ["surfaceTotal", "commandMax", "playbookMax"]) {
+  if (budgets && !Number.isInteger(budgets[key]))
+    fail(`${BUDGET_PATH}: ${key} must be an integer, got ${JSON.stringify(budgets[key])}`);
+}
 const lines = (p) => {
   const text = readFileSync(p, "utf8");
   return text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
@@ -222,11 +237,16 @@ let surfaceLines = 0;
 for (const p of surface) {
   const n = lines(p), r = rel(p);
   surfaceLines += n;
-  if (r.startsWith("commands/") && n > COMMAND_LINE_MAX) fail(`${r}: ${n} lines > ${COMMAND_LINE_MAX}`);
-  if (r.startsWith("playbooks/") && n > PLAYBOOK_LINE_MAX) fail(`${r}: ${n} lines > ${PLAYBOOK_LINE_MAX}`);
+  if (budgets && Number.isInteger(budgets.commandMax) && r.startsWith("commands/") && n > budgets.commandMax)
+    fail(`${r}: ${n} lines > ${budgets.commandMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
+  if (budgets && Number.isInteger(budgets.playbookMax) && r.startsWith("playbooks/") && n > budgets.playbookMax)
+    fail(`${r}: ${n} lines > ${budgets.playbookMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
 }
-if (surfaceLines > SURFACE_LINE_BUDGET)
-  fail(`runtime surface ${surfaceLines} lines > ${SURFACE_LINE_BUDGET} (commands+playbooks+agents+references)`);
+if (budgets && Number.isInteger(budgets.surfaceTotal) && surfaceLines > budgets.surfaceTotal)
+  fail(
+    `runtime surface ${surfaceLines} lines > baseline ${budgets.surfaceTotal} (${BUDGET_PATH}) — ` +
+      `raise the baseline in this same commit if the growth is intended; it is a reviewed decision, not a workaround`
+  );
 
 // 10. No agent pins a model — a pin defeats session-tier escalation.
 for (const f of namesIn("agents"))

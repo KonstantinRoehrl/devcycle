@@ -311,7 +311,7 @@ test("budget check: a surface over 3500 lines in total fails", () => {
   padSurface(dir, 40); // 4000 lines
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
-  assert.match(stderr, /runtime surface \d+ lines > 3620/);
+  assert.match(stderr, /runtime surface \d+ lines > baseline 3620/);
   assert.doesNotMatch(stderr, /lines > 154/); // the total arm fired, not the per-file arm
 });
 
@@ -683,4 +683,59 @@ test("check 14 passes on the repo's own shipped vocabulary", () => {
   const r = spawnSync(process.execPath, [join(REPO_ROOT, "scripts/validate.mjs")],
     { cwd: REPO_ROOT, encoding: "utf8" });
   assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+});
+
+// --- check 9: the line budgets are a committed baseline, not hardcoded constants ---
+
+const BUDGET_PATH = "tests/fixtures/surface-budget.json";
+const budget = (dir, over = {}) =>
+  writeInto(dir, BUDGET_PATH, JSON.stringify({ surfaceTotal: 3620, commandMax: 104, playbookMax: 154, ...over }, null, 2) + "\n");
+
+test("budget baseline: a missing baseline file fails", () => {
+  const dir = makePluginFixture();
+  rmSync(join(dir, BUDGET_PATH), { force: true });
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /surface-budget\.json/);
+  assert.match(stderr, /baseline/);
+});
+
+test("budget baseline: surface growth past the baseline fails and names the overage", () => {
+  const dir = makePluginFixture();
+  budget(dir, { surfaceTotal: 1 });
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /runtime surface \d+ lines > baseline 1/);
+  assert.match(stderr, /raise the baseline in this same commit/);
+});
+
+test("budget baseline: a baseline that admits the current surface passes", () => {
+  const dir = makePluginFixture();
+  budget(dir);
+  assert.equal(runValidate(dir).status, 0);
+});
+
+test("budget baseline: a surface smaller than the baseline passes and the baseline is not rewritten", () => {
+  const dir = makePluginFixture();
+  budget(dir, { surfaceTotal: 9999 });
+  assert.equal(runValidate(dir).status, 0);
+  assert.match(readFileSync(join(dir, BUDGET_PATH), "utf8"), /"surfaceTotal": 9999/);
+});
+
+test("budget baseline: a command over commandMax fails against the baseline's value", () => {
+  const dir = makePluginFixture();
+  budget(dir, { commandMax: 2 });
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /commands\/cycle\.md: \d+ lines > 2/);
+});
+
+test("budget baseline: a playbook over playbookMax fails against the baseline's value", () => {
+  const dir = makePluginFixture();
+  budget(dir, { playbookMax: 1 });
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /playbooks\/demoing-things\.md: \d+ lines > 1/);
+});
+
+test("budget baseline: a non-integer baseline value fails rather than coercing", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, BUDGET_PATH, JSON.stringify({ surfaceTotal: "3620", commandMax: 104, playbookMax: 154 }) + "\n");
+  assert.match(runValidate(dir).stderr, /surfaceTotal.*integer/);
 });
