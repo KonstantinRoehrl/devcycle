@@ -910,6 +910,8 @@ test("the run-record write-site table declares the event kind", () => {
 // references/ledger.md is the owner being cited, never a citer of itself.
 const OWNER = "references/ledger.md";
 const RUN_RECORD = "run-record.mjs";
+const TOKEN = "user-correction-at-gate";
+const OWNER_REF = `\${CLAUDE_PLUGIN_ROOT}/${OWNER}`;
 
 // Every runtime surface file, the same four directories `scripts/validate.mjs` counts.
 const surfaceFiles = () =>
@@ -941,7 +943,130 @@ const runlessSurfaces = () => {
   return runless;
 };
 
-test("every in-cycle surface that asks via AskUserQuestion cites the user-correction-at-gate write site", () => {
+// --- what counts as a gate ---------------------------------------------------------------
+// A gate is a gate whatever words it uses. Keying this check on the literal `AskUserQuestion`
+// let in-cycle surfaces that ask the user in their own words pass while citing nothing, so the
+// detector below is a vocabulary rather than one token. It is a heuristic over prose, and its
+// limits are the written-down kind rather than the implied kind:
+//   - it matches phrasings, not intent, so a gate worded in a way nobody has used yet reads as
+//     no gate at all — which is exactly why the guards below exist;
+//   - it deliberately excludes a stage that stops and reports for a decision taken outside the
+//     run (`planning-waves.md`'s NO-GO verdict): that presents no options, so it has no "Other"
+//     answer to append. The line between that and a gate is a judgement call, not a fact the
+//     text carries;
+//   - every phrase is `\s+`-joined, because this surface is hard-wrapped and one of the
+//     phrasings below ("ask for\n   confirmation") straddles a line break.
+// The defect being fixed is a check that went quiet, so the vocabulary is guarded twice: every
+// phrase must still match some surface, and every surface known to gate without the literal
+// token must still be detected. A rewording then fails a test instead of shrinking the rule.
+const GATE_PHRASES = [
+  /AskUserQuestion/,
+  /\bask(?:s|ing|ed)?\s+(?:the\s+user\s+)?for\s+(?:an?\s+)?confirmation\b/i,
+  /\bONE\s+question\s+per\b/,
+  /\bonly\s+the\s+user\s+may\b/i,
+  /\bon\s+an\s+explicit\s+yes\b/i,
+];
+const gatesUser = (text) => GATE_PHRASES.some((phrase) => phrase.test(text));
+
+// The surfaces that gate the user without ever writing `AskUserQuestion`. Named so that the
+// vocabulary above cannot silently stop matching them.
+const GATES_WITHOUT_THE_TOKEN = [
+  "playbooks/verifying-on-device.md",
+  "playbooks/reviewing-the-branch.md",
+  "playbooks/finishing-the-cycle.md",
+];
+
+// --- what a citation claims ---------------------------------------------------------------
+// `references/ledger.md`'s rule has three outcomes, not two: a gate appends exactly when a run
+// record exists at that moment. So a surface that gates either states the append (affirmative),
+// states that no append is possible where it sits (negative — `references/config.md`'s
+// walkthrough runs before `/devcycle:cycle` mints the record), or is exempt. Asking only whether
+// the token and the owner path appear could not tell the first two apart, which made a citation
+// claiming a journal that cannot happen indistinguishable from a correct one.
+// A conditional citation ("appends ... when this stage runs inside a cycle run") is affirmative:
+// the append does happen on the entry where a run record exists.
+// A block that names the token and the owner but neither claims nor denies the append is
+// `unclear`, and satisfies neither position — a rule the reader cannot act on is the failure
+// this check exists to catch, so it fails loudly instead of counting as cited.
+const AFFIRMATIVE = [/\bappends\s+`user-correction-at-gate`/];
+const NEGATIVE = [
+  /\bnone\s+of\s+them\s+journals\b/i,
+  /\bjournals\s+(?:no|none)\b/i,
+  /\bappends\s+nothing\b/i,
+  /\bnever\s+appends\b/i,
+];
+const citationBlocks = (text) =>
+  text.split(/\n\s*\n/).filter((block) => block.includes(TOKEN) && block.includes(OWNER_REF));
+
+const citationVerdict = (text) => {
+  const blocks = citationBlocks(text);
+  if (blocks.length === 0) return "none";
+  if (blocks.some((block) => AFFIRMATIVE.some((phrase) => phrase.test(block)))) return "affirmative";
+  if (blocks.some((block) => NEGATIVE.some((phrase) => phrase.test(block)))) return "negative";
+  return "unclear";
+};
+
+// A gate that runs before any run record exists must say so, rather than claim an append that
+// cannot happen there. Listed, not derived: "before the mint" is a fact about when the text runs,
+// and nothing in the file structure carries it — `references/config.md`'s walkthrough is reached
+// from `commands/cycle.md` exactly like the stages that do append. The list going stale is
+// guarded in the test: an entry that stops gating, or that turns out to be exempt, fails.
+const PRE_MINT_SURFACES = ["references/config.md"];
+
+test("the gate vocabulary still sees the surfaces that gate the user without naming AskUserQuestion", () => {
+  const files = surfaceFiles();
+  for (const path of GATES_WITHOUT_THE_TOKEN) {
+    assert.ok(
+      !read(path).includes("AskUserQuestion"),
+      `${path} now names AskUserQuestion literally, so it no longer proves the vocabulary reaches past the token`
+    );
+    assert.ok(
+      gatesUser(read(path)),
+      `${path} gates the user in words GATE_PHRASES no longer matches — add the new wording to the vocabulary ` +
+        `rather than letting this check go quiet on that surface`
+    );
+  }
+  // Dead vocabulary is worse than none: a phrase matching nothing reads as coverage it has not got.
+  for (const phrase of GATE_PHRASES)
+    assert.ok(
+      files.some((p) => phrase.test(read(p))),
+      `no surface matches ${phrase} — the phrase is dead vocabulary and overstates what this check covers`
+    );
+});
+
+test("an affirmative citation and a negative declaration are told apart", () => {
+  const preMint = read(PRE_MINT_SURFACES[0]);
+  assert.equal(
+    citationVerdict(preMint),
+    "negative",
+    `${PRE_MINT_SURFACES[0]} gates before any run record exists, so its citation must read as a declaration that ` +
+      `nothing is journalled there — not merely as present`
+  );
+
+  // Flip that declaration into the claim its own position rules out. The verdict must flip with
+  // it: this is the polarity that CI could previously not see, in either direction.
+  const flipped = preMint.replace(/none of them journals one/, "each of them appends `user-correction-at-gate`");
+  assert.notEqual(flipped, preMint, `${PRE_MINT_SURFACES[0]}'s negative wording changed — this flip tests nothing`);
+  assert.equal(citationVerdict(flipped), "affirmative", "a claim that the gate journals still reads as a negative");
+
+  // A surface that must cite affirmatively is not satisfied by the negative wording, however
+  // faithfully that wording names the token and the owner.
+  const negativeBlock = citationBlocks(preMint)[0];
+  assert.ok(negativeBlock, `${PRE_MINT_SURFACES[0]} carries no citation block to reuse`);
+  assert.equal(
+    citationVerdict(`Interview via AskUserQuestion.\n\n${negativeBlock}`),
+    "negative",
+    "a gate that must cite affirmatively is satisfied by a declaration that nothing is journalled"
+  );
+
+  // The remaining verdicts: a real affirmative citer, a text that cites nothing, and a mention
+  // that takes no position at all.
+  assert.equal(citationVerdict(read("commands/cycle.md")), "affirmative");
+  assert.equal(citationVerdict("This stage asks the user nothing about journalling."), "none");
+  assert.equal(citationVerdict(`A gate here relates to \`${TOKEN}\`, per \`${OWNER_REF}\`.`), "unclear");
+});
+
+test("every in-cycle surface that gates the user cites the write site with the polarity its position requires", () => {
   const files = surfaceFiles();
   assert.ok(files.length > 0, "no surface file was scanned — every assertion below would run over nothing");
   assert.ok(
@@ -950,8 +1075,12 @@ test("every in-cycle surface that asks via AskUserQuestion cites the user-correc
   );
   const exempt = runlessSurfaces();
   assert.ok(exempt.size > 0, "no command outside the cycle hands its run to a playbook — the exemption derived nothing");
-  const asking = files.filter((p) => p !== OWNER && read(p).includes("AskUserQuestion"));
-  assert.ok(asking.length > 0, "no surface asks via AskUserQuestion — every assertion below would run over nothing");
+  const gating = files.filter((p) => p !== OWNER && gatesUser(read(p)));
+  assert.ok(gating.length > 0, "no surface gates the user — every assertion below would run over nothing");
+  assert.ok(
+    gating.length > files.filter((p) => p !== OWNER && read(p).includes("AskUserQuestion")).length,
+    "the vocabulary sees no more than the literal AskUserQuestion token — the widening is not live"
+  );
 
   // The subtraction itself, guarded: a playbook both a run-less and a run-bearing command reach
   // can append on the in-cycle entry, so it is never exempt. Drop the subtraction and this fails.
@@ -964,21 +1093,31 @@ test("every in-cycle surface that asks via AskUserQuestion cites the user-correc
       `them from citing the write site: ${dualEntry.filter((p) => exempt.has(p)).join(", ")}`
   );
 
-  const missing = asking.filter(
-    (path) =>
-      !exempt.has(path) &&
-      !read(path)
-        .split(/\n\s*\n/)
-        .some((block) => block.includes("user-correction-at-gate") && block.includes(`\${CLAUDE_PLUGIN_ROOT}/${OWNER}`))
+  const missing = gating.filter(
+    (path) => !exempt.has(path) && !PRE_MINT_SURFACES.includes(path) && citationVerdict(read(path)) !== "affirmative"
   );
   assert.deepEqual(
     missing,
     [],
-    `these surfaces ask via AskUserQuestion inside a cycle run but never cite the user-correction-at-gate write site ` +
-      `in ${OWNER}, so an "Other" answer there appends nothing: ${missing.join(", ")}`
+    `these surfaces gate the user inside a cycle run but never cite the ${TOKEN} write site in ${OWNER} ` +
+      `affirmatively, so an "Other" answer there appends nothing a reader could follow: ` +
+      missing.map((p) => `${p} (${citationVerdict(read(p))})`).join(", ")
   );
 
-  const unfollowable = [...exempt].filter((path) => read(path).includes("user-correction-at-gate"));
+  // A pre-mint surface is a gate like any other and is never exempt, so the list is trustworthy
+  // only while both of those hold — and the declaration it carries has to be the negative one.
+  for (const path of PRE_MINT_SURFACES) {
+    assert.ok(gatesUser(read(path)), `${path} is listed as a pre-mint gate but no longer gates the user`);
+    assert.ok(!exempt.has(path), `${path} is listed as a pre-mint gate and is also exempt — one of the two is wrong`);
+    assert.equal(
+      citationVerdict(read(path)),
+      "negative",
+      `${path} gates before the run record is minted, so it must state that nothing is journalled there; ` +
+        `its citation reads "${citationVerdict(read(path))}"`
+    );
+  }
+
+  const unfollowable = [...exempt].filter((path) => read(path).includes(TOKEN));
   assert.deepEqual(
     unfollowable,
     [],

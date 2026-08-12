@@ -72,7 +72,8 @@ green and diff tidy, and still fail its spec:
    opens no further round — it re-presents the outstanding blocking findings for a user
    decision, per 5's second terminal state. Only the user may grant rounds beyond the cap, and
    only explicitly: record that as `task=branch event=user-decision outcome=review-cap extended
-   to <n>` and treat `<n>` as the cap from then on.
+   to <n>`, treat `<n>` as the cap from then on, and note that granting it via Other also
+   appends `user-correction-at-gate` — `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns both.
 2. **Only blocking findings re-open the loop.** **Blocking means `critical` or `high`** —
    `${CLAUDE_PLUGIN_ROOT}/references/findings.md` owns the severity vocabulary and derives
    blocking from it, and neither is restated here. Each blocking finding goes to a fresh

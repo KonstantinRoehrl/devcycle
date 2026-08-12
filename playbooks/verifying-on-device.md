@@ -61,7 +61,10 @@ walkthrough takes the fast tier per `${CLAUDE_PLUGIN_ROOT}/references/delegation
 Interview rule: **ONE question per checklist item, never batched** — a deliberate exception to
 devcycle's batched-interview standard, because findings quality drops when items are bundled.
 Each question covers exactly one item and tells the human how to observe it (where to click,
-which viewport, which theme). Wait for the verdict before the next item. When the app renders
+which viewport, which theme). Wait for the verdict before the next item; a verdict given via
+Other appends `user-correction-at-gate` on the in-cycle entry, where a run record exists, and
+nothing on standalone `/devcycle:verify` — `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns
+that condition. When the app renders
 as a page and claude-in-chrome is connected, dispatch `devcycle:on-device-driver` to observe an
 item rather than observing it yourself; the human still gives every verdict.
 
