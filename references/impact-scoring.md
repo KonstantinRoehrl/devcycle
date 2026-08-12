@@ -35,11 +35,17 @@ turns on culprit attribution it becomes the culprit-id. The formula is unchanged
 ## Signals that are derived, not written
 
 Four signals are reconstructed from records that already exist, rather than journaled a second
-time:
+time. Same-round `verdict` lines collapse to the latest before any of this fires — the reviewer's
+`conformance = "pass"` line followed by the green gate's own `conformance = "fail"` line for that
+round is one event, not two (the same collapse `qualitySignals` documents and both share):
 
-| Signal | Derived from |
-| --- | --- |
-| `review-reject` | a `verdict` line with `blockingCount > 0` or `conformance = "fail"` |
-| `first-round-accept` | a `verdict` line with `round = 1`, `blockingCount = 0`, `conformance = "pass"` |
-| `re-dispatch` | a `dispatch` line with `retryIndex > 0` |
-| `escalation` | `dispatch.model` differing across retries of one `taskId` |
+| Signal | Derived from | Stage |
+| --- | --- | --- |
+| `review-reject` | a `verdict` line with `blockingCount > 0` or `conformance = "fail"` | `"execution"` |
+| `first-round-accept` | a `verdict` line with `round = 1`, `blockingCount = 0`, `conformance = "pass"` | `"execution"` |
+| `re-dispatch` | a `dispatch` line with `retryIndex > 0` | the stage active at `startedAt`, else `"unattributed"` |
+| `escalation` | `dispatch.model` differing across any two dispatches of one `taskId` | the first dispatch's stage, else `"unattributed"` |
+
+`"unattributed"` is a sentinel, not a member of the schema's stage enum or a `costByStage` key —
+no stage window ever matches it, so `attributedCost` finds no dispatches and the event scores as
+unmeasurable (`impact: null`), never `$0`.

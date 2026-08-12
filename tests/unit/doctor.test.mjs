@@ -1866,3 +1866,17 @@ test("the four derivable events are derived from verdict and dispatch lines", ()
   const derived = deriveEvents(record).map((e) => e.event).sort();
   assert.deepEqual(derived, ["escalation", "first-round-accept", "re-dispatch", "review-reject"]);
 });
+
+test("a round the green gate rejects after the reviewer passed it scores as a reject, not a win", () => {
+  const record = {
+    stages: [{ stage: "execution", startedAt: "2026-08-12T10:00:00Z", endedAt: "2026-08-12T11:00:00Z" }],
+    dispatches: [],
+    verdicts: [
+      { taskId: "1", round: 1, blockingCount: 0, conformance: "pass" },
+      { taskId: "1", round: 1, blockingCount: 0, conformance: "fail" },
+    ],
+    events: [],
+  };
+  const derived = deriveEvents(record).map((e) => e.event);
+  assert.deepEqual(derived, ["review-reject"]);
+});

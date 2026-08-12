@@ -731,21 +731,25 @@ export function toolCallsForDispatch(turns, dispatch) {
   return counts;
 }
 
+// executing-waves.md step 6 legitimately appends a SECOND verdict line for the same
+// taskId+round when the green gate rejects a round the reviewer already accepted — the
+// run record stays append-only (both lines genuinely happened), so every read side collapses
+// same-round verdicts to one outcome before counting anything. File order is chronological,
+// so a later entry naturally overwrites an earlier one in the map, keeping the authoritative
+// (latest) verdict for that round.
+function collapseVerdicts(verdicts) {
+  return [...new Map(
+    (verdicts ?? []).map((v) => [`${v.taskId}:${v.round}`, v]),
+  ).values()];
+}
+
 // Every token metric is paired with a quality signal, so a change that halves cost while doubling
 // review rounds is visible as such. Absent for a record-less run — zero rounds would read as
 // flawless work rather than as no data.
 export function qualitySignals(record) {
   if (!record) return null;
   const dispatches = record.dispatches ?? [];
-  // executing-waves.md step 6 legitimately appends a SECOND verdict line for the same
-  // taskId+round when the green gate rejects a round the reviewer already accepted — the
-  // run record stays append-only (both lines genuinely happened), so the read side collapses
-  // same-round verdicts to one outcome before counting anything. File order is chronological,
-  // so a later entry naturally overwrites an earlier one in the map, keeping the authoritative
-  // (latest) verdict for that round.
-  const verdicts = [...new Map(
-    (record.verdicts ?? []).map((v) => [`${v.taskId}:${v.round}`, v]),
-  ).values()];
+  const verdicts = collapseVerdicts(record.verdicts);
   const tasks = new Set([...dispatches, ...verdicts].map((d) => d.taskId)).size;
   const reviewRounds = verdicts.length;
   return {
@@ -1336,7 +1340,7 @@ export function deriveEvents(record) {
   const stageOf = (ts) =>
     (record.stages ?? []).find((s) => ts >= Date.parse(s.startedAt) && ts < Date.parse(s.endedAt))?.stage
     ?? "unattributed";
-  for (const v of record.verdicts ?? []) {
+  for (const v of collapseVerdicts(record.verdicts)) {
     if (v.blockingCount > 0 || v.conformance === "fail")
       out.push({ event: "review-reject", stage: "execution", task: v.taskId, ts: null });
     else if (v.round === 1 && v.blockingCount === 0 && v.conformance === "pass")
