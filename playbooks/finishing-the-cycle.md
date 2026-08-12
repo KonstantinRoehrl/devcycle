@@ -49,13 +49,16 @@ regardless of the configured value; otherwise effective equals configured. The c
 hard gate: `redaction-check.mjs` defaults to `git ls-files`, so gitignored `.devcycle/` has
 never been screened by CI. Run it directly against what actually exists on this machine —
 `node ${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir .devcycle` and `node
-${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir ~/.claude/devcycle/runs`. The second
-call deliberately screens this user's whole run-record history on this machine, not just this
-cycle's slice — no CLI subcommand derives a narrower slice, and the mint step
-(`commands/cycle.md`, "Before the first confirmation") guarantees this directory exists by the
-time finish runs. A non-zero exit stops the finish stage — surface the specific finding to the
-user rather than silently continuing; this screen exists because the CI screen (which covers
-only the committed schema and golden fixture) structurally cannot see either directory.
+${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir
+~/.claude/devcycle/runs/$(node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs').then(m
+=> console.log(m.repoSlug(process.cwd())))")`. The second call screens only this repo's own
+slice of the run-record store: `run-record.mjs` exports `repoSlug(toplevel)`, the same function
+the mint step uses to name the slice it writes into, so the command substitution above resolves
+that identical directory, and the mint step (`commands/cycle.md`, "Before the first
+confirmation") guarantees this directory exists by the time finish runs. A non-zero exit stops
+the finish stage — surface the specific finding to the user rather than silently continuing;
+this screen exists because the CI screen (which covers only the committed schema and golden
+fixture) structurally cannot see either directory.
 
 As this stage's final state-file write, set `stage: done` and a fresh `updated:` timestamp —
 nothing remains to resume.
