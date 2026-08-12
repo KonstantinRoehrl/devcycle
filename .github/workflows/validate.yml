@@ -14,6 +14,16 @@ on:
   # for the one commit that most needs it. Calling this workflow directly runs the check before
   # the push instead of hoping for one after.
   workflow_call:
+    inputs:
+      ref:
+        # A calling job's own `github.sha`/`github.ref` is fixed at whatever commit the run
+        # started on — it does not follow a commit a prior job in the same run pushes later.
+        # Callers that create a new commit mid-run (prepare-release.yml) pass its sha here so
+        # the checkout below validates THAT commit; every other trigger leaves this empty and
+        # falls back to the normal default.
+        description: 'Commit to validate — defaults to github.ref when omitted'
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -26,6 +36,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # inputs.ref is empty/falsy on every trigger except workflow_call callers that pass
+          # one explicitly, so this falls back to the normal default (push, pull_request,
+          # workflow_dispatch, manual re-run) unchanged.
+          ref: ${{ inputs.ref || github.ref }}
           # Full history: the secret scan below reads every commit, not just the tip. A secret
           # committed and removed one commit later stays fetchable, so scanning the tip alone
           # reports green on a repository that is still leaking.

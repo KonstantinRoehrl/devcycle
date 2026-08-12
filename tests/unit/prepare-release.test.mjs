@@ -97,6 +97,75 @@ test("prepare-release: the guard step runs before, and gates, the bump step", ()
   );
 });
 
+test("validate.yml: workflow_call declares an optional `ref` input", () => {
+  const yaml = read(".github/workflows/validate.yml");
+  const callTrigger = yaml.match(/^ {2}workflow_call:[\s\S]*?(?=\n {2}\S)/m)?.[0];
+  assert.ok(callTrigger, "no `workflow_call:` trigger found");
+  assert.match(
+    callTrigger,
+    /^ {4}inputs:\s*\n {6}ref:\s*\n(?: {8}.*\n)*? {8}required:\s*false\s*\n(?: {8}.*\n)*? {8}type:\s*string\s*$/m,
+    "workflow_call does not declare an optional `ref` input"
+  );
+});
+
+test("validate.yml: the validate job's checkout step falls back from `inputs.ref` to `github.ref`", () => {
+  const yaml = read(".github/workflows/validate.yml");
+  const jobs = parseJobs(yaml);
+  const checkoutStep = jobs.validate?.join("\n").match(/- uses: actions\/checkout@[\s\S]*?(?=\n {6}- (?:uses|name):|\n {2}\S)/)?.[0];
+  assert.ok(checkoutStep, "no checkout step found in the validate job");
+  assert.match(
+    checkoutStep,
+    /ref:\s*\$\{\{\s*inputs\.ref\s*\|\|\s*github\.ref\s*\}\}/,
+    "the validate job's checkout step does not fall back from `inputs.ref` to `github.ref`"
+  );
+});
+
+test("prepare-release: the validate job passes `ref` sourced from `needs.prepare.outputs.sha`", () => {
+  const yaml = read(".github/workflows/prepare-release.yml");
+  const jobs = parseJobs(yaml);
+  const validateJobId = Object.keys(jobs).find((id) =>
+    /^ {4}uses: \.\/\.github\/workflows\/validate\.yml\s*$/m.test(jobs[id].join("\n"))
+  );
+  assert.ok(validateJobId, "no job calls validate.yml at job level — see the preceding test");
+  const validateJobBody = jobs[validateJobId].join("\n");
+  assert.match(
+    validateJobBody,
+    /^ {4}with:\s*\n {6}ref:\s*\$\{\{\s*needs\.prepare\.outputs\.sha\s*\}\}\s*$/m,
+    "the validate job does not pass `with: ref: ${{ needs.prepare.outputs.sha }}`"
+  );
+});
+
+test("prepare-release: the prepare job exposes the settled HEAD sha as a job output, captured after the push", () => {
+  const yaml = read(".github/workflows/prepare-release.yml");
+  assert.match(
+    yaml,
+    /^ {4}outputs:\s*\n(?: {6}.*\n)*? {6}sha:\s*\$\{\{\s*steps\.\S+\.outputs\.sha\s*\}\}/m,
+    "the prepare job's `outputs:` block does not expose a `sha` output"
+  );
+  const pushIdx = yaml.indexOf("- name: Push the bump to dev");
+  const shaCaptureMatch = yaml.match(/- name: [^\n]*\n(?: {8}id: (\S+)\n)?(?: {8}[^\n]*\n)*? {8}run: [^\n]*git rev-parse HEAD[^\n]*/);
+  assert.ok(shaCaptureMatch, "no step found that captures `git rev-parse HEAD`");
+  const shaCaptureIdx = yaml.indexOf(shaCaptureMatch[0]);
+  assert.ok(
+    pushIdx !== -1 && shaCaptureIdx > pushIdx,
+    "the sha-capturing step does not run after the push step, so it could read an unsettled HEAD"
+  );
+});
+
+test("prepare-release: the validate job's comment states it validates the exact commit, via the `ref` input", () => {
+  const yaml = read(".github/workflows/prepare-release.yml");
+  const validateJobComment = yaml.match(/ {2}validate:\n((?: {4}#[^\n]*\n)+)/)?.[1] ?? "";
+  assert.ok(
+    !/this actually validates that commit/.test(validateJobComment),
+    "the validate job's comment still makes the false 'runs after, so this actually validates that commit' claim"
+  );
+  assert.match(
+    validateJobComment,
+    /ref/,
+    "the validate job's comment does not mention the explicit `ref` input that now pins the commit validated"
+  );
+});
+
 test("prepare-release: setup-node matches validate.yml's pin and reads .nvmrc, not lts/*", () => {
   const yaml = read(".github/workflows/prepare-release.yml");
   const validateYaml = read(".github/workflows/validate.yml");

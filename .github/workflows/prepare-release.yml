@@ -21,6 +21,7 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.guard.outputs.already-bumped == 'true' && steps.guard.outputs.version || steps.bump.outputs.version }}
+      sha: ${{ steps.head.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -100,12 +101,22 @@ jobs:
             git pull --rebase origin dev
           done
 
+      - name: Record the sha now on dev
+        id: head
+        # Read after the push step, so this is the settled HEAD whichever branch the guard
+        # took above (a real bump-and-push, or the already-bumped no-op) — either way, the
+        # commit now on dev is exactly what `validate` below must check out.
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   validate:
     # A step's `uses:` can only resolve to an action manifest — calling a reusable workflow
-    # (workflow_call) requires this job-level form instead. Runs after `prepare` pushes the
-    # release commit, so this actually validates that commit rather than the pre-bump tree.
+    # (workflow_call) requires this job-level form instead. `with: ref:` pins the checkout in
+    # validate.yml to the exact commit `prepare` left `dev` at, so this validates that commit
+    # rather than the run's own (pre-bump) github.sha.
     needs: prepare
     uses: ./.github/workflows/validate.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
 
   open-pr:
     needs: [prepare, validate]
