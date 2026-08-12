@@ -550,5 +550,23 @@ if (!existsSync(contextFile)) {
   }
 }
 
+// 16. Every ${CLAUDE_PLUGIN_ROOT} citation resolves: that is check 4 above, which walks every
+//     surface file and tests every cited path against the tree, scripts included. The number is
+//     reserved here so the sequence stays readable — a second parser would report each broken
+//     citation twice, and would fail on a citation that merely ends a sentence unless it also
+//     repeated check 4's trailing-punctuation handling.
+
+// 17. The command count is a regression guard, not a target. D7 proposed collapsing seven verbs
+//     to five; that required folding `continue` into `cycle` (declined — docs/DECISIONS.md,
+//     2026-08-12) and removing `onboard` (never specified anywhere). Neither happened, so the
+//     honest ceiling is today's count and the check exists to make an eighth command deliberate.
+const COMMAND_CEILING = 7;
+const commandCount = namesIn("commands").length;
+if (commandCount > COMMAND_CEILING)
+  fail(
+    `${commandCount} commands > ${COMMAND_CEILING} — the user-facing verb count is a surface decision, ` +
+      `not a file addition; raise this ceiling deliberately or fold the new entry point into an existing one`
+  );
+
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
 console.log("validate: ok");

@@ -812,3 +812,27 @@ test("context budget: a missing baseline file fails", () => {
   rmSync(join(dir, CONTEXT_PATH), { force: true });
   assert.match(runValidate(dir).stderr, /context-budget\.json: missing/);
 });
+
+// --- check 4, revisited: citations outside references/ resolve too ---
+// "Every ${CLAUDE_PLUGIN_ROOT} citation resolves" is check 4's job already, for every surface
+// file and every path shape; a second walk over the same files with the same regex would only
+// have reported each broken citation twice. The case check 4 had no test for is a citation
+// that names something other than a reference, so that is what this adds.
+
+test("plugin-root check: a citation to a script path resolves too", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "scripts/thing.mjs", "// fixture script\n");
+  playbook(dir, "Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/thing.mjs`.\n");
+  ok(runValidate(dir));
+});
+
+// --- check 17: the command count is a regression guard ---
+
+test("command ceiling: an eighth command fails", () => {
+  const dir = makePluginFixture();
+  for (const name of ["one", "two", "three", "four", "five", "six", "seven"])
+    writeInto(dir, `commands/${name}.md`, `---\ndescription: "Fixture command."\n---\n\n# /devcycle:${name}\n`);
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /8 commands > 7/);
+  assert.match(stderr, /surface decision/);
+});
