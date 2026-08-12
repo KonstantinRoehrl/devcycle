@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync, realpathSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync, cpSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { repoSlug, hashSession, recordPath, gitToplevel } from "../../scripts/run-record.mjs";
 
 const SCRIPT = new URL("../../scripts/run-record.mjs", import.meta.url).pathname;
+const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
 // Both fixtures below are assembled from fragments so this file — which is tracked and so
 // scanned by scripts/redaction-check.mjs — carries no literal the check matches. Same idiom as
@@ -341,4 +342,24 @@ test("culprit accepts null, a vocabulary slug and a novel: slug, and rejects any
   const bad = runRecord([...base, "--culprit", "not-in-the-vocabulary"], runs);
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /neither a culprits\.json slug nor a novel: slug/);
+});
+
+test("culprit lookup fails cleanly, not with a stack trace, when culprits.json is valid JSON but not an array", () => {
+  // validateCulprit() resolves references/culprits.json relative to the script's own location,
+  // so the script needs to run from a copy of the tree whose culprits.json is malformed.
+  const treeDir = realpathSync(mkdtempSync(join(tmpdir(), "rr-vocab-tree-")));
+  cpSync(REPO_ROOT, treeDir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  writeFileSync(join(treeDir, "references/culprits.json"), JSON.stringify({ not: "an array" }));
+
+  const runs = mkdtempSync(join(tmpdir(), "rr-vocab-runs-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const r = spawnSync(process.execPath, [
+    join(treeDir, "scripts/run-record.mjs"), "append", "--run", runId, "--kind", "event",
+    "--event", "gate-fail", "--stage", "execution", "--ts", "2026-08-12T10:00:00Z",
+    "--culprit", "partial-evidence-capture",
+  ], { cwd: treeDir, encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: runs } });
+
+  assert.equal(r.status, 1);
+  assert.doesNotMatch(r.stderr, /TypeError|at Object|at file:/);
+  assert.match(r.stderr, /culprits\.json/);
 });

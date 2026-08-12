@@ -658,6 +658,18 @@ test("check 14 fails when culprits.json is missing entirely", () => {
   failsWith(runValidate(dir), /references\/culprits\.json: missing/);
 });
 
+test("check 14 fails on a null entry instead of crashing on the \"slug\" in e check", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/culprits.json", JSON.stringify([null]));
+  failsWith(runValidate(dir), /VALIDATION FAILED/, /references\/culprits\.json\[0\]/);
+});
+
+test("check 14 fails on a bare-string entry instead of crashing on the \"slug\" in e check", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/culprits.json", JSON.stringify(["x"]));
+  failsWith(runValidate(dir), /VALIDATION FAILED/, /references\/culprits\.json\[0\]/);
+});
+
 test("check 14 passes on the repo's own shipped vocabulary", () => {
   const r = spawnSync(process.execPath, [join(REPO_ROOT, "scripts/validate.mjs")],
     { cwd: REPO_ROOT, encoding: "utf8" });

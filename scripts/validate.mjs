@@ -430,6 +430,10 @@ if (!existsSync(culpritsPath)) {
     const slugs = [];
     for (const [i, e] of vocab.entries()) {
       const at = `references/culprits.json[${i}]`;
+      if (typeof e !== "object" || e === null || Array.isArray(e)) {
+        fail(`${at}: entry must be an object, got ${JSON.stringify(e)}`);
+        continue;
+      }
       for (const f of ["slug", "kind", "phase", "desc", "since"])
         if (!(f in e)) fail(`${at}: missing "${f}"`);
       if (typeof e.slug === "string") {

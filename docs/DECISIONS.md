@@ -5,6 +5,25 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-12 — Surface budget raised to 3,620, to admit `references/impact-scoring.md`
+
+**Decision:** `SURFACE_LINE_BUDGET` moves from **3,550 to 3,620**. `COMMAND_LINE_MAX` (104) and
+`PLAYBOOK_LINE_MAX` (154) are deliberately left unchanged — this raise concerns only the total.
+
+**Why:** Wave 4 of the learning-overhaul-phase-1 plan adds `references/impact-scoring.md`, a
+single-owner impact-scoring definition doctor.mjs and learning-from-sessions.md both depend on.
+Before it landed the surface stood at 3,532 lines — 18 lines of headroom under the 3,550 budget
+set 2026-08-11 — not enough to absorb the new file without either compacting elsewhere or raising
+the budget. The 2026-08-11 entry's own precedent (a 3-line reflow, at no cost) does not scale
+here: reclaiming enough lines would mean cutting real content across files no single task owns,
+the outcome the budget exists to prevent rather than the trade it exists to force.
+
+**Measured:** the runtime surface reached **3,577** lines once `references/impact-scoring.md`
+landed; 3,620 leaves 43 lines of headroom for the plan's remaining phases.
+
+**Supersedes:** The 3,550 total set 2026-08-11 (below). The 3,500 total set 2026-08-06 (`:105`)
+and the per-file ceilings it named are unaffected.
+
 ## 2026-08-11 — Surface budget raised to 3,550; the "do not raise" ruling superseded
 
 `SURFACE_LINE_BUDGET` moves from **3,500 to 3,550**; `COMMAND_LINE_MAX` from 100 to 104;

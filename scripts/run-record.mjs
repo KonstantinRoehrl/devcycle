@@ -26,7 +26,9 @@ function validateCulprit(value) {
   } catch (err) {
     return [`culprit "${value}" cannot be checked — references/culprits.json unreadable: ${err.message}`];
   }
-  return vocab.some((e) => e.slug === value)
+  if (!Array.isArray(vocab))
+    return [`culprit "${value}" cannot be checked — references/culprits.json must be an array`];
+  return vocab.some((e) => e && typeof e === "object" && typeof e.slug === "string" && e.slug === value)
     ? []
     : [`culprit "${value}" is neither a culprits.json slug nor a novel: slug`];
 }
