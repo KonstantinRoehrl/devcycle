@@ -95,7 +95,7 @@ function parseArgs(argv) {
   return { flags, knobs, objects };
 }
 
-function gitToplevel(cwd) {
+export function gitToplevel(cwd) {
   const r = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : cwd;
 }

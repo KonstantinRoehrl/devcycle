@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, existsSync, realpathSync, mkdirSync } from "
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { repoSlug, hashSession, recordPath } from "../../scripts/run-record.mjs";
+import { repoSlug, hashSession, recordPath, gitToplevel } from "../../scripts/run-record.mjs";
 
 const SCRIPT = new URL("../../scripts/run-record.mjs", import.meta.url).pathname;
 
@@ -288,4 +288,14 @@ test("new derives repoSlug from the real git toplevel, not the invoking cwd", ()
   // Verify the slug is derived from the real git toplevel (tempRepo), not the nested dir
   assert.notStrictEqual(written.repoSlug, repoSlug(nestedDir));
   assert.strictEqual(written.repoSlug, repoSlug(tempRepo));
+});
+
+test("gitToplevel resolves a nested subdirectory to the real git repo root", () => {
+  const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-")));
+  spawnSync("git", ["init", "-q"], { cwd: tempRepo });
+  const nestedDir = join(tempRepo, "nested", "subdir");
+  mkdirSync(nestedDir, { recursive: true });
+
+  assert.strictEqual(gitToplevel(nestedDir), tempRepo);
+  assert.notStrictEqual(gitToplevel(nestedDir), nestedDir);
 });
