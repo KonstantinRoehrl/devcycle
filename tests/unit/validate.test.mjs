@@ -13,6 +13,7 @@ const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 // The routing table check 6 reads. `cycle` is confirm-first, so the table has to
 // name its justification; helpers.mjs's base table predates that arm and is owned
 // elsewhere, so every fixture tree gets the table from here instead.
+const ROUTING_PATH = "docs/routing.md";
 const ROUTING_HEAD = "# Routing\n\n| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n";
 const CYCLE_ROW = "| run the pipeline | `cycle` | confirm-first | yes |\n";
 const CYCLE_JUSTIFICATION =
@@ -23,12 +24,12 @@ const routing = (...rows) => ROUTING_HEAD + CYCLE_ROW + rows.join("") + CYCLE_JU
 
 const makePluginFixture = () => {
   const dir = makeBaseFixture();
-  writeInto(dir, "references/routing.md", routing());
+  writeInto(dir, ROUTING_PATH, routing());
   return dir;
 };
 
-// Replaces the fixture playbook's body, keeping the head that consumes
-// references/routing.md. Playbooks have no frontmatter.
+// Replaces the fixture playbook's body, keeping the fixture head. Playbooks
+// have no frontmatter.
 const playbook = (dir, body) => writeInto(dir, "playbooks/demoing-things.md", FIXTURE_PLAYBOOK_HEAD + "\n" + body);
 
 // The stage enum lives in commands/cycle.md; checks that consult it need it present.
@@ -192,7 +193,7 @@ test("handoff check: a playbook that states it emits no handoff block is not an 
   ok(runValidate(dir));
 });
 
-// --- check 6: commands against the routing table in references/routing.md ---
+// --- check 6: commands against the routing table in docs/routing.md ---
 
 test("routing check: a command missing from the routing table fails", () => {
   const dir = makePluginFixture();
@@ -204,7 +205,7 @@ test("routing check: a command missing from the routing table fails", () => {
 
 test("routing check: a side-effectful command without the guard fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", routing("| set up a repo | `onboard` | side-effectful | no |\n"));
+  writeInto(dir, ROUTING_PATH, routing("| set up a repo | `onboard` | side-effectful | no |\n"));
   writeInto(dir, "commands/onboard.md", '---\ndescription: "o"\n---\n');
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
@@ -213,7 +214,7 @@ test("routing check: a side-effectful command without the guard fails", () => {
 
 test("routing check: a read-only command carrying the guard fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", routing("| review code | `review` | read-only | yes |\n"));
+  writeInto(dir, ROUTING_PATH, routing("| review code | `review` | read-only | yes |\n"));
   writeInto(dir, "commands/review.md", '---\ndescription: "r"\ndisable-model-invocation: true\n---\n');
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
@@ -225,40 +226,40 @@ test("routing check: a read-only command carrying the guard fails", () => {
 
 test("routing check: a confirm-first command whose justification is missing fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", ROUTING_HEAD + CYCLE_ROW);
-  failsWith(runValidate(dir), /references\/routing\.md/, /cycle.*confirm-first.*justification/);
+  writeInto(dir, ROUTING_PATH, ROUTING_HEAD + CYCLE_ROW);
+  failsWith(runValidate(dir), /docs\/routing\.md/, /cycle.*confirm-first.*justification/);
 });
 
 test("routing check: a confirm-first justification that is only a label fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", ROUTING_HEAD + CYCLE_ROW + "\n**`cycle`'s justification.**\n");
-  failsWith(runValidate(dir), /references\/routing\.md/, /cycle.*confirm-first.*justification/);
+  writeInto(dir, ROUTING_PATH, ROUTING_HEAD + CYCLE_ROW + "\n**`cycle`'s justification.**\n");
+  failsWith(runValidate(dir), /docs\/routing\.md/, /cycle.*confirm-first.*justification/);
 });
 
 test("routing check: a justification naming another command does not cover this one", () => {
   const dir = makePluginFixture();
   writeInto(
     dir,
-    "references/routing.md",
+    ROUTING_PATH,
     ROUTING_HEAD +
       CYCLE_ROW +
       "| plan a change | `sketch` | confirm-first | yes |\n" +
       CYCLE_JUSTIFICATION
   );
   writeInto(dir, "commands/sketch.md", '---\ndescription: "s"\n---\n');
-  failsWith(runValidate(dir), /references\/routing\.md/, /sketch.*confirm-first.*justification/);
+  failsWith(runValidate(dir), /docs\/routing\.md/, /sketch.*confirm-first.*justification/);
 });
 
 test("routing check: a command listed twice in the routing table fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", ROUTING_HEAD + CYCLE_ROW + CYCLE_ROW + CYCLE_JUSTIFICATION);
-  failsWith(runValidate(dir), /references\/routing\.md.*cycle appears more than once/);
+  writeInto(dir, ROUTING_PATH, ROUTING_HEAD + CYCLE_ROW + CYCLE_ROW + CYCLE_JUSTIFICATION);
+  failsWith(runValidate(dir), /docs\/routing\.md.*cycle appears more than once/);
 });
 
 test("routing check: a routing row naming no command fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", routing("| do the thing | `ghost` | read-only | yes |\n"));
-  failsWith(runValidate(dir), /references\/routing\.md.*"ghost" names no command/);
+  writeInto(dir, ROUTING_PATH, routing("| do the thing | `ghost` | read-only | yes |\n"));
+  failsWith(runValidate(dir), /docs\/routing\.md.*"ghost" names no command/);
 });
 
 // --- check 7: skills/ is not part of the surface any more ---

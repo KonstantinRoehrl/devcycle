@@ -48,8 +48,9 @@ export function writeInto(dir, relPath, text) {
 // Throwaway plugin tree that `scripts/validate.mjs` accepts as-is: both
 // manifests, one well-formed playbook, and a routing table whose single row
 // matches the one fixture command. Each validator test starts from this green
-// tree and breaks exactly one thing.
-export const FIXTURE_PLAYBOOK_HEAD = "# Demoing things\n\nThe routing table lives in references/routing.md.\n";
+// tree and breaks exactly one thing. The routing table lives at docs/routing.md,
+// outside the runtime surface, so no reference file needs a consumer here.
+export const FIXTURE_PLAYBOOK_HEAD = "# Demoing things\n\nA fixture playbook.\n";
 
 export function makePluginFixture() {
   const dir = mkdtempSync(join(tmpdir(), "devcycle-test-plugin-"));
@@ -80,17 +81,15 @@ export function makePluginFixture() {
       2
     ) + "\n"
   );
-  // The playbook consumes references/routing.md so the fixture satisfies check 11
-  // (every reference needs a consumer); the real tree's consumer is a script.
   writeInto(dir, "playbooks/demoing-things.md", FIXTURE_PLAYBOOK_HEAD);
   writeInto(
     dir,
-    "references/routing.md",
+    "docs/routing.md",
     "# Routing\n\n| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n| run the pipeline | `cycle` | confirm-first | yes |\n"
   );
   writeInto(dir, "commands/cycle.md", '---\ndescription: "Fixture command."\n---\n\n# /devcycle:cycle\n\n- stage: <scoping|planning|execution>\n');
   // Check 14 requires the vocabulary to exist; every fixture tree therefore ships a minimal
-  // valid one, the same way it ships a routing table for check 11.
+  // valid one, the same way it ships a routing table for check 6.
   writeInto(
     dir,
     "references/culprits.json",

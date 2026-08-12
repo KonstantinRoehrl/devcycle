@@ -145,13 +145,13 @@ if (existsSync(join(root, "playbooks")))
 
 // 6. Every command appears exactly once in the routing table, and its declared consequence
 //    agrees with its disable-model-invocation frontmatter.
-const routingPath = join(root, "references/routing.md");
-if (!existsSync(routingPath)) fail("references/routing.md: missing (the routing table has no owner)");
+const routingPath = join(root, "docs/routing.md");
+if (!existsSync(routingPath)) fail("docs/routing.md: missing (the routing table has no owner)");
 else if (existsSync(join(root, "commands"))) {
   const routing = readFileSync(routingPath, "utf8");
   const rows = new Map();
   for (const [, name, consequence] of routing.matchAll(/^\|[^|]*\|\s*`([a-z-]+)`\s*\|\s*([a-z-]+)\s*\|/gm)) {
-    if (rows.has(name)) fail(`references/routing.md: ${name} appears more than once`);
+    if (rows.has(name)) fail(`docs/routing.md: ${name} appears more than once`);
     rows.set(name, consequence);
   }
   const GUARD_REQUIRED = new Set(["side-effectful", "resume"]);
@@ -169,7 +169,7 @@ else if (existsSync(join(root, "commands"))) {
   for (const f of readdirSync(join(root, "commands"))) {
     if (!f.endsWith(".md")) continue;
     const name = f.replace(/\.md$/, "");
-    if (!rows.has(name)) { fail(`commands/${f}: missing from the routing table in references/routing.md`); continue; }
+    if (!rows.has(name)) { fail(`commands/${f}: missing from the routing table in docs/routing.md`); continue; }
     const consequence = rows.get(name);
     const guarded = frontmatter(join(root, "commands", f))?.["disable-model-invocation"] === "true";
     if (GUARD_REQUIRED.has(consequence) && !guarded)
@@ -177,11 +177,11 @@ else if (existsSync(join(root, "commands"))) {
     if (consequence === "read-only" && guarded)
       fail(`commands/${f}: consequence "read-only" forbids disable-model-invocation`);
     if (consequence === "confirm-first" && !justifies(name))
-      fail(`references/routing.md: \`${name}\` is confirm-first but names no justification — the exception class requires one inline`);
+      fail(`docs/routing.md: \`${name}\` is confirm-first but names no justification — the exception class requires one inline`);
   }
   for (const name of rows.keys())
     if (!existsSync(join(root, `commands/${name}.md`)))
-      fail(`references/routing.md: row "${name}" names no command`);
+      fail(`docs/routing.md: row "${name}" names no command`);
 }
 
 // 7. skills/ is not part of the surface any more.
@@ -195,7 +195,7 @@ const namesIn = (dir) =>
 // 8. Naming: commands are verbs, playbooks are gerunds, agents are role nouns.
 // No exemption list: the rule is "not a gerund", and the one recorded exception to
 // "commands are verbs" — `doctor`, on the brew/flutter/npm precedent — is a noun, so it
-// satisfies this rule on its own merits. The precedent is recorded in references/routing.md,
+// satisfies this rule on its own merits. The precedent is recorded in docs/routing.md,
 // not in code. A command that genuinely needs a gerund name gets an allowlist then, with a
 // test that exercises it.
 for (const f of namesIn("commands")) {
@@ -234,7 +234,8 @@ for (const f of namesIn("agents"))
     fail(`agents/${f}: frontmatter must not set model: — a pin defeats session-tier escalation`);
 
 // 11. Every reference has at least one consumer — a surface file that loads it, or a
-//     script that reads it (references/routing.md's consumer is this validator's check 6).
+//     script that reads it (references/impact-scoring.md's consumer is a comment in
+//     scripts/doctor.mjs; it gains its two surface citations in Phases 2 and 3).
 //     A reference mentioning itself is not a consumer of itself.
 const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
 for (const f of namesIn("references")) {
