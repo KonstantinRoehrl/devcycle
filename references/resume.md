@@ -59,9 +59,11 @@ checkout and may have switched it back to the integration branch):
 
 - If the state file records a topic branch, resume means getting the checkout onto
   that branch — `commands/continue.md`'s recorded-vs-current mismatch rule already
-  covers asking the user before switching; never switch silently. Never create a
-  fresh topic branch when one is recorded: the recorded branch is where any
-  committed work lives.
+  covers asking the user before switching, and an Other answer at that ask appends
+  `user-correction-at-gate` to the run record the resume carries, whose rule
+  `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns; never switch silently. Never
+  create a fresh topic branch when one is recorded: the recorded branch is where
+  any committed work lives.
 - Only if the recorded branch is still the default or an integration branch does
   branch discipline (`references/branch.md`) apply — an interrupted run may have
   stopped before the topic branch was ever created. Create it and record it on the

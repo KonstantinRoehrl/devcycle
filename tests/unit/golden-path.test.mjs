@@ -1078,6 +1078,65 @@ const citationVerdict = (text) => {
   return "unclear";
 };
 
+// --- attributing a citation to the gate it covers -----------------------------------------
+// citationVerdict over a whole file answered "does this file cite anywhere", which a file with
+// several gates satisfies with one paragraph. Sections answer "does this gate cite". Ancestors
+// count: references/config.md states its negative polarity once, in the `## First-run
+// configuration` section whose three subsections do the gating, and demanding three restatements
+// of one rule is the duplication this repo's own conventions forbid.
+// Fenced blocks are skipped, because a heading-shaped line inside one is not a heading: this
+// surface ships file templates (`references/resume.md`'s ```markdown state file opens with
+// `# devcycle state`), and reading those as real headings opened a phantom section that swallowed
+// the enclosing section's citation and re-parented every later section onto it — the same
+// cross-section absolution this whole check exists to remove, one level down.
+const sectionTree = (text) => {
+  const root = { heading: "(preamble)", level: 0, own: [], parent: null };
+  let current = root;
+  const all = [root];
+  let fenced = false;
+  for (const line of text.split("\n")) {
+    if (/^\s*```/.test(line)) fenced = !fenced;
+    const m = fenced ? null : /^(#{1,6})\s+\S/.exec(line);
+    if (!m) { current.own.push(line); continue; }
+    const level = m[1].length;
+    let parent = current;
+    while (parent.level >= level) parent = parent.parent;
+    current = { heading: line.trim(), level, own: [], parent };
+    all.push(current);
+  }
+  return all;
+};
+const ownText = (node) => node.own.join("\n");
+// A section's verdict is its own, or the nearest ancestor's that takes a position at all.
+const sectionVerdict = (node) => {
+  for (let n = node; n; n = n.parent) {
+    const verdict = citationVerdict(ownText(n));
+    if (verdict !== "none") return verdict;
+  }
+  return "none";
+};
+const gatingSections = (text) =>
+  sectionTree(text)
+    .filter((node) => gatesUser(ownText(node)))
+    .map((node) => ({ heading: node.heading, verdict: sectionVerdict(node) }));
+
+// Sections whose gate vocabulary matches a *description* of a gate that runs elsewhere, not a gate
+// the section itself runs. Measured, not assumed, against the surfaces as they stand. Guarded below
+// — an entry naming a section that no longer exists, or no longer matches the vocabulary, fails
+// rather than sitting stale.
+const DESCRIBES_NOT_GATES = [
+  // Describes what the brainstorm stage does with AskUserQuestion; cycle.md's own gate is in
+  // `## Triage the input`, which cites correctly.
+  "commands/cycle.md § ## Stage walk",
+  // States that the user already confirmed at triage, in cycle.md — this playbook runs after that
+  // gate and never re-litigates the verdict, as its own next sentence says.
+  "playbooks/sweeping-mechanical-changes.md § # Sweeping Mechanical Changes",
+  // Says the affected-areas list is one "confirmed ... with the user"; the confirming itself is the
+  // interview in `## The discipline`, which cites the write site. This section writes the summary
+  // the interview produced and asks nothing of its own.
+  "playbooks/scoping-the-request.md § ## Output and handoff",
+];
+
 // A gate that runs before any run record exists must say so, rather than claim an append that
 // cannot happen there. Listed, not derived: "before the mint" is a fact about when the text runs,
 // and nothing in the file structure carries it — `references/config.md`'s walkthrough is reached
@@ -1201,16 +1260,9 @@ test("every in-cycle surface that gates the user cites the write site with the p
       `them from citing the write site: ${dualEntry.filter((p) => exempt.has(p)).join(", ")}`
   );
 
-  const missing = gating.filter(
-    (path) => !exempt.has(path) && !PRE_MINT_SURFACES.includes(path) && citationVerdict(read(path)) !== "affirmative"
-  );
-  assert.deepEqual(
-    missing,
-    [],
-    `these surfaces gate the user inside a cycle run but never cite the ${TOKEN} write site in ${OWNER} ` +
-      `affirmatively, so an "Other" answer there appends nothing a reader could follow: ` +
-      missing.map((p) => `${p} (${citationVerdict(read(p))})`).join(", ")
-  );
+  // Whether each gating *section* cites is asserted by "every gating section of every in-cycle
+  // surface cites the write site" below; this test keeps the properties that are about files and
+  // ordering rather than about individual gates.
 
   // A pre-mint surface is a gate like any other, so the list is trustworthy only while it still
   // gates and its citation still reads negative. (`!exempt.has(path)` used to stand here too, but
@@ -1343,4 +1395,104 @@ test("a negation governing a different clause does not silence a gate in the sam
   // The denials the guard exists for are unaffected — there the negation does govern the ask.
   assert.equal(gatesUser("This stage never asks the user for confirmation."), false);
   assert.equal(gatesUser("No confirmation is asked for here."), false);
+});
+
+test("citation attribution is per section, and a section inherits its ancestors' citation", () => {
+  const cite = `appends \`${TOKEN}\`, whose rule \`${OWNER_REF}\` owns`;
+
+  // One citation in one section does not cover a gate in a sibling section.
+  const twoSections = `# Thing\n\n## First\n\nInterview via AskUserQuestion. It ${cite}.\n\n## Second\n\nAsk the user for confirmation before acting.\n`;
+  const uncited = gatingSections(twoSections).filter((s) => s.verdict !== "affirmative");
+  assert.deepEqual(
+    uncited.map((s) => s.heading),
+    ["## Second"],
+    "a gate in an uncited sibling section was treated as covered by the other section's citation"
+  );
+
+  // A subsection inherits the citation of the section it sits under — which is what makes the
+  // rule correct rather than merely strict: references/config.md states its polarity once, in the
+  // parent of the three subsections that gate.
+  const nested = `# Thing\n\n## Parent\n\nThe stage ${cite}.\n\n### Child\n\nAsk the user for confirmation.\n`;
+  assert.deepEqual(
+    gatingSections(nested).filter((s) => s.verdict !== "affirmative"),
+    [],
+    "a gating subsection was not covered by its parent section's citation"
+  );
+});
+
+test("inheritance runs one way: a subsection's citation does not cover a gate in its parent", () => {
+  // The fourth attribution direction, and the one that would fail silently: `sectionVerdict` walks
+  // upward only, so a citation buried in a subsection must not absolve the gate standing in the
+  // parent's own text. Correct today; unpinned until now, so a walk made bidirectional to "be
+  // lenient" would have passed CI.
+  const cite = `appends \`${TOKEN}\`, whose rule \`${OWNER_REF}\` owns`;
+  const text = `# Thing\n\n## Parent\n\nAsk the user for confirmation before acting.\n\n### Child\n\nThe stage ${cite}.\n`;
+  assert.deepEqual(
+    gatingSections(text).map((s) => `${s.heading} (${s.verdict})`),
+    ["## Parent (none)"],
+    "a gate was treated as covered by a citation sitting in one of its own subsections"
+  );
+});
+
+test("a heading-shaped line inside a fenced block does not open a section", () => {
+  // The defect this pins: `references/resume.md`'s state-file template contains the literal line
+  // `# devcycle state` inside a ```markdown fence. Parsed as a heading, it opened a phantom H1 that
+  // swallowed `## The state file`'s own citation and re-parented every later section onto itself —
+  // so a gate two sections away inherited a citation that was never about it. That is the
+  // cross-section absolution this whole check exists to remove, one level down.
+  const cite = `appends \`${TOKEN}\`, whose rule \`${OWNER_REF}\` owns`;
+  const fenced = [
+    "# Doc",
+    "",
+    "## Template",
+    "",
+    "```markdown",
+    "# devcycle state",
+    "- stage: <a stage>",
+    "```",
+    "",
+    `The stage ${cite}.`,
+    "",
+    "## Later",
+    "",
+    "Ask the user for confirmation before acting.",
+    "",
+  ].join("\n");
+
+  assert.deepEqual(
+    sectionTree(fenced).map((s) => s.heading),
+    ["(preamble)", "# Doc", "## Template", "## Later"],
+    "a heading-shaped line inside a fence was parsed as a real heading"
+  );
+  assert.deepEqual(
+    gatingSections(fenced).map((s) => `${s.heading} (${s.verdict})`),
+    ["## Later (none)"],
+    "a gating section inherited a citation from a section it does not sit under"
+  );
+});
+
+test("every gating section of every in-cycle surface cites the write site, or is a named descriptive mention", () => {
+  const exempt = runlessSurfaces();
+  const offenders = [];
+  for (const path of surfaceFiles()) {
+    if (path === OWNER || exempt.has(path) || PRE_MINT_SURFACES.includes(path)) continue;
+    for (const section of gatingSections(read(path))) {
+      const entry = `${path} § ${section.heading}`;
+      if (DESCRIBES_NOT_GATES.includes(entry)) continue;
+      if (section.verdict !== "affirmative") offenders.push(`${entry} (${section.verdict})`);
+    }
+  }
+  assert.deepEqual(offenders, [], `these sections gate inside a cycle run but cite no write site: ${offenders.join(", ")}`);
+});
+
+test("the descriptive-mention allowlist cannot go stale", () => {
+  for (const entry of DESCRIBES_NOT_GATES) {
+    const [path, heading] = entry.split(" § ");
+    const sections = gatingSections(read(path));
+    assert.ok(
+      sections.some((s) => s.heading === heading),
+      `${entry} is allowlisted as a descriptive mention, but that section no longer exists or no longer ` +
+        `matches the gate vocabulary — drop the entry rather than leaving it to excuse nothing`
+    );
+  }
 });

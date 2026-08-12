@@ -39,6 +39,11 @@ recollection, including the user's.
    and ask before switching; never switch branches silently. During execution,
    never re-dispatch a task the ledger records as committed.
 
+Both asks above are gates — which cycle to resume, and whether to switch
+branches — and a resume already carries a run record, so an Other answer at
+either appends `user-correction-at-gate` to the run the chosen state file names,
+whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
+
 ## Announce the derived position
 
 Before doing anything else, tell the user where the cycle stands, from file evidence
