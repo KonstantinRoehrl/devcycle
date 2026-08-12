@@ -898,27 +898,69 @@ test("the run-record write-site table declares the event kind", () => {
 });
 
 // The invariant, not today's file list: a surface that asks the user anything is a surface
-// where an "Other" answer can happen, so it must point at the rule that owns the append.
+// where an "Other" answer can happen, so it must point at the rule that owns the append —
+// wherever that append is possible at all. It needs a run record, and a command that never
+// writes a run-record line hands its playbook a run with no id to append to, so the citation
+// there would be an instruction no one can follow. Both halves are derived from the surface
+// rather than listed, so the exempt set moves by itself when a command starts minting a run
+// record. A playbook the cycle also reaches (`reviewing-code.md` is the audit stage) stays
+// exempt: its instruction would have to hold on the standalone entry too, and there it cannot.
 // references/ledger.md is the owner being cited, never a citer of itself.
-test("every surface that asks via AskUserQuestion cites the user-correction-at-gate write site", () => {
-  const OWNER = "references/ledger.md";
-  const missing = [];
-  for (const dir of ["commands", "playbooks", "references"])
-    for (const f of readdirSync(join(root, dir))) {
-      if (!f.endsWith(".md")) continue;
-      const path = `${dir}/${f}`;
-      if (path === OWNER) continue;
-      const text = read(path);
-      if (!text.includes("AskUserQuestion")) continue;
-      const cited = text
+const OWNER = "references/ledger.md";
+const RUN_RECORD = "run-record.mjs";
+
+// Every runtime surface file, the same four directories `scripts/validate.mjs` counts.
+const surfaceFiles = () =>
+  ["commands", "playbooks", "references", "agents"].flatMap((dir) =>
+    readdirSync(join(root, dir))
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => `${dir}/${f}`)
+  );
+
+// The playbooks entered with no run record behind them: those a command that writes no
+// run-record line at all hands its run to.
+const runlessSurfaces = () => {
+  const runless = new Set();
+  for (const path of surfaceFiles().filter((p) => p.startsWith("commands/"))) {
+    const text = read(path);
+    if (text.includes(RUN_RECORD)) continue;
+    for (const [, target] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(playbooks\/[A-Za-z0-9._-]+\.md)/g))
+      runless.add(target);
+  }
+  return runless;
+};
+
+test("every in-cycle surface that asks via AskUserQuestion cites the user-correction-at-gate write site", () => {
+  const files = surfaceFiles();
+  assert.ok(files.length > 0, "no surface file was scanned — every assertion below would run over nothing");
+  assert.ok(
+    files.some((p) => read(p).includes(`${RUN_RECORD} new`)),
+    `no surface mints a run record (\`${RUN_RECORD} new\`) — the whole surface would read as exempt`
+  );
+  const exempt = runlessSurfaces();
+  assert.ok(exempt.size > 0, "no command outside the cycle hands its run to a playbook — the exemption derived nothing");
+  const asking = files.filter((p) => p !== OWNER && read(p).includes("AskUserQuestion"));
+  assert.ok(asking.length > 0, "no surface asks via AskUserQuestion — every assertion below would run over nothing");
+
+  const missing = asking.filter(
+    (path) =>
+      !exempt.has(path) &&
+      !read(path)
         .split(/\n\s*\n/)
-        .some((block) => block.includes("user-correction-at-gate") && block.includes(`\${CLAUDE_PLUGIN_ROOT}/${OWNER}`));
-      if (!cited) missing.push(path);
-    }
+        .some((block) => block.includes("user-correction-at-gate") && block.includes(`\${CLAUDE_PLUGIN_ROOT}/${OWNER}`))
+  );
   assert.deepEqual(
     missing,
     [],
-    `these surfaces ask via AskUserQuestion but never cite the user-correction-at-gate write site in ${OWNER}, ` +
-      `so an "Other" answer there appends nothing: ${missing.join(", ")}`
+    `these surfaces ask via AskUserQuestion inside a cycle run but never cite the user-correction-at-gate write site ` +
+      `in ${OWNER}, so an "Other" answer there appends nothing: ${missing.join(", ")}`
+  );
+
+  const unfollowable = [...exempt].filter((path) => read(path).includes("user-correction-at-gate"));
+  assert.deepEqual(
+    unfollowable,
+    [],
+    `these surfaces are reached from a command that mints no run record, so there is nothing to append to, ` +
+      `yet they instruct the append anyway: ${unfollowable.join(", ")}`
   );
 });

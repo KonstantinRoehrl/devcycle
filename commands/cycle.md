@@ -33,7 +33,7 @@ a collision. At any other stage, surface the collision and ask — never overwri
 ## Triage the input
 
 Judge `$ARGUMENTS` on three axes, then confirm every verdict with the user in ONE
-AskUserQuestion **before any stage runs**. Nothing here is profile-conditional.
+AskUserQuestion **before any stage runs**. Nothing here is profile-conditional. An Other answer, here or at any later gate of this cycle, appends `user-correction-at-gate`, whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
 
 **Maturity** picks the entry stage: a rough idea, vague ticket, or one-liner starts at
 **scoping**; a detailed ticket or spec skips it for **brainstorm** as a validation pass, or
@@ -87,7 +87,7 @@ single source of truth — `scripts/validate.mjs` reads its literal form:
    belongs to brainstorm, which takes the report as its context; if diagnosis overturns the
    confirmed scope, return to scoping.
 4. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified) with two notes on top.
-   Ask in AskUserQuestion batches of 1–4 with concrete options plus Other — an Other answer appends `user-correction-at-gate`, whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns — where upstream asks
+   Ask in AskUserQuestion batches of 1–4 with concrete options plus Other, where upstream asks
    one question at a time. And before upstream's "commit the design document to git" step, check
    whether the spec's path is covered by the target repo's own `.gitignore` (`git check-ignore`);
    if so, write the file but skip the commit. An approved spec transitions to planning below,

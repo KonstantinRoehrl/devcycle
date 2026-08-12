@@ -116,7 +116,7 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
    explicit decision**: per-item `AskUserQuestion`, 1–4 at a time; no candidate leaves this set to
    skip its round, and a `contradiction-resolution` needs an explicit human choice between its two
    preserved sides. Granularity changes; nothing is ever auto-applied. Name the side effects
-   **before** asking: how many promotion records will be written, how many memories deleted. An Other answer to any question here appends `user-correction-at-gate`, the rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
+   **before** asking: how many promotion records will be written, how many memories deleted.
 
 If the engine errors, times out, or leaves its corpus unreadable, report that and continue with raw
 1:1 memory-entry batching: mining never blocks landing, and its failure is never silently swallowed.
