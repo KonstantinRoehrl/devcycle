@@ -836,3 +836,101 @@ test("command ceiling: an eighth command fails", () => {
   assert.match(stderr, /8 commands > 7/);
   assert.match(stderr, /surface decision/);
 });
+
+// --- check 18: the model-tier table is well-formed ---
+
+const TIERS_PATH = "references/model-tiers.json";
+const tiers = (dir, value) => writeInto(dir, TIERS_PATH, JSON.stringify(value, null, 2) + "\n");
+const withContext = (dir) => writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": 999999 }, null, 2) + "\n");
+
+test("model tiers: a missing table fails", () => {
+  const dir = makePluginFixture();
+  rmSync(join(dir, TIERS_PATH));
+  assert.match(runValidate(dir).stderr, /model-tiers\.json: missing/);
+});
+
+test("model tiers: a table that is JSON null fails instead of passing silently", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, null);
+  assert.match(runValidate(dir).stderr, /model-tiers\.json: must be an array/);
+});
+
+test("model tiers: non-ascending ranks fail", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, [
+    { family: "sonnet", rank: 2, match: "sonnet" },
+    { family: "haiku", rank: 1, match: "haiku" },
+  ]);
+  assert.match(runValidate(dir).stderr, /ranks must ascend/);
+});
+
+test("model tiers: duplicate ranks fail", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, [
+    { family: "haiku", rank: 1, match: "haiku" },
+    { family: "sonnet", rank: 1, match: "sonnet" },
+  ]);
+  assert.match(runValidate(dir).stderr, /ranks must ascend/);
+});
+
+test("model tiers: a match that is not a valid regular expression fails", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, [{ family: "haiku", rank: 1, match: "haiku(" }]);
+  assert.match(runValidate(dir).stderr, /match .* is not a valid regular expression/);
+});
+
+test("model tiers: a duplicate family fails", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, [
+    { family: "haiku", rank: 1, match: "haiku" },
+    { family: "haiku", rank: 2, match: "haiku-2" },
+  ]);
+  assert.match(runValidate(dir).stderr, /duplicate family/);
+});
+
+test("model tiers: a table that is not valid JSON fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, TIERS_PATH, "[{ family: haiku }]\n");
+  assert.match(runValidate(dir).stderr, /model-tiers\.json: not valid JSON/);
+});
+
+test("model tiers: an entry with no family fails", () => {
+  const dir = makePluginFixture();
+  tiers(dir, [{ rank: 1, match: "haiku" }]);
+  assert.match(runValidate(dir).stderr, /model-tiers\.json\[0\]: family must be a non-empty string, got undefined/);
+});
+
+test("model tiers: a non-integer rank fails rather than coercing", () => {
+  const dir = makePluginFixture();
+  tiers(dir, [{ family: "haiku", rank: "1", match: "haiku" }]);
+  assert.match(runValidate(dir).stderr, /model-tiers\.json\[0\]: rank must be an integer, got "1"/);
+});
+
+test("model tiers: an empty match fails", () => {
+  const dir = makePluginFixture();
+  tiers(dir, [{ family: "haiku", rank: 1, match: "" }]);
+  assert.match(runValidate(dir).stderr, /model-tiers\.json\[0\]: match must be a non-empty string, got ""/);
+});
+
+test("model tiers: an empty table fails rather than ranking nothing", () => {
+  const dir = makePluginFixture();
+  tiers(dir, []);
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /model-tiers\.json: 0 entries, at least 1 required/);
+  assert.match(stderr, /session tier/);
+});
+
+test("model tiers: a well-formed table passes", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, [
+    { family: "haiku", rank: 1, match: "haiku" },
+    { family: "sonnet", rank: 2, match: "sonnet" },
+  ]);
+  assert.equal(runValidate(dir).status, 0, runValidate(dir).stderr);
+});

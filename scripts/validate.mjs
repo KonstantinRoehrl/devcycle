@@ -568,5 +568,65 @@ if (commandCount > COMMAND_CEILING)
       `not a file addition; raise this ceiling deliberately or fold the new entry point into an existing one`
   );
 
+// 18. The model-tier table (references/model-tiers.json) is well-formed: every entry names a
+//     family, an integer rank and a compilable match, ranks ascend strictly, and no family
+//     repeats. The ceiling rule in references/config.md is only as trustworthy as this ordering,
+//     and scripts/model-pool.mjs reads it verbatim.
+const TIERS_PATH_REL = "references/model-tiers.json";
+const tiersFile = join(root, TIERS_PATH_REL);
+if (!existsSync(tiersFile)) {
+  fail(`${TIERS_PATH_REL}: missing — the orchestrator ceiling has no ordering to rank against`);
+} else {
+  // `parsed` tracks whether a usable table survived, for check 14's reason: a `tierTable === null`
+  // sentinel cannot tell "parse failed" from a file whose whole content legally parses to `null`.
+  let tierTable, parsed = true;
+  try {
+    tierTable = JSON.parse(readFileSync(tiersFile, "utf8"));
+  } catch (e) {
+    parsed = false;
+    fail(`${TIERS_PATH_REL}: not valid JSON — ${e.message}`);
+  }
+  if (parsed && !Array.isArray(tierTable)) {
+    fail(`${TIERS_PATH_REL}: must be an array`);
+    parsed = false;
+  }
+  if (parsed) {
+    // An empty table is the one well-formed-looking shape the loop below cannot catch: it runs
+    // zero times, so `rank()` returns null for every id and every dispatch degrades to the
+    // session tier — policy-free, and silently so.
+    if (tierTable.length === 0)
+      fail(
+        `${TIERS_PATH_REL}: 0 entries, at least 1 required — an empty table ranks no family, so ` +
+          `every dispatch would fall back to the session tier; restore the tier entries`
+      );
+    const families = [];
+    let previousRank = null;
+    for (const [i, e] of tierTable.entries()) {
+      const at = `${TIERS_PATH_REL}[${i}]`;
+      if (typeof e?.family !== "string" || !e.family)
+        fail(`${at}: family must be a non-empty string, got ${JSON.stringify(e?.family)}`);
+      else families.push(e.family);
+      if (!Number.isInteger(e?.rank)) fail(`${at}: rank must be an integer, got ${JSON.stringify(e?.rank)}`);
+      else {
+        if (previousRank !== null && e.rank <= previousRank)
+          fail(`${at}: ranks must ascend strictly — ${e.rank} follows ${previousRank}; renumber or reorder the table so each rank exceeds the one before`);
+        previousRank = e.rank;
+      }
+      if (typeof e?.match !== "string" || !e.match)
+        fail(`${at}: match must be a non-empty string, got ${JSON.stringify(e?.match)}`);
+      else {
+        try {
+          new RegExp(e.match);
+        } catch (err) {
+          fail(`${at}: match ${JSON.stringify(e.match)} is not a valid regular expression — ${err.message}`);
+        }
+      }
+    }
+    const dupeFamilies = [...new Set(families.filter((f, i) => families.indexOf(f) !== i))];
+    if (dupeFamilies.length)
+      fail(`${TIERS_PATH_REL}: duplicate family name(s) ${dupeFamilies.join(", ")} — each family must appear exactly once, or the ranking it resolves to is ambiguous`);
+  }
+}
+
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
 console.log("validate: ok");

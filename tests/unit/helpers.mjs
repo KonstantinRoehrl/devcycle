@@ -99,6 +99,13 @@ export function makePluginFixture() {
       2
     ) + "\n"
   );
+  // Check 18 requires the tier table to exist; every fixture tree ships a minimal valid one,
+  // the same way it ships a culprit vocabulary.
+  writeInto(
+    dir,
+    "references/model-tiers.json",
+    JSON.stringify([{ family: "fixture-family", rank: 1, match: "fixture" }], null, 2) + "\n"
+  );
   // Check 9 reads its limits from a committed baseline, so every fixture tree ships one.
   writeInto(
     dir,
