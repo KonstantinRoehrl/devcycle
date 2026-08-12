@@ -1779,3 +1779,38 @@ test("an unresolved concurrent-wave turn (agentId set, no matching dispatch) is 
   assert.strictEqual(attributed.taskId, null);
   assert.strictEqual(attributed.attributionSource, "inferred"); // was "record" — the live M3 bug
 });
+
+// --- the friction journal's `event` lines, read back per session ---
+
+test("readRunRecords collects event lines and merges them across session windows", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rr-events-"));
+  mkdirSync(join(dir, "repo-1a2b3c4d"), { recursive: true });
+  writeFileSync(join(dir, "repo-1a2b3c4d", "aaaa.jsonl"), [
+    JSON.stringify({ kind: "run", runId: "a".repeat(16), schemaVersion: 1, pluginVersion: "0.13.0",
+      pluginSha: "abc1234", repoSlug: "repo-1a2b3c4d", profile: "lean", knobs: {},
+      startedAt: "2026-08-12T10:00:00Z" }),
+    JSON.stringify({ kind: "session", runId: "a".repeat(16), sessionHash: "b".repeat(64) }),
+    JSON.stringify({ kind: "event", runId: "a".repeat(16), event: "gate-fail",
+      stage: "execution", task: "1", culprit: null, ts: "2026-08-12T10:05:00Z" }),
+    JSON.stringify({ kind: "session", runId: "a".repeat(16), sessionHash: "b".repeat(64) }),
+    JSON.stringify({ kind: "event", runId: "a".repeat(16), event: "gate-pass-clean",
+      stage: "execution", task: "1", culprit: null, ts: "2026-08-12T10:15:00Z" }),
+  ].join("\n") + "\n");
+
+  const rec = readRunRecords(dir).get("b".repeat(64));
+  assert.equal(rec.events.length, 2, "events from both session windows must survive the merge");
+  assert.deepEqual(rec.events.map((e) => e.event), ["gate-fail", "gate-pass-clean"]);
+  assert.equal(rec.profile, "lean");
+});
+
+test("a session with no run record reports profile unknown rather than erroring", () => {
+  // An empty runRecords map is exactly the historical case: transcripts written before the run
+  // record existed. summarizeSession must degrade, not throw.
+  const turns = [turn({
+    timestamp: "2026-08-12T10:00:00Z",
+    message: { model: "claude-sonnet-5", usage: { input_tokens: 10, output_tokens: 5 }, content: [] },
+  })];
+  const summary = summarizeSession("no-record-session", turns, new Map());
+  assert.equal(summary.profile, "unknown");
+  assert.equal(summary.pluginVersion, "unknown");
+});

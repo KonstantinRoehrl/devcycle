@@ -656,7 +656,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
       // file and do not reset on a `session` line.
       let runId = null, pluginVersion = null, profile = null, knobs = null, schemaMismatch;
       let current = null;
-      const windows = new Map(); // sessionHash -> { stages, dispatches, verdicts }, file order
+      const windows = new Map(); // sessionHash -> { stages, dispatches, verdicts, events }, file order
       for (const line of readFileSync(join(dir, repo.name, f), "utf8").split("\n").filter(Boolean)) {
         let o;
         try { o = JSON.parse(line); } catch { continue; } // a torn trailing line is normal
@@ -668,16 +668,22 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
           if (o.schemaVersion !== CURRENT_SCHEMA_VERSION) schemaMismatch = true;
         } else if (o.kind === "session") {
           current = o.sessionHash;
-          if (!windows.has(current)) windows.set(current, { stages: [], dispatches: [], verdicts: [] });
+          if (!windows.has(current))
+            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [] });
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
+        else if (o.kind === "event") { if (current) windows.get(current).events.push(o); }
       }
       for (const [h, w] of windows) {
         const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, ...w };
         const prior = bySession.get(h);
         bySession.set(h, prior
-          ? { ...rec, stages: [...prior.stages, ...rec.stages], dispatches: [...prior.dispatches, ...rec.dispatches], verdicts: [...prior.verdicts, ...rec.verdicts] }
+          ? { ...rec,
+              stages: [...prior.stages, ...rec.stages],
+              dispatches: [...prior.dispatches, ...rec.dispatches],
+              verdicts: [...prior.verdicts, ...rec.verdicts],
+              events: [...prior.events, ...rec.events] }
           : rec);
       }
     }
@@ -809,6 +815,10 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   const record = runRecords.get(sha256(sessionId));
   const attributionRecord = record?.schemaMismatch ? null : record;
   let pluginVersion = record?.pluginVersion ?? null;
+  // Already recorded per run (run-record.schema.json's `run` kind) and already parsed by
+  // readRunRecords; this is the first consumer. No transcript-side fallback exists for
+  // profile — a session with no record simply has none.
+  const profile = record?.profile ?? null;
   // No transcript-side fallback for knobs (unlike pluginVersion, above) — a session with no
   // knob data (pre branch-fix-2-3's --knob wiring, or a run that never resolved the knob)
   // reads as absent, never an error.
@@ -896,7 +906,8 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     unpriced,
     cacheBand: costBand(priced),
     models,
-    pluginVersion,
+    profile: profile ?? "unknown",
+    pluginVersion: pluginVersion ?? "unknown",
     knobs,
     attributionSource,
     complianceCandidates: emitComplianceCandidates(toolCallEvents, record),
