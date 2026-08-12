@@ -8,7 +8,9 @@ the history below; both parse it.
 
 Append-only: every future `userConfig` change adds a new record here in the same PR that
 ships it — a written discipline `bump-version.yml`'s automation does not (and should not)
-enforce mechanically, alongside the existing "no phase double-defined" rule.
+enforce mechanically, alongside the existing "no phase double-defined" rule. A record
+written before its release carries `version: "unreleased"`; the release step replaces that
+marker with the version the change lands in, since only the release computes that number.
 
 ```yaml
 - version: "0.4.0"
@@ -57,4 +59,20 @@ enforce mechanically, alongside the existing "no phase double-defined" rule.
   change: added
   key: reviewDepth
   note: "depth-gate and model-routing predicates refined per the token-audit follow-through (#28/#29) — not a new key, a behavior refinement of the existing one"
+- version: "unreleased"
+  change: added
+  key: implementerModel
+  note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
+- version: "unreleased"
+  change: added
+  key: taskReviewerModel
+  note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
+- version: "unreleased"
+  change: added
+  key: walkthroughModel
+  note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
+- version: "unreleased"
+  change: added
+  key: branchReviewModel
+  note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
 ```
