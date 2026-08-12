@@ -397,5 +397,67 @@ if (existsSync(schemaPath)) {
   }
 }
 
+// 14. The culprit vocabulary (references/culprits.json) is well-formed: sorted, unique,
+//     lowercase-hyphen slugs of at most 6 words, kinds from the enum, phases from
+//     commands/cycle.md's stage enum, semver since/resolved-in, resolved-in never earlier
+//     than since. The file is part of the shipped surface, so absence is a failure.
+const culpritsPath = join(root, "references/culprits.json");
+const CULPRIT_KINDS = new Set([
+  "friction", "correction", "rule-violation", "decision", "contradiction", "win",
+]);
+const CULPRIT_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+){0,5}$/;
+const SEMVER_RE = /^\d+\.\d+\.\d+$/;
+const cmpSemver = (a, b) => {
+  const [A, B] = [a.split(".").map(Number), b.split(".").map(Number)];
+  return A[0] - B[0] || A[1] - B[1] || A[2] - B[2];
+};
+if (!existsSync(culpritsPath)) {
+  fail("references/culprits.json: missing — the culprit vocabulary is part of the shipped surface");
+} else {
+  let vocab = null;
+  try {
+    vocab = JSON.parse(readFileSync(culpritsPath, "utf8"));
+  } catch (e) {
+    fail(`references/culprits.json: not valid JSON — ${e.message}`);
+  }
+  if (vocab !== null && !Array.isArray(vocab)) {
+    fail("references/culprits.json: must be an array");
+    vocab = null;
+  }
+  if (vocab) {
+    const slugs = [];
+    for (const [i, e] of vocab.entries()) {
+      const at = `references/culprits.json[${i}]`;
+      for (const f of ["slug", "kind", "phase", "desc", "since"])
+        if (!(f in e)) fail(`${at}: missing "${f}"`);
+      if (typeof e.slug === "string") {
+        slugs.push(e.slug);
+        if (!CULPRIT_SLUG_RE.test(e.slug))
+          fail(`${at}: slug "${e.slug}" is not lowercase-hyphen of at most 6 words`);
+      }
+      if (!CULPRIT_KINDS.has(e.kind))
+        fail(`${at}: kind "${e.kind}" is not one of ${[...CULPRIT_KINDS].join(" | ")}`);
+      if (!Array.isArray(e.phase) || e.phase.length === 0)
+        fail(`${at}: phase must be a non-empty array`);
+      else
+        for (const p of e.phase) {
+          if (!stages.size) fail(`${at}: phase "${p}" unverifiable — no stage enum in commands/cycle.md`);
+          else if (!stages.has(p)) fail(`${at}: phase "${p}" is not in commands/cycle.md's stage enum`);
+        }
+      if (!SEMVER_RE.test(e.since ?? "")) fail(`${at}: since "${e.since}" is not semver`);
+      if ("resolved-in" in e) {
+        if (!SEMVER_RE.test(e["resolved-in"]))
+          fail(`${at}: resolved-in "${e["resolved-in"]}" is not semver`);
+        else if (SEMVER_RE.test(e.since ?? "") && cmpSemver(e["resolved-in"], e.since) < 0)
+          fail(`${at}: resolved-in ${e["resolved-in"]} precedes since ${e.since}`);
+      }
+    }
+    if (slugs.join("\n") !== [...slugs].sort().join("\n"))
+      fail("references/culprits.json: entries must be sorted by slug");
+    const dupes = [...new Set(slugs.filter((s, i) => slugs.indexOf(s) !== i))];
+    if (dupes.length) fail(`references/culprits.json: duplicate slug(s) ${dupes.join(", ")}`);
+  }
+}
+
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
 console.log("validate: ok");

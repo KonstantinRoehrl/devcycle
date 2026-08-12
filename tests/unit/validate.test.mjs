@@ -2,7 +2,7 @@
 // plugin trees. Every test starts from a green fixture and breaks one thing.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, mkdtempSync, cpSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, cpSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -607,4 +607,59 @@ test("check 13 rule 2 fails when no surface instruction names --knob for the kno
   cpSync(REPO_ROOT, passDir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const rPass = spawnSync(process.execPath, [join(passDir, "scripts/validate.mjs")], { cwd: passDir, encoding: "utf8" });
   assert.strictEqual(rPass.status, 0, rPass.stdout + rPass.stderr);
+});
+
+// --- check 14: the culprit vocabulary is well-formed ---
+
+const culprits = (dir, entries) => writeInto(dir, "references/culprits.json", JSON.stringify(entries));
+
+test("check 14 fails on an unsorted culprits.json", () => {
+  const dir = makePluginFixture();
+  culprits(dir, [
+    { slug: "zebra-pattern", kind: "friction", phase: ["execution"], desc: "z", since: "0.13.0" },
+    { slug: "alpha-pattern", kind: "friction", phase: ["execution"], desc: "a", since: "0.13.0" },
+  ]);
+  failsWith(runValidate(dir), /must be sorted by slug/);
+});
+
+test("check 14 fails on a kind outside the enum and a phase outside the stage enum", () => {
+  const dir = makePluginFixture();
+  culprits(dir, [
+    { slug: "alpha-pattern", kind: "not-a-kind", phase: ["not-a-stage"], desc: "a", since: "0.13.0" },
+  ]);
+  failsWith(
+    runValidate(dir),
+    /kind "not-a-kind" is not one of/,
+    /phase "not-a-stage" is not in commands\/cycle\.md's stage enum/
+  );
+});
+
+test("check 14 fails on a duplicate slug", () => {
+  const dir = makePluginFixture();
+  culprits(dir, [
+    { slug: "alpha-pattern", kind: "friction", phase: ["execution"], desc: "a", since: "0.13.0" },
+    { slug: "alpha-pattern", kind: "win", phase: ["execution"], desc: "b", since: "0.13.0" },
+  ]);
+  failsWith(runValidate(dir), /duplicate slug\(s\) alpha-pattern/);
+});
+
+test("check 14 fails when resolved-in precedes since", () => {
+  const dir = makePluginFixture();
+  culprits(dir, [
+    { slug: "alpha-pattern", kind: "friction", phase: ["execution"], desc: "a",
+      since: "0.14.0", "resolved-in": "0.13.0" },
+  ]);
+  failsWith(runValidate(dir), /resolved-in 0\.13\.0 precedes since 0\.14\.0/);
+});
+
+test("check 14 fails when culprits.json is missing entirely", () => {
+  const dir = makePluginFixture();
+  rmSync(join(dir, "references/culprits.json"), { force: true });
+  failsWith(runValidate(dir), /references\/culprits\.json: missing/);
+});
+
+test("check 14 passes on the repo's own shipped vocabulary", () => {
+  const r = spawnSync(process.execPath, [join(REPO_ROOT, "scripts/validate.mjs")],
+    { cwd: REPO_ROOT, encoding: "utf8" });
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
 });

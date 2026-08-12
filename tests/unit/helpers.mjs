@@ -89,6 +89,17 @@ export function makePluginFixture() {
     "# Routing\n\n| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n| run the pipeline | `cycle` | confirm-first | yes |\n"
   );
   writeInto(dir, "commands/cycle.md", '---\ndescription: "Fixture command."\n---\n\n# /devcycle:cycle\n\n- stage: <scoping|planning|execution>\n');
+  // Check 14 requires the vocabulary to exist; every fixture tree therefore ships a minimal
+  // valid one, the same way it ships a routing table for check 11.
+  writeInto(
+    dir,
+    "references/culprits.json",
+    JSON.stringify(
+      [{ slug: "fixture-pattern", kind: "friction", phase: ["execution"], desc: "Fixture entry.", since: "0.0.1" }],
+      null,
+      2
+    ) + "\n"
+  );
   return dir;
 }
 
