@@ -42,3 +42,4 @@ two logs never merge. One row per write site, not a restatement of `tests/fixtur
 | `dispatch` | once per implementer dispatch, at step 4 (report received) — never at step 3 (dispatch), since `endedAt`/`outcome`/round/retry are unknown until the envelope returns | `playbooks/executing-waves.md` |
 | `verdict` | once per review round, at step 5 (after `event=review-verdict`) — never at step 4, since `round`/`blockingCount`/`conformance` are unknown until review runs | `playbooks/executing-waves.md` |
 | `commit` | once per task commit, at step 7 | `playbooks/executing-waves.md` |
+| `event` | `gate-fail` / `gate-pass-clean` once per green-gate run, at step 6; `user-correction-at-gate` at any AskUserQuestion the user answers via "Other" — the stage only, never the typed text | `playbooks/executing-waves.md`, and every surface that asks |

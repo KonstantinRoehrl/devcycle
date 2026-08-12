@@ -881,3 +881,18 @@ test("harvested: verifying-on-device/no-script-checkoff — only a structural ch
   assert.match(v, /`human-required`: the stage is complete ONLY when every non-`\(auto\)` item has a human\s+verdict/);
   assert.match(v, /\*\*ONE question per checklist item, never batched\*\*/);
 });
+
+test("the green gate step instructs both journal appends", () => {
+  const text = read("playbooks/executing-waves.md");
+  assert.match(text, /--kind event --event\s+gate-fail/,
+    "a failing green gate must append a gate-fail event");
+  assert.match(text, /--event gate-pass-clean/,
+    "a clean green gate must append a gate-pass-clean event");
+});
+
+test("the run-record write-site table declares the event kind", () => {
+  const row = read("references/ledger.md").split("\n").find((l) => l.startsWith("| `event` |"));
+  assert.ok(row, "references/ledger.md's write-site table has no row for the event kind");
+  assert.match(row, /gate-fail/);
+  assert.match(row, /user-correction-at-gate/);
+});

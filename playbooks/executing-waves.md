@@ -53,20 +53,18 @@ file conflicts these invariants already preserve.)
 
 1. **Read the ledger first.** A task with an `event=committed` entry is done — never re-dispatch it.
 2. **Slice the brief**, carrying exactly: the task's id (the plan's task number); `**Files:**`
-   (create/modify/test); `**Interfaces:**` (consumes/produces, exact signatures); `**Dependencies:**`;
-   the `**Evidence:**` class from the plan; an `**Evidence tail:** <N>` line, `<N>` from the profile;
-   the task's steps; the global constraints and pinned interfaces that apply; the task's quality
-   constraints resolved; and one named reference,
-   `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` § Read discipline. Nothing else, and nothing
-   restated that a named reference owns — `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` owns the
-   evidence classes, the evidence file paths (keyed on the task id, which is why every brief carries
-   it), and the report shape the implementer must produce.
-   - **Resolve the quality constraints:** look each id on the task's `**Quality constraints:**` line
-     up in the plan's `## Quality Constraints` section and splice those lines in verbatim, ids
-     included, since a bare `QC3` is unreadable to an implementer. **Never the whole criteria
-     catalog, and never the plan's whole constraints section** — only the lines this task's ids name;
-     `references/quality-criteria.md`'s cost rule owns why. A task declaring `none`, or a plan with
-     no such section, adds nothing here.
+   (create/modify/test); `**Interfaces:**` (consumes/produces, exact signatures); `**Dependencies:**`; the
+   `**Evidence:**` class from the plan; an `**Evidence tail:** <N>` line, `<N>` from the profile; the
+   task's steps; the global constraints and pinned interfaces that apply; the task's quality constraints
+   resolved; and one named reference, `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` § Read discipline.
+   Nothing else, and nothing restated that a named reference owns —
+   `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` owns the evidence classes, the evidence file paths (keyed
+   on the task id, which is why every brief carries it), and the report shape the implementer must produce.
+   - **Resolve the quality constraints:** look each id on the task's `**Quality constraints:**` line up in
+     the plan's `## Quality Constraints` section and splice those lines in verbatim, ids included, since a
+     bare `QC3` is unreadable to an implementer. **Never the whole criteria catalog, and never the plan's
+     whole constraints section** — only the lines this task's ids name; `references/quality-criteria.md`'s
+     cost rule owns why. A task declaring `none`, or a plan with no such section, adds nothing here.
    - **Preload what the evidence class needs:** splice exactly what
      `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Preloading a class into a brief names.
 3. **Dispatch devcycle:implementer** with that brief only, never accumulated session history or other
@@ -100,17 +98,18 @@ file conflicts these invariants already preserve.)
    that reaches round 3 without acceptance exits `exhausted-unresolved` and is surfaced to the user
    as a decision, never committed as if it had passed.
 6. **Green gate (REQUIRED, deterministic).** Before accepting, re-run the task's test command
-   yourself and read the exit status. A repo with no test suite runs its documented convention
-   instead. On failure, acceptance is blocked: no commit, ledger
-   `event=review-verdict outcome=rejected (green gate: <symptom>)`, back to the implementer; if
-   this round's own reviewer wrote `conformance=pass`, also append a `verdict` line with
-   `conformance=fail` for this round — a reviewer-rejected round never wrote `conformance=pass`.
+   yourself and read the exit status. A repo with no test suite runs its documented convention instead.
+   On failure, acceptance is blocked: no commit, ledger
+   `event=review-verdict outcome=rejected (green gate: <symptom>)`, back to the implementer; if this
+   round's own reviewer wrote `conformance=pass`, also append a `verdict` line with `conformance=fail` for
+   this round — a reviewer-rejected round never wrote `conformance=pass`. Journal the outcome either way:
+   `run-record.mjs append --run <id> --kind event --event gate-fail --stage execution --task <task-id>` on
+   a failure, `--event gate-pass-clean` on a clean pass. Enums and ids only — never the failure text.
 7. **Branch re-check, then commit.** Immediately before the commit, re-run
    `git rev-parse --abbrev-ref HEAD` against the recorded `branch:` line, per
-   `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s per-commit re-check; a mismatch stops the run
-   rather than committing to the wrong branch. Then, on acceptance: a local commit with a
-   Conventional Commit subject, scoped per
-   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit". Ledger
+   `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s per-commit re-check; a mismatch stops the run rather than
+   committing to the wrong branch. Then, on acceptance: a local commit with a Conventional Commit subject,
+   scoped per `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit". Ledger
    `event=committed` with the sha, then `run-record.mjs append --kind commit` with the task id and sha.
 
 **Trigger: this commit closes the wave.** When no task in the current wave remains undispatched, in
