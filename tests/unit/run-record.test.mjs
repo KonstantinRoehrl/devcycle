@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync, cpSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync, copyFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -345,21 +345,35 @@ test("culprit accepts null, a vocabulary slug and a novel: slug, and rejects any
 });
 
 test("culprit lookup fails cleanly, not with a stack trace, when culprits.json is valid JSON but not an array", () => {
-  // validateCulprit() resolves references/culprits.json relative to the script's own location,
-  // so the script needs to run from a copy of the tree whose culprits.json is malformed.
+  // validateCulprit() resolves both tests/fixtures/run-record.schema.json and
+  // references/culprits.json relative to the script's own location, so the script needs to run
+  // from a tree shaped like the repo's — but only those two files plus the script itself, not a
+  // full copy of the working tree (which would drag gitignored local files into /tmp and leave
+  // them there).
   const treeDir = realpathSync(mkdtempSync(join(tmpdir(), "rr-vocab-tree-")));
-  cpSync(REPO_ROOT, treeDir, { recursive: true, filter: (s) => !s.includes("/.git/") });
-  writeFileSync(join(treeDir, "references/culprits.json"), JSON.stringify({ not: "an array" }));
+  try {
+    mkdirSync(join(treeDir, "scripts"), { recursive: true });
+    mkdirSync(join(treeDir, "tests/fixtures"), { recursive: true });
+    mkdirSync(join(treeDir, "references"), { recursive: true });
+    copyFileSync(join(REPO_ROOT, "scripts/run-record.mjs"), join(treeDir, "scripts/run-record.mjs"));
+    copyFileSync(
+      join(REPO_ROOT, "tests/fixtures/run-record.schema.json"),
+      join(treeDir, "tests/fixtures/run-record.schema.json")
+    );
+    writeFileSync(join(treeDir, "references/culprits.json"), JSON.stringify({ not: "an array" }));
 
-  const runs = mkdtempSync(join(tmpdir(), "rr-vocab-runs-"));
-  const runId = "0f1e2d3c4b5a6978";
-  const r = spawnSync(process.execPath, [
-    join(treeDir, "scripts/run-record.mjs"), "append", "--run", runId, "--kind", "event",
-    "--event", "gate-fail", "--stage", "execution", "--ts", "2026-08-12T10:00:00Z",
-    "--culprit", "partial-evidence-capture",
-  ], { cwd: treeDir, encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: runs } });
+    const runs = mkdtempSync(join(tmpdir(), "rr-vocab-runs-"));
+    const runId = "0f1e2d3c4b5a6978";
+    const r = spawnSync(process.execPath, [
+      join(treeDir, "scripts/run-record.mjs"), "append", "--run", runId, "--kind", "event",
+      "--event", "gate-fail", "--stage", "execution", "--ts", "2026-08-12T10:00:00Z",
+      "--culprit", "partial-evidence-capture",
+    ], { cwd: treeDir, encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: runs } });
 
-  assert.equal(r.status, 1);
-  assert.doesNotMatch(r.stderr, /TypeError|at Object|at file:/);
-  assert.match(r.stderr, /culprits\.json/);
+    assert.equal(r.status, 1);
+    assert.doesNotMatch(r.stderr, /TypeError|at Object|at file:/);
+    assert.match(r.stderr, /culprits\.json/);
+  } finally {
+    rmSync(treeDir, { recursive: true, force: true });
+  }
 });

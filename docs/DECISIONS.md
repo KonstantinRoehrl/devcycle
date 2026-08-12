@@ -11,17 +11,18 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 `PLAYBOOK_LINE_MAX` (154) are deliberately left unchanged — this raise concerns only the total.
 
 **Why:** Wave 4 of the learning-overhaul-phase-1 plan adds `references/impact-scoring.md`, a
-single-owner impact-scoring definition doctor.mjs and learning-from-sessions.md both depend on.
-Before it landed the surface stood at 3,532 lines — 18 lines of headroom under the 3,550 budget
-set 2026-08-11 — not enough to absorb the new file without either compacting elsewhere or raising
-the budget. The 2026-08-11 entry's own precedent (a 3-line reflow, at no cost) does not scale
-here: reclaiming enough lines would mean cutting real content across files no single task owns,
-the outcome the budget exists to prevent rather than the trade it exists to force.
+single-owner impact-scoring definition doctor.mjs depends on (learning-from-sessions.md gains its
+own citation in a later phase, not this one). Before it landed the surface stood at 3,532 lines —
+18 lines of headroom under the 3,550 budget set 2026-08-11 — not enough to absorb the new file
+without either compacting elsewhere or raising the budget. The 2026-08-11 entry's own precedent (a
+3-line reflow, at no cost) does not scale here: reclaiming enough lines would mean cutting real
+content across files no single task owns, the outcome the budget exists to prevent rather than the
+trade it exists to force.
 
-**Measured:** the runtime surface reached **3,577** lines once `references/impact-scoring.md`
-landed; 3,620 leaves 43 lines of headroom for the plan's remaining phases.
+**Measured:** the runtime surface stands at **3,585** lines at this tip; 3,620 leaves 35 lines of
+headroom for the plan's remaining phases.
 
-**Supersedes:** The 3,550 total set 2026-08-11 (below). The 3,500 total set 2026-08-06 (`:105`)
+**Supersedes:** The 3,550 total set 2026-08-11 (below). The 3,500 total set 2026-08-06 (`:127`)
 and the per-file ceilings it named are unaffected.
 
 ## 2026-08-11 — Surface budget raised to 3,550; the "do not raise" ruling superseded

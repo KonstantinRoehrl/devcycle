@@ -658,6 +658,14 @@ test("check 14 fails when culprits.json is missing entirely", () => {
   failsWith(runValidate(dir), /references\/culprits\.json: missing/);
 });
 
+test("check 14 fails when culprits.json's whole content is the JSON literal null, not silently passing", () => {
+  const dir = makePluginFixture();
+  // `null` is valid JSON and the parse-failure sentinel used to be `null` itself, so a file
+  // containing exactly this bypassed both the array guard and the per-entry loop.
+  writeInto(dir, "references/culprits.json", "null");
+  failsWith(runValidate(dir), /references\/culprits\.json: must be an array/);
+});
+
 test("check 14 fails on a null entry instead of crashing on the \"slug\" in e check", () => {
   const dir = makePluginFixture();
   writeInto(dir, "references/culprits.json", JSON.stringify([null]));

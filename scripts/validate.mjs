@@ -416,17 +416,21 @@ const cmpSemver = (a, b) => {
 if (!existsSync(culpritsPath)) {
   fail("references/culprits.json: missing — the culprit vocabulary is part of the shipped surface");
 } else {
-  let vocab = null;
+  // `parsed` tracks whether JSON.parse succeeded — it cannot be impersonated by a legitimate
+  // parse result the way a `vocab === null` sentinel can, since the file's whole content may
+  // itself legally parse to `null` (or any other non-array value).
+  let vocab, parsed = true;
   try {
     vocab = JSON.parse(readFileSync(culpritsPath, "utf8"));
   } catch (e) {
+    parsed = false;
     fail(`references/culprits.json: not valid JSON — ${e.message}`);
   }
-  if (vocab !== null && !Array.isArray(vocab)) {
+  if (parsed && !Array.isArray(vocab)) {
     fail("references/culprits.json: must be an array");
-    vocab = null;
+    parsed = false;
   }
-  if (vocab) {
+  if (parsed) {
     const slugs = [];
     for (const [i, e] of vocab.entries()) {
       const at = `references/culprits.json[${i}]`;
