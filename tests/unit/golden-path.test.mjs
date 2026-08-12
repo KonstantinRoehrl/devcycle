@@ -988,12 +988,28 @@ const GATES_WITHOUT_THE_TOKEN = [
 // A block that names the token and the owner but neither claims nor denies the append is
 // `unclear`, and satisfies neither position — a rule the reader cannot act on is the failure
 // this check exists to catch, so it fails loudly instead of counting as cited.
+// A denial contains the affirmative verb by construction ("never appends", "does not append"),
+// so testing AFFIRMATIVE before NEGATIVE — or the reverse — both decide polarity by which array
+// happens to run first over text that matches both, not by the sentence's actual polarity. The
+// guard below is negation-aware instead: a block reads affirmative only if it contains the
+// affirmative verb with no negation word governing it nearby, in the same sentence. That is a
+// heuristic over prose, not a parser, and it has known blind spots — named here rather than left
+// for the check to silently miss:
+//   - it covers negation immediately before the verb ("never appends", "does not append", "no …
+//     is appended") within one sentence — the scan window stops at the next `.`, so a negation in
+//     an earlier or later sentence of the same block is not seen;
+//   - a negation word elsewhere in the *same* sentence, unrelated to the append, can still
+//     suppress a genuine affirmative — a false negative, which is the safer direction for a check
+//     whose job is proving the append is real rather than assuming it.
+const NEGATES_APPEND = /\b(?:never|not|no|none|nothing|nor|doesn't|does\s+not|won't|will\s+not)\b[^.]{0,60}?\bappend/i;
 const AFFIRMATIVE = [/\bappends\s+`user-correction-at-gate`/];
 const NEGATIVE = [
   /\bnone\s+of\s+them\s+journals\b/i,
   /\bjournals\s+(?:no|none)\b/i,
   /\bappends\s+nothing\b/i,
   /\bnever\s+appends\b/i,
+  /\bdoes\s+not\s+append\b/i,
+  /\bno\b[^.]{0,60}?\bis\s+appended\b/i,
 ];
 const citationBlocks = (text) =>
   text.split(/\n\s*\n/).filter((block) => block.includes(TOKEN) && block.includes(OWNER_REF));
@@ -1001,8 +1017,10 @@ const citationBlocks = (text) =>
 const citationVerdict = (text) => {
   const blocks = citationBlocks(text);
   if (blocks.length === 0) return "none";
-  if (blocks.some((block) => AFFIRMATIVE.some((phrase) => phrase.test(block)))) return "affirmative";
-  if (blocks.some((block) => NEGATIVE.some((phrase) => phrase.test(block)))) return "negative";
+  const isNegative = (block) => NEGATIVE.some((phrase) => phrase.test(block)) || NEGATES_APPEND.test(block);
+  const isAffirmative = (block) => AFFIRMATIVE.some((phrase) => phrase.test(block)) && !isNegative(block);
+  if (blocks.some(isAffirmative)) return "affirmative";
+  if (blocks.some(isNegative)) return "negative";
   return "unclear";
 };
 
@@ -1010,22 +1028,36 @@ const citationVerdict = (text) => {
 // cannot happen there. Listed, not derived: "before the mint" is a fact about when the text runs,
 // and nothing in the file structure carries it — `references/config.md`'s walkthrough is reached
 // from `commands/cycle.md` exactly like the stages that do append. The list going stale is
-// guarded in the test: an entry that stops gating, or that turns out to be exempt, fails.
+// guarded in the test: an entry that stops gating, or that stops running before the mint, fails.
 const PRE_MINT_SURFACES = ["references/config.md"];
+// The command each pre-mint entry is reached from, and the mint call its hand-off must precede —
+// listed here rather than derived for the same reason PRE_MINT_SURFACES is: "which command mints
+// after handing off to this entry" is not carried anywhere in the file structure, either. Both
+// lists have one entry today; a second pre-mint surface would need a citer of its own.
+const PRE_MINT_CITER = "commands/cycle.md";
+const MINT_CALL = `${RUN_RECORD} new`;
 
 test("the gate vocabulary still sees the surfaces that gate the user without naming AskUserQuestion", () => {
   const files = surfaceFiles();
   for (const path of GATES_WITHOUT_THE_TOKEN) {
-    assert.ok(
-      !read(path).includes("AskUserQuestion"),
-      `${path} now names AskUserQuestion literally, so it no longer proves the vocabulary reaches past the token`
-    );
     assert.ok(
       gatesUser(read(path)),
       `${path} gates the user in words GATE_PHRASES no longer matches — add the new wording to the vocabulary ` +
         `rather than letting this check go quiet on that surface`
     );
   }
+  // The point of this list is proving the vocabulary reaches past the literal token, which needs
+  // only one of the three to lack it — not all three. Requiring every entry to lack the token
+  // means a benign edit that adds it to just one of them (still caught by GATE_PHRASES on words
+  // other than the token) turns CI red with no defect to fix. Requiring none of the three to lack
+  // it would be the opposite failure: the proof would go quiet with all three silently converted.
+  const stillWordOnly = GATES_WITHOUT_THE_TOKEN.filter((path) => !read(path).includes("AskUserQuestion"));
+  assert.ok(
+    stillWordOnly.length > 0,
+    `every surface in GATES_WITHOUT_THE_TOKEN now names AskUserQuestion literally (${GATES_WITHOUT_THE_TOKEN.join(", ")}); ` +
+      `either add the wording one of them switched to into GATE_PHRASES, or drop that surface from this list — ` +
+      `the list needs at least one entry the vocabulary catches without the literal token`
+  );
   // Dead vocabulary is worse than none: a phrase matching nothing reads as coverage it has not got.
   for (const phrase of GATE_PHRASES)
     assert.ok(
@@ -1066,6 +1098,28 @@ test("an affirmative citation and a negative declaration are told apart", () => 
   assert.equal(citationVerdict(`A gate here relates to \`${TOKEN}\`, per \`${OWNER_REF}\`.`), "unclear");
 });
 
+test("a denial reads negative through wordings other than the one flip above exercises", () => {
+  // Same defect the flip above closed, reachable through different wording: the affirmative
+  // pattern (`appends \`user-correction-at-gate\``) matches as a substring of each of these
+  // denials, so a check that decides polarity by array order — whichever list it tests first —
+  // grades a surface declaring it journals nothing as satisfying the requirement to journal.
+  assert.equal(
+    citationVerdict(`This surface never appends \`${TOKEN}\`, per \`${OWNER_REF}\`.`),
+    "negative",
+    `a denial worded "never appends" must read negative, not affirmative`
+  );
+  assert.equal(
+    citationVerdict(`This surface does not append \`${TOKEN}\` here, per \`${OWNER_REF}\`.`),
+    "negative",
+    `a denial worded "does not append" must read negative, not affirmative`
+  );
+  assert.equal(
+    citationVerdict(`At this point, no \`${TOKEN}\` is appended, per \`${OWNER_REF}\`.`),
+    "negative",
+    `a denial worded "no ... is appended" must read negative, not affirmative`
+  );
+});
+
 test("every in-cycle surface that gates the user cites the write site with the polarity its position requires", () => {
   const files = surfaceFiles();
   assert.ok(files.length > 0, "no surface file was scanned — every assertion below would run over nothing");
@@ -1104,16 +1158,42 @@ test("every in-cycle surface that gates the user cites the write site with the p
       missing.map((p) => `${p} (${citationVerdict(read(p))})`).join(", ")
   );
 
-  // A pre-mint surface is a gate like any other and is never exempt, so the list is trustworthy
-  // only while both of those hold — and the declaration it carries has to be the negative one.
+  // A pre-mint surface is a gate like any other, so the list is trustworthy only while it still
+  // gates and its citation still reads negative. (`!exempt.has(path)` used to stand here too, but
+  // it could never fail: `exempt` is built from `playbooksReachedFrom`, which only ever collects
+  // `playbooks/…` targets, so a `references/…` entry can never appear in it regardless of whether
+  // the entry is actually exempt. Dropped rather than kept as an assertion whose only job was
+  // looking thorough — the ordering check below tests the real property this one gestured at.)
   for (const path of PRE_MINT_SURFACES) {
     assert.ok(gatesUser(read(path)), `${path} is listed as a pre-mint gate but no longer gates the user`);
-    assert.ok(!exempt.has(path), `${path} is listed as a pre-mint gate and is also exempt — one of the two is wrong`);
     assert.equal(
       citationVerdict(read(path)),
       "negative",
       `${path} gates before the run record is minted, so it must state that nothing is journalled there; ` +
         `its citation reads "${citationVerdict(read(path))}"`
+    );
+  }
+
+  // The property that actually defines "pre-mint" — that this entry's gate runs before the run
+  // record is minted — is a fact about `${PRE_MINT_CITER}`'s own text order: it hands off to each
+  // entry, then mints. Nothing above tests that ordering, so a mint moved earlier in that command
+  // would leave a now-wrong entry silently in place. Derived from the citer's text rather than
+  // listed a second time, so the two lists cannot drift from each other.
+  const citer = read(PRE_MINT_CITER);
+  assert.ok(
+    citer.includes(MINT_CALL),
+    `${PRE_MINT_CITER} no longer mints a run record (\`${MINT_CALL}\`) — the pre-mint ordering check has nothing to compare against`
+  );
+  for (const path of PRE_MINT_SURFACES) {
+    const handoff = `\${CLAUDE_PLUGIN_ROOT}/${path}`;
+    assert.ok(
+      citer.includes(handoff),
+      `${PRE_MINT_CITER} no longer hands off to ${path} — the pre-mint listing has nothing to anchor its ordering to`
+    );
+    assert.ok(
+      citer.indexOf(handoff) < citer.indexOf(MINT_CALL),
+      `${PRE_MINT_CITER} now mints the run record before handing off to ${path} — that entry no longer runs before ` +
+        `any run record exists, so it must either cite affirmatively or be dropped from PRE_MINT_SURFACES`
     );
   }
 
