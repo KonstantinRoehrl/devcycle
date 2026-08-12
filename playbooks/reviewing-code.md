@@ -47,7 +47,7 @@ criteria rather than to run step 2's sweep:
   `ARCHITECTURE.md`, `CLAUDE.md` / `AGENTS.md`, ADRs, style guides, linter/formatter/CI configs, and
   any documented desired-pattern or anti-pattern.
 
-Interview via AskUserQuestion, 1–4 questions in one batch, concrete options plus Other. Slot 1 is
+Interview via AskUserQuestion, 1–4 questions in one batch, concrete options plus Other; an Other answer appends `user-correction-at-gate`, the rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns. Slot 1 is
 **a criteria set you derived from discovery**, for the user to correct — never a blank menu, and a
 good proposal is never permission to act on it. It and the other slots draw from
 `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`, the single owner of what a review measures

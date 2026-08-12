@@ -9,7 +9,7 @@
 Before detecting anything, check for an existing scaffold: a root `CLAUDE.md` with a
 `## devcycle onboarding` section, or per-package `CLAUDE.md` stubs already naming a detected
 stack. If found, **stop and ask** (`AskUserQuestion`) whether to update the scaffold against
-freshly detected commands or leave it untouched — never overwrite silently. A `CLAUDE.md`
+freshly detected commands or leave it untouched — never overwrite silently. An Other answer to it appends `user-correction-at-gate`, the rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns. A `CLAUDE.md`
 without that section is not yet onboarded: proceed to detection and append the section rather
 than overwriting the file.
 

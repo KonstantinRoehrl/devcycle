@@ -896,3 +896,29 @@ test("the run-record write-site table declares the event kind", () => {
   assert.match(row, /gate-fail/);
   assert.match(row, /user-correction-at-gate/);
 });
+
+// The invariant, not today's file list: a surface that asks the user anything is a surface
+// where an "Other" answer can happen, so it must point at the rule that owns the append.
+// references/ledger.md is the owner being cited, never a citer of itself.
+test("every surface that asks via AskUserQuestion cites the user-correction-at-gate write site", () => {
+  const OWNER = "references/ledger.md";
+  const missing = [];
+  for (const dir of ["commands", "playbooks", "references"])
+    for (const f of readdirSync(join(root, dir))) {
+      if (!f.endsWith(".md")) continue;
+      const path = `${dir}/${f}`;
+      if (path === OWNER) continue;
+      const text = read(path);
+      if (!text.includes("AskUserQuestion")) continue;
+      const cited = text
+        .split(/\n\s*\n/)
+        .some((block) => block.includes("user-correction-at-gate") && block.includes(`\${CLAUDE_PLUGIN_ROOT}/${OWNER}`));
+      if (!cited) missing.push(path);
+    }
+  assert.deepEqual(
+    missing,
+    [],
+    `these surfaces ask via AskUserQuestion but never cite the user-correction-at-gate write site in ${OWNER}, ` +
+      `so an "Other" answer there appends nothing: ${missing.join(", ")}`
+  );
+});
