@@ -33,7 +33,7 @@ a collision. At any other stage, surface the collision and ask — never overwri
 ## Triage the input
 
 Judge `$ARGUMENTS` on three axes, then confirm every verdict with the user in ONE
-AskUserQuestion **before any stage runs**. Nothing here is profile-conditional. An Other answer, here or at any later gate of this cycle, appends `user-correction-at-gate`, whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
+AskUserQuestion **before any stage runs**. Nothing here is profile-conditional. The run record is minted by now, so an Other answer at this gate or any later one appends `user-correction-at-gate`, whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
 
 **Maturity** picks the entry stage: a rough idea, vague ticket, or one-liner starts at
 **scoping**; a detailed ticket or spec skips it for **brainstorm** as a validation pass, or

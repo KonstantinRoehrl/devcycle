@@ -903,8 +903,10 @@ test("the run-record write-site table declares the event kind", () => {
 // writes a run-record line hands its playbook a run with no id to append to, so the citation
 // there would be an instruction no one can follow. Both halves are derived from the surface
 // rather than listed, so the exempt set moves by itself when a command starts minting a run
-// record. A playbook the cycle also reaches (`reviewing-code.md` is the audit stage) stays
-// exempt: its instruction would have to hold on the standalone entry too, and there it cannot.
+// record. A playbook reachable BOTH ways (`reviewing-code.md` is the audit stage as well as
+// standalone `/devcycle:review`) is not exempt: on the in-cycle entry a run record exists, so
+// it carries the citation conditioned on one — which is why the run-bearing commands' playbooks
+// are subtracted from the exempt set below.
 // references/ledger.md is the owner being cited, never a citer of itself.
 const OWNER = "references/ledger.md";
 const RUN_RECORD = "run-record.mjs";
@@ -917,16 +919,25 @@ const surfaceFiles = () =>
       .map((f) => `${dir}/${f}`)
   );
 
-// The playbooks entered with no run record behind them: those a command that writes no
-// run-record line at all hands its run to.
-const runlessSurfaces = () => {
-  const runless = new Set();
+// The playbooks a command hands its run to, partitioned by whether that command has a run
+// record behind it — `cycle.md` mints one, `continue.md` resumes one, everything else has none.
+const playbooksReachedFrom = (runBearing) => {
+  const reached = new Set();
   for (const path of surfaceFiles().filter((p) => p.startsWith("commands/"))) {
     const text = read(path);
-    if (text.includes(RUN_RECORD)) continue;
+    if (text.includes(RUN_RECORD) !== runBearing) continue;
     for (const [, target] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(playbooks\/[A-Za-z0-9._-]+\.md)/g))
-      runless.add(target);
+      reached.add(target);
   }
+  return reached;
+};
+
+// Exempt = entered with no run record on EVERY entry: reachable from a run-less command and
+// from no run-bearing one. A dual-entry playbook is subtracted, because the in-cycle entry can
+// append and a surface that can ever append must carry the rule.
+const runlessSurfaces = () => {
+  const runless = playbooksReachedFrom(false);
+  for (const target of playbooksReachedFrom(true)) runless.delete(target);
   return runless;
 };
 
@@ -941,6 +952,17 @@ test("every in-cycle surface that asks via AskUserQuestion cites the user-correc
   assert.ok(exempt.size > 0, "no command outside the cycle hands its run to a playbook — the exemption derived nothing");
   const asking = files.filter((p) => p !== OWNER && read(p).includes("AskUserQuestion"));
   assert.ok(asking.length > 0, "no surface asks via AskUserQuestion — every assertion below would run over nothing");
+
+  // The subtraction itself, guarded: a playbook both a run-less and a run-bearing command reach
+  // can append on the in-cycle entry, so it is never exempt. Drop the subtraction and this fails.
+  const dualEntry = [...playbooksReachedFrom(false)].filter((p) => playbooksReachedFrom(true).has(p));
+  assert.ok(dualEntry.length > 0, "no playbook is reachable both standalone and in-cycle — the check below would prove nothing");
+  assert.deepEqual(
+    dualEntry.filter((p) => exempt.has(p)),
+    [],
+    `these playbooks are reachable inside a cycle run, where a run record exists, yet the exempt set still excuses ` +
+      `them from citing the write site: ${dualEntry.filter((p) => exempt.has(p)).join(", ")}`
+  );
 
   const missing = asking.filter(
     (path) =>
