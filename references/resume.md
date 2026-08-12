@@ -81,6 +81,29 @@ A stage that records its own commit marker in `.devcycle/state.md` (e.g. a
 A stage may add evidence rows of its own for states this table does not name; it may
 never weaken the two rows above.
 
+## Resuming at the recorded stage
+
+The single owner of which playbook each stage resumes through. `commands/cycle.md` walks the
+stages in order and states each one's conditions; this table says where each one is re-entered,
+so neither command carries a second copy.
+
+| stage | resume via |
+| --- | --- |
+| `scoping` | `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` |
+| `audit` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` — re-reads the confirmed criteria from the state file's `audit:` artifact if one was written, otherwise re-runs the criteria interview; never assumes criteria a previous session did not record |
+| `diagnosis` | `superpowers:systematic-debugging`, bugs only — with the devcycle notes in `${CLAUDE_PLUGIN_ROOT}/commands/cycle.md` § Stage walk, which owns them; read that entry, since this session may never have loaded it |
+| `brainstorm` | `superpowers:brainstorming` — likewise with the notes in `${CLAUDE_PLUGIN_ROOT}/commands/cycle.md` § Stage walk |
+| `planning` | `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` |
+| `execution` | `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`, which follows the per-task table below — each task's last ledger event maps to its resume action |
+| `branch-review` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` |
+| `on-device` | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` |
+| `fast-path` | `${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md` (its Resume section) |
+| `sweep` | `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md` (its Resume section) |
+| `finish` | `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
+
+`done` has no row: a closed cycle resumes at nothing, and `/devcycle:cycle` reuses its state file
+rather than resuming it.
+
 ## Resuming a wave's per-task position
 
 `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` re-enters by reading
