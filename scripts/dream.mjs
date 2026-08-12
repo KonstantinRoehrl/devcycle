@@ -264,7 +264,7 @@ export function recordPromotion(repoRoot, rec) {
       `- landed: ${oneLine(rec.landed)}\n` +
       `- commit: ${oneLine(rec.commit)}\n` +
       `- plugin-version: ${oneLine(rec.pluginVersion)}\n` +
-      `- sourced-from-memory: ${rec.sourcedFromMemory === true}\n`,
+      `- sourced-from-memory: ${rec.sourcedFromMemory == null ? "" : rec.sourcedFromMemory === true}\n`,
   );
   return path;
 }

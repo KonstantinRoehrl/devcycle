@@ -1317,6 +1317,42 @@ test("a promotion record round-trips the two provenance fields", () => {
   assert.equal(rec.sourcedFromMemory, true);
 });
 
+test("a promotion recorded without either provenance key round-trips both as absent, not false", () => {
+  const root = repo();
+  const path = recordPromotion(root, {
+    title: "No provenance supplied",
+    promotionType: "doc-edit",
+    clusterSignature: "no provenance",
+    filesTouched: ["a.md"],
+    landed: "2026-08-12",
+    commit: "abc1234",
+  });
+  const text = readFileSync(path, "utf8");
+  assert.match(text, /^- plugin-version: $/m);
+  assert.match(text, /^- sourced-from-memory: $/m);
+
+  const [rec] = readPromotions(root);
+  assert.equal(rec.pluginVersion, null);
+  assert.equal(rec.sourcedFromMemory, null);
+});
+
+test("a promotion recorded with sourcedFromMemory explicitly false round-trips as false, not absent", () => {
+  const root = repo();
+  const path = recordPromotion(root, {
+    title: "Explicit false provenance",
+    promotionType: "doc-edit",
+    clusterSignature: "explicit false",
+    filesTouched: ["a.md"],
+    landed: "2026-08-12",
+    commit: "abc1234",
+    sourcedFromMemory: false,
+  });
+  assert.match(readFileSync(path, "utf8"), /^- sourced-from-memory: false$/m);
+
+  const [rec] = readPromotions(root);
+  assert.equal(rec.sourcedFromMemory, false);
+});
+
 test("a record written before these fields existed parses with both absent, not defaulted", () => {
   const root = repo();
   mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
