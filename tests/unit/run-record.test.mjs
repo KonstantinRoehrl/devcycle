@@ -299,3 +299,46 @@ test("gitToplevel resolves a nested subdirectory to the real git repo root", () 
   assert.strictEqual(gitToplevel(nestedDir), tempRepo);
   assert.notStrictEqual(gitToplevel(nestedDir), nestedDir);
 });
+
+// Same spawn helper as `run` above, under the name the event-kind cases read best with.
+const runRecord = run;
+
+test("the event kind accepts a full line and rejects a bad enum value", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-event-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const ok = runRecord(["append", "--run", runId, "--kind", "event", "--event", "gate-fail",
+    "--stage", "execution", "--task", "3", "--ts", "2026-08-12T10:00:00Z"], runs);
+  assert.equal(ok.status, 0, ok.stderr);
+
+  const bad = runRecord(["append", "--run", runId, "--kind", "event", "--event", "not-an-event",
+    "--stage", "execution", "--ts", "2026-08-12T10:00:00Z"], runs);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /is not one of/);
+});
+
+test("an event omitting --ts is stamped rather than rejected as missing a required field", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-ts-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const r = runRecord(["append", "--run", runId, "--kind", "event",
+    "--event", "gate-pass-clean", "--stage", "execution"], runs);
+  assert.equal(r.status, 0, r.stderr);
+  // recordPath() reads DEVCYCLE_RUNS_DIR from *this* process, which the runRecord helper only
+  // sets for the child — so build the path from the same two parts recordPath composes.
+  const file = join(runs, repoSlug(gitToplevel(process.cwd())), `${runId}.jsonl`);
+  const line = JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1));
+  assert.match(line.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+});
+
+test("culprit accepts null, a vocabulary slug and a novel: slug, and rejects anything else", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-culprit-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const base = ["append", "--run", runId, "--kind", "event", "--event", "gate-fail",
+    "--stage", "execution", "--ts", "2026-08-12T10:00:00Z"];
+
+  assert.equal(runRecord([...base, "--culprit", "partial-evidence-capture"], runs).status, 0);
+  assert.equal(runRecord([...base, "--culprit", "novel:some-new-pattern"], runs).status, 0);
+
+  const bad = runRecord([...base, "--culprit", "not-in-the-vocabulary"], runs);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /neither a culprits\.json slug nor a novel: slug/);
+});
