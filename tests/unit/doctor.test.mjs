@@ -14,7 +14,7 @@ import {
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
   emitComplianceCandidates, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
-  reviewDepthCohortTable,
+  reviewDepthCohortTable, deriveEvents, attributedCost, impactScores,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -1813,4 +1813,56 @@ test("a session with no run record reports profile unknown rather than erroring"
   const summary = summarizeSession("no-record-session", turns, new Map());
   assert.equal(summary.profile, "unknown");
   assert.equal(summary.pluginVersion, "unknown");
+});
+
+// --- impact scoring: references/impact-scoring.md owns the formula ---
+
+const impactFixture = () => ({
+  stages: [
+    { stage: "execution", startedAt: "2026-08-12T10:00:00Z", endedAt: "2026-08-12T11:00:00Z" },
+    { stage: "planning", startedAt: "2026-08-12T09:00:00Z", endedAt: "2026-08-12T09:30:00Z" },
+  ],
+  dispatches: [
+    { taskId: "1", startedAt: "2026-08-12T10:05:00Z", retryIndex: 0, model: "m" },
+    { taskId: "1", startedAt: "2026-08-12T10:20:00Z", retryIndex: 1, model: "m" },
+    { taskId: "2", startedAt: "2026-08-12T10:40:00Z", retryIndex: 0, model: "m" },
+  ],
+  verdicts: [],
+  events: [
+    { event: "gate-fail", stage: "execution", task: "1", ts: "2026-08-12T10:10:00Z" },
+    { event: "gate-fail", stage: "execution", task: "2", ts: "2026-08-12T10:45:00Z" },
+    { event: "user-correction-at-gate", stage: "planning", ts: "2026-08-12T09:10:00Z" },
+  ],
+});
+
+test("impact is the summed per-occurrence attributed cost, in dollars", () => {
+  const scores = impactScores(impactFixture(), { execution: 6.0, planning: 1.0 });
+  const gateFail = scores.find((s) => s.key === "gate-fail:execution");
+  assert.equal(gateFail.frequency, 2);
+  // $6.00 over 3 dispatches = $2.00 per occurrence; 2 occurrences = $4.00.
+  assert.equal(gateFail.impact, 4.0);
+});
+
+test("a stage with no dispatches in the window yields no score, not zero and not a divide error", () => {
+  const scores = impactScores(impactFixture(), { execution: 6.0, planning: 1.0 });
+  const correction = scores.find((s) => s.key === "user-correction-at-gate:planning");
+  assert.equal(correction.frequency, 1);
+  assert.equal(correction.impact, null, "planning has cost but zero dispatches — unmeasurable");
+});
+
+test("the four derivable events are derived from verdict and dispatch lines", () => {
+  const record = {
+    stages: [{ stage: "execution", startedAt: "2026-08-12T10:00:00Z", endedAt: "2026-08-12T11:00:00Z" }],
+    dispatches: [
+      { taskId: "1", startedAt: "2026-08-12T10:05:00Z", retryIndex: 0, model: "fast" },
+      { taskId: "1", startedAt: "2026-08-12T10:20:00Z", retryIndex: 1, model: "session" },
+    ],
+    verdicts: [
+      { taskId: "1", round: 1, blockingCount: 2, conformance: "fail" },
+      { taskId: "2", round: 1, blockingCount: 0, conformance: "pass" },
+    ],
+    events: [],
+  };
+  const derived = deriveEvents(record).map((e) => e.event).sort();
+  assert.deepEqual(derived, ["escalation", "first-round-accept", "re-dispatch", "review-reject"]);
 });

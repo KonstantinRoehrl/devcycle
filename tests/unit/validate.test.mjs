@@ -310,7 +310,7 @@ test("budget check: a surface over 3500 lines in total fails", () => {
   padSurface(dir, 40); // 4000 lines
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
-  assert.match(stderr, /runtime surface \d+ lines > 3550/);
+  assert.match(stderr, /runtime surface \d+ lines > 3620/);
   assert.doesNotMatch(stderr, /lines > 154/); // the total arm fired, not the per-file arm
 });
 

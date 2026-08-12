@@ -1327,4 +1327,67 @@ function main() {
   }
 }
 
+// references/impact-scoring.md owns this formula; this is its only implementation. Four of the
+// eight signals the design names are not written to the journal at all — they are already
+// reconstructible from verdict and dispatch lines, so writing them too would be a second source
+// of the same truth.
+export function deriveEvents(record) {
+  const out = [];
+  const stageOf = (ts) =>
+    (record.stages ?? []).find((s) => ts >= Date.parse(s.startedAt) && ts < Date.parse(s.endedAt))?.stage
+    ?? "unattributed";
+  for (const v of record.verdicts ?? []) {
+    if (v.blockingCount > 0 || v.conformance === "fail")
+      out.push({ event: "review-reject", stage: "execution", task: v.taskId, ts: null });
+    else if (v.round === 1 && v.blockingCount === 0 && v.conformance === "pass")
+      out.push({ event: "first-round-accept", stage: "execution", task: v.taskId, ts: null });
+  }
+  const byTask = new Map();
+  for (const d of record.dispatches ?? []) {
+    if (d.retryIndex > 0)
+      out.push({ event: "re-dispatch", stage: stageOf(Date.parse(d.startedAt)), task: d.taskId, ts: d.startedAt });
+    if (!byTask.has(d.taskId)) byTask.set(d.taskId, []);
+    byTask.get(d.taskId).push(d);
+  }
+  for (const [taskId, ds] of byTask) {
+    const models = new Set(ds.map((d) => d.model));
+    if (ds.length > 1 && models.size > 1)
+      out.push({ event: "escalation", stage: stageOf(Date.parse(ds[0].startedAt)), task: taskId, ts: ds[0].startedAt });
+  }
+  return out;
+}
+
+// Mean per-dispatch cost of the stage the event occurred in. Returns null — never 0 — when the
+// stage has no dispatches in the window or no cost recorded: unmeasurable is not free.
+export function attributedCost(stage, record, costByStage) {
+  const occurrences = (record.stages ?? []).filter((s) => s.stage === stage);
+  if (!occurrences.length) return null;
+  const within = (t, a, b) => t >= Date.parse(a) && t < Date.parse(b);
+  const n = (record.dispatches ?? []).filter((d) =>
+    occurrences.some((s) => within(Date.parse(d.startedAt), s.startedAt, s.endedAt))
+  ).length;
+  const cost = costByStage?.[stage];
+  if (n === 0 || cost === undefined) return null;
+  return cost / n;
+}
+
+export function impactScores(record, costByStage) {
+  const all = [...(record.events ?? []), ...deriveEvents(record)];
+  const byKey = new Map();
+  for (const e of all) {
+    const key = `${e.event}:${e.stage}`;
+    if (!byKey.has(key))
+      byKey.set(key, { key, event: e.event, stage: e.stage, frequency: 0, impact: 0, measurable: true });
+    const agg = byKey.get(key);
+    agg.frequency += 1;
+    const c = attributedCost(e.stage, record, costByStage);
+    if (c === null) agg.measurable = false;
+    else agg.impact += c;
+  }
+  return [...byKey.values()].map(({ measurable, ...rest }) => ({
+    ...rest,
+    impact: measurable ? rest.impact : null,
+  }));
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
