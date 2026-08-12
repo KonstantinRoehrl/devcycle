@@ -1353,6 +1353,23 @@ test("a promotion recorded with sourcedFromMemory explicitly false round-trips a
   assert.equal(rec.sourcedFromMemory, false);
 });
 
+test("a non-boolean sourcedFromMemory (a hand-authored \"true\" string) is refused, not silently written as false", () => {
+  const root = repo();
+  assert.throws(
+    () =>
+      recordPromotion(root, {
+        title: "String provenance",
+        promotionType: "doc-edit",
+        clusterSignature: "string provenance",
+        filesTouched: ["a.md"],
+        landed: "2026-08-12",
+        commit: "abc1234",
+        sourcedFromMemory: "true",
+      }),
+    /sourced-from-memory must be a boolean or absent/,
+  );
+});
+
 test("a record written before these fields existed parses with both absent, not defaulted", () => {
   const root = repo();
   mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
