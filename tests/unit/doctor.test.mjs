@@ -1575,6 +1575,23 @@ test("qualitySignals aggregates rounds, retries and blocking findings per run", 
   assert.strictEqual(q.roundsPerTask, 1.5);
 });
 
+test("a corrective verdict line (same taskId+round, later conformance=fail) collapses to one round, not two", () => {
+  // Mirrors executing-waves.md step 6: the green gate rejects a round the reviewer already
+  // accepted, so a second `verdict` line for the same taskId+round is appended with
+  // conformance=fail — the run record is append-only, so both lines genuinely exist on disk.
+  const q = qualitySignals({
+    dispatches: [{ taskId: "1", reviewRound: 0, retryIndex: 0 }],
+    verdicts: [
+      { taskId: "1", round: 1, blockingCount: 0, conformance: "pass" },
+      { taskId: "1", round: 1, blockingCount: 0, conformance: "fail" },
+    ],
+  });
+  assert.strictEqual(q.tasks, 1);
+  assert.strictEqual(q.reviewRounds, 1);
+  assert.strictEqual(q.conformanceFailures, 1);
+  assert.strictEqual(q.roundsPerTask, 1);
+});
+
 test("a record-less run reports quality as absent, never as zero", () => {
   assert.strictEqual(qualitySignals(null), null);
   const text = formatReport([

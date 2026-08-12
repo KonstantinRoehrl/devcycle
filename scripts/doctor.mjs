@@ -731,7 +731,15 @@ export function toolCallsForDispatch(turns, dispatch) {
 export function qualitySignals(record) {
   if (!record) return null;
   const dispatches = record.dispatches ?? [];
-  const verdicts = record.verdicts ?? [];
+  // executing-waves.md step 6 legitimately appends a SECOND verdict line for the same
+  // taskId+round when the green gate rejects a round the reviewer already accepted — the
+  // run record stays append-only (both lines genuinely happened), so the read side collapses
+  // same-round verdicts to one outcome before counting anything. File order is chronological,
+  // so a later entry naturally overwrites an earlier one in the map, keeping the authoritative
+  // (latest) verdict for that round.
+  const verdicts = [...new Map(
+    (record.verdicts ?? []).map((v) => [`${v.taskId}:${v.round}`, v]),
+  ).values()];
   const tasks = new Set([...dispatches, ...verdicts].map((d) => d.taskId)).size;
   const reviewRounds = verdicts.length;
   return {
