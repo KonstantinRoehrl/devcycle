@@ -998,7 +998,16 @@ const GATE_PHRASES = [
   /\bonly\s+the\s+user\s+may\b/i,
   /\bon\s+an\s+explicit\s+yes\b/i,
 ];
-const gatesUser = (text) => GATE_PHRASES.some((phrase) => phrase.test(text));
+// A denial contains the gate phrasing by construction ("never asks for confirmation"), so matching
+// the phrase alone counted a surface that states it gates nothing as a gate, and then demanded a
+// citation for a journal entry it never writes. Same defect, and same fix, as NEGATES_APPEND below:
+// decide by the sentence's polarity rather than by whether the words occur. Sentence-scoped on
+// purpose — a denial in one sentence must not silence a real gate in the next.
+const NEGATES_GATE = /\b(?:never|not|no|none|nothing|nor|doesn't|does\s+not|won't|will\s+not)\b[^.]{0,60}?\b(?:ask|asks|asking|asked|question|confirmation|AskUserQuestion)\b/i;
+const gatesUser = (text) =>
+  text
+    .split(/(?<=\.)\s+/)
+    .some((sentence) => GATE_PHRASES.some((phrase) => phrase.test(sentence)) && !NEGATES_GATE.test(sentence));
 
 // The surfaces that gate the user without ever writing `AskUserQuestion`. Named so that the
 // vocabulary above cannot silently stop matching them.
@@ -1269,4 +1278,23 @@ test("harvested: resume/stage-table — one table maps every stage to its playbo
       `${path} no longer cites references/resume.md, which now owns the stage table`
     );
   }
+});
+
+test("the gate vocabulary reads a denial as no gate, the way the citation check reads a denial as negative", () => {
+  // The defect: GATE_PHRASES matched "asks for confirmation" wherever it appeared, so a surface
+  // stating it never asks was counted as gating and required to cite a journal entry it never writes.
+  assert.equal(gatesUser("This stage never asks the user for confirmation."), false);
+  assert.equal(gatesUser("This stage does not ask for confirmation before proceeding."), false);
+  assert.equal(gatesUser("No confirmation is asked for here."), false);
+
+  // The positive control: a real gate still reads as one, in the same words the surfaces use.
+  assert.equal(gatesUser("Ask the user for confirmation before switching branches."), true);
+  assert.equal(gatesUser("Interview via AskUserQuestion."), true);
+  assert.equal(gatesUser("Only the user may grant another round."), true);
+
+  // Negation is sentence-scoped, so a denial in one sentence cannot silence a gate in the next.
+  assert.equal(
+    gatesUser("This stage never asks for confirmation. A later step does ask the user for confirmation."),
+    true
+  );
 });
