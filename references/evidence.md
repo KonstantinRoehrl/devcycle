@@ -51,6 +51,13 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   green whole — the whole-gate `-before.txt` legitimately exits 0; capture the honest
   subset red as a third file, `.devcycle/evidence/<task-id>-red.txt`, running just the
   subset command, before any implementation code is written.
+- **Scope every capture to the task's own `**Files:**` list**, as a pathspec — `git diff -- <the
+  task's files>`, never a bare `git diff`. Concurrent implementers share one checkout, and wave
+  formation guarantees no two of them touch the same file, so a file-scoped capture sees exactly
+  this task's work and nothing else.
+- **`git stash` is forbidden.** It reverts siblings' uncommitted work across the shared checkout.
+  With the capture scoped above there is nothing it could be needed for; using it is a defect, not
+  a judgment call.
 
 The report itself is a file on the same principle: the implementer writes it to
 `.devcycle/reports/<task-id>.md` in the shape below, and the dispatch returns only the short

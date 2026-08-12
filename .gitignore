@@ -6,3 +6,6 @@ scripts/redaction-terms.local.txt
 docs/superpowers*
 .DS_Store
 .worktrees/
+docs/overhaul/
+graphify-out/
+docs/block-e-instrumentation/

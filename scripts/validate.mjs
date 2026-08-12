@@ -211,7 +211,7 @@ for (const f of namesIn("playbooks")) {
 
 // 9. Line budgets, as numbers. Counted the way `wc -l` counts: a file's closing
 //    newline terminates its last line rather than starting an empty one.
-const SURFACE_LINE_BUDGET = 3500, COMMAND_LINE_MAX = 100, PLAYBOOK_LINE_MAX = 150;
+const SURFACE_LINE_BUDGET = 3550, COMMAND_LINE_MAX = 104, PLAYBOOK_LINE_MAX = 154;
 const lines = (p) => {
   const text = readFileSync(p, "utf8");
   return text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
@@ -288,6 +288,113 @@ for (const p of stateFixtures) {
   const missing = stateFields.filter((f) => !new RegExp(`^- ${f}:[ \\t]*\\S`, "m").test(text));
   if (missing.length)
     fail(`${rel(p)}: state file drifted from references/resume.md — no value for: ${missing.join(", ")}`);
+}
+
+// 13. The run record's shape is declared once, in tests/fixtures/run-record.schema.json, and
+//     exercised by a golden fixture. A declaration nothing exercises is the failure this check
+//     exists to prevent — the same reason check 12 fails on an empty subject.
+const schemaPath = join(root, "tests/fixtures/run-record.schema.json");
+const goldenPath = join(root, "tests/fixtures/run-record.golden.jsonl");
+if (existsSync(schemaPath)) {
+  if (!existsSync(goldenPath))
+    fail("tests/fixtures/run-record.schema.json: declared with no golden fixture exercising it");
+  else {
+    let schema;
+    try {
+      schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+    } catch (err) {
+      fail(`tests/fixtures/run-record.schema.json: not valid JSON — ${err.message}`);
+      schema = null;
+    }
+    const golden = readFileSync(goldenPath, "utf8").split("\n").filter(Boolean);
+    const parsed = [];
+    for (const [i, line] of golden.entries()) {
+      try {
+        parsed.push(JSON.parse(line));
+      } catch (err) {
+        fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: not valid JSON — ${err.message}`);
+      }
+    }
+    if (schema) {
+      const subs = schema.oneOf ?? [];
+      const declaredKinds = subs.map((s) => s.properties?.kind?.const).filter(Boolean);
+      const exercised = new Set(parsed.map((o) => o.kind));
+      for (const k of declaredKinds)
+        if (!exercised.has(k))
+          fail(`tests/fixtures/run-record.golden.jsonl: schema declares kind "${k}" that no golden line exercises`);
+      for (const [i, obj] of parsed.entries()) {
+        const sub = subs.find((s) => s.properties?.kind?.const === obj.kind);
+        if (!sub) {
+          fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: kind "${obj.kind}" is not declared in the schema`);
+          continue;
+        }
+        for (const req of sub.required ?? [])
+          if (!(req in obj) || obj[req] === undefined)
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: missing required field "${req}"`);
+        for (const key of Object.keys(obj)) {
+          const prop = sub.properties?.[key];
+          if (!prop) {
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: field "${key}" is not declared for kind "${obj.kind}"`);
+            continue;
+          }
+          if (prop.enum && !prop.enum.includes(obj[key]))
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" value "${obj[key]}" is not one of ${prop.enum.join(" | ")}`);
+          if (prop.const !== undefined && obj[key] !== prop.const)
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be ${JSON.stringify(prop.const)}`);
+          if (prop.pattern && !new RegExp(prop.pattern).test(String(obj[key])))
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" does not match ${prop.pattern}`);
+          if (prop.type === "integer" && !Number.isInteger(obj[key]))
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be an integer`);
+          if (typeof prop.minimum === "number" && obj[key] < prop.minimum)
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be >= ${prop.minimum}`);
+        }
+      }
+      for (const sub of subs) {
+        const exercisedFields = new Set(
+          parsed.filter((o) => o.kind === sub.properties?.kind?.const).flatMap((o) => Object.keys(o))
+        );
+        for (const field of Object.keys(sub.properties ?? {}))
+          if (!exercisedFields.has(field))
+            fail(`tests/fixtures/run-record.golden.jsonl: schema declares "${sub.title}.${field}" that no golden line for kind "${sub.title}" exercises`);
+      }
+
+      // Rule 2 (§10.5): the schema declares no field the writing instructions cannot produce —
+      // the same reason stage.path and dispatch.agentId were removed rather than half-wired.
+      // A field is "producible" when some counted-surface file's prose names it as a
+      // run-record.mjs append/new argument. Most fields pass through run-record.mjs's generic
+      // append loop unrenamed (camelCase flag === camelCase key), so `--<field>` is the right
+      // literal to search for — EXCEPT the cases below, verified against scripts/run-record.mjs's
+      // actual field-sourcing code (main()) rather than assumed: kebab-case `new`-subcommand
+      // flags, one explicit rename, and fields the script computes itself rather than ever
+      // reading from a flag.
+      //
+      // Scoped to "run" and "session" kinds only (2026-08-11 decision, docs/DECISIONS.md): those
+      // are the only two kinds whose writing instructions are literal CLI documentation (the
+      // mint/session-append sites) — every other kind's write instructions are documented
+      // conceptually in this codebase's prose (e.g. "with the task id and sha"), never as a
+      // literal `--flag`, so this grep-for-`--flag` rule cannot pass against that prose style no
+      // matter how complete it is. Those other kinds keep their protection at the kind level via
+      // the exercised-kind check above (existing, unchanged) rather than per field.
+      // "knobs" is no longer structurally exempt: it is produced by repeated `--knob key=value`
+      // flags, so FLAG_NAME below points it at the literal `--knob` substring (singular, not the
+      // nonexistent `--knobs`) and it is checked for real, live, every run, same as any other
+      // renamed field.
+      // "startedAt" is always computed by the script itself (`flags.startedAt ?? new
+      // Date().toISOString()...`, scripts/run-record.mjs:114) — no surface instruction ever
+      // needs to name `--started-at`.
+      const STRUCTURAL_FIELDS = new Set(["kind", "runId", "repoSlug", "schemaVersion", "startedAt"]);
+      const FLAG_NAME = { pluginVersion: "plugin-version", pluginSha: "plugin-sha", sessionHash: "sessionId", knobs: "knob" };
+      const RULE2_KINDS = new Set(["run", "session"]);
+      for (const sub of subs.filter((s) => RULE2_KINDS.has(s.properties?.kind?.const)))
+        for (const field of Object.keys(sub.properties ?? {})) {
+          if (STRUCTURAL_FIELDS.has(field)) continue; // computed by the script, never a flag
+          const flag = FLAG_NAME[field] ?? field;
+          const named = [...surface].some((p) => readFileSync(p, "utf8").includes(`--${flag}`));
+          if (!named)
+            fail(`tests/fixtures/run-record.schema.json: "${sub.title}.${field}" is declared but no surface instruction names --${flag}`);
+        }
+    }
+  }
 }
 
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }

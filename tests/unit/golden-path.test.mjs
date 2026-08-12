@@ -230,31 +230,61 @@ const RELEASE_BRANCH = "main";
 // making it do so would trade the safe error for the unsafe one.
 function pushTargets(text) {
   const targets = [];
-  // Order matters, and getting it wrong loses real pushes both ways.
-  //
-  // Comments are stripped FIRST, per physical line. A `#` comment is prose, not a command:
-  // without this, a workflow that merely mentions `git push origin main` in a comment reads as
-  // one that does it, and every following word is parsed as a refspec. `#` only opens a comment
-  // at a line or word boundary, so it cannot truncate a refspec containing one.
-  //
-  // Continuations are joined SECOND, after the comments are already gone. `git push \` with
-  // `origin main` on the next physical line is a routine `run: |` idiom that a per-line parser
-  // misses entirely — it sees a push with no refspec, then a line with no push. Joining before
-  // stripping instead would let a comment ending in a backslash swallow the next line whole,
-  // taking a real push down with it.
-  const stripped = text.split(/\r?\n/).map((l) => l.replace(/(^|\s)#.*$/, "$1"));
-  for (const line of stripped.join("\n").replace(/\\\n\s*/g, " ").split("\n")) {
-    const code = line;
-    for (const [, rest] of code.matchAll(/\bgit push\b([^\n;&|]*)/g)) {
+  // Quote-aware single-pass scanner. Order matters: comments are stripped FIRST (quote-aware),
+  // then continuations are joined (only to non-blank lines), then git push destinations extracted.
+  // Stripping before joining prevents a comment ending in \ from swallowing the next real line.
+
+  // FIRST PASS: Strip comments from all lines, preserving quote state
+  const stripped = text.split(/\r?\n/).map((line) => {
+    let code = "", quote = null;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (quote) {
+        if (ch === "\\" && quote === '"') { code += ch + (line[++i] ?? ""); continue; }
+        if (ch === quote) quote = null;
+        code += ch;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+        code += ch;
+      } else if (ch === "#" && (i === 0 || /\s/.test(line[i - 1]))) {
+        break;
+      } else {
+        code += ch;
+      }
+    }
+    return code;
+  });
+
+  // SECOND PASS: Join continuations (only to non-blank lines) and extract destinations
+  for (let i = 0; i < stripped.length; i++) {
+    let line = stripped[i];
+    // Join continuation backslashes with the next non-blank line only
+    while (/\\\s*$/.test(line) && i + 1 < stripped.length && stripped[i + 1].trim() !== "")
+      line = line.replace(/\\\s*$/, " ") + stripped[++i].replace(/^\s+/, "");
+    line = line.replace(/\\\s*$/, " ");
+
+    // Extract destinations from git push commands in this line
+    for (const [, rest] of line.matchAll(/\bgit push\b([^\n;&|]*)/g)) {
       const positional = rest.trim().split(/\s+/).filter((t) => t && !t.startsWith("-"));
       for (const spec of positional.slice(1)) {
         // slice(1) drops the remote, which is never a refspec
         const dest = spec.replace(/["']/g, "").replace(/^\+/, "").split(":").pop();
-        targets.push(dest.replace(/^refs\/heads\//, ""));
+        // Normalize branch names by stripping refs/heads/ prefix, but only if the result
+        // looks like a valid ref (no invalid characters like #)
+        const normalized = dest.replace(/^refs\/heads\/(?=[A-Za-z0-9\/_.-]+$)/, "");
+        targets.push(normalized);
       }
     }
   }
   return targets;
+}
+
+// A destination with no literal part could be anything, including the release branch:
+// `git push origin "$BRANCH"` records the literal `$BRANCH`, which is not equal to "main", so the
+// equality guard alone passed it. A literal prefix constrains the expansion, so `devcycle--v$V`
+// — the legitimate tag push pinned by pushes-elsewhere.yml — is fine.
+function isBareVariable(dest) {
+  return /^(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)+$/.test(dest);
 }
 
 test("the push guard reads a refspec's destination, whatever form the push takes", () => {
@@ -284,12 +314,82 @@ test("the push guard survives the shapes that previously blinded it", () => {
   assert.deepEqual(pushTargets("        # git push origin main is forbidden\n"), []);
 });
 
+test("the push guard sees a push that follows a quoted # on the same line", () => {
+  // The quote-unaware strip ate to end of line, dropping this push entirely: a workflow could
+  // push main and the guard would report zero destinations.
+  assert.deepStrictEqual(
+    pushTargets('      - run: echo "note #foo" && git push origin main\n'),
+    ["main"]
+  );
+  assert.deepStrictEqual(
+    pushTargets("      - run: echo 'note #foo' && git push origin main\n"),
+    ["main"]
+  );
+});
+
+test("a real comment is still stripped when the # is outside quotes", () => {
+  assert.deepStrictEqual(pushTargets("# git push origin main\n"), []);
+  assert.deepStrictEqual(pushTargets("echo hi # git push origin main\n"), []);
+});
+
+test("a blank line ends a continuation instead of merging two pushes", () => {
+  // The `\s*` in the continuation join bridged the blank line, collapsing two statements onto one
+  // physical line; the greedy scan then read the second statement's words as refspecs.
+  assert.deepStrictEqual(
+    pushTargets("git push origin main \\\n\ngit push origin dev\n"),
+    ["main", "dev"]
+  );
+});
+
+test("pushTargets keeps a real destination after a # inside a quoted refspec", () => {
+  const yaml = 'run: git push origin "refs/heads/main#not-a-comment"\nrun: git push origin next\n';
+  const targets = pushTargets(yaml);
+  assert.deepStrictEqual(targets, ["refs/heads/main#not-a-comment", "next"]);
+});
+
+test("pushTargets does not bridge a blank line into a continuation join", () => {
+  const yaml = 'run: git push \\\n\n  origin main\n';
+  // A blank line between the continuation backslash and its intended next line must NOT be
+  // silently bridged into one push destination — today's \s* join does exactly that.
+  const targets = pushTargets(yaml);
+  assert.deepStrictEqual(targets, []); // the malformed continuation yields no valid destination, not a merged wrong one
+});
+
+test("a bare-variable push destination is rejected", () => {
+  assert.strictEqual(isBareVariable("$BRANCH"), true);
+  assert.strictEqual(isBareVariable("${BRANCH}"), true);
+  assert.strictEqual(isBareVariable("main"), false);
+  // A literal prefix constrains what the variable can expand to.
+  assert.strictEqual(isBareVariable("devcycle--v$V"), false);
+  assert.strictEqual(isBareVariable("release/$NAME"), false);
+});
+
+test("isBareVariable flags a concatenated $A$B destination with no literal part", () => {
+  assert.strictEqual(isBareVariable("$A$B"), true);
+  assert.strictEqual(isBareVariable("${A}${B}"), true);
+  assert.strictEqual(isBareVariable("devcycle--v$V"), false); // literal prefix still passes
+});
+
+test("the push guard catches a variable destination that could resolve to main", () => {
+  const targets = pushTargets(read("tests/fixtures/push-guard/pushes-bare-variable.yml"));
+  assert.ok(targets.length > 0, "fixture produced no targets — the assertion would be vacuous");
+  assert.ok(targets.some(isBareVariable), "a bare-variable destination was not detected");
+});
+
+test("the legitimate tag push is not caught by the bare-variable rule", () => {
+  const targets = pushTargets(read("tests/fixtures/push-guard/pushes-elsewhere.yml"));
+  assert.ok(targets.length > 0);
+  assert.ok(!targets.some(isBareVariable), "a literal-prefixed destination was wrongly flagged");
+});
+
 test("no workflow pushes to the release branch", () => {
   let pushes = 0;
   for (const f of readdirSync(join(root, ".github/workflows"))) {
     for (const target of pushTargets(read(`.github/workflows/${f}`))) {
       pushes++;
       assert.notEqual(target, RELEASE_BRANCH, `${f} pushes ${RELEASE_BRANCH} directly`);
+      assert.ok(!isBareVariable(target),
+        `${f}: push destination "${target}" is a bare variable and could resolve to ${RELEASE_BRANCH}`);
     }
   }
   assert.ok(pushes > 0, "no `git push` was found in any workflow — this guard would assert nothing");
@@ -402,8 +502,8 @@ test("harvested: commands/state-file-resume — the state file's shape and owner
   const t = read("references/resume.md");
   const template = t.match(/```markdown\n# devcycle state\n([\s\S]*?)```/)?.[1] ?? "";
   const lines = template.trim().split("\n");
-  assert.equal(lines.length, 13, "the state template is no longer 13 lines");
-  for (const field of ["stage", "root", "branch", "request", "scope", "audit", "diagnosis", "spec", "plan", "ledger", "checklist", "configured", "updated"])
+  assert.equal(lines.length, 14, "the state template is no longer 14 lines");
+  for (const field of ["stage", "root", "branch", "request", "scope", "audit", "diagnosis", "spec", "plan", "ledger", "checklist", "run", "configured", "updated"])
     assert.ok(lines.some((l) => l.startsWith(`- ${field}:`)), `state field missing: ${field}`);
   assert.ok(template.includes("- ledger: .devcycle/ledger.md"), "the ledger path is not pinned");
   assert.match(t, /The ownership check, run before trusting anything else in the file/);

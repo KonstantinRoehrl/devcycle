@@ -15,42 +15,27 @@ concurrency:
   group: release-main
   cancel-in-progress: false
 jobs:
+  # Run the suite in-line rather than polling for this commit's own Validate run: a commit that
+  # reached main outside a checked pull request — an admin bypass, a weakened ruleset — would
+  # otherwise be tagged and published unverified, and a poll for a run of the same SHA races the
+  # run it is waiting for.
+  validate:
+    uses: ./.github/workflows/validate.yml
   release:
+    needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: write
-      # Reading this commit's own check history is what the gate below is made of.
-      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 — same pin as validate.yml
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require a green Validate run for this commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          # Tag-and-publish is the last gate before a version is public, and until now it had
-          # none of its own: its only question was whether the tag already existed. A commit
-          # that reaches main outside a checked pull request — an admin bypass, a weakened
-          # ruleset — would be tagged and published unverified. So wait for this commit's own
-          # Validate run instead of trusting that one happened.
-          for _ in $(seq 1 40); do
-            conclusion=$(gh api \
-              "repos/$GITHUB_REPOSITORY/actions/workflows/validate.yml/runs?head_sha=$SHA&per_page=1" \
-              --jq '.workflow_runs[0].conclusion // "pending"')
-            case "$conclusion" in
-              success) echo "Validate succeeded for $SHA."; exit 0 ;;
-              pending) sleep 15 ;;
-              *) echo "Validate concluded '$conclusion' for $SHA — refusing to publish."; exit 1 ;;
-            esac
-          done
-          echo "Validate did not conclude for $SHA within 10 minutes — refusing to publish."
-          exit 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: ".nvmrc"
 
       - name: Read the version main carries
         id: v

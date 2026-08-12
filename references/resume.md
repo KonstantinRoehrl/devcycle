@@ -26,11 +26,14 @@ transition, in this shape:
 - plan: <path or none>
 - ledger: .devcycle/ledger.md
 - checklist: <path or none>
+- run: <run id from scripts/run-record.mjs, or none>
 - configured: <no | defaults | date + KEY=VALUE list (possibly empty)>[ · profile-asked]
 - updated: <ISO-8601 UTC>
 ```
 
 `stage:` names the stage the NEXT session resumes at, never the one just completed.
+`run:` is the run record's id, minted once per cycle and carried across `/clear` so a resumed
+cycle appends to the same record rather than starting a second one.
 `configured:` records what configuration was written for this repo and is carried
 forward unchanged when a new cycle reuses the file; `references/config.md` owns what
 its values mean.

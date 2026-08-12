@@ -37,6 +37,13 @@ impact, and give each one its concrete lever:
 - an agent type with an oversized startup floor,
 - dispatches omitting a model,
 - a content class with high carry-weighted cost.
+- whether the plugin got cheaper or more expensive across versions, and by how much.
+
+The sixth is corpus-level rather than per-finding, and the report must state its **direction of
+travel** explicitly — down, up, or flat — with the per-version cohort table behind it. A report that
+lists regressions without saying which way the whole corpus moved is the failure issue #44 recorded:
+the real split was 21 worse / 18 better / 5 flat, aggregate direction down, and the report stated
+the opposite.
 
 ## Report the price vintage and unpriced models
 

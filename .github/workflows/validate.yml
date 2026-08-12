@@ -3,13 +3,27 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
   push:
-    # `dev` is listed so every commit that lands there gets a check suite at push time,
-    # including the ones GitHub's merge API creates on squash-merge. Without it nothing
-    # subscribes to `dev`, its tip carries no suite, and a `dev` -> `main` release PR
-    # opened on that tip reports mergeable with zero checks — silently unverified.
+    # `dev` is listed so human and merge-API commits landing there get a check suite at push
+    # time. It does NOT cover commits pushed with the implicit token — GitHub does not trigger
+    # workflows from it — so the release workflows call this one directly via workflow_call.
     branches: [main, dev]
   # Manual re-run, for requesting a suite without inventing a commit.
   workflow_dispatch:
+  # Called in-line by the release workflows: the release commit is pushed with the implicit token,
+  # and GitHub does not trigger workflows from it, so the push-triggered suite below never fires
+  # for the one commit that most needs it. Calling this workflow directly runs the check before
+  # the push instead of hoping for one after.
+  workflow_call:
+    inputs:
+      ref:
+        # A calling job's own `github.sha`/`github.ref` is fixed at whatever commit the run
+        # started on — it does not follow a commit a prior job in the same run pushes later.
+        # Callers that create a new commit mid-run (prepare-release.yml) pass its sha here so
+        # the checkout below validates THAT commit; every other trigger leaves this empty and
+        # falls back to the normal default.
+        description: 'Commit to validate — defaults to github.ref when omitted'
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -22,6 +36,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # inputs.ref is empty/falsy on every trigger except workflow_call callers that pass
+          # one explicitly, so this falls back to the normal default (push, pull_request,
+          # workflow_dispatch, manual re-run) unchanged.
+          ref: ${{ inputs.ref || github.ref }}
           # Full history: the secret scan below reads every commit, not just the tip. A secret
           # committed and removed one commit later stays fetchable, so scanning the tip alone
           # reports green on a repository that is still leaking.
@@ -29,6 +47,9 @@ jobs:
           # Nothing in this job writes to the repository, so the checkout credential has no
           # reason to stay in .git/config where any later step could reach it.
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: ".nvmrc"
       - name: Validate manifests, playbooks, budget, fences
         run: node scripts/validate.mjs
       - name: Redaction guard (host paths, session ids, deny-listed terms)
