@@ -1239,6 +1239,25 @@ export function buildJsonReport(summaries) {
   };
 }
 
+// One window's worth of summaries. The current window and the preceding one differ only in
+// their bounds: same membership rule, same skip of a session with nothing inside the window,
+// same session-id resolution. They share this helper because the report subtracts one window
+// from the other and calls the difference a trend — two copies that drifted apart would be
+// measuring two different corpora and reporting the gap between them as a change in cost.
+function summarizeWindow(groups, since, until, args, runRecords) {
+  const out = [];
+  for (const [key, records] of groups) {
+    // Membership is a session-level property, so it is decided over every record;
+    // the window then narrows only what gets measured.
+    if (!args.all && !isDevcycleSession(records)) continue;
+    const windowed = records.filter((r) => inWindow(r.timestamp, since, until));
+    if (windowed.length === 0) continue;
+    const sessionId = records.find((r) => r.sessionId)?.sessionId ?? key;
+    out.push(summarizeSession(sessionId, windowed, runRecords));
+  }
+  return out;
+}
+
 function run(args) {
   const files = findTranscriptFiles(args.dir);
   if (files === null) return { ok: false, reasons: [`directory not found: ${args.dir}`] };
@@ -1253,15 +1272,20 @@ function run(args) {
   }
 
   const runRecords = readRunRecords();
-  const sessions = [];
-  for (const [key, records] of groups) {
-    // Membership is a session-level property, so it is decided over every record;
-    // the window then narrows only what gets measured.
-    if (!args.all && !isDevcycleSession(records)) continue;
-    const windowed = records.filter((r) => inWindow(r.timestamp, args.since, args.until));
-    if (windowed.length === 0) continue;
-    const sessionId = records.find((r) => r.sessionId)?.sessionId ?? key;
-    sessions.push(summarizeSession(sessionId, windowed, runRecords));
+  const sessions = summarizeWindow(groups, args.since, args.until, args, runRecords);
+
+  // The preceding window has to be summarized separately: `inWindow` filters records before
+  // summarizeSession ever sees them, so the preceding window's cost is not recoverable from
+  // `sessions` at any granularity. Only built when a window was actually requested — `null`
+  // rather than `[]`, because "no window to compare against" is not "the previous window was
+  // empty", and the tables render those two differently.
+  let previousSessions = null;
+  if (args.since) {
+    const untilMs = args.until ? new Date(args.until).getTime() : Date.now();
+    const sinceMs = new Date(args.since).getTime();
+    const span = untilMs - sinceMs;
+    const prevSince = new Date(sinceMs - span).toISOString();
+    previousSessions = summarizeWindow(groups, prevSince, args.since, args, runRecords);
   }
 
   const totals = { turns: 0, mainTurns: 0, subagentTurns: 0, costUSD: 0, tools: {}, models: {} };
@@ -1275,7 +1299,7 @@ function run(args) {
   }
   totals.costUSD = Math.round(totals.costUSD * 1e4) / 1e4;
 
-  return { ok: true, window: { since: args.since, until: args.until }, sessions, totals };
+  return { ok: true, window: { since: args.since, until: args.until }, sessions, previousSessions, totals };
 }
 
 function main() {
@@ -1438,6 +1462,274 @@ export function cycleGroups(summaries) {
     g.cost += s.costUSD ?? 0;
   }
   return [...groups.values()];
+}
+
+// ─── The report's cost, culprit and win tables ───────────────────────────────────────────────
+// Pure functions over summaries — no file read, no clock — so a table is testable from a
+// hand-built summary and two callers (the markdown report and --json) render the same rows.
+
+// Which impact keys are wins rather than culprits. An event carrying a `culprit` slug is
+// classified by that vocabulary entry's `kind`; the derived signals and the gate events carry
+// no slug, so the two that are wins are named here rather than re-decided at each render site.
+export const WIN_EVENTS = new Set(["gate-pass-clean", "first-round-accept"]);
+
+// A cohort of fewer than three sessions is a sample, not a measurement — spec §6 "Low
+// confidence". Named once because it gates both the row's own flag and every comparison.
+const MIN_COHORT = 3;
+
+// Within ±5% is flat, not a movement — spec §6 "Trend (cost by stage, across versions)".
+const FLAT_BAND_PCT = 5;
+
+// How many versions the cost-by-stage table renders: enough to see a direction of travel,
+// few enough that the row still fits on a screen.
+const TREND_VERSIONS = 6;
+
+const byName = (a, b) => String(a).localeCompare(String(b));
+
+// cohortTable's ordering idiom, named once so every table below orders buckets identically:
+// the known ones in order, the "unknown" bucket last so it never sits between two real ones.
+function orderedBuckets(keys, compare = compareVersions) {
+  const all = [...new Set(keys)];
+  const known = all.filter((k) => k !== "unknown").sort(compare);
+  return all.includes("unknown") ? [...known, "unknown"] : known;
+}
+
+// Version×profile rows in report order: the same idiom applied to both axes of the grid.
+function orderVersionProfileRows(rows) {
+  return orderedBuckets(rows.map((r) => r.version)).flatMap((version) => {
+    const inVersion = rows.filter((r) => r.version === version);
+    return orderedBuckets(inVersion.map((r) => r.profile), byName)
+      .map((profile) => inVersion.find((r) => r.profile === profile));
+  });
+}
+
+// One cost against an earlier one, in the ±5% band spec §6 pins. A zero baseline cannot be
+// divided by, so it reports the direction it moved rather than an infinite percentage.
+function costTrend(now, before) {
+  if (before === 0) return now > 0 ? "up" : "flat";
+  const pct = ((now - before) / before) * 100;
+  return Math.abs(pct) <= FLAT_BAND_PCT ? "flat" : pct < 0 ? "down" : "up";
+}
+
+// The trend across a series, read off its oldest and newest *present* values: a version that
+// carries no cost for a stage says nothing about that stage, and counting the gap as a zero
+// would read as a stage that briefly became free.
+function trendAcross(values) {
+  const present = values.filter((v) => typeof v === "number");
+  return present.length < 2 ? "insufficient data" : costTrend(present[present.length - 1], present[0]);
+}
+
+// Spec §6 "Δ vs. previous (same profile)" and "Low confidence", implemented once so the version
+// table and the culprit table cannot drift into two different comparison rules. `rows` is in
+// report order; the nearest older same-profile row is the one to compare against, and a cohort
+// too small to measure is used on neither side.
+function deltaAgainstPrevious(rows, index, valueOf) {
+  const row = rows[index];
+  // The "unknown" bucket has no place in version order, so it is neither older nor newer than
+  // anything: not compared, rather than compared against whichever row happens to precede it.
+  if (row.version === "unknown") return { state: "not-compared", pct: null };
+  const previous = rows.slice(0, index).reverse()
+    .find((r) => r.version !== "unknown" && r.profile === row.profile);
+  if (!previous) return { state: "first-seen", pct: null };
+  if (row.lowConfidence || previous.lowConfidence) return { state: "not-compared", pct: null };
+  const before = valueOf(previous), now = valueOf(row);
+  // A division that cannot be taken is not a 0% change, and an unmeasurable side is not a zero.
+  if (before === 0 || before === null || now === null) return { state: "not-compared", pct: null };
+  return { state: "compared", pct: ((now - before) / before) * 100 };
+}
+
+// Priciest first, with the rows nobody could price last: an unmeasurable impact is not a cheap
+// one, so it never sorts among the small numbers as if it had been measured at zero.
+const byImpactDesc = (a, b) =>
+  a.impact === null ? (b.impact === null ? 0 : 1) : b.impact === null ? -1 : b.impact - a.impact;
+
+// What a cycle cost under each version and profile, and whether that is better or worse than the
+// last version run the same way.
+export function versionProfileTable(summaries, promotions = []) {
+  const groups = new Map();
+  for (const s of summaries.filter((x) => !x.inFlight)) {
+    const version = s.pluginVersion ?? "unknown";
+    const profile = s.profile ?? "unknown";
+    const key = `${version} ${profile}`;
+    if (!groups.has(key)) groups.set(key, { version, profile, members: [] });
+    groups.get(key).members.push(s);
+  }
+  const rows = orderVersionProfileRows([...groups.values()]).map((g) => {
+    const cycles = cycleGroups(g.members);
+    const stageTotals = new Map();
+    for (const s of g.members)
+      for (const [stage, dollars] of Object.entries(s.costByStage ?? {}))
+        stageTotals.set(stage, (stageTotals.get(stage) ?? 0) + dollars);
+    const priciest = [...stageTotals.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
+    const depths = g.members.map((s) => s.medianDepth).filter((d) => typeof d === "number");
+    return {
+      version: g.version,
+      profile: g.profile,
+      sessions: g.members.length,
+      cycles: cycles.length,
+      medianCostPerCycle: median(cycles.map((c) => c.cost)),
+      delta: { state: "first-seen", pct: null },
+      priciestStage: priciest ? priciest[0] : null,
+      medianDepth: depths.length ? median(depths) : null,
+      quality: aggregateQuality(g.members.map((s) => s.quality ?? null)),
+      lowConfidence: g.members.length < MIN_COHORT,
+      // A promotion that named no culprit contributes nothing rather than a blank entry — which
+      // is every record on disk until Phase 3 teaches recordPromotion to write the field.
+      shipped: [...new Set(promotions
+        .filter((p) => p.pluginVersion === g.version && p.culpritId)
+        .map((p) => p.culpritId))].sort(byName),
+    };
+  });
+  // A second pass, because a row's delta is decided against another row of this same table.
+  rows.forEach((row, i) => { row.delta = deltaAgainstPrevious(rows, i, (r) => r.medianCostPerCycle); });
+  return rows;
+}
+
+// What each stage cost per session across the recent versions, so a stage that is getting more
+// expensive shows up before the total does.
+export function stageByVersionTable(summaries) {
+  const cohorts = versionCohorts(summaries.filter((s) => !s.inFlight));
+  const versions = [...cohorts.keys()].filter((v) => v !== "unknown")
+    .sort(compareVersions).slice(-TREND_VERSIONS);
+  const stages = new Set(versions.flatMap((v) => [...cohorts.get(v).byStage.keys()]));
+  const rows = [...stages].map((stage) => {
+    const byVersion = {};
+    for (const version of versions) {
+      const dollars = cohorts.get(version).byStage.get(stage);
+      // Absent, not zero: this version simply recorded no cost for this stage.
+      byVersion[version] = dollars ? median(dollars) : null;
+    }
+    return { stage, byVersion, trend: trendAcross(versions.map((v) => byVersion[v])) };
+  });
+  const rendered = (r) => Object.values(r.byVersion).reduce((n, d) => n + (d ?? 0), 0);
+  rows.sort((a, b) => rendered(b) - rendered(a) || byName(a.stage, b.stage));
+  return { versions, rows };
+}
+
+// Where this window's money went, stage by stage, and how each stage moved against the window
+// immediately before it.
+export function stageWindowTable(summaries, previousSummaries) {
+  const noWindow = previousSummaries === null || previousSummaries === undefined;
+  const stageTotal = (list, stage) => list.reduce((n, s) => n + (s.costByStage?.[stage] ?? 0), 0);
+  const stages = new Set(summaries.flatMap((s) => Object.keys(s.costByStage ?? {})));
+  const rows = [...stages].map((stage) => {
+    const total = stageTotal(summaries, stage);
+    const before = noWindow ? null : stageTotal(previousSummaries, stage);
+    const depths = summaries
+      .filter((s) => s.costByStage?.[stage] !== undefined && typeof s.medianDepth === "number")
+      .map((s) => s.medianDepth);
+    return {
+      stage,
+      total,
+      pctOfWindow: 0,
+      medianDepth: depths.length ? median(depths) : null,
+      // No window to compare against is not a 0% move, and a stage the previous window never
+      // paid for is new rather than up by everything it now costs.
+      trend: noWindow ? "n/a (no window)" : before === 0 ? "first seen" : costTrend(total, before),
+    };
+  });
+  const windowTotal = rows.reduce((n, r) => n + r.total, 0);
+  for (const r of rows) r.pctOfWindow = windowTotal === 0 ? 0 : (r.total / windowTotal) * 100;
+  rows.sort((a, b) => b.total - a.total || byName(a.stage, b.stage));
+  return rows;
+}
+
+// A key is named by its culprit slug only when every session that recorded the key named the
+// same single slug. A key two sessions blamed differently is reported by key rather than by
+// picking one of them and printing a name the corpus does not agree on.
+function agreedSlug(slugLists) {
+  const single = slugLists.filter((l) => l.length === 1).map((l) => l[0]);
+  if (!slugLists.length || single.length !== slugLists.length) return null;
+  return new Set(single).size === 1 ? single[0] : null;
+}
+
+// Every impact key the corpus scored, folded across sessions: one walk feeding both tables
+// below, so the culprits and the wins can never disagree about what a key cost or how often it
+// fired. The dollar figures are summarizeSession's own impactScores output — this adds them up
+// and never recomputes them, per the one-formula constraint.
+function impactRows(summaries, vocab = []) {
+  const byKey = new Map();
+  for (const s of summaries) {
+    const version = s.pluginVersion ?? "unknown";
+    const profile = s.profile ?? "unknown";
+    for (const scored of s.impact ?? []) {
+      if (!byKey.has(scored.key))
+        byKey.set(scored.key, {
+          key: scored.key, event: scored.event, occurrences: 0, impact: 0,
+          measurable: true, slugLists: [], cohorts: new Map(),
+        });
+      const agg = byKey.get(scored.key);
+      agg.occurrences += scored.frequency;
+      // Unmeasurable propagates: one contribution nobody could price makes the whole row
+      // unpriced, never a total that silently counts it as free.
+      if (scored.impact === null) agg.measurable = false;
+      else agg.impact += scored.impact;
+      agg.slugLists.push(s.culpritsByKey?.[scored.key] ?? []);
+      const cohortKey = `${version} ${profile}`;
+      if (!agg.cohorts.has(cohortKey))
+        agg.cohorts.set(cohortKey, { version, profile, sessions: 0, total: 0, measurable: true });
+      const cohort = agg.cohorts.get(cohortKey);
+      cohort.sessions += 1;
+      if (scored.impact === null) cohort.measurable = false;
+      else cohort.total += scored.impact;
+    }
+  }
+  return [...byKey.values()].map((agg) => {
+    const slug = agreedSlug(agg.slugLists);
+    const entry = slug ? vocab.find((v) => v.slug === slug) : null;
+    const cohorts = orderVersionProfileRows([...agg.cohorts.values()].map((c) => ({
+      version: c.version, profile: c.profile,
+      impact: c.measurable ? c.total : null,
+      lowConfidence: c.sessions < MIN_COHORT,
+    })));
+    const byVersion = new Map();
+    for (const c of cohorts.filter((c) => c.version !== "unknown")) {
+      const running = byVersion.get(c.version);
+      byVersion.set(c.version, running === undefined ? c.impact
+        : running === null || c.impact === null ? null : running + c.impact);
+    }
+    return {
+      key: agg.key,
+      name: slug ?? agg.key,
+      // A key with no vocabulary entry is still reported, labelled as unclassified rather than
+      // filed under a kind nobody assigned it.
+      kind: entry?.kind ?? "unclassified",
+      isWin: WIN_EVENTS.has(agg.event) || entry?.kind === "win",
+      impact: agg.measurable ? agg.impact : null,
+      occurrences: agg.occurrences,
+      delta: cohorts.length
+        ? deltaAgainstPrevious(cohorts, cohorts.length - 1, (r) => r.impact)
+        : { state: "first-seen", pct: null },
+      trend: trendAcross([...byVersion.keys()].sort(compareVersions).map((v) => byVersion.get(v))),
+    };
+  });
+}
+
+// The friction this corpus is paying for, priciest first: what it cost, how often it happened,
+// and whether it is getting better.
+export function culpritTable(summaries, vocab) {
+  return impactRows(summaries, vocab)
+    .filter((r) => !r.isWin)
+    .map(({ name, kind, impact, occurrences, delta, trend }) =>
+      ({ culprit: name, kind, impact, occurrences, delta, trend }))
+    .sort(byImpactDesc);
+}
+
+// What is already working, biggest first: the win events the corpus recorded, plus the
+// version-over-version cost improvements emitCandidates found.
+export function winTable(summaries, vocab, candidates = []) {
+  const rows = impactRows(summaries, vocab)
+    .filter((r) => r.isWin)
+    .map(({ name, impact, occurrences, trend }) => ({ win: name, impact, occurrences, trend }));
+  for (const c of candidates.filter((c) => c.type === "version-improvement"))
+    rows.push({
+      win: `${c.skill} ${c.version_from}→${c.version_to}`,
+      // A cost improvement is a downward cost move, reported as the money it saved.
+      impact: Math.abs(c.delta_dollars),
+      occurrences: c.sessions_sampled,
+      trend: "down",
+    });
+  return rows.sort(byImpactDesc);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

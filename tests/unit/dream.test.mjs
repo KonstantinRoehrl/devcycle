@@ -1381,6 +1381,30 @@ test("a record written before these fields existed parses with both absent, not 
   assert.equal(rec.sourcedFromMemory, null);
 });
 
+test("readPromotions reads the culprit id a promotion shipped", () => {
+  // Hand-written rather than round-tripped through recordPromotion: that writer gains the
+  // field in Phase 3, and the reader has to understand a record before one is ever written —
+  // otherwise doctor's Shipped column is empty by construction rather than for want of data.
+  const root = repo();
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-05-shipped.md"),
+    "# Shipped\n- promotion-type: doc-edit\n- cluster-signature: sig\n- files-touched: a.md\n" +
+    "- landed: 2026-08-05\n- commit: abc1234\n- plugin-version: 0.13.0\n" +
+    "- culprit-id: partial-evidence-capture\n");
+  const [rec] = readPromotions(root);
+  assert.equal(rec.culpritId, "partial-evidence-capture");
+  assert.equal(rec.pluginVersion, "0.13.0");
+});
+
+test("a record written before culprit-id existed parses it as absent, not as an empty string", () => {
+  const root = repo();
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-05-legacy-culprit.md"),
+    "# Legacy\n- promotion-type: doc-edit\n- cluster-signature: old\n- files-touched: a.md\n" +
+    "- landed: 2026-08-05\n- commit: abc1234\n");
+  assert.equal(readPromotions(root)[0].culpritId, null);
+});
+
 test("a newline inside a provenance value cannot forge a second field line", () => {
   const root = repo();
   const path = recordPromotion(root, {
