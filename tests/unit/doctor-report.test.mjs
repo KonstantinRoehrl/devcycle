@@ -574,3 +574,44 @@ test("the empty corpus renders a report rather than throwing", () => {
   assert.match(out, /# Doctor Report/);
   assert.match(out, /no sessions matched/i);
 });
+
+// The cache-band caveat lines, pinned as whole strings rather than by shape. They are shipped
+// prose a reader acts on, and until now neither was asserted anywhere — which is exactly how the
+// affirmation came to be dropped from this report while formatReport still emitted it.
+const EXACT_LINE = "- Cost is exact: every cache write in this corpus carries its TTL split.";
+const NO_CAVEATS_LINE = "- No caveats apply to this corpus.";
+const FORWARD_FILLED_LINE =
+  "- 1 session(s) have inferred stage costs (forward-filled — no run record); the session ids " +
+  "are in the appendix's per-session detail.";
+
+test("a collapsed cache band affirms the cost is exact even when another caveat applies", () => {
+  // The real corpus's shape: the band is collapsed while forward-filled sessions do produce a
+  // caveat, so the no-caveat fallback cannot be what carries the exactness claim.
+  const out = renderReport([sum({ attributionSource: "forward-filled" })], ctx());
+  assert.ok(out.includes(EXACT_LINE), "a collapsed band claimed no exactness");
+  assert.ok(out.includes(FORWARD_FILLED_LINE), "the forward-filled caveat is missing");
+  assert.ok(!out.includes(NO_CAVEATS_LINE), "the fallback fired although a caveat applies");
+});
+
+test("the no-caveat fallback still fires, alongside the exactness affirmation", () => {
+  // Reachability: the fallback is keyed off the caveat classes, so an unconditional band line
+  // does not turn it into dead code. Both lines render for a corpus with nothing to qualify.
+  const out = renderReport([sum()], ctx());
+  assert.ok(out.includes(EXACT_LINE), "a collapsed band claimed no exactness");
+  assert.ok(out.includes(NO_CAVEATS_LINE), "the no-caveat fallback is unreachable");
+});
+
+test("an uncollapsed cache band renders its range and claims no exactness", () => {
+  const out = renderReport(
+    [sum({ cacheBand: { point: 4, low: 3, high: 6, fallbackShare: 0.5, collapsed: false } })],
+    ctx(),
+  );
+  assert.ok(
+    out.includes(
+      "- Cost $4.00 (inferred: cache-write TTL, range $3.00–$6.00; 50.0% of cache-write tokens lack a TTL split).",
+    ),
+    "the inferred cache-band range is missing",
+  );
+  assert.ok(!out.includes(EXACT_LINE), "an inferred band was reported as exact");
+  assert.ok(!out.includes(NO_CAVEATS_LINE), "an inferred band was reported as carrying no caveat");
+});

@@ -1980,39 +1980,45 @@ const turnaroundText = (v) =>
 const anomalyWeight = (c) => Math.abs(c.delta_dollars ?? c.dollars ?? 0);
 
 // What the corpus this report describes actually was, in the reader's terms rather than in flags.
-export function reportScope(args) {
+function reportScope(args) {
   if (args.since || args.until)
     return `${args.since ?? "the earliest record"} to ${args.until ?? "now"}`;
   return args.all ? "every transcript, tagged or not" : "every devcycle-tagged session";
 }
 
-// The caveat block, in formatReport's own order: unpriced models, an inferred cache-write TTL
-// range, forward-filled stage attribution, and sessions still in flight. Only the caveats that
-// actually apply are emitted — a corpus with none says so, which is also where formatReport's
-// "cost is exact" affirmation now lives, since emitting that unconditionally would leave the
-// no-caveat line unreachable.
+// The caveat block, in formatReport's own order: unpriced models, the cache-write TTL band,
+// forward-filled stage attribution, and sessions still in flight. The band line always renders,
+// in formatReport's two forms — the inferred range when the band is open, the "cost is exact"
+// affirmation when it is collapsed — because a reader must be able to tell a band that was
+// checked and found exact from one that was never checked. The no-caveat fallback stays
+// reachable beside it: it is keyed off the caveat classes rather than off the emitted lines, so
+// it fires exactly when none of the four qualifies anything (the affirmation is not a caveat).
 function caveatLines(summaries, agg) {
   if (!summaries.length) return ["- no sessions matched."];
   const out = [];
-  for (const [model, count] of Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]))
-    out.push(`- UNPRICED MODEL: ${model} (${count} requests)`);
-  const band = agg.cacheBand;
-  if (!band.collapsed)
-    out.push(
-      `- Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
-        `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
-        `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`,
-    );
+  const unpriced = Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]);
   const filled = summaries.filter((s) => s.attributionSource === "forward-filled").length;
+  const inFlight = summaries.filter((s) => s.inFlight).length;
+  const band = agg.cacheBand;
+  for (const [model, count] of unpriced)
+    out.push(`- UNPRICED MODEL: ${model} (${count} requests)`);
+  out.push(
+    band.collapsed
+      ? "- Cost is exact: every cache write in this corpus carries its TTL split."
+      : `- Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
+          `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
+          `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`,
+  );
   if (filled > 0)
     out.push(
       `- ${filled} session(s) have inferred stage costs (forward-filled — no run record); the ` +
         "session ids are in the appendix's per-session detail.",
     );
-  const inFlight = summaries.filter((s) => s.inFlight).length;
   if (inFlight > 0)
     out.push(`- ${inFlight} session(s) still in flight (newest record < 30 min old) — ${IN_FLIGHT_NOTE}`);
-  return out.length ? out : ["- No caveats apply to this corpus."];
+  if (band.collapsed && !unpriced.length && filled === 0 && inFlight === 0)
+    out.push("- No caveats apply to this corpus.");
+  return out;
 }
 
 // One line per session, in the same shape formatReport's own detail loop emits. The two are
