@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 
 const args = process.argv.slice(2);
 const flagValue = (name) => {
@@ -24,6 +24,11 @@ const flagValue = (name) => {
   return i === -1 ? null : args[i + 1];
 };
 const dir = flagValue("--dir");
+// A second caller for the same engine: `--dir` and `git ls-files` both scan a corpus, and an
+// issue draft is neither — it is one untracked file that must be screened before it is shown
+// to the user. Takes precedence over --dir so a caller passing both gets the narrower scan
+// rather than a silently widened one.
+const file = flagValue("--file");
 const hashesPath = flagValue("--hashes") ?? "scripts/redaction-hashes.txt";
 
 const SELF_EXEMPT = ["scripts/redaction-check.mjs", "scripts/redaction-hashes.txt"];
@@ -68,6 +73,7 @@ function walk(root, base = root) {
 // unpacked release tarball — there is no such list and `git ls-files` dies, so the working
 // tree stands in, minus the two directories a checkout would never publish anyway.
 function listFiles() {
+  if (file) return [basename(file)];
   if (dir) return walk(dir);
   try {
     return execSync("git ls-files", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
@@ -81,7 +87,9 @@ function listFiles() {
   }
 }
 
-const root = dir ?? process.cwd();
+// Entries are always relative to `root`, so a --file path is split into the two: an absolute
+// path joined onto cwd resolves to a file that does not exist, and the scan would read as clean.
+const root = file ? dirname(file) : (dir ?? process.cwd());
 const files = listFiles();
 // Scanning nothing is not a pass: an empty corpus would report the same `redaction: ok`
 // as a clean one.
@@ -96,7 +104,13 @@ for (const f of files) {
   let text;
   try {
     text = readFileSync(join(root, f), "utf8");
-  } catch {
+  } catch (err) {
+    // A file the caller named explicitly must not read as clean when it cannot be read; a
+    // member of a scanned corpus that is binary still legitimately skips.
+    if (file) {
+      console.error(`redaction-check: cannot read ${f} (${err.code ?? err.message})`);
+      process.exit(1);
+    }
     continue; // binary
   }
   for (const cls of new Set(PATTERNS.filter((p) => p.re.test(text)).map((p) => p.class)))

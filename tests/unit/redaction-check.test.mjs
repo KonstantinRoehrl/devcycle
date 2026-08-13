@@ -168,6 +168,63 @@ test("a run that scanned no file at all fails instead of reporting ok", () => {
   }
 });
 
+// --file: the same engine, one more caller. An untracked draft has no place in `git ls-files`
+// and is not under any --dir, so without this flag the issue-draft screen could not run at all.
+function runFile(path) {
+  return execFileSync("node", [SCRIPT, "--file", path], { encoding: "utf8" });
+}
+
+test("--file flags a single file carrying a home-directory path", () => {
+  const dir = makeFixture({ "draft.md": `body\n${MAC_HOME}${SLASH}notes\n` });
+  try {
+    let stderr = "";
+    assert.throws(
+      () => runFile(join(dir, "draft.md")),
+      (err) => { stderr = err.stderr ?? ""; return true; },
+    );
+    assert.match(stderr, /contains an absolute home-directory path/);
+    // The failure names the class and never reprints what it matched.
+    assert.ok(!stderr.includes("someone"), "the failure message reprinted the match");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file passes a clean file", () => {
+  const dir = makeFixture({ "draft.md": "plugin version 0.12.0, profile thorough, 4 events\n" });
+  try {
+    assert.match(runFile(join(dir, "draft.md")), /redaction: ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file on a missing path fails rather than reporting a clean scan", () => {
+  const dir = makeFixture({});
+  try {
+    let stderr = "";
+    assert.throws(
+      () => runFile(join(dir, "does-not-exist.md")),
+      (err) => { stderr = err.stderr ?? ""; return true; },
+    );
+    assert.match(stderr, /no files to scan|cannot read/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file takes precedence over --dir rather than silently scanning both", () => {
+  const dir = makeFixture({ "clean.md": "nothing here\n", "dirty.md": `${MAC_HOME}${SLASH}x\n` });
+  try {
+    assert.match(
+      execFileSync("node", [SCRIPT, "--file", join(dir, "clean.md"), "--dir", dir], { encoding: "utf8" }),
+      /redaction: ok/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("still flags a deny-listed term, read from the hashes file", () => {
   const term = "forbiddenword";
   const dir = makeFixture({
