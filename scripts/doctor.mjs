@@ -2,6 +2,7 @@
 // Re-measures devcycle's token cost from session transcripts: turn counts, main-thread
 // vs subagent split, context depth, tool mix, and dollar cost by model, stage, and agent.
 // Read-only. Emits counts, dollars, model ids, tool names, and skill names only.
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -16,6 +17,20 @@ import { PRICING, priceFor } from "./pricing.mjs";
 // tree. See docs/platform-notes.md section (c).
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CHANGELOG_PATH = join(PLUGIN_ROOT, "references", "config-changelog.md");
+
+// The plugin's own release changelog, under a name distinct from CHANGELOG_PATH above, which
+// configDrift already holds for references/config-changelog.md. Resolved from PLUGIN_ROOT for
+// the same reason that one is: --drift runs from the target repo, not from the plugin tree.
+const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
+
+// `from-doctor` issues are filed against devcycle itself, wherever doctor happens to run. A
+// bare `gh issue list` resolves to the host repo, so the Outer loop section would render zeros
+// in every repo except this one — the failure this constant exists to prevent.
+export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
+
+// Drafted markers began being recorded in this release; reports written before it carry none,
+// so the count is qualified rather than mixing "none drafted" with "not recorded".
+const DRAFTED_SINCE = "0.13.0";
 
 const DEVCYCLE_PREFIX = /^devcycle:/;
 const PLUGIN_VERSION_RE = /devcycle\/devcycle\/(\d+\.\d+\.\d+)\//;
@@ -1730,6 +1745,116 @@ export function winTable(summaries, vocab, candidates = []) {
       trend: "down",
     });
   return rows.sort(byImpactDesc);
+}
+
+// The marker playbooks/profiling-sessions.md writes when the Actionability step drafts an
+// issue. That playbook is the contract's one written source; this parses what it states.
+const DRAFTED_MARKER_RE = /^Drafted: \[culprit:([a-z0-9][a-z0-9-]*)\] (.+)$/gm;
+
+export function parseDraftedMarkers(text) {
+  const out = [];
+  for (const m of String(text).matchAll(DRAFTED_MARKER_RE))
+    out.push({ slug: m[1], title: m[2].trim() });
+  return out;
+}
+
+// Release dates come from the plugin's own CHANGELOG.md headings, back-filled 2026-08-13. A
+// heading with no date is omitted rather than defaulted: turnaround measured against a made-up
+// release date is a number that reads as fact and is not one.
+export function releaseDates(changelogText) {
+  const dates = new Map();
+  for (const m of String(changelogText).matchAll(/^## (\d+\.\d+\.\d+) — (\d{4}-\d{2}-\d{2})[ \t]*$/gm))
+    dates.set(m[1], m[2]);
+  return dates;
+}
+
+// gh's stdout, or a thrown error. Short timeout: a hanging gh must not hang a report, and the
+// caller degrades to "unavailable" on any throw.
+const defaultGhRunner = (args) =>
+  execFileSync("gh", args, { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
+
+export function outerLoop(reportsDir, ghRunner = defaultGhRunner) {
+  // Drafted is local: it comes from this repo's own persisted reports, so it renders even when
+  // gh is unavailable. Reports written before this phase carry no markers, which is why the
+  // renderer qualifies the count rather than presenting it as "none drafted".
+  let drafted = 0;
+  try {
+    for (const f of readdirSync(reportsDir).filter((n) => n.endsWith(".md")))
+      drafted += parseDraftedMarkers(readFileSync(join(reportsDir, f), "utf8")).length;
+  } catch (err) {
+    if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
+  }
+
+  const unavailable = {
+    drafted, draftedSince: DRAFTED_SINCE,
+    filed: "unavailable", resolved: "unavailable", medianTurnaroundDays: "unavailable",
+  };
+
+  let issues;
+  try {
+    issues = JSON.parse(ghRunner([
+      "issue", "list", "--repo", DEVCYCLE_UPSTREAM, "--author", "@me",
+      "--label", "from-doctor", "--state", "all", "--limit", "200",
+      "--json", "number,title,labels,createdAt,closedAt,state",
+    ]));
+    if (!Array.isArray(issues)) return unavailable;
+  } catch {
+    // Missing gh, an unauthenticated gh, a timeout, or output that is not JSON. All four mean
+    // "not measured" — rendering 0 would read as "nothing has ever been filed".
+    return unavailable;
+  }
+
+  let vocab = [];
+  try {
+    vocab = JSON.parse(readFileSync(join(PLUGIN_ROOT, "references", "culprits.json"), "utf8"));
+  } catch { vocab = []; }
+  const resolvedIn = new Map(
+    vocab.filter((e) => e && e["resolved-in"]).map((e) => [e.slug, e["resolved-in"]]),
+  );
+  let dates = new Map();
+  try { dates = releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8")); } catch { dates = new Map(); }
+
+  const slugOf = (issue) =>
+    (issue.labels ?? []).map((l) => l.name ?? "").find((n) => n.startsWith("culprit:"))?.slice("culprit:".length) ?? null;
+
+  const turnarounds = [];
+  let resolved = 0;
+  for (const issue of issues) {
+    const version = resolvedIn.get(slugOf(issue));
+    if (!version) continue; // no resolved-in: excluded, never counted as an infinite turnaround
+    resolved += 1;
+    const released = dates.get(version);
+    if (!released) continue;
+    const days = (Date.parse(`${released}T00:00:00Z`) - Date.parse(issue.createdAt)) / 86400000;
+    if (Number.isFinite(days)) turnarounds.push(days);
+  }
+
+  return {
+    drafted, draftedSince: DRAFTED_SINCE,
+    filed: issues.length,
+    resolved,
+    medianTurnaroundDays: turnarounds.length ? Math.round(median(turnarounds)) : null,
+  };
+}
+
+// Compiled knowledge needs a `rung:` field on promotion records, which Phase 3 adds — the only
+// `rung` in this repo today is scripts/model-pool.mjs's unrelated model-pool rung. Rather than
+// invent a mapping, the section renders its heading, its gloss, its column header and this
+// line. The directory is still opened rather than skipped: a promotions directory that exists
+// but cannot be read fails here instead of rendering the same no-data line as a repo that has
+// simply never promoted anything (QC5 — absent degrades, a permissions fault throws). The
+// records themselves are deliberately not read here: readPromotions (scripts/dream.mjs) is
+// the one promotion parser, and Phase 3 reads `rung:` through it rather than beside it.
+export function compiledKnowledge(promotionsDir) {
+  try {
+    readdirSync(promotionsDir);
+  } catch (err) {
+    if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
+  }
+  return {
+    rows: [],
+    note: "No data yet — this table fills in from the release that records `rung:` on promotion records.",
+  };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

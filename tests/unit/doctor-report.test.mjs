@@ -4,9 +4,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
+  parseDraftedMarkers, releaseDates, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
 } from "../../scripts/doctor.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
@@ -346,4 +350,97 @@ test("a version-improvement candidate is a win, not a neutral candidate", () => 
   assert.equal(wins.length, 1);
   assert.match(wins[0].win, /execution/);
   assert.equal(wins[0].impact, 12);
+});
+
+const GH_RESPONSE = JSON.stringify([
+  { number: 7, title: "[culprit:partial-evidence-capture] evidence capture", labels: [{ name: "from-doctor" }, { name: "culprit:partial-evidence-capture" }], createdAt: "2026-08-01T00:00:00Z", closedAt: "2026-08-07T00:00:00Z", state: "CLOSED" },
+  { number: 8, title: "[culprit:reviewer-role-confusion] roles", labels: [{ name: "from-doctor" }, { name: "culprit:reviewer-role-confusion" }], createdAt: "2026-08-03T00:00:00Z", closedAt: null, state: "OPEN" },
+]);
+
+function reportsFixture(files) {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-reports-"));
+  for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content, "utf8");
+  return dir;
+}
+
+test("parseDraftedMarkers reads the slug and title out of the marker line", () => {
+  const found = parseDraftedMarkers("prose\nDrafted: [culprit:partial-evidence-capture] Evidence capture is partial\nmore prose\n");
+  assert.deepEqual(found, [{ slug: "partial-evidence-capture", title: "Evidence capture is partial" }]);
+});
+
+test("parseDraftedMarkers ignores prose that merely mentions the word drafted", () => {
+  assert.deepEqual(parseDraftedMarkers("We drafted an issue about culprit: things\n"), []);
+});
+
+test("releaseDates reads a version's date off the dated changelog heading", () => {
+  const dates = releaseDates("# Changelog\n\n## 0.12.0 — 2026-08-07\n\n- feat\n\n## 0.11.0 — 2026-08-05\n\n- fix\n");
+  assert.equal(dates.get("0.12.0"), "2026-08-07");
+  assert.equal(dates.get("0.11.0"), "2026-08-05");
+});
+
+test("releaseDates omits an undated heading rather than inventing a date for it", () => {
+  assert.equal(releaseDates("# Changelog\n\n## 0.1.0\n\n- feat\n").get("0.1.0"), undefined);
+});
+
+test("outerLoop counts drafted markers across persisted reports", () => {
+  const dir = reportsFixture({
+    "2026-08-01-report.md": "Drafted: [culprit:partial-evidence-capture] one\n",
+    "2026-08-08-report.md": "Drafted: [culprit:reviewer-role-confusion] two\nDrafted: [culprit:partial-evidence-capture] three\n",
+  });
+  try {
+    assert.equal(outerLoop(dir, () => GH_RESPONSE).drafted, 3);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("outerLoop queries devcycle's upstream, never the ambient repo", () => {
+  const dir = reportsFixture({});
+  const seen = [];
+  try {
+    outerLoop(dir, (args) => { seen.push(args); return GH_RESPONSE; });
+    const argv = seen[0];
+    const i = argv.indexOf("--repo");
+    assert.ok(i !== -1, "gh was invoked without --repo, so it resolves to the host repo");
+    assert.equal(argv[i + 1], DEVCYCLE_UPSTREAM);
+    assert.ok(argv.includes("--label") && argv.includes("from-doctor"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a failing gh renders unavailable, never zero", () => {
+  const dir = reportsFixture({ "2026-08-01-report.md": "Drafted: [culprit:x] one\n" });
+  try {
+    const r = outerLoop(dir, () => { const e = new Error("gh: command not found"); e.code = "ENOENT"; throw e; });
+    assert.equal(r.filed, "unavailable");
+    assert.equal(r.resolved, "unavailable");
+    assert.equal(r.medianTurnaroundDays, "unavailable");
+    // Drafted comes from local files, so it still renders.
+    assert.equal(r.drafted, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("gh returning something that is not JSON renders unavailable rather than throwing", () => {
+  const dir = reportsFixture({});
+  try {
+    assert.equal(outerLoop(dir, () => "gh: not logged in").filed, "unavailable");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a missing reports directory is no drafts, not a crash", () => {
+  assert.equal(outerLoop(join(tmpdir(), "doctor-reports-absent-xyz"), () => GH_RESPONSE).drafted, 0);
+});
+
+test("compiled knowledge renders no rows and says why, rather than throwing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-promotions-"));
+  try {
+    writeFileSync(join(dir, "2026-08-05-a-promotion.md"),
+      "# A promotion\n- promotion-type: doc-edit\n- cluster-signature: sig\n- files-touched: x.md\n- landed: 2026-08-05\n- commit: abc1234\n");
+    const ck = compiledKnowledge(dir);
+    assert.deepEqual(ck.rows, []);
+    assert.match(ck.note, /rung/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("compiled knowledge on a missing promotions directory renders the same no-data state", () => {
+  const ck = compiledKnowledge(join(tmpdir(), "doctor-promotions-absent-xyz"));
+  assert.deepEqual(ck.rows, []);
+  assert.match(ck.note, /rung/);
 });
