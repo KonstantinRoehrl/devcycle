@@ -11,7 +11,7 @@ import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
   parseDraftedMarkers, releaseDates, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
-  renderReport,
+  renderReport, repoShape, issueBody, parseArgs,
 } from "../../scripts/doctor.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
@@ -614,4 +614,81 @@ test("an uncollapsed cache band renders its range and claims no exactness", () =
   );
   assert.ok(!out.includes(EXACT_LINE), "an inferred band was reported as exact");
   assert.ok(!out.includes(NO_CAVEATS_LINE), "an inferred band was reported as carrying no caveat");
+});
+
+// --- the issue draft ---
+
+test("repoShape reports three enums and never a path or a name", () => {
+  const shape = repoShape(process.cwd());
+  assert.deepEqual(Object.keys(shape).sort(), ["language", "monorepo", "testRunner"]);
+  for (const v of Object.values(shape))
+    assert.ok(typeof v === "boolean" || /^[a-z]+$/.test(v), `"${v}" is not an enum`);
+});
+
+test("this repo, which has no package manifest, is not a monorepo and has no known test runner", () => {
+  const shape = repoShape(process.cwd());
+  assert.equal(shape.monorepo, false);
+  assert.equal(shape.testRunner, "unknown");
+});
+
+const draftSummaries = [1, 2, 3].map((n) => sum({
+  id: `s${n}`, costUSD: 4, costByStage: { execution: 4 },
+  impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
+  culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
+}));
+
+const draftTables = () => ({
+  versionProfile: versionProfileTable(draftSummaries),
+  culprits: culpritTable(draftSummaries, VOCAB),
+});
+
+test("the issue title and labels follow the fixed form", () => {
+  const d = issueBody("partial-evidence-capture", draftSummaries, draftTables(), repoShape(process.cwd()));
+  assert.equal(d.title, "[culprit:partial-evidence-capture] Captured evidence covered less than the whole verification gate command.");
+  assert.deepEqual(d.labels.sort(), ["culprit:partial-evidence-capture", "from-doctor"]);
+});
+
+test("the draft carries the same cohort figure the report renders for that row", () => {
+  const tables = draftTables();
+  const d = issueBody("partial-evidence-capture", draftSummaries, tables, repoShape(process.cwd()));
+  const row = tables.versionProfile.find((r) => r.version === "0.12.0" && r.profile === "thorough");
+  assert.ok(d.body.includes(row.medianCostPerCycle.toFixed(2)), "the draft's cohort figure differs from the table's");
+  assert.ok(d.body.includes(String(row.sessions)));
+});
+
+// A cohort the report qualifies must not be quoted bare here: an issue filed from a two-session
+// cohort would otherwise state a figure the report that produced it declines to stand behind.
+test("a low-confidence cohort carries the report's own qualifier, not a bare count", () => {
+  const summaries = [1, 2].map((n) => sum({
+    id: `s${n}`, costUSD: 4, costByStage: { execution: 4 },
+    impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
+    culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
+  }));
+  const tables = { versionProfile: versionProfileTable(summaries), culprits: culpritTable(summaries, VOCAB) };
+  const row = tables.versionProfile.find((r) => r.version === "0.12.0" && r.profile === "thorough");
+  assert.equal(row.lowConfidence, true);
+  const d = issueBody("partial-evidence-capture", summaries, tables, repoShape(process.cwd()));
+  assert.ok(d.body.includes("2 (low confidence: n<3)"), "the draft quotes a count the report qualifies");
+});
+
+test("the draft carries no path, no machine identity, and no free text beyond the placeholder", () => {
+  const d = issueBody("partial-evidence-capture", draftSummaries, draftTables(), repoShape(process.cwd()));
+  assert.ok(!/\/Users\/|\/home\//.test(d.body));
+  assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(d.body));
+  assert.match(d.body, /<!-- add anything you want to say here -->/);
+});
+
+test("a culprit with no vocabulary entry is still offered a draft", () => {
+  const summaries = [sum({
+    impact: [{ key: "review-reject:execution", event: "review-reject", stage: "execution", frequency: 1, impact: 2 }],
+  })];
+  const tables = { versionProfile: versionProfileTable(summaries), culprits: culpritTable(summaries, VOCAB) };
+  const d = issueBody("review-reject:execution", summaries, tables, repoShape(process.cwd()));
+  assert.match(d.title, /^\[culprit:/);
+});
+
+test("parseArgs reads --issue-body", () => {
+  assert.equal(parseArgs(["--issue-body", "partial-evidence-capture"]).issueBody, "partial-evidence-capture");
+  // The report path is unaffected when the flag is absent.
+  assert.equal(parseArgs(["--all"]).issueBody, null);
 });

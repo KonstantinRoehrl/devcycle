@@ -68,7 +68,7 @@ test("parseArgs: defaults resolve the transcript dir under the home directory", 
 
 test("parseArgs: every flag is read", () => {
   const a = parseArgs(["--dir", "/tmp/x", "--since", "2026-07-01", "--until", "2026-07-31", "--json"]);
-  assert.deepEqual(a, { dir: "/tmp/x", since: "2026-07-01", until: "2026-07-31", json: true, all: false, depth: false, drift: null });
+  assert.deepEqual(a, { dir: "/tmp/x", since: "2026-07-01", until: "2026-07-31", json: true, all: false, depth: false, drift: null, issueBody: null });
 });
 
 test("isDevcycleSession: a devcycle attributionSkill includes the session", () => {

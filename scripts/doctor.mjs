@@ -65,6 +65,7 @@ export function parseArgs(argv) {
     all: false,
     depth: false,
     drift: null,
+    issueBody: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -75,6 +76,7 @@ export function parseArgs(argv) {
     else if (a === "--all") args.all = true;
     else if (a === "--depth") args.depth = true;
     else if (a === "--drift") args.drift = argv[++i];
+    else if (a === "--issue-body") args.issueBody = argv[++i];
   }
   return args;
 }
@@ -1398,6 +1400,25 @@ function main() {
     console.error("SESSION METRICS FAILED:\n" + result.reasons.map((r) => ` - ${r}`).join("\n"));
     process.exit(1);
   }
+  // The draft path, before the report path: it prints one culprit's issue and returns. It never
+  // posts, and it builds its own two tables rather than taking reportContext's, so drafting an
+  // issue never runs the `gh` probe the report's Outer loop section needs.
+  if (args.issueBody) {
+    const tables = {
+      versionProfile: versionProfileTable(result.sessions, safePromotions()),
+      culprits: culpritTable(result.sessions, readVocab()),
+    };
+    if (!tables.culprits.some((r) => r.culprit === args.issueBody)) {
+      console.error(`doctor: no culprit "${args.issueBody}" in this corpus`);
+      process.exit(1);
+    }
+    const draft = issueBody(args.issueBody, result.sessions, tables, repoShape(process.cwd()));
+    console.log(`title: ${draft.title}`);
+    console.log(`labels: ${draft.labels.join(", ")}`);
+    console.log("");
+    console.log(draft.body);
+    return;
+  }
   const ctx = reportContext(args, result);
   if (args.json) {
     console.log(
@@ -1968,6 +1989,12 @@ const deltaText = (d) =>
 // An impact nobody could price is labelled, never rendered as $0.00.
 const impactText = (v) => (v === null || v === undefined ? "unmeasurable" : usd(v));
 
+// The Sessions cell of a version×profile row. One owner for two render sites: the issue draft
+// quotes the same row this table renders, and a cohort the report declines to stand behind must
+// not be quoted as a bare number in an issue filed from it.
+const cohortSessionsText = (r) =>
+  r.lowConfidence ? `${r.sessions} (low confidence: n<${MIN_COHORT})` : String(r.sessions);
+
 // null means gh answered but no resolved culprit had a dated release — not a zero-day
 // turnaround; the string "unavailable" means gh itself could not be reached.
 const turnaroundText = (v) =>
@@ -2078,7 +2105,7 @@ export function renderReport(summaries, ctx) {
     versionProfileTable(summaries, promotions).map((r) => [
       r.version,
       r.profile,
-      r.lowConfidence ? `${r.sessions} (low confidence: n<${MIN_COHORT})` : r.sessions,
+      cohortSessionsText(r),
       r.cycles,
       usd(r.medianCostPerCycle),
       deltaText(r.delta),
@@ -2249,18 +2276,27 @@ export function renderReport(summaries, ctx) {
   return L.join("\n");
 }
 
+// The culprit vocabulary and the promotion records, each with the one degrade path the report
+// has always used. Named here because the issue draft names a culprit and quotes a cohort row
+// from the same two artifacts: a second parse could disagree with the report it was filed from.
+function readVocab() {
+  try {
+    const parsed = JSON.parse(readFileSync(join(PLUGIN_ROOT, "references", "culprits.json"), "utf8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+function safePromotions() {
+  try { return readPromotions(process.cwd()); } catch { return []; }
+}
+
 // Everything the report needs that the summaries cannot carry: the repo it ran in, today's date,
 // and the three artifacts that live outside the transcripts. Built once and handed to both the
 // markdown renderer and --json, so the two forms can never describe different corpora. Each
 // artifact degrades to its own empty form rather than failing the whole report.
 function reportContext(args, result) {
-  let vocab = [];
-  try {
-    const parsed = JSON.parse(readFileSync(join(PLUGIN_ROOT, "references", "culprits.json"), "utf8"));
-    vocab = Array.isArray(parsed) ? parsed : [];
-  } catch { vocab = []; }
-  let promotions = [];
-  try { promotions = readPromotions(process.cwd()); } catch { promotions = []; }
+  const vocab = readVocab();
+  const promotions = safePromotions();
   return {
     // The repo's name, never its path — QC8: no emitted artifact carries machine identity.
     repo: basename(process.cwd()),
@@ -2271,6 +2307,185 @@ function reportContext(args, result) {
     promotions,
     outerLoop: outerLoop(join(process.cwd(), ".devcycle", "doctor")),
     compiledKnowledge: compiledKnowledge(join(process.cwd(), "docs", "devcycle", "promotions")),
+  };
+}
+
+// ─── The issue draft ─────────────────────────────────────────────────────────────────────────
+// What `--issue-body` prints, and only prints: doctor never posts. The draft carries enums and
+// counts only — no path, no machine name, no session id, no transcript excerpt (QC8) — because
+// it is written to be pasted into a public issue tracker by a reader who has not audited it.
+
+// The extensions worth naming a repo's language by, and the name each maps to. Every value is a
+// bare lowercase word: a name carrying a version or a separator would be a fact about this
+// machine's toolchain rather than about the repo's shape.
+const LANGUAGE_BY_EXT = {
+  mjs: "javascript", js: "javascript", jsx: "javascript",
+  ts: "typescript", tsx: "typescript",
+  py: "python", rs: "rust", go: "go", rb: "ruby",
+  java: "java", kt: "kotlin", swift: "swift",
+  cs: "csharp", c: "c", cpp: "cpp",
+};
+
+const TEST_RUNNER_PACKAGES = ["vitest", "jest", "mocha", "ava"];
+
+// A bare command name. A `scripts.test` that starts with anything else — an inline env
+// assignment, a relative script path — names something about this checkout rather than a
+// runner, so it is not carried into the draft.
+const BARE_COMMAND = /^[a-z][a-z0-9-]*$/;
+
+const unknownShape = () => ({ monorepo: false, language: "unknown", testRunner: "unknown" });
+
+// What kind of repo doctor is running in, as three enums and nothing else, so an issue draft
+// carries enough shape to place the report without carrying anything about the machine. Only
+// tracked files are read, so an untracked scratch manifest never decides the answer. QC5: a
+// directory that is not a checkout, or a machine with no git, degrades to the all-unknown shape
+// rather than throwing — an undetectable shape is labelled, never guessed.
+export function repoShape(cwd) {
+  let tracked;
+  try {
+    tracked = execFileSync("git", ["-C", cwd, "ls-files"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 32 * 1024 * 1024,
+    }).split("\n").filter(Boolean);
+  } catch {
+    return unknownShape();
+  }
+  const readTracked = (path) => {
+    try { return readFileSync(join(cwd, path), "utf8"); } catch { return null; }
+  };
+  const manifestPaths = tracked.filter((f) => basename(f) === "package.json");
+  let manifest = null;
+  if (manifestPaths.includes("package.json")) {
+    try { manifest = JSON.parse(readTracked("package.json") ?? ""); } catch { manifest = null; }
+  }
+
+  const cargoWorkspace = tracked
+    .filter((f) => basename(f) === "Cargo.toml")
+    .some((f) => /^\s*\[workspace\]/m.test(readTracked(f) ?? ""));
+  const monorepo =
+    tracked.includes("pnpm-workspace.yaml") ||
+    cargoWorkspace ||
+    manifest?.workspaces !== undefined ||
+    manifestPaths.length > 1;
+
+  const counts = new Map();
+  for (const f of tracked) {
+    const ext = f.includes(".") ? f.slice(f.lastIndexOf(".") + 1) : "";
+    if (LANGUAGE_BY_EXT[ext]) counts.set(ext, (counts.get(ext) ?? 0) + 1);
+  }
+  // Ties break by extension name, so the same tree always reports the same language.
+  const commonest = [...counts.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
+  const language = commonest ? LANGUAGE_BY_EXT[commonest[0]] : "unknown";
+
+  const scripted = String(manifest?.scripts?.test ?? "").trim().split(/\s+/)[0];
+  const deps = { ...(manifest?.dependencies ?? {}), ...(manifest?.devDependencies ?? {}) };
+  const testRunner =
+    BARE_COMMAND.test(scripted) ? scripted
+      : TEST_RUNNER_PACKAGES.find((p) => p in deps) ?? "unknown";
+
+  return { monorepo, language, testRunner };
+}
+
+// The human half of the title. A vocabulary member is described by the vocabulary; a bare
+// `event:stage` row is named by its own key, and a `novel:` slug by the label its author chose —
+// none of the three is ever left blank, because every ranked culprit is offered a draft whether
+// or not it has been promoted into the vocabulary.
+function culpritTitle(slug, entry) {
+  if (entry?.desc) return entry.desc;
+  return slug.startsWith("novel:") ? slug.slice("novel:".length) : slug;
+}
+
+// The sessions that recorded this culprit — by the slug a session attributed to an impact key,
+// or by the key itself for a row the corpus never named.
+function sessionsNaming(slug, summaries) {
+  return summaries.filter((s) =>
+    Object.values(s.culpritsByKey ?? {}).some((l) => (l ?? []).includes(slug)) ||
+    (s.impact ?? []).some((i) => i.key === slug));
+}
+
+// The version×profile row this culprit was mostly recorded under, taken from the table the
+// report itself renders rather than recomputed — the issue and the report quote one row. Ties
+// keep the table's own order, and a cohort with no settled row yields null rather than a
+// fabricated one.
+function cohortRowFor(sources, versionProfile) {
+  const keyOf = (version, profile) => `${version} ${profile}`;
+  const counts = new Map();
+  for (const s of sources) {
+    const k = keyOf(s.pluginVersion ?? "unknown", s.profile ?? "unknown");
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return (versionProfile ?? [])
+    .filter((r) => counts.has(keyOf(r.version, r.profile)))
+    .sort((a, b) => counts.get(keyOf(b.version, b.profile)) - counts.get(keyOf(a.version, a.profile)))[0]
+    ?? null;
+}
+
+// This culprit's own events, folded by stage. Frequencies come from the summaries' already-scored
+// impact rows, so the draft counts exactly what the report counted.
+function eventCountsByStage(slug, sources) {
+  const counts = new Map();
+  for (const s of sources)
+    for (const i of s.impact ?? []) {
+      if (!(s.culpritsByKey?.[i.key] ?? []).includes(slug) && i.key !== slug) continue;
+      const k = `${i.event} in ${i.stage}`;
+      counts.set(k, (counts.get(k) ?? 0) + i.frequency);
+    }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0]));
+}
+
+// A ready-to-paste GitHub issue for one culprit: a title, two labels, and a body of enums and
+// counts. Nothing here posts anything, and nothing here recomputes a figure — the cohort row and
+// the culprit's cost are read from the tables the report rendered.
+export function issueBody(slug, summaries, tables, shape) {
+  const vocab = readVocab();
+  const entry = vocab.find((v) => v.slug === slug) ?? null;
+  const named = sessionsNaming(slug, summaries ?? []);
+  const row = cohortRowFor(named, tables?.versionProfile);
+  const culprit = (tables?.culprits ?? []).find((r) => r.culprit === slug) ?? null;
+  const events = eventCountsByStage(slug, named);
+  const wins = winTable(summaries ?? [], vocab)
+    .map((w) => `${w.win} ×${w.occurrences}`)
+    .join(", ");
+
+  const L = [
+    `Culprit: ${slug} (${culprit?.kind ?? entry?.kind ?? "unclassified"})`,
+    // Unknown, never dropped: a session whose version or profile could not be extracted renders
+    // under the literal `unknown` the cohort table gives it.
+    row
+      ? `Plugin version: ${row.version} · Profile: ${row.profile}`
+      : "Plugin version: unrecorded · Profile: unrecorded",
+    `Repo shape: monorepo=${shape?.monorepo ?? "unknown"} · language=${shape?.language ?? "unknown"} ` +
+      `· test-runner=${shape?.testRunner ?? "unknown"}`,
+    "",
+    "Events by stage:",
+    ...(events.length
+      ? events.map(([k, n]) => `- ${k} ×${n}`)
+      : ["- none recorded for this culprit"]),
+    "",
+    // The cohort figures carry the same qualifier the report's Cost-by-version table carries for
+    // this row, so a two-session cohort cannot be quoted bare in an issue filed from a report
+    // that declines to stand behind it.
+    row ? "Cohort, as the report renders it:" : "Cohort: unavailable (no settled cohort row for this culprit)",
+    ...(row
+      ? [
+          `- Sessions: ${cohortSessionsText(row)}`,
+          `- Cycles: ${row.cycles}`,
+          `- Median $/cycle: ${usd(row.medianCostPerCycle)}`,
+          `- Priciest stage: ${row.priciestStage ?? "unrecorded"}`,
+          `- Δ vs previous: ${deltaText(row.delta)}`,
+        ]
+      : []),
+    `- Cost attributed to this culprit: ${impactText(culprit?.impact)} over ` +
+      `${culprit?.occurrences ?? 0} occurrence(s)`,
+    "",
+    `Wins recorded in the same corpus: ${wins || "none recorded"}`,
+    "",
+    "<!-- add anything you want to say here -->",
+  ];
+
+  return {
+    title: `[culprit:${slug}] ${culpritTitle(slug, entry)}`,
+    labels: [`culprit:${slug}`, "from-doctor"],
+    body: L.join("\n"),
   };
 }
 
