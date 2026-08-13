@@ -73,8 +73,37 @@ test("notesForVersion: the version is matched literally, not as a regex", () => 
 });
 
 test("changelogWithSection: prepends above every existing section", () => {
-  const out = changelogWithSection("# Changelog\n\n## 0.11.0\n\n- old\n", "0.12.0", "- new");
-  assert.match(out, /^# Changelog\n\n## 0\.12\.0\n\n- new\n\n## 0\.11\.0\n/);
+  const out = changelogWithSection("# Changelog\n\n## 0.11.0\n\n- old\n", "0.12.0", "- new", "2026-08-13");
+  assert.match(out, /^# Changelog\n\n## 0\.12\.0 — 2026-08-13\n\n- new\n\n## 0\.11\.0\n/);
   assert.equal(notesForVersion(out, "0.12.0"), "- new");
   assert.equal(notesForVersion(out, "0.11.0"), "- old");
+});
+
+test("notesForVersion reads a dated heading", () => {
+  const log = "# Changelog\n\n## 1.2.0 — 2026-08-13\n\n- feat(x): a thing\n\n## 1.1.0 — 2026-08-01\n\n- fix(y): older\n";
+  assert.equal(notesForVersion(log, "1.2.0"), "- feat(x): a thing");
+  assert.equal(notesForVersion(log, "1.1.0"), "- fix(y): older");
+});
+
+test("notesForVersion still reads an undated heading, so an old tag can still be released", () => {
+  assert.equal(notesForVersion("# Changelog\n\n## 1.0.0\n\n- feat(x): a thing\n", "1.0.0"), "- feat(x): a thing");
+});
+
+test("notesForVersion returns null for an empty dated section rather than the next section", () => {
+  const log = "# Changelog\n\n## 1.2.0 — 2026-08-13\n\n## 1.1.0 — 2026-08-01\n\n- fix(y): older\n";
+  assert.equal(notesForVersion(log, "1.2.0"), null);
+});
+
+test("changelogWithSection writes the date it was given", () => {
+  assert.match(
+    changelogWithSection("# Changelog\n\n## 1.1.0 — 2026-08-01\n\n- old\n", "1.2.0", "- feat(x): new", "2026-08-13"),
+    /^# Changelog\n\n## 1\.2\.0 — 2026-08-13\n\n- feat\(x\): new\n/,
+  );
+});
+
+test("changelogWithSection refuses a date that is not YYYY-MM-DD rather than writing a bad heading", () => {
+  assert.throws(
+    () => changelogWithSection("# Changelog\n", "1.2.0", "- feat(x): new", "13-08-2026"),
+    /not a YYYY-MM-DD date/,
+  );
 });

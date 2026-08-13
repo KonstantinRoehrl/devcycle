@@ -973,3 +973,27 @@ test("model tiers: a well-formed table passes", () => {
   ]);
   assert.equal(runValidate(dir).status, 0, runValidate(dir).stderr);
 });
+
+// --- check 19: every CHANGELOG version heading carries its release date ---
+
+test("changelog dates: a version heading with no date fails", () => {
+  // A heading with no date makes outer-loop turnaround unmeasurable for that release, and the
+  // gap is invisible until someone reads the report and finds a blank column.
+  const dir = makePluginFixture();
+  writeInto(dir, "CHANGELOG.md", "# Changelog\n\n## 1.0.0\n\n- feat(x): a thing\n");
+  const res = runValidate(dir);
+  assert.notEqual(res.status, 0);
+  assert.match(res.stdout + res.stderr, /CHANGELOG\.md.*1\.0\.0.*date/s);
+});
+
+test("changelog dates: a dated version heading passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "CHANGELOG.md", "# Changelog\n\n## 1.0.0 — 2026-08-13\n\n- feat(x): a thing\n");
+  assert.equal(runValidate(dir).status, 0);
+});
+
+test("changelog dates: a heading date that is not a real calendar date fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "CHANGELOG.md", "# Changelog\n\n## 1.0.0 — 2026-02-30\n\n- feat(x): a thing\n");
+  assert.notEqual(runValidate(dir).status, 0);
+});

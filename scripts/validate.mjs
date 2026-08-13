@@ -651,5 +651,28 @@ if (!existsSync(tiersFile)) {
   }
 }
 
+// 19. Every CHANGELOG version heading carries its release date. Outer-loop turnaround
+//     (scripts/doctor.mjs's releaseDates) measures issue createdAt against the release that
+//     resolved it, so a heading with no date silently drops that release out of the metric.
+const changelogPath = join(root, "CHANGELOG.md");
+if (existsSync(changelogPath)) {
+  const VERSION_HEADING = /^## \d+\.\d+\.\d+/;
+  const DATED_HEADING = /^## \d+\.\d+\.\d+ — (\d{4})-(\d{2})-(\d{2})[ \t]*$/;
+  for (const line of readFileSync(changelogPath, "utf8").split("\n")) {
+    if (!VERSION_HEADING.test(line)) continue;
+    const m = line.match(DATED_HEADING);
+    if (!m) {
+      fail(`CHANGELOG.md: heading "${line.trim()}" carries no release date — expected \`## <version> — YYYY-MM-DD\``);
+      continue;
+    }
+    // A real calendar date, not merely the shape: Date rolls 2026-02-30 forward to March 2
+    // rather than rejecting it, so the round-trip is the check.
+    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() + 1 !== mo || dt.getUTCDate() !== d)
+      fail(`CHANGELOG.md: heading "${line.trim()}" carries "${m[1]}-${m[2]}-${m[3]}", which is not a real calendar date`);
+  }
+}
+
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
 console.log("validate: ok");
