@@ -215,18 +215,28 @@ for (const f of namesIn("playbooks")) {
 //    decision, so it fails unless the same commit raises the baseline.
 const BUDGET_PATH = "tests/fixtures/surface-budget.json";
 const budgetFile = join(root, BUDGET_PATH);
-let budgets = null;
+//    `budgetsParsed` tracks whether a usable baseline survived, for check 14's reason: a
+//    `budgets === null` sentinel cannot tell "parse failed" from a file whose whole content
+//    legally parses to `null` — and a falsy `budgets` skips every guard below, leaving the
+//    budget unenforced at exit 0.
+let budgets, budgetsParsed = true;
 if (!existsSync(budgetFile)) {
   fail(`${BUDGET_PATH}: missing — the line budgets have no baseline, so no growth could be reviewed`);
+  budgetsParsed = false;
 } else {
   try {
     budgets = JSON.parse(readFileSync(budgetFile, "utf8"));
   } catch (e) {
+    budgetsParsed = false;
     fail(`${BUDGET_PATH}: not valid JSON — ${e.message}`);
+  }
+  if (budgetsParsed && (typeof budgets !== "object" || budgets === null || Array.isArray(budgets))) {
+    fail(`${BUDGET_PATH}: must be a JSON object carrying the line budgets, got ${JSON.stringify(budgets)}`);
+    budgetsParsed = false;
   }
 }
 for (const key of ["surfaceTotal", "commandMax", "playbookMax"]) {
-  if (budgets && !Number.isInteger(budgets[key]))
+  if (budgetsParsed && !Number.isInteger(budgets[key]))
     fail(`${BUDGET_PATH}: ${key} must be an integer, got ${JSON.stringify(budgets[key])}`);
 }
 const lines = (p) => {
@@ -237,12 +247,12 @@ let surfaceLines = 0;
 for (const p of surface) {
   const n = lines(p), r = rel(p);
   surfaceLines += n;
-  if (budgets && Number.isInteger(budgets.commandMax) && r.startsWith("commands/") && n > budgets.commandMax)
+  if (budgetsParsed && Number.isInteger(budgets.commandMax) && r.startsWith("commands/") && n > budgets.commandMax)
     fail(`${r}: ${n} lines > ${budgets.commandMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
-  if (budgets && Number.isInteger(budgets.playbookMax) && r.startsWith("playbooks/") && n > budgets.playbookMax)
+  if (budgetsParsed && Number.isInteger(budgets.playbookMax) && r.startsWith("playbooks/") && n > budgets.playbookMax)
     fail(`${r}: ${n} lines > ${budgets.playbookMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
 }
-if (budgets && Number.isInteger(budgets.surfaceTotal) && surfaceLines > budgets.surfaceTotal)
+if (budgetsParsed && Number.isInteger(budgets.surfaceTotal) && surfaceLines > budgets.surfaceTotal)
   fail(
     `runtime surface ${surfaceLines} lines > baseline ${budgets.surfaceTotal} (${BUDGET_PATH}) — ` +
       `raise the baseline in this same commit if the growth is intended; it is a reviewed decision, not a workaround`
@@ -499,13 +509,26 @@ const contextFile = join(root, CONTEXT_BUDGET_PATH);
 if (!existsSync(contextFile)) {
   fail(`${CONTEXT_BUDGET_PATH}: missing — no stage declares its context cost, so growth could not be reviewed`);
 } else {
-  let contextBaseline = null;
+  // `parsed` tracks whether a usable baseline survived, for check 14's reason: a
+  // `contextBaseline === null` sentinel cannot tell "parse failed" from a file whose whole
+  // content legally parses to `null`, and the shape guard is what keeps a truthy non-object
+  // from reaching the `in` below — which throws on a primitive, killing the run before
+  // checks 17 and 18 execute at all.
+  let contextBaseline, parsed = true;
   try {
     contextBaseline = JSON.parse(readFileSync(contextFile, "utf8"));
   } catch (e) {
+    parsed = false;
     fail(`${CONTEXT_BUDGET_PATH}: not valid JSON — ${e.message}`);
   }
-  if (contextBaseline) {
+  if (parsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
+    fail(
+      `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each playbook to its byte budget, ` +
+        `got ${JSON.stringify(contextBaseline)}`
+    );
+    parsed = false;
+  }
+  if (parsed) {
     // Citations are followed to a fixed point; `seen` makes a citation cycle terminate and
     // counts each file exactly once, which is also what the reader's context actually pays.
     const citationsIn = (text) =>

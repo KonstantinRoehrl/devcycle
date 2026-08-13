@@ -747,6 +747,26 @@ test("budget baseline: a non-integer baseline value fails rather than coercing",
   assert.match(runValidate(dir).stderr, /surfaceTotal.*integer/);
 });
 
+// A baseline file legally parses to `null`, so a `budgets === null` sentinel cannot tell a
+// thrown parse from a file that simply says `null` — the same defect checks 14 and 18 already
+// carry the `parsed` sentinel to close.
+test("budget baseline: a baseline whose whole content is the JSON literal null fails rather than disabling the check", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, BUDGET_PATH, "null\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1, `expected failure, got:\n${stderr}`);
+  assert.match(stderr, /surface-budget\.json: must be a JSON object/);
+});
+
+test("budget baseline: a baseline that is not an object fails naming the shape, not a missing key", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, BUDGET_PATH, "[]\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1, `expected failure, got:\n${stderr}`);
+  assert.match(stderr, /surface-budget\.json: must be a JSON object/);
+  assert.doesNotMatch(stderr, /TypeError/);
+});
+
 // --- check 15: each stage's transitive context cost against a committed baseline ---
 
 const CONTEXT_PATH = "tests/fixtures/context-budget.json";
@@ -756,6 +776,25 @@ test("context budget: a playbook missing from the baseline fails", () => {
   writeInto(dir, CONTEXT_PATH, JSON.stringify({}, null, 2) + "\n");
   const { stderr } = runValidate(dir);
   assert.match(stderr, /playbooks\/demoing-things\.md.*no entry in/);
+});
+
+test("context budget: a baseline whose whole content is the JSON literal null fails rather than disabling the check", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, CONTEXT_PATH, "null\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1, `expected failure, got:\n${stderr}`);
+  assert.match(stderr, /context-budget\.json: must be a JSON object/);
+});
+
+// The `in` operator throws on a primitive right-hand side, so an unguarded truthy non-object
+// baseline crashed the validator before checks 17 and 18 could run at all.
+test("context budget: a baseline that is not an object fails with a message rather than crashing", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, CONTEXT_PATH, "5\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1, `expected failure, got:\n${stderr}`);
+  assert.match(stderr, /context-budget\.json: must be a JSON object/);
+  assert.doesNotMatch(stderr, /TypeError|Cannot use 'in' operator/);
 });
 
 test("context budget: growth past a playbook's baseline fails and names both numbers", () => {
