@@ -17,6 +17,10 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 
 const stages = (read("commands/cycle.md").match(/stage:\s*<([a-z|-]+)>/)?.[1] ?? "").split("|").filter(Boolean);
 
+// `references/resume.md` § Resuming at the recorded stage now owns every stage's playbook
+// path; both run-bearing commands cite it instead of restating a route inline.
+const RESUME_REF = "${CLAUDE_PLUGIN_ROOT}/references/resume.md";
+
 // --- deriving a matcher from a documented template -------------------------------------
 // Several formats in this surface are pinned as one literal template line in the reference
 // that owns them (the ledger's event line, the loop-status line). Tests below derive their
@@ -62,15 +66,13 @@ const routesSomewhere = (text) => {
   };
 };
 
-// Each stage, as `/devcycle:cycle` itself resolves it: an entry in the stage walk, or one of
-// the two short paths the triage section hands straight to a playbook.
+// Each stage, as `/devcycle:cycle` itself resolves it: an entry in the numbered stage walk.
+// The two short paths (`fast-path`, `sweep`) bypass the walk on confirmation and carry no
+// numbered entry of their own; every stage's actual playbook now comes from the shared table
+// in `references/resume.md`, which both commands cite instead of restating.
 const cycleRoutes = () => {
   const text = read("commands/cycle.md");
   const routes = new Map();
-  for (const [, stage, path] of text.replace(/\n/g, " ").matchAll(
-    /`([a-z-]+)`\s*→\s*`(\$\{CLAUDE_PLUGIN_ROOT\}\/playbooks\/[A-Za-z0-9._-]+\.md)`/g
-  ))
-    routes.set(stage, path);
   const walk = text.split("\n## Stage walk\n")[1] ?? "";
   for (const item of walk.split(/\n(?=\d+\. )/)) {
     const stage = item.match(/^\d+\. \*\*([a-z-]+)\*\*/)?.[1];
@@ -79,31 +81,52 @@ const cycleRoutes = () => {
   return routes;
 };
 
+// `references/resume.md` § Resuming at the recorded stage, parsed into stage -> "resume via" cell —
+// the one place a stage's playbook path now lives.
+const resumeRoutes = () => {
+  const resume = read("references/resume.md");
+  const section = resume.split("## Resuming at the recorded stage")[1]?.split(/\n## /)[0] ?? "";
+  const routes = new Map();
+  for (const [, stage, via] of section.matchAll(/^\|\s*`([a-z-]+)`\s*\|\s*(.+?)\s*\|$/gm)) routes.set(stage, via);
+  return routes;
+};
+
 test("cycle.md itself routes every stage in its enum to a playbook that exists", () => {
-  const routes = cycleRoutes();
-  assert.ok(read("commands/cycle.md").includes("`stage: done`"), "cycle.md no longer names the terminal stage");
+  const cycle = read("commands/cycle.md");
+  assert.ok(cycle.includes("`stage: done`"), "cycle.md no longer names the terminal stage");
+  assert.ok(
+    cycle.includes(RESUME_REF),
+    "commands/cycle.md no longer cites references/resume.md, which owns the stage → playbook routing"
+  );
+  const walked = cycleRoutes();
+  const resumeVia = resumeRoutes();
   for (const s of stages) {
     if (s === TERMINAL) continue;
-    const text = routes.get(s);
-    assert.ok(text, `commands/cycle.md names stage "${s}" in its enum but routes it nowhere`);
-    const { ok, paths } = routesSomewhere(text);
-    assert.ok(ok, `commands/cycle.md routes stage "${s}" to no playbook that exists (found: ${paths.join(", ") || "none"})`);
+    if (s !== "fast-path" && s !== "sweep")
+      assert.ok(walked.get(s), `commands/cycle.md names stage "${s}" in its enum but has no numbered walk entry for it`);
+    const cell = resumeVia.get(s);
+    assert.ok(cell, `references/resume.md's stage table has no row for "${s}" for commands/cycle.md's walk to resume through`);
+    const { ok, paths } = routesSomewhere(cell);
+    assert.ok(ok, `references/resume.md routes stage "${s}" to no playbook that exists (found: ${paths.join(", ") || "none"})`);
   }
 });
 
 test("continue's resume table routes every resumable stage to a playbook that exists", () => {
-  const rows = new Map(
-    [...read("commands/continue.md").matchAll(/^\| ([a-z-]+) \| (.+) \|$/gm)].map((m) => [m[1], m[2]])
+  const continueText = read("commands/continue.md");
+  assert.ok(
+    continueText.includes(RESUME_REF),
+    "commands/continue.md no longer cites references/resume.md, which owns the stage → playbook routing"
   );
+  const resumeVia = resumeRoutes();
   for (const s of stages) {
     if (s === TERMINAL) {
-      assert.ok(!rows.has(s), `continue.md offers to resume the terminal stage "${s}"`);
+      assert.ok(!resumeVia.has(s), `references/resume.md offers to resume the terminal stage "${s}"`);
       continue;
     }
-    const row = rows.get(s);
-    assert.ok(row, `continue.md's resume table has no row for stage "${s}"`);
-    const { ok, paths } = routesSomewhere(row);
-    assert.ok(ok, `continue.md resumes stage "${s}" into no playbook that exists (found: ${paths.join(", ") || "none"})`);
+    const cell = resumeVia.get(s);
+    assert.ok(cell, `references/resume.md's stage table has no row for stage "${s}"`);
+    const { ok, paths } = routesSomewhere(cell);
+    assert.ok(ok, `references/resume.md resumes stage "${s}" into no playbook that exists (found: ${paths.join(", ") || "none"})`);
   }
 });
 
@@ -921,6 +944,14 @@ const surfaceFiles = () =>
       .map((f) => `${dir}/${f}`)
   );
 
+// `references/resume.md` § Resuming at the recorded stage is the single owner of the
+// stage → playbook mapping; a command that cites it reaches every playbook that table
+// routes to, exactly as if it named the path inline.
+const resumePlaybooks = () =>
+  [...read("references/resume.md").matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(playbooks\/[A-Za-z0-9._-]+\.md)/g)].map(
+    (m) => m[1]
+  );
+
 // The playbooks a command hands its run to, partitioned by whether that command has a run
 // record behind it — `cycle.md` mints one, `continue.md` resumes one, everything else has none.
 const playbooksReachedFrom = (runBearing) => {
@@ -930,6 +961,7 @@ const playbooksReachedFrom = (runBearing) => {
     if (text.includes(RUN_RECORD) !== runBearing) continue;
     for (const [, target] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(playbooks\/[A-Za-z0-9._-]+\.md)/g))
       reached.add(target);
+    if (text.includes(RESUME_REF)) for (const target of resumePlaybooks()) reached.add(target);
   }
   return reached;
 };
@@ -948,7 +980,7 @@ const runlessSurfaces = () => {
 // let in-cycle surfaces that ask the user in their own words pass while citing nothing, so the
 // detector below is a vocabulary rather than one token. It is a heuristic over prose, and its
 // limits are the written-down kind rather than the implied kind:
-//   - it matches phrasings, not intent, so a gate worded in a way nobody has used yet reads as
+//   - it matches phrasings, not intent, so a gate worded outside the families below reads as
 //     no gate at all — which is exactly why the guards below exist;
 //   - it deliberately excludes a stage that stops and reports for a decision taken outside the
 //     run (`planning-waves.md`'s NO-GO verdict): that presents no options, so it has no "Other"
@@ -956,17 +988,39 @@ const runlessSurfaces = () => {
 //     text carries;
 //   - every phrase is `\s+`-joined, because this surface is hard-wrapped and one of the
 //     phrasings below ("ask for\n   confirmation") straddles a line break.
-// The defect being fixed is a check that went quiet, so the vocabulary is guarded twice: every
-// phrase must still match some surface, and every surface known to gate without the literal
-// token must still be detected. A rewording then fails a test instead of shrinking the rule.
+// Families, not fingerprints. Each entry below used to match exactly one file, which meant the
+// check recognised today's three token-free gates rather than gate-shaped prose — a rewording
+// anywhere would have quietly dropped a surface out of the check instead of failing it. The
+// families are still a heuristic over prose, and the two guards below still constrain them from
+// both sides: every family must match some surface (dead vocabulary fails), and every surface in
+// GATES_WITHOUT_THE_TOKEN must still be detected.
 const GATE_PHRASES = [
   /AskUserQuestion/,
-  /\bask(?:s|ing|ed)?\s+(?:the\s+user\s+)?for\s+(?:an?\s+)?confirmation\b/i,
-  /\bONE\s+question\s+per\b/,
+  // asking the user, in any of its inflections, for a decision or a confirmation
+  /\bask(?:s|ing|ed)?\b[^.]{0,40}?\b(?:the\s+user|for\s+(?:an?\s+)?confirmation|which|whether|before)\b/i,
+  // confirming with the user before acting
+  /\bconfirm(?:s|ing|ed)?\b[^.]{0,30}?\b(?:with\s+the\s+user|before)\b/i,
+  // the user's assent as a precondition
   /\bonly\s+the\s+user\s+may\b/i,
   /\bon\s+an\s+explicit\s+yes\b/i,
+  /\bthe\s+user'?s?\s+explicit\s+(?:approval|call|decision|permission)\b/i,
+  // presenting options for the user to pick from
+  /\blet\s+the\s+user\s+(?:choose|decide|pick)\b/i,
+  /\bONE\s+question\s+per\b/,
 ];
-const gatesUser = (text) => GATE_PHRASES.some((phrase) => phrase.test(text));
+// A denial contains the gate phrasing by construction ("never asks for confirmation"), so matching
+// the phrase alone counted a surface that states it gates nothing as a gate, and then demanded a
+// citation for a journal entry it never writes. Same defect, and same fix, as NEGATES_APPEND below:
+// decide by the sentence's polarity rather than by whether the words occur. Sentence-scoped on
+// purpose — a denial in one sentence must not silence a real gate in the next — and clause-scoped
+// within the sentence: the window stops at `,`, `;` and `:` as well as `.`, because a negation
+// belonging to an earlier clause ("No prior scaffold exists, so ask ...") does not govern the ask
+// that follows it, and reading it as one silenced real gates.
+const NEGATES_GATE = /\b(?:never|not|no|none|nothing|nor|doesn't|does\s+not|won't|will\s+not)\b[^.,;:]{0,60}?\b(?:ask|asks|asking|asked|question|confirmation|AskUserQuestion)\b/i;
+const gatesUser = (text) =>
+  text
+    .split(/(?<=\.)\s+/)
+    .some((sentence) => GATE_PHRASES.some((phrase) => phrase.test(sentence)) && !NEGATES_GATE.test(sentence));
 
 // The surfaces that gate the user without ever writing `AskUserQuestion`. Named so that the
 // vocabulary above cannot silently stop matching them.
@@ -1023,6 +1077,65 @@ const citationVerdict = (text) => {
   if (blocks.some(isNegative)) return "negative";
   return "unclear";
 };
+
+// --- attributing a citation to the gate it covers -----------------------------------------
+// citationVerdict over a whole file answered "does this file cite anywhere", which a file with
+// several gates satisfies with one paragraph. Sections answer "does this gate cite". Ancestors
+// count: references/config.md states its negative polarity once, in the `## First-run
+// configuration` section whose three subsections do the gating, and demanding three restatements
+// of one rule is the duplication this repo's own conventions forbid.
+// Fenced blocks are skipped, because a heading-shaped line inside one is not a heading: this
+// surface ships file templates (`references/resume.md`'s ```markdown state file opens with
+// `# devcycle state`), and reading those as real headings opened a phantom section that swallowed
+// the enclosing section's citation and re-parented every later section onto it — the same
+// cross-section absolution this whole check exists to remove, one level down.
+const sectionTree = (text) => {
+  const root = { heading: "(preamble)", level: 0, own: [], parent: null };
+  let current = root;
+  const all = [root];
+  let fenced = false;
+  for (const line of text.split("\n")) {
+    if (/^\s*```/.test(line)) fenced = !fenced;
+    const m = fenced ? null : /^(#{1,6})\s+\S/.exec(line);
+    if (!m) { current.own.push(line); continue; }
+    const level = m[1].length;
+    let parent = current;
+    while (parent.level >= level) parent = parent.parent;
+    current = { heading: line.trim(), level, own: [], parent };
+    all.push(current);
+  }
+  return all;
+};
+const ownText = (node) => node.own.join("\n");
+// A section's verdict is its own, or the nearest ancestor's that takes a position at all.
+const sectionVerdict = (node) => {
+  for (let n = node; n; n = n.parent) {
+    const verdict = citationVerdict(ownText(n));
+    if (verdict !== "none") return verdict;
+  }
+  return "none";
+};
+const gatingSections = (text) =>
+  sectionTree(text)
+    .filter((node) => gatesUser(ownText(node)))
+    .map((node) => ({ heading: node.heading, verdict: sectionVerdict(node) }));
+
+// Sections whose gate vocabulary matches a *description* of a gate that runs elsewhere, not a gate
+// the section itself runs. Measured, not assumed, against the surfaces as they stand. Guarded below
+// — an entry naming a section that no longer exists, or no longer matches the vocabulary, fails
+// rather than sitting stale.
+const DESCRIBES_NOT_GATES = [
+  // Describes what the brainstorm stage does with AskUserQuestion; cycle.md's own gate is in
+  // `## Triage the input`, which cites correctly.
+  "commands/cycle.md § ## Stage walk",
+  // States that the user already confirmed at triage, in cycle.md — this playbook runs after that
+  // gate and never re-litigates the verdict, as its own next sentence says.
+  "playbooks/sweeping-mechanical-changes.md § # Sweeping Mechanical Changes",
+  // Says the affected-areas list is one "confirmed ... with the user"; the confirming itself is the
+  // interview in `## The discipline`, which cites the write site. This section writes the summary
+  // the interview produced and asks nothing of its own.
+  "playbooks/scoping-the-request.md § ## Output and handoff",
+];
 
 // A gate that runs before any run record exists must say so, rather than claim an append that
 // cannot happen there. Listed, not derived: "before the mint" is a fact about when the text runs,
@@ -1147,16 +1260,9 @@ test("every in-cycle surface that gates the user cites the write site with the p
       `them from citing the write site: ${dualEntry.filter((p) => exempt.has(p)).join(", ")}`
   );
 
-  const missing = gating.filter(
-    (path) => !exempt.has(path) && !PRE_MINT_SURFACES.includes(path) && citationVerdict(read(path)) !== "affirmative"
-  );
-  assert.deepEqual(
-    missing,
-    [],
-    `these surfaces gate the user inside a cycle run but never cite the ${TOKEN} write site in ${OWNER} ` +
-      `affirmatively, so an "Other" answer there appends nothing a reader could follow: ` +
-      missing.map((p) => `${p} (${citationVerdict(read(p))})`).join(", ")
-  );
+  // Whether each gating *section* cites is asserted by "every gating section of every in-cycle
+  // surface cites the write site" below; this test keeps the properties that are about files and
+  // ordering rather than about individual gates.
 
   // A pre-mint surface is a gate like any other, so the list is trustworthy only while it still
   // gates and its citation still reads negative. (`!exempt.has(path)` used to stand here too, but
@@ -1204,4 +1310,189 @@ test("every in-cycle surface that gates the user cites the write site with the p
     `these surfaces are reached from a command that mints no run record, so there is nothing to append to, ` +
       `yet they instruct the append anyway: ${unfollowable.join(", ")}`
   );
+});
+
+test("harvested: resume/stage-table — one table maps every stage to its playbook, and both commands cite it", () => {
+  const resume = read("references/resume.md");
+  const cycle = read("commands/cycle.md");
+  const enumMatch = cycle.match(/stage:\s*<([a-z|-]+)>/);
+  assert.ok(enumMatch, "commands/cycle.md no longer declares the stage enum this table is checked against");
+  const stages = enumMatch[1].split("|");
+  assert.ok(stages.length > 5, `the stage enum parsed to ${stages.length} entries — the split changed shape`);
+
+  assert.match(resume, /^## Resuming at the recorded stage$/m);
+  for (const stage of stages) {
+    if (stage === "done") continue; // a closed cycle resumes at nothing
+    assert.match(
+      resume,
+      new RegExp(`^\\|\\s*\`${stage}\`\\s*\\|`, "m"),
+      `references/resume.md's stage table has no row for \`${stage}\` — a stage was added to the enum without a resume route`
+    );
+  }
+
+  // The duplication this table exists to remove: neither command may carry a second copy.
+  for (const [path, text] of [["commands/continue.md", read("commands/continue.md")], ["commands/cycle.md", cycle]]) {
+    const rows = stages.filter((s) => new RegExp(`^\\|\\s*\`?${s}\`?\\s*\\|`, "m").test(text));
+    assert.deepEqual(
+      rows,
+      [],
+      `${path} restates the stage table (rows: ${rows.join(", ")}) — it must cite references/resume.md instead`
+    );
+    assert.ok(
+      text.includes("${CLAUDE_PLUGIN_ROOT}/references/resume.md"),
+      `${path} no longer cites references/resume.md, which now owns the stage table`
+    );
+  }
+});
+
+test("the gate vocabulary reads a denial as no gate, the way the citation check reads a denial as negative", () => {
+  // The defect: GATE_PHRASES matched "asks for confirmation" wherever it appeared, so a surface
+  // stating it never asks was counted as gating and required to cite a journal entry it never writes.
+  assert.equal(gatesUser("This stage never asks the user for confirmation."), false);
+  assert.equal(gatesUser("This stage does not ask for confirmation before proceeding."), false);
+  assert.equal(gatesUser("No confirmation is asked for here."), false);
+
+  // The positive control: a real gate still reads as one, in the same words the surfaces use.
+  assert.equal(gatesUser("Ask the user for confirmation before switching branches."), true);
+  assert.equal(gatesUser("Interview via AskUserQuestion."), true);
+  assert.equal(gatesUser("Only the user may grant another round."), true);
+
+  // Negation is sentence-scoped, so a denial in one sentence cannot silence a gate in the next.
+  assert.equal(
+    gatesUser("This stage never asks for confirmation. A later step does ask the user for confirmation."),
+    true
+  );
+});
+
+test("the gate vocabulary recognises gate-shaped prose, not only the three phrasings in use today", () => {
+  // The carry-over: every phrase matched exactly one file, so the check recognised today's gates
+  // rather than gates. These are phrasings no surface uses yet; each must still read as a gate.
+  for (const phrasing of [
+    "Ask the user which one before resuming.",
+    "Confirm with the user before any edit.",
+    "This requires the user's explicit approval.",
+    "Present the options and let the user choose.",
+    "Stop and ask before overwriting it.",
+  ])
+    assert.equal(gatesUser(phrasing), true, `gate-shaped prose read as no gate: ${phrasing}`);
+
+  // And the other side: prose that merely mentions users or decisions is not a gate.
+  for (const phrasing of [
+    "The user's recollection is not evidence.",
+    "This stage writes the report and moves on.",
+    "The coordinator decides which lens applies.",
+  ])
+    assert.equal(gatesUser(phrasing), false, `non-gating prose read as a gate: ${phrasing}`);
+});
+
+test("a negation governing a different clause does not silence a gate in the same sentence", () => {
+  // The carry-over: the negation window ran to the end of the sentence, so a "No" belonging to an
+  // unrelated clause silenced a real gate standing after it. The window stops at a clause boundary
+  // instead, which is what "the negation governs the ask" means in prose this check can read.
+  assert.equal(gatesUser("No prior scaffold exists, so ask ONE AskUserQuestion before continuing."), true);
+  assert.equal(gatesUser("Drift findings are not candidates: they keep their own AskUserQuestion batching."), true);
+
+  // The denials the guard exists for are unaffected — there the negation does govern the ask.
+  assert.equal(gatesUser("This stage never asks the user for confirmation."), false);
+  assert.equal(gatesUser("No confirmation is asked for here."), false);
+});
+
+test("citation attribution is per section, and a section inherits its ancestors' citation", () => {
+  const cite = `appends \`${TOKEN}\`, whose rule \`${OWNER_REF}\` owns`;
+
+  // One citation in one section does not cover a gate in a sibling section.
+  const twoSections = `# Thing\n\n## First\n\nInterview via AskUserQuestion. It ${cite}.\n\n## Second\n\nAsk the user for confirmation before acting.\n`;
+  const uncited = gatingSections(twoSections).filter((s) => s.verdict !== "affirmative");
+  assert.deepEqual(
+    uncited.map((s) => s.heading),
+    ["## Second"],
+    "a gate in an uncited sibling section was treated as covered by the other section's citation"
+  );
+
+  // A subsection inherits the citation of the section it sits under — which is what makes the
+  // rule correct rather than merely strict: references/config.md states its polarity once, in the
+  // parent of the three subsections that gate.
+  const nested = `# Thing\n\n## Parent\n\nThe stage ${cite}.\n\n### Child\n\nAsk the user for confirmation.\n`;
+  assert.deepEqual(
+    gatingSections(nested).filter((s) => s.verdict !== "affirmative"),
+    [],
+    "a gating subsection was not covered by its parent section's citation"
+  );
+});
+
+test("inheritance runs one way: a subsection's citation does not cover a gate in its parent", () => {
+  // The fourth attribution direction, and the one that would fail silently: `sectionVerdict` walks
+  // upward only, so a citation buried in a subsection must not absolve the gate standing in the
+  // parent's own text. Correct today; unpinned until now, so a walk made bidirectional to "be
+  // lenient" would have passed CI.
+  const cite = `appends \`${TOKEN}\`, whose rule \`${OWNER_REF}\` owns`;
+  const text = `# Thing\n\n## Parent\n\nAsk the user for confirmation before acting.\n\n### Child\n\nThe stage ${cite}.\n`;
+  assert.deepEqual(
+    gatingSections(text).map((s) => `${s.heading} (${s.verdict})`),
+    ["## Parent (none)"],
+    "a gate was treated as covered by a citation sitting in one of its own subsections"
+  );
+});
+
+test("a heading-shaped line inside a fenced block does not open a section", () => {
+  // The defect this pins: `references/resume.md`'s state-file template contains the literal line
+  // `# devcycle state` inside a ```markdown fence. Parsed as a heading, it opened a phantom H1 that
+  // swallowed `## The state file`'s own citation and re-parented every later section onto itself —
+  // so a gate two sections away inherited a citation that was never about it. That is the
+  // cross-section absolution this whole check exists to remove, one level down.
+  const cite = `appends \`${TOKEN}\`, whose rule \`${OWNER_REF}\` owns`;
+  const fenced = [
+    "# Doc",
+    "",
+    "## Template",
+    "",
+    "```markdown",
+    "# devcycle state",
+    "- stage: <a stage>",
+    "```",
+    "",
+    `The stage ${cite}.`,
+    "",
+    "## Later",
+    "",
+    "Ask the user for confirmation before acting.",
+    "",
+  ].join("\n");
+
+  assert.deepEqual(
+    sectionTree(fenced).map((s) => s.heading),
+    ["(preamble)", "# Doc", "## Template", "## Later"],
+    "a heading-shaped line inside a fence was parsed as a real heading"
+  );
+  assert.deepEqual(
+    gatingSections(fenced).map((s) => `${s.heading} (${s.verdict})`),
+    ["## Later (none)"],
+    "a gating section inherited a citation from a section it does not sit under"
+  );
+});
+
+test("every gating section of every in-cycle surface cites the write site, or is a named descriptive mention", () => {
+  const exempt = runlessSurfaces();
+  const offenders = [];
+  for (const path of surfaceFiles()) {
+    if (path === OWNER || exempt.has(path) || PRE_MINT_SURFACES.includes(path)) continue;
+    for (const section of gatingSections(read(path))) {
+      const entry = `${path} § ${section.heading}`;
+      if (DESCRIBES_NOT_GATES.includes(entry)) continue;
+      if (section.verdict !== "affirmative") offenders.push(`${entry} (${section.verdict})`);
+    }
+  }
+  assert.deepEqual(offenders, [], `these sections gate inside a cycle run but cite no write site: ${offenders.join(", ")}`);
+});
+
+test("the descriptive-mention allowlist cannot go stale", () => {
+  for (const entry of DESCRIBES_NOT_GATES) {
+    const [path, heading] = entry.split(" § ");
+    const sections = gatingSections(read(path));
+    assert.ok(
+      sections.some((s) => s.heading === heading),
+      `${entry} is allowlisted as a descriptive mention, but that section no longer exists or no longer ` +
+        `matches the gate vocabulary — drop the entry rather than leaving it to excuse nothing`
+    );
+  }
 });

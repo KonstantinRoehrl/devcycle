@@ -344,13 +344,13 @@ loads by path, never something you invoke.
 | Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
 | Workflow `review-panel.js` | Multi-lens read-only review engine for `reviewDepth: panel` — over a branch diff for the review, a file set for the audit. |
 | Workflow `mechanical-sweep.js` | Pilot-first bulk edit engine behind the sweep path and `**Execution:** sweep` plan tasks. |
-| Reference `routing.md` | Which command answers which intent, what each may do before your first confirmation, and which ones a model may invoke on its own. |
 | Reference `delegation.md` | Who does the work inside a stage — the coordinator's closed duty list, the stage budget, the research-dispatch contract, and the return envelopes. |
 | Reference `handoff.md` | What happens at a stage boundary — the handoff block, the three-value context action, the one-block-per-stage rule, and the await gate. |
 | Reference `quality-criteria.md` | What any devcycle review or plan measures against — the criteria catalog, sourcing precedence, seed best-practice index, and how the catalog reaches planning and execution. |
 | Reference `findings.md` | How a finding is expressed — the four-value severity vocabulary with blocking derived, the core and document field sets, the evidence discipline, and the panel's machine shape. |
 | Reference `checklist.md` | The on-device checklist contract — paths, item shape, dimensions, and the `(auto)` boundary — shared by checklist generation and the on-device stage. |
 | Reference `loops.md` | What every bounded loop does when it runs out of rounds — the cap, the exhaustion statuses, and how each outcome is reported. |
+| Doc `docs/routing.md` | Which command answers which intent, what each may do before your first confirmation, and which ones a model may invoke on its own. |
 
 ## Configuration
 

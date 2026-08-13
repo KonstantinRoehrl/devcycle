@@ -5,6 +5,25 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-12 — the routing table is not runtime surface
+
+`references/routing.md` moved to `docs/routing.md`. Measured before the move: zero surface files
+cite it, and its only consumer is `scripts/validate.mjs` check 6, which reads it as a data table.
+Nothing loads it at runtime, so counting its 35 lines against a budget that measures prose an agent
+reads at runtime overstated that budget. This is a classification correction, not a way to fit under
+the ceiling: the line budget's own baseline is unchanged by this move (see the same day's ratchet
+entry).
+
+## 2026-08-12 — /devcycle:continue stays a separate command
+
+The v8 learning-overhaul input (D7) proposes folding `continue` into `cycle`, reaching a five-verb
+surface: no arguments resumes, a request starts a new cycle. Declined during Phase 5's design. Two
+commands state the difference between resuming an existing cycle and starting a new one at the point
+of invocation, where an argument-shape rule states it only after the fact. The duplication the fold
+would have removed — two stage→playbook tables — is removed directly instead, by giving
+`references/resume.md` the single table both commands cite. D7's "7 → 5 verbs" target is dropped with
+it: reaching five also required removing `onboard`, which D7 never specifies.
+
 ## 2026-08-12 — Surface budget raised to 3,620, to admit `references/impact-scoring.md`
 
 **Decision:** `SURFACE_LINE_BUDGET` moves from **3,550 to 3,620**. `COMMAND_LINE_MAX` (104) and
@@ -159,7 +178,7 @@ twelve plain `playbooks/*.md` files with no frontmatter — two pairs merge on t
 `finishing-the-cycle`, `onboarding-a-repo`, `planning-waves`, `reviewing-code`,
 `reviewing-the-branch`, `scoping-interview`, `sweeping-mechanical-changes`,
 `verifying-on-device`. What remains listed to a user or a model is seven commands, and
-`references/routing.md` is their single owner. `scripts/validate.mjs` fails the build when a
+`docs/routing.md` is their single owner. `scripts/validate.mjs` fails the build when a
 `devcycle:` id names a playbook, when a command is missing from the routing table, or when a
 command's declared consequence disagrees with its `disable-model-invocation` frontmatter.
 **Why:** a skill is selected by its `description`, which made every stage's prose reachable by
@@ -204,7 +223,7 @@ two-tier disposition is affected.
 
 **Decision:** `DESIGN.md` §4 amendment 4 — entry points cannot auto-fire, except `/cycle`
 deliberately — stands unchanged in substance and stops being the place the rule lives. Each
-command now declares a `consequence` class in `references/routing.md`: `read-only` (must not
+command now declares a `consequence` class in `docs/routing.md`: `read-only` (must not
 carry `disable-model-invocation`), `confirm-first` (may write, but takes no irreversible action
 before its first user confirmation), `side-effectful` and `resume` (both must carry the guard).
 `scripts/validate.mjs` fails the build on any disagreement between a row and a command's real
@@ -223,7 +242,7 @@ nothing else before its first confirmation, it creates no branch and makes no co
 surfaces a state-file collision rather than overwriting one. A reviewer can now test that
 claim against the command; before, they could only find the sentence granting the exception.
 **Supersedes:** amendment 4 as the rule's *owner* — it is now the record of why the exception
-was granted. `references/routing.md` owns which commands may be model-invoked, and nothing
+was granted. `docs/routing.md` owns which commands may be model-invoked, and nothing
 else restates it.
 
 ## 2026-08-06 — the line budget counts what enters a context window, not directories

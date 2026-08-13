@@ -14,7 +14,9 @@ review depth and the on-device gate by their stages).
 1. **An explicitly configured value wins, verbatim**: one that is neither a
    literal `${user_config...}` placeholder nor `auto`, and that lies inside the
    knob's allowed set. It beats the profile and any documented default, for as
-   long as it stays configured.
+   long as it stays configured. For a `*Model` knob the allowed set includes an
+   ordered, comma-separated pool of ids as well as a single id — the Model tiers
+   section below owns what a pool means.
 2. **Everything else falls back** — a literal placeholder and `auto` are unset, a
    value outside the knob's allowed set is invalid, and both take the same route.
    `auto` is sanctioned on every knob, not only the `*Model` ones: it is how a user
@@ -221,8 +223,13 @@ resolves the same way:
 
 - still a literal `${user_config...}` placeholder (unset) OR the value
   `auto` → derive the model per the predicates below;
-- any other value → binding: use it verbatim for every dispatch, never
-  override or downshift it.
+- a value with no comma → a pin: use it verbatim for every dispatch, subject
+  only to the ceiling below;
+- a value with one or more commas → a **pool**: an ordered list of ids,
+  ascending by capability, position declaring order. Entries are trimmed and
+  empties dropped, so a pool that parses to one id is a pin. A pool cannot be
+  an array in the manifest — `userConfig` types are `string | number | boolean |
+  directory | file` — so the comma is the ordering, not a workaround.
 
 Derivation picks between two tiers — defined by capability, never by a
 model id written here, because ids in skill prose rot as models change:
@@ -259,10 +266,43 @@ Derivation predicates (dispatch-time-observable inputs only):
   map rather than a judgment. Session tier remains for dispatches that must
   judge: review, diagnosis, design.
 
+**The ladder.** A pool uses the same predicates as `auto`, counted rather than
+thresholded: `rung = 1 + the number of escalation signals that fired`, clamped
+to the pool's length. Zero signals is rung 1, which is why leaving a knob unset
+behaves exactly as it does today. `walkthroughModel` and `branchReviewModel`
+have no complexity predicate — both judge — so a pool on either saturates the
+ladder and resolves to its top rung, still under the ceiling below.
+
+**The ceiling.** No dispatch, by any path — `auto`, a pool, or a pin — resolves
+to a model above the orchestrator's own tier. Ordering is by family, held in
+`${CLAUDE_PLUGIN_ROOT}/references/model-tiers.json` rather than in this text, for
+the reason this section already gives about ids in prose; a newer model of a
+weaker family does not outrank an older model of a stronger one. A pick above the
+ceiling clamps to the highest entry at or below it; a pin has no lower entry to
+fall to, so a pin above the ceiling clamps to the orchestrator's own id, dispatched
+as an explicit override. Where nothing qualifies — an
+id or an orchestrator the table cannot rank, or a pool whose every rung sits above
+the orchestrator — resolution dispatches with no model override at all, the one
+form that cannot exceed the orchestrator by construction. A clamp is logged, never
+silent.
+
+`${CLAUDE_PLUGIN_ROOT}/scripts/model-pool.mjs` is this policy's single implementation:
+`parsePool`, `rungFor`, `rank` and `resolveModel` decide exactly what is written
+above — the pin, pool, ladder and ceiling arithmetic, and nothing else. The `auto`
+predicates above stay with the caller, which is why an unset knob returns `model
+session (auto)` from that module rather than a derived tier: the caller derives, the
+module only keeps the result under the ceiling. Its `outcome` return value is the
+audit string below. This text owns the policy; that module owns the arithmetic.
+
 Upstream's Model Selection tiers are background only; these predicates
 decide. Auditability: every dispatch's ledger event records the decision and
 its inputs — `outcome=model fast:<resolved id> (auto: files=3, deps=none,
 steps=specified)` or `outcome=model session (auto: escalated on files=9)` for
-derived choices, `outcome=model <id> (pinned)` for explicit config. An
+derived choices, `outcome=model <id> (pinned)` for explicit config. A pooled
+pick records `outcome=model <id> (pooled: rung <n>/<len>)`, gaining
+`, clamped from <requested-id>` when the ceiling moved it; a clamped pin records
+`outcome=model <id> (pinned, clamped from <requested-id>)`; a fall-through to no
+override records `outcome=model session (ceiling: <id> unranked)` or
+`outcome=model session (ceiling: no rung at or below <orchestrator-id>)`. An
 escalation always names the signal that fired. Research dispatches that run
 before any ledger exists log nothing; where a ledger exists, same shape.

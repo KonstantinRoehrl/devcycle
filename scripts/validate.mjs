@@ -145,13 +145,13 @@ if (existsSync(join(root, "playbooks")))
 
 // 6. Every command appears exactly once in the routing table, and its declared consequence
 //    agrees with its disable-model-invocation frontmatter.
-const routingPath = join(root, "references/routing.md");
-if (!existsSync(routingPath)) fail("references/routing.md: missing (the routing table has no owner)");
+const routingPath = join(root, "docs/routing.md");
+if (!existsSync(routingPath)) fail("docs/routing.md: missing (the routing table has no owner)");
 else if (existsSync(join(root, "commands"))) {
   const routing = readFileSync(routingPath, "utf8");
   const rows = new Map();
   for (const [, name, consequence] of routing.matchAll(/^\|[^|]*\|\s*`([a-z-]+)`\s*\|\s*([a-z-]+)\s*\|/gm)) {
-    if (rows.has(name)) fail(`references/routing.md: ${name} appears more than once`);
+    if (rows.has(name)) fail(`docs/routing.md: ${name} appears more than once`);
     rows.set(name, consequence);
   }
   const GUARD_REQUIRED = new Set(["side-effectful", "resume"]);
@@ -169,7 +169,7 @@ else if (existsSync(join(root, "commands"))) {
   for (const f of readdirSync(join(root, "commands"))) {
     if (!f.endsWith(".md")) continue;
     const name = f.replace(/\.md$/, "");
-    if (!rows.has(name)) { fail(`commands/${f}: missing from the routing table in references/routing.md`); continue; }
+    if (!rows.has(name)) { fail(`commands/${f}: missing from the routing table in docs/routing.md`); continue; }
     const consequence = rows.get(name);
     const guarded = frontmatter(join(root, "commands", f))?.["disable-model-invocation"] === "true";
     if (GUARD_REQUIRED.has(consequence) && !guarded)
@@ -177,11 +177,11 @@ else if (existsSync(join(root, "commands"))) {
     if (consequence === "read-only" && guarded)
       fail(`commands/${f}: consequence "read-only" forbids disable-model-invocation`);
     if (consequence === "confirm-first" && !justifies(name))
-      fail(`references/routing.md: \`${name}\` is confirm-first but names no justification — the exception class requires one inline`);
+      fail(`docs/routing.md: \`${name}\` is confirm-first but names no justification — the exception class requires one inline`);
   }
   for (const name of rows.keys())
     if (!existsSync(join(root, `commands/${name}.md`)))
-      fail(`references/routing.md: row "${name}" names no command`);
+      fail(`docs/routing.md: row "${name}" names no command`);
 }
 
 // 7. skills/ is not part of the surface any more.
@@ -195,7 +195,7 @@ const namesIn = (dir) =>
 // 8. Naming: commands are verbs, playbooks are gerunds, agents are role nouns.
 // No exemption list: the rule is "not a gerund", and the one recorded exception to
 // "commands are verbs" — `doctor`, on the brew/flutter/npm precedent — is a noun, so it
-// satisfies this rule on its own merits. The precedent is recorded in references/routing.md,
+// satisfies this rule on its own merits. The precedent is recorded in docs/routing.md,
 // not in code. A command that genuinely needs a gerund name gets an allowlist then, with a
 // test that exercises it.
 for (const f of namesIn("commands")) {
@@ -209,11 +209,36 @@ for (const f of namesIn("playbooks")) {
     fail(`playbooks/${f}: playbook names are gerunds ("${name}" contains no -ing word)`);
 }
 
-// 9. Line budgets, as numbers. Counted the way `wc -l` counts: a file's closing
-//    newline terminates its last line rather than starting an empty one.
-// The surface budget was raised 3550 -> 3620 once, deliberately, to admit
-// references/impact-scoring.md; it is an auditable guard change, not a licence to grow.
-const SURFACE_LINE_BUDGET = 3620, COMMAND_LINE_MAX = 104, PLAYBOOK_LINE_MAX = 154;
+// 9. Line budgets, as numbers, read from a committed baseline rather than hardcoded here.
+//    Counted the way `wc -l` counts: a file's closing newline terminates its last line
+//    rather than starting an empty one. Growth is not forbidden — it must be a reviewed
+//    decision, so it fails unless the same commit raises the baseline.
+const BUDGET_PATH = "tests/fixtures/surface-budget.json";
+const budgetFile = join(root, BUDGET_PATH);
+//    `budgetsParsed` tracks whether a usable baseline survived, for check 14's reason: a
+//    `budgets === null` sentinel cannot tell "parse failed" from a file whose whole content
+//    legally parses to `null` — and a falsy `budgets` skips every guard below, leaving the
+//    budget unenforced at exit 0.
+let budgets, budgetsParsed = true;
+if (!existsSync(budgetFile)) {
+  fail(`${BUDGET_PATH}: missing — the line budgets have no baseline, so no growth could be reviewed`);
+  budgetsParsed = false;
+} else {
+  try {
+    budgets = JSON.parse(readFileSync(budgetFile, "utf8"));
+  } catch (e) {
+    budgetsParsed = false;
+    fail(`${BUDGET_PATH}: not valid JSON — ${e.message}`);
+  }
+  if (budgetsParsed && (typeof budgets !== "object" || budgets === null || Array.isArray(budgets))) {
+    fail(`${BUDGET_PATH}: must be a JSON object carrying the line budgets, got ${JSON.stringify(budgets)}`);
+    budgetsParsed = false;
+  }
+}
+for (const key of ["surfaceTotal", "commandMax", "playbookMax"]) {
+  if (budgetsParsed && !Number.isInteger(budgets[key]))
+    fail(`${BUDGET_PATH}: ${key} must be an integer, got ${JSON.stringify(budgets[key])}`);
+}
 const lines = (p) => {
   const text = readFileSync(p, "utf8");
   return text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
@@ -222,11 +247,16 @@ let surfaceLines = 0;
 for (const p of surface) {
   const n = lines(p), r = rel(p);
   surfaceLines += n;
-  if (r.startsWith("commands/") && n > COMMAND_LINE_MAX) fail(`${r}: ${n} lines > ${COMMAND_LINE_MAX}`);
-  if (r.startsWith("playbooks/") && n > PLAYBOOK_LINE_MAX) fail(`${r}: ${n} lines > ${PLAYBOOK_LINE_MAX}`);
+  if (budgetsParsed && Number.isInteger(budgets.commandMax) && r.startsWith("commands/") && n > budgets.commandMax)
+    fail(`${r}: ${n} lines > ${budgets.commandMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
+  if (budgetsParsed && Number.isInteger(budgets.playbookMax) && r.startsWith("playbooks/") && n > budgets.playbookMax)
+    fail(`${r}: ${n} lines > ${budgets.playbookMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
 }
-if (surfaceLines > SURFACE_LINE_BUDGET)
-  fail(`runtime surface ${surfaceLines} lines > ${SURFACE_LINE_BUDGET} (commands+playbooks+agents+references)`);
+if (budgetsParsed && Number.isInteger(budgets.surfaceTotal) && surfaceLines > budgets.surfaceTotal)
+  fail(
+    `runtime surface ${surfaceLines} lines > baseline ${budgets.surfaceTotal} (${BUDGET_PATH}) — ` +
+      `raise the baseline in this same commit if the growth is intended; it is a reviewed decision, not a workaround`
+  );
 
 // 10. No agent pins a model — a pin defeats session-tier escalation.
 for (const f of namesIn("agents"))
@@ -234,7 +264,8 @@ for (const f of namesIn("agents"))
     fail(`agents/${f}: frontmatter must not set model: — a pin defeats session-tier escalation`);
 
 // 11. Every reference has at least one consumer — a surface file that loads it, or a
-//     script that reads it (references/routing.md's consumer is this validator's check 6).
+//     script that reads it (references/impact-scoring.md's consumer is a comment in
+//     scripts/doctor.mjs; it gains its two surface citations in Phases 2 and 3).
 //     A reference mentioning itself is not a consumer of itself.
 const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
 for (const f of namesIn("references")) {
@@ -466,6 +497,157 @@ if (!existsSync(culpritsPath)) {
       fail("references/culprits.json: entries must be sorted by slug");
     const dupes = [...new Set(slugs.filter((s, i) => slugs.indexOf(s) !== i))];
     if (dupes.length) fail(`references/culprits.json: duplicate slug(s) ${dupes.join(", ")}`);
+  }
+}
+
+// 15. Per-stage context budget: a playbook's own bytes plus every reference reachable from it
+//     through ${CLAUDE_PLUGIN_ROOT} citations, against a committed baseline. Bytes, not lines:
+//     a context window is spent in bytes, and a long line costs what it costs. Growth is a
+//     reviewed decision, same rule as check 9.
+const CONTEXT_BUDGET_PATH = "tests/fixtures/context-budget.json";
+const contextFile = join(root, CONTEXT_BUDGET_PATH);
+if (!existsSync(contextFile)) {
+  fail(`${CONTEXT_BUDGET_PATH}: missing — no stage declares its context cost, so growth could not be reviewed`);
+} else {
+  // `parsed` tracks whether a usable baseline survived, for check 14's reason: a
+  // `contextBaseline === null` sentinel cannot tell "parse failed" from a file whose whole
+  // content legally parses to `null`, and the shape guard is what keeps a truthy non-object
+  // from reaching the `in` below — which throws on a primitive, killing the run before
+  // checks 17 and 18 execute at all.
+  let contextBaseline, parsed = true;
+  try {
+    contextBaseline = JSON.parse(readFileSync(contextFile, "utf8"));
+  } catch (e) {
+    parsed = false;
+    fail(`${CONTEXT_BUDGET_PATH}: not valid JSON — ${e.message}`);
+  }
+  if (parsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
+    fail(
+      `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each playbook to its byte budget, ` +
+        `got ${JSON.stringify(contextBaseline)}`
+    );
+    parsed = false;
+  }
+  if (parsed) {
+    // Citations are followed to a fixed point; `seen` makes a citation cycle terminate and
+    // counts each file exactly once, which is also what the reader's context actually pays.
+    const citationsIn = (text) =>
+      [...text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(references\/[A-Za-z0-9._-]+\.md)/g)].map((m) => m[1]);
+    const transitiveBytes = (startRel) => {
+      const seen = new Set();
+      const queue = [startRel];
+      let total = 0;
+      while (queue.length) {
+        const relPath = queue.shift();
+        if (seen.has(relPath)) continue;
+        seen.add(relPath);
+        const abs = join(root, relPath);
+        if (!existsSync(abs)) continue;
+        const text = readFileSync(abs, "utf8");
+        total += Buffer.byteLength(text);
+        queue.push(...citationsIn(text));
+      }
+      return total;
+    };
+    const playbookNames = namesIn("playbooks").map((f) => `playbooks/${f}`);
+    for (const p of playbookNames) {
+      if (!(p in contextBaseline)) {
+        fail(`${p}: no entry in ${CONTEXT_BUDGET_PATH} — a stage must declare its context budget`);
+        continue;
+      }
+      const limit = contextBaseline[p];
+      if (!Number.isInteger(limit)) {
+        fail(`${CONTEXT_BUDGET_PATH}: ${p} must be an integer, got ${JSON.stringify(limit)}`);
+        continue;
+      }
+      const bytes = transitiveBytes(p);
+      if (bytes > limit)
+        fail(
+          `${p}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, playbook plus its cited references) — ` +
+            `raise the baseline in this same commit if the growth is intended`
+        );
+    }
+    for (const p of Object.keys(contextBaseline))
+      if (!playbookNames.includes(p))
+        fail(`${CONTEXT_BUDGET_PATH}: entry "${p}" names no such playbook — remove it or restore the file`);
+  }
+}
+
+// 16. Every ${CLAUDE_PLUGIN_ROOT} citation resolves: that is check 4 above, which walks every
+//     surface file and tests every cited path against the tree, scripts included. The number is
+//     reserved here so the sequence stays readable — a second parser would report each broken
+//     citation twice, and would fail on a citation that merely ends a sentence unless it also
+//     repeated check 4's trailing-punctuation handling.
+
+// 17. The command count is a regression guard, not a target. D7 proposed collapsing seven verbs
+//     to five; that required folding `continue` into `cycle` (declined — docs/DECISIONS.md,
+//     2026-08-12) and removing `onboard` (never specified anywhere). Neither happened, so the
+//     honest ceiling is today's count and the check exists to make an eighth command deliberate.
+const COMMAND_CEILING = 7;
+const commandCount = namesIn("commands").length;
+if (commandCount > COMMAND_CEILING)
+  fail(
+    `${commandCount} commands > ${COMMAND_CEILING} — the user-facing verb count is a surface decision, ` +
+      `not a file addition; raise this ceiling deliberately or fold the new entry point into an existing one`
+  );
+
+// 18. The model-tier table (references/model-tiers.json) is well-formed: every entry names a
+//     family, an integer rank and a compilable match, ranks ascend strictly, and no family
+//     repeats. The ceiling rule in references/config.md is only as trustworthy as this ordering,
+//     and scripts/model-pool.mjs reads it verbatim.
+const TIERS_PATH_REL = "references/model-tiers.json";
+const tiersFile = join(root, TIERS_PATH_REL);
+if (!existsSync(tiersFile)) {
+  fail(`${TIERS_PATH_REL}: missing — the orchestrator ceiling has no ordering to rank against`);
+} else {
+  // `parsed` tracks whether a usable table survived, for check 14's reason: a `tierTable === null`
+  // sentinel cannot tell "parse failed" from a file whose whole content legally parses to `null`.
+  let tierTable, parsed = true;
+  try {
+    tierTable = JSON.parse(readFileSync(tiersFile, "utf8"));
+  } catch (e) {
+    parsed = false;
+    fail(`${TIERS_PATH_REL}: not valid JSON — ${e.message}`);
+  }
+  if (parsed && !Array.isArray(tierTable)) {
+    fail(`${TIERS_PATH_REL}: must be an array`);
+    parsed = false;
+  }
+  if (parsed) {
+    // An empty table is the one well-formed-looking shape the loop below cannot catch: it runs
+    // zero times, so `rank()` returns null for every id and every dispatch degrades to the
+    // session tier — policy-free, and silently so.
+    if (tierTable.length === 0)
+      fail(
+        `${TIERS_PATH_REL}: 0 entries, at least 1 required — an empty table ranks no family, so ` +
+          `every dispatch would fall back to the session tier; restore the tier entries`
+      );
+    const families = [];
+    let previousRank = null;
+    for (const [i, e] of tierTable.entries()) {
+      const at = `${TIERS_PATH_REL}[${i}]`;
+      if (typeof e?.family !== "string" || !e.family)
+        fail(`${at}: family must be a non-empty string, got ${JSON.stringify(e?.family)}`);
+      else families.push(e.family);
+      if (!Number.isInteger(e?.rank)) fail(`${at}: rank must be an integer, got ${JSON.stringify(e?.rank)}`);
+      else {
+        if (previousRank !== null && e.rank <= previousRank)
+          fail(`${at}: ranks must ascend strictly — ${e.rank} follows ${previousRank}; renumber or reorder the table so each rank exceeds the one before`);
+        previousRank = e.rank;
+      }
+      if (typeof e?.match !== "string" || !e.match)
+        fail(`${at}: match must be a non-empty string, got ${JSON.stringify(e?.match)}`);
+      else {
+        try {
+          new RegExp(e.match);
+        } catch (err) {
+          fail(`${at}: match ${JSON.stringify(e.match)} is not a valid regular expression — ${err.message}`);
+        }
+      }
+    }
+    const dupeFamilies = [...new Set(families.filter((f, i) => families.indexOf(f) !== i))];
+    if (dupeFamilies.length)
+      fail(`${TIERS_PATH_REL}: duplicate family name(s) ${dupeFamilies.join(", ")} — each family must appear exactly once, or the ranking it resolves to is ambiguous`);
   }
 }
 

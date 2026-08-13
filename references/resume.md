@@ -44,9 +44,11 @@ its own `git rev-parse --show-toplevel` first. A differing `root:` means the fil
 belongs to another checkout or leaked from another project: never resume it and never
 silently reset it — report what its `root:` and `request:` say versus where you are,
 and let the user choose between adopting it (the repo genuinely moved: rewrite `root:`,
-keep everything else) and leaving it alone. A file with no `root:` line predates this
-format and is not foreign: adopt it by writing `root:` and `request:` at the next
-rewrite.
+keep everything else) and leaving it alone. The adopt-or-leave answer is the user's to
+give, and an Other answer to it appends `user-correction-at-gate` to the run record a
+resume already carries; `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that rule. A
+file with no `root:` line predates this format and is not foreign: adopt it by writing
+`root:` and `request:` at the next rewrite.
 
 ## Settle the branch first, before reading anything else
 
@@ -57,9 +59,11 @@ checkout and may have switched it back to the integration branch):
 
 - If the state file records a topic branch, resume means getting the checkout onto
   that branch — `commands/continue.md`'s recorded-vs-current mismatch rule already
-  covers asking the user before switching; never switch silently. Never create a
-  fresh topic branch when one is recorded: the recorded branch is where any
-  committed work lives.
+  covers asking the user before switching, and an Other answer at that ask appends
+  `user-correction-at-gate` to the run record the resume carries, whose rule
+  `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns; never switch silently. Never
+  create a fresh topic branch when one is recorded: the recorded branch is where
+  any committed work lives.
 - Only if the recorded branch is still the default or an integration branch does
   branch discipline (`references/branch.md`) apply — an interrupted run may have
   stopped before the topic branch was ever created. Create it and record it on the
@@ -80,6 +84,29 @@ A stage that records its own commit marker in `.devcycle/state.md` (e.g. a
 `git merge-base --is-ancestor <sha> <branch>` exits 0 — never guessed from the log.
 A stage may add evidence rows of its own for states this table does not name; it may
 never weaken the two rows above.
+
+## Resuming at the recorded stage
+
+The single owner of which playbook each stage resumes through. `commands/cycle.md` walks the
+stages in order and states each one's conditions; this table says where each one is re-entered,
+so neither command carries a second copy.
+
+| stage | resume via |
+| --- | --- |
+| `scoping` | `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` |
+| `audit` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` — re-reads the confirmed criteria from the state file's `audit:` artifact if one was written, otherwise re-runs the criteria interview; never assumes criteria a previous session did not record |
+| `diagnosis` | `superpowers:systematic-debugging`, bugs only — with the devcycle notes in `${CLAUDE_PLUGIN_ROOT}/commands/cycle.md` § Stage walk, which owns them; read that entry, since this session may never have loaded it |
+| `brainstorm` | `superpowers:brainstorming` — likewise with the notes in `${CLAUDE_PLUGIN_ROOT}/commands/cycle.md` § Stage walk |
+| `planning` | `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` |
+| `execution` | `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`, which follows the per-task table below — each task's last ledger event maps to its resume action |
+| `branch-review` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` |
+| `on-device` | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` |
+| `fast-path` | `${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md` (its Resume section) |
+| `sweep` | `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md` (its Resume section) |
+| `finish` | `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
+
+`done` has no row: a closed cycle resumes at nothing, and `/devcycle:cycle` reuses its state file
+rather than resuming it.
 
 ## Resuming a wave's per-task position
 

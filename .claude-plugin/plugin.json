@@ -32,25 +32,25 @@
       "type": "string",
       "title": "Implementer model",
       "default": "auto",
-      "description": "Model id, or 'auto' (default) to let the coordinator derive per task; an explicit id is binding."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier."
     },
     "taskReviewerModel": {
       "type": "string",
       "title": "Task reviewer model",
       "default": "auto",
-      "description": "Model id, or 'auto' (default) to let the coordinator derive per task; an explicit id is binding."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier."
     },
     "walkthroughModel": {
       "type": "string",
       "title": "Walkthrough model",
       "default": "auto",
-      "description": "Model id, or 'auto' (default) to let the coordinator derive per task; an explicit id is binding."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier."
     },
     "branchReviewModel": {
       "type": "string",
       "title": "Branch review model",
       "default": "auto",
-      "description": "Model id, or 'auto' (default) to let the coordinator derive per task; an explicit id is binding."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier."
     },
     "reviewDepth": {
       "type": "string",

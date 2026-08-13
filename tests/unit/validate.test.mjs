@@ -13,6 +13,7 @@ const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 // The routing table check 6 reads. `cycle` is confirm-first, so the table has to
 // name its justification; helpers.mjs's base table predates that arm and is owned
 // elsewhere, so every fixture tree gets the table from here instead.
+const ROUTING_PATH = "docs/routing.md";
 const ROUTING_HEAD = "# Routing\n\n| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n";
 const CYCLE_ROW = "| run the pipeline | `cycle` | confirm-first | yes |\n";
 const CYCLE_JUSTIFICATION =
@@ -23,12 +24,12 @@ const routing = (...rows) => ROUTING_HEAD + CYCLE_ROW + rows.join("") + CYCLE_JU
 
 const makePluginFixture = () => {
   const dir = makeBaseFixture();
-  writeInto(dir, "references/routing.md", routing());
+  writeInto(dir, ROUTING_PATH, routing());
   return dir;
 };
 
-// Replaces the fixture playbook's body, keeping the head that consumes
-// references/routing.md. Playbooks have no frontmatter.
+// Replaces the fixture playbook's body, keeping the fixture head. Playbooks
+// have no frontmatter.
 const playbook = (dir, body) => writeInto(dir, "playbooks/demoing-things.md", FIXTURE_PLAYBOOK_HEAD + "\n" + body);
 
 // The stage enum lives in commands/cycle.md; checks that consult it need it present.
@@ -192,7 +193,7 @@ test("handoff check: a playbook that states it emits no handoff block is not an 
   ok(runValidate(dir));
 });
 
-// --- check 6: commands against the routing table in references/routing.md ---
+// --- check 6: commands against the routing table in docs/routing.md ---
 
 test("routing check: a command missing from the routing table fails", () => {
   const dir = makePluginFixture();
@@ -204,7 +205,7 @@ test("routing check: a command missing from the routing table fails", () => {
 
 test("routing check: a side-effectful command without the guard fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", routing("| set up a repo | `onboard` | side-effectful | no |\n"));
+  writeInto(dir, ROUTING_PATH, routing("| set up a repo | `onboard` | side-effectful | no |\n"));
   writeInto(dir, "commands/onboard.md", '---\ndescription: "o"\n---\n');
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
@@ -213,7 +214,7 @@ test("routing check: a side-effectful command without the guard fails", () => {
 
 test("routing check: a read-only command carrying the guard fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", routing("| review code | `review` | read-only | yes |\n"));
+  writeInto(dir, ROUTING_PATH, routing("| review code | `review` | read-only | yes |\n"));
   writeInto(dir, "commands/review.md", '---\ndescription: "r"\ndisable-model-invocation: true\n---\n');
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
@@ -225,40 +226,40 @@ test("routing check: a read-only command carrying the guard fails", () => {
 
 test("routing check: a confirm-first command whose justification is missing fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", ROUTING_HEAD + CYCLE_ROW);
-  failsWith(runValidate(dir), /references\/routing\.md/, /cycle.*confirm-first.*justification/);
+  writeInto(dir, ROUTING_PATH, ROUTING_HEAD + CYCLE_ROW);
+  failsWith(runValidate(dir), /docs\/routing\.md/, /cycle.*confirm-first.*justification/);
 });
 
 test("routing check: a confirm-first justification that is only a label fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", ROUTING_HEAD + CYCLE_ROW + "\n**`cycle`'s justification.**\n");
-  failsWith(runValidate(dir), /references\/routing\.md/, /cycle.*confirm-first.*justification/);
+  writeInto(dir, ROUTING_PATH, ROUTING_HEAD + CYCLE_ROW + "\n**`cycle`'s justification.**\n");
+  failsWith(runValidate(dir), /docs\/routing\.md/, /cycle.*confirm-first.*justification/);
 });
 
 test("routing check: a justification naming another command does not cover this one", () => {
   const dir = makePluginFixture();
   writeInto(
     dir,
-    "references/routing.md",
+    ROUTING_PATH,
     ROUTING_HEAD +
       CYCLE_ROW +
       "| plan a change | `sketch` | confirm-first | yes |\n" +
       CYCLE_JUSTIFICATION
   );
   writeInto(dir, "commands/sketch.md", '---\ndescription: "s"\n---\n');
-  failsWith(runValidate(dir), /references\/routing\.md/, /sketch.*confirm-first.*justification/);
+  failsWith(runValidate(dir), /docs\/routing\.md/, /sketch.*confirm-first.*justification/);
 });
 
 test("routing check: a command listed twice in the routing table fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", ROUTING_HEAD + CYCLE_ROW + CYCLE_ROW + CYCLE_JUSTIFICATION);
-  failsWith(runValidate(dir), /references\/routing\.md.*cycle appears more than once/);
+  writeInto(dir, ROUTING_PATH, ROUTING_HEAD + CYCLE_ROW + CYCLE_ROW + CYCLE_JUSTIFICATION);
+  failsWith(runValidate(dir), /docs\/routing\.md.*cycle appears more than once/);
 });
 
 test("routing check: a routing row naming no command fails", () => {
   const dir = makePluginFixture();
-  writeInto(dir, "references/routing.md", routing("| do the thing | `ghost` | read-only | yes |\n"));
-  failsWith(runValidate(dir), /references\/routing\.md.*"ghost" names no command/);
+  writeInto(dir, ROUTING_PATH, routing("| do the thing | `ghost` | read-only | yes |\n"));
+  failsWith(runValidate(dir), /docs\/routing\.md.*"ghost" names no command/);
 });
 
 // --- check 7: skills/ is not part of the surface any more ---
@@ -301,8 +302,15 @@ test("budget check: a command over 100 lines fails", () => {
 
 // Pads the surface with `count` gerund-named playbooks of 100 lines each — each
 // one under the 150-line per-file ceiling, so only the total arm can fire.
+// Each padding playbook also gets a context-budget entry, generous enough never to fire:
+// check 15 requires every playbook to declare one, and these exist to move the line total.
 const padSurface = (dir, count) => {
-  for (let i = 0; i < count; i++) writeInto(dir, `playbooks/padding-${i}.md`, "x\n".repeat(100));
+  const context = { "playbooks/demoing-things.md": 999999 };
+  for (let i = 0; i < count; i++) {
+    writeInto(dir, `playbooks/padding-${i}.md`, "x\n".repeat(100));
+    context[`playbooks/padding-${i}.md`] = 999999;
+  }
+  writeInto(dir, CONTEXT_PATH, JSON.stringify(context, null, 2) + "\n");
 };
 
 test("budget check: a surface over 3500 lines in total fails", () => {
@@ -310,7 +318,7 @@ test("budget check: a surface over 3500 lines in total fails", () => {
   padSurface(dir, 40); // 4000 lines
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
-  assert.match(stderr, /runtime surface \d+ lines > 3620/);
+  assert.match(stderr, /runtime surface \d+ lines > baseline 3620/);
   assert.doesNotMatch(stderr, /lines > 154/); // the total arm fired, not the per-file arm
 });
 
@@ -682,4 +690,286 @@ test("check 14 passes on the repo's own shipped vocabulary", () => {
   const r = spawnSync(process.execPath, [join(REPO_ROOT, "scripts/validate.mjs")],
     { cwd: REPO_ROOT, encoding: "utf8" });
   assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+});
+
+// --- check 9: the line budgets are a committed baseline, not hardcoded constants ---
+
+const BUDGET_PATH = "tests/fixtures/surface-budget.json";
+const budget = (dir, over = {}) =>
+  writeInto(dir, BUDGET_PATH, JSON.stringify({ surfaceTotal: 3620, commandMax: 104, playbookMax: 154, ...over }, null, 2) + "\n");
+
+test("budget baseline: a missing baseline file fails", () => {
+  const dir = makePluginFixture();
+  rmSync(join(dir, BUDGET_PATH), { force: true });
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /surface-budget\.json/);
+  assert.match(stderr, /baseline/);
+});
+
+test("budget baseline: surface growth past the baseline fails and names the overage", () => {
+  const dir = makePluginFixture();
+  budget(dir, { surfaceTotal: 1 });
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /runtime surface \d+ lines > baseline 1/);
+  assert.match(stderr, /raise the baseline in this same commit/);
+});
+
+test("budget baseline: a baseline that admits the current surface passes", () => {
+  const dir = makePluginFixture();
+  budget(dir);
+  assert.equal(runValidate(dir).status, 0);
+});
+
+test("budget baseline: a surface smaller than the baseline passes and the baseline is not rewritten", () => {
+  const dir = makePluginFixture();
+  budget(dir, { surfaceTotal: 9999 });
+  assert.equal(runValidate(dir).status, 0);
+  assert.match(readFileSync(join(dir, BUDGET_PATH), "utf8"), /"surfaceTotal": 9999/);
+});
+
+test("budget baseline: a command over commandMax fails against the baseline's value", () => {
+  const dir = makePluginFixture();
+  budget(dir, { commandMax: 2 });
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /commands\/cycle\.md: \d+ lines > 2/);
+});
+
+test("budget baseline: a playbook over playbookMax fails against the baseline's value", () => {
+  const dir = makePluginFixture();
+  budget(dir, { playbookMax: 1 });
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /playbooks\/demoing-things\.md: \d+ lines > 1/);
+});
+
+test("budget baseline: a non-integer baseline value fails rather than coercing", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, BUDGET_PATH, JSON.stringify({ surfaceTotal: "3620", commandMax: 104, playbookMax: 154 }) + "\n");
+  assert.match(runValidate(dir).stderr, /surfaceTotal.*integer/);
+});
+
+// A baseline file legally parses to `null`, so a `budgets === null` sentinel cannot tell a
+// thrown parse from a file that simply says `null` — the same defect checks 14 and 18 already
+// carry the `parsed` sentinel to close.
+test("budget baseline: a baseline whose whole content is the JSON literal null fails rather than disabling the check", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, BUDGET_PATH, "null\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1, `expected failure, got:\n${stderr}`);
+  assert.match(stderr, /surface-budget\.json: must be a JSON object/);
+});
+
+test("budget baseline: a baseline that is not an object fails naming the shape, not a missing key", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, BUDGET_PATH, "[]\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1, `expected failure, got:\n${stderr}`);
+  assert.match(stderr, /surface-budget\.json: must be a JSON object/);
+  assert.doesNotMatch(stderr, /TypeError/);
+});
+
+// --- check 15: each stage's transitive context cost against a committed baseline ---
+
+const CONTEXT_PATH = "tests/fixtures/context-budget.json";
+
+test("context budget: a playbook missing from the baseline fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({}, null, 2) + "\n");
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /playbooks\/demoing-things\.md.*no entry in/);
+});
+
+test("context budget: a baseline whose whole content is the JSON literal null fails rather than disabling the check", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, CONTEXT_PATH, "null\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1, `expected failure, got:\n${stderr}`);
+  assert.match(stderr, /context-budget\.json: must be a JSON object/);
+});
+
+// The `in` operator throws on a primitive right-hand side, so an unguarded truthy non-object
+// baseline crashed the validator before checks 17 and 18 could run at all.
+test("context budget: a baseline that is not an object fails with a message rather than crashing", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, CONTEXT_PATH, "5\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1, `expected failure, got:\n${stderr}`);
+  assert.match(stderr, /context-budget\.json: must be a JSON object/);
+  assert.doesNotMatch(stderr, /TypeError|Cannot use 'in' operator/);
+});
+
+test("context budget: growth past a playbook's baseline fails and names both numbers", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": 1 }, null, 2) + "\n");
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /playbooks\/demoing-things\.md: \d+ bytes > baseline 1/);
+  assert.match(stderr, /raise the baseline in this same commit/);
+});
+
+test("context budget: a baseline entry for a playbook that no longer exists fails", () => {
+  const dir = makePluginFixture();
+  writeInto(
+    dir,
+    CONTEXT_PATH,
+    JSON.stringify({ "playbooks/demoing-things.md": 999999, "playbooks/gone-away.md": 10 }, null, 2) + "\n"
+  );
+  assert.match(runValidate(dir).stderr, /playbooks\/gone-away\.md.*no such playbook/);
+});
+
+test("context budget: the total counts a cited reference, and counts it once when two cite each other", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/alpha.md", "# Alpha\n\nSee ${CLAUDE_PLUGIN_ROOT}/references/beta.md.\n");
+  writeInto(dir, "references/beta.md", "# Beta\n\nSee ${CLAUDE_PLUGIN_ROOT}/references/alpha.md.\n");
+  writeInto(
+    dir,
+    "playbooks/demoing-things.md",
+    FIXTURE_PLAYBOOK_HEAD + "\nLoad ${CLAUDE_PLUGIN_ROOT}/references/alpha.md.\n"
+  );
+  // A cycle must terminate, and the two references must be counted once each, not repeatedly.
+  const playbookBytes = Buffer.byteLength(readFileSync(join(dir, "playbooks/demoing-things.md"), "utf8"));
+  const alphaBytes = Buffer.byteLength(readFileSync(join(dir, "references/alpha.md"), "utf8"));
+  const betaBytes = Buffer.byteLength(readFileSync(join(dir, "references/beta.md"), "utf8"));
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": playbookBytes + alphaBytes + betaBytes }, null, 2) + "\n");
+  const res = runValidate(dir);
+  assert.equal(res.status, 0, res.stderr);
+});
+
+test("context budget: one byte less than the transitive total fails, proving the closure is followed", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/alpha.md", "# Alpha\n\nA reference the playbook loads.\n");
+  writeInto(
+    dir,
+    "playbooks/demoing-things.md",
+    FIXTURE_PLAYBOOK_HEAD + "\nLoad ${CLAUDE_PLUGIN_ROOT}/references/alpha.md.\n"
+  );
+  const playbookBytes = Buffer.byteLength(readFileSync(join(dir, "playbooks/demoing-things.md"), "utf8"));
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": playbookBytes }, null, 2) + "\n");
+  assert.match(runValidate(dir).stderr, /playbooks\/demoing-things\.md: \d+ bytes > baseline/);
+});
+
+test("context budget: a missing baseline file fails", () => {
+  const dir = makePluginFixture();
+  rmSync(join(dir, CONTEXT_PATH), { force: true });
+  assert.match(runValidate(dir).stderr, /context-budget\.json: missing/);
+});
+
+// --- check 4, revisited: citations outside references/ resolve too ---
+// "Every ${CLAUDE_PLUGIN_ROOT} citation resolves" is check 4's job already, for every surface
+// file and every path shape; a second walk over the same files with the same regex would only
+// have reported each broken citation twice. The case check 4 had no test for is a citation
+// that names something other than a reference, so that is what this adds.
+
+test("plugin-root check: a citation to a script path resolves too", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "scripts/thing.mjs", "// fixture script\n");
+  playbook(dir, "Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/thing.mjs`.\n");
+  ok(runValidate(dir));
+});
+
+// --- check 17: the command count is a regression guard ---
+
+test("command ceiling: an eighth command fails", () => {
+  const dir = makePluginFixture();
+  for (const name of ["one", "two", "three", "four", "five", "six", "seven"])
+    writeInto(dir, `commands/${name}.md`, `---\ndescription: "Fixture command."\n---\n\n# /devcycle:${name}\n`);
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /8 commands > 7/);
+  assert.match(stderr, /surface decision/);
+});
+
+// --- check 18: the model-tier table is well-formed ---
+
+const TIERS_PATH = "references/model-tiers.json";
+const tiers = (dir, value) => writeInto(dir, TIERS_PATH, JSON.stringify(value, null, 2) + "\n");
+const withContext = (dir) => writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": 999999 }, null, 2) + "\n");
+
+test("model tiers: a missing table fails", () => {
+  const dir = makePluginFixture();
+  rmSync(join(dir, TIERS_PATH));
+  assert.match(runValidate(dir).stderr, /model-tiers\.json: missing/);
+});
+
+test("model tiers: a table that is JSON null fails instead of passing silently", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, null);
+  assert.match(runValidate(dir).stderr, /model-tiers\.json: must be an array/);
+});
+
+test("model tiers: non-ascending ranks fail", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, [
+    { family: "sonnet", rank: 2, match: "sonnet" },
+    { family: "haiku", rank: 1, match: "haiku" },
+  ]);
+  assert.match(runValidate(dir).stderr, /ranks must ascend/);
+});
+
+test("model tiers: duplicate ranks fail", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, [
+    { family: "haiku", rank: 1, match: "haiku" },
+    { family: "sonnet", rank: 1, match: "sonnet" },
+  ]);
+  assert.match(runValidate(dir).stderr, /ranks must ascend/);
+});
+
+test("model tiers: a match that is not a valid regular expression fails", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, [{ family: "haiku", rank: 1, match: "haiku(" }]);
+  assert.match(runValidate(dir).stderr, /match .* is not a valid regular expression/);
+});
+
+test("model tiers: a duplicate family fails", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, [
+    { family: "haiku", rank: 1, match: "haiku" },
+    { family: "haiku", rank: 2, match: "haiku-2" },
+  ]);
+  assert.match(runValidate(dir).stderr, /duplicate family/);
+});
+
+test("model tiers: a table that is not valid JSON fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, TIERS_PATH, "[{ family: haiku }]\n");
+  assert.match(runValidate(dir).stderr, /model-tiers\.json: not valid JSON/);
+});
+
+test("model tiers: an entry with no family fails", () => {
+  const dir = makePluginFixture();
+  tiers(dir, [{ rank: 1, match: "haiku" }]);
+  assert.match(runValidate(dir).stderr, /model-tiers\.json\[0\]: family must be a non-empty string, got undefined/);
+});
+
+test("model tiers: a non-integer rank fails rather than coercing", () => {
+  const dir = makePluginFixture();
+  tiers(dir, [{ family: "haiku", rank: "1", match: "haiku" }]);
+  assert.match(runValidate(dir).stderr, /model-tiers\.json\[0\]: rank must be an integer, got "1"/);
+});
+
+test("model tiers: an empty match fails", () => {
+  const dir = makePluginFixture();
+  tiers(dir, [{ family: "haiku", rank: 1, match: "" }]);
+  assert.match(runValidate(dir).stderr, /model-tiers\.json\[0\]: match must be a non-empty string, got ""/);
+});
+
+test("model tiers: an empty table fails rather than ranking nothing", () => {
+  const dir = makePluginFixture();
+  tiers(dir, []);
+  const { stderr } = runValidate(dir);
+  assert.match(stderr, /model-tiers\.json: 0 entries, at least 1 required/);
+  assert.match(stderr, /session tier/);
+});
+
+test("model tiers: a well-formed table passes", () => {
+  const dir = makePluginFixture();
+  withContext(dir);
+  tiers(dir, [
+    { family: "haiku", rank: 1, match: "haiku" },
+    { family: "sonnet", rank: 2, match: "sonnet" },
+  ]);
+  assert.equal(runValidate(dir).status, 0, runValidate(dir).stderr);
 });

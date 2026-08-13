@@ -68,17 +68,17 @@ playbook owns and runs before any agent edits.
 
 ## Stage walk
 
-Run these in order, each via its playbook, rewriting the state file at every transition; two short paths
-bypass it on confirmation: `fast-path` → `${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md`, `sweep`
-→ `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md`. The line below is the stage enum's
-single source of truth — `scripts/validate.mjs` reads its literal form:
+Run these in order, rewriting the state file at every transition; two short paths bypass the walk on
+confirmation (`fast-path`, `sweep`). Each stage's playbook and its re-entry conditions live in
+`${CLAUDE_PLUGIN_ROOT}/references/resume.md` § Resuming at the recorded stage. The line below is the
+stage enum's single source of truth — `scripts/validate.mjs` reads its literal form:
 
 - stage: <scoping|audit|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|finish|done>
 
-1. **scoping** — `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` (skipped per triage).
-2. **audit** (audit-shaped input only) — `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`,
-   in place of scoping. It writes `docs/audits/YYYY-MM-DD-<topic>.md`, recorded on the state
-   file's `audit:` line; a cycle that ends at the report, no change selected, closes there.
+1. **scoping** — (skipped per triage).
+2. **audit** (audit-shaped input only) — in place of scoping. It writes
+   `docs/audits/YYYY-MM-DD-<topic>.md`, recorded on the state file's `audit:` line; a cycle that
+   ends at the report, no change selected, closes there.
 3. **diagnosis** (bugs only) — `superpowers:systematic-debugging` (upstream, unmodified):
    reproduce the failure, then isolate the root cause. The stage ends by writing a root-cause
    report to `.devcycle/diagnosis.md` — reproduction steps, the established cause with its
@@ -92,13 +92,12 @@ single source of truth — `scripts/validate.mjs` reads its literal form:
    whether the spec's path is covered by the target repo's own `.gitignore` (`git check-ignore`);
    if so, write the file but skip the commit. An approved spec transitions to planning below,
    never directly to upstream's writing-plans.
-5. **planning** — `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md`.
-6. **execution** — `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`.
-7. **branch-review** — `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md`.
-8. **on-device** — `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md`, skipped only when
-   the change has no rendered surface (record the skip in the handoff).
-9. **finish** — `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md`, closing the state file
-   with `stage: done`.
+5. **planning** — wave-based plan.
+6. **execution**.
+7. **branch-review**.
+8. **on-device** — skipped only when the change has no rendered surface (record the skip in the
+   handoff).
+9. **finish** — closing the state file with `stage: done`.
 
 Whether planning and execution run devcycle-native or overlay their upstream counterparts is the
 `profile`'s call, resolved by each playbook per `${CLAUDE_PLUGIN_ROOT}/references/config.md`.

@@ -1,0 +1,6 @@
+[
+  { "family": "haiku", "rank": 1, "match": "haiku" },
+  { "family": "sonnet", "rank": 2, "match": "sonnet" },
+  { "family": "opus", "rank": 3, "match": "opus" },
+  { "family": "mythos", "rank": 4, "match": "mythos" }
+]
