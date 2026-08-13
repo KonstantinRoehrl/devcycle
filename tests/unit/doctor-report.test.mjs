@@ -11,6 +11,7 @@ import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
   parseDraftedMarkers, releaseDates, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
+  renderReport,
 } from "../../scripts/doctor.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
@@ -443,4 +444,133 @@ test("compiled knowledge on a missing promotions directory renders the same no-d
   const ck = compiledKnowledge(join(tmpdir(), "doctor-promotions-absent-xyz"));
   assert.deepEqual(ck.rows, []);
   assert.match(ck.note, /rung/);
+});
+
+// --- the markdown report ---
+
+const ctx = (over = {}) => ({
+  repo: "devcycle", today: "2026-08-13", scope: "every devcycle-tagged session",
+  previousSummaries: null, vocab: VOCAB, promotions: [],
+  outerLoop: { drafted: 0, draftedSince: "0.13.0", filed: "unavailable", resolved: "unavailable", medianTurnaroundDays: "unavailable" },
+  compiledKnowledge: { rows: [], note: "No data yet — this table fills in from the release that records `rung:` on promotion records." },
+  ...over,
+});
+
+test("both playbook anchors render, in their specified positions", () => {
+  const out = renderReport([sum()], ctx());
+  const at = (needle) => out.indexOf(needle);
+  assert.ok(at("<!-- devcycle:highlights -->") !== -1, "the highlights anchor is missing");
+  assert.ok(at("<!-- devcycle:findings -->") !== -1, "the findings anchor is missing");
+  // Highlights sits between the caveat block and Cost by version.
+  assert.ok(at("## Read this first") < at("<!-- devcycle:highlights -->"));
+  assert.ok(at("<!-- devcycle:highlights -->") < at("## Cost by version"));
+  // Findings sits between Compiled knowledge and the Appendix.
+  assert.ok(at("## Compiled knowledge") < at("<!-- devcycle:findings -->"));
+  assert.ok(at("<!-- devcycle:findings -->") < at("## Appendix"));
+});
+
+test("the section order is fixed", () => {
+  const out = renderReport([sum()], ctx());
+  const order = [
+    "# Doctor Report", "## Read this first", "## Highlights", "## Cost by version",
+    "## Cost by stage", "### Cost by stage (this window)", "## Your culprits", "### Compliance",
+    "## Your wins", "## Cost anomalies", "## Previously promoted — did it hold", "## Outer loop",
+    "## Compiled knowledge", "## Findings", "## Appendix",
+  ];
+  const positions = order.map((h) => out.indexOf(h));
+  assert.ok(positions.every((p) => p !== -1), `a section is missing: ${order.filter((h, i) => positions[i] === -1)}`);
+  assert.deepEqual(positions, [...positions].sort((a, b) => a - b), "sections are out of order");
+});
+
+test("every section carries a one-line gloss", () => {
+  const out = renderReport([sum()], ctx());
+  // Each `## ` or `### ` heading (except the two anchored ones, whose gloss precedes the
+  // anchor, and the H1) is followed within three lines by an italic gloss line.
+  const lines = out.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^#{2,3} /.test(lines[i])) continue;
+    const window = lines.slice(i + 1, i + 4).join("\n");
+    assert.match(window, /^\s*\*.+\*\s*$/m, `no gloss under "${lines[i]}"`);
+  }
+});
+
+test("the report renders no path, no session id, and no machine identity", () => {
+  const out = renderReport([sum()], ctx());
+  assert.ok(!/\/Users\/|\/home\//.test(out), "the report leaked a home-directory path");
+  assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(out), "the report leaked a session id");
+});
+
+test("every legacy line-class still has a home in the rendered report", () => {
+  // Spec §5's coverage test: a future change that silently drops a metric fails here rather
+  // than passing review. One entry per line-class the pre-overhaul report rendered.
+  const summaries = [sum({
+    unpriced: { "some-unpriced-model": 3 },
+    costByModel: { "claude-opus-5": 4 }, costByAgentType: { main: 3, subagent: 1 },
+    bandCounts: { "0-50k": 2 }, startupFloor: { main: [12000] },
+    carryWeighted: { Read: 900 }, dispatches: { total: 5, withoutModel: 2 },
+    knobs: { reviewDepth: "panel" }, models: { "claude-opus-5": 1 }, tools: { Read: 2 },
+    attributionSource: "forward-filled",
+    cacheBand: { point: 4, low: 3, high: 6, fallbackShare: 0.5, collapsed: false },
+  })];
+  const out = renderReport(summaries, ctx());
+  for (const needle of [
+    "UNPRICED MODEL",          // Read this first
+    "inferred: cache-write TTL", // Read this first
+    "forward-filled",          // Read this first
+    "Cost by version",         // per-version cohorts
+    "Cost by stage",           // by stage
+    "Cost anomalies",          // version-regression, unpriced-model, depth-outlier, cost-outlier
+    "Your wins",               // version-improvement
+    "Compliance",              // compliance candidates
+    "Cost by model",           // appendix
+    "Cost by agent type",      // appendix
+    "Startup floor",           // appendix
+    "Carry-weighted",          // appendix
+    "Dispatches",              // appendix
+    "reviewDepth",             // appendix
+    "Context depth bands",     // appendix
+    "Total cost by version",   // appendix
+    "prices as of",            // appendix footer
+    "forward-filled within each transcript", // the attribution disclosure
+    "fraction of the model's context window", // the depth disclosure
+  ]) assert.ok(out.includes(needle), `the rendered report dropped "${needle}"`);
+});
+
+test("the cost-by-stage table names the unknown-version cohort it excluded", () => {
+  // stageByVersionTable cannot place "unknown" on a version axis, so it drops that cohort. The
+  // render site says so rather than letting the omission read as a clean bill of health.
+  const out = renderReport([
+    sum({ id: "a", costByStage: { execution: 3 } }),
+    sum({ id: "b", pluginVersion: "unknown", costByStage: { execution: 4 } }),
+    sum({ id: "c", pluginVersion: "unknown", costByStage: { planning: 1 } }),
+  ], ctx());
+  const line = "_Excluded from this table: 2 session(s), $5.00 (inferred: no version detectable). " +
+    "Their cost is in Total cost by version, in the appendix._";
+  assert.ok(out.includes(line), "the excluded unknown-version cohort is not named");
+  // Under the across-versions table, not the window one.
+  assert.ok(out.indexOf("## Cost by stage") < out.indexOf(line));
+  assert.ok(out.indexOf(line) < out.indexOf("### Cost by stage (this window)"));
+  // Nothing dropped, nothing claimed: no line at all rather than a zero.
+  assert.ok(!renderReport([sum()], ctx()).includes("Excluded from this table"));
+});
+
+test("compiled knowledge and the shipped column render empty rather than throwing", () => {
+  const out = renderReport([sum()], ctx());
+  assert.match(out, /## Compiled knowledge/);
+  assert.match(out, /fills in from the release that records/);
+  // The Shipped column exists and its cell is the em dash, never a blank that reads as
+  // "nothing shipped".
+  assert.match(out, /\| Shipped \|/);
+});
+
+test("an unavailable outer loop renders unavailable, not zeros", () => {
+  const out = renderReport([sum()], ctx());
+  assert.match(out, /Filed: unavailable/);
+  assert.ok(!/Filed: 0/.test(out));
+});
+
+test("the empty corpus renders a report rather than throwing", () => {
+  const out = renderReport([], ctx());
+  assert.match(out, /# Doctor Report/);
+  assert.match(out, /no sessions matched/i);
 });

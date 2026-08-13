@@ -9,6 +9,9 @@ import { homedir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PRICING, priceFor } from "./pricing.mjs";
+// The one reader of this repo's promotion records; doctor's Cost-by-version "Shipped" column
+// names what each version shipped rather than parsing those records a second time here.
+import { readPromotions } from "./dream.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // references/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -1233,7 +1236,11 @@ function mergeCounts(target, source) {
 // The --json counterpart of formatReport: same corpus, same QC5 labelling (every session
 // carries `inferred`, the report carries `cost_band`) — never left implicit the way a
 // human reader could infer from prose but a machine consumer of the JSON could not.
-export function buildJsonReport(summaries) {
+// `ctx` is reportContext's output, the same object renderReport is handed, so the two forms of
+// the report cannot describe different corpora. It is optional and every key it feeds defaults
+// to its own empty form: a caller with only summaries in hand still gets every table that is
+// derivable from summaries alone.
+export function buildJsonReport(summaries, ctx = {}) {
   return {
     pricesAsOf: PRICING.asOf,
     sessions: summaries.map((s) => ({
@@ -1251,6 +1258,19 @@ export function buildJsonReport(summaries) {
       note: IN_FLIGHT_NOTE,
     },
     cost_band: aggregateCacheBand(summaries),
+    // Additive: every key above keeps its name and meaning. These eight are the markdown
+    // report's own sections, so a machine consumer reads exactly the rows the report renders
+    // rather than re-deriving them from `sessions`.
+    version_profile_cohorts: versionProfileTable(summaries, ctx.promotions ?? []),
+    stage_by_version: stageByVersionTable(summaries),
+    stage_window: stageWindowTable(summaries, ctx.previousSummaries ?? null),
+    culprits: culpritTable(summaries, ctx.vocab ?? []),
+    wins: winTable(summaries, ctx.vocab ?? [], emitCandidates(summaries)),
+    // Absent, not zero: a probe that did not run renders null here for the same reason the
+    // markdown renders "unavailable" — a 0 would read as "nothing filed".
+    outer_loop: ctx.outerLoop ?? null,
+    compiled_knowledge: ctx.compiledKnowledge ?? null,
+    cycles: cycleGroups(summaries),
   };
 }
 
@@ -1378,16 +1398,17 @@ function main() {
     console.error("SESSION METRICS FAILED:\n" + result.reasons.map((r) => ` - ${r}`).join("\n"));
     process.exit(1);
   }
+  const ctx = reportContext(args, result);
   if (args.json) {
     console.log(
       JSON.stringify(
-        { window: result.window, totals: result.totals, ...buildJsonReport(result.sessions) },
+        { window: result.window, totals: result.totals, ...buildJsonReport(result.sessions, ctx) },
         null,
         2,
       ),
     );
   } else {
-    console.log(formatReport(result.sessions));
+    console.log(renderReport(result.sessions, ctx));
   }
 }
 
@@ -1854,6 +1875,396 @@ export function compiledKnowledge(promotionsDir) {
   return {
     rows: [],
     note: "No data yet — this table fills in from the release that records `rung:` on promotion records.",
+  };
+}
+
+// ─── The markdown report ─────────────────────────────────────────────────────────────────────
+
+// The one-line plain-language gloss under each heading, written for a reader who has never read
+// devcycle's internals. Shipped text from the design's §4 — kept in one table so a section and
+// its gloss cannot drift apart, and so the renderer has no place to improvise one.
+const GLOSSES = {
+  "read-this-first": "Caveats that qualify every number below. Each one says what it excludes and why.",
+  highlights: "The three things worth knowing before reading any table.",
+  "cost-by-version":
+    "What a cycle costs on each plugin version, compared only against the same profile — so a " +
+    "month where you happened to run `lean` more often cannot masquerade as an improvement.",
+  "cost-by-stage": "Whether a stage is getting cheaper or dearer over releases — not just what it costs today.",
+  "cost-by-stage-window": "Where this window's money actually went.",
+  culprits:
+    "Recurring problems, priced. The dollar figure is what each one actually cost you, summed " +
+    "over every occurrence — not a severity guess.",
+  compliance: "Rules devcycle states but could not enforce, and how often they were broken.",
+  wins:
+    "What went right, priced the same way — a system that only counts failures cannot tell you " +
+    "whether it is improving.",
+  anomalies:
+    "Individual cost defects: a model with no price, a run far dearer than its peers, a session " +
+    "running far deeper than its own startup floor, a stage whose cost jumped between versions.",
+  promoted: "Whether lessons this repo already adopted actually stopped the problem recurring.",
+  "outer-loop": "Whether filing issues from this report is actually producing fixes.",
+  "compiled-knowledge":
+    "Whether lessons are getting cheaper to carry — a check costs nothing to read, prose costs " +
+    "context on every run.",
+  findings: "What to do about all of it: the problems worth fixing, ranked, and the changes that stop a whole class of them.",
+  appendix: "Supporting detail: the inputs behind the tables above.",
+  // The Appendix's own `###` subsections. Drafted here rather than at the render site for the
+  // same reason as every gloss above: shipped prose, reviewed once, in one table.
+  "appendix-cost-by-model":
+    "Which models the money actually went to — the cut to read when the question is routing " +
+    "rather than process.",
+  "appendix-cost-by-agent-type":
+    "How the spend splits between the main thread and the subagents it dispatched — the first " +
+    "check on whether delegation pays for itself.",
+  "appendix-context-depth-bands":
+    "How many turns ran at each depth band, as a fraction of the model's context window — the " +
+    "distribution behind the median-depth columns above.",
+  "appendix-startup-floor":
+    "What an agent carries before it does any work: the context its very first turn already " +
+    "holds, per agent type.",
+  "appendix-carry-weighted-tokens":
+    "Which content classes are dearest to keep, weighting every token added by the number of " +
+    "later turns that had to carry it.",
+  "appendix-dispatches":
+    "How many subagents were dispatched, and how many inherited the caller's model instead of " +
+    "naming one.",
+  "appendix-cohorts-by-reviewdepth":
+    "The same cohort cut keyed by the `reviewDepth` knob rather than the version, so the other " +
+    "lever on review rigor is visible too.",
+  "appendix-total-cost-by-version":
+    "Total spend per version — the volume figure the per-cycle medians above deliberately leave out.",
+  "appendix-per-session-detail":
+    "One line per session, so any figure above can be traced back to the sessions that produced it.",
+};
+
+// Rendered in place of the two sections the playbook owns. playbooks/profiling-sessions.md
+// replaces exactly these two lines when it persists the report and changes nothing else, so the
+// template stays wholly script-owned and the playbook writes only prose.
+const HIGHLIGHTS_ANCHOR = "<!-- devcycle:highlights -->";
+const FINDINGS_ANCHOR = "<!-- devcycle:findings -->";
+
+// An absent value renders as an em dash, never as a blank cell a reader would take for a zero.
+const markdownCell = (v) => (v === null || v === undefined || v === "" ? "—" : String(v));
+
+// Every table renders its header row and separator even with nothing in it, and says why it is
+// empty — an empty table with no explanation reads as a clean bill of health (QC3).
+function markdownTable(headers, rows, whyEmpty) {
+  const out = [
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map((r) => `| ${r.map(markdownCell).join(" | ")} |`),
+  ];
+  if (!rows.length) out.push("", `_No rows: ${whyEmpty}._`);
+  return out;
+}
+
+// deltaAgainstPrevious' three states, rendered. A comparison that could not be taken names its
+// reason; it never falls back to 0%, which would read as a version that changed nothing.
+const deltaText = (d) =>
+  d.state === "compared"
+    ? `${d.pct >= 0 ? "+" : ""}${d.pct.toFixed(1)}%`
+    : d.state === "first-seen" ? "first seen" : "not compared";
+
+// An impact nobody could price is labelled, never rendered as $0.00.
+const impactText = (v) => (v === null || v === undefined ? "unmeasurable" : usd(v));
+
+// null means gh answered but no resolved culprit had a dated release — not a zero-day
+// turnaround; the string "unavailable" means gh itself could not be reached.
+const turnaroundText = (v) =>
+  v === null || v === undefined
+    ? "unavailable (no resolved culprit has a dated release)"
+    : v === "unavailable" ? "unavailable" : `${v} day(s)`;
+
+// Cost anomalies are ranked by the money at stake. A candidate carrying no dollar figure ranks
+// last rather than being sorted as if it had been measured at zero.
+const anomalyWeight = (c) => Math.abs(c.delta_dollars ?? c.dollars ?? 0);
+
+// What the corpus this report describes actually was, in the reader's terms rather than in flags.
+export function reportScope(args) {
+  if (args.since || args.until)
+    return `${args.since ?? "the earliest record"} to ${args.until ?? "now"}`;
+  return args.all ? "every transcript, tagged or not" : "every devcycle-tagged session";
+}
+
+// The caveat block, in formatReport's own order: unpriced models, an inferred cache-write TTL
+// range, forward-filled stage attribution, and sessions still in flight. Only the caveats that
+// actually apply are emitted — a corpus with none says so, which is also where formatReport's
+// "cost is exact" affirmation now lives, since emitting that unconditionally would leave the
+// no-caveat line unreachable.
+function caveatLines(summaries, agg) {
+  if (!summaries.length) return ["- no sessions matched."];
+  const out = [];
+  for (const [model, count] of Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]))
+    out.push(`- UNPRICED MODEL: ${model} (${count} requests)`);
+  const band = agg.cacheBand;
+  if (!band.collapsed)
+    out.push(
+      `- Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
+        `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
+        `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`,
+    );
+  const filled = summaries.filter((s) => s.attributionSource === "forward-filled").length;
+  if (filled > 0)
+    out.push(
+      `- ${filled} session(s) have inferred stage costs (forward-filled — no run record); the ` +
+        "session ids are in the appendix's per-session detail.",
+    );
+  const inFlight = summaries.filter((s) => s.inFlight).length;
+  if (inFlight > 0)
+    out.push(`- ${inFlight} session(s) still in flight (newest record < 30 min old) — ${IN_FLIGHT_NOTE}`);
+  return out.length ? out : ["- No caveats apply to this corpus."];
+}
+
+// One line per session, in the same shape formatReport's own detail loop emits. The two are
+// deliberately separate copies while formatReport is retained: this task keeps that function
+// byte-for-byte unchanged, so the shared line is folded into one owner when it is retired.
+function sessionDetailLines(summaries) {
+  if (!summaries.length) return ["_No rows: no sessions matched._"];
+  return summaries.map((s) => {
+    // `?? {}` / `?? 0`: a summary built for one table's assertion carries only that table's
+    // fields, so this loop must render something rather than throw on an omitted detail field.
+    const modelList = Object.keys(s.models ?? {}).join(", ") || "none";
+    const toolList = Object.entries(s.tools ?? {}).map(([k, v]) => `${k}:${v}`).join(", ") || "none";
+    return (
+      `session ${s.id} — turns ${s.turns} (main ${s.mainTurns}, subagent ${s.subagentTurns}), ` +
+      `depth median ${s.medianDepth} max ${s.maxDepth}, cost ${usd(s.costUSD ?? 0)}, ` +
+      `models [${modelList}], tools [${toolList}], quality: ${qualityText(s.quality)}` +
+      (s.attributionSource === "forward-filled"
+        ? " [stage costs inferred — forward-filled, no run record]"
+        : "") +
+      (s.inFlight ? " [in flight — excluded from medians]" : "")
+    );
+  });
+}
+
+// The whole markdown report. Section order is fixed by the design and is the point of it: the
+// reader meets the caveats, then the money, then the culprits, then what to do — never a table
+// before the caveat that qualifies it. Pure over its arguments: every file read and every clock
+// call happens in reportContext, so a test renders the whole document from fixtures.
+export function renderReport(summaries, ctx) {
+  const {
+    repo, today, scope,
+    previousSummaries = null, vocab = [], promotions = [],
+    outerLoop: loop = null, compiledKnowledge: compiled = null,
+  } = ctx ?? {};
+  const L = [];
+  const section = (heading, glossKey) => { L.push("", heading, "", `*${GLOSSES[glossKey]}*`, ""); };
+  const agg = aggregate(summaries);
+  const candidates = emitCandidates(summaries);
+
+  L.push(
+    `# Doctor Report — ${repo} — ${today}`,
+    "",
+    `Scope: ${scope} · Sessions: ${summaries.length} · Cycles: ${cycleGroups(summaries).length} · ` +
+      `Total cost: ${usd(agg.costUSD)} · Prices as of ${PRICING.asOf}`,
+  );
+
+  section("## Read this first", "read-this-first");
+  L.push(...caveatLines(summaries, agg));
+
+  section("## Highlights", "highlights");
+  L.push(HIGHLIGHTS_ANCHOR);
+
+  section("## Cost by version", "cost-by-version");
+  L.push(...markdownTable(
+    ["Version", "Profile", "Sessions", "Cycles", "Median $/cycle", "Δ vs previous",
+      "Priciest stage", "Median depth", "Quality", "Shipped"],
+    versionProfileTable(summaries, promotions).map((r) => [
+      r.version,
+      r.profile,
+      r.lowConfidence ? `${r.sessions} (low confidence: n<${MIN_COHORT})` : r.sessions,
+      r.cycles,
+      usd(r.medianCostPerCycle),
+      deltaText(r.delta),
+      r.priciestStage,
+      r.medianDepth,
+      qualityText(r.quality),
+      r.shipped.join(", "),
+    ]),
+    "no sessions in this corpus",
+  ));
+
+  section("## Cost by stage", "cost-by-stage");
+  const stageTrend = stageByVersionTable(summaries);
+  L.push(...markdownTable(
+    ["Stage", ...stageTrend.versions, "Trend"],
+    stageTrend.rows.map((r) => [
+      r.stage,
+      ...stageTrend.versions.map((v) => (r.byVersion[v] === null ? null : usd(r.byVersion[v]))),
+      r.trend,
+    ]),
+    "no version-tagged sessions to compare across releases",
+  ));
+  // stageByVersionTable drops the undetectable-version cohort from every column and every trend,
+  // because "unknown" cannot sit on a version axis — right, but silent, and an omission nobody
+  // names reads as a clean bill of health. cohortTable is the sibling that keeps that bucket,
+  // computed over the same corpus by the same rules, so the two cannot disagree about what was
+  // excluded. No unknown row means nothing was dropped: no line at all, rather than a zero.
+  const droppedCohort = cohortTable(summaries).find((r) => r.version === "unknown");
+  if (droppedCohort)
+    L.push(
+      "",
+      `_Excluded from this table: ${droppedCohort.sessions} session(s), ${usd(droppedCohort.total)} ` +
+        "(inferred: no version detectable). Their cost is in Total cost by version, in the appendix._",
+    );
+
+  section("### Cost by stage (this window)", "cost-by-stage-window");
+  L.push(...markdownTable(
+    ["Stage", "Cost", "% of window", "Median depth", "Trend vs previous window"],
+    stageWindowTable(summaries, previousSummaries).map((r) => [
+      r.stage, usd(r.total), `${r.pctOfWindow.toFixed(1)}%`, r.medianDepth, r.trend,
+    ]),
+    "no stage cost recorded in this window",
+  ));
+
+  section("## Your culprits", "culprits");
+  L.push(...markdownTable(
+    ["Culprit", "Kind", "Cost", "Occurrences", "Δ vs previous", "Trend"],
+    culpritTable(summaries, vocab).map((r) => [
+      r.culprit, r.kind, impactText(r.impact), r.occurrences, deltaText(r.delta), r.trend,
+    ]),
+    "no scored culprit events in this corpus",
+  ));
+
+  section("### Compliance", "compliance");
+  const compliance = complianceCandidatesOf(summaries);
+  L.push(...(compliance.length
+    ? compliance.map((c) => `- ${formatComplianceCandidate(c)}`)
+    : ["_No rows: no compliance signals in this corpus._"]));
+
+  section("## Your wins", "wins");
+  L.push(...markdownTable(
+    ["Win", "Value", "Occurrences", "Trend"],
+    winTable(summaries, vocab, candidates).map((r) => [
+      r.win, impactText(r.impact), r.occurrences, r.trend,
+    ]),
+    "no win events recorded in this corpus",
+  ));
+
+  section("## Cost anomalies", "anomalies");
+  // version-improvement belongs to Your wins above; everything else emitCandidates found is a
+  // cost defect, priciest first.
+  const anomalies = candidates
+    .filter((c) => c.type !== "version-improvement")
+    .sort((a, b) => anomalyWeight(b) - anomalyWeight(a));
+  L.push(...(anomalies.length
+    ? anomalies.map((c) => `- ${formatCandidate(c)}`)
+    : ["_No rows: no cost anomalies in this corpus._"]));
+
+  section("## Previously promoted — did it hold", "promoted");
+  L.push(
+    "_Rendered by the playbook from the latest .devcycle/dreaming/<date>-dream.md, under that " +
+      "artifact's own capped/empty-not-checked rules; the whole section is omitted when no " +
+      "artifact exists._",
+  );
+
+  section("## Outer loop", "outer-loop");
+  // A probe that could not run renders "unavailable" for every field it feeds — never 0, which
+  // would read as "nothing has ever been filed".
+  const l = loop ?? {
+    drafted: "unavailable", draftedSince: DRAFTED_SINCE,
+    filed: "unavailable", resolved: "unavailable", medianTurnaroundDays: "unavailable",
+  };
+  L.push(
+    `- Drafted: ${l.drafted} (markers recorded since ${l.draftedSince})`,
+    `- Filed: ${l.filed}`,
+    `- Resolved: ${l.resolved}`,
+    `- Median turnaround: ${turnaroundText(l.medianTurnaroundDays)}`,
+  );
+
+  section("## Compiled knowledge (cumulative, by version)", "compiled-knowledge");
+  const ck = compiled ?? { rows: [], note: "Unavailable — the compiled-knowledge probe did not run." };
+  L.push(...markdownTable(
+    ["Version", "Rung", "Lessons", "Context cost"],
+    ck.rows.map((r) => [r.version, r.rung, r.lessons, r.contextCost]),
+    ck.note.replace(/\.$/, ""),
+  ));
+
+  section("## Findings", "findings");
+  L.push(FINDINGS_ANCHOR);
+
+  section("## Appendix", "appendix");
+
+  section("### Cost by model", "appendix-cost-by-model");
+  L.push(ranked(agg.costByModel, usd) || "_No rows: no priced turns in this corpus._");
+
+  section("### Cost by agent type", "appendix-cost-by-agent-type");
+  L.push(ranked(agg.costByAgentType, usd) || "_No rows: no priced turns in this corpus._");
+
+  section("### Context depth bands", "appendix-context-depth-bands");
+  L.push(BAND_LABELS.map((label) => `${label} ${agg.bandCounts[label]}`).join(", "));
+
+  section("### Startup floor by agent type", "appendix-startup-floor");
+  L.push(
+    Object.entries(agg.startupFloor)
+      .sort((a, b) => median(b[1]) - median(a[1]))
+      .map(([k, v]) => `${k} median ${median(v)} min ${Math.min(...v)} (n=${v.length})`)
+      .join(", ") || "_No rows: no session recorded a first turn._",
+  );
+
+  section("### Carry-weighted tokens by content class", "appendix-carry-weighted-tokens");
+  L.push(ranked(agg.carryWeighted, (v) => Math.round(v)) || "_No rows: no content classes recorded._");
+
+  section("### Dispatches", "appendix-dispatches");
+  L.push(`${agg.dispatches.total} dispatched, ${agg.dispatches.withoutModel} without an explicit model`);
+
+  section("### Cohorts by reviewDepth", "appendix-cohorts-by-reviewdepth");
+  L.push(...markdownTable(
+    ["reviewDepth", "Sessions", "Total", "Median/session", "Quality"],
+    reviewDepthCohortTable(summaries).map((r) => [
+      r.inferred ? `${r.reviewDepth} (inferred: ${r.inferred})` : r.reviewDepth,
+      r.sessions, usd(r.total), usd(r.medianPerSession), qualityText(r.quality),
+    ]),
+    "no settled sessions in this corpus",
+  ));
+
+  section("### Total cost by version", "appendix-total-cost-by-version");
+  L.push(...markdownTable(
+    ["Version", "Sessions", "Total", "Median/session", "Median depth", "Quality"],
+    cohortTable(summaries).map((r) => [
+      r.inferred ? `${r.version} (inferred: ${r.inferred})` : r.version,
+      r.sessions, usd(r.total), usd(r.medianPerSession), r.medianDepth, qualityText(r.quality),
+    ]),
+    "no settled sessions in this corpus",
+  ));
+  const direction = corpusDirectionOfTravel(summaries.filter((s) => !s.inFlight));
+  L.push(
+    "",
+    direction.direction === "insufficient-data"
+      ? "Direction of travel: insufficient data (need at least two known versions)"
+      : `Direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
+        "cost, oldest to newest known version)",
+  );
+
+  section("### Per-session detail", "appendix-per-session-detail");
+  L.push(...sessionDetailLines(summaries));
+
+  L.push("", `prices as of ${PRICING.asOf}`, "", DISCLOSURE, "", DEPTH_DISCLOSURE, "");
+  return L.join("\n");
+}
+
+// Everything the report needs that the summaries cannot carry: the repo it ran in, today's date,
+// and the three artifacts that live outside the transcripts. Built once and handed to both the
+// markdown renderer and --json, so the two forms can never describe different corpora. Each
+// artifact degrades to its own empty form rather than failing the whole report.
+function reportContext(args, result) {
+  let vocab = [];
+  try {
+    const parsed = JSON.parse(readFileSync(join(PLUGIN_ROOT, "references", "culprits.json"), "utf8"));
+    vocab = Array.isArray(parsed) ? parsed : [];
+  } catch { vocab = []; }
+  let promotions = [];
+  try { promotions = readPromotions(process.cwd()); } catch { promotions = []; }
+  return {
+    // The repo's name, never its path — QC8: no emitted artifact carries machine identity.
+    repo: basename(process.cwd()),
+    today: new Date().toISOString().slice(0, 10),
+    scope: reportScope(args),
+    previousSummaries: result.previousSessions,
+    vocab,
+    promotions,
+    outerLoop: outerLoop(join(process.cwd(), ".devcycle", "doctor")),
+    compiledKnowledge: compiledKnowledge(join(process.cwd(), "docs", "devcycle", "promotions")),
   };
 }
 
