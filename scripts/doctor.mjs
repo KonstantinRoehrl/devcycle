@@ -786,6 +786,20 @@ export function isInFlight(newestRecordMs, nowMs = Date.now()) {
   return nowMs - newestRecordMs < IN_FLIGHT_MS;
 }
 
+// The culprit slugs each impact key's events carried, so a table can name the vocabulary entry
+// without impactScores having to key on it — the key stays (event, stage) until the release
+// references/impact-scoring.md § The grouping key names. A key whose events carry no slug is
+// absent, never present with an empty list: absent is not "attributed to nothing".
+function culpritsByKey(record) {
+  const out = {};
+  for (const e of journalEvents(record)) {
+    if (!e.culprit) continue;
+    const key = `${e.event}:${e.stage}`;
+    (out[key] ??= new Set()).add(e.culprit);
+  }
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...v].sort()]));
+}
+
 export function summarizeSession(sessionId, records, runRecords = new Map()) {
   const turns = records.filter(isTurn);
   const depths = turns.map((r) => contextDepth(r.message.usage));
@@ -913,6 +927,13 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     profile: profile ?? "unknown",
     pluginVersion: pluginVersion ?? "unknown",
     knobs,
+    // The full session id is still in hand here and the record is already resolved; a summary
+    // carries only `id: sessionId.slice(0, 8)`, so nothing downstream could redo this join.
+    runId: record?.runId ?? null,
+    // References/impact-scoring.md owns the formula; this is the only call site that scores a
+    // session, and every table downstream reads the result rather than recomputing it.
+    impact: record ? impactScores(record, costByStage) : null,
+    culpritsByKey: culpritsByKey(record),
     attributionSource,
     complianceCandidates: emitComplianceCandidates(toolCallEvents, record),
     inFlight: newestRecordMs !== null && isInFlight(newestRecordMs),
@@ -1375,8 +1396,16 @@ export function attributedCost(stage, record, costByStage) {
   return cost / n;
 }
 
+// Every event one run produced, journaled and derived alike, in one place. impactScores and
+// summarizeSession both need this set, and two copies of the concatenation would be two places
+// for the derived-signal list to drift out of step with references/impact-scoring.md.
+export function journalEvents(record) {
+  if (!record) return [];
+  return [...(record.events ?? []), ...deriveEvents(record)];
+}
+
 export function impactScores(record, costByStage) {
-  const all = [...(record.events ?? []), ...deriveEvents(record)];
+  const all = journalEvents(record);
   const byKey = new Map();
   for (const e of all) {
     const key = `${e.event}:${e.stage}`;
@@ -1392,6 +1421,23 @@ export function impactScores(record, costByStage) {
     ...rest,
     impact: measurable ? rest.impact : null,
   }));
+}
+
+// Sessions are grouped into cycles by the run they belong to: one run record spans every
+// session of one cycle, including sessions resumed after a /clear, so a per-session median
+// would count one long cycle as several cheap ones. A session that joined no run record is its
+// own cycle rather than being pooled with every other record-less session, which would fuse
+// unrelated work into one giant cycle and understate the median.
+export function cycleGroups(summaries) {
+  const groups = new Map();
+  for (const s of summaries) {
+    const key = s.runId ?? `session:${s.id}`;
+    if (!groups.has(key)) groups.set(key, { runId: s.runId ?? null, sessions: [], cost: 0 });
+    const g = groups.get(key);
+    g.sessions.push(s.id);
+    g.cost += s.costUSD ?? 0;
+  }
+  return [...groups.values()];
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
