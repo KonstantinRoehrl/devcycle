@@ -151,6 +151,17 @@ test("devcycle: reference check: an anchor inside an HTML comment is exempt, the
   failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /devcycle:highlights/);
 });
 
+test("devcycle: reference check: the comment exemption is scoped to a bare anchor, not any comment containing one", () => {
+  // The exemption covers a comment whose entire body is a devcycle:<name> splice anchor. A
+  // comment that merely mentions one inline, inside a longer sentence of prose, is not a
+  // splice anchor and must still be checked like any other text.
+  const dir = makePluginFixture();
+  playbook(dir, "<!-- a note about devcycle:not-a-real-thing in passing -->\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /devcycle:not-a-real-thing/);
+  playbook(dir, "<!-- devcycle:highlights -->\n");
+  ok(runValidate(dir));
+});
+
 // --- check 4: ${CLAUDE_PLUGIN_ROOT}/<path> against the tree ---
 
 test("plugin-root check: a path that exists passes", () => {
