@@ -1805,6 +1805,13 @@ export function parseDraftedMarkers(text) {
   return out;
 }
 
+// The slug out of a filed issue's title, read with the marker parser above rather than a second
+// pattern: an issue title is exactly what follows `Drafted: ` in the marker the playbook writes,
+// so the two forms cannot drift into disagreeing about which slug shapes are legal. null for a
+// title the filer wrote themselves, which is not this report's work and is not counted.
+const titleSlug = (title) =>
+  parseDraftedMarkers(`Drafted: ${String(title ?? "").trim()}`)[0]?.slug ?? null;
+
 // Release dates come from the plugin's own CHANGELOG.md headings, back-filled 2026-08-13. A
 // heading with no date is omitted rather than defaulted: turnaround measured against a made-up
 // release date is a number that reads as fact and is not one.
@@ -1828,24 +1835,34 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride 
   // Drafted is local: it comes from this repo's own persisted reports, so it renders even when
   // gh is unavailable. Reports written before this phase carry no markers, which is why the
   // renderer qualifies the count rather than presenting it as "none drafted".
-  let drafted = 0;
+  // Distinct culprits, not marker lines: the marker records drafting rather than posting, so one
+  // culprit drafted, declined at a gate and drafted again writes two lines for one draft, and a
+  // recurring culprit is re-offered in every later report. Counting lines would inflate Drafted
+  // against Filed, which is the comparison this section exists to support.
+  const draftedCulprits = new Set();
   try {
     for (const f of readdirSync(reportsDir).filter((n) => n.endsWith(".md")))
-      drafted += parseDraftedMarkers(readFileSync(join(reportsDir, f), "utf8")).length;
+      for (const m of parseDraftedMarkers(readFileSync(join(reportsDir, f), "utf8")))
+        draftedCulprits.add(m.slug);
   } catch (err) {
     if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
   }
+  const drafted = draftedCulprits.size;
 
   const unavailable = {
     drafted, draftedSince: DRAFTED_SINCE,
     filed: "unavailable", resolved: "unavailable", medianTurnaroundDays: "unavailable",
   };
 
+  // No `--label` filter: applying a label to devcycle's upstream needs push access, and GitHub
+  // drops the labels a user without it supplies when they open an issue — so a label-keyed query
+  // returns nothing for every filer but the maintainer, and the section reads zero forever. The
+  // title is the one part of the draft every filer can set, and issueBody fixes its form.
   let issues;
   try {
     issues = JSON.parse(ghRunner([
       "issue", "list", "--repo", DEVCYCLE_UPSTREAM, "--author", "@me",
-      "--label", "from-doctor", "--state", "all", "--limit", "200",
+      "--state", "all", "--limit", "200",
       "--json", "number,title,labels,createdAt,closedAt,state",
     ]));
     if (!Array.isArray(issues)) return unavailable;
@@ -1867,13 +1884,15 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride 
   let dates = new Map();
   try { dates = releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8")); } catch { dates = new Map(); }
 
-  const slugOf = (issue) =>
-    (issue.labels ?? []).map((l) => l.name ?? "").find((n) => n.startsWith("culprit:"))?.slice("culprit:".length) ?? null;
+  // Every issue this author opened on the upstream comes back now that the query filters by no
+  // label; the ones this report produced are the ones whose title carries the `[culprit:<slug>]`
+  // prefix issueBody writes.
+  const filed = issues.filter((i) => titleSlug(i.title) !== null);
 
   const turnarounds = [];
   let resolved = 0;
-  for (const issue of issues) {
-    const version = resolvedIn.get(slugOf(issue));
+  for (const issue of filed) {
+    const version = resolvedIn.get(titleSlug(issue.title));
     if (!version) continue; // no resolved-in: excluded, never counted as an infinite turnaround
     resolved += 1;
     const released = dates.get(version);
@@ -1884,7 +1903,7 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride 
 
   return {
     drafted, draftedSince: DRAFTED_SINCE,
-    filed: issues.length,
+    filed: filed.length,
     resolved,
     medianTurnaroundDays: turnarounds.length ? Math.round(median(turnarounds)) : null,
   };
@@ -2210,7 +2229,7 @@ export function renderReport(summaries, ctx) {
     filed: "unavailable", resolved: "unavailable", medianTurnaroundDays: "unavailable",
   };
   L.push(
-    `- Drafted: ${l.drafted} (markers recorded since ${l.draftedSince})`,
+    `- Drafted: ${l.drafted} (distinct culprits; markers recorded since ${l.draftedSince})`,
     `- Filed: ${l.filed}`,
     `- Resolved: ${l.resolved}`,
     `- Median turnaround: ${turnaroundText(l.medianTurnaroundDays)}`,

@@ -4,7 +4,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -418,17 +419,33 @@ test("releaseDates omits an undated heading rather than inventing a date for it"
   assert.equal(releaseDates("# Changelog\n\n## 0.1.0\n\n- feat\n").get("0.1.0"), undefined);
 });
 
-test("outerLoop counts drafted markers across persisted reports", () => {
+test("outerLoop counts the distinct culprits drafted across persisted reports", () => {
   const dir = reportsFixture({
     "2026-08-01-report.md": "Drafted: [culprit:partial-evidence-capture] one\n",
     "2026-08-08-report.md": "Drafted: [culprit:reviewer-role-confusion] two\nDrafted: [culprit:partial-evidence-capture] three\n",
   });
   try {
-    assert.equal(outerLoop(dir, () => GH_RESPONSE).drafted, 3);
+    // Three marker lines, two culprits.
+    assert.equal(outerLoop(dir, () => GH_RESPONSE).drafted, 2);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("outerLoop queries devcycle's upstream, never the ambient repo", () => {
+// The marker records drafting rather than posting, so one culprit drafted, declined at a gate and
+// drafted again writes two marker lines for what is still one drafted culprit — and a run that
+// re-offers a recurring culprit in a later report writes another. Counting lines inflates Drafted
+// against Filed, which is the one comparison this section exists to support.
+test("a culprit drafted twice counts once, so Drafted cannot outrun Filed by re-drafting", () => {
+  const dir = reportsFixture({
+    "2026-08-01-report.md":
+      "Drafted: [culprit:partial-evidence-capture] Evidence capture is partial\n" +
+      "Drafted: [culprit:partial-evidence-capture] Evidence capture is partial\n",
+  });
+  try {
+    assert.equal(outerLoop(dir, () => GH_RESPONSE).drafted, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("outerLoop queries devcycle's upstream, never the ambient repo, and filters by no label", () => {
   const dir = reportsFixture({});
   const seen = [];
   try {
@@ -437,7 +454,14 @@ test("outerLoop queries devcycle's upstream, never the ambient repo", () => {
     const i = argv.indexOf("--repo");
     assert.ok(i !== -1, "gh was invoked without --repo, so it resolves to the host repo");
     assert.equal(argv[i + 1], DEVCYCLE_UPSTREAM);
-    assert.ok(argv.includes("--label") && argv.includes("from-doctor"));
+    assert.ok(argv.includes("--author") && argv.includes("@me"));
+    // A label filter can never match for a filer without push access on the upstream: GitHub
+    // drops the labels such a user supplies, so the query would return nothing for the very
+    // people this loop exists to serve.
+    assert.ok(
+      !argv.includes("--label"),
+      "the query still filters by a label only a maintainer can apply, so Filed reads zero for everyone else",
+    );
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -479,10 +503,14 @@ const TURNAROUND_VOCAB = [
   { slug: "still-open", kind: "friction" },
 ];
 
+// A slug of null is an issue the author opened by hand: no `[culprit:…]` title prefix, and so no
+// business in a count of what this report produced. The query carries no label filter any more,
+// so every issue the author ever opened on the upstream comes back and the title is what sorts
+// them.
 const issue = (number, slug, createdAt) => ({
   number,
-  title: `[culprit:${slug ?? "none"}] an issue`,
-  labels: slug ? [{ name: "from-doctor" }, { name: `culprit:${slug}` }] : [{ name: "from-doctor" }],
+  title: slug ? `[culprit:${slug}] an issue` : "an issue this author filed by hand",
+  labels: slug ? [{ name: "from-doctor" }, { name: `culprit:${slug}` }] : [],
   createdAt,
   closedAt: null,
   state: "OPEN",
@@ -494,18 +522,36 @@ const TURNAROUND_ISSUES = JSON.stringify([
   issue(3, "stale-brief", "2026-07-08T00:00:00Z"), // 30 days to 0.12.0
   issue(4, "fixed-but-unreleased", "2026-08-01T00:00:00Z"), // resolved, but 99.0.0 has no date
   issue(5, "still-open", "2026-08-01T00:00:00Z"), // no resolved-in
-  issue(6, null, "2026-08-01T00:00:00Z"), // no culprit label at all
+  issue(6, null, "2026-08-01T00:00:00Z"), // not from this report at all
 ]);
 
-test("outerLoop counts every filed issue, resolves the ones the vocabulary marks fixed, and medians their turnaround", () => {
+test("outerLoop counts the issues this report produced, resolves the ones the vocabulary marks fixed, and medians their turnaround", () => {
   const dir = reportsFixture({});
   try {
     const r = outerLoop(dir, () => TURNAROUND_ISSUES, TURNAROUND_VOCAB);
-    assert.equal(r.filed, 6);
+    // Five of the six carry the title prefix; the hand-filed one is not this report's work.
+    assert.equal(r.filed, 5);
     // The three dated ones plus the one fixed in an undated release; the other two are not fixed.
     assert.equal(r.resolved, 4);
     // Median of 2, 10 and 30 days — not their mean, which would be 14.
     assert.equal(r.medianTurnaroundDays, 10);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The filer this loop exists to serve has no push access on the upstream, so their issue carries
+// no labels at all — GitHub drops the ones they supply. Everything the section counts therefore
+// has to be readable from the title, which is the one part of the draft they can always set.
+test("an issue filed with no labels still counts and still resolves, read from its title", () => {
+  const dir = reportsFixture({});
+  const unlabelled = JSON.stringify([{
+    number: 9, title: "[culprit:partial-evidence-capture] evidence capture",
+    labels: [], createdAt: "2026-08-05T00:00:00Z", closedAt: null, state: "OPEN",
+  }]);
+  try {
+    const r = outerLoop(dir, () => unlabelled, TURNAROUND_VOCAB);
+    assert.equal(r.filed, 1);
+    assert.equal(r.resolved, 1);
+    assert.equal(r.medianTurnaroundDays, 2);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -678,8 +724,9 @@ test("every legacy line-class still has a home in the rendered report", () => {
     // Cost by stage, across versions and within this window
     "| execution | $10.00 | $5.00 | down |",
     "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
-    // Your culprits
-    "| partial-evidence-capture | friction | $6.00 | 2 | first seen |",
+    // Your culprits — out to the row's end, for the same reason as the cohort row above: a
+    // needle that stopped at the Δ column still matched after the Trend column was deleted.
+    "| partial-evidence-capture | friction | $6.00 | 2 | first seen | insufficient data |",
     // Compliance
     "- CANDIDATE: inherited-model inherited=2/5",
     // Your wins: a win event, and a version-over-version improvement
@@ -729,6 +776,27 @@ test("the cost-by-stage table names the unknown-version cohort it excluded", () 
   assert.ok(!renderReport([sum()], ctx()).includes("Excluded from this table"));
 });
 
+// Every needle above pins the Shipped cell as `—`, the placeholder an empty shipped list renders
+// as — which a deleted cell would produce too. This is the one assertion on a rendered non-empty
+// Shipped value, so the column has to actually carry what the promotion record named.
+test("the Shipped cell renders the culprit id the version's promotion recorded", () => {
+  const out = renderReport([sum(), sum({ id: "b" }), sum({ id: "c" })], ctx({
+    promotions: [
+      { pluginVersion: "0.12.0", culpritId: "partial-evidence-capture" },
+      { pluginVersion: "0.11.0", culpritId: "reviewer-role-confusion" },
+    ],
+  }));
+  assert.ok(
+    out.includes(
+      "| 0.12.0 | thorough | 3 | 3 | $1.00 | first seen | execution | 40000 | " +
+        "unavailable (no run record) | partial-evidence-capture |",
+    ),
+    "the cohort row does not carry the culprit its version shipped",
+  );
+  // The other version's promotion belongs to its own row and must not bleed into this one.
+  assert.ok(!out.includes("reviewer-role-confusion"), "a promotion from another version was rendered here");
+});
+
 test("compiled knowledge and the shipped column render empty rather than throwing", () => {
   const out = renderReport([sum()], ctx());
   assert.match(out, /## Compiled knowledge/);
@@ -772,6 +840,16 @@ test("an unavailable outer loop renders unavailable, not zeros", () => {
   const out = renderReport([sum()], ctx());
   assert.match(out, /Filed: unavailable/);
   assert.ok(!/Filed: 0/.test(out));
+});
+
+test("the Drafted line says the count is of culprits, not of marker lines", () => {
+  const out = renderReport([sum()], ctx({
+    outerLoop: { drafted: 2, draftedSince: "0.13.0", filed: 1, resolved: 0, medianTurnaroundDays: null },
+  }));
+  assert.ok(
+    out.includes("- Drafted: 2 (distinct culprits; markers recorded since 0.13.0)"),
+    "the Drafted line reads as a count of marker lines, which is not what it counts",
+  );
 });
 
 test("the empty corpus renders a report rather than throwing", () => {
@@ -910,6 +988,56 @@ test("a culprit with no vocabulary entry is still offered a draft", () => {
   assert.match(d.title, /^\[culprit:/);
 });
 
+// Everything above exercises the draft as a value. The flag itself prints it, and what a filer
+// pastes into gh is that printed form — which nothing read until this test: the comment above
+// issueDraftLines claims the printed form is pinned by a test rather than by nothing.
+const SCRIPT = new URL("../../scripts/doctor.mjs", import.meta.url).pathname;
+
+// One transcript carrying a devcycle attribution, and the run record that gives its cost a stage
+// and names a culprit — the smallest corpus in which a culprit is rankable and so draftable.
+function issueBodyFixture() {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-issue-body-"));
+  const proj = join(dir, "projects", "-some-project");
+  mkdirSync(proj, { recursive: true });
+  writeFileSync(join(proj, "sess-abcdef123456.jsonl"),
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) + "\n");
+  const runs = join(dir, "runs", "some-repo");
+  mkdirSync(runs, { recursive: true });
+  writeFileSync(join(runs, "run.jsonl"), [
+    { kind: "run", schemaVersion: 1, runId: "0123456789abcdef", pluginVersion: "0.12.0", profile: "thorough", knobs: {} },
+    { kind: "session", sessionHash: sha256("sess-abcdef123456") },
+    { kind: "stage", stage: "execution", startedAt: "2026-07-20T09:00:00.000Z", endedAt: "2026-07-20T11:00:00.000Z", outcome: "complete" },
+    { kind: "event", event: "gate-fail", stage: "execution", task: "1", culprit: "partial-evidence-capture", ts: "2026-07-20T10:00:00.000Z" },
+  ].map((l) => JSON.stringify(l)).join("\n") + "\n");
+  return dir;
+}
+
+test("--issue-body prints the whole draft and nothing else, naming the upstream and the fixed-form title", () => {
+  const dir = issueBodyFixture();
+  try {
+    // PATH is emptied so nothing here can reach gh; node is spawned by its absolute path.
+    const res = spawnSync(
+      process.execPath,
+      [SCRIPT, "--dir", join(dir, "projects"), "--issue-body", "partial-evidence-capture"],
+      { encoding: "utf8", env: { ...process.env, PATH: "", CLAUDE_CODE_SESSION_ID: "", DEVCYCLE_RUNS_DIR: join(dir, "runs") } },
+    );
+    assert.equal(res.status, 0, res.stderr);
+    const desc = JSON.parse(readFileSync(join(process.cwd(), "references/culprits.json"), "utf8"))
+      .find((e) => e.slug === "partial-evidence-capture").desc;
+    const lines = res.stdout.split("\n");
+    // The repo line leads: it is the one field the filing step acts on rather than pastes.
+    assert.equal(lines[0], `repo: ${DEVCYCLE_UPSTREAM}`);
+    assert.equal(lines[1], `title: [culprit:partial-evidence-capture] ${desc}`);
+    assert.equal(lines[2], "labels: culprit:partial-evidence-capture, from-doctor");
+    assert.equal(lines[3], "");
+    assert.equal(lines[4], "Culprit: partial-evidence-capture (friction)");
+    // "and nothing else": the draft's own last line is the last line printed.
+    assert.equal(lines.at(-2), "<!-- add anything you want to say here -->");
+    assert.equal(lines.at(-1), "");
+    assert.ok(!/\/Users\/|\/home\//.test(res.stdout), "the printed draft leaked a path");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("parseArgs reads --issue-body", () => {
   assert.equal(parseArgs(["--issue-body", "partial-evidence-capture"]).issueBody, "partial-evidence-capture");
   // The report path is unaffected when the flag is absent.
@@ -942,11 +1070,11 @@ test("the playbook names both splice anchors the renderer emits", () => {
 });
 
 // The consent path is the only route from a doctor finding to a public issue, and it has been
-// dropped once already: the playbook ended at "filing is theirs to do", so nothing ever carried
-// the labels the Outer loop section counts by and that section could only ever read zero. This
-// pins the whole path — two distinct gates, a marker written when the draft is made rather than
-// when it is posted, and a filing that reaches the repo Outer loop reads.
-test("the playbook's consent path keeps both gates and files with both labels", () => {
+// dropped once already: the playbook ended at "filing is theirs to do", so nothing was ever filed
+// and the Outer loop section could only ever read zero. This pins the whole path — two distinct
+// gates, a marker written when the draft is made rather than when it is posted, and a filing that
+// reaches the repo Outer loop reads.
+test("the playbook's consent path keeps both gates and files a runnable command", () => {
   const playbook = readFileSync(join(process.cwd(), "playbooks/profiling-sessions.md"), "utf8");
   const firstGate = playbook.indexOf("first gate");
   const secondGate = playbook.indexOf("second gate");
@@ -963,18 +1091,16 @@ test("the playbook's consent path keeps both gates and files with both labels", 
       "the Outer loop section counting zero forever",
   );
   assert.ok(
-    marker !== -1 && marker < secondGate,
-    "the Drafted: marker is written only after the posting gate, so a declined draft leaves no " +
+    marker !== -1 && marker < firstGate,
+    "the Drafted: marker is written after a consent gate, so a draft declined at one leaves no " +
       "record and Drafted can never exceed Filed",
   );
   // Bound to the numbered item that spells the command, never to the whole procedure: the six
   // items carry no blank line between them, so a "\n\n" split checks the entire path at once and
-  // a label named anywhere in it would pass.
+  // a flag named anywhere in it would pass.
   const step = playbook.split(/\n(?=\d+\. |#{2,3} )/).find((p) => p.includes("gh issue create"));
-  assert.match(step, /from-doctor/, "the filing step drops the from-doctor label Outer loop counts by");
-  assert.match(step, /culprit:/, "the filing step drops the culprit:<slug> label");
-  // The commands themselves, not the prose around them: a sentence mentioning `gh issue create`
-  // is not an invocation, and only an invocation can carry a flag.
+  // The command itself, not the prose around it: a sentence mentioning `gh issue create` is not
+  // an invocation, and only an invocation can carry a flag.
   const commands = step.split("\n").map((l) => l.trim());
   const create = commands.find((l) => l.startsWith("gh issue create"));
   assert.ok(create, "the filing step names no gh issue create command to run");
@@ -984,12 +1110,22 @@ test("the playbook's consent path keeps both gates and files with both labels", 
     "gh issue create runs without --repo, so the draft is filed into whatever repo the run " +
       "happened in and Outer loop never sees it",
   );
-  // gh issue create does not create labels — it aborts on one that does not exist, after both
-  // consent gates have already been given.
-  for (const label of ["culprit:<slug>", "from-doctor"]) {
-    const ensure = commands.find((l) => l.startsWith("gh label create") && l.includes(label));
-    assert.ok(ensure, `the filing step never ensures the ${label} label exists on the target repo`);
-    assert.match(ensure, /--repo/, `the ${label} label is created on the ambient repo, not the target`);
-    assert.match(ensure, /--force/, `creating the ${label} label fails when it already exists`);
-  }
+  // Without both, gh run non-interactively answers "must provide --title and --body" and files
+  // nothing — after both consent gates have already been given.
+  assert.match(create, /--title/, "gh issue create carries no --title, so it cannot run non-interactively");
+  assert.match(create, /--body/, "gh issue create carries no body, so it cannot run non-interactively");
+  // Labels are the maintainer's triage step, never the filer's: creating one on the upstream
+  // needs push access, and GitHub drops labels supplied by a user without it. A filing step that
+  // attempts either dead-ends after both gates, with the Drafted: marker already on disk.
+  assert.doesNotMatch(
+    create,
+    /--label/,
+    "the filing step supplies labels a filer without push access cannot set — GitHub drops them, " +
+      "so the flag buys nothing and Outer loop must not be counting by them",
+  );
+  assert.ok(
+    !commands.some((l) => l.startsWith("gh label create")),
+    "the filing step creates a label on the upstream, which needs push access: a filer who is " +
+      "not a collaborator gets HTTP 403 and the run halts with nothing filed",
+  );
 });

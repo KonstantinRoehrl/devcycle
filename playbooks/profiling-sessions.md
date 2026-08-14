@@ -134,19 +134,19 @@ to draft. For each finding it chose:
 5. Ask separately whether to post it — the second gate, never inferred from the first. Nothing is
    ever auto-posted, and the script itself still posts nothing.
 6. Only after that second confirmation, file it against the repo the draft's `repo:` line named —
-   never the repo the run happened in, which is what a bare `gh issue create` resolves to. Both
-   labels have to exist first, because `gh issue create` does not create them and an open-ended
-   `culprit:<slug>` usually will not be there yet; `--force` makes creating an existing one a
-   no-op:
+   never the repo the run happened in, which is what a bare `gh issue create` resolves to. Carry
+   the title and body exactly as `--issue-body` printed them: the title is its `title:` line, the
+   body everything below the blank line under `labels:`, written to its own file.
 
    ```
-   gh label create "culprit:<slug>" --repo <repo> --force
-   gh label create from-doctor --repo <repo> --force
-   gh issue create --repo <repo> --label "culprit:<slug>" --label from-doctor
+   gh issue create --repo <repo> --title "<title>" --body-file <body-file>
    ```
 
-   Carry the title and body exactly as `--issue-body` printed them. Those two labels are what the
-   Outer loop section counts by.
+   Pass no `--label`, and create none. Labelling that repo needs push access, so a filer who is
+   not a collaborator gets a 403 — after both gates, with the draft already recorded — and GitHub
+   drops labels such a filer supplies anyway. The draft's `labels:` line says what the maintainer
+   applies at triage; the Outer loop section counts by the `[culprit:<slug>]` title prefix, which
+   every filer can set.
 
 ## Config-drift mode
 
