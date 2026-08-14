@@ -225,6 +225,31 @@ test("--file takes precedence over --dir rather than silently scanning both", ()
   }
 });
 
+// The playbook invokes this script by an absolute ${CLAUDE_PLUGIN_ROOT} path from inside the
+// *user's own repo*, so cwd is never this repo's root. The default deny-list path must resolve
+// against the script's own location, not cwd, or every such invocation dies on ENOENT.
+test("--file works when the caller's cwd is not this repo (default --hashes path)", () => {
+  const dir = makeFixture({ "draft.md": "plugin version 0.12.0, profile thorough, 4 events\n" });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--file", join(dir, "draft.md")], {
+      encoding: "utf8",
+      cwd: dir,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout, /redaction: ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A valueless --file (it was the last token on the command line) must not silently widen the
+// scan to the whole git corpus and report a clean draft that was never actually read.
+test("--file with no value fails naming the missing argument, rather than scanning the whole corpus", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--file"], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--file/);
+});
+
 test("still flags a deny-listed term, read from the hashes file", () => {
   const term = "forbiddenword";
   const dir = makeFixture({
