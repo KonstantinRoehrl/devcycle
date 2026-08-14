@@ -20,19 +20,52 @@ import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
-const flagValue = (name) => {
-  const i = args.indexOf(name);
-  return i === -1 ? null : args[i + 1];
-};
+const KNOWN_FLAGS = ["--file", "--dir", "--hashes"];
+// Parses both calling conventions this script supports — the space form (`--file x`) and the
+// equals form (`--file=x`) — into one map, and rejects anything that looks like a flag but isn't
+// one of the three known ones. An unrecognised flag (a typo such as `--fil`) is a hard error
+// rather than a silent pass-through: `--dir .devcycle` is this script's privacy gate over files
+// `git ls-files` cannot see, and a caller whose flag was never read still gets `redaction: ok`
+// against the wrong corpus — the same false green the value guard below exists to prevent, just
+// reached by a different mistake. This narrows what the script accepts; it does not change what
+// any currently-passing invocation does, since no real caller passes flags outside this set.
+function parseFlags(argv) {
+  const values = {};
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (!arg.startsWith("--")) continue;
+    const eq = arg.indexOf("=");
+    const name = eq === -1 ? arg : arg.slice(0, eq);
+    if (!KNOWN_FLAGS.includes(name)) {
+      console.error(`redaction-check: unrecognised flag ${name}`);
+      process.exit(1);
+    }
+    if (eq !== -1) {
+      values[name] = arg.slice(eq + 1);
+      continue;
+    }
+    const next = argv[i + 1];
+    // A value that is itself another flag means this flag's value is missing, not that the
+    // next flag's token belongs to this one.
+    if (next !== undefined && !next.startsWith("--")) {
+      values[name] = next;
+      i++;
+    } else {
+      values[name] = undefined;
+    }
+  }
+  return values;
+}
+const flags = parseFlags(args);
 // A flag's value must be an explicit, non-empty path: a missing value (the flag was the last
 // token, or is immediately followed by another flag) and an empty or whitespace-only value are
 // the same operator mistake in two guises — e.g. `--file "$draft"` for an unset shell variable
 // — and both must fail loudly, naming the flag, rather than silently widening the scan to the
 // whole corpus.
 function requireValue(name) {
-  if (!args.includes(name)) return undefined;
-  const v = flagValue(name);
-  if (v == null || v.trim() === "" || v.startsWith("--")) {
+  if (!(name in flags)) return undefined;
+  const v = flags[name];
+  if (v == null || v.trim() === "") {
     console.error(`redaction-check: ${name} requires a path argument`);
     process.exit(1);
   }

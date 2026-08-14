@@ -310,6 +310,101 @@ test("--hashes with an empty-string value fails the same way a missing value doe
   assert.match(res.stderr, /--hashes/);
 });
 
+// --flag=value form: the same guard as the space form, not a separate code path. `--file=/tmp/x`
+// is a single token that must still be recognised as --file, not silently widened to the whole
+// git corpus (the bug this task fixes).
+test("--dir=<path> (equals form) is recognised and scans the named directory", () => {
+  const dir = makeFixture({ "a.md": `See ${MAC_HOME}/Programming/thing for details.\n` });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, `--dir=${dir}`, "--hashes", HASHES], { encoding: "utf8" });
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /home-directory path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file=<path> (equals form) is recognised and flags a leak", () => {
+  const dir = makeFixture({ "draft.md": `body\n${MAC_HOME}${SLASH}notes\n` });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, `--file=${join(dir, "draft.md")}`], { encoding: "utf8" });
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /contains an absolute home-directory path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--hashes=<path> (equals form) is recognised and uses the named deny-list", () => {
+  const term = "forbiddenword";
+  const dir = makeFixture({
+    "a.md": `This mentions ${term} once.\n`,
+    "hashes.txt": `${createHash("sha256").update(term).digest("hex")}\n`,
+  });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--dir", dir, `--hashes=${join(dir, "hashes.txt")}`], {
+      encoding: "utf8",
+    });
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /deny-listed term/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file=<clean path> (equals form) passes", () => {
+  const dir = makeFixture({ "draft.md": "plugin version 0.12.0, profile thorough, 4 events\n" });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, `--file=${join(dir, "draft.md")}`], { encoding: "utf8" });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout, /redaction: ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file= with an empty value (equals form) fails naming --file, rather than scanning the whole corpus", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--file="], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--file/);
+});
+
+test("--file=<whitespace> (equals form) fails naming --file", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--file=   "], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--file/);
+});
+
+test("--dir= with an empty value (equals form) fails naming --dir", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir="], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--dir/);
+});
+
+test("--hashes= with an empty value (equals form) fails naming --hashes", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir", process.cwd(), "--hashes="], {
+    encoding: "utf8",
+    cwd: process.cwd(),
+  });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--hashes/);
+});
+
+// An unrecognised flag (a typo such as `--fil` for `--file`) must not fall through to scanning
+// the whole git corpus and reporting a false green — the same silent-widening class the guard
+// above fixes, reached by a different mistake. See the task report for why this is a hard error.
+test("an unrecognised flag fails naming the flag, rather than falling through to the whole corpus", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--fil", "x"], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--fil/);
+});
+
+test("an unrecognised flag in equals form fails naming the flag", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--fil=x"], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--fil/);
+});
+
 test("still flags a deny-listed term, read from the hashes file", () => {
   const term = "forbiddenword";
   const dir = makeFixture({
