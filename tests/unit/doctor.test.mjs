@@ -1096,9 +1096,9 @@ function installDoctor(changelog) {
   // check fail and main() would never run.
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "doctor-install-")));
   mkdirSync(join(dir, "scripts"), { recursive: true });
-  // dream.mjs travels with it: doctor.mjs imports readPromotions from it to name what each
+  // promotions.mjs travels with it: doctor.mjs imports readPromotions from it to name what each
   // version shipped, so a copy without it cannot be loaded at all.
-  for (const name of ["doctor.mjs", "pricing.mjs", "dream.mjs"])
+  for (const name of ["doctor.mjs", "pricing.mjs", "promotions.mjs"])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
   if (changelog !== null) {
     mkdirSync(join(dir, "references"), { recursive: true });

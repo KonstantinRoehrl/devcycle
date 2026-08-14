@@ -14,7 +14,7 @@ F1–F6 were exposed by two real-conditions runs over this repo's own session co
 which are local-only and deliberately untracked — so treat the numbers as recorded
 observations, not as figures a reader can re-derive from this repo.
 
-### F1 — `--check-recurrence` is structurally near-incapable of firing (blocking, design)
+### F1 — `--check-recurrence` is structurally near-incapable of firing (blocking, design) — fixed 2026-08-14
 
 `checkRecurrence` (`scripts/dream.mjs:335`) tests a promotion's `cluster-signature` as a
 literal substring of each session's normalized text (`s.normalized.includes(sig)`, `:354`),
@@ -33,7 +33,10 @@ would have made them recur.
 promotions held. It must never be reported as evidence that they held; that reading is not
 available from this data.
 
-### F2 — Reduce is not reproducible on identical input (blocking, correctness)
+### F2 — Reduce is not reproducible on identical input (blocking, correctness) — fixed 2026-08-14
+
+Both halves are closed by keying identity on `culprit-id` before clustering and deleting
+signature matching: clustering still varies run to run, but nothing's identity depends on it.
 
 Two reduce runs over a byte-identical store (38 records, 11 files, verified unchanged)
 produced 30 and 12 candidates respectively, with **exactly 1** cluster-signature in common;

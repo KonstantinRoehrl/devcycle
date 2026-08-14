@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { PRICING, priceFor } from "./pricing.mjs";
 // The one reader of this repo's promotion records; doctor's Cost-by-version "Shipped" column
 // names what each version shipped rather than parsing those records a second time here.
-import { readPromotions } from "./dream.mjs";
+import { readPromotions } from "./promotions.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // references/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -1926,7 +1926,7 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride 
 // line. The directory is still opened rather than skipped: a promotions directory that exists
 // but cannot be read fails here instead of rendering the same no-data line as a repo that has
 // simply never promoted anything (QC5 — absent degrades, a permissions fault throws). The
-// records themselves are deliberately not read here: readPromotions (scripts/dream.mjs) is
+// records themselves are deliberately not read here: readPromotions (scripts/promotions.mjs) is
 // the one promotion parser, and Phase 3 reads `rung:` through it rather than beside it.
 export function compiledKnowledge(promotionsDir) {
   try {
