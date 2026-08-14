@@ -579,8 +579,8 @@ test("harvested: delegation/depth-gate — depth is measured by the probe, and a
 test("harvested: distilling-learnings/memory-deleted-on-promotion — a memory is deleted only by its own landed promotion", () => {
   const t = read("playbooks/learning-from-sessions.md");
   assert.match(t, /Delete the source memory once its promotion lands, and only if it has one/);
-  assert.match(t, /deleting nothing is then the normal outcome, not\s+a skipped step/);
-  assert.match(t, /A landed promotion never deletes an entry it did not come from; a declined one\s+leaves its memory untouched/);
+  assert.match(t, /Every landing names the \*\*highest\s+mechanizable rung\*\* and records `whyNotHigher`/);
+  assert.match(t, /`--record-promotion` refuses the record if it resolves to neither/);
   assert.match(t, /references\/branch\.md`'s Committing rule first/);
 });
 
@@ -593,7 +593,7 @@ test("harvested: distilling-learnings/stop-on-unconfirmed-promotion — nothing 
 
 test("harvested: distilling-learnings/two-tier-disposition — the artifact's partition decides the batching", () => {
   const t = read("playbooks/learning-from-sessions.md");
-  assert.ok(t.includes("**Bulk** (ordinary `doc-edit`, `skill-edit`, `enforcement-gap`) and **Requires explicit decision**"), "the two-tier partition changed");
+  assert.match(t, /\*\*bulk\*\* \(ordinary `doc-edit`, `skill-edit`, `enforcement-gap`\) and \*\*explicit\*\* \(every\s+sensitive-flagged candidate and every `contradiction-resolution`\)/, "the two-tier partition changed");
   assert.match(t, /no candidate moves into the bulk to avoid a per-item decision/);
   assert.match(t, /one reviewed decision covers the whole part/);
   assert.match(t, /per-item `AskUserQuestion`, 1[–-]4 at a time; no candidate leaves this set to\s+skip its round/);
@@ -635,7 +635,7 @@ test("harvested: dreaming-across-sessions/contradiction-not-auto-resolved — re
 
 test("harvested: dreaming-across-sessions/contradiction-spanning-sessions — a contradiction is always escalated", () => {
   const t = read("playbooks/learning-from-sessions.md");
-  assert.match(t, /\*\*Requires explicit decision\*\*\s+\(every sensitive-flagged candidate and every `contradiction-resolution`\)/);
+  assert.match(t, /\*\*explicit\*\* \(every\s+sensitive-flagged candidate and every `contradiction-resolution`\)/);
   assert.match(t, /a `contradiction-resolution` needs an explicit human choice between its two\s+preserved sides/);
 });
 
@@ -643,13 +643,13 @@ test("harvested: dreaming-across-sessions/cross-session-evidence — a claim may
   const t = read("playbooks/learning-from-sessions.md");
   assert.match(t, /\*\*an observation may state only what its quote shows\*\*/);
   assert.match(t, /`subject` is the\s+normalized phrase the next stage clusters on across sessions/);
-  assert.match(t, /groups records by\s+`subject`/);
+  assert.match(t, /It assigns every candidate a culprit-id before it clusters/);
 });
 
 test("harvested: dreaming-across-sessions/dual-invocation-checkpoint — a fresh artifact is reused and the checkpoint does not re-advance", () => {
   const t = read("playbooks/learning-from-sessions.md");
   assert.match(t, /If `artifactFresh` is true, read `artifactPath` and report it — no mining, screening, recurrence\s+check, artifact rewrite, and above all no checkpoint advance/);
-  assert.match(t, /advance the corpus\s+checkpoint with `--commit-checkpoint <now, ISO-8601 UTC>`/);
+  assert.match(t, /Advance the corpus\s+checkpoint with `--commit-checkpoint <now, ISO-8601 UTC>`/);
 });
 
 test("harvested: dreaming-across-sessions/marginal-run-remines-nothing — an already-mined slice is never re-mined", () => {
@@ -661,8 +661,8 @@ test("harvested: dreaming-across-sessions/marginal-run-remines-nothing — an al
 
 test("harvested: dreaming-across-sessions/sensitive-content-screening — the cluster signature is screened too", () => {
   const t = read("playbooks/learning-from-sessions.md");
-  assert.match(t, /\*\*Screen\*\* every candidate's content \*\*and its cluster signature\*\*/);
-  assert.match(t, /a signature\s+can reveal more than the fix it describes/);
+  assert.match(t, /\*\*Screen\*\* every candidate's content for anything resembling a credential/);
+  assert.match(t, /for anything resembling a credential, an internal URL, or a\s+proprietary snippet/);
   assert.match(t, /flag it for human attention/);
 });
 
