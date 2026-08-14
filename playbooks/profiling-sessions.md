@@ -114,20 +114,14 @@ follow-up is itself skippable, never a forced gate on finishing the command.
 to draft. For each finding it chose:
 
 1. Take the draft from the script, never hand-composed:
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --issue-body <culprit-slug>`.
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --issue-body <culprit-slug>`. Its `repo:` line
+   names the repo every command below targets — read the slug from there, never from this file.
 2. Screen it before anyone sees it: write it to a file, then run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`. A draft that fails
    the screen is not shown at all — name the class that failed and stop there.
-3. Show the screened draft and ask whether it is right. That is the first gate, and it asks about
-   the draft's content only.
-4. Ask separately whether to post it — the second gate, never inferred from the first. Nothing is
-   ever auto-posted, and the script itself still posts nothing.
-5. Only after that second confirmation, file it with `gh issue create` against devcycle's own
-   upstream repo — never the repo the run happened in — carrying `--label "culprit:<slug>"
-   --label from-doctor` and the title and body exactly as `--issue-body` printed them. Those two
-   labels are what the Outer loop section counts by.
-6. Then append the draft's title to the persisted report, prefixed with `Drafted: `, on a line of
-   its own:
+3. Record it as drafted now, before either gate — the marker records drafting, not posting, so a
+   draft declined below still counts: append the draft's title to the persisted report, prefixed
+   with `Drafted: `, on a line of its own:
 
    ```
    Drafted: [culprit:<slug>] <title>
@@ -135,6 +129,24 @@ to draft. For each finding it chose:
 
    That marker is the only record of a draft: the Outer loop section counts these lines out of
    `.devcycle/doctor/`, and `scripts/doctor.mjs` parses exactly this form, which this file owns.
+4. Show the screened draft and ask whether it is right. That is the first gate, and it asks about
+   the draft's content only.
+5. Ask separately whether to post it — the second gate, never inferred from the first. Nothing is
+   ever auto-posted, and the script itself still posts nothing.
+6. Only after that second confirmation, file it against the repo the draft's `repo:` line named —
+   never the repo the run happened in, which is what a bare `gh issue create` resolves to. Both
+   labels have to exist first, because `gh issue create` does not create them and an open-ended
+   `culprit:<slug>` usually will not be there yet; `--force` makes creating an existing one a
+   no-op:
+
+   ```
+   gh label create "culprit:<slug>" --repo <repo> --force
+   gh label create from-doctor --repo <repo> --force
+   gh issue create --repo <repo> --label "culprit:<slug>" --label from-doctor
+   ```
+
+   Carry the title and body exactly as `--issue-body` printed them. Those two labels are what the
+   Outer loop section counts by.
 
 ## Config-drift mode
 

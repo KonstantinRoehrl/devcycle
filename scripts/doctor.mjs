@@ -1413,10 +1413,7 @@ function main() {
       process.exit(1);
     }
     const draft = issueBody(args.issueBody, result.sessions, tables, repoShape(process.cwd()));
-    console.log(`title: ${draft.title}`);
-    console.log(`labels: ${draft.labels.join(", ")}`);
-    console.log("");
-    console.log(draft.body);
+    for (const line of issueDraftLines(draft)) console.log(line);
     return;
   }
   const ctx = reportContext(args, result);
@@ -2497,10 +2494,26 @@ export function issueBody(slug, summaries, tables, shape) {
   ];
 
   return {
+    repo: DEVCYCLE_UPSTREAM,
     title: `[culprit:${slug}] ${culpritTitle(slug, entry)}`,
     labels: [`culprit:${slug}`, "from-doctor"],
     body: L.join("\n"),
   };
+}
+
+// Exactly what `--issue-body` prints. The repo line leads because it is the one field the filing
+// step must act on rather than paste: a bare `gh issue create` resolves to the repo the run
+// happened in, so a draft filed without it lands in the user's own tracker while the Outer loop
+// section queries DEVCYCLE_UPSTREAM and counts zero. Held here, not inlined in main(), so the
+// printed form is pinned by a test rather than by nothing.
+export function issueDraftLines(draft) {
+  return [
+    `repo: ${draft.repo}`,
+    `title: ${draft.title}`,
+    `labels: ${draft.labels.join(", ")}`,
+    "",
+    draft.body,
+  ];
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

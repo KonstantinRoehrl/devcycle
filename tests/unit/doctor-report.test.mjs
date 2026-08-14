@@ -11,7 +11,7 @@ import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
   parseDraftedMarkers, releaseDates, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
-  renderReport, repoShape, issueBody, parseArgs,
+  renderReport, repoShape, issueBody, issueDraftLines, parseArgs,
 } from "../../scripts/doctor.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
@@ -613,6 +613,12 @@ const coverageSession = (over = {}) => sum({
   ...over,
 });
 
+// Quality is rendered in three cohort tables, and every one of them read "unavailable (no run
+// record)" while the corpus carried no quality signal at all — so nothing pinned the column and
+// deleting it broke no test. One session carries a real signal; these are the figures it makes
+// each of those three tables render.
+const COVERAGE_QUALITY_TEXT = "1.5 rounds/task (2 tasks, 1 retries, 4 blocking, 1 conformance fail)";
+
 const COVERAGE_CORPUS = [
   // 0.11.0: the baseline cohort the 0.12.0 comparisons are taken against.
   ...[1, 2, 3].map((n) => coverageSession({
@@ -640,7 +646,13 @@ const COVERAGE_CORPUS = [
     impact: [{ key: "first-round-accept:execution", event: "first-round-accept", stage: "execution", frequency: 3, impact: 9 }],
     culpritsByKey: { "first-round-accept:execution": ["first-round-clean-accept"] },
   }),
-  coverageSession({ id: "22222223", costUSD: 15, costByStage: { execution: 5, planning: 10 } }),
+  coverageSession({
+    id: "22222223", costUSD: 15, costByStage: { execution: 5, planning: 10 },
+    quality: {
+      tasks: 2, reviewRounds: 3, retries: 1, blockingFindings: 4,
+      conformanceFailures: 1, roundsPerTask: 1.5,
+    },
+  }),
   // Far dearer than its peers for the same stage: the cost outlier.
   coverageSession({ id: "22222224", costUSD: 100, costByStage: { execution: 100 } }),
   coverageSession({ id: "33333333", costUSD: 2, costByStage: { execution: 2 }, inFlight: true }),
@@ -660,8 +672,9 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "- Cost $4.00 (inferred: cache-write TTL, range $3.00–$6.00; 50.0% of cache-write tokens lack a TTL split).",
     "- 1 session(s) have inferred stage costs (forward-filled — no run record)",
     "- 1 session(s) still in flight (newest record < 30 min old) — in-flight sessions have only part of their cost recorded",
-    // Cost by version
-    "| 0.12.0 | thorough | 4 | 4 | $15.00 | +36.4% | execution | 40000 |",
+    // Cost by version — the whole row, out to its last cell: a needle that stopped at the depth
+    // column still matched after the Quality and Shipped columns were deleted.
+    `| 0.12.0 | thorough | 4 | 4 | $15.00 | +36.4% | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
     // Cost by stage, across versions and within this window
     "| execution | $10.00 | $5.00 | down |",
     "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
@@ -684,13 +697,15 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "main median 12000 min 12000 (n=1), subagent median 4000 min 4000 (n=1)",
     "Read 900, Bash 400",
     "5 dispatched, 2 without an explicit model",
-    "| panel | 7 | $178.00 | $15.00 |",
-    "| 0.12.0 | 4 | $145.00 | $15.00 | 40000 |",
+    `| panel | 7 | $178.00 | $15.00 | ${COVERAGE_QUALITY_TEXT} |`,
+    `| 0.12.0 | 4 | $145.00 | $15.00 | 40000 | ${COVERAGE_QUALITY_TEXT} |`,
     "Direction of travel: up (36.4% median cost, oldest to newest known version)",
     "session 22222221 — turns 20 (main 15, subagent 5), depth median 40000 max 60000, cost $15.00, " +
       "models [claude-opus-5], tools [Read:2], quality: unavailable (no run record) " +
       "[stage costs inferred — forward-filled, no run record]",
-    "prices as of",            // appendix footer
+    // The vintage itself, not the label: a report rendering "prices as of undefined" passed the
+    // label-only needle, which is the failure the whole appendix footer exists to prevent.
+    "prices as of 2026-08-01", // appendix footer
     "forward-filled within each transcript", // the attribution disclosure
     "fraction of the model's context window", // the depth disclosure
   ]) assert.ok(out.includes(needle), `the rendered report dropped "${needle}"`);
@@ -861,6 +876,24 @@ test("a low-confidence cohort carries the report's own qualifier, not a bare cou
   assert.ok(d.body.includes("2 (low confidence: n<3)"), "the draft quotes a count the report qualifies");
 });
 
+// The read half (outerLoop) already queries DEVCYCLE_UPSTREAM. The write half has to reach the
+// same repo or the two never meet: a bare `gh issue create` resolves to whatever repo the run
+// happened in, so the draft would land in the user's own tracker and Filed would stay zero.
+test("the printed draft names the upstream it must be filed against, and owns that slug alone", () => {
+  const d = issueBody("partial-evidence-capture", draftSummaries, draftTables(), repoShape(process.cwd()));
+  assert.equal(d.repo, DEVCYCLE_UPSTREAM);
+  assert.ok(
+    issueDraftLines(d).includes(`repo: ${DEVCYCLE_UPSTREAM}`),
+    "the printed draft names no repo, so the filing step has nothing to pass to gh --repo",
+  );
+  const playbook = readFileSync(join(process.cwd(), "playbooks/profiling-sessions.md"), "utf8");
+  assert.ok(
+    !playbook.includes(DEVCYCLE_UPSTREAM),
+    "the playbook spells the upstream slug itself — a second owner, free to drift from the one " +
+      "outerLoop reads",
+  );
+});
+
 test("the draft carries no path, no machine identity, and no free text beyond the placeholder", () => {
   const d = issueBody("partial-evidence-capture", draftSummaries, draftTables(), repoShape(process.cwd()));
   assert.ok(!/\/Users\/|\/home\//.test(d.body));
@@ -911,12 +944,14 @@ test("the playbook names both splice anchors the renderer emits", () => {
 // The consent path is the only route from a doctor finding to a public issue, and it has been
 // dropped once already: the playbook ended at "filing is theirs to do", so nothing ever carried
 // the labels the Outer loop section counts by and that section could only ever read zero. This
-// pins the whole path — two distinct gates, then a real filing that is countable.
+// pins the whole path — two distinct gates, a marker written when the draft is made rather than
+// when it is posted, and a filing that reaches the repo Outer loop reads.
 test("the playbook's consent path keeps both gates and files with both labels", () => {
   const playbook = readFileSync(join(process.cwd(), "playbooks/profiling-sessions.md"), "utf8");
   const firstGate = playbook.indexOf("first gate");
   const secondGate = playbook.indexOf("second gate");
   const filing = playbook.indexOf("gh issue create");
+  const marker = playbook.indexOf("Drafted: [culprit:");
   assert.ok(firstGate !== -1, "the playbook no longer names a first confirmation gate");
   assert.ok(
     secondGate > firstGate,
@@ -927,7 +962,34 @@ test("the playbook's consent path keeps both gates and files with both labels", 
     "the consent path files nothing after the second gate — a run that posts nothing leaves " +
       "the Outer loop section counting zero forever",
   );
-  const step = playbook.split("\n\n").find((p) => p.includes("gh issue create"));
+  assert.ok(
+    marker !== -1 && marker < secondGate,
+    "the Drafted: marker is written only after the posting gate, so a declined draft leaves no " +
+      "record and Drafted can never exceed Filed",
+  );
+  // Bound to the numbered item that spells the command, never to the whole procedure: the six
+  // items carry no blank line between them, so a "\n\n" split checks the entire path at once and
+  // a label named anywhere in it would pass.
+  const step = playbook.split(/\n(?=\d+\. |#{2,3} )/).find((p) => p.includes("gh issue create"));
   assert.match(step, /from-doctor/, "the filing step drops the from-doctor label Outer loop counts by");
   assert.match(step, /culprit:/, "the filing step drops the culprit:<slug> label");
+  // The commands themselves, not the prose around them: a sentence mentioning `gh issue create`
+  // is not an invocation, and only an invocation can carry a flag.
+  const commands = step.split("\n").map((l) => l.trim());
+  const create = commands.find((l) => l.startsWith("gh issue create"));
+  assert.ok(create, "the filing step names no gh issue create command to run");
+  assert.match(
+    create,
+    /--repo/,
+    "gh issue create runs without --repo, so the draft is filed into whatever repo the run " +
+      "happened in and Outer loop never sees it",
+  );
+  // gh issue create does not create labels — it aborts on one that does not exist, after both
+  // consent gates have already been given.
+  for (const label of ["culprit:<slug>", "from-doctor"]) {
+    const ensure = commands.find((l) => l.startsWith("gh label create") && l.includes(label));
+    assert.ok(ensure, `the filing step never ensures the ${label} label exists on the target repo`);
+    assert.match(ensure, /--repo/, `the ${label} label is created on the ambient repo, not the target`);
+    assert.match(ensure, /--force/, `creating the ${label} label fails when it already exists`);
+  }
 });
