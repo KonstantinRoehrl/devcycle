@@ -373,6 +373,41 @@ test("parseDraftedMarkers ignores prose that merely mentions the word drafted", 
   assert.deepEqual(parseDraftedMarkers("We drafted an issue about culprit: things\n"), []);
 });
 
+// Spec §8: the flow offers a draft for every culprit, not only vocabulary members — so
+// issueBody writes `novel:` slugs and bare `event:stage` keys into the marker's title. A parser
+// that cannot read them back drops those drafts from the Drafted count without saying so.
+test("parseDraftedMarkers reads back every slug shape the issue draft can write", () => {
+  assert.deepEqual(
+    parseDraftedMarkers([
+      "Drafted: [culprit:partial-evidence-capture] Evidence capture is partial",
+      "Drafted: [culprit:novel:evidence-drift] A culprit no vocabulary names",
+      "Drafted: [culprit:review-reject:execution] Reviews reject execution work",
+      "",
+    ].join("\n")),
+    [
+      { slug: "partial-evidence-capture", title: "Evidence capture is partial" },
+      { slug: "novel:evidence-drift", title: "A culprit no vocabulary names" },
+      { slug: "review-reject:execution", title: "Reviews reject execution work" },
+    ],
+  );
+});
+
+test("the slug stops at the closing bracket rather than swallowing it", () => {
+  assert.deepEqual(
+    parseDraftedMarkers("Drafted: [culprit:stale-brief] A title with a ] in it\n"),
+    [{ slug: "stale-brief", title: "A title with a ] in it" }],
+  );
+});
+
+// The playbook states the marker inside an indented fenced block, so a marker copied from it
+// verbatim carries leading whitespace.
+test("a marker indented as the playbook states it still parses", () => {
+  assert.deepEqual(
+    parseDraftedMarkers("   Drafted: [culprit:stale-brief] Briefs go stale\n"),
+    [{ slug: "stale-brief", title: "Briefs go stale" }],
+  );
+});
+
 test("releaseDates reads a version's date off the dated changelog heading", () => {
   const dates = releaseDates("# Changelog\n\n## 0.12.0 — 2026-08-07\n\n- feat\n\n## 0.11.0 — 2026-08-05\n\n- fix\n");
   assert.equal(dates.get("0.12.0"), "2026-08-07");
@@ -427,6 +462,72 @@ test("gh returning something that is not JSON renders unavailable rather than th
 
 test("a missing reports directory is no drafts, not a crash", () => {
   assert.equal(outerLoop(join(tmpdir(), "doctor-reports-absent-xyz"), () => GH_RESPONSE).drafted, 0);
+});
+
+// Spec §12: filed/resolved/turnaround render from a fixture gh response, never from the network.
+// The vocabulary is injected on the same principle as the gh runner — references/culprits.json
+// carries no `resolved-in:` today, so the resolved and turnaround arithmetic would otherwise run
+// in no test at all.
+//
+// Release dates come from this repo's own CHANGELOG.md, whose 0.12.0 heading is dated
+// 2026-08-07; each createdAt below is that date minus the turnaround it is meant to produce.
+const TURNAROUND_VOCAB = [
+  { slug: "partial-evidence-capture", kind: "friction", "resolved-in": "0.12.0" },
+  { slug: "reviewer-role-confusion", kind: "friction", "resolved-in": "0.12.0" },
+  { slug: "stale-brief", kind: "friction", "resolved-in": "0.12.0" },
+  { slug: "fixed-but-unreleased", kind: "friction", "resolved-in": "99.0.0" },
+  { slug: "still-open", kind: "friction" },
+];
+
+const issue = (number, slug, createdAt) => ({
+  number,
+  title: `[culprit:${slug ?? "none"}] an issue`,
+  labels: slug ? [{ name: "from-doctor" }, { name: `culprit:${slug}` }] : [{ name: "from-doctor" }],
+  createdAt,
+  closedAt: null,
+  state: "OPEN",
+});
+
+const TURNAROUND_ISSUES = JSON.stringify([
+  issue(1, "partial-evidence-capture", "2026-08-05T00:00:00Z"), // 2 days to 0.12.0
+  issue(2, "reviewer-role-confusion", "2026-07-28T00:00:00Z"), // 10 days to 0.12.0
+  issue(3, "stale-brief", "2026-07-08T00:00:00Z"), // 30 days to 0.12.0
+  issue(4, "fixed-but-unreleased", "2026-08-01T00:00:00Z"), // resolved, but 99.0.0 has no date
+  issue(5, "still-open", "2026-08-01T00:00:00Z"), // no resolved-in
+  issue(6, null, "2026-08-01T00:00:00Z"), // no culprit label at all
+]);
+
+test("outerLoop counts every filed issue, resolves the ones the vocabulary marks fixed, and medians their turnaround", () => {
+  const dir = reportsFixture({});
+  try {
+    const r = outerLoop(dir, () => TURNAROUND_ISSUES, TURNAROUND_VOCAB);
+    assert.equal(r.filed, 6);
+    // The three dated ones plus the one fixed in an undated release; the other two are not fixed.
+    assert.equal(r.resolved, 4);
+    // Median of 2, 10 and 30 days — not their mean, which would be 14.
+    assert.equal(r.medianTurnaroundDays, 10);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("an issue whose culprit is not marked fixed is excluded, never counted as an infinite turnaround", () => {
+  const dir = reportsFixture({});
+  try {
+    const r = outerLoop(dir, () => JSON.stringify([issue(5, "still-open", "2026-08-01T00:00:00Z")]), TURNAROUND_VOCAB);
+    assert.equal(r.filed, 1);
+    assert.equal(r.resolved, 0);
+    // null, not 0 and not "unavailable": gh answered, and no resolved culprit had a dated release.
+    assert.equal(r.medianTurnaroundDays, null);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("gh answering with JSON that is not a list of issues renders unavailable, never a count", () => {
+  const dir = reportsFixture({});
+  try {
+    const r = outerLoop(dir, () => JSON.stringify({ message: "Not Found" }), TURNAROUND_VOCAB);
+    assert.equal(r.filed, "unavailable");
+    assert.equal(r.resolved, "unavailable");
+    assert.equal(r.medianTurnaroundDays, "unavailable");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("compiled knowledge renders no rows and says why, rather than throwing", () => {
@@ -500,36 +601,95 @@ test("the report renders no path, no session id, and no machine identity", () =>
   assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(out), "the report leaked a session id");
 });
 
-test("every legacy line-class still has a home in the rendered report", () => {
-  // Spec §5's coverage test: a future change that silently drops a metric fails here rather
-  // than passing review. One entry per line-class the pre-overhaul report rendered.
-  const summaries = [sum({
+// Spec §5's coverage fixture. Every metric class the report can render has to actually render a
+// row here, or the coverage test below degrades into asserting that headings exist. Two adjacent
+// version cohorts (so the version comparisons fire), one dear outlier session, one in-flight
+// session, one session carrying the appendix's raw aggregates, one carrying a win, and one
+// carrying a compliance breach.
+const coverageSession = (over = {}) => sum({
+  profile: "thorough", knobs: { reviewDepth: "panel" },
+  turns: 20, mainTurns: 15, subagentTurns: 5, maxDepth: 60000,
+  models: { "claude-opus-5": 1 }, tools: { Read: 2 },
+  ...over,
+});
+
+const COVERAGE_CORPUS = [
+  // 0.11.0: the baseline cohort the 0.12.0 comparisons are taken against.
+  ...[1, 2, 3].map((n) => coverageSession({
+    id: `1111111${n}`, pluginVersion: "0.11.0",
+    costUSD: 11, costByStage: { execution: 10, planning: 1 },
+    costByModel: { "claude-opus-5": 11 }, costByAgentType: { main: 8, subagent: 3 },
+  })),
+  // execution got cheaper (a win), planning got dearer (an anomaly).
+  coverageSession({
+    id: "22222221", costUSD: 15, costByStage: { execution: 5, planning: 10 },
+    costByModel: { "claude-opus-5": 15 }, costByAgentType: { main: 12, subagent: 3 },
+    bandCounts: { "0-50k": 2, "50-100k": 1 },
+    startupFloor: { main: [12000], subagent: [4000] },
+    carryWeighted: { Read: 900, Bash: 400 },
+    dispatches: { total: 5, withoutModel: 2 },
     unpriced: { "some-unpriced-model": 3 },
-    costByModel: { "claude-opus-5": 4 }, costByAgentType: { main: 3, subagent: 1 },
-    bandCounts: { "0-50k": 2 }, startupFloor: { main: [12000] },
-    carryWeighted: { Read: 900 }, dispatches: { total: 5, withoutModel: 2 },
-    knobs: { reviewDepth: "panel" }, models: { "claude-opus-5": 1 }, tools: { Read: 2 },
     attributionSource: "forward-filled",
     cacheBand: { point: 4, low: 3, high: 6, fallbackShare: 0.5, collapsed: false },
-  })];
-  const out = renderReport(summaries, ctx());
+    impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
+    culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
+    complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5 }],
+  }),
+  coverageSession({
+    id: "22222222", costUSD: 15, costByStage: { execution: 5, planning: 10 },
+    impact: [{ key: "first-round-accept:execution", event: "first-round-accept", stage: "execution", frequency: 3, impact: 9 }],
+    culpritsByKey: { "first-round-accept:execution": ["first-round-clean-accept"] },
+  }),
+  coverageSession({ id: "22222223", costUSD: 15, costByStage: { execution: 5, planning: 10 } }),
+  // Far dearer than its peers for the same stage: the cost outlier.
+  coverageSession({ id: "22222224", costUSD: 100, costByStage: { execution: 100 } }),
+  coverageSession({ id: "33333333", costUSD: 2, costByStage: { execution: 2 }, inFlight: true }),
+];
+
+test("every legacy line-class still has a home in the rendered report", () => {
+  // Spec §5's coverage test: a future change that silently drops a metric fails here rather
+  // than passing review. Every needle is a rendered value, never a heading — a heading is
+  // emitted unconditionally, so a needle pointed at one survives the deletion of the metric
+  // underneath it.
+  const out = renderReport(COVERAGE_CORPUS, ctx());
   for (const needle of [
-    "UNPRICED MODEL",          // Read this first
-    "inferred: cache-write TTL", // Read this first
-    "forward-filled",          // Read this first
-    "Cost by version",         // per-version cohorts
-    "Cost by stage",           // by stage
-    "Cost anomalies",          // version-regression, unpriced-model, depth-outlier, cost-outlier
-    "Your wins",               // version-improvement
-    "Compliance",              // compliance candidates
-    "Cost by model",           // appendix
-    "Cost by agent type",      // appendix
-    "Startup floor",           // appendix
-    "Carry-weighted",          // appendix
-    "Dispatches",              // appendix
-    "reviewDepth",             // appendix
-    "Context depth bands",     // appendix
-    "Total cost by version",   // appendix
+    // Header
+    "· Total cost: $180.00 ·",
+    // Read this first
+    "- UNPRICED MODEL: some-unpriced-model (3 requests)",
+    "- Cost $4.00 (inferred: cache-write TTL, range $3.00–$6.00; 50.0% of cache-write tokens lack a TTL split).",
+    "- 1 session(s) have inferred stage costs (forward-filled — no run record)",
+    "- 1 session(s) still in flight (newest record < 30 min old) — in-flight sessions have only part of their cost recorded",
+    // Cost by version
+    "| 0.12.0 | thorough | 4 | 4 | $15.00 | +36.4% | execution | 40000 |",
+    // Cost by stage, across versions and within this window
+    "| execution | $10.00 | $5.00 | down |",
+    "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
+    // Your culprits
+    "| partial-evidence-capture | friction | $6.00 | 2 | first seen |",
+    // Compliance
+    "- CANDIDATE: inherited-model inherited=2/5",
+    // Your wins: a win event, and a version-over-version improvement
+    "| first-round-clean-accept | $9.00 | 3 |",
+    "| execution 0.11.0→0.12.0 | $5.00 | 4 | down |",
+    // Cost anomalies, one line per candidate type the report can raise
+    "- CANDIDATE: cost-outlier skill=execution delta=900.0% dollars=$100.00 sessions=7",
+    "- CANDIDATE: depth-outlier dollars=$15.00 sessions=1 low confidence: n=1",
+    "- CANDIDATE: version-regression skill=planning 0.11.0->0.12.0 delta=+$9.00 (900.0%) dollars=$10.00 sessions=3",
+    "- CANDIDATE: unpriced-model model=some-unpriced-model count=3 sessions=1 low confidence: n=1",
+    // Appendix
+    "claude-opus-5 $48.00",
+    "main $36.00, subagent $12.00",
+    "0-50k 2, 50-100k 1, 100-150k 0, 150-200k 0, 200-300k 0, 300k+ 0",
+    "main median 12000 min 12000 (n=1), subagent median 4000 min 4000 (n=1)",
+    "Read 900, Bash 400",
+    "5 dispatched, 2 without an explicit model",
+    "| panel | 7 | $178.00 | $15.00 |",
+    "| 0.12.0 | 4 | $145.00 | $15.00 | 40000 |",
+    "Direction of travel: up (36.4% median cost, oldest to newest known version)",
+    "session 22222221 — turns 20 (main 15, subagent 5), depth median 40000 max 60000, cost $15.00, " +
+      "models [claude-opus-5], tools [Read:2], quality: unavailable (no run record) " +
+      "[stage costs inferred — forward-filled, no run record]",
     "prices as of",            // appendix footer
     "forward-filled within each transcript", // the attribution disclosure
     "fraction of the model's context window", // the depth disclosure
@@ -561,6 +721,36 @@ test("compiled knowledge and the shipped column render empty rather than throwin
   // The Shipped column exists and its cell is the em dash, never a blank that reads as
   // "nothing shipped".
   assert.match(out, /\| Shipped \|/);
+});
+
+// The shipped report's own direction-of-travel line. Its only assertion used to sit on
+// formatReport, which main() no longer prints — so the line a reader actually sees could have
+// been dropped without failing anything.
+test("the rendered report states the corpus direction of travel, under the cohort table it summarises", () => {
+  const out = renderReport([
+    sum({ id: "aaaaaaa1", pluginVersion: "0.11.0", costUSD: 10, costByStage: { execution: 10 } }),
+    sum({ id: "aaaaaaa2", costUSD: 5, costByStage: { execution: 5 } }),
+  ], ctx());
+  const line = "Direction of travel: down (-50.0% median cost, oldest to newest known version)";
+  assert.ok(out.includes(line), "the shipped report states no direction of travel");
+  assert.ok(out.indexOf("### Total cost by version") < out.indexOf(line), "the direction precedes the table it summarises");
+  assert.ok(out.indexOf(line) < out.indexOf("### Per-session detail"));
+});
+
+test("one known version is insufficient data, never a flat trend", () => {
+  const out = renderReport([sum()], ctx());
+  assert.ok(out.includes("Direction of travel: insufficient data (need at least two known versions)"));
+});
+
+test("an in-flight session cannot set the direction of travel", () => {
+  // A part-recorded session carries part of its cost, so letting it open a newest cohort would
+  // report an improvement the corpus never made.
+  const out = renderReport([
+    sum({ id: "aaaaaaa1", pluginVersion: "0.11.0", costUSD: 10, costByStage: { execution: 10 } }),
+    sum({ id: "aaaaaaa2", costUSD: 5, costByStage: { execution: 5 } }),
+    sum({ id: "aaaaaaa3", pluginVersion: "0.13.0", costUSD: 90, costByStage: { execution: 90 }, inFlight: true }),
+  ], ctx());
+  assert.ok(out.includes("Direction of travel: down (-50.0% median cost, oldest to newest known version)"));
 });
 
 test("an unavailable outer loop renders unavailable, not zeros", () => {
@@ -700,7 +890,9 @@ test("the Drafted: marker round-trips from the playbook's own literal to the par
   const playbook = readFileSync(join(process.cwd(), "playbooks/profiling-sessions.md"), "utf8");
   const literal = playbook.split("\n").find((l) => l.trim().startsWith("Drafted: [culprit:"));
   assert.ok(literal, "playbooks/profiling-sessions.md no longer states the Drafted: marker form");
-  const filled = literal.trim()
+  // Fed exactly as the playbook states it — indentation included. Trimming it here is what hid
+  // the parser's column-0 anchor from this test in the first place.
+  const filled = literal
     .replace("<slug>", "partial-evidence-capture")
     .replace("<title>", "Evidence capture is partial");
   assert.deepEqual(
@@ -714,4 +906,28 @@ test("the playbook names both splice anchors the renderer emits", () => {
   const playbook = readFileSync(join(process.cwd(), "playbooks/profiling-sessions.md"), "utf8");
   assert.match(playbook, /<!-- devcycle:highlights -->/);
   assert.match(playbook, /<!-- devcycle:findings -->/);
+});
+
+// The consent path is the only route from a doctor finding to a public issue, and it has been
+// dropped once already: the playbook ended at "filing is theirs to do", so nothing ever carried
+// the labels the Outer loop section counts by and that section could only ever read zero. This
+// pins the whole path — two distinct gates, then a real filing that is countable.
+test("the playbook's consent path keeps both gates and files with both labels", () => {
+  const playbook = readFileSync(join(process.cwd(), "playbooks/profiling-sessions.md"), "utf8");
+  const firstGate = playbook.indexOf("first gate");
+  const secondGate = playbook.indexOf("second gate");
+  const filing = playbook.indexOf("gh issue create");
+  assert.ok(firstGate !== -1, "the playbook no longer names a first confirmation gate");
+  assert.ok(
+    secondGate > firstGate,
+    "the two confirmations are no longer stated as separate, ordered gates",
+  );
+  assert.ok(
+    filing > secondGate,
+    "the consent path files nothing after the second gate — a run that posts nothing leaves " +
+      "the Outer loop section counting zero forever",
+  );
+  const step = playbook.split("\n\n").find((p) => p.includes("gh issue create"));
+  assert.match(step, /from-doctor/, "the filing step drops the from-doctor label Outer loop counts by");
+  assert.match(step, /culprit:/, "the filing step drops the culprit:<slug> label");
 });

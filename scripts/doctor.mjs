@@ -1793,7 +1793,13 @@ export function winTable(summaries, vocab, candidates = []) {
 // issue. That playbook is the contract's one written source; this parses what it states, and a
 // round-trip test (tests/unit/doctor-report.test.mjs) feeds this parser the literal extracted
 // from that file so neither side can drift.
-const DRAFTED_MARKER_RE = /^Drafted: \[culprit:([a-z0-9][a-z0-9-]*)\] (.+)$/gm;
+// The slug is colon-separated because the flow offers a draft for every culprit, not only
+// vocabulary members: issueBody names an unclassified one by its bare `event:stage` key and a
+// new one as `novel:<slug>`. Each segment is still a slug, so the group cannot reach the
+// closing bracket or run into the title. Leading whitespace is tolerated because the playbook
+// states the marker inside an indented block, and a marker copied from there carries its indent.
+const DRAFTED_MARKER_RE =
+  /^[ \t]*Drafted: \[culprit:([a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)*)\] (.+)$/gm;
 
 export function parseDraftedMarkers(text) {
   const out = [];
@@ -1817,7 +1823,11 @@ export function releaseDates(changelogText) {
 const defaultGhRunner = (args) =>
   execFileSync("gh", args, { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
 
-export function outerLoop(reportsDir, ghRunner = defaultGhRunner) {
+// `vocabOverride` is injected on the same principle as `ghRunner`: the resolved and turnaround
+// arithmetic below keys off `resolved-in:`, which no shipped vocabulary entry carries yet, so
+// without a substitutable vocabulary that arithmetic could only be exercised by editing
+// references/culprits.json. null means "read the shipped one", which is what every caller does.
+export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride = null) {
   // Drafted is local: it comes from this repo's own persisted reports, so it renders even when
   // gh is unavailable. Reports written before this phase carry no markers, which is why the
   // renderer qualifies the count rather than presenting it as "none drafted".
@@ -1848,10 +1858,12 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner) {
     return unavailable;
   }
 
-  let vocab = [];
-  try {
-    vocab = JSON.parse(readFileSync(join(PLUGIN_ROOT, "references", "culprits.json"), "utf8"));
-  } catch { vocab = []; }
+  let vocab = vocabOverride;
+  if (vocab === null) {
+    try {
+      vocab = JSON.parse(readFileSync(join(PLUGIN_ROOT, "references", "culprits.json"), "utf8"));
+    } catch { vocab = []; }
+  }
   const resolvedIn = new Map(
     vocab.filter((e) => e && e["resolved-in"]).map((e) => [e.slug, e["resolved-in"]]),
   );
