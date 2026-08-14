@@ -4,6 +4,8 @@ Produce an implementation plan that wave-based parallel execution can consume. R
 `${CLAUDE_PLUGIN_ROOT}/references/output.md`. **Announce at start:** "I'm using the planning-waves
 playbook to create the implementation plan."
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons planning`. No store, no output.
+
 ## Engine selection (keyed to `profile`)
 
 Resolve `profile` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`. At **`lean` / `standard`** do NOT

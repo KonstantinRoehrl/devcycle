@@ -10,6 +10,8 @@ script, a screenshot, or a code reading is an unverified completion claim
 This playbook is the on-device stage proper — walkthrough, gate, handoff — run in a fresh
 session after the branch review. Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons on-device`. No store, no output.
+
 ## Checklist source
 
 Two sources, one engine. Which one applies is settled before the walkthrough begins;

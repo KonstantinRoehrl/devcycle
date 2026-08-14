@@ -5,6 +5,8 @@ Both `/devcycle:cycle` and `/devcycle:continue` run the finish stage through thi
 the policy logic lives here and only here. It reports per
 `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons finish`. No store, no output.
+
 ## Configured policy
 
 Resolve `${user_config.gitPolicy}` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`: allowed

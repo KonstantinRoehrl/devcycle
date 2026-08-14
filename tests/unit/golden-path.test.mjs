@@ -1496,3 +1496,40 @@ test("the descriptive-mention allowlist cannot go stale", () => {
     );
   }
 });
+
+test("every stage playbook reads its own lessons section, and no other file claims to", () => {
+  const STAGE_PLAYBOOKS = {
+    "scoping-the-request.md": "scoping",
+    "reviewing-code.md": "audit",
+    "planning-waves.md": "planning",
+    "executing-waves.md": "execution",
+    "reviewing-the-branch.md": "branch-review",
+    "verifying-on-device.md": "on-device",
+    "taking-the-fast-path.md": "fast-path",
+    "sweeping-mechanical-changes.md": "sweep",
+    "finishing-the-cycle.md": "finish",
+  };
+  for (const [file, stage] of Object.entries(STAGE_PLAYBOOKS)) {
+    const text = readFileSync(join(root, "playbooks", file), "utf8");
+    const line = text.split("\n").find((l) => l.includes("--lessons"));
+    assert.ok(line, `playbooks/${file} must read its lessons section`);
+    assert.match(line, new RegExp(`--lessons ${stage}\\b`),
+      `playbooks/${file} must pass the stage "${stage}", not another stage's name`);
+  }
+  for (const file of ["profiling-sessions.md", "learning-from-sessions.md", "onboarding-a-repo.md"]) {
+    const text = readFileSync(join(root, "playbooks", file), "utf8");
+    assert.doesNotMatch(text, /--lessons [a-z-]+\b(?![^\n]*owns)/,
+      `playbooks/${file} is not a stage playbook and takes no lessons line`);
+  }
+});
+
+test("the lessons line is short enough that duplication-check exempts it", () => {
+  for (const file of readdirSync(join(root, "playbooks"))) {
+    const text = readFileSync(join(root, "playbooks", file), "utf8");
+    for (const para of text.split(/\n\s*\n+/)) {
+      if (!para.includes("--lessons ")) continue;
+      assert.ok(para.trim().split(/\s+/).length < 20,
+        `playbooks/${file}: the lessons paragraph must stay under duplication-check's 20-word floor`);
+    }
+  }
+});
