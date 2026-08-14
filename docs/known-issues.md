@@ -47,7 +47,7 @@ work unreliable. *Granularity instability:* nothing pins cluster granularity, so
 produced" is not comparable across runs and tokens-per-accepted-promotion inherits an unstable
 denominator.
 
-### F3 — `standard` depth cannot see user turns at all (high)
+### F3 — `standard` depth cannot see user turns at all (high) — fixed 2026-08-14
 
 `messageText` (`scripts/dream.mjs:368`) keeps only `content[].type === "text"` blocks and
 discards role and per-message timestamps. Verified on a real slice: 550 lines / 31,324 bytes
@@ -62,27 +62,27 @@ single archive ledger yielded more than five correction slices combined.
 
 Also makes each observation record's `ts` field unpopulatable per-record.
 
-### F4 — corpus `totalBytes` overstates model-visible input ~34× (medium)
+### F4 — corpus `totalBytes` overstates model-visible input ~34× (medium) — fixed 2026-08-14
 
 `totalBytes` reported 28,417,431 bytes where the sum of `--extract` output across all 9
 sessions was 843,108 bytes (~210k tokens). The skill offers `totalBytes` as the way to budget
 a run before starting it, so budgeting from it overstates real cost by roughly 34×.
 
-### F5 — slice granularity loses within-session growth permanently (medium)
+### F5 — slice granularity loses within-session growth permanently (medium) — fixed 2026-08-14
 
 Slice ids carry no offset and no content hash, so once a slice has an observation file its
 session's later growth is never mined. Observed: the coordinator session grew from 678,475 to
 4,218,253 bytes between runs and none of that growth was mined, nor will any later run mine
 it. This is the flip side of the resume mechanism that makes marginal runs cheap.
 
-### F6 — observation filenames are never validated against the manifest (low)
+### F6 — observation filenames are never validated against the manifest (low) — fixed 2026-08-14
 
 One map dispatch wrote a slice filename truncated to the session id's first segment despite
 being given the exact path. It was renamed by hand; left alone it would have caused the next
 run to re-mine that slice. Nothing in the engine checks observation filenames against the
 manifest's slice ids.
 
-### Observation files are validated only on the happy path (medium)
+### Observation files are validated only on the happy path (medium) — fixed 2026-08-14
 
 `--check-observations` runs only inside the map dispatch that just wrote the file, so an
 *interrupted* dispatch — the exact failure mode the validation exists for — never reaches it.

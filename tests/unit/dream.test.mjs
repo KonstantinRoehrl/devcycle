@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -359,6 +359,46 @@ function projectsWith(repoRoot, entries) {
 function withArtifact(repoRoot, name = "2026-08-05-dream.md") {
   mkdirSync(join(repoRoot, ".devcycle", "dreaming"), { recursive: true });
   writeFileSync(join(repoRoot, ".devcycle", "dreaming", name), "# dream\n");
+}
+
+// F3-F6 fixtures need a session carrying real message text and, for F5, the ability to grow
+// after planCorpus has already run once — plainRecord/selfRecord above only carry a timestamp.
+// One session per call, always named CORPUS_SESSION_ID: sessionIdOf(root) hands that id back
+// so a test never has to know it by magic string.
+const CORPUS_SESSION_ID = "s1";
+const sessionIdOf = () => CORPUS_SESSION_ID;
+
+function corpusRecord({ role = "user", ts, text, toolResult }) {
+  const content =
+    toolResult !== undefined
+      ? [{ type: "tool_result", content: toolResult }]
+      : [{ type: "text", text: text ?? "" }];
+  return { timestamp: ts, type: role, message: { role, content } };
+}
+
+// `text` is the common case of one user turn; `records` hands raw {role, ts, text|toolResult}
+// shapes for a test that needs a specific block type (e.g. a tool_result). `padding` inflates
+// on-disk bytes without inflating the extracted text, which is what F4's "extractBytes is far
+// smaller than totalBytes" assertion needs something to divide by — it lands as trailing
+// whitespace on the JSONL line, which JSON.parse ignores. `append` lets a test grow the session
+// after planCorpus has already run once (F5's reopened-slice case).
+function corpusWithSession({ text, records, padding = 0 } = {}) {
+  const root = realpathSync(repo());
+  const dir = mkdtempSync(join(tmpdir(), "dream-proj-"));
+  const slug = join(dir, root.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(slug, { recursive: true });
+  const file = join(slug, `${CORPUS_SESSION_ID}.jsonl`);
+  const entries = records ?? [{ role: "user", ts: "2026-08-05T12:00:00Z", text }];
+  const line = (r) => JSON.stringify(corpusRecord(r)) + (padding ? " ".repeat(padding) : "") + "\n";
+  writeFileSync(file, entries.map(line).join(""));
+  const append = (moreText) =>
+    appendFileSync(file, line({ role: "user", ts: "2026-08-05T12:05:00Z", text: moreText }));
+  return { root, projects: dir, append };
+}
+
+function writeObservationFile(root, id, observations) {
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), `${id}.json`), JSON.stringify(observations));
 }
 
 test("planCorpus: the dream's own session does not make its own artifact stale", () => {
@@ -905,22 +945,27 @@ test("planCorpus: reports per-session and total byte sizes", () => {
   assert.equal(m.totalBytes, m.sessions.reduce((n, s) => n + s.bytes, 0));
 });
 
+// F5: unmined and observations are now keyed by each session's slice id (session id + size +
+// content hash), not the bare session id — a slice id is only knowable after planCorpus has
+// looked at the session once, so this reads it back off the first call's own sessions list.
 test("planCorpus: unmined lists exactly the sessions with no observation file", () => {
   const root = realpathSync(repo());
   const proj = projectsWith(root, [
     ["mined", [plainRecord("2026-08-05T12:00:00Z")]],
     ["fresh", [plainRecord("2026-08-05T12:30:00Z")]],
   ]);
-  mkdirSync(observationsDir(root), { recursive: true });
-  writeFileSync(join(observationsDir(root), "mined.json"), "[]\n");
+  const before = planCorpus({ repoRoot: root, projectsDir: proj, since: null });
+  const minedSlice = before.sessions.find((s) => s.id === "mined").slice;
+  const freshSlice = before.sessions.find((s) => s.id === "fresh").slice;
+  writeObservationFile(root, minedSlice, []);
   // A non-session slice: the memory store is mined at every profile and has no session id.
-  writeFileSync(join(observationsDir(root), "memory.json"), "[]\n");
+  writeObservationFile(root, "memory", []);
   const m = planCorpus({ repoRoot: root, projectsDir: proj, since: null });
-  assert.deepEqual(m.unmined, ["fresh"], "unmined is the session-shaped work list");
-  assert.deepEqual(m.observations, ["memory", "mined"], "observations lists every slice id");
-  assert.equal(hasObservations(root, "mined"), true);
-  assert.equal(hasObservations(root, "fresh"), false);
-  assert.deepEqual(listObservations(root), ["memory", "mined"]);
+  assert.deepEqual(m.unmined, [freshSlice], "unmined is the session-shaped work list");
+  assert.deepEqual(m.observations, ["memory", minedSlice].sort(), "observations lists every slice id");
+  assert.equal(hasObservations(root, minedSlice), true);
+  assert.equal(hasObservations(root, freshSlice), false);
+  assert.deepEqual(listObservations(root), ["memory", minedSlice].sort());
 });
 
 // spec §5.4's observation-record schema. quote is verbatim in this fixture; readObservations
@@ -1278,10 +1323,17 @@ test("a missing projects root fails rather than reporting an empty corpus", () =
   assert.match(r.stderr, /^dream: projects root does not exist/m);
 });
 
-test("messageText: decodes string and text-block content, ignores tool blocks", () => {
-  assert.equal(messageText({ message: { content: "plain string" } }), "plain string");
+// F3: the role and timestamp are now part of the returned text (see F3's tests further down),
+// so this asserts the prefixed shape rather than the old flat text.
+test("messageText: decodes string and text-block content, ignores tool_use blocks", () => {
+  assert.equal(
+    messageText({ timestamp: "2026-08-05T12:00:00Z", type: "user", message: { content: "plain string" } }),
+    "[2026-08-05T12:00:00Z] user: plain string",
+  );
   assert.equal(
     messageText({
+      timestamp: "2026-08-05T12:00:00Z",
+      type: "assistant",
       message: {
         content: [
           { type: "text", text: "kept" },
@@ -1290,7 +1342,7 @@ test("messageText: decodes string and text-block content, ignores tool blocks", 
         ],
       },
     }),
-    "kept\nalso kept",
+    "[2026-08-05T12:00:00Z] assistant: kept\nalso kept",
   );
   assert.equal(messageText({ message: {} }), "");
   assert.equal(messageText({}), "");
@@ -1418,4 +1470,69 @@ test("a newline inside a provenance value cannot forge a second field line", () 
     sourcedFromMemory: false,
   });
   assert.equal(readFileSync(path, "utf8").match(/^- landed:/gm).length, 1);
+});
+
+test("F3: extracted text carries each message's role and timestamp", () => {
+  const { root, projects } = corpusWithSession({ text: "hello world" });
+  const out = extractSession({ repoRoot: root, projectsDir: projects, sessionId: sessionIdOf(root) });
+  assert.match(out, /^\[2\d{3}-\d{2}-\d{2}T[\d:.]+Z?\] (user|assistant): /m,
+    "a correction slice cannot separate user turns from assistant turns without the role");
+});
+
+test("F3: an AskUserQuestion answer arriving as a tool_result is not silently dropped", () => {
+  const { root, projects } = corpusWithSession({
+    records: [{ role: "user", ts: "2026-08-01T00:00:00Z", toolResult: "Other: keep the labels off" }],
+  });
+  const out = extractSession({ repoRoot: root, projectsDir: projects, sessionId: sessionIdOf(root) });
+  assert.match(out, /keep the labels off/,
+    "the answers to AskUserQuestion arrive as tool_result blocks — dropping them loses the corrections");
+});
+
+test("F4: the budgeting number is the extract sum, not the on-disk size", () => {
+  const { root, projects } = corpusWithSession({ text: "hello world", padding: 50_000 });
+  const m = planCorpus({ repoRoot: root, projectsDir: projects, since: null });
+  assert.ok(m.extractBytes > 0, "extractBytes must be populated");
+  assert.ok(m.extractBytes < m.totalBytes / 10,
+    "the extract sum is the model-visible input; totalBytes is JSONL on disk and overstates it");
+});
+
+test("F5: a slice id carries the session's size and content hash", () => {
+  const { root, projects } = corpusWithSession({ text: "one" });
+  const [a] = planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined;
+  assert.match(a, /@\d+-[0-9a-f]{8}$/);
+});
+
+test("F5: a session that grew is unmined again, under a new slice id", () => {
+  const { root, projects, append } = corpusWithSession({ text: "one" });
+  const first = planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined[0];
+  writeObservationFile(root, first, [{ kind: "friction", subject: "s", quote: "q", target: null }]);
+  assert.deepEqual(planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined, []);
+  append("two");
+  const after = planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined;
+  assert.equal(after.length, 1, "growth reopens the slice");
+  assert.notEqual(after[0], first, "under a new id, so the old observation file is not overwritten");
+});
+
+test("F6: an observation filename that is not a manifest slice id is reported", () => {
+  const { root, projects } = corpusWithSession({ text: "one" });
+  writeObservationFile(root, "truncated-id", [{ kind: "friction", subject: "s", quote: "q", target: null }]);
+  const m = planCorpus({ repoRoot: root, projectsDir: projects, since: null });
+  assert.deepEqual(m.orphanObservations, ["truncated-id"],
+    "a file the manifest cannot address is named, never silently counted as mined");
+});
+
+test("happy-path gap: a truncated observation file counts as unmined, not as mined forever", () => {
+  const { root, projects } = corpusWithSession({ text: "one" });
+  const [id] = planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined;
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), `${id}.json`), "[{\"kind\":\"fricti");
+  const m = planCorpus({ repoRoot: root, projectsDir: projects, since: null });
+  assert.deepEqual(m.unmined, [id], "an unreadable file is work still to do");
+});
+
+test("happy-path gap: an observation file with an out-of-enum kind counts as unmined", () => {
+  const { root, projects } = corpusWithSession({ text: "one" });
+  const [id] = planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined;
+  writeObservationFile(root, id, [{ kind: "guessed", subject: "s", quote: "q", target: null }]);
+  assert.deepEqual(planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined, [id]);
 });

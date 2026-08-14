@@ -2,9 +2,10 @@
 // Deterministic half of devcycle's dreaming pass: checkpoint, corpus manifest, session
 // cap, artifact freshness. The semantic half lives in playbooks/learning-from-sessions.md.
 // Emits no message text, no branch names — only ids, paths, timestamps, and counts.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, readRecords, inWindow } from "./doctor.mjs";
 
@@ -71,6 +72,19 @@ export function readObservations(repoRoot, sliceId) {
   if (!Array.isArray(records)) throw new Error(`malformed observation file (not an array): ${sliceId}`);
   records.forEach((rec, i) => validateObservation(rec, i));
   return records;
+}
+
+// The resume mechanism used to be "does a file exist", so a truncated file left by an interrupted
+// dispatch counted as mined forever — the exact failure the validation was written for, never
+// reached because it only ran inside the dispatch that had just succeeded. A slice is mined when
+// its observation file PARSES, not when it is present.
+export function isMined(repoRoot, id) {
+  try {
+    readObservations(repoRoot, id);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // `\s*` matches a newline too, so a field left blank on its own line would otherwise let
@@ -397,14 +411,30 @@ export function checkRecurrence(promotions, manifest, readText = defaultReadText
 // phrase that happened to wrap in the transcript silently missed. Reading the decoded
 // text field means JSON.parse has already turned that escape into a real newline before
 // normalizePhrase (above) ever sees it.
+// F3: role and timestamp are what make a correction slice a correction slice, and tool_result is
+// where an AskUserQuestion answer actually lives — doctor reports AskUserQuestion turns for
+// sessions whose extracted text held none of them. Prefixing rather than returning a structure
+// keeps every existing caller (defaultReadText, extractSession, the F4 byte sum) working on a
+// string, and gives each observation record a real per-message `ts` to carry.
 export function messageText(record) {
+  const role = record.message?.role ?? record.type ?? "unknown";
+  const ts = record.timestamp ?? "";
   const content = record.message?.content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((c) => c && c.type === "text" && typeof c.text === "string")
-    .map((c) => c.text)
-    .join("\n");
+  const parts = [];
+  if (typeof content === "string") parts.push(content);
+  else if (Array.isArray(content))
+    for (const c of content) {
+      if (!c) continue;
+      if (c.type === "text" && typeof c.text === "string") parts.push(c.text);
+      // A tool_result's content is either a string or the same block array again.
+      else if (c.type === "tool_result") {
+        if (typeof c.content === "string") parts.push(c.content);
+        else if (Array.isArray(c.content))
+          for (const b of c.content) if (b?.type === "text" && typeof b.text === "string") parts.push(b.text);
+      }
+    }
+  if (!parts.length) return "";
+  return `[${ts}] ${role}: ${parts.join("\n")}`;
 }
 
 function defaultReadText(session) {
@@ -469,6 +499,13 @@ function resolveProjectFiles(repoRoot, projectsDir) {
   return all.filter((f) => sessionCwdMatches(f, repoRoot));
 }
 
+// F5: a slice id that is only the session id can never reopen when the session grows, so every
+// byte written after the first mining pass was invisible forever — the exact window in which a
+// recurrence would appear. The id now carries the slice's own size and a content hash, so growth
+// produces a new id, a new work item, and a new observation file beside the old one.
+export const sliceId = (sessionId, bytes, digest) => `${sessionId}@${bytes}-${digest}`;
+export const sliceSessionId = (id) => String(id).split("@")[0];
+
 export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false }) {
   const groups = new Map();
   for (const file of resolveProjectFiles(repoRoot, projectsDir)) {
@@ -483,8 +520,11 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     let records = 0;
     let self = false;
     let bytes = 0;
+    const hash = createHash("sha256");
     for (const f of files) {
-      bytes += statSync(f).size;
+      const raw = readFileSync(f, "utf8");
+      bytes += Buffer.byteLength(raw);
+      hash.update(raw);
       for (const r of readRecords(f)) {
         records += 1;
         if (r.timestamp) stamps.push(r.timestamp);
@@ -499,7 +539,23 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     stamps.sort();
     const lastTimestamp = stamps.at(-1);
     if (!inWindow(lastTimestamp, since, null)) continue;
-    sessions.push({ id, files, firstTimestamp: stamps[0], lastTimestamp, records, bytes, self });
+    // F4: the model-visible size the same way `--extract` does, reused from messageText rather
+    // than a second extractor (QC2).
+    let extractBytes = 0;
+    for (const f of files)
+      for (const r of readRecords(f)) extractBytes += Buffer.byteLength(messageText(r));
+    const slice = sliceId(id, bytes, hash.digest("hex").slice(0, 8));
+    sessions.push({
+      id,
+      files,
+      firstTimestamp: stamps[0],
+      lastTimestamp,
+      records,
+      bytes,
+      self,
+      slice,
+      extractBytes,
+    });
   }
 
   sessions.sort((a, b) => b.lastTimestamp.localeCompare(a.lastTimestamp));
@@ -515,11 +571,23 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     // `records` alone let a dispatch be handed an unreadable 22.6 MB slice with no warning,
     // and a run cannot be budgeted without a size. Totals cover the kept sessions only, so the
     // number describes what a run would actually mine rather than what the cap discarded.
+    // F4: this is JSONL on disk, not what a dispatch reads — see extractBytes below for the
+    // budgeting number. Stays for a caller sizing disk reads.
     totalBytes: kept.reduce((n, s) => n + s.bytes, 0),
+    // F4: totalBytes is JSONL on disk and overstated model-visible input ~34× on this repo's own
+    // corpus. It stays — a caller sizing disk reads still wants it — but the budgeting number a
+    // run is planned against is the extract sum, which is what a dispatch actually reads.
+    extractBytes: kept.reduce((n, s) => n + s.extractBytes, 0),
     // The mining work list: an interrupted run resumes by mining only these, which is the same
-    // mechanism that makes a marginal run cheap.
+    // mechanism that makes a marginal run cheap. Keyed by each session's `slice`, not its bare
+    // `id` (F5) — so a grown session reopens under its new id — and mined means the observation
+    // file PARSES (isMined), not merely exists (the happy-path validation gap).
     observations: listObservations(repoRoot),
-    unmined: kept.filter((s) => !hasObservations(repoRoot, s.id)).map((s) => s.id),
+    unmined: kept.filter((s) => !isMined(repoRoot, s.slice)).map((s) => s.slice),
+    // F6: a dispatch that wrote its file under a truncated name leaves a store entry the manifest
+    // cannot address. Naming it is the whole fix — the alternative is a slice that is re-mined
+    // every run with nobody able to see why.
+    orphanObservations: listObservations(repoRoot).filter((o) => !kept.some((s) => s.slice === o)),
     archives: archives(repoRoot).filter((a) => inWindow(`${a.date}T23:59:59Z`, since, null)),
     // Same escaping as the transcript project directory above: every non-alphanumeric
     // character becomes "-". Replacing only "/" points at a store that does not exist
