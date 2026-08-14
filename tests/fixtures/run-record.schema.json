@@ -120,6 +120,7 @@
         },
         "task": { "type": "string" },
         "culprit": { "type": ["string", "null"] },
+        "attributedBy": { "enum": ["coordinator", "distillation"] },
         "ts": { "type": "string", "format": "date-time" }
       },
       "required": ["kind", "runId", "event", "stage", "ts"],

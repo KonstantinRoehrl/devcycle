@@ -344,6 +344,37 @@ test("culprit accepts null, a vocabulary slug and a novel: slug, and rejects any
   assert.match(bad.stderr, /neither a culprits\.json slug nor a novel: slug/);
 });
 
+test("an event line may carry attributedBy, and the schema declares it", () => {
+  const schema = JSON.parse(
+    readFileSync(join(REPO_ROOT, "tests/fixtures/run-record.schema.json"), "utf8")
+  );
+  const event = schema.oneOf.find((s) => s.properties?.kind?.const === "event");
+  assert.ok(event.properties.attributedBy, "the event subschema must declare attributedBy");
+  assert.deepEqual(event.properties.attributedBy.enum, ["coordinator", "distillation"]);
+  assert.ok(!event.required.includes("attributedBy"), "attribution is optional — Phase 1 wrote none");
+});
+
+test("run-record append accepts --attributedBy on an event line", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-attributed-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const r = runRecord(["append", "--run", runId, "--kind", "event", "--event", "gate-fail",
+    "--stage", "execution", "--culprit", "novel:brief-omitted-a-field",
+    "--attributedBy", "coordinator", "--ts", "2026-08-14T00:00:00Z"], runs);
+  assert.equal(r.status, 0, r.stderr);
+  const file = join(runs, repoSlug(gitToplevel(process.cwd())), `${runId}.jsonl`);
+  const last = JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1));
+  assert.equal(last.attributedBy, "coordinator");
+});
+
+test("an undeclared attribution value is rejected at write time", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-attributed-bad-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const r = runRecord(["append", "--run", runId, "--kind", "event", "--event", "gate-fail",
+    "--stage", "execution", "--attributedBy", "guessed", "--ts", "2026-08-14T00:00:00Z"], runs);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /"attributedBy" value "guessed" is not one of coordinator \| distillation/);
+});
+
 test("culprit lookup fails cleanly, not with a stack trace, when culprits.json is valid JSON but not an array", () => {
   // validateCulprit() resolves both tests/fixtures/run-record.schema.json and
   // references/culprits.json relative to the script's own location, so the script needs to run

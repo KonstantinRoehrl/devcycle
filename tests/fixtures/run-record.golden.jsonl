@@ -5,6 +5,6 @@
 {"kind":"dispatch","runId":"0f1e2d3c4b5a6978","taskId":"3","agentType":"devcycle:implementer","model":"claude-sonnet-5","modelSource":"explicit","startedAt":"2026-08-07T10:21:00Z","endedAt":"2026-08-07T10:29:00Z","outcome":"complete","reviewRound":0,"retryIndex":0}
 {"kind":"verdict","runId":"0f1e2d3c4b5a6978","taskId":"3","round":1,"blockingCount":0,"evidenceClass":"red-green","conformance":"pass"}
 {"kind":"commit","runId":"0f1e2d3c4b5a6978","taskId":"3","sha":"1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"}
-{"kind":"event","runId":"0f1e2d3c4b5a6978","event":"gate-fail","stage":"execution","task":"3","culprit":null,"ts":"2026-08-07T10:30:00Z"}
+{"kind":"event","runId":"0f1e2d3c4b5a6978","event":"gate-fail","stage":"execution","task":"3","culprit":null,"attributedBy":"coordinator","ts":"2026-08-07T10:30:00Z"}
 {"kind":"event","runId":"0f1e2d3c4b5a6978","event":"gate-pass-clean","stage":"execution","task":"3","culprit":null,"ts":"2026-08-07T10:35:00Z"}
 {"kind":"event","runId":"0f1e2d3c4b5a6978","event":"user-correction-at-gate","stage":"planning","task":"3","culprit":null,"ts":"2026-08-07T10:05:00Z"}
