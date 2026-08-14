@@ -422,7 +422,9 @@ test("releaseDates omits an undated heading rather than inventing a date for it"
 test("outerLoop counts the distinct culprits drafted across persisted reports", () => {
   const dir = reportsFixture({
     "2026-08-01-report.md": "Drafted: [culprit:partial-evidence-capture] one\n",
-    "2026-08-08-report.md": "Drafted: [culprit:reviewer-role-confusion] two\nDrafted: [culprit:partial-evidence-capture] three\n",
+    // The re-drafted culprit below carries the same title as its first marker — culpritTitle is
+    // deterministic per slug, so a real re-draft of the same culprit always repeats it verbatim.
+    "2026-08-08-report.md": "Drafted: [culprit:reviewer-role-confusion] two\nDrafted: [culprit:partial-evidence-capture] one\n",
   });
   try {
     // Three marker lines, two culprits.
@@ -442,6 +444,34 @@ test("a culprit drafted twice counts once, so Drafted cannot outrun Filed by re-
   });
   try {
     assert.equal(outerLoop(dir, () => GH_RESPONSE).drafted, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// D-4: Drafted is an issue count, matching Filed and Resolved. The dedup above still holds — a
+// re-drafted culprit is one draft — but the key is the draft, not the culprit alone, so two
+// genuinely different issues opened for the same culprit are two drafts.
+test("Drafted counts issues: two different issues for one culprit count twice", () => {
+  const dir = reportsFixture({
+    "2026-08-01-report.md":
+      "Drafted: [culprit:friction:x] evidence tail truncated\n" +
+      "Drafted: [culprit:friction:x] evidence file missing entirely\n",
+  });
+  try {
+    assert.equal(outerLoop(dir, () => "[]").drafted, 2);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Drafted still counts one draft once when its marker is repeated verbatim", () => {
+  const dir = reportsFixture({
+    "2026-08-01-report.md":
+      "Drafted: [culprit:friction:x] evidence tail truncated\n" +
+      "Drafted: [culprit:friction:x] evidence tail truncated\n",
+  });
+  try {
+    assert.equal(
+      outerLoop(dir, () => "[]").drafted, 1,
+      "one culprit drafted, declined at a gate and drafted again is one draft, not two",
+    );
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -842,14 +872,41 @@ test("an unavailable outer loop renders unavailable, not zeros", () => {
   assert.ok(!/Filed: 0/.test(out));
 });
 
-test("the Drafted line says the count is of culprits, not of marker lines", () => {
+// D-4: the unit is issues, matching Filed and Resolved, so the outer-loop line reads as one
+// monotonic funnel rather than mixing units.
+test("the Drafted line names its unit as issues, matching Filed and Resolved", () => {
   const out = renderReport([sum()], ctx({
-    outerLoop: { drafted: 2, draftedSince: "0.13.0", filed: 1, resolved: 0, medianTurnaroundDays: null },
+    outerLoop: { drafted: 2, draftedSince: "0.13.0", filed: 1, resolved: 0, medianTurnaroundDays: null, truncated: false },
   }));
-  assert.ok(
-    out.includes("- Drafted: 2 (distinct culprits; markers recorded since 0.13.0)"),
-    "the Drafted line reads as a count of marker lines, which is not what it counts",
-  );
+  assert.match(out, /^- Drafted: 2 \(issues; markers recorded since 0\.13\.0\)$/m);
+});
+
+test("an outer-loop query that hits its limit says so rather than under-reporting silently", () => {
+  const dir = reportsFixture({});
+  const issues = Array.from({ length: 200 }, (_, i) => ({
+    number: i + 1, title: `[culprit:friction:x] issue ${i}`, labels: [],
+    createdAt: "2026-08-01T00:00:00Z", closedAt: null, state: "open",
+  }));
+  try {
+    const l = outerLoop(dir, () => JSON.stringify(issues));
+    assert.equal(l.truncated, true);
+    const out = renderReport([sum()], ctx({ outerLoop: l }));
+    assert.match(out, /at the 200-issue query limit — the counts below are a lower bound/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a query below the limit carries no truncation marker", () => {
+  const dir = reportsFixture({});
+  const issues = [{
+    number: 1, title: "[culprit:friction:x] one", labels: [],
+    createdAt: "2026-08-01T00:00:00Z", closedAt: null, state: "open",
+  }];
+  try {
+    const l = outerLoop(dir, () => JSON.stringify(issues));
+    assert.equal(l.truncated, false);
+    const out = renderReport([sum()], ctx({ outerLoop: l }));
+    assert.doesNotMatch(out, /lower bound/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("the empty corpus renders a report rather than throwing", () => {
@@ -957,6 +1014,21 @@ test("a low-confidence cohort carries the report's own qualifier, not a bare cou
 // The read half (outerLoop) already queries DEVCYCLE_UPSTREAM. The write half has to reach the
 // same repo or the two never meet: a bare `gh issue create` resolves to whatever repo the run
 // happened in, so the draft would land in the user's own tracker and Filed would stay zero.
+// A filer without push access on the upstream cannot set labels — GitHub drops them on an issue
+// opened by a non-collaborator. The printed labels are still declared (the draft's whole point),
+// but the page must not imply the filer can apply them.
+test("the printed draft states the labels are the maintainer's to apply at triage", () => {
+  const lines = issueDraftLines({
+    repo: "KonstantinRoehrl/devcycle", title: "[culprit:friction:x] thing",
+    labels: ["culprit:friction:x", "from-doctor"], body: "body",
+  });
+  const text = lines.join("\n");
+  assert.match(
+    text,
+    /^labels: culprit:friction:x, from-doctor \(suggested — the maintainer applies these at triage; an issue opened without push access cannot set them\)$/m,
+  );
+});
+
 test("the printed draft names the upstream it must be filed against, and owns that slug alone", () => {
   const d = issueBody("partial-evidence-capture", draftSummaries, draftTables(), repoShape(process.cwd()));
   assert.equal(d.repo, DEVCYCLE_UPSTREAM);
@@ -1028,7 +1100,11 @@ test("--issue-body prints the whole draft and nothing else, naming the upstream 
     // The repo line leads: it is the one field the filing step acts on rather than pastes.
     assert.equal(lines[0], `repo: ${DEVCYCLE_UPSTREAM}`);
     assert.equal(lines[1], `title: [culprit:partial-evidence-capture] ${desc}`);
-    assert.equal(lines[2], "labels: culprit:partial-evidence-capture, from-doctor");
+    assert.equal(
+      lines[2],
+      "labels: culprit:partial-evidence-capture, from-doctor (suggested — the maintainer applies " +
+        "these at triage; an issue opened without push access cannot set them)",
+    );
     assert.equal(lines[3], "");
     assert.equal(lines[4], "Culprit: partial-evidence-capture (friction)");
     // "and nothing else": the draft's own last line is the last line printed.

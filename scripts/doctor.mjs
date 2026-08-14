@@ -35,6 +35,10 @@ export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
 // so the count is qualified rather than mixing "none drafted" with "not recorded".
 const DRAFTED_SINCE = "0.13.0";
 
+// The bound `gh issue list --limit` is given below. Named once so the query and the truncation
+// check it feeds can never drift apart.
+const OUTER_LOOP_QUERY_LIMIT = 200;
+
 const DEVCYCLE_PREFIX = /^devcycle:/;
 const PLUGIN_VERSION_RE = /devcycle\/devcycle\/(\d+\.\d+\.\d+)\//;
 
@@ -1835,23 +1839,24 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride 
   // Drafted is local: it comes from this repo's own persisted reports, so it renders even when
   // gh is unavailable. Reports written before this phase carry no markers, which is why the
   // renderer qualifies the count rather than presenting it as "none drafted".
-  // Distinct culprits, not marker lines: the marker records drafting rather than posting, so one
-  // culprit drafted, declined at a gate and drafted again writes two lines for one draft, and a
-  // recurring culprit is re-offered in every later report. Counting lines would inflate Drafted
-  // against Filed, which is the comparison this section exists to support.
-  const draftedCulprits = new Set();
+  // D-4: Drafted is an issue count, so the outer-loop line reads as one funnel with Filed and
+  // Resolved rather than mixing units. The key stays deduped — one culprit drafted, declined at a
+  // gate and drafted again is one draft — but it keys on the draft, not on the culprit, so two
+  // genuinely different issues for one culprit are two drafts.
+  const draftedIssues = new Set();
   try {
     for (const f of readdirSync(reportsDir).filter((n) => n.endsWith(".md")))
       for (const m of parseDraftedMarkers(readFileSync(join(reportsDir, f), "utf8")))
-        draftedCulprits.add(m.slug);
+        draftedIssues.add(`${m.slug} ${m.title}`);
   } catch (err) {
     if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
   }
-  const drafted = draftedCulprits.size;
+  const drafted = draftedIssues.size;
 
   const unavailable = {
     drafted, draftedSince: DRAFTED_SINCE,
     filed: "unavailable", resolved: "unavailable", medianTurnaroundDays: "unavailable",
+    truncated: false,
   };
 
   // No `--label` filter: applying a label to devcycle's upstream needs push access, and GitHub
@@ -1862,7 +1867,7 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride 
   try {
     issues = JSON.parse(ghRunner([
       "issue", "list", "--repo", DEVCYCLE_UPSTREAM, "--author", "@me",
-      "--state", "all", "--limit", "200",
+      "--state", "all", "--limit", String(OUTER_LOOP_QUERY_LIMIT),
       "--json", "number,title,labels,createdAt,closedAt,state",
     ]));
     if (!Array.isArray(issues)) return unavailable;
@@ -1871,6 +1876,11 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride 
     // "not measured" — rendering 0 would read as "nothing has ever been filed".
     return unavailable;
   }
+
+  // `gh issue list --limit N` truncates silently, so a prolific filer's funnel would render as a
+  // confident under-count. A result exactly at the bound is indistinguishable from one that was
+  // cut, so it is reported as a lower bound rather than as a number.
+  const truncated = issues.length >= OUTER_LOOP_QUERY_LIMIT;
 
   let vocab = vocabOverride;
   if (vocab === null) {
@@ -1906,6 +1916,7 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride 
     filed: filed.length,
     resolved,
     medianTurnaroundDays: turnarounds.length ? Math.round(median(turnarounds)) : null,
+    truncated,
   };
 }
 
@@ -2227,11 +2238,15 @@ export function renderReport(summaries, ctx) {
   const l = loop ?? {
     drafted: "unavailable", draftedSince: DRAFTED_SINCE,
     filed: "unavailable", resolved: "unavailable", medianTurnaroundDays: "unavailable",
+    truncated: false,
   };
   L.push(
-    `- Drafted: ${l.drafted} (distinct culprits; markers recorded since ${l.draftedSince})`,
+    `- Drafted: ${l.drafted} (issues; markers recorded since ${l.draftedSince})`,
     `- Filed: ${l.filed}`,
     `- Resolved: ${l.resolved}`,
+    ...(l.truncated
+      ? [`- Note: the issue query returned results at the ${OUTER_LOOP_QUERY_LIMIT}-issue query limit — the counts below are a lower bound`]
+      : []),
     `- Median turnaround: ${turnaroundText(l.medianTurnaroundDays)}`,
   );
 
@@ -2529,7 +2544,7 @@ export function issueDraftLines(draft) {
   return [
     `repo: ${draft.repo}`,
     `title: ${draft.title}`,
-    `labels: ${draft.labels.join(", ")}`,
+    `labels: ${draft.labels.join(", ")} (suggested — the maintainer applies these at triage; an issue opened without push access cannot set them)`,
     "",
     draft.body,
   ];
