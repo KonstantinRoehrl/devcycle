@@ -10,9 +10,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" [--all] [--since <date>] [--unti
 
 Add `--json` for machine output, `--depth` for the bare depth probe — the probe ignores the window
 flags and exits non-zero with a one-line reason when it cannot resolve a depth. Do not walk
-transcripts yourself. What it prints is the finished report: a markdown document whose section
-order, glosses, tables, caveats, disclosures and price vintage are fixed and owned by
-`scripts/doctor.mjs`. Read it, splice the two sections below into it, and retype none of it.
+transcripts yourself. What it prints is the finished report, owned end to end by
+`scripts/doctor.mjs`: read it, splice the two sections below into it, and retype none of it.
 
 ## Scope — what the script actually covers, and announce it
 
@@ -103,7 +102,7 @@ Every step here is skippable — the ranked report stands alone. If findings exi
 acting on, offer one batched `AskUserQuestion` (multi-select), letting the user choose, per finding:
 
 - **skip** — no action;
-- **draft a GitHub issue** — drafted and shown for review, never filed by this run;
+- **draft a GitHub issue** — drafted, screened, shown for review, filed only on two confirmations;
 - **get a `/devcycle:cycle` entry point** — a one-line request string handed back for the user
   to run themselves. This run never invokes `/devcycle:cycle` itself: an entry point that
   chains onward takes the selection decision away from the user.
@@ -111,20 +110,24 @@ acting on, offer one batched `AskUserQuestion` (multi-select), letting the user 
 Always include an explicit "just the overview, no action" choice in the same batch — the
 follow-up is itself skippable, never a forced gate on finishing the command.
 
-**Drafting an issue: two gates, and nothing posted.** That selection is the first gate. For each
-finding it chose:
+**Drafting an issue: two gates before anything is posted.** The selection above only chooses what
+to draft. For each finding it chose:
 
-1. Take the draft from the script, never hand-composed — it prints a title, labels and a body
-   quoting the rows the report already rendered:
+1. Take the draft from the script, never hand-composed:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --issue-body <culprit-slug>`.
 2. Screen it before anyone sees it: write it to a file, then run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`. A draft that fails
    the screen is not shown at all — name the class that failed and stop there.
-3. Show the screened draft. The second gate is a separate explicit confirmation that this one is
-   the user's to file. Filing is theirs to do, in their own tracker: this run posts nothing and
-   runs no command that could.
-4. Only after that confirmation, append the draft's title to the persisted report, prefixed with
-   `Drafted: `, on a line of its own:
+3. Show the screened draft and ask whether it is right. That is the first gate, and it asks about
+   the draft's content only.
+4. Ask separately whether to post it — the second gate, never inferred from the first. Nothing is
+   ever auto-posted, and the script itself still posts nothing.
+5. Only after that second confirmation, file it with `gh issue create` against devcycle's own
+   upstream repo — never the repo the run happened in — carrying `--label "culprit:<slug>"
+   --label from-doctor` and the title and body exactly as `--issue-body` printed them. Those two
+   labels are what the Outer loop section counts by.
+6. Then append the draft's title to the persisted report, prefixed with `Drafted: `, on a line of
+   its own:
 
    ```
    Drafted: [culprit:<slug>] <title>
