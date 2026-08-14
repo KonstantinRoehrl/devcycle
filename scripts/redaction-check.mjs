@@ -24,22 +24,32 @@ const flagValue = (name) => {
   const i = args.indexOf(name);
   return i === -1 ? null : args[i + 1];
 };
-const dir = flagValue("--dir");
+// A flag's value must be an explicit, non-empty path: a missing value (the flag was the last
+// token, or is immediately followed by another flag) and an empty or whitespace-only value are
+// the same operator mistake in two guises — e.g. `--file "$draft"` for an unset shell variable
+// — and both must fail loudly, naming the flag, rather than silently widening the scan to the
+// whole corpus.
+function requireValue(name) {
+  if (!args.includes(name)) return undefined;
+  const v = flagValue(name);
+  if (v == null || v.trim() === "" || v.startsWith("--")) {
+    console.error(`redaction-check: ${name} requires a path argument`);
+    process.exit(1);
+  }
+  return v;
+}
+const dir = requireValue("--dir");
 // A second caller for the same engine: `--dir` and `git ls-files` both scan a corpus, and an
 // issue draft is neither — it is one untracked file that must be screened before it is shown
 // to the user. Takes precedence over --dir so a caller passing both gets the narrower scan
 // rather than a silently widened one.
-if (args.includes("--file") && flagValue("--file") == null) {
-  console.error("redaction-check: --file requires a path argument");
-  process.exit(1);
-}
-const file = flagValue("--file");
+const file = requireValue("--file");
 // The playbook invokes this script by its absolute ${CLAUDE_PLUGIN_ROOT} path from inside the
 // *user's own repo*, so cwd is never this repo. The default must resolve against this script's
 // own directory, not cwd, or the deny-list is unreadable on every such invocation. An explicit
 // --hashes keeps its current (cwd-relative or absolute) meaning.
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const hashesPath = flagValue("--hashes") ?? join(SCRIPT_DIR, "redaction-hashes.txt");
+const hashesPath = requireValue("--hashes") ?? join(SCRIPT_DIR, "redaction-hashes.txt");
 
 const SELF_EXEMPT = ["scripts/redaction-check.mjs", "scripts/redaction-hashes.txt"];
 const hashes = new Set(

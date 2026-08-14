@@ -250,6 +250,66 @@ test("--file with no value fails naming the missing argument, rather than scanni
   assert.match(res.stderr, /--file/);
 });
 
+// --dir is the playbook's privacy gate over gitignored files that `git ls-files` cannot see
+// (playbooks/finishing-the-cycle.md uses `--dir .devcycle`). A silent fallback to the whole
+// git corpus there would report success over a file set that structurally excludes the very
+// files the gate exists to screen.
+test("--dir with no value fails naming the missing argument, rather than scanning the whole corpus", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir"], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--dir/);
+});
+
+test("--dir immediately followed by another flag fails naming the missing argument", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir", "--hashes", HASHES], {
+    encoding: "utf8",
+    cwd: process.cwd(),
+  });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--dir/);
+});
+
+// --hashes with no value falls back to the shipped deny-list today, which is benign, but it is
+// the same silent widening as --file/--dir and must fail the same way for consistency.
+test("--hashes with no value fails naming the missing argument, rather than falling back silently", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir", process.cwd(), "--hashes"], {
+    encoding: "utf8",
+    cwd: process.cwd(),
+  });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--hashes/);
+});
+
+// `--file "$draft"` for an unset shell variable expands to `--file ""` — an empty string, not a
+// missing argument — and must fail the same way a missing value does rather than falling through
+// to the whole-corpus scan.
+test("--file with an empty-string value fails the same way a missing value does", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--file", ""], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--file/);
+});
+
+test("--file with a whitespace-only value fails the same way a missing value does", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--file", "   "], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--file/);
+});
+
+test("--dir with an empty-string value fails the same way a missing value does", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir", ""], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--dir/);
+});
+
+test("--hashes with an empty-string value fails the same way a missing value does", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir", process.cwd(), "--hashes", ""], {
+    encoding: "utf8",
+    cwd: process.cwd(),
+  });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--hashes/);
+});
+
 test("still flags a deny-listed term, read from the hashes file", () => {
   const term = "forbiddenword";
   const dir = makeFixture({
