@@ -168,6 +168,243 @@ test("a run that scanned no file at all fails instead of reporting ok", () => {
   }
 });
 
+// --file: the same engine, one more caller. An untracked draft has no place in `git ls-files`
+// and is not under any --dir, so without this flag the issue-draft screen could not run at all.
+function runFile(path) {
+  return execFileSync("node", [SCRIPT, "--file", path], { encoding: "utf8" });
+}
+
+test("--file flags a single file carrying a home-directory path", () => {
+  const dir = makeFixture({ "draft.md": `body\n${MAC_HOME}${SLASH}notes\n` });
+  try {
+    let stderr = "";
+    assert.throws(
+      () => runFile(join(dir, "draft.md")),
+      (err) => { stderr = err.stderr ?? ""; return true; },
+    );
+    assert.match(stderr, /contains an absolute home-directory path/);
+    // The failure names the class and never reprints what it matched.
+    assert.ok(!stderr.includes("someone"), "the failure message reprinted the match");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file passes a clean file", () => {
+  const dir = makeFixture({ "draft.md": "plugin version 0.12.0, profile thorough, 4 events\n" });
+  try {
+    assert.match(runFile(join(dir, "draft.md")), /redaction: ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file on a missing path fails rather than reporting a clean scan", () => {
+  const dir = makeFixture({});
+  try {
+    let stderr = "";
+    assert.throws(
+      () => runFile(join(dir, "does-not-exist.md")),
+      (err) => { stderr = err.stderr ?? ""; return true; },
+    );
+    assert.match(stderr, /no files to scan|cannot read/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file takes precedence over --dir rather than silently scanning both", () => {
+  const dir = makeFixture({ "clean.md": "nothing here\n", "dirty.md": `${MAC_HOME}${SLASH}x\n` });
+  try {
+    assert.match(
+      execFileSync("node", [SCRIPT, "--file", join(dir, "clean.md"), "--dir", dir], { encoding: "utf8" }),
+      /redaction: ok/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The playbook invokes this script by an absolute ${CLAUDE_PLUGIN_ROOT} path from inside the
+// *user's own repo*, so cwd is never this repo's root. The default deny-list path must resolve
+// against the script's own location, not cwd, or every such invocation dies on ENOENT.
+test("--file works when the caller's cwd is not this repo (default --hashes path)", () => {
+  const dir = makeFixture({ "draft.md": "plugin version 0.12.0, profile thorough, 4 events\n" });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--file", join(dir, "draft.md")], {
+      encoding: "utf8",
+      cwd: dir,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout, /redaction: ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A valueless --file (it was the last token on the command line) must not silently widen the
+// scan to the whole git corpus and report a clean draft that was never actually read.
+test("--file with no value fails naming the missing argument, rather than scanning the whole corpus", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--file"], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--file/);
+});
+
+// --dir is the playbook's privacy gate over gitignored files that `git ls-files` cannot see
+// (playbooks/finishing-the-cycle.md uses `--dir .devcycle`). A silent fallback to the whole
+// git corpus there would report success over a file set that structurally excludes the very
+// files the gate exists to screen.
+test("--dir with no value fails naming the missing argument, rather than scanning the whole corpus", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir"], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--dir/);
+});
+
+test("--dir immediately followed by another flag fails naming the missing argument", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir", "--hashes", HASHES], {
+    encoding: "utf8",
+    cwd: process.cwd(),
+  });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--dir/);
+});
+
+// --hashes with no value falls back to the shipped deny-list today, which is benign, but it is
+// the same silent widening as --file/--dir and must fail the same way for consistency.
+test("--hashes with no value fails naming the missing argument, rather than falling back silently", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir", process.cwd(), "--hashes"], {
+    encoding: "utf8",
+    cwd: process.cwd(),
+  });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--hashes/);
+});
+
+// `--file "$draft"` for an unset shell variable expands to `--file ""` — an empty string, not a
+// missing argument — and must fail the same way a missing value does rather than falling through
+// to the whole-corpus scan.
+test("--file with an empty-string value fails the same way a missing value does", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--file", ""], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--file/);
+});
+
+test("--file with a whitespace-only value fails the same way a missing value does", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--file", "   "], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--file/);
+});
+
+test("--dir with an empty-string value fails the same way a missing value does", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir", ""], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--dir/);
+});
+
+test("--hashes with an empty-string value fails the same way a missing value does", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir", process.cwd(), "--hashes", ""], {
+    encoding: "utf8",
+    cwd: process.cwd(),
+  });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--hashes/);
+});
+
+// --flag=value form: the same guard as the space form, not a separate code path. `--file=/tmp/x`
+// is a single token that must still be recognised as --file, not silently widened to the whole
+// git corpus (the bug this task fixes).
+test("--dir=<path> (equals form) is recognised and scans the named directory", () => {
+  const dir = makeFixture({ "a.md": `See ${MAC_HOME}/Programming/thing for details.\n` });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, `--dir=${dir}`, "--hashes", HASHES], { encoding: "utf8" });
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /home-directory path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file=<path> (equals form) is recognised and flags a leak", () => {
+  const dir = makeFixture({ "draft.md": `body\n${MAC_HOME}${SLASH}notes\n` });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, `--file=${join(dir, "draft.md")}`], { encoding: "utf8" });
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /contains an absolute home-directory path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--hashes=<path> (equals form) is recognised and uses the named deny-list", () => {
+  const term = "forbiddenword";
+  const dir = makeFixture({
+    "a.md": `This mentions ${term} once.\n`,
+    "hashes.txt": `${createHash("sha256").update(term).digest("hex")}\n`,
+  });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--dir", dir, `--hashes=${join(dir, "hashes.txt")}`], {
+      encoding: "utf8",
+    });
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /deny-listed term/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file=<clean path> (equals form) passes", () => {
+  const dir = makeFixture({ "draft.md": "plugin version 0.12.0, profile thorough, 4 events\n" });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, `--file=${join(dir, "draft.md")}`], { encoding: "utf8" });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout, /redaction: ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--file= with an empty value (equals form) fails naming --file, rather than scanning the whole corpus", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--file="], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--file/);
+});
+
+test("--file=<whitespace> (equals form) fails naming --file", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--file=   "], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--file/);
+});
+
+test("--dir= with an empty value (equals form) fails naming --dir", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir="], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--dir/);
+});
+
+test("--hashes= with an empty value (equals form) fails naming --hashes", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--dir", process.cwd(), "--hashes="], {
+    encoding: "utf8",
+    cwd: process.cwd(),
+  });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--hashes/);
+});
+
+// An unrecognised flag (a typo such as `--fil` for `--file`) must not fall through to scanning
+// the whole git corpus and reporting a false green — the same silent-widening class the guard
+// above fixes, reached by a different mistake. See the task report for why this is a hard error.
+test("an unrecognised flag fails naming the flag, rather than falling through to the whole corpus", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--fil", "x"], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--fil/);
+});
+
+test("an unrecognised flag in equals form fails naming the flag", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--fil=x"], { encoding: "utf8", cwd: process.cwd() });
+  assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /--fil/);
+});
+
 test("still flags a deny-listed term, read from the hashes file", () => {
   const term = "forbiddenword";
   const dir = makeFixture({

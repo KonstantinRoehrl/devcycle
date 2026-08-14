@@ -110,8 +110,14 @@ for (const p of surface) {
 
   // 3. Every devcycle:<name> must resolve to an agent or a command. Playbooks are addressed
   //    by path (check 4), never by a devcycle: id — naming one here means someone tried to
-  //    invoke stage logic as if it were a user-facing skill.
-  for (const [, , name] of text.matchAll(/(^|[^A-Za-z0-9_-])devcycle:([a-z0-9][a-z0-9-]*)/g)) {
+  //    invoke stage logic as if it were a user-facing skill. Only from this check, an HTML
+  //    comment whose entire body is a bare devcycle:<name> anchor is exempt: it is a splice
+  //    anchor a script renders into its output, not an invocation, and
+  //    playbooks/profiling-sessions.md must state both of doctor.mjs's anchors verbatim because
+  //    it owns the splice rule. A devcycle:<name> mentioned inside a longer comment is not a
+  //    splice anchor and is still checked. Every other check still reads the whole text.
+  const outsideComments = text.replace(/<!--\s*devcycle:[a-z0-9][a-z0-9-]*\s*-->/g, "");
+  for (const [, , name] of outsideComments.matchAll(/(^|[^A-Za-z0-9_-])devcycle:([a-z0-9][a-z0-9-]*)/g)) {
     if (existsSync(join(root, `playbooks/${name}.md`)))
       once(`ref:${name}`, `${rel(p)}: devcycle:${name} names a playbook — reference it as \${CLAUDE_PLUGIN_ROOT}/playbooks/${name}.md`);
     else if (![`agents/${name}.md`, `commands/${name}.md`].some((c) => existsSync(join(root, c))))
@@ -648,6 +654,29 @@ if (!existsSync(tiersFile)) {
     const dupeFamilies = [...new Set(families.filter((f, i) => families.indexOf(f) !== i))];
     if (dupeFamilies.length)
       fail(`${TIERS_PATH_REL}: duplicate family name(s) ${dupeFamilies.join(", ")} — each family must appear exactly once, or the ranking it resolves to is ambiguous`);
+  }
+}
+
+// 19. Every CHANGELOG version heading carries its release date. Outer-loop turnaround
+//     (scripts/doctor.mjs's releaseDates) measures issue createdAt against the release that
+//     resolved it, so a heading with no date silently drops that release out of the metric.
+const changelogPath = join(root, "CHANGELOG.md");
+if (existsSync(changelogPath)) {
+  const VERSION_HEADING = /^## \d+\.\d+\.\d+/;
+  const DATED_HEADING = /^## \d+\.\d+\.\d+ — (\d{4})-(\d{2})-(\d{2})[ \t]*$/;
+  for (const line of readFileSync(changelogPath, "utf8").split("\n")) {
+    if (!VERSION_HEADING.test(line)) continue;
+    const m = line.match(DATED_HEADING);
+    if (!m) {
+      fail(`CHANGELOG.md: heading "${line.trim()}" carries no release date — expected \`## <version> — YYYY-MM-DD\``);
+      continue;
+    }
+    // A real calendar date, not merely the shape: Date rolls 2026-02-30 forward to March 2
+    // rather than rejecting it, so the round-trip is the check.
+    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() + 1 !== mo || dt.getUTCDate() !== d)
+      fail(`CHANGELOG.md: heading "${line.trim()}" carries "${m[1]}-${m[2]}-${m[3]}", which is not a real calendar date`);
   }
 }
 

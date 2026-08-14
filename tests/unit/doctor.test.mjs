@@ -68,7 +68,7 @@ test("parseArgs: defaults resolve the transcript dir under the home directory", 
 
 test("parseArgs: every flag is read", () => {
   const a = parseArgs(["--dir", "/tmp/x", "--since", "2026-07-01", "--until", "2026-07-31", "--json"]);
-  assert.deepEqual(a, { dir: "/tmp/x", since: "2026-07-01", until: "2026-07-31", json: true, all: false, depth: false, drift: null });
+  assert.deepEqual(a, { dir: "/tmp/x", since: "2026-07-01", until: "2026-07-31", json: true, all: false, depth: false, drift: null, issueBody: null });
 });
 
 test("isDevcycleSession: a devcycle attributionSkill includes the session", () => {
@@ -357,16 +357,24 @@ function fixtureDir() {
   return dir;
 }
 
+// PATH is emptied so the report's outer-loop probe cannot find `gh`: the report now shells out
+// to it, and a test that reached the real GitHub API would be neither offline-safe nor
+// deterministic. The probe's documented degrade — "unavailable", never 0 — is what these tests
+// therefore exercise. Node itself is unaffected: it is spawned by its absolute path.
 const run = (args, env = {}, cwd = process.cwd()) =>
   spawnSync(process.execPath, [SCRIPT, ...args], {
     encoding: "utf8",
     cwd,
-    env: { ...process.env, CLAUDE_CODE_SESSION_ID: "", ...env },
+    env: { ...process.env, CLAUDE_CODE_SESSION_ID: "", PATH: "", ...env },
   });
 
 test("cli: reports the devcycle session and filters out the non-devcycle one", () => {
   const res = run(["--dir", fixtureDir()]);
   assert.equal(res.status, 0, res.stderr);
+  // What the command prints is the markdown report, so the corpus is read off its headings
+  // rather than off the pre-overhaul flat text.
+  assert.match(res.stdout, /^# Doctor Report — /m);
+  assert.match(res.stdout, /^### Per-session detail$/m);
   assert.match(res.stdout, /sess-abc/);
   assert.doesNotMatch(res.stdout, /999999999999/);
 });
@@ -692,7 +700,7 @@ test("cli: --json emits a candidates array carrying emitCandidates' signals", ()
   assert.ok(unpriced, "expected the unpriced-model signal to reach the CLI's json output");
 });
 
-test("cli: the plain-text report surfaces candidate signals, not just the raw aggregate", () => {
+test("cli: the markdown report surfaces candidate signals, not just the raw aggregate", () => {
   const dir = mkdtempSync(join(tmpdir(), "doctor-candidates-text-"));
   const slug = join(dir, "-Users-x-proj");
   mkdirSync(slug, { recursive: true });
@@ -708,7 +716,13 @@ test("cli: the plain-text report surfaces candidate signals, not just the raw ag
   );
   const out = run(["--dir", dir]);
   assert.equal(out.status, 0, out.stderr);
-  assert.match(out.stdout, /unpriced-model/);
+  // Under its own heading, not merely somewhere in the document: a signal rendered outside the
+  // section that ranks it is a signal no reader of the report will act on.
+  const anomalies = out.stdout.slice(
+    out.stdout.indexOf("## Cost anomalies"),
+    out.stdout.indexOf("## Previously promoted"),
+  );
+  assert.match(anomalies, /unpriced-model/);
 });
 
 test("cli: a malformed trailing line is skipped rather than fatal", () => {
@@ -1082,7 +1096,9 @@ function installDoctor(changelog) {
   // check fail and main() would never run.
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "doctor-install-")));
   mkdirSync(join(dir, "scripts"), { recursive: true });
-  for (const name of ["doctor.mjs", "pricing.mjs"])
+  // dream.mjs travels with it: doctor.mjs imports readPromotions from it to name what each
+  // version shipped, so a copy without it cannot be loaded at all.
+  for (const name of ["doctor.mjs", "pricing.mjs", "dream.mjs"])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
   if (changelog !== null) {
     mkdirSync(join(dir, "references"), { recursive: true });

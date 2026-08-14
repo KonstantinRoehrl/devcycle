@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.12.0
+## 0.12.0 — 2026-08-07
 
 - feat(surface): collapse to seven commands and rename audit, dream and distill
 
@@ -54,85 +54,85 @@ surface rather than changing it again.
 Entries for 0.11.1 and earlier name the surface as it stood at the time and are left as
 written.
 
-## 0.11.1
+## 0.11.1 — 2026-08-05
 
 - ci(release): make main changeable only by checked pull request
 
-## 0.11.0
+## 0.11.0 — 2026-08-05
 
 - feat(dream): add dreaming across sessions (#36)
 
-## 0.10.1
+## 0.10.1 — 2026-08-03
 
 - fix(doctor): forward-fill skill attribution and correct scope docs
 
-## 0.10.0
+## 0.10.0 — 2026-08-03
 
 - feat(devcycle): add onboarding-a-repo and distilling-learnings skills (#31)
 
-## 0.9.2
+## 0.9.2 — 2026-08-01
 
 - perf(devcycle): act on the token audit's cost model, routing, and depth-gate findings (#29)
 
-## 0.9.1
+## 0.9.1 — 2026-07-31
 
 - perf(devcycle): cut orchestrator context depth and delegate inline tool work to subagents (#27)
 
-## 0.9.0
+## 0.9.0 — 2026-07-29
 
 - feat: unify every review surface on shared criteria and one review engine (#25)
 
-## 0.8.1
+## 0.8.1 — 2026-07-29
 
 - docs(changelog): drop Unreleased entries already shipped in 0.8.0 (#24)
 
-## 0.8.0
+## 0.8.0 — 2026-07-28
 
 - feat: add branch-scoped audits, a compact profile-driven pipeline, and sweep routing
 
-## 0.7.0
+## 0.7.0 — 2026-07-25
 
 - feat: add trivial-change fast path plus audit-round triage and review improvements (#18)
 
-## 0.6.1
+## 0.6.1 — 2026-07-24
 
 - fix(cycle): make the command model-invocable and halt for compact/clear at boundaries (#11)
 
-## 0.6.0
+## 0.6.0 — 2026-07-24
 
 - feat(verifying-on-device): drive on-device structural checks with claude-in-chrome (#10)
 
-## 0.5.0
+## 0.5.0 — 2026-07-24
 
 - feat: discover repo/implementation-scoped context docs via graphify-first, index-then-fetch fallback
 
-## 0.4.1
+## 0.4.1 — 2026-07-23
 
 - fix: gitPolicy respects permission and branch push restrictions
 
-## 0.4.0
+## 0.4.0 — 2026-07-23
 
 - feat: auto model selection, first-run config walkthrough, and pipeline composition fixes (#7)
 
-## 0.3.0
+## 0.3.0 — 2026-07-23
 
 - ci: push branch before tag in release job and guard existing tags (#6)
 - docs: rewrite README for comprehension (#5)
 - feat: harden pipeline guardrails and pin execution strategy (#4)
 
-## 0.2.3
+## 0.2.3 — 2026-07-23
 
 - chore(deps): bump actions/checkout (#1)
 
-## 0.2.2
+## 0.2.2 — 2026-07-23
 
 - docs: add e2e dry-run report and complete install instructions (#3)
 
-## 0.2.1
+## 0.2.1 — 2026-07-22
 
 - docs: fold unreleased 0.1.0 section into the 0.2.0 release notes (#2)
 
-## 0.2.0
+## 0.2.0 — 2026-07-22
 
 - chore: ignore local execution artifacts and Finder metadata
 - docs: finalize README and design appendix

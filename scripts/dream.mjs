@@ -296,6 +296,12 @@ export function readPromotions(repoRoot) {
         landed: field(text, "landed"),
         commit: field(text, "commit"),
         pluginVersion: field(text, "plugin-version") || null,
+        // Which vocabulary entry this promotion was meant to fix, so doctor's Cost-by-version
+        // Shipped column can name it. Read here rather than by a second parser in doctor.mjs:
+        // one reader for this record shape, the way pluginVersion above is already read.
+        // Absent (Phase 3 teaches recordPromotion to write it) reads null, never "" — an empty
+        // string would render as a culprit whose id is blank.
+        culpritId: field(text, "culprit-id") || null,
         sourcedFromMemory:
           field(text, "sourced-from-memory") === ""
             ? null

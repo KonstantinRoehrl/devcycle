@@ -140,6 +140,28 @@ test("devcycle: reference check: a name resolving to a playbook fails, asking fo
   );
 });
 
+test("devcycle: reference check: an anchor inside an HTML comment is exempt, the same name in prose is not", () => {
+  // A splice anchor a script renders into its output is not an invocation, so a surface file
+  // may state one verbatim. Nothing else about the check moves: the same name in prose still
+  // has to resolve to an agent or a command.
+  const dir = makePluginFixture();
+  playbook(dir, "Replace `<!-- devcycle:highlights -->` with prose.\n");
+  ok(runValidate(dir));
+  playbook(dir, "Replace `<!-- devcycle:highlights -->` with prose, then run `devcycle:highlights`.\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /devcycle:highlights/);
+});
+
+test("devcycle: reference check: the comment exemption is scoped to a bare anchor, not any comment containing one", () => {
+  // The exemption covers a comment whose entire body is a devcycle:<name> splice anchor. A
+  // comment that merely mentions one inline, inside a longer sentence of prose, is not a
+  // splice anchor and must still be checked like any other text.
+  const dir = makePluginFixture();
+  playbook(dir, "<!-- a note about devcycle:not-a-real-thing in passing -->\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /devcycle:not-a-real-thing/);
+  playbook(dir, "<!-- devcycle:highlights -->\n");
+  ok(runValidate(dir));
+});
+
 // --- check 4: ${CLAUDE_PLUGIN_ROOT}/<path> against the tree ---
 
 test("plugin-root check: a path that exists passes", () => {
@@ -972,4 +994,28 @@ test("model tiers: a well-formed table passes", () => {
     { family: "sonnet", rank: 2, match: "sonnet" },
   ]);
   assert.equal(runValidate(dir).status, 0, runValidate(dir).stderr);
+});
+
+// --- check 19: every CHANGELOG version heading carries its release date ---
+
+test("changelog dates: a version heading with no date fails", () => {
+  // A heading with no date makes outer-loop turnaround unmeasurable for that release, and the
+  // gap is invisible until someone reads the report and finds a blank column.
+  const dir = makePluginFixture();
+  writeInto(dir, "CHANGELOG.md", "# Changelog\n\n## 1.0.0\n\n- feat(x): a thing\n");
+  const res = runValidate(dir);
+  assert.notEqual(res.status, 0);
+  assert.match(res.stdout + res.stderr, /CHANGELOG\.md.*1\.0\.0.*date/s);
+});
+
+test("changelog dates: a dated version heading passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "CHANGELOG.md", "# Changelog\n\n## 1.0.0 — 2026-08-13\n\n- feat(x): a thing\n");
+  assert.equal(runValidate(dir).status, 0);
+});
+
+test("changelog dates: a heading date that is not a real calendar date fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "CHANGELOG.md", "# Changelog\n\n## 1.0.0 — 2026-02-30\n\n- feat(x): a thing\n");
+  assert.notEqual(runValidate(dir).status, 0);
 });
