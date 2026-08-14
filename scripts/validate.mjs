@@ -110,8 +110,12 @@ for (const p of surface) {
 
   // 3. Every devcycle:<name> must resolve to an agent or a command. Playbooks are addressed
   //    by path (check 4), never by a devcycle: id — naming one here means someone tried to
-  //    invoke stage logic as if it were a user-facing skill.
-  for (const [, , name] of text.matchAll(/(^|[^A-Za-z0-9_-])devcycle:([a-z0-9][a-z0-9-]*)/g)) {
+  //    invoke stage logic as if it were a user-facing skill. An HTML comment is exempt, and
+  //    only from this check: it is a splice anchor a script renders into its output, not an
+  //    invocation, and playbooks/profiling-sessions.md must state both of doctor.mjs's anchors
+  //    verbatim because it owns the splice rule. Every other check still reads the whole text.
+  const outsideComments = text.replace(/<!--[\s\S]*?-->/g, "");
+  for (const [, , name] of outsideComments.matchAll(/(^|[^A-Za-z0-9_-])devcycle:([a-z0-9][a-z0-9-]*)/g)) {
     if (existsSync(join(root, `playbooks/${name}.md`)))
       once(`ref:${name}`, `${rel(p)}: devcycle:${name} names a playbook — reference it as \${CLAUDE_PLUGIN_ROOT}/playbooks/${name}.md`);
     else if (![`agents/${name}.md`, `commands/${name}.md`].some((c) => existsSync(join(root, c))))

@@ -140,6 +140,17 @@ test("devcycle: reference check: a name resolving to a playbook fails, asking fo
   );
 });
 
+test("devcycle: reference check: an anchor inside an HTML comment is exempt, the same name in prose is not", () => {
+  // A splice anchor a script renders into its output is not an invocation, so a surface file
+  // may state one verbatim. Nothing else about the check moves: the same name in prose still
+  // has to resolve to an agent or a command.
+  const dir = makePluginFixture();
+  playbook(dir, "Replace `<!-- devcycle:highlights -->` with prose.\n");
+  ok(runValidate(dir));
+  playbook(dir, "Replace `<!-- devcycle:highlights -->` with prose, then run `devcycle:highlights`.\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /devcycle:highlights/);
+});
+
 // --- check 4: ${CLAUDE_PLUGIN_ROOT}/<path> against the tree ---
 
 test("plugin-root check: a path that exists passes", () => {

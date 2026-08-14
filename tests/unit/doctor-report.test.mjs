@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -691,4 +691,27 @@ test("parseArgs reads --issue-body", () => {
   assert.equal(parseArgs(["--issue-body", "partial-evidence-capture"]).issueBody, "partial-evidence-capture");
   // The report path is unaffected when the flag is absent.
   assert.equal(parseArgs(["--all"]).issueBody, null);
+});
+
+// The marker is written by playbooks/profiling-sessions.md and parsed by doctor.mjs, with
+// nothing else binding the two. This pins the contract on behaviour rather than on regex source:
+// the literal is extracted from the playbook and fed to the parser. Drift in either file fails.
+test("the Drafted: marker round-trips from the playbook's own literal to the parser", () => {
+  const playbook = readFileSync(join(process.cwd(), "playbooks/profiling-sessions.md"), "utf8");
+  const literal = playbook.split("\n").find((l) => l.trim().startsWith("Drafted: [culprit:"));
+  assert.ok(literal, "playbooks/profiling-sessions.md no longer states the Drafted: marker form");
+  const filled = literal.trim()
+    .replace("<slug>", "partial-evidence-capture")
+    .replace("<title>", "Evidence capture is partial");
+  assert.deepEqual(
+    parseDraftedMarkers(filled),
+    [{ slug: "partial-evidence-capture", title: "Evidence capture is partial" }],
+    "the playbook's marker form no longer parses — the writer and the reader have drifted",
+  );
+});
+
+test("the playbook names both splice anchors the renderer emits", () => {
+  const playbook = readFileSync(join(process.cwd(), "playbooks/profiling-sessions.md"), "utf8");
+  assert.match(playbook, /<!-- devcycle:highlights -->/);
+  assert.match(playbook, /<!-- devcycle:findings -->/);
 });

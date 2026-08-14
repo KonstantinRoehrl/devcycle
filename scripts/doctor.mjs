@@ -1790,7 +1790,9 @@ export function winTable(summaries, vocab, candidates = []) {
 }
 
 // The marker playbooks/profiling-sessions.md writes when the Actionability step drafts an
-// issue. That playbook is the contract's one written source; this parses what it states.
+// issue. That playbook is the contract's one written source; this parses what it states, and a
+// round-trip test (tests/unit/doctor-report.test.mjs) feeds this parser the literal extracted
+// from that file so neither side can drift.
 const DRAFTED_MARKER_RE = /^Drafted: \[culprit:([a-z0-9][a-z0-9-]*)\] (.+)$/gm;
 
 export function parseDraftedMarkers(text) {
