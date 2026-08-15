@@ -74,10 +74,16 @@ test("criterion 6: a full section's landing carries an eviction the report rende
 
 test("criterion 7: the Confirm partition is golden — nothing moves into the bulk", () => {
   const c = JSON.parse(readFileSync(join(FIXTURES, "candidates.json"), "utf8"));
-  for (const cand of c.candidates)
-    if (cand.sensitive || cand.culpritId.startsWith("contradiction:"))
-      assert.equal(cand.partition, "explicit",
-        `${cand.culpritId} must not be partitioned into the bulk to skip its decision`);
+  // §3: a pipeline-fault candidate "is filed only on per-item consent" — never silently
+  // bulked. Sensitive and contradiction-linked candidates carry the same must-be-explicit rule.
+  const mustBeExplicit = c.candidates.filter(
+    (cand) => cand.fault === "pipeline" || cand.sensitive || cand.culpritId.startsWith("contradiction:"),
+  );
+  assert.ok(mustBeExplicit.length >= 1,
+    "guard: a fixture with no must-be-explicit candidate would satisfy the next assertion vacuously");
+  for (const cand of mustBeExplicit)
+    assert.equal(cand.partition, "explicit",
+      `${cand.culpritId} must not be partitioned into the bulk to skip its decision`);
 });
 
 test("criterion 8: proposal and outcome differ only in their proposal/outcome headings", () => {
