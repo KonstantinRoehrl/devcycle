@@ -4,6 +4,35 @@
 
 - feat(learn): add the cross-session learning loop with verification and lifecycle
 
+devcycle now learns from its own past runs. Every cycle journals the friction it hits against a
+shared culprit vocabulary; `/devcycle:learn` mines that journal across sessions, dedups and
+clusters recurring friction, and promotes a fix up a graduated ladder that a human Confirms before
+anything lands. `/devcycle:doctor` renders the result as a document — a per-profile write-up with
+its top culprit filed as an issue draft, and a verification scoreboard that measures whether each
+promoted lesson actually held. Nothing is written without an explicit Confirm.
+
+### The loop
+
+- **Journaled friction, shared vocabulary.** Cycles record friction events keyed by a stable
+  culprit-id drawn from one vocabulary, so the same problem is recognised across sessions and
+  scored by impact rather than counted twice.
+- **Journal-first mining with dedup and a Confirm ladder.** `/devcycle:learn` reads the journal,
+  dedups by culprit-id, and walks candidates up an r0–r3 promotion ladder; a landed culprit-id is
+  never re-proposed, and each run renders a report of what it found.
+- **The profile as a document.** `/devcycle:doctor` renders the measured session profile as prose
+  and files its top culprit as a ready-to-paste issue draft.
+- **Verification and lifecycle.** A shared verification engine scores every promoted lesson as
+  held / recurred / unmeasurable against real runs and routes candidates to escalation,
+  retirement, or revert. Retirement and revert persist as lifecycle records that suppress
+  re-proposal; a `resolved-in:` check watches whether a fix holds past the release that shipped it;
+  and an always-loaded byte budget refuses lesson growth past an aggregate ceiling without a
+  same-run retirement.
+
+### Foundations
+
+- **Trustworthy instrumentation.** A verifiable run-record captures per-run cost, model routing,
+  and stage timings — the measured substrate the loop and the doctor read.
+
 ## 0.12.0 — 2026-08-07
 
 - feat(surface): collapse to seven commands and rename audit, dream and distill
