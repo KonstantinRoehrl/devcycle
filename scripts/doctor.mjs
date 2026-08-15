@@ -4,7 +4,7 @@
 // Read-only. Emits counts, dollars, model ids, tool names, and skill names only.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12,6 +12,10 @@ import { PRICING, priceFor } from "./pricing.mjs";
 // The one reader of this repo's promotion records; doctor's Cost-by-version "Shipped" column
 // names what each version shipped rather than parsing those records a second time here.
 import { readPromotions } from "./promotions.mjs";
+// The shared verification engine (Wave 2): the one source of the promotion scoreboard, the
+// escalation/retirement candidates and the resolved-in lines, plus the installed plugin version.
+// doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
+import { verify, installedVersion } from "./verification.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // references/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -1421,6 +1425,9 @@ function main() {
     return;
   }
   const ctx = reportContext(args, result);
+  // The cost-driven revert sidecar is a by-product of every report run, written for the playbook
+  // to read; its own write is fail-safe, so it never blocks rendering.
+  revertCandidates(result.sessions, ctx.promotions);
   if (args.json) {
     console.log(
       JSON.stringify(
@@ -1920,22 +1927,30 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride 
   };
 }
 
-// Compiled knowledge needs a `rung:` field on promotion records, which Phase 3 adds — the only
-// `rung` in this repo today is scripts/model-pool.mjs's unrelated model-pool rung. Rather than
-// invent a mapping, the section renders its heading, its gloss, its column header and this
-// line. The directory is still opened rather than skipped: a promotions directory that exists
-// but cannot be read fails here instead of rendering the same no-data line as a repo that has
-// simply never promoted anything (QC5 — absent degrades, a permissions fault throws). The
-// records themselves are deliberately not read here: readPromotions (scripts/promotions.mjs) is
-// the one promotion parser, and Phase 3 reads `rung:` through it rather than beside it.
-export function compiledKnowledge(promotionsDir) {
-  try {
-    readdirSync(promotionsDir);
-  } catch (err) {
-    if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
+// The cumulative-by-version table: one row per (version, rung) over the standing lessons, each row
+// counting how many lessons landed at that rung on that version. It consumes the records
+// readPromotions already parsed rather than re-reading the directory here — that reader is the one
+// promotion parser, and it owns the IO fail-safe (safePromotions wraps it), so a missing or
+// unreadable promotions directory degrades to an empty list upstream and this function sees `[]`.
+// A lifecycle record (a retirement or a revert) is counted as retired, never as a standing lesson,
+// so a retired lesson does not inflate its rung's count. A record predating `rung:` (rung === null)
+// contributes no row, and the note still names what fills the table in.
+export function compiledKnowledge(promotions = []) {
+  const groups = new Map();
+  let retired = 0;
+  for (const p of promotions) {
+    if (p.lifecycle) { retired++; continue; }
+    if (!p.rung) continue;
+    const version = p.pluginVersion ?? "unknown";
+    const key = `${version} ${p.rung}`;
+    if (!groups.has(key)) groups.set(key, { version, rung: p.rung, lessons: 0, contextCost: null });
+    groups.get(key).lessons += 1;
   }
+  const rows = [...groups.values()].sort((a, b) =>
+    a.version === b.version ? a.rung.localeCompare(b.rung) : compareVersions(a.version, b.version));
   return {
-    rows: [],
+    rows,
+    retired,
     note: "No data yet — this table fills in from the release that records `rung:` on promotion records.",
   };
 }
@@ -2119,7 +2134,7 @@ export function renderReport(summaries, ctx) {
   const {
     repo, today, scope,
     previousSummaries = null, vocab = [], promotions = [],
-    outerLoop: loop = null, compiledKnowledge: compiled = null,
+    outerLoop: loop = null, compiledKnowledge: compiled = null, verification = null,
   } = ctx ?? {};
   const L = [];
   const section = (heading, glossKey) => { L.push("", heading, "", `*${GLOSSES[glossKey]}*`, ""); };
@@ -2226,11 +2241,22 @@ export function renderReport(summaries, ctx) {
     : ["_No rows: no cost anomalies in this corpus._"]));
 
   section("## Previously promoted — did it hold", "promoted");
-  L.push(
-    "_Rendered by the playbook from the latest .devcycle/dreaming/<date>-dream.md, under that " +
-      "artifact's own capped/empty-not-checked rules; the whole section is omitted when no " +
-      "artifact exists._",
-  );
+  // The verification engine computes every verdict; this only renders it. One line per scoreboard
+  // entry (held / recurred / unmeasurable / broken), then the resolved-in lines, then the
+  // Actionability menu — each recurred lesson the engine flagged for escalation becomes a
+  // `/devcycle:cycle` entry point the reader can run (playbooks/profiling-sessions.md).
+  const v = verification ?? { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] };
+  const overRuns = (n) => (n ? ` over ${n} run${n === 1 ? "" : "s"}` : "");
+  if (!v.scoreboard.length && !v.resolvedIn.length) {
+    L.push("_No promoted lesson has been measured against a run yet._");
+  } else {
+    for (const s of v.scoreboard)
+      L.push(`- ${s.culpritId} (${s.rung}): ${s.verdict}${overRuns(s.runsObserved)}`);
+    for (const r of v.resolvedIn)
+      L.push(`- ${r.culpritId}: resolved in ${r.resolvedIn} — ${r.verdict}${overRuns(r.runsObserved)}`);
+    for (const e of v.candidates.escalation)
+      L.push(`- Actionability — \`/devcycle:cycle\` re-address ${e.culpritId} (${e.reason}; escalate from ${e.rung})`);
+  }
 
   section("## Outer loop", "outer-loop");
   // A probe that could not run renders "unavailable" for every field it feeds — never 0, which
@@ -2351,8 +2377,69 @@ function reportContext(args, result) {
     vocab,
     promotions,
     outerLoop: outerLoop(join(process.cwd(), ".devcycle", "doctor")),
-    compiledKnowledge: compiledKnowledge(join(process.cwd(), "docs", "devcycle", "promotions")),
+    compiledKnowledge: compiledKnowledge(promotions),
+    verification: promotionVerification(promotions),
   };
+}
+
+// The engine renders, doctor never recomputes: flatten every run record's journal events (the same
+// journalEvents set impactScores reads), tag each with its own record's runId so runsObserved can
+// count distinct runs, and hand them to verify() with the installed plugin version. A missing runs
+// directory or an unreadable plugin.json degrades to an empty verification rather than aborting the
+// whole report (QC7 — the same fail-safe safePromotions gives the promotion records).
+function promotionVerification(promotions) {
+  try {
+    const events = [...readRunRecords().values()].flatMap((rec) =>
+      journalEvents(rec).map((e) => ({ ...e, runId: e.runId ?? rec.runId })));
+    return verify(promotions, events, installedVersion());
+  } catch {
+    return { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] };
+  }
+}
+
+// Revert detection is cost-driven and lives here, not in the engine (QC1 / spec §5.3): the engine
+// never sees cost cohorts. A landed lesson whose own (profile, stage) cost regressed after the
+// version it landed on is a candidate to undo — same profile only, so a profile-mix shift can never
+// masquerade as a regression, and stage-scoped, so one dear stage does not indict the rest. The undo
+// is an edit, never `git revert`. Reuses versionCohorts on a profile-filtered slice rather than
+// building a second (profile, stage) grouper (QC2). The sidecar write degrades, never aborts (QC7).
+const REVERT_REGRESSION_PCT = 15;
+
+export function revertCandidates(summaries, promotions, { root = process.cwd() } = {}) {
+  const settled = (summaries ?? []).filter((s) => !s.inFlight);
+  const profiles = [...new Set(settled.map((s) => s.profile ?? "unknown"))];
+  const candidates = [];
+  for (const p of promotions ?? []) {
+    if (p.lifecycle || !p.culpritId || !p.pluginVersion) continue;
+    for (const profile of profiles) {
+      const cohorts = versionCohorts(settled.filter((s) => (s.profile ?? "unknown") === profile));
+      const known = [...cohorts.keys()].filter((ver) => ver !== "unknown").sort(compareVersions);
+      const idx = known.indexOf(p.pluginVersion);
+      if (idx < 1) continue;                         // no same-profile predecessor to compare against
+      const before = cohorts.get(known[idx - 1]);
+      const after = cohorts.get(known[idx]);
+      for (const stage of new Set([...before.byStage.keys(), ...after.byStage.keys()])) {
+        const b = median(before.byStage.get(stage) ?? []);
+        const a = median(after.byStage.get(stage) ?? []);
+        if (!b) continue;                            // no baseline to measure a regression against
+        const deltaPct = Math.round(((b - a) / b) * 1000) / 10;   // > 0 cheaper, < 0 dearer
+        if (deltaPct < -REVERT_REGRESSION_PCT)
+          candidates.push({
+            culpritId: p.culpritId, rung: p.rung, landedCommit: p.commit ?? null,
+            profile, stage, deltaPct,
+            reason: `${stage} cost rose ${Math.abs(deltaPct).toFixed(1)}% from ${known[idx - 1]} to ` +
+              `${p.pluginVersion} on the ${profile} profile`,
+          });
+      }
+    }
+  }
+  const out = { generatedAt: new Date().toISOString(), installedVersion: installedVersion(), candidates };
+  try {
+    const dir = join(root, ".devcycle", "doctor");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "revert-candidates.json"), JSON.stringify(out, null, 2) + "\n");
+  } catch { /* QC7: the sidecar write must never abort the report */ }
+  return out;
 }
 
 // ─── The issue draft ─────────────────────────────────────────────────────────────────────────
