@@ -32,8 +32,9 @@ own header line, which the script writes. Every number in it is only as wide as 
 The report leaves exactly two lines for this playbook to fill, and they are the only two it may
 replace: `<!-- devcycle:highlights -->` takes the Highlights prose, `<!-- devcycle:findings -->`
 the ranked findings and the systemic recommendations. Change nothing else in the rendered
-document, apart from the one placeholder line under `## Previously promoted — did it hold`, which
-states its own rule; every other heading, gloss, table and caveat carries through byte for byte.
+document: every other heading, gloss, table and caveat — including the whole
+`## Previously promoted — did it hold` section, now rendered end to end by the verification engine —
+carries through byte for byte.
 
 ## Interpret, don't transcribe
 
@@ -73,21 +74,27 @@ report's culprit table renders from.
 cause and propose one structural fix per cluster — consolidating playbooks, extracting a shared
 reference — rather than only patching each finding individually.
 
-**Previously promoted — did it hold.** The report's own section of that name is rendered from the
-recurrence section of the latest `.devcycle/dreaming/<date>-dream.md` artifact, written by
-`${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`'s own `--check-recurrence` step, never
-by this run — this playbook reads that artifact and never invokes that loop, so it stays runnable
-standalone and pays none of the mining cost. Each hit is its own finding, ranked like everything
-above: a reappearance means the promotion did not fix the pattern, not a reason to re-promote it.
+**Previously promoted — did it hold.** The report's own section of that name is rendered by the
+shared verification engine directly from the run-record journal, never from a dream artifact and
+never by re-running the mining loop — so this playbook stays runnable standalone and pays none of
+the mining cost. The engine scores each promotion and the section carries one line per scored
+promotion — `<culprit-id> (<rung>): <verdict>` — with its verdict one of: `held` (runs observed,
+no recurrence), `recurred` (the pattern came back), `unmeasurable` (zero runs observed, never read
+as `held`), or `broken` (an r3 check that now fails). Each `recurred` hit is its own finding,
+ranked like everything above: a reappearance means the promotion did not fix the pattern, not a
+reason to re-promote it. With nothing scored yet, the section renders the single line
+`_No promoted lesson has been measured against a run yet._`.
 
-- Render the artifact's `capped` value alongside the hits: past 100 sessions truncation is the
-  normal case, so a capped run's empty appendix is a possibly-incomplete answer, not a clean
-  bill of health.
-- No hits and the artifact's `Profile:` line reads `standard` or `thorough` → render the section
-  present-but-empty. `Profile: lean` → the recurrence check never ran, so render it
-  **empty-not-checked**; doctor resolves no profile of its own, it only renders the distinction
-  the artifact already carries.
-- No artifact at all → delete the section, heading and all.
+- Beneath the verdicts come the `resolved-in` lines — `<culprit-id>: resolved in <version> —
+  <verdict>` — one per culprit whose vocabulary entry claims a `resolved-in` version, verdict
+  `unmeasurable` until the installed version reaches that mark and a run is observed against it.
+- A `recurred` r2 culprit also renders an escalation entry point in the same section —
+  `Actionability — /devcycle:cycle re-address <culprit-id> (recurred N×; escalate from r2)` — and,
+  being its own finding, its `/devcycle:cycle` entry point is also offered through the Actionability
+  menu below.
+- The report run also writes the cost-driven revert sidecar `.devcycle/doctor/revert-candidates.json`
+  (same-profile, stage-scoped; the undo is an edit, never `git revert`) that the learning loop's
+  Confirm step reads — a promotion whose own profile-and-stage cost regressed after it landed.
 
 ## Persisted artifact
 
@@ -106,6 +113,11 @@ acting on, offer one batched `AskUserQuestion` (multi-select), letting the user 
 - **get a `/devcycle:cycle` entry point** — a one-line request string handed back for the user
   to run themselves. This run never invokes `/devcycle:cycle` itself: an entry point that
   chains onward takes the selection decision away from the user.
+
+A `recurred` r2 escalation candidate from the scoreboard is itself one of these findings: its
+`/devcycle:cycle` entry point re-addresses the culprit the promotion failed to fix, the same
+escalation the scoreboard already rendered inline as an `Actionability — /devcycle:cycle re-address`
+line.
 
 Always include an explicit "just the overview, no action" choice in the same batch — the
 follow-up is itself skippable, never a forced gate on finishing the command.

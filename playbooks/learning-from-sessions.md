@@ -176,9 +176,20 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
    **The edit cannot land unresolved**: either the user approves the eviction or the landing is
    deferred.
 6. **Surface any retirement or revert candidates** raised since the last run, proposed exactly like
-   fresh candidates. Both render empty until Phase 4 raises them, except the section-cap eviction
-   above, which raises its own. A revert proposes an *edit*, never `git revert`: recorded `commit:`
-   shas predate squash-merging and often do not resolve on the integration branch.
+   fresh candidates — this runs live. A **retirement** candidate is a `held` r1/r2 lesson past 10
+   runs or 90 days; it proposes deleting the line and writing a **retirement** lifecycle record. A
+   **revert** candidate, read from `.devcycle/doctor/revert-candidates.json`, proposes the undo
+   *edit* and a **revert** lifecycle record — never `git revert`, since recorded `commit:` shas
+   predate squash-merging and often do not resolve on the integration branch. Both carry the
+   prior-lifecycle hint: a lifecycle record surfaces here as advice, never a hard suppression (the
+   D-5 hint pattern), so re-proposing a retired or reverted lesson stays a human call.
+
+   The rendered report's summary carries an `Always-loaded budget: <n> bytes (within budget)` line —
+   the net bytes this run adds to the always-loaded surfaces — which reads `over budget — a same-run
+   retirement is required` once growth crosses the aggregate ceiling. `--render-report` refuses that
+   over-ceiling run outright unless the same run also reclaims room, printing `dream: always-loaded
+   budget exceeded — this run adds <n> net bytes, past the <ceiling>-byte ceiling; retire a lesson
+   in the same run to make room` to stderr and exiting non-zero, with no report written.
 
 If the engine errors, times out, or leaves its corpus unreadable, report that and continue with raw
 1:1 memory-entry batching: mining never blocks landing, and its failure is never silently swallowed.
