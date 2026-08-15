@@ -1430,12 +1430,22 @@ test("criterion 3: suppression is an id lookup", () => {
 });
 
 test("criterion 4: a legacy record produces a hint, never a suppression", () => {
+  // Seeded into a temp corpus rather than read from this repo's own promotions store: that
+  // store is per-repo output state (gitignored, absent on CI), so a test that scanned it would
+  // pass locally and fail on a fresh checkout. A legacy record carries a title and
+  // cluster-signature but no culprit-id.
+  const root = repo();
   const title = "Brace-group the chained evidence commands before redirecting";
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-05-brace-group.md"),
+    `# ${title}\n- promotion-type: doc-edit\n` +
+    "- cluster-signature: bare chained evidence command redirect drops earlier output\n" +
+    "- files-touched: references/evidence.md\n- landed: 2026-08-05\n- commit: 87dec97\n");
   assert.deepEqual(
-    JSON.parse(run(["--check-suppressed", "friction:bare-chained-redirect"], REPO_ROOT).stdout),
+    JSON.parse(run(["--check-suppressed", "friction:bare-chained-redirect"], root).stdout),
     { suppressed: false },
   );
-  const hints = JSON.parse(run(["--legacy-similar", title], REPO_ROOT).stdout).hints;
+  const hints = JSON.parse(run(["--legacy-similar", title], root).stdout).hints;
   assert.ok(hints.length >= 1, "the legacy record with that title is hinted");
   assert.ok(hints.every((h) => h.path.startsWith("docs/devcycle/promotions/")));
 });
