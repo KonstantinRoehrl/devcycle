@@ -158,3 +158,15 @@ not clean up `main`: the individual commits stay out of the merge base, so those
 absent from `main` and need their own PR against it. And no ref-range on `dev` can tell you
 what is unreleased — `main..dev` reports long-shipped work as new — which is why the release
 notes come from the PR title rather than from a commit range.
+
+### Watching a fix past release: the maintainer-cohort check
+
+`doctor.mjs` tells one user whether a `resolved-in:` fix held for *their* own runs, but no local
+journal sees whether it held fleet-wide. After a `resolved-in:` release ships, watch
+`gh issue list --label culprit:<slug> --label from-doctor` for that culprit-id: if new issues
+keep arriving post-release, the fix did not hold across the userbase even though it may show
+`held` in an individual doctor report.
+
+This is a maintainer habit, not a script. Automating it would need issue-tracker credentials no
+local run has, and would be one more surface to keep honest for a signal only a human should
+weigh.
