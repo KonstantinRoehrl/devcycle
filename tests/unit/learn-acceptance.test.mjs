@@ -183,13 +183,18 @@ test("acceptance (C, module-level per R-T9-a): resolved-in recurs once installed
   assert.equal(held.resolvedIn[0].verdict, "held");
 });
 
-// (D) The revert sidecar — correctly EMPTY (Ruling R-T9-c). Driving the doctor over the fixture
-// world produces .devcycle/doctor/revert-candidates.json; over this fixture no same-profile
-// stage-scoped economic regression exists, so candidates is empty — proving the sidecar is
-// produced and never a profile-mix false fire.
+// (D) The revert sidecar — correctly EMPTY (Ruling R-T9-c). A report run writes
+// .devcycle/doctor/revert-candidates.json as a by-product; this asserts the CLI produces it with
+// the right shape and no candidates. The doctor is driven over a committed transcript fixture via
+// an explicit --dir, so the run is hermetic — it never reads the developer's real ~/.claude/projects
+// (absent on CI). That fixture carries a single version-less session, so it forms no comparable cost
+// cohort and no regression can fire; the regression and no-false-fire logic itself is covered
+// against constructed cohorts in doctor-report.test.mjs.
 test("acceptance (D, per R-T9-c): the doctor revert sidecar is produced and correctly empty over the fixture", () => {
   const { root, env } = world();
-  const res = spawnSync(process.execPath, [DOCTOR], { cwd: root, encoding: "utf8", env: { ...process.env, ...env } });
+  const projects = new URL("../fixtures/learn/doctor-projects/", import.meta.url).pathname;
+  const res = spawnSync(process.execPath, [DOCTOR, "--dir", projects],
+    { cwd: root, encoding: "utf8", env: { ...process.env, ...env } });
   assert.equal(res.status, 0, res.stderr);
   const sidecar = JSON.parse(readFileSync(join(root, ".devcycle", "doctor", "revert-candidates.json"), "utf8"));
   assert.equal(typeof sidecar.generatedAt, "string");
