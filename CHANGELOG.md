@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.0 — 2026-08-15
+
+- feat(learn): add the cross-session learning loop with verification and lifecycle
+
 ## 0.12.0 — 2026-08-07
 
 - feat(surface): collapse to seven commands and rename audit, dream and distill
