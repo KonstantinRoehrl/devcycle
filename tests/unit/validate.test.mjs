@@ -1019,3 +1019,134 @@ test("changelog dates: a heading date that is not a real calendar date fails", (
   writeInto(dir, "CHANGELOG.md", "# Changelog\n\n## 1.0.0 — 2026-02-30\n\n- feat(x): a thing\n");
   assert.notEqual(runValidate(dir).status, 0);
 });
+
+// --- check 20: a read-only-mandate agent must disclaim commit and push ---
+// An agent whose frontmatter grants Bash and whose body claims read-only access must name
+// both "commit" and "push" among the git operations it disallows — Bash itself is not
+// restricted by the harness, so the prose is the only thing standing between the mandate
+// and a write that sticks.
+
+const readOnlyAgent = (dir, name, body) =>
+  writeInto(dir, `agents/${name}.md`, `---\nname: ${name}\ntools: Read, Grep, Glob, Bash\n---\n\n${body}`);
+
+test("read-only mandate check: an agent naming both commit and push passes", () => {
+  const dir = makePluginFixture();
+  readOnlyAgent(
+    dir,
+    "example-reviewer",
+    "Your access is read-only: never a route to commit, and never a route to push.\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("read-only mandate check: an agent naming commit but not push fails, naming file and word", () => {
+  const dir = makePluginFixture();
+  readOnlyAgent(dir, "example-reviewer", "Your access is read-only: never a route to committing.\n");
+  failsWith(runValidate(dir), /agents\/example-reviewer\.md/, /push/);
+});
+
+test("read-only mandate check: an agent with no Bash tool is exempt regardless of its prose", () => {
+  const dir = makePluginFixture();
+  writeInto(
+    dir,
+    "agents/example-reviewer.md",
+    "---\nname: example-reviewer\ntools: Read, Grep, Glob\n---\n\nYour access is read-only.\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("read-only mandate check: an agent with Bash that never claims read-only access is exempt", () => {
+  const dir = makePluginFixture();
+  readOnlyAgent(dir, "example-implementer", "You may write files, run commands, and commit.\n");
+  ok(runValidate(dir));
+});
+
+// --- check 21: a checkout's persist-credentials: false followed by a later `git push` in the
+// same job must show re-authentication evidence in between (a checkout that drops the push
+// credential and a push with no replacement credential fails at push time, or worse, someone
+// "fixes" it by dropping persist-credentials: false instead) ---
+
+const workflow = (dir, name, body) => writeInto(dir, `.github/workflows/${name}.yml`, body);
+
+test("workflow re-auth check: persist-credentials: false then a bare git push with no re-auth evidence fails, naming file and job", () => {
+  const dir = makePluginFixture();
+  workflow(
+    dir,
+    "bad",
+    "name: Bad workflow\n" +
+      "on: push\n" +
+      "jobs:\n" +
+      "  bad-job:\n" +
+      "    runs-on: ubuntu-24.04\n" +
+      "    steps:\n" +
+      "      - uses: actions/checkout@abc123\n" +
+      "        with:\n" +
+      "          persist-credentials: false\n" +
+      "      - name: Push without re-auth\n" +
+      "        run: |\n" +
+      "          git push origin main\n"
+  );
+  failsWith(runValidate(dir), /\.github\/workflows\/bad\.yml/, /bad-job/);
+});
+
+test("workflow re-auth check: a git remote set-url before the push passes", () => {
+  const dir = makePluginFixture();
+  workflow(
+    dir,
+    "good",
+    "name: Good workflow\n" +
+      "on: push\n" +
+      "jobs:\n" +
+      "  good-job:\n" +
+      "    runs-on: ubuntu-24.04\n" +
+      "    steps:\n" +
+      "      - uses: actions/checkout@abc123\n" +
+      "        with:\n" +
+      "          persist-credentials: false\n" +
+      "      - name: Push with re-auth\n" +
+      "        env:\n" +
+      "          GH_TOKEN: ${{ github.token }}\n" +
+      "        run: |\n" +
+      "          git remote set-url origin https://x-access-token:$GH_TOKEN@github.com/example/example.git\n" +
+      "          git push origin main\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("workflow re-auth check: persist-credentials: false with no push in the job passes", () => {
+  const dir = makePluginFixture();
+  workflow(
+    dir,
+    "read-only",
+    "name: Read-only workflow\n" +
+      "on: push\n" +
+      "jobs:\n" +
+      "  read-only-job:\n" +
+      "    runs-on: ubuntu-24.04\n" +
+      "    steps:\n" +
+      "      - uses: actions/checkout@abc123\n" +
+      "        with:\n" +
+      "          persist-credentials: false\n" +
+      "      - name: Just read things\n" +
+      "        run: node scripts/validate.mjs\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("workflow re-auth check: a bare git push with no persist-credentials: false anywhere in the job passes", () => {
+  const dir = makePluginFixture();
+  workflow(
+    dir,
+    "default-creds",
+    "name: Default credentials workflow\n" +
+      "on: push\n" +
+      "jobs:\n" +
+      "  default-creds-job:\n" +
+      "    runs-on: ubuntu-24.04\n" +
+      "    steps:\n" +
+      "      - uses: actions/checkout@abc123\n" +
+      "      - name: Push with the default checkout credential\n" +
+      "        run: git push origin main\n"
+  );
+  ok(runValidate(dir));
+});

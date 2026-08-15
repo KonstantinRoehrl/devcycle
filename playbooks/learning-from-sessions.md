@@ -165,8 +165,9 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
    - **fault** — `repo` (the repo's own defect) or `pipeline` (devcycle's own). A pipeline-fault
      candidate never lands locally: render it as a D4 issue draft and file it only on per-item
      consent.
-   - **scope**, for repo-fault candidates only — `repo-devs` (committed to
-     `docs/devcycle/lessons.md`) or `just-me` (the user's own store). Decide by the skill-placement
+   - **scope**, for repo-fault candidates only — `repo-devs` (written to `docs/devcycle/lessons.md`
+     — local output state, gitignored like `.devcycle/` and never committed, since it regenerates
+     from that repo's own sessions) or `just-me` (the user's own store). Decide by the skill-placement
      test: if the lesson still reads correctly with every repo-specific noun replaced by "the
      project", it is also mirrored to the user's global store.
    - A `legacyDuplicateOf` hint is shown to the user as a hint and never acted on automatically.
@@ -215,14 +216,17 @@ see them.
 
 Then, per adopted candidate:
 
-1. **Apply the edit** and commit it scoped per
-   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit". Any playbook file
+1. **Apply the edit.** An r1/r3 edit lands in tracked plugin/repo source and is committed, scoped per
+   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit" — any playbook file
    touched here is checked first against `tests/unit/golden-path.test.mjs`, `scripts/validate.mjs`,
-   `scripts/redaction-check.mjs`, and `scripts/duplication-check.mjs`.
-2. **Record the promotion** once that commit lands: write the JSON (`title`, `promotionType`,
-   `clusterSignature`, `filesTouched`, `landed`, `commit`, `pluginVersion`, `sourcedFromMemory`,
-   plus `culpritId`, `rung`, `audience`, `verify` and `aliases`) to a scratch file and pass it with
-   the double-quoted `$(cat …)` form, never inline single quotes:
+   `scripts/redaction-check.mjs`, and `scripts/duplication-check.mjs`. An r2 edit lands in
+   `docs/devcycle/lessons.md` — gitignored local output, like `.devcycle/` — and is only written,
+   never committed; its promotion record below carries no `commit` sha.
+2. **Record the promotion**, for an r1/r3 edit once that commit lands, for an r2 edit once the write
+   completes: write the JSON (`title`, `promotionType`, `clusterSignature`, `filesTouched`, `landed`,
+   `commit` (empty for r2), `pluginVersion`, `sourcedFromMemory`, plus `culpritId`, `rung`,
+   `audience`, `verify` and `aliases`) to a scratch file and pass it with the double-quoted
+   `$(cat …)` form, never inline single quotes:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --record-promotion "$(cat <scratch-file>)"`.
 3. **Delete the source memory once its promotion lands, and only if it has one.**
 
