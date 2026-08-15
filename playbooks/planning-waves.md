@@ -105,6 +105,8 @@ fixing what it finds inline as you go; no re-review pass.
 5. **No count-only enumeration:** never cite an enumeration by count alone ("all four guardrails");
    one that more than one task reproduces belongs in Global Constraints, verbatim in every brief.
 6. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
+7. **Pasted-code lint:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/lint-plan-code-blocks.mjs"` over the
+   plan just written and fix any JS/mjs code block it flags before a task brief carries it forward.
 
 ## The three per-task declaration lines
 
