@@ -9,3 +9,8 @@ docs/superpowers*
 docs/overhaul/
 graphify-out/
 docs/block-e-instrumentation/
+# The learn loop's per-repo output store — promotion records and the compiled
+# lessons.md are local state (like .devcycle/), regenerated from each repo's own
+# sessions. Ship only the synthetic fixtures under tests/fixtures/learn/.
+docs/devcycle/promotions/
+docs/devcycle/lessons.md
