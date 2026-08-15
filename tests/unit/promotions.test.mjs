@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  promoDir, readPromotions, recordPromotion, validatePromotion,
+  promoDir, readPromotions, recordPromotion, recordLifecycle, validatePromotion,
   suppressedByCulpritId, legacySimilar, novelSlugs,
 } from "../../scripts/promotions.mjs";
 
@@ -187,4 +187,28 @@ test("a malformed culprit-id is rejected", () => {
     }, { repoRoot: root }),
     /invalid culprit-id/,
   );
+});
+
+test("recordLifecycle writes a retirement record readPromotions tags", () => {
+  const root = mkdtempSync(join(tmpdir(), "life-"));
+  mkdirSync(join(root, "docs", "devcycle", "promotions"), { recursive: true });
+  const path = recordLifecycle(root, {
+    title: "Flaky retry masks a real dependency-order bug",
+    lifecycle: "retirement", culpritId: "friction:flaky-test-retry", rung: "r2",
+    landed: "2026-05-01", at: "2026-08-15", pluginVersion: "0.14.0",
+    reason: "held 12 runs over 106 days",
+  });
+  assert.ok(path.endsWith("-retired.md"));
+  const recs = readPromotions(root);
+  const life = recs.find((r) => r.lifecycle === "retirement");
+  assert.equal(life.culpritId, "friction:flaky-test-retry");
+  assert.equal(life.rung, "r2");
+  assert.equal(life.at, "2026-08-15");
+});
+
+test("validatePromotion rejects an unknown lifecycle value", () => {
+  assert.throws(() => validatePromotion({
+    title: "x", lifecycle: "deleted", culpritId: "friction:x", rung: "r2",
+    landed: "2026-05-01", at: "2026-08-15",
+  }));
 });

@@ -1097,8 +1097,14 @@ function installDoctor(changelog) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "doctor-install-")));
   mkdirSync(join(dir, "scripts"), { recursive: true });
   // promotions.mjs travels with it: doctor.mjs imports readPromotions from it to name what each
-  // version shipped, so a copy without it cannot be loaded at all.
-  for (const name of ["doctor.mjs", "pricing.mjs", "promotions.mjs"])
+  // version shipped, so a copy without it cannot be loaded at all. This list is doctor.mjs's whole
+  // load-time import closure — a copy missing any of it cannot be loaded, so --drift would report a
+  // module-not-found stack rather than the doctor: diagnostic these tests pin. doctor → verification
+  // → {journal → run-record, semver}, plus pricing and promotions.
+  for (const name of [
+    "doctor.mjs", "pricing.mjs", "promotions.mjs",
+    "verification.mjs", "journal.mjs", "semver.mjs", "run-record.mjs",
+  ])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
   if (changelog !== null) {
     mkdirSync(join(dir, "references"), { recursive: true });

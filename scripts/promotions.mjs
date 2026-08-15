@@ -28,6 +28,7 @@ const isValidCalendarDate = (s) =>
 
 const RUNGS = ["r0", "r1", "r2", "r3"];
 const CULPRIT_ID_RE = /^[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$/;
+export const LIFECYCLE = ["retirement", "revert"];
 
 // An r3 lesson's whole claim is "a check exists and is green", so a verify: that resolves to
 // nothing makes the strongest rung the least verifiable one. Rejected at WRITE time, not at read
@@ -48,6 +49,22 @@ function validateVerify(rec, repoRoot) {
 }
 
 export function validatePromotion(rec, { repoRoot } = {}) {
+  // A lifecycle record (retirement/revert) is not a landing — it shares the culprit-id/rung/date
+  // shape with a promotion record but carries none of the promotion-specific fields, so it is
+  // validated and returned on its own branch rather than falling through to the checks below.
+  if (rec.lifecycle != null) {
+    if (!LIFECYCLE.includes(rec.lifecycle))
+      throw new Error(`invalid lifecycle "${rec.lifecycle}" — must be one of: ${LIFECYCLE.join(", ")}`);
+    if (!CULPRIT_ID_RE.test(rec.culpritId ?? ""))
+      throw new Error(`invalid culprit-id "${rec.culpritId}" — must be <kind>:<slug>, lowercase kebab-case`);
+    if (!RUNGS.includes(rec.rung))
+      throw new Error(`invalid rung "${rec.rung}" — must be one of: ${RUNGS.join(", ")}`);
+    if (!isValidCalendarDate(rec.landed ?? ""))
+      throw new Error(`invalid landed date "${rec.landed}" — must be a real YYYY-MM-DD calendar date`);
+    if (!isValidCalendarDate(rec.at ?? ""))
+      throw new Error(`invalid at date "${rec.at}" — must be a real YYYY-MM-DD calendar date`);
+    return;
+  }
   if (!PROMOTION_TYPES.has(rec.promotionType))
     throw new Error(`invalid promotionType "${rec.promotionType}" — must be one of: ${[...PROMOTION_TYPES].join(", ")}`);
   if (!isValidCalendarDate(rec.landed ?? ""))
@@ -92,6 +109,27 @@ export function recordPromotion(repoRoot, rec) {
   return path;
 }
 
+export function recordLifecycle(repoRoot, rec) {
+  validatePromotion(rec); // shares the lifecycle branch above
+  mkdirSync(promoDir(repoRoot), { recursive: true });
+  const suffix = rec.lifecycle === "revert" ? "reverted" : "retired";
+  const slug = rec.culpritId.split(":").pop();
+  const file = join(promoDir(repoRoot), `${rec.at}-${slug}-${suffix}.md`);
+  const lines = [
+    `# ${oneLine(rec.title)}`,
+    `- lifecycle: ${rec.lifecycle}`,
+    `- culprit-id: ${rec.culpritId}`,
+    `- rung: ${rec.rung}`,
+    `- landed: ${rec.landed}`,
+    `- at: ${rec.at}`,
+    `- plugin-version: ${rec.pluginVersion ?? ""}`,
+    ...(rec.lifecycle === "revert" ? [`- reverts-commit: ${rec.revertsCommit ?? ""}`] : []),
+    `- reason: ${rec.reason ?? ""}`,
+  ];
+  writeFileSync(file, lines.join("\n") + "\n");
+  return file;
+}
+
 export function readPromotions(repoRoot) {
   const dir = promoDir(repoRoot);
   if (!existsSync(dir)) return [];
@@ -117,6 +155,9 @@ export function readPromotions(repoRoot) {
         aliases: field(text, "aliases").split(",").map((s) => s.trim()).filter(Boolean),
         sourcedFromMemory:
           field(text, "sourced-from-memory") === "" ? null : field(text, "sourced-from-memory") === "true",
+        lifecycle: orNull("lifecycle"),
+        at: orNull("at"),
+        revertsCommit: orNull("reverts-commit"),
       };
     });
 }

@@ -1430,12 +1430,22 @@ test("criterion 3: suppression is an id lookup", () => {
 });
 
 test("criterion 4: a legacy record produces a hint, never a suppression", () => {
+  // Seeded into a temp corpus rather than read from this repo's own promotions store: that
+  // store is per-repo output state (gitignored, absent on CI), so a test that scanned it would
+  // pass locally and fail on a fresh checkout. A legacy record carries a title and
+  // cluster-signature but no culprit-id.
+  const root = repo();
   const title = "Brace-group the chained evidence commands before redirecting";
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-05-brace-group.md"),
+    `# ${title}\n- promotion-type: doc-edit\n` +
+    "- cluster-signature: bare chained evidence command redirect drops earlier output\n" +
+    "- files-touched: references/evidence.md\n- landed: 2026-08-05\n- commit: 87dec97\n");
   assert.deepEqual(
-    JSON.parse(run(["--check-suppressed", "friction:bare-chained-redirect"], REPO_ROOT).stdout),
+    JSON.parse(run(["--check-suppressed", "friction:bare-chained-redirect"], root).stdout),
     { suppressed: false },
   );
-  const hints = JSON.parse(run(["--legacy-similar", title], REPO_ROOT).stdout).hints;
+  const hints = JSON.parse(run(["--legacy-similar", title], root).stdout).hints;
   assert.ok(hints.length >= 1, "the legacy record with that title is hinted");
   assert.ok(hints.every((h) => h.path.startsWith("docs/devcycle/promotions/")));
 });
@@ -1452,7 +1462,7 @@ test("criterion 10: zero observed runs is unmeasurable, never held", () => {
     promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
   });
   const out = JSON.parse(run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir }).stdout);
-  const [r] = out.results;
+  const [r] = out.scoreboard;
   assert.equal(r.verdict, "unmeasurable");
   assert.equal(r.runsObserved, 0);
   assert.notEqual(r.verdict, "held");
@@ -1466,7 +1476,7 @@ test("--check-recurrence reports held with its run count, and recurred when the 
       { culprit: "friction:y", ts: "2026-03-01T00:00:00Z", runId: "b".repeat(16) },
     ],
   });
-  const held = JSON.parse(run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir }).stdout).results[0];
+  const held = JSON.parse(run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir }).stdout).scoreboard[0];
   assert.equal(held.verdict, "held");
   assert.equal(held.runsObserved, 2);
 
@@ -1474,7 +1484,7 @@ test("--check-recurrence reports held with its run count, and recurred when the 
     promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
     events: [{ culprit: "friction:x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
   });
-  const recurred = JSON.parse(run(["--check-recurrence"], r2, { DEVCYCLE_RUNS_DIR: d2 }).stdout).results[0];
+  const recurred = JSON.parse(run(["--check-recurrence"], r2, { DEVCYCLE_RUNS_DIR: d2 }).stdout).scoreboard[0];
   assert.equal(recurred.verdict, "recurred");
   assert.equal(recurred.recurrences, 1);
 });
@@ -1575,34 +1585,37 @@ test("--check-recurrence ignores journal events dated on or before the promotion
       { culprit: "friction:x", ts: "2026-05-01T23:00:00Z", runId: "b".repeat(16) },
     ],
   });
-  const [r] = JSON.parse(run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir }).stdout).results;
+  const [r] = JSON.parse(run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir }).stdout).scoreboard;
   assert.equal(r.verdict, "unmeasurable");
   assert.equal(r.runsObserved, 0, "runs that predate the landing are outside the window entirely");
   assert.equal(r.recurrences, 0);
-  assert.equal(r.lastRecurrence, null);
   assert.notEqual(r.verdict, "held", "a run that predates the promotion is not evidence the lesson held");
 });
 
-// The other half of the deleted pinned-shape test, against the id-keyed engine: the result
-// object's whole key set, and QC10 — a promotion's title and cluster-signature are prose, and
-// neither may reach the caller's transcript through this subcommand's stdout.
-test("--check-recurrence output matches the pinned shape and carries no record prose", () => {
+// The pinned shape against the shared engine (verification.mjs): `--check-recurrence` now emits
+// the engine's full output — `{ scoreboard, candidates, resolvedIn }`, a superset of the old
+// `{ results }` — and each scoreboard row carries the engine's own key set. QC10 still holds: a
+// promotion's title and cluster-signature are prose and neither may reach the caller's transcript.
+test("--check-recurrence output matches the pinned engine shape and carries no record prose", () => {
   const { root, runsDir } = corpusWithJournal({
     promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
     events: [{ culprit: "friction:x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
   });
   const res = run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir });
-  const [r] = JSON.parse(res.stdout).results;
-  // Seven keys, not the six the plan's contract table lists: step 5's code adds
-  // `lastRecurrence`, so the shape is pinned as the engine actually emits it.
+  const out = JSON.parse(res.stdout);
+  assert.deepEqual(Object.keys(out).sort(), ["candidates", "resolvedIn", "scoreboard"]);
+  assert.ok(Array.isArray(out.scoreboard));
+  assert.ok(out.candidates && Array.isArray(out.candidates.escalation) && Array.isArray(out.candidates.retirement));
+  assert.ok(Array.isArray(out.resolvedIn));
+
+  const [r] = out.scoreboard;
   assert.deepEqual(
     Object.keys(r).sort(),
-    ["culpritId", "landed", "lastRecurrence", "recordPath", "recurrences", "runsObserved", "verdict"],
+    ["culpritId", "detail", "recurrences", "rung", "runsObserved", "verdict"],
   );
-  assert.match(r.recordPath, /^docs\/devcycle\/promotions\/2026-01-01-.+\.md$/);
   assert.equal(r.culpritId, "friction:x");
-  assert.equal(r.landed, "2026-01-01");
-  assert.equal(r.lastRecurrence, "2026-02-01T00:00:00Z");
+  assert.equal(r.verdict, "recurred");
+  assert.equal(r.recurrences, 1);
 
   const [promo] = readPromotions(root);
   assert.equal(res.stdout.includes(promo.title), false, "a record's title is prose and must not be echoed");
@@ -1617,4 +1630,105 @@ test("the deleted prose matchers are gone from the source", () => {
   const src = readFileSync(SCRIPT, "utf8");
   assert.doesNotMatch(src, /suppressedByLandedSignature/, "the prose comparison is deleted (spec §5)");
   assert.doesNotMatch(src, /s\.normalized\.includes\(sig\)/, "raw-text recurrence matching is deleted");
+});
+
+// A lifecycle record (retirement/revert) is not a landing: --record-lifecycle writes it via the
+// promotions store's own writer and it reads back tagged `lifecycle`, carrying none of the
+// promotion-specific fields (spec §7 / Phase 4).
+test("--record-lifecycle writes a lifecycle record that reads back tagged, not as a landing", () => {
+  const root = realpathSync(repo());
+  const res = run(
+    [
+      "--record-lifecycle",
+      JSON.stringify({
+        lifecycle: "retirement",
+        title: "Retire the flaky-test-retry lesson",
+        culpritId: "friction:flaky-test-retry",
+        rung: "r2",
+        landed: "2026-01-01",
+        at: "2026-08-15",
+        reason: "held 12 runs since 2026-01-01",
+      }),
+    ],
+    root,
+  );
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout.trim(), /docs\/devcycle\/promotions\/2026-08-15-flaky-test-retry-retired\.md$/);
+
+  const records = readPromotions(root);
+  const rec = records.find((p) => p.culpritId === "friction:flaky-test-retry");
+  assert.ok(rec, "the record reads back");
+  assert.equal(rec.lifecycle, "retirement", "it is tagged as a lifecycle record");
+  assert.equal(rec.promotionType, "", "it carries none of the promotion (landing) fields");
+});
+
+test("--record-lifecycle rejects a missing record argument with a dream: error", () => {
+  const root = realpathSync(repo());
+  const res = run(["--record-lifecycle"], root);
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /dream: /);
+});
+
+// Spec §7 / QC5/QC6 (coordinator ruling): the --render-report path reports the always-loaded
+// net-byte figure and hard-gates growth past the ceiling. A run whose landed always-loaded output
+// exceeds ALWAYS_LOADED_CEILING (1200) without a same-run eviction/retirement is refused; the same
+// growth paired with an eviction passes and renders the net-byte line. Fixtures carry real bloat
+// (a >1200-byte landed line), never a vacuous zero.
+function writeBudgetFixture({ evict }) {
+  const dir = mkdtempSync(join(tmpdir(), "dream-budget-"));
+  const path = join(dir, "candidates.json");
+  writeFileSync(
+    path,
+    JSON.stringify({
+      repo: "devcycle",
+      generatedAt: "2026-08-15T00:00:00Z",
+      profile: "thorough",
+      corpus: { sessions: 3, from: "2026-08-01", to: "2026-08-15", capped: false, journalEvents: 4, journalEmpty: false },
+      checkpoint: { before: "2026-08-01T00:00:00Z", after: "2026-08-15T00:00:00Z" },
+      attribution: { vocabulary: 1, novel: 0 },
+      candidates: [
+        {
+          title: "x".repeat(1300),
+          culpritId: "friction:bloat",
+          aliases: [],
+          disposition: "landed",
+          partition: "bulk",
+          rung: "r2",
+          whyNotHigher: "digest line",
+          locations: ["docs/devcycle/lessons.md#executing-waves"],
+          fault: "repo",
+          scope: "repo-devs",
+          impact: 1.0,
+          occurrences: 2,
+          trend: "new",
+          priorOccurrences: 0,
+          evidenceSessions: 1,
+          verify: "journal-recurrence",
+          sourcedFromMemory: false,
+          sensitive: false,
+          legacyDuplicateOf: null,
+          declineReason: null,
+        },
+      ],
+      contradictions: [],
+      evictions: evict ? [{ culpritId: "friction:old-thing", section: "executing-waves", reason: "cap" }] : [],
+    }),
+  );
+  return path;
+}
+
+test("--render-report refuses always-loaded growth past the ceiling without a same-run retirement", () => {
+  const res = run(["--render-report", writeBudgetFixture({ evict: false })], REPO_ROOT);
+  assert.notEqual(res.status, 0, "an over-ceiling run with no eviction is refused");
+  assert.match(res.stderr, /dream: /);
+  assert.match(res.stderr, /1200/, "the refusal names the ceiling");
+});
+
+test("--render-report passes the same growth when it is paired with an eviction, and renders the net-byte line", () => {
+  const res = run(["--render-report", writeBudgetFixture({ evict: true })], REPO_ROOT);
+  assert.equal(res.status, 0, res.stderr);
+  const m = res.stdout.match(/^Always-loaded budget: (\d+) bytes \(within budget\)/m);
+  assert.ok(m, "the net-byte line is rendered");
+  assert.ok(Number(m[1]) > 1200, "the reported growth is real (>1200 bytes), not a vacuous zero");
+  assert.match(res.stdout, /^# Learn Report \(proposal\)/m, "the report body still renders");
 });

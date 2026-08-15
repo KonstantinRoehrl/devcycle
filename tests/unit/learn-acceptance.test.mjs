@@ -5,8 +5,10 @@ import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoSlug } from "../../scripts/run-record.mjs";
+import { verify, installedVersion } from "../../scripts/verification.mjs";
 
 const SCRIPT = new URL("../../scripts/dream.mjs", import.meta.url).pathname;
+const DOCTOR = new URL("../../scripts/doctor.mjs", import.meta.url).pathname;
 const FIXTURES = new URL("../fixtures/learn/", import.meta.url).pathname;
 
 // A whole repo, journal and lesson store on disk, driven only through the CLI.
@@ -102,14 +104,16 @@ test("criterion 9: the all-time rollup is computed from the fixture promotions d
   assert.match(out, /1 record predates `rung:` and does not bucket/);
 });
 
-test("criterion 10: a promotion with no observed runs after it landed is unmeasurable", () => {
+test("criterion 10: a journal-recurrence promotion with no observed runs after it landed is unmeasurable", () => {
   const { root, env } = world({ journal: false });
   const out = JSON.parse(cli(root, env, ["--check-recurrence"]).stdout);
-  assert.ok(out.results.length >= 1);
-  for (const r of out.results) {
-    assert.equal(r.runsObserved, 0);
-    assert.equal(r.verdict, "unmeasurable");
-  }
+  // The F1 intent is about the journal-recurrence axis: zero observed runs is never `held`. The r3
+  // `friction:redaction-unknown-flag` row is governed by the check-execution rule (a different
+  // axis) and is asserted elsewhere, so this targets the journal-recurrence row specifically.
+  const r = out.scoreboard.find((s) => s.culpritId === "friction:partial-evidence-capture");
+  assert.ok(r, "the journal-recurrence promotion is scored");
+  assert.equal(r.runsObserved, 0);
+  assert.equal(r.verdict, "unmeasurable");
 });
 
 test("criterion 11: an r3 promotion whose verify does not resolve is refused", () => {
@@ -120,6 +124,84 @@ test("criterion 11: an r3 promotion whose verify does not resolve is refused", (
     culpritId: "friction:x", rung: "r3", verify: "tests/unit/absent.test.mjs",
   })]);
   assert.notEqual(res.status, 0);
+});
+
+// ─── End-to-end acceptance (Task 9): the fixture scoreboard + three candidate classes ───────────
+// Added alongside the existing 11 criteria; criterion 10 already owns the journal:false
+// zero-runs-is-unmeasurable case, so these target the complementary verdicts.
+
+// (A) The full scoreboard over the fixture world, journal present — CLI-driven. Asserts the real
+// fixture rows non-vacuously: the r2 journal-recurrence row recurs (raising an escalation
+// candidate), and the r3 row is broken because its verify: path is absent in the temp root and so
+// is shell-exec'd and fails ({ran:true,ok:false}).
+test("acceptance (A): the fixture scoreboard recurs the r2 row, breaks the r3 row, and raises exactly the escalation candidate", () => {
+  const { root, env } = world();
+  const out = JSON.parse(cli(root, env, ["--check-recurrence"]).stdout);
+  const r2 = out.scoreboard.find((s) => s.culpritId === "friction:partial-evidence-capture");
+  assert.ok(r2, "the r2 journal-recurrence promotion is scored");
+  assert.equal(r2.verdict, "recurred");
+  assert.equal(r2.runsObserved, 2);
+  assert.equal(r2.recurrences, 2);
+  const r3 = out.scoreboard.find((s) => s.culpritId === "friction:redaction-unknown-flag");
+  assert.ok(r3, "the r3 promotion is scored");
+  assert.equal(r3.verdict, "broken");
+  assert.deepEqual(out.candidates.escalation.map((c) => c.culpritId), ["friction:partial-evidence-capture"]);
+  assert.equal(out.candidates.retirement.length, 0);
+});
+
+// (B) r3 "did-not-execute → unmeasurable" — module-level (Ruling R-T9-b). The shipped CLI cannot
+// force ran:false deterministically (defaultRunCheck shell-execs the verify: path), so this verdict
+// is asserted at the engine boundary with an injected runCheck, mirroring verification.test.mjs.
+test("acceptance (B, module-level per R-T9-b): an r3 check that did not execute is unmeasurable, never held", () => {
+  const p = [{
+    culpritId: "friction:redaction-unknown-flag", rung: "r3",
+    verify: "tests/fixtures/learn/candidates.json", landed: "2026-08-01", aliases: [], lifecycle: null,
+  }];
+  const out = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20"), runCheck: () => ({ ran: false, ok: false }) });
+  assert.equal(out.scoreboard[0].verdict, "unmeasurable");
+  assert.notEqual(out.scoreboard[0].verdict, "held");
+});
+
+// (C) The resolved-in axis — module-level (Ruling R-T9-a). The CLI cannot drive it: verify() loads
+// vocab from ${PLUGIN_ROOT}/references/culprits.json (never a fixture), the shipped vocab has no
+// resolved-in entries, and installedVersion() is 0.12.0 while shipped since ≥ 0.13.0 — so the
+// "installed ≥ resolved" side is unreachable there. The injected vocab lives at
+// tests/fixtures/learn/culprits.json (NOT wired into the CLI) and is read here.
+test("acceptance (C, module-level per R-T9-a): resolved-in recurs once installed reaches the resolving version, unmeasurable below it", () => {
+  const vocab = JSON.parse(readFileSync(join(FIXTURES, "culprits.json"), "utf8"));
+  const entry = vocab.find((e) => e && e["resolved-in"]);
+  assert.ok(entry, "the fixture vocab carries a resolved-in entry");
+  const id = `${entry.kind}:${entry.slug}`;
+  const releaseDates = new Map([[entry["resolved-in"], "2026-08-05"]]);
+  const runs = [{ event: "gate-fail", culprit: id, ts: "2026-08-10T00:00:00Z", runId: "r1" }];
+  const at = verify([], runs, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(at.resolvedIn[0].verdict, "recurred");
+  const below = verify([], runs, "0.13.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(below.resolvedIn[0].verdict, "unmeasurable");
+  const other = [{ event: "gate-fail", culprit: "friction:unrelated", ts: "2026-08-10T00:00:00Z", runId: "r1" }];
+  const held = verify([], other, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(held.resolvedIn[0].verdict, "held");
+});
+
+// (D) The revert sidecar — correctly EMPTY (Ruling R-T9-c). A report run writes
+// .devcycle/doctor/revert-candidates.json as a by-product; this asserts the CLI produces it with
+// the right shape and no candidates. The doctor is driven over a committed transcript fixture via
+// an explicit --dir, so the run is hermetic — it never reads the developer's real ~/.claude/projects
+// (absent on CI). That fixture carries a single version-less session, so it forms no comparable cost
+// cohort and no regression can fire; the regression and no-false-fire logic itself is covered
+// against constructed cohorts in doctor-report.test.mjs.
+test("acceptance (D, per R-T9-c): the doctor revert sidecar is produced and correctly empty over the fixture", () => {
+  const { root, env } = world();
+  const projects = new URL("../fixtures/learn/doctor-projects/", import.meta.url).pathname;
+  const res = spawnSync(process.execPath, [DOCTOR, "--dir", projects],
+    { cwd: root, encoding: "utf8", env: { ...process.env, ...env } });
+  assert.equal(res.status, 0, res.stderr);
+  const sidecar = JSON.parse(readFileSync(join(root, ".devcycle", "doctor", "revert-candidates.json"), "utf8"));
+  assert.equal(typeof sidecar.generatedAt, "string");
+  assert.equal(sidecar.installedVersion, installedVersion());
+  assert.ok(Array.isArray(sidecar.candidates));
+  assert.equal(sidecar.candidates.length, 0,
+    "no same-profile stage-scoped regression exists in the fixture — the sidecar must not false-fire");
 });
 
 test("criterion 5 is asserted where the merge happens, and this harness says so", () => {

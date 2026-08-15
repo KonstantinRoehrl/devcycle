@@ -11,9 +11,10 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, readRecords, inWindow } from "./doctor.mjs";
-import { journalEvents, eventsByCulprit, lastRecurrence, runsObserved } from "./journal.mjs";
-import { readPromotions, recordPromotion, suppressedByCulpritId, legacySimilar, novelSlugs } from "./promotions.mjs";
-import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES } from "./lessons.mjs";
+import { journalEvents, eventsByCulprit } from "./journal.mjs";
+import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs } from "./promotions.mjs";
+import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId } from "./lessons.mjs";
+import { verify, installedVersion } from "./verification.mjs";
 import { renderLearnReport } from "./learn-report.mjs";
 
 const CAP = 100;
@@ -446,30 +447,34 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
   };
 }
 
-// D-8, and the F1 lesson in one function: a promotion's culprit-id is matched by equality against
-// journal events dated after it landed. Three verdicts, and the third is the whole point —
-// `unmeasurable` means no run was observed at all, which is not evidence the lesson held.
-export function runCheckRecurrence({ repoRoot }) {
-  const promotions = readPromotions(repoRoot).filter((p) => p.verify === "journal-recurrence" && p.culpritId);
-  const { events } = journalEvents({ toplevel: repoRoot });
-  const results = promotions.map((p) => {
-    const after = events.filter((e) => String(e.ts).slice(0, 10) > p.landed);
-    const runs = runsObserved(after);
-    const ids = new Set([p.culpritId, ...p.aliases]);
-    const recurrences = after.filter((e) => e.culprit && ids.has(e.culprit)).length;
-    const verdict = runs === 0 ? "unmeasurable" : recurrences > 0 ? "recurred" : "held";
-    return {
-      recordPath: p.path, culpritId: p.culpritId, landed: p.landed,
-      verdict, runsObserved: runs, recurrences,
-      lastRecurrence: lastRecurrence(after, p.culpritId),
-    };
-  });
-  return { results };
-}
-
 // CLAUDE_DREAM_PROJECTS overrides the transcript root, mirroring doctor.mjs's
 // CLAUDE_DOCTOR_PROJECTS; it exists so the CLI is testable without scanning ~/.claude.
 const resolveProjectsRoot = () => process.env.CLAUDE_DREAM_PROJECTS || join(homedir(), ".claude", "projects");
+
+// Spec §7's always-loaded byte budget gates LANDED output only (QC6): the r2 digest lines and any
+// r1 always-loaded prose this run lands, minus the bytes a same-run eviction reclaims. r0/r3 are
+// not always-loaded and never count. The pinned candidate schema (QC1) carries no landed-line
+// text, so each landed always-loaded candidate is measured by the digest line it lands — the
+// `- <title> [<culpritId>]` shape lessons.md stores (`LESSON_RE`) — which is real, title-proportional
+// growth rather than a vacuous constant.
+function alwaysLoadedNetBytes(candidates, root) {
+  const landed = (candidates.candidates ?? []).filter(
+    (c) => c.disposition === "landed" && (c.rung === "r1" || c.rung === "r2"),
+  );
+  const added = landed.reduce((n, c) => n + Buffer.byteLength(`- ${c.title} [${c.culpritId}]`), 0);
+  // An eviction reclaims the exact line it removes from the capped store; read its current bytes so
+  // a run that lands one line and evicts a longer one nets negative rather than being over-counted.
+  const reclaimed = (candidates.evictions ?? []).reduce((n, e) => {
+    const line = readSection(repoStorePath(root), e.section).find((l) => lessonId(l) === e.culpritId);
+    return n + (line ? Buffer.byteLength(line) : 0);
+  }, 0);
+  return added - reclaimed;
+}
+
+// A same-run reclaim: the pinned candidate schema (QC1) has no dedicated retirement field, and an
+// eviction is exactly the removal of a landed lesson from the capped always-loaded store — the
+// concrete "made room this run" signal spec §7's gate turns on.
+const hasSameRunRetirement = (candidates) => (candidates.evictions ?? []).length > 0;
 
 function main() {
   const argv = process.argv.slice(2);
@@ -482,7 +487,7 @@ function main() {
   // than pairwise, which cost five lines per flag added.
   const SUBCOMMANDS = [
     "--plan", "--commit-checkpoint", "--check-suppressed", "--extract", "--check-observations",
-    "--record-promotion", "--check-recurrence", "--journal-events", "--legacy-similar",
+    "--record-promotion", "--record-lifecycle", "--check-recurrence", "--journal-events", "--legacy-similar",
     "--novel-slugs", "--lessons", "--render-report",
   ];
   const present = SUBCOMMANDS.filter((f) => argv.includes(f));
@@ -558,6 +563,21 @@ function main() {
     return;
   }
 
+  // A retirement/revert is written through the promotions store's own lifecycle writer, which tags
+  // it so it never reads back as a landing. Mirrors --record-promotion's guard/parse/print style.
+  const lifecycleIdx = argv.indexOf("--record-lifecycle");
+  if (lifecycleIdx !== -1) {
+    try {
+      const arg = argv[lifecycleIdx + 1];
+      if (!arg) throw new Error("--record-lifecycle requires a JSON record argument");
+      console.log(recordLifecycle(root, JSON.parse(arg)));
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
   // Gives readObservations a real caller: the Map dispatch verifies the slice it just wrote
   // via this subcommand rather than the skill re-reading the file itself ("the skill invokes
   // the CLI, not the module"). Reports pass/fail only — never the records themselves, which
@@ -575,9 +595,19 @@ function main() {
     return;
   }
 
+  // The shared verification engine (scripts/verification.mjs) is the one owner of the recurrence
+  // math — this prints its full output: `{ scoreboard, candidates, resolvedIn }`. The engine's 2nd
+  // argument is the events ARRAY (it does `journalEvents.filter(...)`), and the installed version is
+  // the running plugin's own manifest, never an env var.
   if (hasCheckRecurrence) {
     try {
-      console.log(JSON.stringify(runCheckRecurrence({ repoRoot: root }), null, 2));
+      console.log(
+        JSON.stringify(
+          verify(readPromotions(root), journalEvents({ toplevel: root }).events, installedVersion(), { root }),
+          null,
+          2,
+        ),
+      );
     } catch (e) {
       console.error(`dream: ${e.message}`);
       process.exit(1);
@@ -660,8 +690,19 @@ function main() {
       const path = argv[renderIdx + 1];
       if (!path) throw new Error("--render-report requires a candidate file path");
       const candidates = JSON.parse(readFileSync(path, "utf8"));
+      const budget = budgetStatus(alwaysLoadedNetBytes(candidates, root), hasSameRunRetirement(candidates));
+      // Spec §7's hard gate: refuse growth past the always-loaded ceiling unless this run also
+      // reclaims room (a same-run eviction/retirement). The report is never even written for a
+      // refused run — the byte figure and the ceiling are named so the caller can act.
+      if (!budget.withinBudget) {
+        console.error(
+          `dream: always-loaded budget exceeded — this run adds ${budget.netBytes} net bytes, past the ` +
+            `${ALWAYS_LOADED_CEILING}-byte ceiling; retire a lesson in the same run to make room`,
+        );
+        process.exit(1);
+      }
       process.stdout.write(renderLearnReport({
-        candidates, promotions: readPromotions(root), outcome: argv.includes("--outcome"),
+        candidates, promotions: readPromotions(root), outcome: argv.includes("--outcome"), budget,
       }));
     } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
     return;
@@ -669,6 +710,7 @@ function main() {
 
   console.error(
     "usage: dream.mjs --plan | --extract <session-id> | --commit-checkpoint <iso> | --record-promotion <json> | " +
+      "--record-lifecycle <json> | " +
       "--check-recurrence | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
       "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --lessons <stage> | " +
       "--render-report <candidates.json> [--outcome]",

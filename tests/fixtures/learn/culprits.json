@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "friction",
+    "slug": "flaky-test-retry",
+    "since": "0.13.0",
+    "resolved-in": "0.14.0"
+  }
+]

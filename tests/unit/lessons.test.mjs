@@ -6,6 +6,7 @@ import { join, dirname } from "node:path";
 import {
   SECTION_CAP, STAGES, repoStorePath, userRepoStorePath, userGlobalStorePath,
   readSection, renderLessons, planLanding, applyLanding,
+  ALWAYS_LOADED_CEILING, budgetStatus,
 } from "../../scripts/lessons.mjs";
 import { readFileSync } from "node:fs";
 
@@ -129,4 +130,15 @@ test("the user store paths sit under the learnings root, mirroring the runs stor
   assert.match(userRepoStorePath("/tmp/fake-repo"), /^\/tmp\/learnings\/fake-repo-[0-9a-f]{8}\/lessons\.md$/);
   assert.equal(userGlobalStorePath(), "/tmp/learnings/global/lessons.md");
   assert.match(repoStorePath("/tmp/fake-repo"), /\/tmp\/fake-repo\/docs\/devcycle\/lessons\.md$/);
+});
+
+// Spec §7: the always-loaded byte budget refuses growth past the aggregate ceiling unless the
+// same run retires a lesson to make room. A net-byte count over the ceiling is within budget only
+// when a retirement accompanies it.
+test("budgetStatus refuses over-ceiling growth without a same-run retirement", () => {
+  const over = ALWAYS_LOADED_CEILING + 1;
+  assert.equal(budgetStatus(over, false).withinBudget, false);
+  assert.equal(budgetStatus(over, true).withinBudget, true);
+  assert.equal(budgetStatus(ALWAYS_LOADED_CEILING, false).withinBudget, true,
+    "net exactly at the ceiling still fits");
 });

@@ -160,3 +160,31 @@ test("the sensitive flag renders for both a landed and a declined candidate", ()
   assert.match(out, /Brief omitted the evidence class.*· sensitive: no/,
     "the declined line carries the flag too, since sensitivity applies regardless of disposition");
 });
+
+// Phase 4: a retirement lifecycle record un-hardwires the r2→retired median and the retired
+// count — the rollup times the transition from the real (at − landed) day-delta and counts it.
+test("allTimeRollup times r2->retired from lifecycle records", () => {
+  const roll = allTimeRollup([
+    { rung: "r2", lifecycle: null, sourcedFromMemory: false, culpritId: "friction:a", landed: "2026-05-01" },
+    { rung: "r2", lifecycle: "retirement", culpritId: "friction:a", landed: "2026-05-01", at: "2026-08-15" },
+  ]);
+  assert.equal(roll.byRung.r2.retired, 1);
+  assert.equal(roll.transitions.r2retired, 106);
+});
+
+// Phase 4: the verify() candidate shape and the byte-budget line render into the report.
+test("renderLearnReport renders verify candidates and the always-loaded budget line", () => {
+  const verification = {
+    scoreboard: [],
+    candidates: {
+      escalation: [{ culpritId: "friction:a", rung: "r2", reason: "recurred 3×" }],
+      retirement: [{ culpritId: "friction:b", rung: "r2", reason: "held 6 runs since 2026-01-01" }],
+    },
+    resolvedIn: [],
+  };
+  const budget = { netBytes: 320, withinBudget: true };
+  const out = renderLearnReport({ candidates: CANDIDATES, promotions: PROMOTIONS, verification, budget });
+  assert.match(out, /`friction:a` \(r2\) — recurred 3×/);
+  assert.match(out, /`friction:b` \(r2\) — held 6 runs since 2026-01-01/);
+  assert.match(out, /^Always-loaded budget: 320 bytes/m);
+});

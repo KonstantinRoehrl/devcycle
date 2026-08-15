@@ -11,9 +11,10 @@ import { join } from "node:path";
 import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
-  parseDraftedMarkers, releaseDates, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
-  renderReport, repoShape, issueBody, issueDraftLines, parseArgs,
+  parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
+  renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates,
 } from "../../scripts/doctor.mjs";
+import { verify, releaseDates } from "../../scripts/verification.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
@@ -606,30 +607,59 @@ test("gh answering with JSON that is not a list of issues renders unavailable, n
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("compiled knowledge renders no rows and says why, rather than throwing", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-promotions-"));
-  try {
-    writeFileSync(join(dir, "2026-08-05-a-promotion.md"),
-      "# A promotion\n- promotion-type: doc-edit\n- cluster-signature: sig\n- files-touched: x.md\n- landed: 2026-08-05\n- commit: abc1234\n");
-    const ck = compiledKnowledge(dir);
-    assert.deepEqual(ck.rows, []);
-    assert.match(ck.note, /rung/);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test("compiled knowledge on a missing promotions directory renders the same no-data state", () => {
-  const ck = compiledKnowledge(join(tmpdir(), "doctor-promotions-absent-xyz"));
+test("compiled knowledge renders no rows and says why when no record carries a rung", () => {
+  // A promotion parsed by readPromotions but predating rung: is a record with rung === null — it
+  // contributes no row, and the note still names what fills the table in.
+  const ck = compiledKnowledge([
+    { culpritId: null, rung: null, pluginVersion: "0.12.0", lifecycle: null },
+  ]);
   assert.deepEqual(ck.rows, []);
   assert.match(ck.note, /rung/);
 });
 
+test("compiled knowledge on no promotions renders the same no-data state", () => {
+  const ck = compiledKnowledge([]);
+  assert.deepEqual(ck.rows, []);
+  assert.match(ck.note, /rung/);
+});
+
+test("compiled knowledge groups landed lessons by version and rung, excluding retired records", () => {
+  const ck = compiledKnowledge([
+    { culpritId: "friction:a", rung: "r2", pluginVersion: "0.12.0", lifecycle: null },
+    { culpritId: "friction:b", rung: "r2", pluginVersion: "0.12.0", lifecycle: null },
+    { culpritId: "friction:c", rung: "r3", pluginVersion: "0.12.0", lifecycle: null },
+    // A retired lesson is a lifecycle record: counted as retired, never as a standing lesson.
+    { culpritId: "friction:a", rung: "r2", pluginVersion: "0.12.0", lifecycle: "retirement", landed: "2026-07-01", at: "2026-08-10" },
+  ]);
+  const r2 = ck.rows.find((r) => r.rung === "r2");
+  assert.equal(r2.version, "0.12.0");
+  assert.equal(r2.lessons, 2);
+  assert.ok(ck.rows.some((r) => r.rung === "r3" && r.lessons === 1));
+});
+
 // --- the markdown report ---
+
+// A real fixture promotions set + journal, run through the shared verification engine so the
+// "Previously promoted" section renders engine output rather than a mock. r2 recurred (escalates),
+// r1 held, r2 unmeasurable (no run after it landed), r3 broken (a verify command that exits
+// non-zero) — one of each of the four verdict words the section renders.
+const PROMOTED_PROMOTIONS = [
+  { culpritId: "friction:recurred-one", rung: "r2", landed: "2026-07-01", lifecycle: null, aliases: [] },
+  { culpritId: "friction:held-one", rung: "r1", landed: "2026-07-01", lifecycle: null, aliases: [] },
+  { culpritId: "friction:unmeasured-one", rung: "r2", landed: "2026-08-20", lifecycle: null, aliases: [] },
+  { culpritId: "friction:broken-one", rung: "r3", verify: "false", landed: "2026-07-01", lifecycle: null, aliases: [] },
+];
+const PROMOTED_JOURNAL = [
+  { event: "gate-fail", culprit: "friction:recurred-one", ts: "2026-07-15T10:00:00.000Z", runId: "run-1" },
+];
+const PROMOTED_VERIFICATION = verify(PROMOTED_PROMOTIONS, PROMOTED_JOURNAL, "0.14.0");
 
 const ctx = (over = {}) => ({
   repo: "devcycle", today: "2026-08-13", scope: "every devcycle-tagged session",
   previousSummaries: null, vocab: VOCAB, promotions: [],
   outerLoop: { drafted: 0, draftedSince: "0.13.0", filed: "unavailable", resolved: "unavailable", medianTurnaroundDays: "unavailable" },
   compiledKnowledge: { rows: [], note: "No data yet — this table fills in from the release that records `rung:` on promotion records." },
+  verification: PROMOTED_VERIFICATION,
   ...over,
 });
 
@@ -1204,4 +1234,74 @@ test("the playbook's consent path keeps both gates and files a runnable command"
     "the filing step creates a label on the upstream, which needs push access: a filer who is " +
       "not a collaborator gets HTTP 403 and the run halts with nothing filed",
   );
+});
+
+// --- the "Previously promoted — did it hold" section renders the verification engine ---
+
+// The section between its own heading and the next one — so a verdict word matched here cannot
+// have leaked in from a different section.
+const promotedSection = (out) =>
+  out.slice(out.indexOf("## Previously promoted — did it hold"), out.indexOf("## Outer loop"));
+
+test("the previously-promoted section renders every verdict word from the engine scoreboard", () => {
+  const section = promotedSection(renderReport([sum()], ctx()));
+  for (const verdict of ["held", "recurred", "unmeasurable", "broken"])
+    assert.match(section, new RegExp(`\\b${verdict}\\b`), `verdict "${verdict}" is not rendered`);
+  assert.match(section, /friction:recurred-one/);
+});
+
+test("a recurred r2 promotion reaches the Actionability menu as a /devcycle:cycle entry point", () => {
+  const out = renderReport([sum()], ctx());
+  const line = out.split("\n").find((l) => l.includes("/devcycle:cycle") && l.includes("friction:recurred-one"));
+  assert.ok(line, "no /devcycle:cycle entry point names the recurred culprit");
+});
+
+test("a corpus with nothing measured yet renders the section without throwing", () => {
+  const section = promotedSection(renderReport([sum()], ctx({
+    verification: { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] },
+  })));
+  assert.match(section, /## Previously promoted — did it hold/);
+});
+
+// --- revert candidates: cost-driven, same-profile, stage-scoped, written as a sidecar ---
+
+test("revertCandidates emits a same-profile stage-scoped regression with the sidecar fields", () => {
+  const root = mkdtempSync(join(tmpdir(), "doctor-revert-"));
+  try {
+    const summaries = [
+      sum({ id: "o1", pluginVersion: "0.11.0", profile: "thorough", costByStage: { execution: 5 } }),
+      sum({ id: "o2", pluginVersion: "0.11.0", profile: "thorough", costByStage: { execution: 5 } }),
+      sum({ id: "n1", pluginVersion: "0.12.0", profile: "thorough", costByStage: { execution: 20 } }),
+      sum({ id: "n2", pluginVersion: "0.12.0", profile: "thorough", costByStage: { execution: 20 } }),
+    ];
+    const promotions = [
+      { culpritId: "friction:regressor", rung: "r2", pluginVersion: "0.12.0", commit: "abc1234", lifecycle: null },
+    ];
+    const result = revertCandidates(summaries, promotions, { root });
+    const c = result.candidates[0];
+    assert.equal(c.culpritId, "friction:regressor");
+    assert.equal(c.rung, "r2");
+    assert.equal(c.profile, "thorough");
+    assert.equal(c.stage, "execution");
+    assert.ok(c.deltaPct < 0, "a regression is a negative deltaPct");
+    // The sidecar is written to the pinned path under the given root, in the same shape.
+    const written = JSON.parse(readFileSync(join(root, ".devcycle", "doctor", "revert-candidates.json"), "utf8"));
+    assert.equal(written.candidates[0].culpritId, "friction:regressor");
+    assert.ok("generatedAt" in written && "installedVersion" in written);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("revertCandidates never fires on a profile-mix shift — the regression is compared within one profile", () => {
+  const root = mkdtempSync(join(tmpdir(), "doctor-revert-mix-"));
+  try {
+    // The dearer newer cohort is a different profile: same-profile scoping means no candidate.
+    const summaries = [
+      sum({ id: "o1", pluginVersion: "0.11.0", profile: "lean", costByStage: { execution: 5 } }),
+      sum({ id: "n1", pluginVersion: "0.12.0", profile: "thorough", costByStage: { execution: 20 } }),
+    ];
+    const promotions = [
+      { culpritId: "friction:regressor", rung: "r2", pluginVersion: "0.12.0", commit: "abc1234", lifecycle: null },
+    ];
+    assert.deepEqual(revertCandidates(summaries, promotions, { root }).candidates, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
