@@ -3,6 +3,7 @@
 // markdown fences, and cross-references between the plugin's own surface files.
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { SEMVER_RE, cmpSemver } from "./semver.mjs";
 
 const DESCRIPTION_BUDGET_TOTAL = 6000; // chars; source: docs/platform-notes.md
 const root = process.cwd();
@@ -445,11 +446,6 @@ const CULPRIT_KINDS = new Set([
   "friction", "correction", "rule-violation", "decision", "contradiction", "win",
 ]);
 const CULPRIT_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+){0,5}$/;
-const SEMVER_RE = /^\d+\.\d+\.\d+$/;
-const cmpSemver = (a, b) => {
-  const [A, B] = [a.split(".").map(Number), b.split(".").map(Number)];
-  return A[0] - B[0] || A[1] - B[1] || A[2] - B[2];
-};
 if (!existsSync(culpritsPath)) {
   fail("references/culprits.json: missing — the culprit vocabulary is part of the shipped surface");
 } else {
