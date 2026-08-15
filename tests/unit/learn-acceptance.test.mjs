@@ -102,14 +102,16 @@ test("criterion 9: the all-time rollup is computed from the fixture promotions d
   assert.match(out, /1 record predates `rung:` and does not bucket/);
 });
 
-test("criterion 10: a promotion with no observed runs after it landed is unmeasurable", () => {
+test("criterion 10: a journal-recurrence promotion with no observed runs after it landed is unmeasurable", () => {
   const { root, env } = world({ journal: false });
   const out = JSON.parse(cli(root, env, ["--check-recurrence"]).stdout);
-  assert.ok(out.results.length >= 1);
-  for (const r of out.results) {
-    assert.equal(r.runsObserved, 0);
-    assert.equal(r.verdict, "unmeasurable");
-  }
+  // The F1 intent is about the journal-recurrence axis: zero observed runs is never `held`. The r3
+  // `friction:redaction-unknown-flag` row is governed by the check-execution rule (a different
+  // axis) and is asserted elsewhere, so this targets the journal-recurrence row specifically.
+  const r = out.scoreboard.find((s) => s.culpritId === "friction:partial-evidence-capture");
+  assert.ok(r, "the journal-recurrence promotion is scored");
+  assert.equal(r.runsObserved, 0);
+  assert.equal(r.verdict, "unmeasurable");
 });
 
 test("criterion 11: an r3 promotion whose verify does not resolve is refused", () => {
