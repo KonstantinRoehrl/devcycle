@@ -676,5 +676,61 @@ if (existsSync(changelogPath)) {
   }
 }
 
+// 20. A "read-only-mandate" agent — its frontmatter grants Bash, and its body prose asserts
+//     read-only access even though Bash itself is not actually restricted by the harness — must
+//     name both "commit" and "push" among the git operations it disclaims. Naming only one
+//     (as agents/task-reviewer.md once did, "committing" with no "push") leaves the prose
+//     silent on the one write a Bash-wielding "read-only" agent could actually make stick.
+const READ_ONLY_RE = /read[- ]only/i;
+for (const f of namesIn("agents")) {
+  const path = join(root, "agents", f);
+  const tools = frontmatter(path)?.tools ?? "";
+  if (!/\bBash\b/.test(tools)) continue;
+  const body = readFileSync(path, "utf8");
+  if (!READ_ONLY_RE.test(body)) continue;
+  const lower = body.toLowerCase();
+  const missing = ["commit", "push"].filter((w) => !lower.includes(w));
+  if (missing.length)
+    fail(`agents/${f}: grants Bash and claims read-only access but never names ${missing.join(" or ")} among the disallowed git operations`);
+}
+
+// 21. A job that checks out with `persist-credentials: false` and later runs `git push` must
+//     show re-authentication evidence in between (`git remote set-url`, or a token env var like
+//     GH_TOKEN/GITHUB_TOKEN) — persist-credentials: false deliberately drops the checkout's push
+//     credential, so a push after it with no replacement credential fails at push time, or worse,
+//     invites "fixing" it by dropping persist-credentials: false instead. Text-based, not a YAML
+//     parse: this repo's own workflow YAML is flat enough that job bodies are delimited by their
+//     2-space-indented name lines under `jobs:`.
+const workflowsDir = join(root, ".github/workflows");
+const REAUTH_RE = /git remote set-url|\bGH_TOKEN\b|\bGITHUB_TOKEN\b|\b[A-Z][A-Z0-9]*_TOKEN\b/;
+if (existsSync(workflowsDir))
+  for (const f of readdirSync(workflowsDir)) {
+    if (!/\.ya?ml$/.test(f)) continue;
+    const text = readFileSync(join(workflowsDir, f), "utf8");
+    const jobsAt = text.search(/^jobs:[ \t]*$/m);
+    if (jobsAt === -1) continue; // no jobs: section, nothing to check
+    const jobsText = text.slice(jobsAt);
+    const jobHeads = [...jobsText.matchAll(/^ {2}([A-Za-z0-9_-]+):[ \t]*$/gm)];
+    for (const [i, m] of jobHeads.entries()) {
+      const jobStart = m.index + m[0].length;
+      const jobEnd = i + 1 < jobHeads.length ? jobHeads[i + 1].index : jobsText.length;
+      const jobText = jobsText.slice(jobStart, jobEnd);
+      const credAt = jobText.search(/persist-credentials:\s*false/);
+      if (credAt === -1) continue;
+      // Only a hazard when the persist-credentials: false belongs to a checkout step — a
+      // detached occurrence elsewhere in the job (there is none in practice, but the text scan
+      // cannot otherwise tell) would be a false positive.
+      if (jobText.lastIndexOf("actions/checkout", credAt) === -1) continue;
+      for (const push of jobText.matchAll(/git push\b/g)) {
+        if (push.index <= credAt) continue; // only a push AFTER the checkout is the hazard
+        if (!REAUTH_RE.test(jobText.slice(credAt, push.index)))
+          fail(
+            `.github/workflows/${f}: job "${m[1]}" checks out with persist-credentials: false and later runs ` +
+              `git push with no re-authentication evidence (e.g. git remote set-url, or a *_TOKEN env var) in between`
+          );
+      }
+    }
+  }
+
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
 console.log("validate: ok");

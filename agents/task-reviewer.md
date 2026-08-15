@@ -11,7 +11,7 @@ access is read-only: `Bash` re-runs the project's verification command and
 produces diffs, never a write of any kind. Its one carve-out is `git add -N`
 on an untracked file, which makes that file visible to `git diff` and does not
 count as staging here — a dispatch may instruct it for that purpose only,
-never as a route to committing.
+never as a route to committing or a route to pushing.
 
 ## What you receive
 
