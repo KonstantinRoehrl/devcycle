@@ -5,6 +5,142 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-12 — the routing table is not runtime surface
+
+`references/routing.md` moved to `docs/routing.md`. Measured before the move: zero surface files
+cite it, and its only consumer is `scripts/validate.mjs` check 6, which reads it as a data table.
+Nothing loads it at runtime, so counting its 35 lines against a budget that measures prose an agent
+reads at runtime overstated that budget. This is a classification correction, not a way to fit under
+the ceiling: the line budget's own baseline is unchanged by this move (see the same day's ratchet
+entry).
+
+## 2026-08-12 — /devcycle:continue stays a separate command
+
+The v8 learning-overhaul input (D7) proposes folding `continue` into `cycle`, reaching a five-verb
+surface: no arguments resumes, a request starts a new cycle. Declined during Phase 5's design. Two
+commands state the difference between resuming an existing cycle and starting a new one at the point
+of invocation, where an argument-shape rule states it only after the fact. The duplication the fold
+would have removed — two stage→playbook tables — is removed directly instead, by giving
+`references/resume.md` the single table both commands cite. D7's "7 → 5 verbs" target is dropped with
+it: reaching five also required removing `onboard`, which D7 never specifies.
+
+## 2026-08-12 — Surface budget raised to 3,620, to admit `references/impact-scoring.md`
+
+**Decision:** `SURFACE_LINE_BUDGET` moves from **3,550 to 3,620**. `COMMAND_LINE_MAX` (104) and
+`PLAYBOOK_LINE_MAX` (154) are deliberately left unchanged — this raise concerns only the total.
+
+**Why:** Wave 4 of the learning-overhaul-phase-1 plan adds `references/impact-scoring.md`, a
+single-owner impact-scoring definition doctor.mjs depends on (learning-from-sessions.md gains its
+own citation in a later phase, not this one). Before it landed the surface stood at 3,532 lines —
+18 lines of headroom under the 3,550 budget set 2026-08-11 — not enough to absorb the new file
+without either compacting elsewhere or raising the budget. The 2026-08-11 entry's own precedent (a
+3-line reflow, at no cost) does not scale here: reclaiming enough lines would mean cutting real
+content across files no single task owns, the outcome the budget exists to prevent rather than the
+trade it exists to force.
+
+**Measured:** the runtime surface stands at **3,585** lines at this tip; 3,620 leaves 35 lines of
+headroom for the plan's remaining phases.
+
+**Supersedes:** The 3,550 total set 2026-08-11 (below). The 3,500 total set 2026-08-06 (`:127`)
+and the per-file ceilings it named are unaffected.
+
+## 2026-08-11 — Surface budget raised to 3,550; the "do not raise" ruling superseded
+
+`SURFACE_LINE_BUDGET` moves from **3,500 to 3,550**; `COMMAND_LINE_MAX` from 100 to 104;
+`PLAYBOOK_LINE_MAX` from 150 to 154. This supersedes the standing prohibition recorded during
+cycle 2's original execution (`.devcycle/briefs/4.md:41`, `28.md:65`: "Do not raise
+`SURFACE_LINE_BUDGET`"; `.devcycle/ledger.md`, 2026-08-07T18:09:34Z: "the binding cycle-1 ruling
+against relitigating it was not disturbed") — a deliberate, user-confirmed reversal, not an
+oversight.
+
+**Why now, and why not another descope instead.** Branch-review round 1 found the run-record
+write sequencing does not work as shipped and required a redesign (spec §10), which reopens two
+items this cycle had already deferred once for budget reasons: the ledger's compact run-record
+table and the finish-stage privacy screen (§10.6, §10.8 — both already user-approved as shipping
+this cycle, not deferred again). Between them and three smaller prose sites (mint reordering,
+session-line instructions, dispatch/verdict resequencing), the real need is ~35–45 lines against
+14 lines of headroom. A dedicated compression pass across the ten highest-content surface files
+(`config.md`, `quality-criteria.md`, `delegation.md`, `reviewing-the-branch.md`,
+`scoping-the-request.md`, `profiling-sessions.md`, `resume.md`, `handoff.md`, `evidence.md`,
+`finishing-the-cycle.md`) found exactly 2 safe lines, both in `config.md` — restated rationale,
+applied in this same change. This is the same finding the 2026-08-06 entry already made for the
+same root cause ("two independent reviewers established the residual is not cuttable without
+behaviour loss") — hitting it a second time in the same cycle is a signal about this codebase's
+prose density, not a one-off. Deferring the two already-approved items again was offered to the
+user as an alternative and declined, since it would reopen decisions made after their approval of
+spec §10.
+
+**Measured:** surface moved from 3,486 to **3,485** after the config.md compression, before this plan's remaining tasks land; against the new 3,550 budget that leaves **65** lines of headroom for Tasks 38–42 below.
+
+## 2026-08-11 — E2 (Node version pinning) re-enters the plan; corrects a silent drop
+
+Task 22 (`.nvmrc` + `actions/setup-node`, per spec §5.3) was planned into Wave 1 of the original
+block-E plan, moved to Wave 3 by an in-session patch, marked "never dispatched," and then never
+re-entered. `.devcycle/ledger.md:142` (Wave 3 formation, 2026-08-07) incorrectly records it as
+carrying `event=committed` — no dispatch, report, verdict, or commit event for task 22 exists
+anywhere in that ledger. Branch-review round 1 caught this (`.devcycle/ledger.md`,
+2026-08-08T09:55:00Z). This entry is the decision record §10.7 requires: the ledger's historical
+lines are not edited (append-only), but this task genuinely lands now, closing the gap.
+
+## 2026-08-11 — `.gitignore`'s third entry, recorded
+
+`docs/block-e-instrumentation/` (`.gitignore:11`) was added during this cycle's execution
+(`.devcycle/state.md`'s Wave 7 rulings: "a per-cycle working artifact lives only on this machine,
+consistent with A45 and `.gitignore:6`'s `docs/superpowers*`," applied by Task 34, `399f20c`) but
+never got its own `docs/DECISIONS.md` entry, unlike G1's two — round 1 flagged the gap
+(`.devcycle/ledger.md`, 2026-08-08T09:55:00Z). This entry closes it: the addition stands, for the
+same reason G1's two do — a per-cycle on-device checklist directory is exactly the class of
+working artifact G1 already established should not be committed.
+
+## 2026-08-11 — `session.firstSeen`/`lastSeen` dropped; `validate.mjs`'s new schema-vs-surface
+rule scoped to `run` and `session` kinds only
+
+**Decision:** `tests/fixtures/run-record.schema.json`'s `session` sub-schema drops
+`firstSeen`/`lastSeen` from both `properties` and `required` (and the golden fixture's `session`
+line drops the matching keys) — the same class of removal Task 36 already made for
+`dispatch.toolCalls`, `stage.path`, and `dispatch.agentId`. Separately, `scripts/validate.mjs`
+check 13's new rule 2 (the schema-vs-surface cross-check added by Task 37, "the schema declares
+no field the writing instructions cannot produce") is scoped to iterate only the `run` and
+`session` kinds, not all six.
+**Why:** `firstSeen`/`lastSeen` are produced and consumed by nothing anywhere in the codebase —
+confirmed by grepping `scripts/` and every counted-surface file, same dead-field class as Task
+36's three. Rule 2's mechanism — grepping surface prose for a literal `--<flag>` naming a schema
+field — structurally cannot pass for `stage`, `dispatch`, `verdict`, or `commit`: this codebase
+documents those kinds' writing instructions conceptually (e.g. "with the task id and sha"), never
+as literal CLI invocations, confirmed live at `references/handoff.md:27` and the dispatch/
+verdict/commit sites in `playbooks/executing-waves.md`. Applying rule 2 to those four kinds would
+fail against any amount of real, correct surface prose, which is not a defect the rule should
+report. `run` and `session` are different: their writing instructions genuinely are literal CLI
+documentation (the mint and session-append sites Tasks 38/39 own), so rule 2's literal-flag check
+is meaningful there. The other four kinds keep their existing protection at the kind level —
+check 13's pre-existing "every declared kind must be exercised by the golden fixture" check,
+unchanged — just not per field.
+**Supersedes:** Nothing reversed for the kind-level check (unchanged); this narrows Task 37's own
+rule 2 before it ever shipped un-scoped, and extends Task 36's dead-field-removal precedent to a
+fourth field pair found during Task 37's real-tree verification.
+
+## 2026-08-08 — Surface accounting after cycle 2 (block E)
+
+`SURFACE_LINE_BUDGET = 3500` stands. The surface moved from **3,407** (v0.12.0, 36 files) to
+**3,486** across 39 files, leaving **14** lines of headroom.
+
+**The plan's own projection was wrong, and that is the entry's point.** Planning estimated ~+64 net
+for the whole cycle, landing near 3,471. Wave 1 alone spent +67; measured after it, the surface
+stood at **3,474 — 26 lines of headroom** against a remaining need of **~+92**. Three tasks were
+cut to fit and are deferred to cycle 3: the ledger's run-record section (+33), the on-device
+three-path resolution (+32), and the finish stage's local privacy screen (+17). A ~2-line stub kept
+`agents/on-device-driver.md` dispatched rather than orphaned. **The lesson is to re-measure the
+surface at every wave boundary, not once at planning.**
+
+The binding constraint was never the aggregate alone. `commands/cycle.md` sat at exactly
+`COMMAND_LINE_MAX` and ends at exactly 100; `playbooks/executing-waves.md` was 2 lines under
+`PLAYBOOK_LINE_MAX` and ends at exactly 150; `playbooks/reviewing-the-branch.md` had 1. What fit,
+fit because the run record is written by `scripts/run-record.mjs` — scripts are not counted surface,
+so each instruction site costs about one line (the call) rather than a field-by-field specification
+in prose. A future block adding runtime prose to any of those three files must pay for it with a cut
+in the same file; the aggregate headroom does not help there, and cycle 3 starts with ~+82 of
+deferred surface already owed.
+
 ## 2026-08-06 — the runtime surface budget is 3,500 lines, not 2,600
 
 **Decision:** `scripts/validate.mjs` enforces `SURFACE_LINE_BUDGET = 3500` across
@@ -42,7 +178,7 @@ twelve plain `playbooks/*.md` files with no frontmatter — two pairs merge on t
 `finishing-the-cycle`, `onboarding-a-repo`, `planning-waves`, `reviewing-code`,
 `reviewing-the-branch`, `scoping-interview`, `sweeping-mechanical-changes`,
 `verifying-on-device`. What remains listed to a user or a model is seven commands, and
-`references/routing.md` is their single owner. `scripts/validate.mjs` fails the build when a
+`docs/routing.md` is their single owner. `scripts/validate.mjs` fails the build when a
 `devcycle:` id names a playbook, when a command is missing from the routing table, or when a
 command's declared consequence disagrees with its `disable-model-invocation` frontmatter.
 **Why:** a skill is selected by its `description`, which made every stage's prose reachable by
@@ -87,7 +223,7 @@ two-tier disposition is affected.
 
 **Decision:** `DESIGN.md` §4 amendment 4 — entry points cannot auto-fire, except `/cycle`
 deliberately — stands unchanged in substance and stops being the place the rule lives. Each
-command now declares a `consequence` class in `references/routing.md`: `read-only` (must not
+command now declares a `consequence` class in `docs/routing.md`: `read-only` (must not
 carry `disable-model-invocation`), `confirm-first` (may write, but takes no irreversible action
 before its first user confirmation), `side-effectful` and `resume` (both must carry the guard).
 `scripts/validate.mjs` fails the build on any disagreement between a row and a command's real
@@ -106,7 +242,7 @@ nothing else before its first confirmation, it creates no branch and makes no co
 surfaces a state-file collision rather than overwriting one. A reviewer can now test that
 claim against the command; before, they could only find the sentence granting the exception.
 **Supersedes:** amendment 4 as the rule's *owner* — it is now the record of why the exception
-was granted. `references/routing.md` owns which commands may be model-invoked, and nothing
+was granted. `docs/routing.md` owns which commands may be model-invoked, and nothing
 else restates it.
 
 ## 2026-08-06 — the line budget counts what enters a context window, not directories

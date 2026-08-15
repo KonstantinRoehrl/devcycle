@@ -3,6 +3,7 @@
 // markdown fences, and cross-references between the plugin's own surface files.
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { SEMVER_RE, cmpSemver } from "./semver.mjs";
 
 const DESCRIPTION_BUDGET_TOTAL = 6000; // chars; source: docs/platform-notes.md
 const root = process.cwd();
@@ -110,8 +111,14 @@ for (const p of surface) {
 
   // 3. Every devcycle:<name> must resolve to an agent or a command. Playbooks are addressed
   //    by path (check 4), never by a devcycle: id — naming one here means someone tried to
-  //    invoke stage logic as if it were a user-facing skill.
-  for (const [, , name] of text.matchAll(/(^|[^A-Za-z0-9_-])devcycle:([a-z0-9][a-z0-9-]*)/g)) {
+  //    invoke stage logic as if it were a user-facing skill. Only from this check, an HTML
+  //    comment whose entire body is a bare devcycle:<name> anchor is exempt: it is a splice
+  //    anchor a script renders into its output, not an invocation, and
+  //    playbooks/profiling-sessions.md must state both of doctor.mjs's anchors verbatim because
+  //    it owns the splice rule. A devcycle:<name> mentioned inside a longer comment is not a
+  //    splice anchor and is still checked. Every other check still reads the whole text.
+  const outsideComments = text.replace(/<!--\s*devcycle:[a-z0-9][a-z0-9-]*\s*-->/g, "");
+  for (const [, , name] of outsideComments.matchAll(/(^|[^A-Za-z0-9_-])devcycle:([a-z0-9][a-z0-9-]*)/g)) {
     if (existsSync(join(root, `playbooks/${name}.md`)))
       once(`ref:${name}`, `${rel(p)}: devcycle:${name} names a playbook — reference it as \${CLAUDE_PLUGIN_ROOT}/playbooks/${name}.md`);
     else if (![`agents/${name}.md`, `commands/${name}.md`].some((c) => existsSync(join(root, c))))
@@ -145,13 +152,13 @@ if (existsSync(join(root, "playbooks")))
 
 // 6. Every command appears exactly once in the routing table, and its declared consequence
 //    agrees with its disable-model-invocation frontmatter.
-const routingPath = join(root, "references/routing.md");
-if (!existsSync(routingPath)) fail("references/routing.md: missing (the routing table has no owner)");
+const routingPath = join(root, "docs/routing.md");
+if (!existsSync(routingPath)) fail("docs/routing.md: missing (the routing table has no owner)");
 else if (existsSync(join(root, "commands"))) {
   const routing = readFileSync(routingPath, "utf8");
   const rows = new Map();
   for (const [, name, consequence] of routing.matchAll(/^\|[^|]*\|\s*`([a-z-]+)`\s*\|\s*([a-z-]+)\s*\|/gm)) {
-    if (rows.has(name)) fail(`references/routing.md: ${name} appears more than once`);
+    if (rows.has(name)) fail(`docs/routing.md: ${name} appears more than once`);
     rows.set(name, consequence);
   }
   const GUARD_REQUIRED = new Set(["side-effectful", "resume"]);
@@ -169,7 +176,7 @@ else if (existsSync(join(root, "commands"))) {
   for (const f of readdirSync(join(root, "commands"))) {
     if (!f.endsWith(".md")) continue;
     const name = f.replace(/\.md$/, "");
-    if (!rows.has(name)) { fail(`commands/${f}: missing from the routing table in references/routing.md`); continue; }
+    if (!rows.has(name)) { fail(`commands/${f}: missing from the routing table in docs/routing.md`); continue; }
     const consequence = rows.get(name);
     const guarded = frontmatter(join(root, "commands", f))?.["disable-model-invocation"] === "true";
     if (GUARD_REQUIRED.has(consequence) && !guarded)
@@ -177,11 +184,11 @@ else if (existsSync(join(root, "commands"))) {
     if (consequence === "read-only" && guarded)
       fail(`commands/${f}: consequence "read-only" forbids disable-model-invocation`);
     if (consequence === "confirm-first" && !justifies(name))
-      fail(`references/routing.md: \`${name}\` is confirm-first but names no justification — the exception class requires one inline`);
+      fail(`docs/routing.md: \`${name}\` is confirm-first but names no justification — the exception class requires one inline`);
   }
   for (const name of rows.keys())
     if (!existsSync(join(root, `commands/${name}.md`)))
-      fail(`references/routing.md: row "${name}" names no command`);
+      fail(`docs/routing.md: row "${name}" names no command`);
 }
 
 // 7. skills/ is not part of the surface any more.
@@ -195,7 +202,7 @@ const namesIn = (dir) =>
 // 8. Naming: commands are verbs, playbooks are gerunds, agents are role nouns.
 // No exemption list: the rule is "not a gerund", and the one recorded exception to
 // "commands are verbs" — `doctor`, on the brew/flutter/npm precedent — is a noun, so it
-// satisfies this rule on its own merits. The precedent is recorded in references/routing.md,
+// satisfies this rule on its own merits. The precedent is recorded in docs/routing.md,
 // not in code. A command that genuinely needs a gerund name gets an allowlist then, with a
 // test that exercises it.
 for (const f of namesIn("commands")) {
@@ -209,9 +216,36 @@ for (const f of namesIn("playbooks")) {
     fail(`playbooks/${f}: playbook names are gerunds ("${name}" contains no -ing word)`);
 }
 
-// 9. Line budgets, as numbers. Counted the way `wc -l` counts: a file's closing
-//    newline terminates its last line rather than starting an empty one.
-const SURFACE_LINE_BUDGET = 3500, COMMAND_LINE_MAX = 100, PLAYBOOK_LINE_MAX = 150;
+// 9. Line budgets, as numbers, read from a committed baseline rather than hardcoded here.
+//    Counted the way `wc -l` counts: a file's closing newline terminates its last line
+//    rather than starting an empty one. Growth is not forbidden — it must be a reviewed
+//    decision, so it fails unless the same commit raises the baseline.
+const BUDGET_PATH = "tests/fixtures/surface-budget.json";
+const budgetFile = join(root, BUDGET_PATH);
+//    `budgetsParsed` tracks whether a usable baseline survived, for check 14's reason: a
+//    `budgets === null` sentinel cannot tell "parse failed" from a file whose whole content
+//    legally parses to `null` — and a falsy `budgets` skips every guard below, leaving the
+//    budget unenforced at exit 0.
+let budgets, budgetsParsed = true;
+if (!existsSync(budgetFile)) {
+  fail(`${BUDGET_PATH}: missing — the line budgets have no baseline, so no growth could be reviewed`);
+  budgetsParsed = false;
+} else {
+  try {
+    budgets = JSON.parse(readFileSync(budgetFile, "utf8"));
+  } catch (e) {
+    budgetsParsed = false;
+    fail(`${BUDGET_PATH}: not valid JSON — ${e.message}`);
+  }
+  if (budgetsParsed && (typeof budgets !== "object" || budgets === null || Array.isArray(budgets))) {
+    fail(`${BUDGET_PATH}: must be a JSON object carrying the line budgets, got ${JSON.stringify(budgets)}`);
+    budgetsParsed = false;
+  }
+}
+for (const key of ["surfaceTotal", "commandMax", "playbookMax"]) {
+  if (budgetsParsed && !Number.isInteger(budgets[key]))
+    fail(`${BUDGET_PATH}: ${key} must be an integer, got ${JSON.stringify(budgets[key])}`);
+}
 const lines = (p) => {
   const text = readFileSync(p, "utf8");
   return text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
@@ -220,11 +254,16 @@ let surfaceLines = 0;
 for (const p of surface) {
   const n = lines(p), r = rel(p);
   surfaceLines += n;
-  if (r.startsWith("commands/") && n > COMMAND_LINE_MAX) fail(`${r}: ${n} lines > ${COMMAND_LINE_MAX}`);
-  if (r.startsWith("playbooks/") && n > PLAYBOOK_LINE_MAX) fail(`${r}: ${n} lines > ${PLAYBOOK_LINE_MAX}`);
+  if (budgetsParsed && Number.isInteger(budgets.commandMax) && r.startsWith("commands/") && n > budgets.commandMax)
+    fail(`${r}: ${n} lines > ${budgets.commandMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
+  if (budgetsParsed && Number.isInteger(budgets.playbookMax) && r.startsWith("playbooks/") && n > budgets.playbookMax)
+    fail(`${r}: ${n} lines > ${budgets.playbookMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
 }
-if (surfaceLines > SURFACE_LINE_BUDGET)
-  fail(`runtime surface ${surfaceLines} lines > ${SURFACE_LINE_BUDGET} (commands+playbooks+agents+references)`);
+if (budgetsParsed && Number.isInteger(budgets.surfaceTotal) && surfaceLines > budgets.surfaceTotal)
+  fail(
+    `runtime surface ${surfaceLines} lines > baseline ${budgets.surfaceTotal} (${BUDGET_PATH}) — ` +
+      `raise the baseline in this same commit if the growth is intended; it is a reviewed decision, not a workaround`
+  );
 
 // 10. No agent pins a model — a pin defeats session-tier escalation.
 for (const f of namesIn("agents"))
@@ -232,7 +271,8 @@ for (const f of namesIn("agents"))
     fail(`agents/${f}: frontmatter must not set model: — a pin defeats session-tier escalation`);
 
 // 11. Every reference has at least one consumer — a surface file that loads it, or a
-//     script that reads it (references/routing.md's consumer is this validator's check 6).
+//     script that reads it (references/impact-scoring.md's consumer is a comment in
+//     scripts/doctor.mjs; it gains its two surface citations in Phases 2 and 3).
 //     A reference mentioning itself is not a consumer of itself.
 const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
 for (const f of namesIn("references")) {
@@ -288,6 +328,352 @@ for (const p of stateFixtures) {
   const missing = stateFields.filter((f) => !new RegExp(`^- ${f}:[ \\t]*\\S`, "m").test(text));
   if (missing.length)
     fail(`${rel(p)}: state file drifted from references/resume.md — no value for: ${missing.join(", ")}`);
+}
+
+// 13. The run record's shape is declared once, in tests/fixtures/run-record.schema.json, and
+//     exercised by a golden fixture. A declaration nothing exercises is the failure this check
+//     exists to prevent — the same reason check 12 fails on an empty subject.
+const schemaPath = join(root, "tests/fixtures/run-record.schema.json");
+const goldenPath = join(root, "tests/fixtures/run-record.golden.jsonl");
+if (existsSync(schemaPath)) {
+  if (!existsSync(goldenPath))
+    fail("tests/fixtures/run-record.schema.json: declared with no golden fixture exercising it");
+  else {
+    let schema;
+    try {
+      schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+    } catch (err) {
+      fail(`tests/fixtures/run-record.schema.json: not valid JSON — ${err.message}`);
+      schema = null;
+    }
+    const golden = readFileSync(goldenPath, "utf8").split("\n").filter(Boolean);
+    const parsed = [];
+    for (const [i, line] of golden.entries()) {
+      try {
+        parsed.push(JSON.parse(line));
+      } catch (err) {
+        fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: not valid JSON — ${err.message}`);
+      }
+    }
+    if (schema) {
+      const subs = schema.oneOf ?? [];
+      const declaredKinds = subs.map((s) => s.properties?.kind?.const).filter(Boolean);
+      const exercised = new Set(parsed.map((o) => o.kind));
+      for (const k of declaredKinds)
+        if (!exercised.has(k))
+          fail(`tests/fixtures/run-record.golden.jsonl: schema declares kind "${k}" that no golden line exercises`);
+      for (const [i, obj] of parsed.entries()) {
+        const sub = subs.find((s) => s.properties?.kind?.const === obj.kind);
+        if (!sub) {
+          fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: kind "${obj.kind}" is not declared in the schema`);
+          continue;
+        }
+        for (const req of sub.required ?? [])
+          if (!(req in obj) || obj[req] === undefined)
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: missing required field "${req}"`);
+        for (const key of Object.keys(obj)) {
+          const prop = sub.properties?.[key];
+          if (!prop) {
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: field "${key}" is not declared for kind "${obj.kind}"`);
+            continue;
+          }
+          if (prop.enum && !prop.enum.includes(obj[key]))
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" value "${obj[key]}" is not one of ${prop.enum.join(" | ")}`);
+          if (prop.const !== undefined && obj[key] !== prop.const)
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be ${JSON.stringify(prop.const)}`);
+          if (prop.pattern && !new RegExp(prop.pattern).test(String(obj[key])))
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" does not match ${prop.pattern}`);
+          if (prop.type === "integer" && !Number.isInteger(obj[key]))
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be an integer`);
+          if (typeof prop.minimum === "number" && obj[key] < prop.minimum)
+            fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be >= ${prop.minimum}`);
+        }
+      }
+      for (const sub of subs) {
+        const exercisedFields = new Set(
+          parsed.filter((o) => o.kind === sub.properties?.kind?.const).flatMap((o) => Object.keys(o))
+        );
+        for (const field of Object.keys(sub.properties ?? {}))
+          if (!exercisedFields.has(field))
+            fail(`tests/fixtures/run-record.golden.jsonl: schema declares "${sub.title}.${field}" that no golden line for kind "${sub.title}" exercises`);
+      }
+
+      // Rule 2 (§10.5): the schema declares no field the writing instructions cannot produce —
+      // the same reason stage.path and dispatch.agentId were removed rather than half-wired.
+      // A field is "producible" when some counted-surface file's prose names it as a
+      // run-record.mjs append/new argument. Most fields pass through run-record.mjs's generic
+      // append loop unrenamed (camelCase flag === camelCase key), so `--<field>` is the right
+      // literal to search for — EXCEPT the cases below, verified against scripts/run-record.mjs's
+      // actual field-sourcing code (main()) rather than assumed: kebab-case `new`-subcommand
+      // flags, one explicit rename, and fields the script computes itself rather than ever
+      // reading from a flag.
+      //
+      // Scoped to "run" and "session" kinds only (2026-08-11 decision, docs/DECISIONS.md): those
+      // are the only two kinds whose writing instructions are literal CLI documentation (the
+      // mint/session-append sites) — every other kind's write instructions are documented
+      // conceptually in this codebase's prose (e.g. "with the task id and sha"), never as a
+      // literal `--flag`, so this grep-for-`--flag` rule cannot pass against that prose style no
+      // matter how complete it is. Those other kinds keep their protection at the kind level via
+      // the exercised-kind check above (existing, unchanged) rather than per field.
+      // "knobs" is no longer structurally exempt: it is produced by repeated `--knob key=value`
+      // flags, so FLAG_NAME below points it at the literal `--knob` substring (singular, not the
+      // nonexistent `--knobs`) and it is checked for real, live, every run, same as any other
+      // renamed field.
+      // "startedAt" is always computed by the script itself (`flags.startedAt ?? new
+      // Date().toISOString()...`, scripts/run-record.mjs:114) — no surface instruction ever
+      // needs to name `--started-at`.
+      const STRUCTURAL_FIELDS = new Set(["kind", "runId", "repoSlug", "schemaVersion", "startedAt"]);
+      const FLAG_NAME = { pluginVersion: "plugin-version", pluginSha: "plugin-sha", sessionHash: "sessionId", knobs: "knob" };
+      const RULE2_KINDS = new Set(["run", "session"]);
+      for (const sub of subs.filter((s) => RULE2_KINDS.has(s.properties?.kind?.const)))
+        for (const field of Object.keys(sub.properties ?? {})) {
+          if (STRUCTURAL_FIELDS.has(field)) continue; // computed by the script, never a flag
+          const flag = FLAG_NAME[field] ?? field;
+          const named = [...surface].some((p) => readFileSync(p, "utf8").includes(`--${flag}`));
+          if (!named)
+            fail(`tests/fixtures/run-record.schema.json: "${sub.title}.${field}" is declared but no surface instruction names --${flag}`);
+        }
+    }
+  }
+}
+
+// 14. The culprit vocabulary (references/culprits.json) is well-formed: sorted, unique,
+//     lowercase-hyphen slugs of at most 6 words, kinds from the enum, phases from
+//     commands/cycle.md's stage enum, semver since/resolved-in, resolved-in never earlier
+//     than since. The file is part of the shipped surface, so absence is a failure.
+const culpritsPath = join(root, "references/culprits.json");
+const CULPRIT_KINDS = new Set([
+  "friction", "correction", "rule-violation", "decision", "contradiction", "win",
+]);
+const CULPRIT_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+){0,5}$/;
+if (!existsSync(culpritsPath)) {
+  fail("references/culprits.json: missing — the culprit vocabulary is part of the shipped surface");
+} else {
+  // `parsed` tracks whether JSON.parse succeeded — it cannot be impersonated by a legitimate
+  // parse result the way a `vocab === null` sentinel can, since the file's whole content may
+  // itself legally parse to `null` (or any other non-array value).
+  let vocab, parsed = true;
+  try {
+    vocab = JSON.parse(readFileSync(culpritsPath, "utf8"));
+  } catch (e) {
+    parsed = false;
+    fail(`references/culprits.json: not valid JSON — ${e.message}`);
+  }
+  if (parsed && !Array.isArray(vocab)) {
+    fail("references/culprits.json: must be an array");
+    parsed = false;
+  }
+  if (parsed) {
+    const slugs = [];
+    for (const [i, e] of vocab.entries()) {
+      const at = `references/culprits.json[${i}]`;
+      if (typeof e !== "object" || e === null || Array.isArray(e)) {
+        fail(`${at}: entry must be an object, got ${JSON.stringify(e)}`);
+        continue;
+      }
+      for (const f of ["slug", "kind", "phase", "desc", "since"])
+        if (!(f in e)) fail(`${at}: missing "${f}"`);
+      if (typeof e.slug === "string") {
+        slugs.push(e.slug);
+        if (!CULPRIT_SLUG_RE.test(e.slug))
+          fail(`${at}: slug "${e.slug}" is not lowercase-hyphen of at most 6 words`);
+      }
+      if (!CULPRIT_KINDS.has(e.kind))
+        fail(`${at}: kind "${e.kind}" is not one of ${[...CULPRIT_KINDS].join(" | ")}`);
+      if (!Array.isArray(e.phase) || e.phase.length === 0)
+        fail(`${at}: phase must be a non-empty array`);
+      else
+        for (const p of e.phase) {
+          if (!stages.size) fail(`${at}: phase "${p}" unverifiable — no stage enum in commands/cycle.md`);
+          else if (!stages.has(p)) fail(`${at}: phase "${p}" is not in commands/cycle.md's stage enum`);
+        }
+      if (!SEMVER_RE.test(e.since ?? "")) fail(`${at}: since "${e.since}" is not semver`);
+      if ("resolved-in" in e) {
+        if (!SEMVER_RE.test(e["resolved-in"]))
+          fail(`${at}: resolved-in "${e["resolved-in"]}" is not semver`);
+        else if (SEMVER_RE.test(e.since ?? "") && cmpSemver(e["resolved-in"], e.since) < 0)
+          fail(`${at}: resolved-in ${e["resolved-in"]} precedes since ${e.since}`);
+      }
+    }
+    if (slugs.join("\n") !== [...slugs].sort().join("\n"))
+      fail("references/culprits.json: entries must be sorted by slug");
+    const dupes = [...new Set(slugs.filter((s, i) => slugs.indexOf(s) !== i))];
+    if (dupes.length) fail(`references/culprits.json: duplicate slug(s) ${dupes.join(", ")}`);
+  }
+}
+
+// 15. Per-stage context budget: a playbook's own bytes plus every reference reachable from it
+//     through ${CLAUDE_PLUGIN_ROOT} citations, against a committed baseline. Bytes, not lines:
+//     a context window is spent in bytes, and a long line costs what it costs. Growth is a
+//     reviewed decision, same rule as check 9.
+const CONTEXT_BUDGET_PATH = "tests/fixtures/context-budget.json";
+const contextFile = join(root, CONTEXT_BUDGET_PATH);
+if (!existsSync(contextFile)) {
+  fail(`${CONTEXT_BUDGET_PATH}: missing — no stage declares its context cost, so growth could not be reviewed`);
+} else {
+  // `parsed` tracks whether a usable baseline survived, for check 14's reason: a
+  // `contextBaseline === null` sentinel cannot tell "parse failed" from a file whose whole
+  // content legally parses to `null`, and the shape guard is what keeps a truthy non-object
+  // from reaching the `in` below — which throws on a primitive, killing the run before
+  // checks 17 and 18 execute at all.
+  let contextBaseline, parsed = true;
+  try {
+    contextBaseline = JSON.parse(readFileSync(contextFile, "utf8"));
+  } catch (e) {
+    parsed = false;
+    fail(`${CONTEXT_BUDGET_PATH}: not valid JSON — ${e.message}`);
+  }
+  if (parsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
+    fail(
+      `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each playbook to its byte budget, ` +
+        `got ${JSON.stringify(contextBaseline)}`
+    );
+    parsed = false;
+  }
+  if (parsed) {
+    // Citations are followed to a fixed point; `seen` makes a citation cycle terminate and
+    // counts each file exactly once, which is also what the reader's context actually pays.
+    const citationsIn = (text) =>
+      [...text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(references\/[A-Za-z0-9._-]+\.md)/g)].map((m) => m[1]);
+    const transitiveBytes = (startRel) => {
+      const seen = new Set();
+      const queue = [startRel];
+      let total = 0;
+      while (queue.length) {
+        const relPath = queue.shift();
+        if (seen.has(relPath)) continue;
+        seen.add(relPath);
+        const abs = join(root, relPath);
+        if (!existsSync(abs)) continue;
+        const text = readFileSync(abs, "utf8");
+        total += Buffer.byteLength(text);
+        queue.push(...citationsIn(text));
+      }
+      return total;
+    };
+    const playbookNames = namesIn("playbooks").map((f) => `playbooks/${f}`);
+    for (const p of playbookNames) {
+      if (!(p in contextBaseline)) {
+        fail(`${p}: no entry in ${CONTEXT_BUDGET_PATH} — a stage must declare its context budget`);
+        continue;
+      }
+      const limit = contextBaseline[p];
+      if (!Number.isInteger(limit)) {
+        fail(`${CONTEXT_BUDGET_PATH}: ${p} must be an integer, got ${JSON.stringify(limit)}`);
+        continue;
+      }
+      const bytes = transitiveBytes(p);
+      if (bytes > limit)
+        fail(
+          `${p}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, playbook plus its cited references) — ` +
+            `raise the baseline in this same commit if the growth is intended`
+        );
+    }
+    for (const p of Object.keys(contextBaseline))
+      if (!playbookNames.includes(p))
+        fail(`${CONTEXT_BUDGET_PATH}: entry "${p}" names no such playbook — remove it or restore the file`);
+  }
+}
+
+// 16. Every ${CLAUDE_PLUGIN_ROOT} citation resolves: that is check 4 above, which walks every
+//     surface file and tests every cited path against the tree, scripts included. The number is
+//     reserved here so the sequence stays readable — a second parser would report each broken
+//     citation twice, and would fail on a citation that merely ends a sentence unless it also
+//     repeated check 4's trailing-punctuation handling.
+
+// 17. The command count is a regression guard, not a target. D7 proposed collapsing seven verbs
+//     to five; that required folding `continue` into `cycle` (declined — docs/DECISIONS.md,
+//     2026-08-12) and removing `onboard` (never specified anywhere). Neither happened, so the
+//     honest ceiling is today's count and the check exists to make an eighth command deliberate.
+const COMMAND_CEILING = 7;
+const commandCount = namesIn("commands").length;
+if (commandCount > COMMAND_CEILING)
+  fail(
+    `${commandCount} commands > ${COMMAND_CEILING} — the user-facing verb count is a surface decision, ` +
+      `not a file addition; raise this ceiling deliberately or fold the new entry point into an existing one`
+  );
+
+// 18. The model-tier table (references/model-tiers.json) is well-formed: every entry names a
+//     family, an integer rank and a compilable match, ranks ascend strictly, and no family
+//     repeats. The ceiling rule in references/config.md is only as trustworthy as this ordering,
+//     and scripts/model-pool.mjs reads it verbatim.
+const TIERS_PATH_REL = "references/model-tiers.json";
+const tiersFile = join(root, TIERS_PATH_REL);
+if (!existsSync(tiersFile)) {
+  fail(`${TIERS_PATH_REL}: missing — the orchestrator ceiling has no ordering to rank against`);
+} else {
+  // `parsed` tracks whether a usable table survived, for check 14's reason: a `tierTable === null`
+  // sentinel cannot tell "parse failed" from a file whose whole content legally parses to `null`.
+  let tierTable, parsed = true;
+  try {
+    tierTable = JSON.parse(readFileSync(tiersFile, "utf8"));
+  } catch (e) {
+    parsed = false;
+    fail(`${TIERS_PATH_REL}: not valid JSON — ${e.message}`);
+  }
+  if (parsed && !Array.isArray(tierTable)) {
+    fail(`${TIERS_PATH_REL}: must be an array`);
+    parsed = false;
+  }
+  if (parsed) {
+    // An empty table is the one well-formed-looking shape the loop below cannot catch: it runs
+    // zero times, so `rank()` returns null for every id and every dispatch degrades to the
+    // session tier — policy-free, and silently so.
+    if (tierTable.length === 0)
+      fail(
+        `${TIERS_PATH_REL}: 0 entries, at least 1 required — an empty table ranks no family, so ` +
+          `every dispatch would fall back to the session tier; restore the tier entries`
+      );
+    const families = [];
+    let previousRank = null;
+    for (const [i, e] of tierTable.entries()) {
+      const at = `${TIERS_PATH_REL}[${i}]`;
+      if (typeof e?.family !== "string" || !e.family)
+        fail(`${at}: family must be a non-empty string, got ${JSON.stringify(e?.family)}`);
+      else families.push(e.family);
+      if (!Number.isInteger(e?.rank)) fail(`${at}: rank must be an integer, got ${JSON.stringify(e?.rank)}`);
+      else {
+        if (previousRank !== null && e.rank <= previousRank)
+          fail(`${at}: ranks must ascend strictly — ${e.rank} follows ${previousRank}; renumber or reorder the table so each rank exceeds the one before`);
+        previousRank = e.rank;
+      }
+      if (typeof e?.match !== "string" || !e.match)
+        fail(`${at}: match must be a non-empty string, got ${JSON.stringify(e?.match)}`);
+      else {
+        try {
+          new RegExp(e.match);
+        } catch (err) {
+          fail(`${at}: match ${JSON.stringify(e.match)} is not a valid regular expression — ${err.message}`);
+        }
+      }
+    }
+    const dupeFamilies = [...new Set(families.filter((f, i) => families.indexOf(f) !== i))];
+    if (dupeFamilies.length)
+      fail(`${TIERS_PATH_REL}: duplicate family name(s) ${dupeFamilies.join(", ")} — each family must appear exactly once, or the ranking it resolves to is ambiguous`);
+  }
+}
+
+// 19. Every CHANGELOG version heading carries its release date. Outer-loop turnaround
+//     (scripts/verification.mjs's releaseDates) measures issue createdAt against the release that
+//     resolved it, so a heading with no date silently drops that release out of the metric.
+const changelogPath = join(root, "CHANGELOG.md");
+if (existsSync(changelogPath)) {
+  const VERSION_HEADING = /^## \d+\.\d+\.\d+/;
+  const DATED_HEADING = /^## \d+\.\d+\.\d+ — (\d{4})-(\d{2})-(\d{2})[ \t]*$/;
+  for (const line of readFileSync(changelogPath, "utf8").split("\n")) {
+    if (!VERSION_HEADING.test(line)) continue;
+    const m = line.match(DATED_HEADING);
+    if (!m) {
+      fail(`CHANGELOG.md: heading "${line.trim()}" carries no release date — expected \`## <version> — YYYY-MM-DD\``);
+      continue;
+    }
+    // A real calendar date, not merely the shape: Date rolls 2026-02-30 forward to March 2
+    // rather than rejecting it, so the round-trip is the check.
+    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() + 1 !== mo || dt.getUTCDate() !== d)
+      fail(`CHANGELOG.md: heading "${line.trim()}" carries "${m[1]}-${m[2]}-${m[3]}", which is not a real calendar date`);
+  }
 }
 
 if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }

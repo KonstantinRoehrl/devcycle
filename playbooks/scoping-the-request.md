@@ -6,6 +6,8 @@ root cause is not yet established, in front of the diagnosis stage
 (`superpowers:systematic-debugging`): it settles *what is being asked*; root-cause
 hunting, design exploration, approach trade-offs, and spec writing stay downstream.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons scoping`. No store, no output.
+
 ## The target
 
 The stage ends with the most precise description of the desired end state the
@@ -50,7 +52,7 @@ Whenever scope, intent, architecture, data, or user preference is uncertain:
 **interview, never guess.**
 
 Questions go through AskUserQuestion in batches of 1–4, each with concrete options plus Other.
-Never one question per message.
+Never one question per message. A question answered via Other appends `user-correction-at-gate`; `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns the rule.
 
 1. **Research BEFORE questions.** Read the relevant code and docs first, so every
    question is informed by what the repo already shows. Never ask what the repo can

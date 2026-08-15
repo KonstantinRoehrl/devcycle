@@ -1,0 +1,57 @@
+name: Back-merge
+# After every release, `main` gets a commit `dev` does not have (the version bump lives on
+# `dev`, but the release PR is squash-merged into `main`), so this workflow opens the PR that
+# brings it back. A skipped merge is what left the 0.12.0 release PR conflicting across four
+# files, every conflict a squash artifact. The weekly schedule below catches the follow-on
+# failure the automation invites: a back-merge PR opened and then forgotten leaves `dev`
+# behind `main` just as surely as a skipped merge did.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: back-merge
+  cancel-in-progress: false
+jobs:
+  back-merge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fail if dev is behind main
+        run: |
+          set -euo pipefail
+          behind=$(git rev-list --count origin/dev..origin/main)
+          echo "dev is $behind commit(s) behind main"
+          if [ "$behind" -gt 0 ]; then
+            echo "::error::dev is $behind commit(s) behind main. Merge the back-merge PR before the next release; a release PR opened on a diverged dev conflicts on squash artifacts."
+            exit 1
+          fi
+
+      - name: Open the back-merge PR
+        if: failure() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh pr list --base dev --head main --state open --json number --jq 'length' \
+               | grep -qv '^0$'; then
+            echo "Back-merge PR already open."; exit 0
+          fi
+          if ! gh pr create --base dev --head main \
+            --title "chore: merge the release back into dev" \
+            --body "Opened automatically after a release. CONTRIBUTING.md requires main to be merged back into dev after every release; skipping it is what left the 0.12.0 release PR conflicting across four files."; then
+            echo "::error::Settings -> Actions -> General -> Allow GitHub Actions to create and approve pull requests"
+            exit 1
+          fi

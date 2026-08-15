@@ -14,7 +14,9 @@ review depth and the on-device gate by their stages).
 1. **An explicitly configured value wins, verbatim**: one that is neither a
    literal `${user_config...}` placeholder nor `auto`, and that lies inside the
    knob's allowed set. It beats the profile and any documented default, for as
-   long as it stays configured.
+   long as it stays configured. For a `*Model` knob the allowed set includes an
+   ordered, comma-separated pool of ids as well as a single id — the Model tiers
+   section below owns what a pool means.
 2. **Everything else falls back** — a literal placeholder and `auto` are unset, a
    value outside the knob's allowed set is invalid, and both take the same route.
    `auto` is sanctioned on every knob, not only the `*Model` ones: it is how a user
@@ -48,9 +50,9 @@ One form per outcome, and this is the list that decides between them:
   which asserts the opposite.
 
 The `· profile-asked` marker rides on any of the last three. **Its only producer is
-first-run configuration below** — every completion of either offer there writes it,
-whichever offer ran and whatever the answer wrote — **and its only consumer is that
-section's path 2**, which is what stops the configuration question being put twice to
+first-run configuration below** — every completion of either offer writes it — **and
+its only consumer is that section's path 2**, which is what stops the configuration
+question being put twice to
 the same user in the same repo. Nothing else on the line distinguishes a knob pinned
 by choice from one inherited from an older version.
 
@@ -66,13 +68,13 @@ by choice from one inherited from an older version.
 | evidence tail in reports | 10 lines | 20 lines | 50 lines |
 | branch-review round cap | 2 | 3 | 5 |
 | audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
-| dreaming depth | memory store only | + archives / findings / ledgers + user-correction turns | + raw transcripts |
+| learn depth | journal + memory | + archives / findings / ledgers + user-correction turns | + raw transcripts |
 
 Which column applies, and when a knob overrides it, is the resolution order above —
 this table supplies the values, not the rule for choosing them.
 
-The dreaming depth column controls how deep into the corpus a run mines, staged densest signal
-first: **memory → archives/findings/ledgers → user-correction turns → raw transcript text**.
+The learn depth column controls how deep a run mines, staged densest signal
+first: **journal → memory → archives/findings/ledgers → user-correction turns → raw transcript text**.
 Gating is by profile, never by token budget or a signal heuristic — a budget gate would make
 coverage nondeterministic and destroy the marginal-vs-first-run comparison the measurement gate
 depends on.
@@ -85,7 +87,7 @@ never fakes one and never reports a gate as passed that did not run.
 ## First-run configuration
 
 `/devcycle:cycle` runs this once per repo, after it writes the state file and before
-triage; no other command offers configuration. Nothing here is profile-conditional.
+triage; no other command offers configuration. Nothing here is profile-conditional. Every question below takes an Other answer, and none of them journals one: `user-correction-at-gate` needs a run record, and this walkthrough runs before `/devcycle:cycle` mints it — `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that condition.
 
 Read five knobs as they render in THIS text — `${user_config.profile}`,
 `${user_config.gitPolicy}`, `${user_config.reviewDepth}`,
@@ -186,10 +188,9 @@ for the reason the *adopt* answer above gives.
 Ask the four knobs in one AskUserQuestion batch — one line of meaning each, the default
 marked "(recommended)" — then write ONLY the knobs whose answer differs from the offered
 default, one `--config` per changed knob. A knob the user simply accepted at its
-"(recommended)" value is left unwritten, for the same reason the profile branch writes
-nothing but the profile: writing it would make that knob explicitly configured, and an
-explicit knob wins over the profile forever, so a later `profile: thorough` would never
-move it. If every answer matches its default, nothing is written. The four:
+"(recommended)" value is left unwritten — same rationale as the *Adopt* answer above
+(lines 142–146): writing it would make that knob explicitly configured forever. If every
+answer matches its default, nothing is written. The four:
 
 - `gitPolicy` — what the finish stage may do with the branch (`local-commits-only`
   recommended · `push-allowed` · `open-pr`).
@@ -222,8 +223,13 @@ resolves the same way:
 
 - still a literal `${user_config...}` placeholder (unset) OR the value
   `auto` → derive the model per the predicates below;
-- any other value → binding: use it verbatim for every dispatch, never
-  override or downshift it.
+- a value with no comma → a pin: use it verbatim for every dispatch, subject
+  only to the ceiling below;
+- a value with one or more commas → a **pool**: an ordered list of ids,
+  ascending by capability, position declaring order. Entries are trimmed and
+  empties dropped, so a pool that parses to one id is a pin. A pool cannot be
+  an array in the manifest — `userConfig` types are `string | number | boolean |
+  directory | file` — so the comma is the ordering, not a workaround.
 
 Derivation picks between two tiers — defined by capability, never by a
 model id written here, because ids in skill prose rot as models change:
@@ -260,10 +266,43 @@ Derivation predicates (dispatch-time-observable inputs only):
   map rather than a judgment. Session tier remains for dispatches that must
   judge: review, diagnosis, design.
 
+**The ladder.** A pool uses the same predicates as `auto`, counted rather than
+thresholded: `rung = 1 + the number of escalation signals that fired`, clamped
+to the pool's length. Zero signals is rung 1, which is why leaving a knob unset
+behaves exactly as it does today. `walkthroughModel` and `branchReviewModel`
+have no complexity predicate — both judge — so a pool on either saturates the
+ladder and resolves to its top rung, still under the ceiling below.
+
+**The ceiling.** No dispatch, by any path — `auto`, a pool, or a pin — resolves
+to a model above the orchestrator's own tier. Ordering is by family, held in
+`${CLAUDE_PLUGIN_ROOT}/references/model-tiers.json` rather than in this text, for
+the reason this section already gives about ids in prose; a newer model of a
+weaker family does not outrank an older model of a stronger one. A pick above the
+ceiling clamps to the highest entry at or below it; a pin has no lower entry to
+fall to, so a pin above the ceiling clamps to the orchestrator's own id, dispatched
+as an explicit override. Where nothing qualifies — an
+id or an orchestrator the table cannot rank, or a pool whose every rung sits above
+the orchestrator — resolution dispatches with no model override at all, the one
+form that cannot exceed the orchestrator by construction. A clamp is logged, never
+silent.
+
+`${CLAUDE_PLUGIN_ROOT}/scripts/model-pool.mjs` is this policy's single implementation:
+`parsePool`, `rungFor`, `rank` and `resolveModel` decide exactly what is written
+above — the pin, pool, ladder and ceiling arithmetic, and nothing else. The `auto`
+predicates above stay with the caller, which is why an unset knob returns `model
+session (auto)` from that module rather than a derived tier: the caller derives, the
+module only keeps the result under the ceiling. Its `outcome` return value is the
+audit string below. This text owns the policy; that module owns the arithmetic.
+
 Upstream's Model Selection tiers are background only; these predicates
 decide. Auditability: every dispatch's ledger event records the decision and
 its inputs — `outcome=model fast:<resolved id> (auto: files=3, deps=none,
 steps=specified)` or `outcome=model session (auto: escalated on files=9)` for
-derived choices, `outcome=model <id> (pinned)` for explicit config. An
+derived choices, `outcome=model <id> (pinned)` for explicit config. A pooled
+pick records `outcome=model <id> (pooled: rung <n>/<len>)`, gaining
+`, clamped from <requested-id>` when the ceiling moved it; a clamped pin records
+`outcome=model <id> (pinned, clamped from <requested-id>)`; a fall-through to no
+override records `outcome=model session (ceiling: <id> unranked)` or
+`outcome=model session (ceiling: no rung at or below <orchestrator-id>)`. An
 escalation always names the signal that fired. Research dispatches that run
 before any ledger exists log nothing; where a ledger exists, same shape.

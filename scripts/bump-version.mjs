@@ -16,6 +16,7 @@
 //   --subject <s>      the release PR title; decides the bump level and the CHANGELOG entry
 //   --dry-run          print "<level> <version>" and change nothing
 //   --notes-for <ver>  print that version's CHANGELOG section and exit (used at tag time)
+//   --date <YYYY-MM-DD>  the release date stamped on the CHANGELOG heading; defaults to today (UTC)
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -51,13 +52,24 @@ export function notesForVersion(changelog, version) {
   const escaped = String(version).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   // Deliberately no `m` flag: with it, `$` in the lookahead matches end-of-*line*, so an
   // empty section would capture the next version's heading instead of stopping empty.
-  const m = changelog.match(new RegExp(`(?:^|\\n)## ${escaped}[ \\t]*\\n([\\s\\S]*?)(?=\\n## |$)`));
+  // `(?: — \d{4}-\d{2}-\d{2})?` — the release date, added 2026-08-13 so outer-loop turnaround has
+  // a per-version date to measure against. Optional, because every heading written before that
+  // date carries none and `--notes-for` must still build a release body for those tags.
+  const m = changelog.match(
+    new RegExp(`(?:^|\\n)## ${escaped}(?: — \\d{4}-\\d{2}-\\d{2})?[ \\t]*\\n([\\s\\S]*?)(?=\\n## |$)`),
+  );
   const body = m && m[1].trim();
   return body || null;
 }
 
-export const changelogWithSection = (changelog, version, notes) =>
-  changelog.replace(/^# Changelog\n/, `# Changelog\n\n## ${version}\n\n${notes}\n`);
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export const changelogWithSection = (changelog, version, notes, date) => {
+  // Refused rather than written: a malformed date produces a heading that check 19 rejects and
+  // that releaseDates() cannot parse, and the failure would only surface at the next release.
+  if (!ISO_DATE.test(String(date))) throw new Error(`release date "${date}" is not a YYYY-MM-DD date`);
+  return changelog.replace(/^# Changelog\n/, `# Changelog\n\n## ${version} — ${date}\n\n${notes}\n`);
+};
 
 function main() {
   const argv = process.argv.slice(2);
@@ -80,6 +92,11 @@ function main() {
   if (!releasingSubjects([subject]).length)
     throw new Error(`release title "${subject}" is not a Conventional Commit`);
 
+  const dateIdx = argv.indexOf("--date");
+  // Defaults to today in UTC. The flag exists so tests pin a date instead of depending on
+  // when they run; the release workflow leaves it off and stamps the day it stages the release.
+  const date = dateIdx === -1 ? new Date().toISOString().slice(0, 10) : argv[dateIdx + 1];
+
   const level = bumpLevel([subject]);
   const plugin = JSON.parse(readFileSync(PLUGIN_PATH, "utf8"));
   const version = nextVersion(plugin.version, level);
@@ -93,7 +110,7 @@ function main() {
   writeFileSync(PLUGIN_PATH, JSON.stringify(plugin, null, 2) + "\n");
   writeFileSync(
     CHANGELOG_PATH,
-    changelogWithSection(readFileSync(CHANGELOG_PATH, "utf8"), version, `- ${subject}`),
+    changelogWithSection(readFileSync(CHANGELOG_PATH, "utf8"), version, `- ${subject}`, date),
   );
   console.log(version);
 }

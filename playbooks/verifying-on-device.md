@@ -10,6 +10,8 @@ script, a screenshot, or a code reading is an unverified completion claim
 This playbook is the on-device stage proper — walkthrough, gate, handoff — run in a fresh
 session after the branch review. Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons on-device`. No store, no output.
+
 ## Checklist source
 
 Two sources, one engine. Which one applies is settled before the walkthrough begins;
@@ -61,7 +63,12 @@ walkthrough takes the fast tier per `${CLAUDE_PLUGIN_ROOT}/references/delegation
 Interview rule: **ONE question per checklist item, never batched** — a deliberate exception to
 devcycle's batched-interview standard, because findings quality drops when items are bundled.
 Each question covers exactly one item and tells the human how to observe it (where to click,
-which viewport, which theme). Wait for the verdict before the next item.
+which viewport, which theme). Wait for the verdict before the next item; a verdict given via
+Other appends `user-correction-at-gate` on the in-cycle entry, where a run record exists, and
+nothing on standalone `/devcycle:verify` — `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns
+that condition. When the app renders
+as a page and claude-in-chrome is connected, dispatch `devcycle:on-device-driver` to observe an
+item rather than observing it yourself; the human still gives every verdict.
 
 The walkthrough ends with an agent-actionable results report, one line per item, plain
 language, symptom first:

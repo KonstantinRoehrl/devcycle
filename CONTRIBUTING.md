@@ -139,7 +139,15 @@ outside the convention is refused rather than treated as a patch, since it would
 Prepare commits `chore(release): prepare vX.Y.Z` to `dev` and opens the `main` ← `dev` PR.
 Squash-merge it **with that same title** once checks pass. `Release` then tags
 `devcycle--vX.Y.Z` and publishes the GitHub release from that version's CHANGELOG section.
-After every release, merge `main` back into `dev`.
+After every release, merge `main` back into `dev`. The `Back-merge` workflow opens that PR
+automatically after every release and fails weekly while `dev` is behind `main`, so a skipped or
+forgotten merge surfaces before the next release rather than as conflicts in its PR. Review and
+merge it; the automation opens it but never merges it.
+
+`Prepare release` opens its own PR, which requires **Settings → Actions → General → Allow GitHub
+Actions to create and approve pull requests** to be enabled. Without it the workflow fails after
+pushing the bump, with that instruction in its log; re-running it once the setting is on opens the
+missing PR without bumping again.
 
 **Nothing pushes to `main`.** The version bump arrives inside the release PR, so `main` only
 ever changes through a checked pull request — which is what lets a ruleset require exactly
@@ -150,3 +158,15 @@ not clean up `main`: the individual commits stay out of the merge base, so those
 absent from `main` and need their own PR against it. And no ref-range on `dev` can tell you
 what is unreleased — `main..dev` reports long-shipped work as new — which is why the release
 notes come from the PR title rather than from a commit range.
+
+### Watching a fix past release: the maintainer-cohort check
+
+`doctor.mjs` tells one user whether a `resolved-in:` fix held for *their* own runs, but no local
+journal sees whether it held fleet-wide. After a `resolved-in:` release ships, watch
+`gh issue list --label culprit:<slug> --label from-doctor` for that culprit-id: if new issues
+keep arriving post-release, the fix did not hold across the userbase even though it may show
+`held` in an individual doctor report.
+
+This is a maintainer habit, not a script. Automating it would need issue-tracker credentials no
+local run has, and would be one more surface to keep honest for a signal only a human should
+weigh.

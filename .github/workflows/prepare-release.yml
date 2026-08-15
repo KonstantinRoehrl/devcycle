@@ -19,13 +19,19 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
-      pull-requests: write
+    outputs:
+      version: ${{ steps.guard.outputs.already-bumped == 'true' && steps.guard.outputs.version || steps.bump.outputs.version }}
+      sha: ${{ steps.head.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: dev
           fetch-depth: 0
           persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: ".nvmrc"
 
       - name: Refuse to prepare a release from anything but dev
         env:
@@ -38,34 +44,50 @@ jobs:
             exit 1
           fi
 
+      - name: Check whether the bump already landed
+        id: guard
+        run: |
+          set -euo pipefail
+          # Reads the PREVIOUSLY-COMMITTED version straight from HEAD's git object, never the
+          # working tree — the bump step below writes the NEW version to plugin.json on disk
+          # as a side effect, and a working-tree read after that point would always see this
+          # run's own bump, never a genuinely-already-bumped state left by an earlier partial
+          # run. Running before the bump step (below) additionally lets that step gate on
+          # this one's output.
+          COMMITTED=$(git log -1 --format=%s -- .claude-plugin/plugin.json | grep -oP '(?<=prepare v)\S+' || echo "")
+          CURRENT=$(git show HEAD:.claude-plugin/plugin.json | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          if [ "$COMMITTED" = "$CURRENT" ] && git log -1 --format=%s | grep -q "^chore(release): prepare v$CURRENT$"; then
+            echo "already-bumped=true" >> "$GITHUB_OUTPUT"
+            echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          else
+            echo "already-bumped=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Bump version and changelog
         id: bump
+        if: steps.guard.outputs.already-bumped != 'true'
         env:
           TITLE: ${{ inputs.title }}
         run: echo "version=$(node scripts/bump-version.mjs --subject "$TITLE")" >> "$GITHUB_OUTPUT"
 
-      - name: Refuse to reuse a released version
+      - name: Commit the version bump
+        if: steps.guard.outputs.already-bumped != 'true'
         env:
           V: ${{ steps.bump.outputs.version }}
         run: |
-          # An already-published tag means the bump landed on a stale plugin.json; pushing
-          # on would open a PR whose merge could never be tagged.
-          if git rev-parse -q --verify "refs/tags/devcycle--v$V" >/dev/null; then
-            echo "tag devcycle--v$V already exists — dev's plugin.json is behind main"
-            exit 1
-          fi
-
-      - name: Commit the bump to dev and open the release PR
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          TITLE: ${{ inputs.title }}
-          V: ${{ steps.bump.outputs.version }}
-        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .claude-plugin/plugin.json CHANGELOG.md
           git commit -m "chore(release): prepare v$V"
+
+      - name: Push the bump to dev
+        if: steps.guard.outputs.already-bumped != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
           # persist-credentials: false above means the checkout left no push credential in
           # .git/config, so authenticate the push explicitly right before it.
           git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
@@ -78,11 +100,53 @@ jobs:
             fi
             git pull --rebase origin dev
           done
-          gh pr create --base main --head dev --title "$TITLE" \
-            --body "Release **v$V**, staged by \`Prepare release\`.
+
+      - name: Record the sha now on dev
+        id: head
+        # Read after the push step, so this is the settled HEAD whichever branch the guard
+        # took above (a real bump-and-push, or the already-bumped no-op) — either way, the
+        # commit now on dev is exactly what `validate` below must check out.
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  validate:
+    # A step's `uses:` can only resolve to an action manifest — calling a reusable workflow
+    # (workflow_call) requires this job-level form instead. `with: ref:` pins the checkout in
+    # validate.yml to the exact commit `prepare` left `dev` at, so this validates that commit
+    # rather than the run's own (pre-bump) github.sha.
+    needs: prepare
+    uses: ./.github/workflows/validate.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  open-pr:
+    needs: [prepare, validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Open the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: ${{ inputs.title }}
+          V: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh pr list --base main --head dev --state open --json number \
+               --jq 'length' | grep -qv '^0$'; then
+            echo "Release PR already open."; exit 0
+          fi
+          if ! gh pr create --base main --head dev --title "$TITLE" \
+                 --body "Release **v$V**, staged by \`Prepare release\`.
 
           \`.claude-plugin/plugin.json\` and \`CHANGELOG.md\` are already bumped in this PR, so
           merging it needs no push to \`main\`. On merge, \`Release\` tags \`devcycle--v$V\` and
           publishes the GitHub release from the CHANGELOG section.
 
-          Squash-merge with this exact title — it becomes main's commit subject."
+          Squash-merge with this exact title — it becomes main's commit subject."; then
+            echo "::error::Could not create the release PR. Enable it in the repository settings:"
+            echo "::error::Settings -> Actions -> General -> Allow GitHub Actions to create and approve pull requests"
+            echo "::error::The version bump is committed and pushed to dev; re-run this workflow after enabling it."
+            exit 1
+          fi

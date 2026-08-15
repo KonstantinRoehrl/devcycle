@@ -1,0 +1,1 @@
+{"sessionId":"sess-acceptance01","isSidechain":false,"type":"assistant","timestamp":"2026-07-20T10:00:00.000Z","cwd":"/fixture/project","gitBranch":"fixture-branch","attributionSkill":"devcycle:cycle","message":{"model":"claude-opus-5","usage":{"input_tokens":10,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":20}}}

@@ -12,6 +12,8 @@ review: the `checklist:` line of `.devcycle/state.md`, which this stage's handof
 This stage, and every agent it dispatches, reports per
 `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons branch-review`. No store, no output.
+
 ## Configuration
 
 Resolve every knob and the profile per `${CLAUDE_PLUGIN_ROOT}/references/config.md`, including
@@ -61,7 +63,7 @@ green and diff tidy, and still fail its spec:
    `review-verdict` event for the round's outcome too.
 
    **The ledger is the round counter, and the count is per cycle.** On entry — including every
-   re-entry via `/devcycle:continue` after a `fixes-required` stop or a `/clear` — count the
+   re-entry via `/devcycle:continue` after an `exhausted-unresolved` stop or `/clear` — count the
    `task=branch event=review-round` lines whose `ref=` equals THIS cycle's spec path; the round
    about to run is that count plus one. Scoping by spec path is what lets a fresh cycle start at
    round 1 in a repo whose ledger is never reset, so it takes the cycle's own dated-and-slugged
@@ -72,7 +74,8 @@ green and diff tidy, and still fail its spec:
    opens no further round — it re-presents the outstanding blocking findings for a user
    decision, per 5's second terminal state. Only the user may grant rounds beyond the cap, and
    only explicitly: record that as `task=branch event=user-decision outcome=review-cap extended
-   to <n>` and treat `<n>` as the cap from then on.
+   to <n>`, treat `<n>` as the cap from then on, and note that granting it via Other also
+   appends `user-correction-at-gate` — `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns both.
 2. **Only blocking findings re-open the loop.** **Blocking means `critical` or `high`** —
    `${CLAUDE_PLUGIN_ROOT}/references/findings.md` owns the severity vocabulary and derives
    blocking from it, and neither is restated here. Each blocking finding goes to a fresh
@@ -88,14 +91,14 @@ green and diff tidy, and still fail its spec:
    over the fix diff — `<this round's pre-fix HEAD>..<the fix commit>`, never an earlier
    execution-stage commit — plus a re-check of the specific findings the previous round raised,
    not a fresh whole-branch pass. Round 1 already covered the branch.
-4. The loop ends as soon as a round leaves no blocking findings outstanding: verdict `pass`,
+4. The loop ends as soon as a round leaves no blocking findings outstanding: verdict `resolved`,
    with any non-blocking residue listed as carry-overs in the handoff. Never close the gate on
    "fixed" without the re-review.
-5. **At the cap (round N complete), exactly two terminal states:**
-   - **No blocking findings outstanding → verdict `pass`.** The residue is non-blocking; list
-     it as carry-overs in the handoff.
-   - **Blocking findings outstanding → verdict `fixes-required`.** The stage stops here and
-     reports the outstanding findings for a user decision. It does not hand off to on-device
+5. **At the cap (round N complete), exactly two terminal states, named by `references/loops.md`:**
+   - **No blocking findings outstanding → verdict `resolved`.** The residue is non-blocking;
+     list it as carry-overs in the handoff.
+   - **Blocking findings outstanding → verdict `exhausted-unresolved`.** The stage stops here
+     and reports the outstanding findings for a user decision. It does not hand off to on-device
      and does not proceed to finishing.
 
 **The cap bounds effort, never truth.** Reaching the cap NEVER converts an outstanding
@@ -115,7 +118,7 @@ unconditional — it holds at every profile, and the cap's own value never softe
 - Findings:
   1. [severity] <symptom first, plain language — what goes wrong, then the mechanism>
 - Carry-overs: <non-blocking findings accepted as residue, or "none">
-- Verdict: pass | fixes-required
+- Verdict: <one of `${CLAUDE_PLUGIN_ROOT}/references/loops.md`'s three values — never an ad-hoc `pass`>
 ```
 
 The engine line records what actually ran, and its value is one of the five above — no
@@ -140,9 +143,9 @@ session resumes at — then emit the block per
   checklist), keep instead `checklist: none — on-device stage will judge applicability` and
   the branch.
 
-A `fixes-required` verdict at the cap still emits this stage's block — the outcome IS the stage
-result. Keep `stage: branch-review` in `.devcycle/state.md` so the cycle resumes here rather
-than at on-device, and emit `Stage completed: branch-review` with the review report as its
+An `exhausted-unresolved` verdict at the cap still emits this stage's block — the outcome IS
+the stage result. Keep `stage: branch-review` in `.devcycle/state.md` so the cycle resumes here
+rather than at on-device, and emit `Stage completed: branch-review` with the review report as its
 artifact, the outstanding blocking findings as its carry-overs, and the stop-for-a-user-decision
 outcome stated in the block. The block reports a stop; it never reports a pass. The resuming
 session re-derives the round count from the ledger per the findings loop's step 1 — it re-enters

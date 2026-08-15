@@ -1,0 +1,61 @@
+{
+  "repo": "devcycle",
+  "generatedAt": "2026-08-14T00:00:00Z",
+  "profile": "thorough",
+  "corpus": { "sessions": 9, "from": "2026-08-01", "to": "2026-08-14",
+              "capped": false, "journalEvents": 214, "journalEmpty": false },
+  "checkpoint": { "before": "2026-08-01T00:00:00Z", "after": "2026-08-14T00:00:00Z" },
+  "attribution": { "vocabulary": 17, "novel": 3 },
+  "candidates": [
+    {
+      "title": "Flaky retry masks a real dependency-order bug",
+      "culpritId": "friction:flaky-test-retry",
+      "aliases": [],
+      "disposition": "landed",
+      "partition": "bulk",
+      "rung": "r2",
+      "whyNotHigher": "the fix is a repo-specific fixture ordering issue",
+      "locations": ["docs/devcycle/lessons.md#executing-waves"],
+      "fault": "repo",
+      "scope": "repo-devs",
+      "impact": 4.10,
+      "occurrences": 7,
+      "trend": "recurring",
+      "priorOccurrences": 4,
+      "evidenceSessions": 3,
+      "verify": "journal-recurrence",
+      "sourcedFromMemory": false,
+      "sensitive": false,
+      "legacyDuplicateOf": null,
+      "declineReason": null
+    },
+    {
+      "title": "Reviewer re-reads the whole diff instead of the round's fix diff",
+      "culpritId": "friction:reviewer-rereads-whole-diff",
+      "aliases": [],
+      "disposition": "declined",
+      "partition": "explicit",
+      "rung": "r1",
+      "whyNotHigher": null,
+      "locations": [],
+      "fault": "pipeline",
+      "scope": null,
+      "impact": 1.20,
+      "occurrences": 2,
+      "trend": "first-seen",
+      "priorOccurrences": 0,
+      "evidenceSessions": 1,
+      "verify": "manual",
+      "sourcedFromMemory": true,
+      "sensitive": false,
+      "legacyDuplicateOf": null,
+      "declineReason": "insufficient evidence — a single session, no recurrence in the journal"
+    }
+  ],
+  "contradictions": [
+    { "culpritId": "contradiction:x", "sideA": "...", "sideB": "...", "chosen": "sideA" }
+  ],
+  "evictions": [
+    { "culpritId": "friction:old-thing", "section": "executing-waves", "reason": "cap" }
+  ]
+}

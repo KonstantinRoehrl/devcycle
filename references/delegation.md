@@ -13,6 +13,7 @@ The coordinator does exactly these things itself, and delegates everything else 
 - run the green gate and read its exit status;
 - create commits;
 - append the ledger;
+- append the run record, always via `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append`;
 - update `.devcycle/state.md`;
 - emit handoff blocks.
 
@@ -22,8 +23,8 @@ failures — is a dispatch.
 
 **Exempt from delegation**, read directly however deep the session has run: files whose exact
 path is already known and whose contents the coordinator must reason about itself —
-`.devcycle/state.md`, `.devcycle/ledger.md`, the plan's dispatch map, and a spec under
-approval. Small and bounded; a subagent would cost more than it saves.
+`.devcycle/state.md`, `.devcycle/ledger.md`, the run record, the plan's dispatch map, and a spec
+under approval. Small and bounded; a subagent would cost more than it saves.
 
 ## The stage budget
 
@@ -57,7 +58,11 @@ recorded. An unknown depth is never evidence of a shallow one.
 
 Repo research — locating code, mapping surfaces, tracing usage, discovering docs — is a
 subagent dispatch that returns **a map, not file dumps**. Every dispatch names its model
-explicitly; `references/config.md` owns the tier and how an omitted one resolves.
+explicitly; `${CLAUDE_PLUGIN_ROOT}/references/config.md` owns the tier, how an omitted one
+resolves, and the ceiling that stops any dispatch resolving above the orchestrator's own tier.
+It names its agent type explicitly too: read-only search, mapping and tracing go to `Explore`,
+never `general-purpose` — measured at a 13955 startup floor against a 32711 median, ~2.3× per
+dispatch. `general-purpose` is for work that must also write or judge.
 
 The procedure, named rather than restated by the stages that run it:
 

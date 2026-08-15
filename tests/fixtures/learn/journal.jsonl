@@ -1,0 +1,6 @@
+{"kind":"run","runId":"1111111111111111","schemaVersion":1,"pluginVersion":"0.13.0","pluginSha":"abc1234","repoSlug":"fixture-00000000","profile":"thorough","knobs":{},"startedAt":"2026-08-01T00:00:00Z"}
+{"kind":"event","runId":"1111111111111111","event":"gate-fail","stage":"execution","culprit":"friction:partial-evidence-capture","attributedBy":"coordinator","ts":"2026-08-02T00:00:00Z"}
+{"kind":"event","runId":"1111111111111111","event":"gate-fail","stage":"execution","culprit":"novel:brief-omitted-evidence-class","attributedBy":"coordinator","ts":"2026-08-03T00:00:00Z"}
+{"kind":"run","runId":"2222222222222222","schemaVersion":1,"pluginVersion":"0.13.0","pluginSha":"abc1234","repoSlug":"fixture-00000000","profile":"thorough","knobs":{},"startedAt":"2026-08-05T00:00:00Z"}
+{"kind":"event","runId":"2222222222222222","event":"gate-pass-clean","stage":"execution","culprit":null,"ts":"2026-08-06T00:00:00Z"}
+{"kind":"event","runId":"2222222222222222","event":"gate-fail","stage":"branch-review","culprit":"friction:partial-evidence-capture","attributedBy":"coordinator","ts":"2026-08-07T00:00:00Z"}

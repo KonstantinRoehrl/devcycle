@@ -76,7 +76,7 @@ devcycle/                (public GitHub repo)
 │   ├── plugin.json               # name, version (bump per release), dependency on superpowers
 │   │                             # userConfig (see §7)
 │   └── marketplace.json          # source "./", allowCrossMarketplaceDependenciesOn: ["claude-plugins-official"]
-├── commands/                     # L0 — the whole user-facing surface; intents mapped in references/routing.md
+├── commands/                     # L0 — the whole user-facing surface; intents mapped in docs/routing.md
 │   ├── cycle.md                  # entry: input-maturity triage → stage walk; model-invocable (wrappers can call it)
 │   ├── continue.md               # resume from .devcycle/state.md after /clear (see §5)
 │   ├── review.md                 # a branch, this repo, or a file set, scoped by argument; starts no cycle (see §15.3)
@@ -133,7 +133,7 @@ finish per `gitPolicy`.
    `/devcycle:continue` carry `disable-model-invocation: true` so they cannot be silently substituted.
    `/cycle` is a deliberate exception (reversed 2026-07-24): it is model-invocable so a wrapper skill —
    e.g. one that loads/saves tickets around a run — can call the pipeline programmatically.
-   The rule itself now lives in `references/routing.md`, which declares each command's
+   The rule itself now lives in `docs/routing.md`, which declares each command's
    `consequence` class and the guard that class requires; `scripts/validate.mjs` fails the build
    when a command's frontmatter disagrees with it. This amendment records why the exception was
    granted, not where it is enforced.
@@ -290,7 +290,8 @@ Names are the shipped `playbooks/` files (§3); the ordering is the historical p
 
 ## 12. Migration Sequence
 
-Governing rule: **when a skill ships, the corresponding global-CLAUDE.md section is deleted in the same step** —
+Governing rule: **when a skill ships (historical: devcycle ships playbooks, not skills — this section records the migration as it was
+planned, not the surface as it stands), the corresponding global-CLAUDE.md section is deleted in the same step** —
 no phase is ever double-defined.
 
 1. Create the public repo: manifest + marketplace + README skeleton; declare superpowers dependency; install via
@@ -326,7 +327,7 @@ full-history secret scan.
   every developer already reads as "diagnose this".
 - Commands (the whole user-facing surface, seven since 2026-08-06): `/devcycle:cycle`,
   `/devcycle:continue`, `/devcycle:review`, `/devcycle:verify`, `/devcycle:learn`,
-  `/devcycle:doctor`, `/devcycle:onboard`. `references/routing.md` maps each to the intent it
+  `/devcycle:doctor`, `/devcycle:onboard`. `docs/routing.md` maps each to the intent it
   serves and what it may do before its first confirmation.
 - Playbooks: verb-first gerunds, listed in §3. They are addressed by path, never as
   `devcycle:<name>`, so a playbook name is never a user-typed string.
@@ -351,7 +352,6 @@ convention:
 
 | File | Owns |
 | --- | --- |
-| `routing.md` | the user-facing surface: which intent each command serves, its `consequence` class, and whether it may be model-invoked |
 | `config.md` | knob resolution, the profile matrix and its resolution order, the model tiers and their derivation predicates |
 | `evidence.md` | the three evidence classes, the file-backed evidence contract, the implementer report and reviewer verdict shapes |
 | `resume.md` | settling the branch from the state file, git-evidence resume rules, "review acceptance is never inferable from git" |
@@ -526,7 +526,7 @@ zero restated trigger-condition prose per the migration rule (§12) — the desc
 
 The contract used to cover skills. It covers commands because, since 2026-08-06, commands are
 the only files with frontmatter: playbooks are loaded by path and carry no description at all
-(§3), so nothing but a command can be selected by description. `references/routing.md` carries
+(§3), so nothing but a command can be selected by description. `docs/routing.md` carries
 the same information in prose a human reads, and `scripts/validate.mjs` fails the build when a
 command is absent from it — which is the closest thing to a mechanized sufficiency check the
 repo has.

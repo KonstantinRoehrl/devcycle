@@ -9,6 +9,8 @@ stages). Every agent this skill dispatches reports per `${CLAUDE_PLUGIN_ROOT}/re
 What the coordinator does itself and what it delegates — including the stage budget, which binds this
 skill hardest — is owned by `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`: read it and follow it.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons execution`. No store, no output.
+
 At **`lean` / `standard`**, do not load **superpowers:subagent-driven-development** — the mechanics
 below are self-contained. At **`thorough`**, load it (REQUIRED): it owns brief slicing and file
 handoffs, the review/fix loop, implementer-status handling, reviewer-prompt construction, and
@@ -53,20 +55,18 @@ file conflicts these invariants already preserve.)
 
 1. **Read the ledger first.** A task with an `event=committed` entry is done — never re-dispatch it.
 2. **Slice the brief**, carrying exactly: the task's id (the plan's task number); `**Files:**`
-   (create/modify/test); `**Interfaces:**` (consumes/produces, exact signatures); `**Dependencies:**`;
-   the `**Evidence:**` class from the plan; an `**Evidence tail:** <N>` line, `<N>` from the profile;
-   the task's steps; the global constraints and pinned interfaces that apply; the task's quality
-   constraints resolved; and one named reference,
-   `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` § Read discipline. Nothing else, and nothing
-   restated that a named reference owns — `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` owns the
-   evidence classes, the evidence file paths (keyed on the task id, which is why every brief carries
-   it), and the report shape the implementer must produce.
-   - **Resolve the quality constraints:** look each id on the task's `**Quality constraints:**` line
-     up in the plan's `## Quality Constraints` section and splice those lines in verbatim, ids
-     included, since a bare `QC3` is unreadable to an implementer. **Never the whole criteria
-     catalog, and never the plan's whole constraints section** — only the lines this task's ids name;
-     `references/quality-criteria.md`'s cost rule owns why. A task declaring `none`, or a plan with
-     no such section, adds nothing here.
+   (create/modify/test); `**Interfaces:**` (consumes/produces, exact signatures); `**Dependencies:**`; the
+   `**Evidence:**` class from the plan; an `**Evidence tail:** <N>` line, `<N>` from the profile; the
+   task's steps; the global constraints and pinned interfaces that apply; the task's quality constraints
+   resolved; and one named reference, `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` § Read discipline.
+   Nothing else, and nothing restated that a named reference owns —
+   `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` owns the evidence classes, the evidence file paths (keyed
+   on the task id, which is why every brief carries it), and the report shape the implementer must produce.
+   - **Resolve the quality constraints:** look each id on the task's `**Quality constraints:**` line up in
+     the plan's `## Quality Constraints` section and splice those lines in verbatim, ids included, since a
+     bare `QC3` is unreadable to an implementer. **Never the whole criteria catalog, and never the plan's
+     whole constraints section** — only the lines this task's ids name; `references/quality-criteria.md`'s
+     cost rule owns why. A task declaring `none`, or a plan with no such section, adds nothing here.
    - **Preload what the evidence class needs:** splice exactly what
      `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Preloading a class into a brief names.
 3. **Dispatch devcycle:implementer** with that brief only, never accumulated session history or other
@@ -74,38 +74,45 @@ file conflicts these invariants already preserve.)
    instruct the implementer to commit, stage, or push. Ledger `event=dispatched`. It returns the
    implementer envelope `references/delegation.md` defines — never the report body — and that
    envelope's on-device count is what triggers the checklist below.
-4. **Confirm the report file exists** at the envelope's named path before logging
-   `event=report-received` with `ref=` that path: the envelope's `report:` field is the implementer's
-   claim, not proof. A missing file is treated the way step 6 treats a failed green gate — ledger
-   `event=report-received outcome=rejected (missing report file)` with `ref=` the named path, then
-   back to the implementer, no reviewer dispatch. The coordinator neither produces nor reads the task
-   diff; step 5 does both.
+4. **Confirm the report file exists** at the envelope's named path, **and that it carries the fields
+   its declared evidence class requires** (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` owns the
+   classes), before logging `event=report-received` with `ref=` that path — the envelope's `report:`
+   field is a claim, not proof. Missing or mismatched: ledger `event=report-received
+   outcome=rejected (missing report file)`, `ref=` the named path, back to the implementer, no
+   reviewer dispatch. Otherwise write the `dispatch` line now — `run-record.mjs append --kind
+   dispatch` — using step 3's own `startedAt`, this step's time as `endedAt`, the envelope's
+   outcome, and the current round/retry index: every field this line needs is only known from
+   here on. The coordinator neither produces nor reads the task diff; step 5 does both.
 5. **Dispatch devcycle:task-reviewer** (read-only) with the brief, the report path, the task's file
    list, the two evidence-file paths the report names, and the task's constraints block, instructing
    it to produce the diff itself: `git add -N <new files>` first, or they are invisible to diff, then
    `git diff -U10 HEAD -- <files>`. It returns the task-reviewer envelope `references/delegation.md`
    defines; it has no write tool, so the coordinator writes what that envelope returns to
-   `.devcycle/findings/<task-id>-round-<n>.md`. Ledger one `event=review-round` per reviewer dispatch
-   (round n) and `event=review-verdict` for its outcome; a non-zero blocking count sends the findings
-   path back to the implementer, and re-review after fixes logs the next `review-round`.
+   `.devcycle/findings/<task-id>-round-<n>.md`. Ledger `event=review-round` per reviewer dispatch
+   (round n), `event=review-verdict` for its outcome, then the `verdict` line — `run-record.mjs
+   append --kind verdict` — this round's number, blocking count, the task's declared evidence
+   class, `conformance` = `pass` on acceptance else `fail`. Non-zero blocking sends the findings
+   path back to the implementer; re-review after fixes logs the next `review-round` (and, once the
+   fix pass's envelope returns, another step-4 `dispatch` line).
 
    Cap: 3 rounds per task; one round is one reviewer dispatch plus the implementer's fix pass.
    Statuses and their reporting are owned by `${CLAUDE_PLUGIN_ROOT}/references/loops.md` — a task
    that reaches round 3 without acceptance exits `exhausted-unresolved` and is surfaced to the user
    as a decision, never committed as if it had passed.
 6. **Green gate (REQUIRED, deterministic).** Before accepting, re-run the task's test command
-   yourself and read the exit status — the implementer's claimed output and the reviewer's accept
-   verdict both judge a report, not the repo, and neither is sufficient. A repo with no test suite
-   but a documented verification convention runs that convention's command instead; never bolt a new
-   test framework onto the repo to create one. On failure, acceptance is blocked: no commit, ledger
-   `event=review-verdict outcome=rejected (green gate: <symptom>)`, back to the implementer.
+   yourself and read the exit status. A repo with no test suite runs its documented convention instead.
+   On failure, acceptance is blocked: no commit, ledger
+   `event=review-verdict outcome=rejected (green gate: <symptom>)`, back to the implementer; if this
+   round's own reviewer wrote `conformance=pass`, also append a `verdict` line with `conformance=fail` for
+   this round — a reviewer-rejected round never wrote `conformance=pass`. Journal the outcome either way:
+   `run-record.mjs append --run <id> --kind event --event gate-fail --stage execution --task <task-id>` on
+   a failure, `--event gate-pass-clean` on a clean pass. Enums and ids only — never the failure text.
 7. **Branch re-check, then commit.** Immediately before the commit, re-run
    `git rev-parse --abbrev-ref HEAD` against the recorded `branch:` line, per
-   `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s per-commit re-check; a mismatch stops the run
-   rather than committing to the wrong branch. Then, on acceptance: a local commit with a
-   Conventional Commit subject, scoped per
-   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit". Ledger
-   `event=committed` with the sha.
+   `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s per-commit re-check; a mismatch stops the run rather than
+   committing to the wrong branch. Then, on acceptance: a local commit with a Conventional Commit subject,
+   scoped per `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit". Ledger
+   `event=committed` with the sha, then `run-record.mjs append --kind commit` with the task id and sha.
 
 **Trigger: this commit closes the wave.** When no task in the current wave remains undispatched, in
 review, or uncommitted, stop here — before forming the next wave — and follow ## Wave boundaries and

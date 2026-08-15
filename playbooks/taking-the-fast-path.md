@@ -1,7 +1,7 @@
 # Taking the Fast Path
 
 The mini-cycle for requests triage has judged trivial and the user has confirmed via the
-AskUserQuestion gate (fast path vs. full pipeline). This playbook never re-litigates that
+AskUserQuestion gate (fast path vs. full pipeline), where an Other answer appends `user-correction-at-gate`, the rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns. This playbook never re-litigates that
 verdict — by the time it runs, the trivial checklist has already passed. Instead of the full
 scoping → brainstorm → planning → execution → branch-review → on-device walk it runs a single
 in-session pass: implement, commit, one reviewer pass, hand to finish. The ceremony
@@ -11,6 +11,8 @@ still binds.
 **Announce at start:** "I'm using the taking-the-fast-path playbook to implement this in-session."
 
 Report as `${CLAUDE_PLUGIN_ROOT}/references/output.md` requires.
+
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons fast-path`. No store, no output.
 
 ## The mini-cycle
 

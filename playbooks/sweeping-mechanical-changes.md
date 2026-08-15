@@ -10,6 +10,8 @@ nothing in the steps below is.
 
 **Announce at start:** "I'm using the sweeping-mechanical-changes playbook to run this as a supervised sweep."
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons sweep`. No store, no output.
+
 ## The sweep walk
 
 1. **Branch discipline.** Read `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and follow it before anything
@@ -38,7 +40,7 @@ nothing in the steps below is.
    defines or this path's own `model unset (auto: no fast-tier id resolved; CLI default applies)`, since a bare
    name hides which path chose it. Then ask ONE AskUserQuestion presenting exactly that blast radius, model
    included: confirm / adjust (re-run the clean-targets check over the adjusted list, rewrite the plan
-   file, re-present) / abort (closed out per **State file** below). Nothing runs and no agent edits anything
+   file, re-present) / abort (closed out per **State file** below); an Other answer appends `user-correction-at-gate`, the rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns. Nothing runs and no agent edits anything
    until this gate passes. On confirm, write `{"files": [...], "instruction": "...", "verifyCommand":
    "..."}` to `.devcycle/sweep-args.json`.
 4. **Capture the baseline, then run the sweep.** BEFORE invoking anything, run the confirmed verifyCommand in
@@ -147,4 +149,6 @@ accepted and step 6 runs again. On top of that reference's rows, this path reads
 but not one made *after* the interruption, which `git status` cannot tell apart from sweep work. So wherever a
 row above finds uncommitted target edits, show `git diff -- <targets>` and have the user confirm they are this
 sweep's own before anything is reverted, re-run, or amended; if they cannot vouch, stop for a decision —
-revert, commit separately, or drop those files.
+revert, commit separately, or drop those files. An Other answer at that confirmation, or at the decision it
+falls back to, appends `user-correction-at-gate` to the run record the resume carries;
+`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that rule.
