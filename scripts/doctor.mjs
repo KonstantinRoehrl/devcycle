@@ -15,7 +15,7 @@ import { readPromotions } from "./promotions.mjs";
 // The shared verification engine (Wave 2): the one source of the promotion scoreboard, the
 // escalation/retirement candidates and the resolved-in lines, plus the installed plugin version.
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
-import { verify, installedVersion } from "./verification.mjs";
+import { verify, installedVersion, releaseDates } from "./verification.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // references/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -1825,13 +1825,8 @@ const titleSlug = (title) =>
 
 // Release dates come from the plugin's own CHANGELOG.md headings, back-filled 2026-08-13. A
 // heading with no date is omitted rather than defaulted: turnaround measured against a made-up
-// release date is a number that reads as fact and is not one.
-export function releaseDates(changelogText) {
-  const dates = new Map();
-  for (const m of String(changelogText).matchAll(/^## (\d+\.\d+\.\d+) — (\d{4}-\d{2}-\d{2})[ \t]*$/gm))
-    dates.set(m[1], m[2]);
-  return dates;
-}
+// release date is a number that reads as fact and is not one. The parser now lives in
+// verification.mjs (the resolved-in verdict is its other consumer); imported above.
 
 // gh's stdout, or a thrown error. Short timeout: a hanging gh must not hang a report, and the
 // caller degrades to "unavailable" on any throw.
@@ -1942,7 +1937,7 @@ export function compiledKnowledge(promotions = []) {
     if (p.lifecycle) { retired++; continue; }
     if (!p.rung) continue;
     const version = p.pluginVersion ?? "unknown";
-    const key = `${version} ${p.rung}`;
+    const key = `${version} ${p.rung}`;
     if (!groups.has(key)) groups.set(key, { version, rung: p.rung, lessons: 0, contextCost: null });
     groups.get(key).lessons += 1;
   }

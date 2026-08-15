@@ -11,10 +11,10 @@ import { join } from "node:path";
 import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
-  parseDraftedMarkers, releaseDates, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
+  parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
   renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates,
 } from "../../scripts/doctor.mjs";
-import { verify } from "../../scripts/verification.mjs";
+import { verify, releaseDates } from "../../scripts/verification.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 

@@ -654,7 +654,7 @@ if (!existsSync(tiersFile)) {
 }
 
 // 19. Every CHANGELOG version heading carries its release date. Outer-loop turnaround
-//     (scripts/doctor.mjs's releaseDates) measures issue createdAt against the release that
+//     (scripts/verification.mjs's releaseDates) measures issue createdAt against the release that
 //     resolved it, so a heading with no date silently drops that release out of the metric.
 const changelogPath = join(root, "CHANGELOG.md");
 if (existsSync(changelogPath)) {
