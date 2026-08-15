@@ -1,0 +1,13 @@
+# The redaction check hard-errors on an unknown flag instead of passing silently
+- promotion-type: enforcement-gap
+- cluster-signature: unknown flag accepted as a clean pass
+- files-touched: scripts/redaction-check.mjs
+- landed: 2026-08-10
+- commit: def5678
+- plugin-version: 0.13.0
+- sourced-from-memory: true
+- culprit-id: friction:redaction-unknown-flag
+- rung: r3
+- audience: repo-devs
+- verify: tests/fixtures/learn/candidates.json
+- aliases:

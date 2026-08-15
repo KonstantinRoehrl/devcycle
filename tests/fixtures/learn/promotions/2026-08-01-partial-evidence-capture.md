@@ -1,0 +1,13 @@
+# Capture the whole gate's output, not only the last command in the chain
+- promotion-type: enforcement-gap
+- cluster-signature: partial evidence capture drops earlier command output
+- files-touched: references/evidence.md
+- landed: 2026-08-01
+- commit: abc1234
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: friction:partial-evidence-capture
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases:
