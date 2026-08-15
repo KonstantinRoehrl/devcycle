@@ -9,6 +9,8 @@ criteria and taking its findings back inline. Resolve `profile` first per
 `${CLAUDE_PLUGIN_ROOT}/references/config.md` (`audit depth` sets how far an audit sweeps) and report
 per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons audit`. No store, no output.
+
 ## Scope
 
 Exactly one scope argument, plus `criteria` — confirmed at step 1 on an audit run, the spec's

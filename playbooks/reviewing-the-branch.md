@@ -12,6 +12,8 @@ review: the `checklist:` line of `.devcycle/state.md`, which this stage's handof
 This stage, and every agent it dispatches, reports per
 `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons branch-review`. No store, no output.
+
 ## Configuration
 
 Resolve every knob and the profile per `${CLAUDE_PLUGIN_ROOT}/references/config.md`, including

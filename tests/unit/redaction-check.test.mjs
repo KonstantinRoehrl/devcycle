@@ -396,13 +396,15 @@ test("--hashes= with an empty value (equals form) fails naming --hashes", () => 
 test("an unrecognised flag fails naming the flag, rather than falling through to the whole corpus", () => {
   const res = spawnSync(process.execPath, [SCRIPT, "--fil", "x"], { encoding: "utf8", cwd: process.cwd() });
   assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
-  assert.match(res.stderr, /--fil/);
+  assert.match(res.stderr, /unrecognised flag --fil$/m,
+    "the message must name the flag the caller actually typed — /--fil/ alone is satisfied by --file");
 });
 
 test("an unrecognised flag in equals form fails naming the flag", () => {
   const res = spawnSync(process.execPath, [SCRIPT, "--fil=x"], { encoding: "utf8", cwd: process.cwd() });
   assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
-  assert.match(res.stderr, /--fil/);
+  assert.match(res.stderr, /unrecognised flag --fil$/m,
+    "the message must name the flag the caller actually typed — /--fil/ alone is satisfied by --file");
 });
 
 test("still flags a deny-listed term, read from the hashes file", () => {

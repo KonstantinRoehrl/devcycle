@@ -6,6 +6,8 @@ root cause is not yet established, in front of the diagnosis stage
 (`superpowers:systematic-debugging`): it settles *what is being asked*; root-cause
 hunting, design exploration, approach trade-offs, and spec writing stay downstream.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons scoping`. No store, no output.
+
 ## The target
 
 The stage ends with the most precise description of the desired end state the

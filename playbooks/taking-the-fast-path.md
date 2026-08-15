@@ -12,6 +12,8 @@ still binds.
 
 Report as `${CLAUDE_PLUGIN_ROOT}/references/output.md` requires.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons fast-path`. No store, no output.
+
 ## The mini-cycle
 
 1. **Branch discipline.** Read `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and follow it

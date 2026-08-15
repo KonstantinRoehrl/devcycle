@@ -10,6 +10,8 @@ nothing in the steps below is.
 
 **Announce at start:** "I'm using the sweeping-mechanical-changes playbook to run this as a supervised sweep."
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons sweep`. No store, no output.
+
 ## The sweep walk
 
 1. **Branch discipline.** Read `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and follow it before anything

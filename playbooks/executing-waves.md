@@ -9,6 +9,8 @@ stages). Every agent this skill dispatches reports per `${CLAUDE_PLUGIN_ROOT}/re
 What the coordinator does itself and what it delegates — including the stage budget, which binds this
 skill hardest — is owned by `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`: read it and follow it.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons execution`. No store, no output.
+
 At **`lean` / `standard`**, do not load **superpowers:subagent-driven-development** — the mechanics
 below are self-contained. At **`thorough`**, load it (REQUIRED): it owns brief slicing and file
 handoffs, the review/fix loop, implementer-status handling, reviewer-prompt construction, and

@@ -127,7 +127,7 @@ to draft. For each finding it chose:
    Drafted: [culprit:<slug>] <title>
    ```
 
-   That marker is the only record of a draft: the Outer loop section counts these lines out of
+   That marker is the only record of a draft: the Outer loop section counts the issues out of
    `.devcycle/doctor/`, and `scripts/doctor.mjs` parses exactly this form, which this file owns.
 4. Show the screened draft and ask whether it is right. That is the first gate, and it asks about
    the draft's content only.

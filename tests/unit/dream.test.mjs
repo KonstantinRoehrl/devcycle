@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -10,20 +10,23 @@ import {
   commitCheckpoint,
   planCorpus,
   artifactFresh,
-  recordPromotion,
-  readPromotions,
-  checkRecurrence,
-  runCheckRecurrence,
   observationsDir,
   hasObservations,
   listObservations,
   readObservations,
-  suppressedByLandedSignature,
   extractSession,
   messageText,
 } from "../../scripts/dream.mjs";
 
+// The promotion reader/writer moved to promotions.mjs; the record-shape tests below were
+// written against it while it lived in dream.mjs and still pin the same behaviour, so they
+// travel with the import rather than being dropped.
+import { readPromotions, recordPromotion } from "../../scripts/promotions.mjs";
+import { repoSlug } from "../../scripts/run-record.mjs";
+
 const SCRIPT = new URL("../../scripts/dream.mjs", import.meta.url).pathname;
+// This repo itself, for the criteria that must run against its real promotion records.
+const REPO_ROOT = new URL("../../", import.meta.url).pathname;
 
 const repo = () => mkdtempSync(join(tmpdir(), "dream-repo-"));
 
@@ -361,6 +364,46 @@ function withArtifact(repoRoot, name = "2026-08-05-dream.md") {
   writeFileSync(join(repoRoot, ".devcycle", "dreaming", name), "# dream\n");
 }
 
+// F3-F6 fixtures need a session carrying real message text and, for F5, the ability to grow
+// after planCorpus has already run once — plainRecord/selfRecord above only carry a timestamp.
+// One session per call, always named CORPUS_SESSION_ID: sessionIdOf(root) hands that id back
+// so a test never has to know it by magic string.
+const CORPUS_SESSION_ID = "s1";
+const sessionIdOf = () => CORPUS_SESSION_ID;
+
+function corpusRecord({ role = "user", ts, text, toolResult }) {
+  const content =
+    toolResult !== undefined
+      ? [{ type: "tool_result", content: toolResult }]
+      : [{ type: "text", text: text ?? "" }];
+  return { timestamp: ts, type: role, message: { role, content } };
+}
+
+// `text` is the common case of one user turn; `records` hands raw {role, ts, text|toolResult}
+// shapes for a test that needs a specific block type (e.g. a tool_result). `padding` inflates
+// on-disk bytes without inflating the extracted text, which is what F4's "extractBytes is far
+// smaller than totalBytes" assertion needs something to divide by — it lands as trailing
+// whitespace on the JSONL line, which JSON.parse ignores. `append` lets a test grow the session
+// after planCorpus has already run once (F5's reopened-slice case).
+function corpusWithSession({ text, records, padding = 0 } = {}) {
+  const root = realpathSync(repo());
+  const dir = mkdtempSync(join(tmpdir(), "dream-proj-"));
+  const slug = join(dir, root.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(slug, { recursive: true });
+  const file = join(slug, `${CORPUS_SESSION_ID}.jsonl`);
+  const entries = records ?? [{ role: "user", ts: "2026-08-05T12:00:00Z", text }];
+  const line = (r) => JSON.stringify(corpusRecord(r)) + (padding ? " ".repeat(padding) : "") + "\n";
+  writeFileSync(file, entries.map(line).join(""));
+  const append = (moreText) =>
+    appendFileSync(file, line({ role: "user", ts: "2026-08-05T12:05:00Z", text: moreText }));
+  return { root, projects: dir, append };
+}
+
+function writeObservationFile(root, id, observations) {
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), `${id}.json`), JSON.stringify(observations));
+}
+
 test("planCorpus: the dream's own session does not make its own artifact stale", () => {
   const root = realpathSync(repo());
   withArtifact(root);
@@ -696,198 +739,6 @@ test("recordPromotion rejects an empty or missing cluster-signature instead of w
   assert.equal(readPromotions(root).length, 0);
 });
 
-test("recurrence reports a signature that reappears after it landed", () => {
-  const manifest = {
-    sessions: [{ id: "s1", files: [], lastTimestamp: "2026-08-06T00:00:00Z", records: 1 }],
-  };
-  const hits = checkRecurrence(
-    [{ ...REC, promotionType: "skill-edit", filesTouched: [] }],
-    manifest,
-    () => "the task-reviewer flags files from a concurrent task again",
-  );
-  assert.equal(hits.length, 1);
-  assert.deepEqual(hits[0].hits, ["s1"]);
-});
-
-test("recurrence ignores sessions that predate the promotion", () => {
-  const manifest = {
-    sessions: [{ id: "old", files: [], lastTimestamp: "2026-08-01T00:00:00Z", records: 1 }],
-  };
-  const hits = checkRecurrence([REC], manifest, () => REC.clusterSignature);
-  assert.equal(hits.length, 0);
-});
-
-// Old matcher: shared-word Jaccard over a 0.6 threshold, tokenized from raw JSONL. Measured
-// against the real corpus: the repo's own unit-test signature matched 95/100 sessions.
-// Replacement: exact normalized-phrase substring containment, deterministic, no threshold.
-test("recurrence requires an exact normalized-phrase match, not a fuzzy word-overlap score", () => {
-  const manifest = {
-    sessions: [{ id: "s1", files: [], lastTimestamp: "2026-08-06T00:00:00Z", records: 1 }],
-  };
-  const rec = { ...REC, clusterSignature: "task-reviewer flags files from a concurrent task" };
-  // Shares every word with the signature, scattered rather than contiguous — scores 1.0
-  // under a word-overlap threshold but is not the same recurring phrase.
-  const scatteredText =
-    "files from a concurrent task were reviewed; the task-reviewer flags them separately";
-  const hits = checkRecurrence([rec], manifest, () => scatteredText);
-  assert.equal(hits.length, 0);
-});
-
-// F1: normalizing raw JSONL treated a message newline (the two characters "\" and "n")
-// asymmetrically — the backslash vanished but the "n" survived as a stray word, so a
-// phrase that happened to wrap in the transcript silently missed. Each whitespace form a
-// real transcript can contain must normalize the same way on both sides of the match.
-const WRAP_MANIFEST = () => ({
-  sessions: [{ id: "s1", files: [], lastTimestamp: "2026-08-06T00:00:00Z", records: 1 }],
-});
-const WRAP_SIGNATURE = "task-reviewer flags files from a concurrent task";
-const WRAP_REC = { ...REC, clusterSignature: WRAP_SIGNATURE };
-
-for (const [label, wrapped] of [
-  ["a JSON-escaped \\n", "task-reviewer flags files\\nfrom a concurrent task"],
-  ["a JSON-escaped \\r", "task-reviewer flags files\\rfrom a concurrent task"],
-  ["a JSON-escaped \\t", "task-reviewer flags files\\tfrom a concurrent task"],
-  ["a literal newline", "task-reviewer flags files\nfrom a concurrent task"],
-  ["a literal tab", "task-reviewer flags files\tfrom a concurrent task"],
-  ["a literal \\r\\n", "task-reviewer flags files\r\nfrom a concurrent task"],
-  ["a U+2028 line separator", "task-reviewer flags files from a concurrent task"],
-  ["a U+2029 paragraph separator", "task-reviewer flags files from a concurrent task"],
-]) {
-  test(`recurrence matches a signature that wraps across ${label} in the transcript`, () => {
-    const hits = checkRecurrence([WRAP_REC], WRAP_MANIFEST(), () => wrapped);
-    assert.equal(hits.length, 1);
-    assert.deepEqual(hits[0].hits, ["s1"]);
-  });
-}
-
-// The one wrap form that must NOT match: a break inside a word is not the same word
-// reassembled, and treating whitespace as a separator (never deleting it) is what keeps
-// that true instead of accidentally re-gluing split words into a spurious hit.
-test("a wrap inside a word does not create a spurious phrase match", () => {
-  const rec = { ...REC, clusterSignature: "a concurrent task review" };
-  const hits = checkRecurrence(
-    [rec],
-    WRAP_MANIFEST(),
-    () => "flags a conc\nurrent task review here",
-  );
-  assert.equal(hits.length, 0);
-});
-
-// End to end: the fix must match against the *extracted message text*, not the raw
-// transcript bytes — a JSONL fixture whose real message text contains a newline (so the
-// file on disk contains the two-character "\n" escape, reproducing the reported bug)
-// must still be found by the full plan → recurrence pipeline.
-test("recurrence matches a line-wrapped signature through the full plan pipeline, not just a mocked readText", () => {
-  const root = repo();
-  recordPromotion(root, { ...REC, landed: "2026-08-01", clusterSignature: WRAP_SIGNATURE, title: "Wrapped recurrence" });
-
-  const projectsDir = mkdtempSync(join(tmpdir(), "dream-wrap-"));
-  const slug = join(projectsDir, root.replaceAll("/", "-"));
-  mkdirSync(slug, { recursive: true });
-  writeFileSync(
-    join(slug, "wrapped.jsonl"),
-    JSON.stringify({
-      timestamp: "2026-08-03T00:00:00Z",
-      type: "assistant",
-      message: { content: [{ type: "text", text: "task-reviewer flags files\nfrom a concurrent task" }] },
-    }) + "\n",
-  );
-
-  const result = runCheckRecurrence({ repoRoot: root, projectsDir });
-  assert.equal(result.hits.length, 1);
-  assert.deepEqual(result.hits[0].hits, ["wrapped"]);
-});
-
-test("check-recurrence output matches the pinned shape and carries no cluster-signature text", () => {
-  const manifest = {
-    sessions: [{ id: "s1", files: [], lastTimestamp: "2026-08-06T00:00:00Z", records: 1 }],
-  };
-  const promo = {
-    path: "docs/devcycle/promotions/2026-08-04-x.md",
-    title: REC.title,
-    promotionType: REC.promotionType,
-    clusterSignature: REC.clusterSignature,
-    filesTouched: [],
-    landed: REC.landed,
-    commit: REC.commit,
-  };
-  const hits = checkRecurrence([promo], manifest, () => `${REC.clusterSignature} again`);
-  assert.deepEqual(hits, [
-    { recordPath: promo.path, title: promo.title, commit: promo.commit, landed: promo.landed, hits: ["s1"] },
-  ]);
-  assert.equal(JSON.stringify(hits).includes(REC.clusterSignature), false);
-});
-
-// The manifest handed to checkRecurrence must not itself be bounded by the checkpoint: a
-// promotion landed well before the checkpoint would otherwise have the sessions between
-// its own landed date and the checkpoint silently excluded from its own recurrence check.
-test("check-recurrence windows the corpus by each promotion's own landed date, decoupled from the checkpoint", () => {
-  const root = repo();
-  writeCheckpoint(root, { lastDreamedThrough: "2026-08-05T00:00:00Z", lastArtifact: null });
-  const signature = "a recurring workaround for the flaky import step";
-  recordPromotion(root, {
-    ...REC,
-    landed: "2026-08-01",
-    clusterSignature: signature,
-    title: "Flaky import workaround",
-  });
-
-  const projectsDir = mkdtempSync(join(tmpdir(), "dream-recur-"));
-  const slug = join(projectsDir, root.replaceAll("/", "-"));
-  mkdirSync(slug, { recursive: true });
-  writeFileSync(
-    join(slug, "mid.jsonl"),
-    JSON.stringify({
-      timestamp: "2026-08-03T00:00:00Z", // after landed, but before the checkpoint above
-      type: "assistant",
-      message: { content: [{ type: "text", text: `hit ${signature} again` }] },
-    }) + "\n",
-  );
-
-  const result = runCheckRecurrence({ repoRoot: root, projectsDir });
-  assert.equal(result.hits.length, 1);
-  assert.deepEqual(result.hits[0].hits, ["mid"]);
-});
-
-// F4: `checkRecurrence` normalized the whole corpus before it ever looked at
-// `promotions`, paying the full-corpus read even with zero (or all-empty-signature)
-// records — the same cost complaint spec §10's amendment already made once.
-test("checkRecurrence returns immediately without reading the corpus when no promotion carries a signature", () => {
-  const manifest = { sessions: [{ id: "s1", files: [], lastTimestamp: "2026-08-06T00:00:00Z", records: 1 }] };
-  let called = false;
-  const readText = () => {
-    called = true;
-    return "anything";
-  };
-
-  assert.deepEqual(checkRecurrence([], manifest, readText), []);
-  assert.equal(called, false);
-
-  assert.deepEqual(checkRecurrence([{ ...REC, clusterSignature: "" }], manifest, readText), []);
-  assert.equal(called, false);
-});
-
-// F9: an empty recurrence result and a cap-truncated corpus both used to render the same
-// way (an empty array); truncation must be visible.
-test("runCheckRecurrence reports when the 100-session cap truncated its corpus", () => {
-  const root = repo();
-  const many = Array.from({ length: 105 }, (_, i) => [
-    `sess-${String(i).padStart(3, "0")}`,
-    `2026-01-${String((i % 27) + 1).padStart(2, "0")}T00:00:00Z`,
-  ]);
-  const result = runCheckRecurrence({ repoRoot: root, projectsDir: projects(root, many) });
-  assert.equal(result.capped, true);
-});
-
-test("runCheckRecurrence reports capped false when the corpus fits under the cap", () => {
-  const root = repo();
-  const result = runCheckRecurrence({
-    repoRoot: root,
-    projectsDir: projects(root, [["a", "2026-08-01T00:00:00Z"]]),
-  });
-  assert.equal(result.capped, false);
-});
-
 // F10: `--commit-checkpoint` must not silently swallow `--check-recurrence`, the same way
 // it already refuses to silently swallow `--plan`.
 test("cli: --commit-checkpoint combined with --check-recurrence fails instead of silently swallowing the check", () => {
@@ -905,22 +756,27 @@ test("planCorpus: reports per-session and total byte sizes", () => {
   assert.equal(m.totalBytes, m.sessions.reduce((n, s) => n + s.bytes, 0));
 });
 
+// F5: unmined and observations are now keyed by each session's slice id (session id + size +
+// content hash), not the bare session id — a slice id is only knowable after planCorpus has
+// looked at the session once, so this reads it back off the first call's own sessions list.
 test("planCorpus: unmined lists exactly the sessions with no observation file", () => {
   const root = realpathSync(repo());
   const proj = projectsWith(root, [
     ["mined", [plainRecord("2026-08-05T12:00:00Z")]],
     ["fresh", [plainRecord("2026-08-05T12:30:00Z")]],
   ]);
-  mkdirSync(observationsDir(root), { recursive: true });
-  writeFileSync(join(observationsDir(root), "mined.json"), "[]\n");
+  const before = planCorpus({ repoRoot: root, projectsDir: proj, since: null });
+  const minedSlice = before.sessions.find((s) => s.id === "mined").slice;
+  const freshSlice = before.sessions.find((s) => s.id === "fresh").slice;
+  writeObservationFile(root, minedSlice, []);
   // A non-session slice: the memory store is mined at every profile and has no session id.
-  writeFileSync(join(observationsDir(root), "memory.json"), "[]\n");
+  writeObservationFile(root, "memory", []);
   const m = planCorpus({ repoRoot: root, projectsDir: proj, since: null });
-  assert.deepEqual(m.unmined, ["fresh"], "unmined is the session-shaped work list");
-  assert.deepEqual(m.observations, ["memory", "mined"], "observations lists every slice id");
-  assert.equal(hasObservations(root, "mined"), true);
-  assert.equal(hasObservations(root, "fresh"), false);
-  assert.deepEqual(listObservations(root), ["memory", "mined"]);
+  assert.deepEqual(m.unmined, [freshSlice], "unmined is the session-shaped work list");
+  assert.deepEqual(m.observations, ["memory", minedSlice].sort(), "observations lists every slice id");
+  assert.equal(hasObservations(root, minedSlice), true);
+  assert.equal(hasObservations(root, freshSlice), false);
+  assert.deepEqual(listObservations(root), ["memory", minedSlice].sort());
 });
 
 // spec §5.4's observation-record schema. quote is verbatim in this fixture; readObservations
@@ -1025,49 +881,6 @@ test("cli: --check-observations cannot be combined with another subcommand", () 
   assert.match(r.stderr, /cannot be combined/);
 });
 
-// spec §4 step 5 / §3.2: the reduce stage suppresses any candidate whose subject matches a
-// landed cluster-signature. §10's amendment 1 requires an exact normalized-phrase match, not
-// a similarity score, so casing/punctuation differences must still match and an unrelated
-// subject sharing some words must not.
-test("suppressedByLandedSignature reports a candidate matching a landed cluster-signature", () => {
-  const root = realpathSync(repo());
-  recordPromotion(root, { ...REC, clusterSignature: "task-reviewer flags files from a concurrent task" });
-  const promotions = readPromotions(root);
-  assert.equal(
-    suppressedByLandedSignature("Task-Reviewer Flags Files From A Concurrent Task!", promotions),
-    true,
-  );
-});
-
-test("suppressedByLandedSignature reports a non-matching subject as not suppressed", () => {
-  const root = realpathSync(repo());
-  recordPromotion(root, { ...REC, clusterSignature: "task-reviewer flags files from a concurrent task" });
-  const promotions = readPromotions(root);
-  // Shares every word, scattered rather than contiguous — must not pass an exact-phrase match.
-  assert.equal(
-    suppressedByLandedSignature("files from a concurrent task were reviewed separately", promotions),
-    false,
-  );
-});
-
-test("cli: --check-suppressed reports suppressed:true without printing the signature text", () => {
-  const root = realpathSync(repo());
-  const signature = "task-reviewer flags files from a concurrent task";
-  recordPromotion(root, { ...REC, clusterSignature: signature });
-  const res = run(["--check-suppressed", signature], root);
-  assert.equal(res.status, 0);
-  assert.deepEqual(JSON.parse(res.stdout), { suppressed: true });
-  assert.equal(res.stdout.includes(signature), false);
-});
-
-test("cli: --check-suppressed reports suppressed:false for an unrelated subject", () => {
-  const root = realpathSync(repo());
-  recordPromotion(root, { ...REC, clusterSignature: "task-reviewer flags files from a concurrent task" });
-  const res = run(["--check-suppressed", "an entirely unrelated finding"], root);
-  assert.equal(res.status, 0);
-  assert.deepEqual(JSON.parse(res.stdout), { suppressed: false });
-});
-
 test("cli: --check-suppressed cannot be combined with --plan, --commit-checkpoint, or --record-promotion", () => {
   const root = realpathSync(repo());
   const recordJson = JSON.stringify({ ...REC, landed: "2026-08-05" });
@@ -1095,18 +908,14 @@ test("cli: --check-suppressed cannot be combined with --extract or --check-recur
   }
 });
 
-// G1-a: `subject` is a normalized multi-word phrase (the skill's own example: "scenario
-// evidence sections omitted"). A caller passing it unquoted lets the shell split it into
-// several argv elements — reproduced here directly, without a shell, by passing each word as
-// its own array element (spawnSync's array form never re-quotes, so this is exactly what a
-// split unquoted invocation looks like to the process). Matching on the first word alone
-// would silently answer for a phrase that was never actually checked against the landed
-// signature below, so the extra words must be rejected rather than dropped.
-test("cli: --check-suppressed rejects a subject split across several argv elements instead of matching the first word", () => {
+// G1-a: the argument is one culprit-id. A caller who passes anything else — an unquoted title
+// the shell split into several argv elements, reproduced here by passing each word as its own
+// array element — must be refused: answering for the first element alone would report on an id
+// that was never actually checked.
+test("cli: --check-suppressed rejects an argument split across several argv elements instead of answering for the first", () => {
   const root = realpathSync(repo());
-  recordPromotion(root, { ...REC, clusterSignature: "scenario evidence sections omitted" });
   const r = run(["--check-suppressed", "scenario", "evidence", "sections", "omitted"], root);
-  assert.equal(r.status, 1, "a split subject must be rejected, not matched on its first word");
+  assert.equal(r.status, 1, "a split argument must be rejected, not matched on its first word");
   assert.match(r.stderr, /^dream: /m);
   assert.equal(r.stdout.trim(), "", "no {\"suppressed\": ...} payload on the rejected path");
 });
@@ -1231,16 +1040,15 @@ test("recordPromotion accepts enforcement-gap and rejects extract-to-script", ()
 });
 
 test("--check-recurrence reports failures as dream: <message>, not a stack trace", () => {
-  const root = realpathSync(repo());
-  // A projects root that exists but is a file, not a directory: readable-path failure, which
-  // §9 requires to surface as a failure rather than an empty success.
-  const notADir = join(root, "not-a-dir");
-  writeFileSync(notADir, "x\n");
-  const r = spawnSync(process.execPath, [SCRIPT, "--check-recurrence"], {
-    cwd: root,
-    env: { ...process.env, CLAUDE_DREAM_PROJECTS: notADir },
-    encoding: "utf8",
+  // The recurrence corpus is the journal now, so its readable-path failure is a journal line
+  // that does not parse — which §9 requires to surface as a failure rather than as an empty
+  // (and reassuring) result set.
+  const { root, runsDir } = corpusWithJournal({
+    promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
   });
+  mkdirSync(join(runsDir, repoSlug(root)), { recursive: true });
+  writeFileSync(join(runsDir, repoSlug(root), `${"a".repeat(16)}.jsonl`), "{not json\n");
+  const r = run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /^dream: /m);
   assert.doesNotMatch(r.stderr, /at .*dream\.mjs:\d+/, "no raw stack trace");
@@ -1278,10 +1086,17 @@ test("a missing projects root fails rather than reporting an empty corpus", () =
   assert.match(r.stderr, /^dream: projects root does not exist/m);
 });
 
-test("messageText: decodes string and text-block content, ignores tool blocks", () => {
-  assert.equal(messageText({ message: { content: "plain string" } }), "plain string");
+// F3: the role and timestamp are now part of the returned text (see F3's tests further down),
+// so this asserts the prefixed shape rather than the old flat text.
+test("messageText: decodes string and text-block content, ignores tool_use blocks", () => {
+  assert.equal(
+    messageText({ timestamp: "2026-08-05T12:00:00Z", type: "user", message: { content: "plain string" } }),
+    "[2026-08-05T12:00:00Z] user: plain string",
+  );
   assert.equal(
     messageText({
+      timestamp: "2026-08-05T12:00:00Z",
+      type: "assistant",
       message: {
         content: [
           { type: "text", text: "kept" },
@@ -1290,7 +1105,7 @@ test("messageText: decodes string and text-block content, ignores tool blocks", 
         ],
       },
     }),
-    "kept\nalso kept",
+    "[2026-08-05T12:00:00Z] assistant: kept\nalso kept",
   );
   assert.equal(messageText({ message: {} }), "");
   assert.equal(messageText({}), "");
@@ -1418,4 +1233,388 @@ test("a newline inside a provenance value cannot forge a second field line", () 
     sourcedFromMemory: false,
   });
   assert.equal(readFileSync(path, "utf8").match(/^- landed:/gm).length, 1);
+});
+
+test("F3: extracted text carries each message's role and timestamp", () => {
+  const { root, projects } = corpusWithSession({ text: "hello world" });
+  const out = extractSession({ repoRoot: root, projectsDir: projects, sessionId: sessionIdOf(root) });
+  assert.match(out, /^\[2\d{3}-\d{2}-\d{2}T[\d:.]+Z?\] (user|assistant): /m,
+    "a correction slice cannot separate user turns from assistant turns without the role");
+});
+
+test("F3: an AskUserQuestion answer arriving as a tool_result is not silently dropped", () => {
+  const { root, projects } = corpusWithSession({
+    records: [{ role: "user", ts: "2026-08-01T00:00:00Z", toolResult: "Other: keep the labels off" }],
+  });
+  const out = extractSession({ repoRoot: root, projectsDir: projects, sessionId: sessionIdOf(root) });
+  assert.match(out, /keep the labels off/,
+    "the answers to AskUserQuestion arrive as tool_result blocks — dropping them loses the corrections");
+});
+
+test("F4: the budgeting number is the extract sum, not the on-disk size", () => {
+  const { root, projects } = corpusWithSession({ text: "hello world", padding: 50_000 });
+  const m = planCorpus({ repoRoot: root, projectsDir: projects, since: null });
+  assert.ok(m.extractBytes > 0, "extractBytes must be populated");
+  assert.ok(m.extractBytes < m.totalBytes / 10,
+    "the extract sum is the model-visible input; totalBytes is JSONL on disk and overstates it");
+});
+
+test("F5: a slice id carries the session's size and content hash", () => {
+  const { root, projects } = corpusWithSession({ text: "one" });
+  const [a] = planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined;
+  assert.match(a, /@\d+-[0-9a-f]{8}$/);
+});
+
+test("F5: a session that grew is unmined again, under a new slice id", () => {
+  const { root, projects, append } = corpusWithSession({ text: "one" });
+  const first = planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined[0];
+  writeObservationFile(root, first, [{ kind: "friction", subject: "s", quote: "q", target: null }]);
+  assert.deepEqual(planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined, []);
+  append("two");
+  const after = planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined;
+  assert.equal(after.length, 1, "growth reopens the slice");
+  assert.notEqual(after[0], first, "under a new id, so the old observation file is not overwritten");
+});
+
+test("F6: an observation filename that is not a manifest slice id is reported", () => {
+  const { root, projects } = corpusWithSession({ text: "one" });
+  writeObservationFile(root, "truncated-id", [{ kind: "friction", subject: "s", quote: "q", target: null }]);
+  const m = planCorpus({ repoRoot: root, projectsDir: projects, since: null });
+  assert.deepEqual(m.orphanObservations, ["truncated-id"],
+    "a file the manifest cannot address is named, never silently counted as mined");
+});
+
+test("happy-path gap: a truncated observation file counts as unmined, not as mined forever", () => {
+  const { root, projects } = corpusWithSession({ text: "one" });
+  const [id] = planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined;
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), `${id}.json`), "[{\"kind\":\"fricti");
+  const m = planCorpus({ repoRoot: root, projectsDir: projects, since: null });
+  assert.deepEqual(m.unmined, [id], "an unreadable file is work still to do");
+});
+
+test("happy-path gap: an observation file with an out-of-enum kind counts as unmined", () => {
+  const { root, projects } = corpusWithSession({ text: "one" });
+  const [id] = planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined;
+  writeObservationFile(root, id, [{ kind: "guessed", subject: "s", quote: "q", target: null }]);
+  assert.deepEqual(planCorpus({ repoRoot: root, projectsDir: projects, since: null }).unmined, [id]);
+});
+
+// The rewired CLI's own corpus: corpusWithSession's transcript fixture (QC2 — one corpus
+// builder, extended, not a second one beside it) plus the two structured stores the engine now
+// reads by id — the friction journal under DEVCYCLE_RUNS_DIR, and promotion records written by
+// the same writer the CLI itself uses.
+function corpusWithJournal({ events = [], promotions = [], text = "one" } = {}) {
+  const { root, projects, append } = corpusWithSession({ text });
+  const runsDir = mkdtempSync(join(tmpdir(), "dream-runs-"));
+  const byRun = new Map();
+  for (const e of events) {
+    const runId = e.runId ?? "0".repeat(16);
+    if (!byRun.has(runId)) byRun.set(runId, []);
+    byRun.get(runId).push({
+      kind: "event",
+      runId,
+      event: "gate-fail",
+      stage: "execution",
+      culprit: e.culprit,
+      ts: e.ts,
+    });
+  }
+  if (byRun.size) {
+    const dir = join(runsDir, repoSlug(root));
+    mkdirSync(dir, { recursive: true });
+    for (const [runId, lines] of byRun)
+      writeFileSync(join(dir, `${runId}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  }
+  for (const p of promotions)
+    recordPromotion(root, {
+      title: `promotion for ${p.culpritId}`,
+      promotionType: "doc-edit",
+      clusterSignature: `signature for ${p.culpritId}`,
+      filesTouched: [],
+      commit: "abc1234",
+      ...p,
+    });
+  return { root, projects, runsDir, append };
+}
+
+// The candidate file exactly as spec §3 pins it — no field added, renamed, dropped or re-typed
+// (QC1). Written to a temp path so --render-report has a real file to read.
+function writeCandidateFixture() {
+  const dir = mkdtempSync(join(tmpdir(), "dream-candidates-"));
+  const path = join(dir, "candidates.json");
+  writeFileSync(
+    path,
+    JSON.stringify({
+      repo: "devcycle",
+      generatedAt: "2026-08-14T00:00:00Z",
+      profile: "thorough",
+      corpus: {
+        sessions: 9,
+        from: "2026-08-01",
+        to: "2026-08-14",
+        capped: false,
+        journalEvents: 214,
+        journalEmpty: false,
+      },
+      checkpoint: { before: "2026-08-01T00:00:00Z", after: "2026-08-14T00:00:00Z" },
+      attribution: { vocabulary: 17, novel: 3 },
+      candidates: [
+        {
+          title: "Flaky retry masks a real dependency-order bug",
+          culpritId: "friction:flaky-test-retry",
+          aliases: [],
+          disposition: "landed",
+          partition: "bulk",
+          rung: "r2",
+          whyNotHigher: "the fix is a repo-specific fixture ordering issue",
+          locations: ["docs/devcycle/lessons.md#executing-waves"],
+          fault: "repo",
+          scope: "repo-devs",
+          impact: 4.1,
+          occurrences: 7,
+          trend: "recurring",
+          priorOccurrences: 4,
+          evidenceSessions: 3,
+          verify: "journal-recurrence",
+          sourcedFromMemory: false,
+          sensitive: false,
+          legacyDuplicateOf: null,
+          declineReason: null,
+        },
+      ],
+      contradictions: [{ culpritId: "contradiction:x", sideA: "...", sideB: "...", chosen: "sideA" }],
+      evictions: [{ culpritId: "friction:old-thing", section: "executing-waves", reason: "cap" }],
+    }),
+  );
+  return path;
+}
+
+test("criterion 1: a non-empty journal issues zero mining dispatches for the journal slice", () => {
+  const { root, projects, runsDir } = corpusWithJournal({
+    events: [{ culprit: "friction:flaky-test-retry", ts: "2026-08-10T00:00:00Z" }],
+  });
+  const m = JSON.parse(
+    run(["--plan"], root, { CLAUDE_DREAM_PROJECTS: projects, DEVCYCLE_RUNS_DIR: runsDir }).stdout,
+  );
+  assert.equal(m.journal.empty, false);
+  assert.ok(m.journal.events > 0, "the fixture journal must be non-empty — an empty one passes this vacuously");
+  assert.ok(
+    !m.unmined.some((id) => id.startsWith("journal")),
+    "the journal is already structured: it is never a mining slice",
+  );
+});
+
+test("criterion 2: an empty journal reports `empty`, distinct from read-and-found-nothing", () => {
+  const { root, projects, runsDir } = corpusWithJournal({ events: [] });
+  const m = JSON.parse(
+    run(["--plan"], root, { CLAUDE_DREAM_PROJECTS: projects, DEVCYCLE_RUNS_DIR: runsDir }).stdout,
+  );
+  assert.equal(m.journal.empty, true);
+  assert.equal(m.journal.events, 0);
+});
+
+test("criterion 3: suppression is an id lookup", () => {
+  const res = run(["--check-suppressed", "friction:flaky-test-retry"], REPO_ROOT);
+  assert.equal(res.status, 0);
+  assert.deepEqual(JSON.parse(res.stdout), { suppressed: false });
+
+  // The other half of "an id lookup": a landed record carrying that exact id suppresses it,
+  // and its own prose (title, cluster-signature) has nothing to do with the verdict.
+  const { root } = corpusWithJournal({
+    promotions: [{ culpritId: "friction:flaky-test-retry", rung: "r2", landed: "2026-01-01" }],
+  });
+  const hit = run(["--check-suppressed", "friction:flaky-test-retry"], root);
+  assert.equal(hit.status, 0);
+  assert.deepEqual(JSON.parse(hit.stdout), { suppressed: true });
+});
+
+test("criterion 4: a legacy record produces a hint, never a suppression", () => {
+  const title = "Brace-group the chained evidence commands before redirecting";
+  assert.deepEqual(
+    JSON.parse(run(["--check-suppressed", "friction:bare-chained-redirect"], REPO_ROOT).stdout),
+    { suppressed: false },
+  );
+  const hints = JSON.parse(run(["--legacy-similar", title], REPO_ROOT).stdout).hints;
+  assert.ok(hints.length >= 1, "the legacy record with that title is hinted");
+  assert.ok(hints.every((h) => h.path.startsWith("docs/devcycle/promotions/")));
+});
+
+test("--novel-slugs lists the novel ids the clustering dispatch must dedup against", () => {
+  const res = run(["--novel-slugs"], REPO_ROOT);
+  assert.equal(res.status, 0);
+  assert.ok(Array.isArray(JSON.parse(res.stdout).slugs));
+});
+
+test("criterion 10: zero observed runs is unmeasurable, never held", () => {
+  const { root, runsDir } = corpusWithJournal({
+    events: [],
+    promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
+  });
+  const out = JSON.parse(run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir }).stdout);
+  const [r] = out.results;
+  assert.equal(r.verdict, "unmeasurable");
+  assert.equal(r.runsObserved, 0);
+  assert.notEqual(r.verdict, "held");
+});
+
+test("--check-recurrence reports held with its run count, and recurred when the id reappears", () => {
+  const { root, runsDir } = corpusWithJournal({
+    promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
+    events: [
+      { culprit: "friction:y", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) },
+      { culprit: "friction:y", ts: "2026-03-01T00:00:00Z", runId: "b".repeat(16) },
+    ],
+  });
+  const held = JSON.parse(run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir }).stdout).results[0];
+  assert.equal(held.verdict, "held");
+  assert.equal(held.runsObserved, 2);
+
+  const { root: r2, runsDir: d2 } = corpusWithJournal({
+    promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
+    events: [{ culprit: "friction:x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
+  });
+  const recurred = JSON.parse(run(["--check-recurrence"], r2, { DEVCYCLE_RUNS_DIR: d2 }).stdout).results[0];
+  assert.equal(recurred.verdict, "recurred");
+  assert.equal(recurred.recurrences, 1);
+});
+
+test("criterion 11: --record-promotion rejects an r3 verify that does not resolve", () => {
+  const root = realpathSync(repo());
+  const res = run(
+    [
+      "--record-promotion",
+      JSON.stringify({
+        title: "t",
+        promotionType: "doc-edit",
+        clusterSignature: "s",
+        filesTouched: [],
+        landed: "2026-08-14",
+        commit: "abc",
+        pluginVersion: "0.13.0",
+        culpritId: "friction:x",
+        rung: "r3",
+        verify: "tests/unit/nope.test.mjs",
+      }),
+    ],
+    root,
+  );
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /r3 verify "tests\/unit\/nope\.test\.mjs" resolves to no path/);
+});
+
+test("--lessons prints three labelled subsections and rejects an unknown stage", () => {
+  const learnings = mkdtempSync(join(tmpdir(), "dream-learnings-"));
+  const ok = run(["--lessons", "execution"], REPO_ROOT, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.equal(ok.status, 0);
+  assert.match(ok.stdout, /repo \(docs\/devcycle\/lessons\.md\)/);
+  const bad = run(["--lessons", "not-a-stage"], REPO_ROOT, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stderr, /unknown stage "not-a-stage"/);
+});
+
+test("criterion 8: --render-report and --render-report --outcome agree on structure", () => {
+  const path = writeCandidateFixture();
+  const a = run(["--render-report", path], REPO_ROOT).stdout;
+  const b = run(["--render-report", path, "--outcome"], REPO_ROOT).stdout;
+  const heads = (s) => (s.match(/^#{2,3} .*$/gm) ?? []);
+  assert.deepEqual(heads(a), heads(b));
+  assert.match(a, /^# Learn Report \(proposal\)/m);
+  assert.match(b, /^# Learn Report \(outcome\)/m);
+});
+
+test("--render-report on an unreadable file exits nonzero rather than printing an empty report", () => {
+  const res = run(["--render-report", join(tmpdir(), "no-such-candidates.json")], REPO_ROOT);
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /dream: /);
+});
+
+test("every new subcommand refuses to be combined with another", () => {
+  const root = realpathSync(repo());
+  for (const pair of [
+    ["--lessons", "execution", "--plan"],
+    ["--novel-slugs", "--check-recurrence"],
+    ["--journal-events", "--plan"],
+    ["--render-report", "x", "--check-suppressed", "y"],
+  ]) {
+    const res = run(pair, root);
+    assert.notEqual(res.status, 0, `${pair.join(" ")} must not be accepted`);
+    assert.match(res.stderr, /cannot be combined/);
+  }
+});
+
+test("--journal-events keys the journal by culprit-id and says whether the store is empty", () => {
+  const { root, runsDir } = corpusWithJournal({
+    events: [
+      { culprit: "friction:x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) },
+      { culprit: "friction:x", ts: "2026-03-01T00:00:00Z", runId: "b".repeat(16) },
+    ],
+  });
+  const out = JSON.parse(run(["--journal-events"], root, { DEVCYCLE_RUNS_DIR: runsDir }).stdout);
+  assert.equal(out.journalEmpty, false);
+  assert.equal(out.byCulprit["friction:x"].length, 2);
+
+  const windowed = JSON.parse(
+    run(["--journal-events", "--since", "2026-02-15T00:00:00Z"], root, { DEVCYCLE_RUNS_DIR: runsDir }).stdout,
+  );
+  assert.equal(windowed.events.length, 1, "--since bounds the window");
+  assert.equal(windowed.journalEmpty, false, "a windowed-away event is not an empty store");
+});
+
+// The window the three verdicts hang on: an event dated on or before `landed` cannot say
+// anything about a promotion that did not exist yet. Were pre-landed events counted,
+// `runsObserved` would be non-zero from runs the promotion cannot have influenced and the
+// verdict would read `held` off them — the F1 failure this engine exists to stop, and the
+// Global Constraint "zero observed runs is never reported as held".
+test("--check-recurrence ignores journal events dated on or before the promotion's landed date", () => {
+  const { root, runsDir } = corpusWithJournal({
+    promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-05-01", verify: "journal-recurrence" }],
+    events: [
+      { culprit: "friction:x", ts: "2026-01-01T00:00:00Z", runId: "a".repeat(16) },
+      // The boundary itself: a run on the landing day is not evidence about the landing.
+      { culprit: "friction:x", ts: "2026-05-01T23:00:00Z", runId: "b".repeat(16) },
+    ],
+  });
+  const [r] = JSON.parse(run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir }).stdout).results;
+  assert.equal(r.verdict, "unmeasurable");
+  assert.equal(r.runsObserved, 0, "runs that predate the landing are outside the window entirely");
+  assert.equal(r.recurrences, 0);
+  assert.equal(r.lastRecurrence, null);
+  assert.notEqual(r.verdict, "held", "a run that predates the promotion is not evidence the lesson held");
+});
+
+// The other half of the deleted pinned-shape test, against the id-keyed engine: the result
+// object's whole key set, and QC10 — a promotion's title and cluster-signature are prose, and
+// neither may reach the caller's transcript through this subcommand's stdout.
+test("--check-recurrence output matches the pinned shape and carries no record prose", () => {
+  const { root, runsDir } = corpusWithJournal({
+    promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
+    events: [{ culprit: "friction:x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
+  });
+  const res = run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir });
+  const [r] = JSON.parse(res.stdout).results;
+  // Seven keys, not the six the plan's contract table lists: step 5's code adds
+  // `lastRecurrence`, so the shape is pinned as the engine actually emits it.
+  assert.deepEqual(
+    Object.keys(r).sort(),
+    ["culpritId", "landed", "lastRecurrence", "recordPath", "recurrences", "runsObserved", "verdict"],
+  );
+  assert.match(r.recordPath, /^docs\/devcycle\/promotions\/2026-01-01-.+\.md$/);
+  assert.equal(r.culpritId, "friction:x");
+  assert.equal(r.landed, "2026-01-01");
+  assert.equal(r.lastRecurrence, "2026-02-01T00:00:00Z");
+
+  const [promo] = readPromotions(root);
+  assert.equal(res.stdout.includes(promo.title), false, "a record's title is prose and must not be echoed");
+  assert.equal(
+    res.stdout.includes(promo.clusterSignature),
+    false,
+    "a cluster-signature is prose and must not be echoed",
+  );
+});
+
+test("the deleted prose matchers are gone from the source", () => {
+  const src = readFileSync(SCRIPT, "utf8");
+  assert.doesNotMatch(src, /suppressedByLandedSignature/, "the prose comparison is deleted (spec §5)");
+  assert.doesNotMatch(src, /s\.normalized\.includes\(sig\)/, "raw-text recurrence matching is deleted");
 });

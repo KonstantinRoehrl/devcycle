@@ -2,11 +2,19 @@
 // Deterministic half of devcycle's dreaming pass: checkpoint, corpus manifest, session
 // cap, artifact freshness. The semantic half lives in playbooks/learning-from-sessions.md.
 // Emits no message text, no branch names — only ids, paths, timestamps, and counts.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+// The stores each have one owner, and this file is the CLI over them rather than a second
+// copy: journal.mjs (run records), promotions.mjs (landed lessons), lessons.mjs (the three
+// capped stores), learn-report.mjs (the report).
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, readRecords, inWindow } from "./doctor.mjs";
+import { journalEvents, eventsByCulprit, lastRecurrence, runsObserved } from "./journal.mjs";
+import { readPromotions, recordPromotion, suppressedByCulpritId, legacySimilar, novelSlugs } from "./promotions.mjs";
+import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES } from "./lessons.mjs";
+import { renderLearnReport } from "./learn-report.mjs";
 
 const CAP = 100;
 const dreamDir = (root) => join(root, ".devcycle", "dreaming");
@@ -38,7 +46,8 @@ export function listObservations(repoRoot) {
 // garbage grouping key the reduce stage would then cluster on.
 const OBSERVATION_KINDS = new Set(["friction", "correction", "rule-violation", "decision", "contradiction-side"]);
 
-// Mirrors validatePromotion's style and error-message shape below. `subject` and `quote`
+// Mirrors validatePromotion's style and error-message shape (`scripts/promotions.mjs`, the
+// one validator of the other record shape this engine writes). `subject` and `quote`
 // are the two fields §5.4 calls load-bearing: `subject` is the cross-session grouping key
 // and `quote` is the grounding anchor ("an observation may state only what its quote
 // shows"), so both are required rather than merely typed.
@@ -73,10 +82,23 @@ export function readObservations(repoRoot, sliceId) {
   return records;
 }
 
+// The resume mechanism used to be "does a file exist", so a truncated file left by an interrupted
+// dispatch counted as mined forever — the exact failure the validation was written for, never
+// reached because it only ran inside the dispatch that had just succeeded. A slice is mined when
+// its observation file PARSES, not when it is present.
+export function isMined(repoRoot, id) {
+  try {
+    readObservations(repoRoot, id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // `\s*` matches a newline too, so a field left blank on its own line would otherwise let
 // the capture cross into the next "- key: value" line and read that line back as the
 // value. `[ \t]*` stops at the newline: it only ever captures the rest of the field's own
-// line, blank or not. Also shared by readPromotions' field reader below (one regex, not two).
+// line, blank or not.
 function field(text, key) {
   const m = text.match(new RegExp(`^- ${key}:[ \\t]*(.*)$`, "m"));
   return m ? m[1].trim() : "";
@@ -199,140 +221,15 @@ function archives(repoRoot) {
   return out.sort((a, b) => b.date.localeCompare(a.date) || a.index - b.index);
 }
 
-const promoDir = (root) => join(root, "docs", "devcycle", "promotions");
-const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
-// A value that itself contained a newline could otherwise open what looks like its own
-// "- key: value" line in the written record, and a later read-back would match that
-// phantom line before the real one (readCheckpoint/readPromotions take the first match).
-// `\r` alone and the U+2028/U+2029 line/paragraph separators are line terminators for
-// `^`/`$`/`.` in JavaScript regexes too, so all of them — not just "\r?\n" — must fold.
-const oneLine = (s) => String(s ?? "").replace(/\r\n|[\r\n\u2028\u2029]/g, " ").trim();
-
-// `enforcement-gap` — the rule already exists and is being violated; the fix is enforcement,
-// not a new rule (spec §6). `extract-to-script` is gone: its only producer was Phase 1b-ii,
-// which is dropped (§12), and a dead value in a committed schema outlives the reason for it.
-const PROMOTION_TYPES = new Set([
-  "doc-edit",
-  "skill-edit",
-  "enforcement-gap",
-  "contradiction-resolution",
-  "config-proposal",
-]);
-const LANDED_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-// `Date.parse("2026-02-30")` rolls over to March 2 in V8 instead of returning NaN, so
-// `Number.isNaN(Date.parse(...))` alone accepts impossible calendar dates the shape regex
-// already let through. Round-tripping through `toISOString` catches the rollover.
-const isValidCalendarDate = (s) =>
-  LANDED_RE.test(s) && !Number.isNaN(Date.parse(s)) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
-
-function validatePromotion(rec) {
-  if (!PROMOTION_TYPES.has(rec.promotionType))
-    throw new Error(
-      `invalid promotionType "${rec.promotionType}" — must be one of: ${[...PROMOTION_TYPES].join(", ")}`,
-    );
-  if (!isValidCalendarDate(rec.landed ?? ""))
-    throw new Error(`invalid landed date "${rec.landed}" — must be a real YYYY-MM-DD calendar date`);
-  // Required because it is the record's entire purpose: checkRecurrence skips any
-  // promotion whose signature is empty, so one recorded without it is permanently
-  // invisible to the recurrence metric with nothing anywhere reporting it.
-  if (!String(rec.clusterSignature ?? "").trim())
-    throw new Error("cluster-signature is required and cannot be empty");
-  // Accepted shape: a real boolean, or absent (null/undefined). Anything else — most
-  // plausibly the string "true" from a hand-built JSON scratch file — is refused here
-  // rather than silently coerced, so it can never fall through the writer's `=== true`
-  // check below and land as a definite (and wrong) "false".
-  if (rec.sourcedFromMemory != null && typeof rec.sourcedFromMemory !== "boolean")
-    throw new Error(
-      `sourced-from-memory must be a boolean or absent, got ${JSON.stringify(rec.sourcedFromMemory)}`,
-    );
-}
-
-export function recordPromotion(repoRoot, rec) {
-  validatePromotion(rec);
-  mkdirSync(promoDir(repoRoot), { recursive: true });
-  const slug = slugify(oneLine(rec.title));
-  let path = join(promoDir(repoRoot), `${rec.landed}-${slug}.md`);
-  for (let n = 2; existsSync(path); n++) path = join(promoDir(repoRoot), `${rec.landed}-${slug}-${n}.md`);
-  // README.md documents files-touched as "comma-separated paths" — a plain string is the
-  // documented shape; an array (the --record-promotion JSON payload's own shape) and an
-  // absent value are also accepted rather than crashing after the promotion already landed.
-  // Each element is sanitized on its own before joining: joining raw elements let a
-  // newline (or \r, or U+2028) inside a single element forge a phantom "- landed:" line,
-  // same as an unsanitized joined string would.
-  const filesTouched = Array.isArray(rec.filesTouched)
-    ? rec.filesTouched.map((f) => oneLine(f)).join(", ")
-    : oneLine(rec.filesTouched);
-  writeFileSync(
-    path,
-    `# ${oneLine(rec.title)}\n` +
-      `- promotion-type: ${oneLine(rec.promotionType)}\n` +
-      `- cluster-signature: ${oneLine(rec.clusterSignature)}\n` +
-      `- files-touched: ${filesTouched}\n` +
-      `- landed: ${oneLine(rec.landed)}\n` +
-      `- commit: ${oneLine(rec.commit)}\n` +
-      `- plugin-version: ${oneLine(rec.pluginVersion)}\n` +
-      // Accepted shape for sourced-from-memory (validatePromotion above rejects anything
-      // else): a real boolean, written as the literal "true"/"false", or absent
-      // (null/undefined), written empty. No other type reaches here.
-      `- sourced-from-memory: ${rec.sourcedFromMemory == null ? "" : rec.sourcedFromMemory === true}\n`,
-  );
-  return path;
-}
-
-export function readPromotions(repoRoot) {
-  const dir = promoDir(repoRoot);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".md") && f !== "README.md")
-    .map((f) => {
-      const text = readFileSync(join(dir, f), "utf8");
-      return {
-        path: relative(repoRoot, join(dir, f)),
-        title: (text.match(/^# (.*)$/m) ?? [, ""])[1].trim(),
-        promotionType: field(text, "promotion-type"),
-        clusterSignature: field(text, "cluster-signature"),
-        filesTouched: field(text, "files-touched").split(",").map((s) => s.trim()).filter(Boolean),
-        landed: field(text, "landed"),
-        commit: field(text, "commit"),
-        pluginVersion: field(text, "plugin-version") || null,
-        // Which vocabulary entry this promotion was meant to fix, so doctor's Cost-by-version
-        // Shipped column can name it. Read here rather than by a second parser in doctor.mjs:
-        // one reader for this record shape, the way pluginVersion above is already read.
-        // Absent (Phase 3 teaches recordPromotion to write it) reads null, never "" — an empty
-        // string would render as a culprit whose id is blank.
-        culpritId: field(text, "culprit-id") || null,
-        sourcedFromMemory:
-          field(text, "sourced-from-memory") === ""
-            ? null
-            : field(text, "sourced-from-memory") === "true",
-      };
-    });
-}
-
-// Every whitespace form a transcript can contain folds to a single separator — literal
-// newline/tab/CRLF, U+2028/U+2029, and JSON-escaped "\n"/"\r"/"\t" (the two characters
-// backslash+letter, for text that reaches here without having been JSON-decoded first).
-// A *single* separator, never deleted: deleting instead of spacing would glue words
-// split by a genuine line wrap back together but would just as wrongly glue two
-// unrelated words meeting at a mid-word wrap into a spurious match.
-const WHITESPACE_RE = /\\[nrt]|\r\n|[\r\n\t\u2028\u2029]/g;
-const normalizePhrase = (s) =>
-  String(s ?? "")
-    .replace(WHITESPACE_RE, " ")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
-// devcycle's own dreaming/doctor sessions echo the recurrence output (a promotion's commit,
-// landed date, cluster phrasing quoted back) into their own transcript — corpus for a
-// later run — so a signature could otherwise match the very run that reported it.
-// Excluded from the recurrence corpus only; --plan's mining corpus still sees them.
-// The ids are the commands that run these two scripts. `dreaming-across-sessions` is the
-// pre-v0.12 id for what is now `learn`, kept for transcripts that may carry it: this is a
-// shipped plugin, so v0.11-era transcripts exist on installed machines even though none of
-// the transcripts readable here carry the id. Dropping it would re-admit every dream
-// recorded before the rename.
+// devcycle's own dreaming/doctor sessions echo a run's own output back into their own
+// transcript — corpus for a later run — so mining them can re-attribute this run's findings to
+// the sessions that reported them. Excluded from `artifactFresh` on every call (a dream's own
+// session must not make its own artifact stale); `excludeSelf` drops them from the mining
+// corpus too. The ids are the commands that run these two scripts. `dreaming-across-sessions`
+// is the pre-v0.12 id for what is now `learn`, kept for transcripts that may carry it: this is
+// a shipped plugin, so v0.11-era transcripts exist on installed machines even though none of
+// the transcripts readable here carry the id. Dropping it would re-admit every dream recorded
+// before the rename.
 const SELF_ATTRIBUTION_RE = /^devcycle:(learn|dreaming-across-sessions|doctor)$/;
 function isSelfRecord(r) {
   if (SELF_ATTRIBUTION_RE.test(r.attributionSkill ?? "")) return true;
@@ -353,58 +250,33 @@ function isSelfRecord(r) {
   return false;
 }
 
-// The reduce stage's suppression primitive (spec §4 step 5, §3.2): a candidate whose
-// subject matches a landed cluster-signature is work that already landed and must not be
-// re-proposed. Reuses normalizePhrase and requires an exact match on the normalized phrase,
-// never a similarity score — §10's amendment 1 records that a 60%-word-overlap approach
-// matched 74-95 of 100 unrelated sessions.
-export function suppressedByLandedSignature(subject, promotions) {
-  const norm = normalizePhrase(subject);
-  if (!norm) return false;
-  return promotions.some((p) => normalizePhrase(p.clusterSignature) === norm);
-}
-
-export function checkRecurrence(promotions, manifest, readText = defaultReadText) {
-  // Compute each promotion's normalized signature first and bail out before reading the
-  // corpus at all when none carries one — with zero promotion records (every repo's
-  // first dreams) this was a full corpus read-and-normalize for nothing: 2.63 s and RSS
-  // from 209 MB to 805 MB on this repo's own 65-session corpus.
-  const candidates = promotions
-    .map((p) => ({ p, sig: normalizePhrase(p.clusterSignature) }))
-    .filter(({ sig }) => sig);
-  if (!candidates.length) return [];
-
-  // Read and normalize every session's text once, not once per promotion — re-reading and
-  // re-tokenizing the whole corpus per record was the measured cost (4.6s/13.5s/43.6s for
-  // 1/3/10 records).
-  const sessions = manifest.sessions.map((s) => ({ ...s, normalized: normalizePhrase(readText(s)) }));
-  const out = [];
-  for (const { p, sig } of candidates) {
-    const hits = [];
-    for (const s of sessions) {
-      if (s.lastTimestamp.slice(0, 10) <= p.landed) continue;
-      if (s.normalized.includes(sig)) hits.push(s.id);
-    }
-    if (hits.length)
-      out.push({ recordPath: p.path, title: p.title, commit: p.commit, landed: p.landed, hits });
-  }
-  return out;
-}
-
-// Extracts a record's actual message text rather than dumping the raw transcript line:
-// matching over raw JSONL meant a message newline (the two characters "\" and "n" in the
-// file on disk) survived normalization with the "n" read back as a stray word, so a
-// phrase that happened to wrap in the transcript silently missed. Reading the decoded
-// text field means JSON.parse has already turned that escape into a real newline before
-// normalizePhrase (above) ever sees it.
+// Extracts a record's actual message text rather than dumping the raw transcript line: a
+// consumer of `--extract` gets what the model wrote, with JSON.parse having already turned
+// each escape back into the character it stands for — never the JSONL bytes around it.
+// F3: role and timestamp are what make a correction slice a correction slice, and tool_result is
+// where an AskUserQuestion answer actually lives — doctor reports AskUserQuestion turns for
+// sessions whose extracted text held none of them. Prefixing rather than returning a structure
+// keeps every existing caller (defaultReadText, extractSession, the F4 byte sum) working on a
+// string, and gives each observation record a real per-message `ts` to carry.
 export function messageText(record) {
+  const role = record.message?.role ?? record.type ?? "unknown";
+  const ts = record.timestamp ?? "";
   const content = record.message?.content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((c) => c && c.type === "text" && typeof c.text === "string")
-    .map((c) => c.text)
-    .join("\n");
+  const parts = [];
+  if (typeof content === "string") parts.push(content);
+  else if (Array.isArray(content))
+    for (const c of content) {
+      if (!c) continue;
+      if (c.type === "text" && typeof c.text === "string") parts.push(c.text);
+      // A tool_result's content is either a string or the same block array again.
+      else if (c.type === "tool_result") {
+        if (typeof c.content === "string") parts.push(c.content);
+        else if (Array.isArray(c.content))
+          for (const b of c.content) if (b?.type === "text" && typeof b.text === "string") parts.push(b.text);
+      }
+    }
+  if (!parts.length) return "";
+  return `[${ts}] ${role}: ${parts.join("\n")}`;
 }
 
 function defaultReadText(session) {
@@ -469,6 +341,13 @@ function resolveProjectFiles(repoRoot, projectsDir) {
   return all.filter((f) => sessionCwdMatches(f, repoRoot));
 }
 
+// F5: a slice id that is only the session id can never reopen when the session grows, so every
+// byte written after the first mining pass was invisible forever — the exact window in which a
+// recurrence would appear. The id now carries the slice's own size and a content hash, so growth
+// produces a new id, a new work item, and a new observation file beside the old one.
+export const sliceId = (sessionId, bytes, digest) => `${sessionId}@${bytes}-${digest}`;
+export const sliceSessionId = (id) => String(id).split("@")[0];
+
 export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false }) {
   const groups = new Map();
   for (const file of resolveProjectFiles(repoRoot, projectsDir)) {
@@ -483,8 +362,11 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     let records = 0;
     let self = false;
     let bytes = 0;
+    const hash = createHash("sha256");
     for (const f of files) {
-      bytes += statSync(f).size;
+      const raw = readFileSync(f, "utf8");
+      bytes += Buffer.byteLength(raw);
+      hash.update(raw);
       for (const r of readRecords(f)) {
         records += 1;
         if (r.timestamp) stamps.push(r.timestamp);
@@ -492,14 +374,29 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
       }
     }
     if (!stamps.length) continue;
-    // `excludeSelf` (the recurrence path) drops these sessions outright, because a printed
-    // signature would self-seed a permanent hit. Freshness ignores them on every path — see
-    // artifactFresh — but they stay mineable here.
+    // `excludeSelf` drops devcycle's own sessions from the mining corpus outright. Freshness
+    // ignores them on every path — see artifactFresh — but by default they stay mineable here.
     if (excludeSelf && self) continue;
     stamps.sort();
     const lastTimestamp = stamps.at(-1);
     if (!inWindow(lastTimestamp, since, null)) continue;
-    sessions.push({ id, files, firstTimestamp: stamps[0], lastTimestamp, records, bytes, self });
+    // F4: the model-visible size the same way `--extract` does, reused from messageText rather
+    // than a second extractor (QC2).
+    let extractBytes = 0;
+    for (const f of files)
+      for (const r of readRecords(f)) extractBytes += Buffer.byteLength(messageText(r));
+    const slice = sliceId(id, bytes, hash.digest("hex").slice(0, 8));
+    sessions.push({
+      id,
+      files,
+      firstTimestamp: stamps[0],
+      lastTimestamp,
+      records,
+      bytes,
+      self,
+      slice,
+      extractBytes,
+    });
   }
 
   sessions.sort((a, b) => b.lastTimestamp.localeCompare(a.lastTimestamp));
@@ -515,11 +412,23 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     // `records` alone let a dispatch be handed an unreadable 22.6 MB slice with no warning,
     // and a run cannot be budgeted without a size. Totals cover the kept sessions only, so the
     // number describes what a run would actually mine rather than what the cap discarded.
+    // F4: this is JSONL on disk, not what a dispatch reads — see extractBytes below for the
+    // budgeting number. Stays for a caller sizing disk reads.
     totalBytes: kept.reduce((n, s) => n + s.bytes, 0),
+    // F4: totalBytes is JSONL on disk and overstated model-visible input ~34× on this repo's own
+    // corpus. It stays — a caller sizing disk reads still wants it — but the budgeting number a
+    // run is planned against is the extract sum, which is what a dispatch actually reads.
+    extractBytes: kept.reduce((n, s) => n + s.extractBytes, 0),
     // The mining work list: an interrupted run resumes by mining only these, which is the same
-    // mechanism that makes a marginal run cheap.
+    // mechanism that makes a marginal run cheap. Keyed by each session's `slice`, not its bare
+    // `id` (F5) — so a grown session reopens under its new id — and mined means the observation
+    // file PARSES (isMined), not merely exists (the happy-path validation gap).
     observations: listObservations(repoRoot),
-    unmined: kept.filter((s) => !hasObservations(repoRoot, s.id)).map((s) => s.id),
+    unmined: kept.filter((s) => !isMined(repoRoot, s.slice)).map((s) => s.slice),
+    // F6: a dispatch that wrote its file under a truncated name leaves a store entry the manifest
+    // cannot address. Naming it is the whole fix — the alternative is a slice that is re-mined
+    // every run with nobody able to see why.
+    orphanObservations: listObservations(repoRoot).filter((o) => !kept.some((s) => s.slice === o)),
     archives: archives(repoRoot).filter((a) => inWindow(`${a.date}T23:59:59Z`, since, null)),
     // Same escaping as the transcript project directory above: every non-alphanumeric
     // character becomes "-". Replacing only "/" points at a store that does not exist
@@ -527,20 +436,35 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     memoryDir: join(homedir(), ".claude", "projects", escapeProjectPath(repoRoot), "memory"),
     artifactFresh: fresh,
     artifactPath: path,
+    // D3 step 1: the journal is already structured, so it is read directly rather than mined —
+    // it needs no observation file and never appears in `unmined`. `empty` describes the store,
+    // which is what lets the report say "journal empty" instead of "nothing found".
+    journal: (() => {
+      const { journalEmpty, events, runs } = journalEvents({ toplevel: repoRoot, since });
+      return { empty: journalEmpty, events: events.length, runs };
+    })(),
   };
 }
 
-// The recurrence corpus is windowed per promotion by that promotion's own `landed` date
-// (done inside checkRecurrence), not by the checkpoint — so it must not itself be bounded
-// by the checkpoint, or a promotion landed before the checkpoint but after by less than a
-// full mining cycle would see its own recurring sessions silently excluded. The 100-session
-// cap still applies, which is what keeps the comparison independent of checkpoint age (§10).
-// `capped` travels alongside `hits` rather than as a bare array: an empty result and a
-// corpus truncated to the 100-most-recent-session cap otherwise render identically, and
-// on a repo past 100 sessions cap truncation is the normal case, not the exception.
-export function runCheckRecurrence({ repoRoot, projectsDir }) {
-  const manifest = planCorpus({ repoRoot, projectsDir, since: null, excludeSelf: true });
-  return { capped: manifest.capped, hits: checkRecurrence(readPromotions(repoRoot), manifest) };
+// D-8, and the F1 lesson in one function: a promotion's culprit-id is matched by equality against
+// journal events dated after it landed. Three verdicts, and the third is the whole point —
+// `unmeasurable` means no run was observed at all, which is not evidence the lesson held.
+export function runCheckRecurrence({ repoRoot }) {
+  const promotions = readPromotions(repoRoot).filter((p) => p.verify === "journal-recurrence" && p.culpritId);
+  const { events } = journalEvents({ toplevel: repoRoot });
+  const results = promotions.map((p) => {
+    const after = events.filter((e) => String(e.ts).slice(0, 10) > p.landed);
+    const runs = runsObserved(after);
+    const ids = new Set([p.culpritId, ...p.aliases]);
+    const recurrences = after.filter((e) => e.culprit && ids.has(e.culprit)).length;
+    const verdict = runs === 0 ? "unmeasurable" : recurrences > 0 ? "recurred" : "held";
+    return {
+      recordPath: p.path, culpritId: p.culpritId, landed: p.landed,
+      verdict, runsObserved: runs, recurrences,
+      lastRecurrence: lastRecurrence(after, p.culpritId),
+    };
+  });
+  return { results };
 }
 
 // CLAUDE_DREAM_PROJECTS overrides the transcript root, mirroring doctor.mjs's
@@ -550,6 +474,22 @@ const resolveProjectsRoot = () => process.env.CLAUDE_DREAM_PROJECTS || join(home
 function main() {
   const argv = process.argv.slice(2);
   const root = process.cwd();
+
+  // §9's guard requirement covers every subcommand against every other, not only the pairs
+  // someone thought of: each handler below dispatches and returns, so an unguarded combination
+  // silently runs one and omits the other's output entirely — read by a caller parsing for that
+  // output's key, the omission reads as a confident (and wrong) answer. Enumerated once rather
+  // than pairwise, which cost five lines per flag added.
+  const SUBCOMMANDS = [
+    "--plan", "--commit-checkpoint", "--check-suppressed", "--extract", "--check-observations",
+    "--record-promotion", "--check-recurrence", "--journal-events", "--legacy-similar",
+    "--novel-slugs", "--lessons", "--render-report",
+  ];
+  const present = SUBCOMMANDS.filter((f) => argv.includes(f));
+  if (present.length > 1) {
+    console.error(`dream: ${present.join(" and ")} cannot be combined`);
+    process.exit(1);
+  }
 
   const hasPlan = argv.includes("--plan");
   const hasCheckRecurrence = argv.includes("--check-recurrence");
@@ -561,54 +501,8 @@ function main() {
   const hasExtract = extractIdx !== -1;
   const observationsIdx = argv.indexOf("--check-observations");
   const hasCheckObservations = observationsIdx !== -1;
-
-  if (hasCommit && hasPlan) {
-    console.error("dream: --commit-checkpoint and --plan cannot be combined");
-    process.exit(1);
-  }
-
-  if (hasCommit && hasCheckRecurrence) {
-    console.error("dream: --commit-checkpoint and --check-recurrence cannot be combined");
-    process.exit(1);
-  }
-
-  if (hasSuppressed && hasPlan) {
-    console.error("dream: --check-suppressed and --plan cannot be combined");
-    process.exit(1);
-  }
-
-  if (hasSuppressed && hasCommit) {
-    console.error("dream: --check-suppressed and --commit-checkpoint cannot be combined");
-    process.exit(1);
-  }
-
-  // §9's guard requirement covers every sibling flag, not only --plan/--commit-checkpoint:
-  // --extract and --check-recurrence both dispatch and return before --check-suppressed's own
-  // handler runs below, so without these two a combined invocation silently ran the other
-  // subcommand and omitted `{"suppressed": ...}` from its output entirely — read by a caller
-  // expecting that key, that omission reads as a confident (and wrong) "not suppressed".
-  if (hasSuppressed && hasExtract) {
-    console.error("dream: --check-suppressed and --extract cannot be combined");
-    process.exit(1);
-  }
-
-  if (hasSuppressed && hasCheckRecurrence) {
-    console.error("dream: --check-suppressed and --check-recurrence cannot be combined");
-    process.exit(1);
-  }
-
-  if (hasCheckObservations && (hasPlan || hasCommit || hasCheckRecurrence || hasSuppressed || hasExtract)) {
-    console.error("dream: --check-observations cannot be combined with another subcommand");
-    process.exit(1);
-  }
-
   const r = argv.indexOf("--record-promotion");
   const hasRecord = r !== -1;
-
-  if (hasRecord && (hasPlan || hasCommit || hasCheckRecurrence || hasSuppressed || hasExtract || hasCheckObservations)) {
-    console.error("dream: --record-promotion cannot be combined with another subcommand");
-    process.exit(1);
-  }
 
   if (hasExtract) {
     try {
@@ -683,9 +577,7 @@ function main() {
 
   if (hasCheckRecurrence) {
     try {
-      console.log(
-        JSON.stringify(runCheckRecurrence({ repoRoot: root, projectsDir: resolveProjectsRoot() }), null, 2),
-      );
+      console.log(JSON.stringify(runCheckRecurrence({ repoRoot: root }), null, 2));
     } catch (e) {
       console.error(`dream: ${e.message}`);
       process.exit(1);
@@ -694,24 +586,21 @@ function main() {
   }
 
   // The reduce stage's suppression check, called by the skill as a subcommand — the skill
-  // invokes the CLI, not the module. Prints only the boolean verdict, never the subject or
-  // a landed cluster-signature: either would land in this session's transcript, which is
-  // corpus for every later run (spec §10's amendment 1).
+  // invokes the CLI, not the module. The verdict is an equality test on a culprit-id, so the
+  // id is safe to print: an id is matched in the promotion store and never against transcript
+  // text, which is what makes echoing it unable to self-seed a later run.
   if (hasSuppressed) {
     try {
-      const subject = argv[suppressedIdx + 1];
-      if (!subject) throw new Error("--check-suppressed requires a subject argument");
-      // `subject` is a normalized multi-word phrase (the skill's own example:
-      // "scenario evidence sections omitted"). If a caller passes it unquoted, the shell
-      // splits it into several argv elements and only the first would be read above —
-      // matching on that single word alone would silently answer for a phrase that was
-      // never actually checked, so any further non-flag argv element here must fail loudly
-      // rather than be dropped.
+      const culpritId = argv[suppressedIdx + 1];
+      if (!culpritId) throw new Error("--check-suppressed requires a culprit-id argument");
+      // A culprit-id is a single token. Extra argv elements mean the caller passed something
+      // else — most plausibly an unquoted title the shell split — and answering for the first
+      // element alone would report on an id that was never actually checked.
       const trailing = [];
       for (let i = suppressedIdx + 2; i < argv.length && !argv[i].startsWith("--"); i++) trailing.push(argv[i]);
       if (trailing.length)
-        throw new Error("--check-suppressed requires its subject as a single (quoted) argument, not several");
-      console.log(JSON.stringify({ suppressed: suppressedByLandedSignature(subject, readPromotions(root)) }));
+        throw new Error("--check-suppressed requires a single culprit-id argument, not several");
+      console.log(JSON.stringify({ suppressed: suppressedByCulpritId(culpritId, readPromotions(root)) }));
     } catch (e) {
       console.error(`dream: ${e.message}`);
       process.exit(1);
@@ -719,9 +608,70 @@ function main() {
     return;
   }
 
+  if (argv.includes("--journal-events")) {
+    try {
+      const sinceIdx = argv.indexOf("--since");
+      const { journalEmpty, events } = journalEvents({
+        toplevel: root, since: sinceIdx === -1 ? null : argv[sinceIdx + 1],
+      });
+      const byCulprit = Object.fromEntries([...eventsByCulprit(events)].map(([k, v]) => [k, v]));
+      console.log(JSON.stringify({ journalEmpty, events, byCulprit }, null, 2));
+    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
+    return;
+  }
+
+  if (argv.includes("--novel-slugs")) {
+    try {
+      console.log(JSON.stringify({ slugs: novelSlugs(readPromotions(root)) }));
+    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
+    return;
+  }
+
+  const legacyIdx = argv.indexOf("--legacy-similar");
+  if (legacyIdx !== -1) {
+    try {
+      const title = argv[legacyIdx + 1];
+      if (!title) throw new Error("--legacy-similar requires a title argument");
+      console.log(JSON.stringify({
+        hints: legacySimilar(title, readPromotions(root)).map((p) => ({ path: p.path, title: p.title })),
+      }));
+    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
+    return;
+  }
+
+  const lessonsIdx = argv.indexOf("--lessons");
+  if (lessonsIdx !== -1) {
+    try {
+      const stage = argv[lessonsIdx + 1];
+      if (!STAGES.includes(stage))
+        throw new Error(`unknown stage "${stage}" — must be one of: ${STAGES.join(", ")}`);
+      process.stdout.write(renderLessons(stage, {
+        repo: readSection(repoStorePath(root), stage),
+        userRepo: readSection(userRepoStorePath(root), stage),
+        userGlobal: readSection(userGlobalStorePath(), stage),
+      }));
+    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
+    return;
+  }
+
+  const renderIdx = argv.indexOf("--render-report");
+  if (renderIdx !== -1) {
+    try {
+      const path = argv[renderIdx + 1];
+      if (!path) throw new Error("--render-report requires a candidate file path");
+      const candidates = JSON.parse(readFileSync(path, "utf8"));
+      process.stdout.write(renderLearnReport({
+        candidates, promotions: readPromotions(root), outcome: argv.includes("--outcome"),
+      }));
+    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
+    return;
+  }
+
   console.error(
     "usage: dream.mjs --plan | --extract <session-id> | --commit-checkpoint <iso> | --record-promotion <json> | " +
-      "--check-recurrence | --check-suppressed <subject> | --check-observations <session-id>",
+      "--check-recurrence | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
+      "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --lessons <stage> | " +
+      "--render-report <candidates.json> [--outcome]",
   );
   process.exit(1);
 }

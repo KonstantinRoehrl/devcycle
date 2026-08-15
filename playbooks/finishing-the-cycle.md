@@ -5,6 +5,8 @@ Both `/devcycle:cycle` and `/devcycle:continue` run the finish stage through thi
 the policy logic lives here and only here. It reports per
 `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
+Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons finish`. No store, no output.
+
 ## Configured policy
 
 Resolve `${user_config.gitPolicy}` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`: allowed
@@ -76,7 +78,7 @@ verdict the run superseded into `.devcycle/archive-<YYYY-MM-DD>-<branch-slug>/`,
 verdicts for one loop is a defect, not a record.
 
 Then copy, never move, into `.devcycle/archive-<YYYY-MM-DD>-<branch-slug>/`: `ledger.md`, and
-the `evidence/`, `findings/`, and `reports/` directories. Use the cycle's own branch name,
+the `briefs/`, `evidence/`, `findings/`, and `reports/` directories. Use the cycle's own branch name,
 slugified, and today's UTC date. The copy runs unconditionally and asks nothing: it only
 duplicates files this stage already declines to delete, so it cannot lose work and cannot
 change the finish verdict. A failed copy is reported and the stage continues.
@@ -88,8 +90,7 @@ files whose only purpose was to pass content between this cycle's dispatches.
 
 1. **Enumerate.** The ephemeral set is exactly: `.devcycle/reports/*`, `.devcycle/evidence/*`,
    `.devcycle/findings/*`, `.devcycle/sweep-args-*.json`, `.devcycle/sweep-report*.json`, and
-   any generated per-task brief files. Nothing else is a candidate. Archiving above has
-   already copied this set, so a confirmed removal costs nothing that a later dream needs.
+   any generated per-task brief files. Nothing else is a candidate.
 2. **Show and ask.** Present the list and what it totals — file count and size — and ask for
    confirmation in one question, answered inside a cycle run: an Other answer appends
    `user-correction-at-gate`, whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
