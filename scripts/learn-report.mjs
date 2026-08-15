@@ -20,7 +20,17 @@ export function allTimeRollup(promotions) {
   const byRung = Object.fromEntries(RUNGS.map((r) => [r, { landed: 0, retired: 0, net: 0 }]));
   let unbucketed = 0;
   const sourced = { memory: 0, mining: 0 };
+  // A retirement lifecycle record (Phase 4) is a transition out, not a landing: it counts toward
+  // its rung's retired total and carries the (at − landed) day-delta this phase can now time. Any
+  // other lifecycle record (e.g. a revert) is neither a landing nor a retirement count.
+  const retirementDeltas = [];
   for (const p of promotions) {
+    if (p.lifecycle === "retirement") {
+      if (p.rung && byRung[p.rung]) byRung[p.rung].retired += 1;
+      if (p.landed && p.at) retirementDeltas.push(days(p.landed, p.at));
+      continue;
+    }
+    if (p.lifecycle) continue;
     if (p.rung && byRung[p.rung]) byRung[p.rung].landed += 1;
     else unbucketed += 1;
     if (p.sourcedFromMemory === true) sourced.memory += 1;
@@ -28,12 +38,12 @@ export function allTimeRollup(promotions) {
   }
   for (const r of RUNGS) byRung[r].net = byRung[r].landed - byRung[r].retired;
 
-  // An escalation is one culprit-id appearing at r2 and later at r3 — the only transition this
-  // phase can time. Retirement has no record type until Phase 4, so its median is null, and the
-  // renderer says so rather than printing a zero that would read as "instant".
+  // An escalation is one culprit-id appearing at r2 and later at r3 — landings only, so a
+  // retirement record sharing the id is excluded from the span. Retirement now has its own record
+  // kind, so its median is measured from the retirement records' day-deltas rather than held null.
   const byId = new Map();
   for (const p of promotions) {
-    if (!p.culpritId) continue;
+    if (p.lifecycle || !p.culpritId) continue;
     if (!byId.has(p.culpritId)) byId.set(p.culpritId, []);
     byId.get(p.culpritId).push(p);
   }
@@ -43,7 +53,7 @@ export function allTimeRollup(promotions) {
     const to = records.filter((p) => p.rung === "r3").map((p) => p.landed).sort().at(-1);
     if (from && to && to > from) spans.push(days(from, to));
   }
-  return { byRung, sourced, transitions: { r2r3: median(spans), r2retired: null }, unbucketed };
+  return { byRung, sourced, transitions: { r2r3: median(spans), r2retired: median(retirementDeltas) }, unbucketed };
 }
 
 function summaryTable(cands, roll) {
@@ -75,10 +85,14 @@ function landedEntry(c) {
   ].join("\n");
 }
 
-export function renderLearnReport({ candidates, promotions, outcome = false }) {
+export function renderLearnReport({ candidates, promotions, outcome = false, verification = null, budget = null }) {
   const { corpus, checkpoint, attribution } = candidates;
   const cands = candidates.candidates ?? [];
   const roll = allTimeRollup(promotions ?? []);
+  const vcands = {
+    escalation: verification?.candidates?.escalation ?? [],
+    retirement: verification?.candidates?.retirement ?? [],
+  };
   const landed = cands.filter((c) => c.disposition === "landed");
   const rest = cands.filter((c) => c.disposition !== "landed");
   // Unmeasurable is not zero (`references/impact-scoring.md`): summing a non-numeric impact in as
@@ -125,6 +139,10 @@ export function renderLearnReport({ candidates, promotions, outcome = false }) {
       `${roll.transitions.r2r3 === null ? "— (no escalation recorded yet)" : `${roll.transitions.r2r3} days`} · ` +
       `r2 → retired (held out), median ` +
       `${roll.transitions.r2retired === null ? "— (no retirement recorded yet)" : `${roll.transitions.r2retired} days`}`,
+    ...(budget
+      ? [`Always-loaded budget: ${budget.netBytes} bytes ` +
+         `(${budget.withinBudget ? "within budget" : "over budget — a same-run retirement is required"})`]
+      : []),
     "",
     "## Landed",
     "",
@@ -150,6 +168,20 @@ export function renderLearnReport({ candidates, promotions, outcome = false }) {
     "| Culprit-id | Side A | Side B | Chosen |",
     "|---|---|---|---|",
     ...(candidates.contradictions ?? []).map((c) => `| ${c.culpritId} | ${c.sideA} | ${c.sideB} | ${c.chosen} |`),
+    "",
+    "## Verification candidates",
+    "",
+    "### Escalation (r2 → r3)",
+    "",
+    vcands.escalation.length
+      ? vcands.escalation.map((c) => `- \`${c.culpritId}\` (${c.rung}) — ${c.reason}`).join("\n")
+      : "(none this run)",
+    "",
+    "### Retirement",
+    "",
+    vcands.retirement.length
+      ? vcands.retirement.map((c) => `- \`${c.culpritId}\` (${c.rung}) — ${c.reason}`).join("\n")
+      : "(none this run)",
     "",
     "## Previously promoted — did it hold",
     "",

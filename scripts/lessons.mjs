@@ -11,6 +11,20 @@ import { repoSlug } from "./run-record.mjs";
 
 export const SECTION_CAP = 15;
 
+// Spec §7's always-loaded byte budget. The ceiling is the committed r2 store's current byte count
+// (`wc -c docs/devcycle/lessons.md`, 0 while the store has no landed lessons yet) plus one
+// section's headroom (SECTION_CAP × ~80 bytes/line ≈ 1200), so the first net growth beyond a
+// single section requires a same-run retirement to make room.
+export const ALWAYS_LOADED_CEILING = 1200;
+
+// A run may grow the always-loaded surface past the ceiling only when it also retires a lesson in
+// the same run — otherwise the store ratchets up forever. `netBytes` is the net bytes this run
+// adds to the landed r2 store (QC6: it gates that surface alone, and knows nothing about mining or
+// dreaming depth); `hasRetirement` is whether this run retires a lesson.
+export function budgetStatus(netBytes, hasRetirement) {
+  return { netBytes, withinBudget: netBytes <= ALWAYS_LOADED_CEILING || hasRetirement };
+}
+
 // The same enum tests/fixtures/run-record.schema.json declares, in the same order. Restated here
 // rather than imported because that file is a JSON fixture, not a module — but any change there
 // must be mirrored here, which tests/unit/lessons.test.mjs pins.
