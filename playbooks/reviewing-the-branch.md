@@ -146,10 +146,9 @@ session resumes at — then emit the block per
   session on <model>.` — this stage's job, because the on-device session's model is chosen by
   whoever launches it. `<model>` is whatever `walkthroughModel` resolves to per
   `${CLAUDE_PLUGIN_ROOT}/references/config.md`, named by its present id.
-- Compaction hint: keep the checklist path and the branch; drop all review and implementation
-  context. When the state file records `checklist: none` (no rendered surface produced a
-  checklist), keep instead `checklist: none — on-device stage will judge applicability` and
-  the branch.
+- Compaction hint: n/a — clears (`Fresh session` boundary). When the state file records
+  `checklist: none` (no rendered surface produced a checklist), record instead the marker
+  `checklist: none — on-device stage will judge applicability`.
 
 An `exhausted-unresolved` verdict at the cap still emits this stage's block — the outcome IS
 the stage result. Keep `stage: branch-review` in `.devcycle/state.md` so the cycle resumes here

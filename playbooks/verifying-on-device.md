@@ -121,4 +121,4 @@ same contents:
   surface)` when this stage judges itself not applicable.
 - `Carry-overs:` failed items with severity, unverified residue under `auto-ok`, the skip
   reason when skipped, or `none`.
-- `Compaction hint:` Keep checklist path, branch, failed items. Drop walkthrough transcript.
+- `Compaction hint:` n/a — clears. Failed items already carry via `Carry-overs:`.
