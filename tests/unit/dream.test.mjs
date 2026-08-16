@@ -1732,3 +1732,32 @@ test("--render-report passes the same growth when it is paired with an eviction,
   assert.ok(Number(m[1]) > 1200, "the reported growth is real (>1200 bytes), not a vacuous zero");
   assert.match(res.stdout, /^# Learn Report \(proposal\)/m, "the report body still renders");
 });
+
+test("dream --match returns only file-relevant lessons with a pull hint", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-match-")));
+  const learnings = mkdtempSync(join(tmpdir(), "dream-match-learn-"));
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/lessons.md"),
+    "# Lessons\n\n## execution\n- Guard the thing [novel:guard-thing]\n");
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-16-guard-thing.md"),
+    "# Guard the thing\n- files-touched: scripts/x.mjs\n- affected-files: scripts/*.mjs\n- culprit-id: novel:guard-thing\n");
+  const hit = run(["--match", "--stage", "execution", "--files", "scripts/x.mjs"], root, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.equal(hit.status, 0);
+  assert.match(hit.stdout, /\[novel:guard-thing\] → node .*--lesson novel:guard-thing/);
+  const miss = run(["--match", "--stage", "execution", "--files", "other/z.md"], root, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.equal(miss.status, 0);
+  assert.equal(miss.stdout.trim(), "");
+});
+
+test("dream --lesson prints the record; unknown id exits 1", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-lesson-")));
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-16-guard-thing.md"),
+    "# Guard the thing\n- culprit-id: novel:guard-thing\n- files-touched: scripts/x.mjs\n");
+  const ok = run(["--lesson", "novel:guard-thing"], root);
+  assert.equal(ok.status, 0);
+  assert.match(ok.stdout, /# Guard the thing/);
+  const bad = run(["--lesson", "novel:nope"], root);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /no record for novel:nope/);
+});

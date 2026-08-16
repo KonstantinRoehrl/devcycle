@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { repoSlug } from "./run-record.mjs";
+import { findPromotionById } from "./promotions.mjs";
 
 export const SECTION_CAP = 15;
 
@@ -126,6 +127,52 @@ export function planLanding({ stage, line, culpritId, existing, events = [], pro
   const [oldest] = evictionOrder(existing, events, promotions);
   if (!oldest) return { fits: true, eviction: null };
   return { fits: false, eviction: { culpritId: oldest.id, section: stage, reason: "cap" } };
+}
+
+export const MATCH_CAP = 5;
+
+// Minimal glob match, no dependency: '*' matches within a path segment, '**' across segments.
+export function fileMatchesGlob(file, glob) {
+  if (!glob) return false;
+  if (glob === file) return true;
+  const rx = "^" + String(glob)
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, " ")
+    .replace(/\*/g, "[^/]*")
+    .replace(/ /g, ".*") + "$";
+  return new RegExp(rx).test(file);
+}
+
+// Pure: join each r2 lesson headline to its promotion record, glob-match the record's
+// affected-files (files-touched fallback) against `files`, dedupe by id, rank exact>glob, cap.
+export function matchLessons({ lessonLines, promotions, files, cap = MATCH_CAP }) {
+  const seen = new Set();
+  const ranked = [];
+  for (const line of lessonLines) {
+    const id = lessonId(line);
+    if (!id || seen.has(id)) continue;
+    const rec = findPromotionById(promotions, id);
+    const globs = (rec && rec.affectedFiles && rec.affectedFiles.length ? rec.affectedFiles : rec && rec.filesTouched) || [];
+    let rank = null; // 0 exact, 1 glob
+    for (const g of globs) {
+      for (const f of files) {
+        if (g === f) { rank = 0; break; }
+        if (rank === null && fileMatchesGlob(f, g)) rank = 1;
+      }
+      if (rank === 0) break;
+    }
+    if (rank === null) continue;
+    seen.add(id);
+    ranked.push({ id, line, rank });
+  }
+  ranked.sort((a, b) => a.rank - b.rank);
+  return ranked.slice(0, cap);
+}
+
+export function renderMatch(matches) {
+  return matches
+    .map((m) => `${m.line} → node "\${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lesson ${m.id}`)
+    .join("\n");
 }
 
 // Pure: returns the store's new text. The caller writes it, after screening — spec §7's user

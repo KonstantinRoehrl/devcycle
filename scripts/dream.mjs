@@ -12,8 +12,9 @@ import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, readRecords, inWindow } from "./doctor.mjs";
 import { journalEvents, eventsByCulprit } from "./journal.mjs";
-import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs } from "./promotions.mjs";
-import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId } from "./lessons.mjs";
+import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
+import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch } from "./lessons.mjs";
+import { parseFileList } from "./task-files.mjs";
 import { verify, installedVersion } from "./verification.mjs";
 import { renderLearnReport } from "./learn-report.mjs";
 
@@ -488,7 +489,7 @@ function main() {
   const SUBCOMMANDS = [
     "--plan", "--commit-checkpoint", "--check-suppressed", "--extract", "--check-observations",
     "--record-promotion", "--record-lifecycle", "--check-recurrence", "--journal-events", "--legacy-similar",
-    "--novel-slugs", "--lessons", "--render-report",
+    "--novel-slugs", "--lessons", "--render-report", "--match", "--lesson",
   ];
   const present = SUBCOMMANDS.filter((f) => argv.includes(f));
   if (present.length > 1) {
@@ -684,6 +685,41 @@ function main() {
     return;
   }
 
+  const matchIdx = argv.indexOf("--match");
+  if (matchIdx !== -1) {
+    try {
+      const argVal = (name) => { const i = argv.indexOf(name); return i !== -1 ? argv[i + 1] : undefined; };
+      const stage = argVal("--stage");
+      if (!STAGES.includes(stage)) throw new Error(`--match needs a valid --stage (one of ${STAGES.join(", ")})`);
+      const files = parseFileList(argVal("--files") ?? "");
+      const lessonLines = [
+        ...readSection(repoStorePath(root), stage),
+        ...readSection(userRepoStorePath(root), stage),
+        ...readSection(userGlobalStorePath(), stage),
+      ];
+      const out = renderMatch(matchLessons({ lessonLines, promotions: readPromotions(root), files }));
+      if (out) process.stdout.write(out + "\n");
+      return;
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
+  }
+
+  const lessonPullIdx = argv.indexOf("--lesson");
+  if (lessonPullIdx !== -1) {
+    try {
+      const id = argv[lessonPullIdx + 1];
+      const rec = findPromotionById(readPromotions(root), id);
+      if (!rec) { console.error(`no record for ${id}`); process.exit(1); }
+      process.stdout.write(readFileSync(join(root, rec.path), "utf8"));
+      return;
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
+  }
+
   const renderIdx = argv.indexOf("--render-report");
   if (renderIdx !== -1) {
     try {
@@ -713,6 +749,7 @@ function main() {
       "--record-lifecycle <json> | " +
       "--check-recurrence | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
       "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --lessons <stage> | " +
+      "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
       "--render-report <candidates.json> [--outcome]",
   );
   process.exit(1);

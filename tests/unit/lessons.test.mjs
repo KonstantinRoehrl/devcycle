@@ -7,6 +7,7 @@ import {
   SECTION_CAP, STAGES, repoStorePath, userRepoStorePath, userGlobalStorePath,
   readSection, renderLessons, planLanding, applyLanding,
   ALWAYS_LOADED_CEILING, budgetStatus,
+  fileMatchesGlob, matchLessons, renderMatch, MATCH_CAP,
 } from "../../scripts/lessons.mjs";
 import { readFileSync } from "node:fs";
 
@@ -141,4 +142,31 @@ test("budgetStatus refuses over-ceiling growth without a same-run retirement", (
   assert.equal(budgetStatus(over, true).withinBudget, true);
   assert.equal(budgetStatus(ALWAYS_LOADED_CEILING, false).withinBudget, true,
     "net exactly at the ceiling still fits");
+});
+
+test("fileMatchesGlob: * within a segment, ** across", () => {
+  assert.equal(fileMatchesGlob("scripts/a.mjs", "scripts/*.mjs"), true);
+  assert.equal(fileMatchesGlob("scripts/sub/a.mjs", "scripts/*.mjs"), false);
+  assert.equal(fileMatchesGlob("scripts/sub/a.mjs", "scripts/**"), true);
+  assert.equal(fileMatchesGlob("scripts/a.mjs", "scripts/a.mjs"), true);
+});
+
+test("matchLessons joins by id, ranks exact over glob, dedupes, caps", () => {
+  const promotions = [
+    { culpritId: "novel:one", aliases: [], path: "docs/devcycle/promotions/2026-08-16-one.md", affectedFiles: ["scripts/a.mjs"], filesTouched: ["scripts/a.mjs"] },
+    { culpritId: "novel:two", aliases: [], path: "docs/devcycle/promotions/2026-08-16-two.md", affectedFiles: ["scripts/*.mjs"], filesTouched: [] },
+  ];
+  const lessonLines = ["- L1 [novel:one]", "- L2 [novel:two]", "- L2dup [novel:two]"];
+  const matches = matchLessons({ lessonLines, promotions, files: ["scripts/a.mjs"] });
+  assert.deepEqual(matches.map((m) => m.id), ["novel:one", "novel:two"]); // exact before glob, deduped
+});
+
+test("matchLessons: no relevant file → empty", () => {
+  const promotions = [{ culpritId: "novel:one", aliases: [], path: "p/2026-08-16-one.md", affectedFiles: ["scripts/a.mjs"], filesTouched: [] }];
+  assert.deepEqual(matchLessons({ lessonLines: ["- L1 [novel:one]"], promotions, files: ["other/z.md"] }), []);
+});
+
+test("renderMatch appends the pull hint verbatim", () => {
+  const out = renderMatch([{ id: "novel:one", line: "- L1 [novel:one]", rank: 0 }]);
+  assert.match(out, /- L1 \[novel:one\] → node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/dream\.mjs" --lesson novel:one/);
 });
