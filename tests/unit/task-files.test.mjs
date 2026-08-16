@@ -18,3 +18,19 @@ test("extractFiles pulls path tokens out of a Files block", () => {
 test("parseFileList normalizes a CSV --files argument", () => {
   assert.deepEqual(parseFileList("scripts/a.mjs:1-9, `b/c.md` , Modify"), ["scripts/a.mjs", "b/c.md"]);
 });
+
+test("parseFileList keeps a top-level extensionless file the caller explicitly named", () => {
+  // The --files CSV is caller-asserted: these ARE files, so the path-shape gate must not drop
+  // Dockerfile/Makefile/LICENSE, or their lessons are silently withheld.
+  assert.deepEqual(parseFileList("Dockerfile"), ["Dockerfile"]);
+  assert.deepEqual(parseFileList("Dockerfile, Makefile, scripts/a.mjs"),
+    ["Dockerfile", "Makefile", "scripts/a.mjs"]);
+  // Labels and bare dashes are still dropped even on the trusted path.
+  assert.deepEqual(parseFileList("Modify, -, LICENSE"), ["LICENSE"]);
+});
+
+test("extractFiles still rejects a bare extensionless token as prose (the asymmetry the fix preserves)", () => {
+  // The **Files:**-block parse path stays strict: an extensionless word with no slash reads as
+  // surrounding prose, so wave-disjointness parity is unchanged.
+  assert.deepEqual([...extractFiles("Dockerfile is the build entrypoint")], []);
+});

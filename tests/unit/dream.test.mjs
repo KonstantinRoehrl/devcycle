@@ -1749,6 +1749,36 @@ test("dream --match returns only file-relevant lessons with a pull hint", () => 
   assert.equal(miss.stdout.trim(), "");
 });
 
+test("dream --match selects lessons for a review-stage diff's files, not only execution", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-match-review-")));
+  const learnings = mkdtempSync(join(tmpdir(), "dream-match-review-learn-"));
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/lessons.md"),
+    "# Lessons\n\n## branch-review\n- Re-review the finding [novel:review-thing]\n");
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-16-review-thing.md"),
+    "# Review thing\n- affected-files: scripts/*.mjs\n- culprit-id: novel:review-thing\n");
+  const hit = run(["--match", "--stage", "branch-review", "--files", "scripts/x.mjs"], root, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.equal(hit.status, 0);
+  assert.match(hit.stdout, /\[novel:review-thing\] → node .*--lesson novel:review-thing/,
+    "the branch-review stage matches its diff's files, proving --match is not execution-only");
+  const audit = run(["--match", "--stage", "audit", "--files", "scripts/x.mjs"], root, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.equal(audit.status, 0, "audit is a valid --match stage too");
+});
+
+test("dream --match delivers a lesson for a top-level extensionless file named in --files", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-match-dockerfile-")));
+  const learnings = mkdtempSync(join(tmpdir(), "dream-match-dockerfile-learn-"));
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/lessons.md"),
+    "# Lessons\n\n## execution\n- Pin the base image digest [novel:docker-thing]\n");
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-16-docker-thing.md"),
+    "# Docker thing\n- affected-files: Dockerfile\n- culprit-id: novel:docker-thing\n");
+  const hit = run(["--match", "--stage", "execution", "--files", "Dockerfile"], root, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.equal(hit.status, 0);
+  assert.match(hit.stdout, /\[novel:docker-thing\] → node .*--lesson novel:docker-thing/,
+    "an extensionless top-level file the caller named must not be dropped by the path-shape gate");
+});
+
 test("dream --lesson prints the record; unknown id exits 1", () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-lesson-")));
   mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
