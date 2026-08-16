@@ -6,6 +6,7 @@
 // it cannot see two tasks coupled only by editing the same shared resource's prose or
 // assertions without naming the same file.
 import { readFileSync, existsSync } from "node:fs";
+import { extractFiles } from "./task-files.mjs";
 
 const planPath = process.argv[2];
 if (!planPath) {
@@ -21,26 +22,6 @@ const text = readFileSync(planPath, "utf8");
 
 const TASK_HEADING_RE = /^### Task (\d+):.*$/gm;
 const FILES_BLOCK_RE = /\*\*Files:\*\*\n([\s\S]*?)(?=\n\*\*|\n###|$)/;
-const LABELS = new Set(["Create", "Modify", "Test"]);
-
-// Pulls file-path-shaped tokens out of a task's **Files:** block: strips a trailing
-// `:123-145`-style line-range suffix, strips surrounding backticks/parens/commas, skips
-// the literal Create/Modify/Test labels, and keeps only tokens that still look like a
-// path afterward (a slash, or a dot-extension at the end) -- which is what filters out
-// the surrounding prose (parenthetical notes, bullet dashes) that also lives in that block.
-function extractFiles(block) {
-  const files = new Set();
-  const tokens = block.split(/\s+/).filter(Boolean);
-  for (const raw of tokens) {
-    let tok = raw.replace(/^[`(),]+/, "").replace(/[`(),]+$/, "");
-    tok = tok.replace(/:\d+-\d+$/, "");
-    tok = tok.replace(/:$/, "");
-    if (!tok || LABELS.has(tok) || tok === "-") continue;
-    if (!/\//.test(tok) && !/\.[A-Za-z0-9]+$/.test(tok)) continue;
-    files.add(tok);
-  }
-  return files;
-}
 
 // Maps task number -> Set of files that task's **Files:** block declares.
 function parseTaskFiles(planText) {
