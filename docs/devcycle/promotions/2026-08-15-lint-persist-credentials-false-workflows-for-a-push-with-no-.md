@@ -1,0 +1,13 @@
+# Lint persist-credentials:false workflows for a push with no re-auth in between
+- promotion-type: enforcement-gap
+- cluster-signature: A lint over .github/workflows/*.yml flagging any checkout with persist-credentials:false followed by a git push with no explicit re-auth step would have caught this exact case.
+- files-touched: scripts/validate.mjs, tests/unit/validate.test.mjs
+- landed: 2026-08-15
+- commit: 68a2a05
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: novel:persist-credentials-blanket-rule-breaks-push-steps
+- rung: r3
+- audience: repo-devs
+- verify: scripts/validate.mjs
+- aliases: 

@@ -358,12 +358,13 @@ Set options with `/plugin configure devcycle@devcycle` (or
 `claude plugin install devcycle@devcycle --config KEY=VALUE`). Everything has a working
 default; configure nothing and the pipeline still runs. The first time `/devcycle:cycle`
 runs with nothing configured, it asks one question — which `profile` to run — and never asks
-again; answer *customize* instead and it asks the four behavioral options in one batch.
+again; answer *customize* instead and it asks the five behavioral options in one batch.
 
 | Option | What it controls | Values | Default |
 | --- | --- | --- | --- |
 | `profile` | Cost against rigor, across every stage at once | `lean` / `standard` / `thorough` | `standard` |
 | `gitPolicy` | What the finish stage may do with git | `local-commits-only` / `push-allowed` / `open-pr` | `local-commits-only` |
+| `docTrackingPolicy` | What devcycle attempts to commit (the repo's `.gitignore` still decides what lands) | `standard` / `all-local` / `all-tracked` | `standard` |
 | `reviewDepth` | How the branch review runs | `single` / `panel` / `auto` | `single` |
 | `crossModelReview` | Adds a second-model lens to the panel | `true` / `false` | `false` |
 | `onDeviceGate` | Whether a human must finish the on-device checklist | `human-required` / `auto-ok` / `auto` | `human-required` |

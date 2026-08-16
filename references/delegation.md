@@ -122,6 +122,7 @@ report: .devcycle/reports/<task-id>.md
 files: <comma-separated paths>
 on-device items: <count> | none
 deviations: <count> | none
+lessons: <N matched / M read>
 ```
 
 **Task reviewer** — the dispatch's entire final output:
@@ -130,6 +131,7 @@ deviations: <count> | none
 verdict: <per references/evidence.md>
 blocking findings: <count>
 findings: .devcycle/findings/<task-id>-round-<n>.md | none
+lessons: <N matched / M read>
 ```
 
 The coordinator opens a report or findings file only when a decision needs content the
@@ -139,7 +141,9 @@ envelope cannot carry.
 coordinator duty that fires *without* reading the file: `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` must
 generate the on-device checklist in the same wave a task reports rendered changes, and the
 deviations count tells the coordinator whether opening the file is a decision it has to make.
-An envelope that dropped either field would trade a real gate for a token saving.
+An envelope that dropped either field would trade a real gate for a token saving. The `lessons`
+count makes lesson consultation observable at the coordinator without mandating a read — `M = 0`
+is legitimate when none applied.
 
 ## The short paths
 

@@ -1,0 +1,13 @@
+# Pre-flight check for same-wave Files-block overlap
+- promotion-type: enforcement-gap
+- cluster-signature: A pre-flight script diffing every task's declared Files block for literal path overlap catches the direct-overlap case of the file-disjointness invariant.
+- files-touched: scripts/wave-disjointness-check.mjs, tests/unit/wave-disjointness-check.test.mjs, playbooks/planning-waves.md
+- landed: 2026-08-15
+- commit: 5d739fe
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: novel:wave-file-disjointness-invariant-breached
+- rung: r3
+- audience: repo-devs
+- verify: scripts/wave-disjointness-check.mjs
+- aliases: 

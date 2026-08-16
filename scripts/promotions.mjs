@@ -89,6 +89,11 @@ export function recordPromotion(repoRoot, rec) {
   const filesTouched = Array.isArray(rec.filesTouched)
     ? rec.filesTouched.map((f) => oneLine(f)).join(", ")
     : oneLine(rec.filesTouched);
+  const affectedFiles = Array.isArray(rec.affectedFiles)
+    ? rec.affectedFiles.map((f) => oneLine(f)).join(", ")
+    : rec.affectedFiles != null
+      ? oneLine(rec.affectedFiles)
+      : filesTouched;
   const aliases = Array.isArray(rec.aliases) ? rec.aliases.map((a) => oneLine(a)).join(", ") : oneLine(rec.aliases);
   writeFileSync(
     path,
@@ -96,6 +101,7 @@ export function recordPromotion(repoRoot, rec) {
       `- promotion-type: ${oneLine(rec.promotionType)}\n` +
       `- cluster-signature: ${oneLine(rec.clusterSignature)}\n` +
       `- files-touched: ${filesTouched}\n` +
+      `- affected-files: ${affectedFiles}\n` +
       `- landed: ${oneLine(rec.landed)}\n` +
       `- commit: ${oneLine(rec.commit)}\n` +
       `- plugin-version: ${oneLine(rec.pluginVersion)}\n` +
@@ -145,6 +151,7 @@ export function readPromotions(repoRoot) {
         promotionType: field(text, "promotion-type"),
         clusterSignature: field(text, "cluster-signature"),
         filesTouched: field(text, "files-touched").split(",").map((s) => s.trim()).filter(Boolean),
+        affectedFiles: field(text, "affected-files").split(",").map((s) => s.trim()).filter(Boolean),
         landed: field(text, "landed"),
         commit: field(text, "commit"),
         pluginVersion: orNull("plugin-version"),
@@ -168,6 +175,21 @@ export function suppressedByCulpritId(culpritId, promotions) {
   const id = String(culpritId ?? "").trim();
   if (!id) return false;
   return promotions.some((p) => p.culpritId === id || p.aliases.includes(id));
+}
+
+// Resolves a lesson id to its record: culprit-id first, then alias, then the filename slug (the
+// date prefix and .md extension stripped) — the last fallback exists so a pre-culprit-id record
+// can still be joined against a trigger written before culprit-ids existed.
+export function findPromotionById(promotions, id) {
+  const want = String(id ?? "").trim();
+  if (!want) return null;
+  for (const p of promotions) if (p.culpritId === want) return p;
+  for (const p of promotions) if (p.aliases.includes(want)) return p;
+  for (const p of promotions) {
+    const base = p.path.split("/").pop().replace(/\.md$/, "").replace(/^\d{4}-\d{2}-\d{2}-/, "");
+    if (base === want) return p;
+  }
+  return null;
 }
 
 const tokens = (s) =>

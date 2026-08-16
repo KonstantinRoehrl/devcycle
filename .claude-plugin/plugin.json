@@ -28,6 +28,12 @@
       "default": "local-commits-only",
       "description": "What the finish stage may do with the branch. One of: local-commits-only, push-allowed, open-pr."
     },
+    "docTrackingPolicy": {
+      "type": "string",
+      "title": "Doc-tracking policy",
+      "default": "standard",
+      "description": "What devcycle attempts to commit in a host repo (the repo's own .gitignore always wins). One of: standard (commit lessons + promotions, keep specs + plans local), all-local (commit nothing devcycle produces), all-tracked (also commit specs + plans)."
+    },
     "implementerModel": {
       "type": "string",
       "title": "Implementer model",

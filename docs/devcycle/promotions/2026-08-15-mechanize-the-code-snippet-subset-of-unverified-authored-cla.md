@@ -1,0 +1,13 @@
+# Mechanize the code-snippet subset of unverified-authored-claim (plan/spec pasted JS blocks)
+- promotion-type: enforcement-gap
+- cluster-signature: Only the code-snippet subset of unverified-authored-claim is mechanizable as a hard gate (node --check every plan-pasted code block).
+- files-touched: scripts/lint-plan-code-blocks.mjs, tests/unit/lint-plan-code-blocks.test.mjs, playbooks/planning-waves.md
+- landed: 2026-08-15
+- commit: f82bba1
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: rule-violation:unverified-authored-claim
+- rung: r3
+- audience: repo-devs
+- verify: scripts/lint-plan-code-blocks.mjs
+- aliases: 

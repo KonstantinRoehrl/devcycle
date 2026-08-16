@@ -1,0 +1,13 @@
+# Check diff size before a branch review -- chunk or use `rtk proxy git diff`, don't trust one truncated pass
+- promotion-type: doc-edit
+- cluster-signature: Auto-chunking the review panel over large diffs is the real fix but is a panel/script change beyond this run's remit; the reachable ceiling is a playb
+- files-touched: docs/devcycle/lessons.md
+- landed: 2026-08-15
+- commit: 
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: novel:branch-review-diff-truncation-hides-findings
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases: 
