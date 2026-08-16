@@ -1,0 +1,13 @@
+# Harden /devcycle:continue's resume checklist -- state-file/resume-context recognition has repeatedly missed
+- promotion-type: doc-edit
+- cluster-signature: The three instances have different proximate causes (a search miss, a stale report of no state file, and a resume-intent misread over prepared fixture
+- files-touched: docs/devcycle/lessons.md
+- landed: 2026-08-15
+- commit: 
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: novel:continue-state-file-discovery-failure
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases: 

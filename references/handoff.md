@@ -18,11 +18,16 @@ no diagnosis block. The finish stage emits the pipeline's final block. The block
 ## Handoff
 - Stage completed: <stage>
 - Artifacts: <paths, one per line>
+- Lessons read: <N matched / M consulted>
 - Carry-overs: <pinned interfaces / open decisions, or "none">
 - Context depth: <n> (<pct>% of window, <band>)
 - Context action: <Continue | Clear + /devcycle:continue | Fresh session>
-- Compaction hint: Keep <X>. Drop <Y>.
+- Compaction hint: Keep <X>. Drop <Y>. (present only when the action is `Continue`; every other boundary clears and carries no Keep/Drop payload)
 ```
+
+`Lessons read:` is populated from the stage's own `--match`/`--lessons` result — the count matched
+against the count consulted — and, for the execution stage specifically, from the aggregated
+`lessons:` lines across that wave's dispatch return envelopes.
 
 Every boundary also appends one `stage` line to the run record — `run-record.mjs append --kind
 stage` with the stage name, its start and end timestamps and its outcome. Those timestamps are the
@@ -51,15 +56,15 @@ column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, 
 | scoping → brainstorm | Clear + `/devcycle:continue` | scope path, confirmed constraints, open `<tbd>`s | interview transcript, research output |
 | scoping → diagnosis (bugs) | Clear + `/devcycle:continue` | scope path, reproduction steps | interview transcript |
 | audit → brainstorm (findings selected) | Clear + `/devcycle:continue` | audit path, the selected findings | audit transcript, rejected findings |
-| diagnosis → brainstorm (root cause established) | Clear + `/devcycle:continue` | diagnosis report path, reproduction steps, root cause | debugging transcripts, ruled-out hypotheses |
-| brainstorm → planning (spec approved) | Clear + `/devcycle:continue` | spec path, decisions, constraints | design back-and-forth |
-| planning → execution (plan approved) | Clear + `/devcycle:continue` | nothing (files carry it) | planning conversation |
-| wave → wave (within execution) | Clear + `/devcycle:continue` | ledger/plan paths, dispatch map, wave status | implementer transcripts, resolved findings |
-| execution → branch-review | Clear + `/devcycle:continue` | branch, spec path, ledger path | all implementation context |
-| branch-review → on-device | Fresh session | checklist path, branch | everything else |
+| diagnosis → brainstorm (root cause established) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
+| brainstorm → planning (spec approved) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
+| planning → execution (plan approved) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
+| wave → wave (within execution) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
+| execution → branch-review | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
+| branch-review → on-device | Fresh session | n/a — clears | n/a — clears |
 | fast-path → finish | Clear + `/devcycle:continue` | branch, what changed | the implementation conversation |
 | sweep → finish | Clear + `/devcycle:continue` | branch, sweep report path | per-file sweep output |
-| on-device → finish | Clear + `/devcycle:continue` | checklist path, verified items | on-device transcript |
+| on-device → finish | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
 | finish → (end) | Continue | — | — |
 
 A reviewer that watched the code being written inherits the implementer's assumptions, which is

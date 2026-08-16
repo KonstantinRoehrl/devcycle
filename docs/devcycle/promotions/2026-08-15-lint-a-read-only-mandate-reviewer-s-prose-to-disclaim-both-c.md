@@ -1,0 +1,13 @@
+# Lint a read-only-mandate reviewer's prose to disclaim both commit and push
+- promotion-type: enforcement-gap
+- cluster-signature: A scoped guard/lint over agents/*.md read-only-mandate frontmatter/prose, since a hard Bash-capability removal would also remove legitimate read operations.
+- files-touched: scripts/validate.mjs, tests/unit/validate.test.mjs, agents/task-reviewer.md
+- landed: 2026-08-15
+- commit: 68a2a05
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: novel:reviewer-agent-retains-git-write-capability
+- rung: r3
+- audience: repo-devs
+- verify: scripts/validate.mjs
+- aliases: 

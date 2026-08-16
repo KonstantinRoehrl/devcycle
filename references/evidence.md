@@ -45,7 +45,11 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   which redirects only the last command and silently drops every earlier command's output.
 - The captured command for `-before.txt` and `-after.txt` is always the repo's whole
   verification gate; capturing fewer commands than the gate runs in either file is a
-  declared deviation. The normal `red-green` case is a task whose own new tests fail that
+  declared deviation. `node scripts/evidence-completeness-check.mjs <report>` mechanizes the
+  narrow-selector subset of this rule — a `cmd:` naming one test file or carrying a
+  test-name filter flag — but it cannot catch every partial-gate case, so the
+  concurrent-wave whole-tree-capture case stays a human judgment call. The normal
+  `red-green` case is a task whose own new tests fail that
   whole gate, so `-before.txt` exits non-zero honestly. When a task's red is instead a
   subset inside an otherwise-green suite — new tests added to a file that's part of a
   green whole — the whole-gate `-before.txt` legitimately exits 0; capture the honest

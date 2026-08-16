@@ -2,11 +2,12 @@
 // plugin trees. Every test starts from a green fixture and breaks one thing.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, mkdtempSync, cpSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { makePluginFixture as makeBaseFixture, writeInto, runValidate, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
+import { lessonsTrackingErrors } from "../../scripts/validate.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
@@ -1018,4 +1019,163 @@ test("changelog dates: a heading date that is not a real calendar date fails", (
   const dir = makePluginFixture();
   writeInto(dir, "CHANGELOG.md", "# Changelog\n\n## 1.0.0 — 2026-02-30\n\n- feat(x): a thing\n");
   assert.notEqual(runValidate(dir).status, 0);
+});
+
+// --- lessonsTrackingErrors: the learn loop's compiled memory must stay tracked ---
+
+test("lessonsTrackingErrors flags a re-ignored learn store, passes when tracked", () => {
+  const root = mkdtempSync(join(tmpdir(), "track-"));
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/lessons.md"), "# Lessons\n");
+  writeFileSync(join(root, ".gitignore"), "docs/devcycle/lessons.md\ndocs/devcycle/promotions/\n");
+  assert.ok(lessonsTrackingErrors(root).length >= 1);
+  writeFileSync(join(root, ".gitignore"), "node_modules/\n");
+  assert.deepEqual(lessonsTrackingErrors(root), []);
+});
+
+test("lessonsTrackingErrors still fires when the store is tracked AND re-ignored", () => {
+  // `git check-ignore` reports "not ignored" for any path already in the index, so once the
+  // learn store is committed/staged the guard is dead unless it consults the ignore rules
+  // regardless of index state (--no-index). Reproduce the tracked-and-re-ignored state and
+  // assert the guard still fires.
+  const root = mkdtempSync(join(tmpdir(), "track-indexed-"));
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/lessons.md"), "# Lessons\n");
+  writeFileSync(join(root, "docs/devcycle/promotions/p.md"), "# A promotion\n");
+  execFileSync("git", ["add", "docs/devcycle/lessons.md", "docs/devcycle/promotions/"], { cwd: root });
+  writeFileSync(join(root, ".gitignore"), "docs/devcycle/lessons.md\ndocs/devcycle/promotions/\n");
+  assert.ok(lessonsTrackingErrors(root).length >= 1);
+});
+
+// --- check 20: a read-only-mandate agent must disclaim commit and push ---
+// An agent whose frontmatter grants Bash and whose body claims read-only access must name
+// both "commit" and "push" among the git operations it disallows — Bash itself is not
+// restricted by the harness, so the prose is the only thing standing between the mandate
+// and a write that sticks.
+
+const readOnlyAgent = (dir, name, body) =>
+  writeInto(dir, `agents/${name}.md`, `---\nname: ${name}\ntools: Read, Grep, Glob, Bash\n---\n\n${body}`);
+
+test("read-only mandate check: an agent naming both commit and push passes", () => {
+  const dir = makePluginFixture();
+  readOnlyAgent(
+    dir,
+    "example-reviewer",
+    "Your access is read-only: never a route to commit, and never a route to push.\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("read-only mandate check: an agent naming commit but not push fails, naming file and word", () => {
+  const dir = makePluginFixture();
+  readOnlyAgent(dir, "example-reviewer", "Your access is read-only: never a route to committing.\n");
+  failsWith(runValidate(dir), /agents\/example-reviewer\.md/, /push/);
+});
+
+test("read-only mandate check: an agent with no Bash tool is exempt regardless of its prose", () => {
+  const dir = makePluginFixture();
+  writeInto(
+    dir,
+    "agents/example-reviewer.md",
+    "---\nname: example-reviewer\ntools: Read, Grep, Glob\n---\n\nYour access is read-only.\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("read-only mandate check: an agent with Bash that never claims read-only access is exempt", () => {
+  const dir = makePluginFixture();
+  readOnlyAgent(dir, "example-implementer", "You may write files, run commands, and commit.\n");
+  ok(runValidate(dir));
+});
+
+// --- check 21: a checkout's persist-credentials: false followed by a later `git push` in the
+// same job must show re-authentication evidence in between (a checkout that drops the push
+// credential and a push with no replacement credential fails at push time, or worse, someone
+// "fixes" it by dropping persist-credentials: false instead) ---
+
+const workflow = (dir, name, body) => writeInto(dir, `.github/workflows/${name}.yml`, body);
+
+test("workflow re-auth check: persist-credentials: false then a bare git push with no re-auth evidence fails, naming file and job", () => {
+  const dir = makePluginFixture();
+  workflow(
+    dir,
+    "bad",
+    "name: Bad workflow\n" +
+      "on: push\n" +
+      "jobs:\n" +
+      "  bad-job:\n" +
+      "    runs-on: ubuntu-24.04\n" +
+      "    steps:\n" +
+      "      - uses: actions/checkout@abc123\n" +
+      "        with:\n" +
+      "          persist-credentials: false\n" +
+      "      - name: Push without re-auth\n" +
+      "        run: |\n" +
+      "          git push origin main\n"
+  );
+  failsWith(runValidate(dir), /\.github\/workflows\/bad\.yml/, /bad-job/);
+});
+
+test("workflow re-auth check: a git remote set-url before the push passes", () => {
+  const dir = makePluginFixture();
+  workflow(
+    dir,
+    "good",
+    "name: Good workflow\n" +
+      "on: push\n" +
+      "jobs:\n" +
+      "  good-job:\n" +
+      "    runs-on: ubuntu-24.04\n" +
+      "    steps:\n" +
+      "      - uses: actions/checkout@abc123\n" +
+      "        with:\n" +
+      "          persist-credentials: false\n" +
+      "      - name: Push with re-auth\n" +
+      "        env:\n" +
+      "          GH_TOKEN: ${{ github.token }}\n" +
+      "        run: |\n" +
+      "          git remote set-url origin https://x-access-token:$GH_TOKEN@github.com/example/example.git\n" +
+      "          git push origin main\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("workflow re-auth check: persist-credentials: false with no push in the job passes", () => {
+  const dir = makePluginFixture();
+  workflow(
+    dir,
+    "read-only",
+    "name: Read-only workflow\n" +
+      "on: push\n" +
+      "jobs:\n" +
+      "  read-only-job:\n" +
+      "    runs-on: ubuntu-24.04\n" +
+      "    steps:\n" +
+      "      - uses: actions/checkout@abc123\n" +
+      "        with:\n" +
+      "          persist-credentials: false\n" +
+      "      - name: Just read things\n" +
+      "        run: node scripts/validate.mjs\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("workflow re-auth check: a bare git push with no persist-credentials: false anywhere in the job passes", () => {
+  const dir = makePluginFixture();
+  workflow(
+    dir,
+    "default-creds",
+    "name: Default credentials workflow\n" +
+      "on: push\n" +
+      "jobs:\n" +
+      "  default-creds-job:\n" +
+      "    runs-on: ubuntu-24.04\n" +
+      "    steps:\n" +
+      "      - uses: actions/checkout@abc123\n" +
+      "      - name: Push with the default checkout credential\n" +
+      "        run: git push origin main\n"
+  );
+  ok(runValidate(dir));
 });

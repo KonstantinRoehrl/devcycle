@@ -1,0 +1,13 @@
+# Wave briefs must name sibling-safety/re-staging steps -- shared checkouts let tasks' git state bleed
+- promotion-type: doc-edit
+- cluster-signature: A fully mechanized fix means real per-task worktree isolation (one checkout per implementer), which is an architecture change beyond a doc lesson; the
+- files-touched: docs/devcycle/lessons.md
+- landed: 2026-08-15
+- commit: 
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: novel:shared-checkout-cross-task-git-state-bleed
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases: 

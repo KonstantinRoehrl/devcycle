@@ -83,7 +83,9 @@ copied verbatim, implicitly part of every task's requirements); and `## Quality 
 (Create / Modify, with `path.py:123-145` line ranges where they help / Test); `**Interfaces:**` (Consumes
 — what this task uses from earlier tasks, exact signatures; Produces — what later tasks rely on, exact
 function names and parameter and return types); the declaration lines below plus the
-`**Quality constraints:**` line above; then `- [ ]` steps carrying the actual code, the exact command,
+`**Quality constraints:**` line above and a `**Lessons:**` line right after it — emitted empty by
+planning and filled by `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`'s brief-slice from
+`--match`; then `- [ ]` steps carrying the actual code, the exact command,
 and the expected output inline.
 
 **No placeholders.** Every step carries the actual content the implementer needs; none of these may
@@ -105,6 +107,8 @@ fixing what it finds inline as you go; no re-review pass.
 5. **No count-only enumeration:** never cite an enumeration by count alone ("all four guardrails");
    one that more than one task reproduces belongs in Global Constraints, verbatim in every brief.
 6. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
+7. **Pasted-code lint:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/lint-plan-code-blocks.mjs"` over the
+   plan just written and fix any JS/mjs code block it flags before a task brief carries it forward.
 
 ## The three per-task declaration lines
 
@@ -131,7 +135,10 @@ The plan ends with a `## Dispatch Map` grouping tasks into waves — `- Wave 1: 
 only dependency-ready, file-disjoint tasks: never place two tasks touching the same file in one
 wave, even if both declare `none`. Execution dispatches by readiness from this map, never by written
 order. That map, the plan header, and the per-task blocks are the whole contract
-`${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` consumes.
+`${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` consumes. Before handing the plan off, run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/wave-disjointness-check.mjs" <plan-path>` -- it only catches a
+literal Files-block overlap within one wave, not the harder case of two tasks coupled only by
+editing the same shared resource's prose or assertions.
 
 ## Reuse before rebuild
 

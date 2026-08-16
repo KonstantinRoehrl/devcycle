@@ -1,0 +1,13 @@
+# Mechanize the narrow-selector subset of partial-evidence-capture
+- promotion-type: enforcement-gap
+- cluster-signature: A gate-completeness check comparing a captured Evidence cmd against a narrow-selector pattern is addable as a lint over reports.
+- files-touched: scripts/evidence-completeness-check.mjs, tests/unit/evidence-completeness-check.test.mjs, references/evidence.md
+- landed: 2026-08-15
+- commit: e326035
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: friction:partial-evidence-capture
+- rung: r3
+- audience: repo-devs
+- verify: scripts/evidence-completeness-check.mjs
+- aliases: 

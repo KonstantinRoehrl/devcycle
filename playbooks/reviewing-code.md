@@ -71,6 +71,13 @@ convention covers in `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`'s or
 is binding and is cited per finding. Without web access the sweep still runs against repo conventions
 plus that file's seed index, recording the limit in the coverage statement.
 
+On an audit run, match the stabilized scope to its lessons before the lenses are grouped: the coordinator runs
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match --stage audit --files "<the stabilized audit scope files>"`
+and folds the printed lesson lines (only the lines, not the stage section they came from) into
+the lens charters as known risks the reviewers must weigh the scope against. The `--lesson
+<id>` tail on each line lets a reviewer pull that record when a lens needs it. Nothing is
+folded in when the match returns empty.
+
 Then, for every caller, read that same file — owner of the catalog, the sourcing precedence and the
 seed index — and group the criteria into **2–5 lens charters**, **by kind, not by count**: related
 criteria share a lens so each reviewer holds a charter it can actually hold ("correctness and data

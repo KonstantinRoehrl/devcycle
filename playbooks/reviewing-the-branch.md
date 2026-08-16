@@ -32,6 +32,14 @@ Delegated in full to `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` — eng
 `reviewDepth`, panel invocation, the `panel→single` degradation with its disclosed reason, and
 the model export are all its rules, and none of them are restated here.
 
+Before that invocation, the coordinator matches this branch's lessons to what it changed —
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match --stage branch-review --files "<the base..branch diff's changed files>"` —
+and splices the matched lesson lines it prints (those lines alone, never a whole stage
+section) into the reviewer's dispatch as an explicit known-lesson check: *does this diff
+re-introduce any matched lesson's mistake?* Each spliced line ends in its own `--lesson <id>`
+pull hint, so the reviewer fetches the full record on demand instead of being handed it up
+front. A match that comes back empty adds no such block.
+
 Invoke it with `scope: {ref: "<base>..<branch>"}`, the spec path as `specPath`, and this
 stage's criteria — what the spec requires and forbids, plus the default criteria set — and
 record the engine line it returns **verbatim** in the report below.
@@ -138,10 +146,9 @@ session resumes at — then emit the block per
   session on <model>.` — this stage's job, because the on-device session's model is chosen by
   whoever launches it. `<model>` is whatever `walkthroughModel` resolves to per
   `${CLAUDE_PLUGIN_ROOT}/references/config.md`, named by its present id.
-- Compaction hint: keep the checklist path and the branch; drop all review and implementation
-  context. When the state file records `checklist: none` (no rendered surface produced a
-  checklist), keep instead `checklist: none — on-device stage will judge applicability` and
-  the branch.
+- Compaction hint: n/a — clears (`Fresh session` boundary). When the state file records
+  `checklist: none` (no rendered surface produced a checklist), record instead the marker
+  `checklist: none — on-device stage will judge applicability`.
 
 An `exhausted-unresolved` verdict at the cap still emits this stage's block — the outcome IS
 the stage result. Keep `stage: branch-review` in `.devcycle/state.md` so the cycle resumes here

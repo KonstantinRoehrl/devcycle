@@ -1,10 +1,14 @@
 name: Back-merge
 # After every release, `main` gets a commit `dev` does not have (the version bump lives on
-# `dev`, but the release PR is squash-merged into `main`), so this workflow opens the PR that
-# brings it back. A skipped merge is what left the 0.12.0 release PR conflicting across four
-# files, every conflict a squash artifact. The weekly schedule below catches the follow-on
-# failure the automation invites: a back-merge PR opened and then forgotten leaves `dev`
-# behind `main` just as surely as a skipped merge did.
+# `dev`, but the release PR is squash-merged into `main`), so `dev` falls one commit behind.
+# This workflow closes that gap automatically: it merges `main` back into `dev` and pushes, with
+# no PR and no manual step. Skipping the back-merge is what left the 0.12.0 release PR conflicting
+# across four files — every conflict a squash artifact — so keeping `dev` current matters.
+#
+# A clean back-merge is GREEN and silent. The run only turns RED when `main` cannot be merged into
+# `dev` without conflict — a genuinely stuck state that needs a human. That is the alarm; a routine
+# post-release run is not one. The weekly schedule re-checks and heals (or alarms) if a push-time
+# run was ever missed.
 on:
   push:
     branches: [main]
@@ -21,37 +25,57 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: read
-      pull-requests: write
+      contents: write        # pushes the merge commit to dev
+      pull-requests: write    # only used on the conflict fallback below
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: dev
           fetch-depth: 0
+          # No stored push credential — the push below authenticates explicitly, so the token
+          # is never written into .git/config where a later step could read it.
           persist-credentials: false
 
-      - name: Fail if dev is behind main
-        run: |
-          set -euo pipefail
-          behind=$(git rev-list --count origin/dev..origin/main)
-          echo "dev is $behind commit(s) behind main"
-          if [ "$behind" -gt 0 ]; then
-            echo "::error::dev is $behind commit(s) behind main. Merge the back-merge PR before the next release; a release PR opened on a diverged dev conflicts on squash artifacts."
-            exit 1
-          fi
-
-      - name: Open the back-merge PR
-        if: failure() && github.event_name == 'push'
+      - name: Merge main into dev, or alarm if it conflicts
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if gh pr list --base dev --head main --state open --json number --jq 'length' \
-               | grep -qv '^0$'; then
-            echo "Back-merge PR already open."; exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          behind=$(git rev-list --count origin/dev..origin/main)
+          echo "dev is $behind commit(s) behind main"
+          if [ "$behind" -eq 0 ]; then
+            echo "dev already contains main — nothing to back-merge."
+            exit 0
           fi
-          if ! gh pr create --base dev --head main \
-            --title "chore: merge the release back into dev" \
-            --body "Opened automatically after a release. CONTRIBUTING.md requires main to be merged back into dev after every release; skipping it is what left the 0.12.0 release PR conflicting across four files."; then
-            echo "::error::Settings -> Actions -> General -> Allow GitHub Actions to create and approve pull requests"
-            exit 1
+
+          # The release PR was squashed onto main, so main's tree already lives on dev as its
+          # granular history: this merge is normally a clean, content-empty merge commit.
+          git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
+          if git merge --no-ff origin/main -m "chore: merge the release back into dev"; then
+            n=0
+            until git push origin HEAD:dev; do
+              n=$((n+1))
+              if [ "$n" -ge 3 ]; then echo "push to dev failed after $n rebase retries"; exit 1; fi
+              git pull --rebase origin dev
+            done
+            echo "Merged main into dev and pushed."
+            exit 0
           fi
+
+          # A real conflict is the one state a human must resolve — the only red this workflow
+          # should ever show. Abort the half-done merge, escalate, and (on a release push) open a
+          # PR so the resolution has somewhere to happen.
+          git merge --abort || true
+          echo "::error::main could not be merged into dev without conflict — resolve it manually."
+          if [ "$EVENT" = "push" ]; then
+            gh pr create --base dev --head main \
+              --title "chore: merge the release back into dev" \
+              --body "The automatic back-merge hit a conflict. Resolve it here and merge; CONTRIBUTING.md requires main to be merged back into dev after every release." \
+              || echo "::error::Could not open the fallback PR either — enable Settings -> Actions -> General -> Allow GitHub Actions to create and approve pull requests."
+          fi
+          exit 1

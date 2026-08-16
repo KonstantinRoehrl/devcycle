@@ -89,16 +89,17 @@ never fakes one and never reports a gate as passed that did not run.
 `/devcycle:cycle` runs this once per repo, after it writes the state file and before
 triage; no other command offers configuration. Nothing here is profile-conditional. Every question below takes an Other answer, and none of them journals one: `user-correction-at-gate` needs a run record, and this walkthrough runs before `/devcycle:cycle` mints it — `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that condition.
 
-Read five knobs as they render in THIS text — `${user_config.profile}`,
-`${user_config.gitPolicy}`, `${user_config.reviewDepth}`,
-`${user_config.crossModelReview}`, `${user_config.onDeviceGate}` — each either
+Read six knobs as they render in THIS text — `${user_config.profile}`,
+`${user_config.gitPolicy}`, `${user_config.docTrackingPolicy}`,
+`${user_config.reviewDepth}`, `${user_config.crossModelReview}`,
+`${user_config.onDeviceGate}` — each either
 substituted to a real value (explicitly configured) or still a literal `${user_config`
 placeholder (never configured). That reading picks exactly one path, checked in order:
 
 1. `profile` substituted → it is already configured; skip to triage.
-2. `profile` literal AND at least one of the four behavioural knobs substituted AND the
+2. `profile` literal AND at least one of the five behavioural knobs substituted AND the
    `configured:` line does NOT carry `· profile-asked` → **the upgrade offer** below.
-3. `profile` literal, all four behavioural knobs literal, AND the `configured:` line
+3. `profile` literal, all five behavioural knobs literal, AND the `configured:` line
    reads `no` → **the first-run walkthrough** below.
 
 Anything else skips to triage.
@@ -116,10 +117,11 @@ to undo it. Reaching this offer therefore means the profile question has not yet
 to this user in this repo.
 
 Only profile-covered knobs can shadow a profile. The **shadowing set** is whichever of
-`reviewDepth` and `onDeviceGate` render substituted. `gitPolicy` and `crossModelReview`
-are outside the profile matrix — an explicit value there shadows nothing and is never
-rewritten. If the shadowing set is empty there is nothing to migrate: run the first-run
-walkthrough instead and record its outcome exactly as that section says, marker included.
+`reviewDepth` and `onDeviceGate` render substituted. `gitPolicy`, `docTrackingPolicy`,
+and `crossModelReview` are outside the profile matrix — an explicit value there shadows
+nothing and is never rewritten. If the shadowing set is empty there is nothing to
+migrate: run the first-run walkthrough instead and record its outcome exactly as that
+section says, marker included.
 
 Otherwise ask ONE AskUserQuestion, before any stage runs — a batch of two:
 
@@ -148,7 +150,7 @@ What each answer writes, and nothing more:
   them again.
 - **Keep my current knobs** — nothing is written at all, not even `profile` (unset, it
   reads as `standard`). The state file is what stops the re-ask.
-- **Customize** — the four-knob path below, with one change: the comparison baseline is
+- **Customize** — the five-knob path below, with one change: the comparison baseline is
   each knob's currently configured value shown in the question, not the offered default,
   so a knob is written only when the answer moves it.
 
@@ -177,23 +179,26 @@ every stage:
   on-device gate.
 - **`lean`** — fewer review rounds, shorter evidence tails, `auto-ok` on-device gate.
 - **`thorough`** — upstream overlays, review panel, deepest audits.
-- **customize individual knobs** — take the four-knob path below instead.
+- **customize individual knobs** — take the five-knob path below instead.
 
 On a profile answer, write **only** the profile —
 `claude plugin install devcycle@devcycle --config profile=<value>` — and nothing else,
 for the reason the *adopt* answer above gives.
 
-### The four-knob customize path
+### The five-knob customize path
 
-Ask the four knobs in one AskUserQuestion batch — one line of meaning each, the default
+Ask the five knobs in one AskUserQuestion batch — one line of meaning each, the default
 marked "(recommended)" — then write ONLY the knobs whose answer differs from the offered
 default, one `--config` per changed knob. A knob the user simply accepted at its
 "(recommended)" value is left unwritten — same rationale as the *Adopt* answer above
-(lines 142–146): writing it would make that knob explicitly configured forever. If every
-answer matches its default, nothing is written. The four:
+(lines 146–150): writing it would make that knob explicitly configured forever. If every
+answer matches its default, nothing is written. The five:
 
 - `gitPolicy` — what the finish stage may do with the branch (`local-commits-only`
   recommended · `push-allowed` · `open-pr`).
+- `docTrackingPolicy` — what devcycle attempts to commit in a host repo (`standard`
+  recommended · `all-local` · `all-tracked`); the repo's own `.gitignore` always wins.
+  Outside the profile matrix, like `gitPolicy`.
 - `reviewDepth` — branch review engine (`single` recommended · `panel` · `auto`).
 - `crossModelReview` — add a cross-model lens to the review panel (`false` recommended ·
   `true`).

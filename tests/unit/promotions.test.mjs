@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   promoDir, readPromotions, recordPromotion, recordLifecycle, validatePromotion,
-  suppressedByCulpritId, legacySimilar, novelSlugs,
+  suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById,
 } from "../../scripts/promotions.mjs";
 
 function repo(files = {}) {
@@ -211,4 +211,57 @@ test("validatePromotion rejects an unknown lifecycle value", () => {
     title: "x", lifecycle: "deleted", culpritId: "friction:x", rung: "r2",
     landed: "2026-05-01", at: "2026-08-15",
   }));
+});
+
+test("recordPromotion writes affected-files when provided, and readPromotions parses it back", () => {
+  const root = repo();
+  const path = recordPromotion(root, {
+    title: "Pin the model tier in every dispatch",
+    promotionType: "doc-edit",
+    clusterSignature: "dispatch inherits the caller model",
+    filesTouched: ["references/delegation.md"],
+    affectedFiles: ["scripts/dispatch.mjs", "references/delegation.md"],
+    landed: "2026-08-14",
+    commit: "deadbee",
+    pluginVersion: "0.13.0",
+    culpritId: "friction:model-inherited-not-pinned",
+  });
+  const text = readFileSync(path, "utf8");
+  assert.match(text, /^- affected-files: scripts\/dispatch\.mjs, references\/delegation\.md$/m);
+  const [p] = readPromotions(root);
+  assert.deepEqual(p.affectedFiles, ["scripts/dispatch.mjs", "references/delegation.md"]);
+});
+
+test("affected-files falls back to files-touched when rec.affectedFiles is absent", () => {
+  const root = repo();
+  const path = recordPromotion(root, {
+    title: "Pin the model tier in every dispatch",
+    promotionType: "doc-edit",
+    clusterSignature: "dispatch inherits the caller model",
+    filesTouched: ["references/delegation.md"],
+    landed: "2026-08-14",
+    commit: "deadbee",
+    pluginVersion: "0.13.0",
+  });
+  const text = readFileSync(path, "utf8");
+  assert.match(text, /^- affected-files: references\/delegation\.md$/m);
+  const [p] = readPromotions(root);
+  assert.deepEqual(p.affectedFiles, ["references/delegation.md"]);
+});
+
+test("readPromotions returns an empty affectedFiles array for a legacy record with no affected-files line", () => {
+  const root = repo({ "2026-08-05-brace.md": LEGACY });
+  const [p] = readPromotions(root);
+  assert.deepEqual(p.affectedFiles, []);
+});
+
+test("findPromotionById resolves by culprit-id, then alias, then filename slug, and returns null when nothing matches", () => {
+  const root = repo({ "2026-08-14-flaky.md": V2, "2026-08-05-brace.md": LEGACY });
+  const ps = readPromotions(root);
+  const flaky = ps.find((p) => p.culpritId === "friction:flaky-test-retry");
+  const legacy = ps.find((p) => p.culpritId === null);
+  assert.equal(findPromotionById(ps, "friction:flaky-test-retry"), flaky);
+  assert.equal(findPromotionById(ps, "novel:retry-masks-ordering"), flaky);
+  assert.equal(findPromotionById(ps, "brace"), legacy);
+  assert.equal(findPromotionById(ps, "friction:no-such-id"), null);
 });

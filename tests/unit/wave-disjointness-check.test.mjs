@@ -1,0 +1,161 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+
+const SCRIPT = join(process.cwd(), "scripts/wave-disjointness-check.mjs");
+
+// realpath: on macOS the temp dir is a symlink, which would otherwise make every
+// reported path a chain of `../` when the script echoes back the plan path.
+function makeFixture(planText) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "wave-disjointness-")));
+  mkdirSync(dir, { recursive: true });
+  const planPath = join(dir, "plan.md");
+  writeFileSync(planPath, planText, "utf8");
+  return { dir, planPath };
+}
+
+const PIPE = { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
+
+test("two same-wave tasks that declare the same file: exits 1 and names both tasks and the file", () => {
+  const { dir, planPath } = makeFixture(
+    `# Fixture Plan
+
+### Task 1: First
+**Files:**
+- Create: scripts/shared.mjs
+
+**Interfaces:** none
+
+### Task 2: Second
+**Files:**
+- Modify: scripts/shared.mjs
+
+**Interfaces:** none
+
+## Dispatch Map
+- Wave 1: Task 1, Task 2 (file-disjoint, no dependencies)
+`
+  );
+  try {
+    let stderr = "";
+    assert.throws(() => {
+      execFileSync(process.execPath, [SCRIPT, planPath], PIPE);
+    }, (err) => {
+      stderr = (err.stdout ?? "") + (err.stderr ?? "");
+      return err.status === 1;
+    });
+    assert.match(stderr, /Wave 1/);
+    assert.match(stderr, /Task 1/);
+    assert.match(stderr, /Task 2/);
+    assert.match(stderr, /scripts\/shared\.mjs/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("genuinely disjoint same-wave tasks: exits 0", () => {
+  const { dir, planPath } = makeFixture(
+    `# Fixture Plan
+
+### Task 1: First
+**Files:**
+- Create: scripts/one.mjs
+
+**Interfaces:** none
+
+### Task 2: Second
+**Files:**
+- Create: scripts/two.mjs
+
+**Interfaces:** none
+
+## Dispatch Map
+- Wave 1: Task 1, Task 2 (file-disjoint, no dependencies)
+`
+  );
+  try {
+    const out = execFileSync(process.execPath, [SCRIPT, planPath], PIPE);
+    assert.match(out, /ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("two tasks in different waves sharing a file: exits 0 (disjointness is a same-wave invariant only)", () => {
+  const { dir, planPath } = makeFixture(
+    `# Fixture Plan
+
+### Task 1: First
+**Files:**
+- Create: scripts/shared.mjs
+
+**Interfaces:** none
+
+### Task 2: Second
+**Files:**
+- Modify: scripts/shared.mjs
+
+**Interfaces:** none
+
+## Dispatch Map
+- Wave 1: Task 1 (no dependencies)
+- Wave 2: Task 2 (needs Task 1 committed)
+`
+  );
+  try {
+    const out = execFileSync(process.execPath, [SCRIPT, planPath], PIPE);
+    assert.match(out, /ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a plan with no Dispatch Map section: reports the problem rather than silently passing", () => {
+  const { dir, planPath } = makeFixture(
+    `# Fixture Plan
+
+### Task 1: First
+**Files:**
+- Create: scripts/one.mjs
+
+**Interfaces:** none
+`
+  );
+  try {
+    const out = execFileSync(process.execPath, [SCRIPT, planPath], PIPE);
+    assert.match(out, /Dispatch Map/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a line-range suffix and surrounding punctuation on a Files entry does not break file matching", () => {
+  const { dir, planPath } = makeFixture(
+    "# Fixture Plan\n\n" +
+      "### Task 1: First\n" +
+      "**Files:**\n" +
+      "- Modify: \`scripts/shared.mjs:12-40\`\n\n" +
+      "**Interfaces:** none\n\n" +
+      "### Task 2: Second\n" +
+      "**Files:**\n" +
+      "- Modify: scripts/shared.mjs (touches the same helper)\n\n" +
+      "**Interfaces:** none\n\n" +
+      "## Dispatch Map\n" +
+      "- Wave 1: Task 1, Task 2 (file-disjoint, no dependencies)\n"
+  );
+  try {
+    let stderr = "";
+    assert.throws(() => {
+      execFileSync(process.execPath, [SCRIPT, planPath], PIPE);
+    }, (err) => {
+      stderr = (err.stdout ?? "") + (err.stderr ?? "");
+      return err.status === 1;
+    });
+    assert.match(stderr, /scripts\/shared\.mjs/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

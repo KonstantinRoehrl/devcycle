@@ -139,10 +139,12 @@ outside the convention is refused rather than treated as a patch, since it would
 Prepare commits `chore(release): prepare vX.Y.Z` to `dev` and opens the `main` ← `dev` PR.
 Squash-merge it **with that same title** once checks pass. `Release` then tags
 `devcycle--vX.Y.Z` and publishes the GitHub release from that version's CHANGELOG section.
-After every release, merge `main` back into `dev`. The `Back-merge` workflow opens that PR
-automatically after every release and fails weekly while `dev` is behind `main`, so a skipped or
-forgotten merge surfaces before the next release rather than as conflicts in its PR. Review and
-merge it; the automation opens it but never merges it.
+After every release, `main` has to be merged back into `dev`. The `Back-merge` workflow does this
+for you: on each push to `main` it merges `main` into `dev` and pushes — no PR, no manual step —
+and the run is green. It only turns **red** when `main` cannot be merged into `dev` without a
+conflict, which is the one case a human must resolve; on a release push it also opens a fallback
+PR so the resolution has somewhere to land. A weekly run re-checks and heals (or, on a conflict,
+alarms) in case a push-time run was ever missed.
 
 `Prepare release` opens its own PR, which requires **Settings → Actions → General → Allow GitHub
 Actions to create and approve pull requests** to be enabled. Without it the workflow fails after

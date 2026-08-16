@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.1 — 2026-08-16
+
+- perf(lessons): deliver r2 lessons on demand and add a doc-tracking policy
+
+Lessons a past cycle recorded are now fetched only when they actually apply to the diff at hand,
+instead of never or always: `dream.mjs --match/--lesson` scores changed files against stored
+lessons, and matched lessons ride into implementer briefs and the branch/audit reviewers as
+return envelopes. A new `docTrackingPolicy` option and a `validate` guard also settle which
+devcycle artifacts belong in git — lessons (and optionally promotions) are tracked for their
+long-term value, while single-run plans and specs stay out of the repo to avoid bloat.
+
 ## 0.13.0 — 2026-08-15
 
 - feat(learn): add the cross-session learning loop with verification and lifecycle
