@@ -62,11 +62,20 @@ package directory its own `CLAUDE.md` stub, in addition to the root file.
 4. **The verification command** is the scaffolded `CLAUDE.md`'s own `Test:` line — where the
    green gate and this repo's CI find it. No separate state file.
 
-5. **Commit the scaffold**, scoped per
+5. **`.gitignore` doc-tracking setup.** Resolve `${user_config.docTrackingPolicy}` per
+   `${CLAUDE_PLUGIN_ROOT}/references/config.md`, then add lines to the host repo's
+   `.gitignore` (creating it if absent) so the resolved policy "just works" with no manual
+   edit: `standard` ignores `docs/superpowers/` and `.devcycle/` while leaving
+   `docs/devcycle/` trackable; `all-local` additionally ignores `docs/devcycle/`;
+   `all-tracked` additionally leaves `docs/superpowers/` trackable. Append only the lines the
+   policy calls for — never touch existing entries, and never add a line already covered by
+   one already there; the repo's own `.gitignore` always wins over anything devcycle proposes.
+
+6. **Commit the scaffold**, scoped per
    `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit": the root
-   and per-package `CLAUDE.md` files are the only thing this run authored. If
-   `git check-ignore` covers a written path, write it and skip the commit for that file; the
-   repo's own ignore rules decide.
+   and per-package `CLAUDE.md` files, plus any `.gitignore` lines just added, are the only
+   things this run authored. If `git check-ignore` covers a written path, write it and skip
+   the commit for that file; the repo's own ignore rules decide.
 
 ## Entry point
 
