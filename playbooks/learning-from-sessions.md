@@ -165,9 +165,9 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
    - **fault** — `repo` (the repo's own defect) or `pipeline` (devcycle's own). A pipeline-fault
      candidate never lands locally: render it as a D4 issue draft and file it only on per-item
      consent.
-   - **scope**, for repo-fault candidates only — `repo-devs` (written to `docs/devcycle/lessons.md`
-     — local output state, gitignored like `.devcycle/` and never committed, since it regenerates
-     from that repo's own sessions) or `just-me` (the user's own store). Decide by the skill-placement
+   - **scope**, for repo-fault candidates only — `repo-devs` (written to `docs/devcycle/lessons.md`,
+     committed per `${user_config.docTrackingPolicy}` (default `standard`) and subject to the host
+     repo's `.gitignore`) or `just-me` (the user's own store). Decide by the skill-placement
      test: if the lesson still reads correctly with every repo-specific noun replaced by "the
      project", it is also mirrored to the user's global store.
    - A `legacyDuplicateOf` hint is shown to the user as a hint and never acted on automatically.
@@ -220,15 +220,26 @@ Then, per adopted candidate:
    `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit" — any playbook file
    touched here is checked first against `tests/unit/golden-path.test.mjs`, `scripts/validate.mjs`,
    `scripts/redaction-check.mjs`, and `scripts/duplication-check.mjs`. An r2 edit lands in
-   `docs/devcycle/lessons.md` — gitignored local output, like `.devcycle/` — and is only written,
-   never committed; its promotion record below carries no `commit` sha.
+   `docs/devcycle/lessons.md`, committed per `${user_config.docTrackingPolicy}` (default `standard`)
+   and subject to the host repo's `.gitignore` by the commit-prompt step below; its promotion record
+   is written before that commit and so carries no `commit` sha.
 2. **Record the promotion**, for an r1/r3 edit once that commit lands, for an r2 edit once the write
    completes: write the JSON (`title`, `promotionType`, `clusterSignature`, `filesTouched`, `landed`,
    `commit` (empty for r2), `pluginVersion`, `sourcedFromMemory`, plus `culpritId`, `rung`,
    `audience`, `verify` and `aliases`) to a scratch file and pass it with the double-quoted
    `$(cat …)` form, never inline single quotes:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --record-promotion "$(cat <scratch-file>)"`.
-3. **Delete the source memory once its promotion lands, and only if it has one.**
+3. **Offer to commit the freshly written output.** Resolve `${user_config.docTrackingPolicy}`
+   (default `standard`). When it permits tracking — `standard` or `all-tracked`, never `all-local`
+   — **and** `git check-ignore <path>` vetoes none of the just-written paths, name the side effect
+   and **ask the user** (AskUserQuestion, mirroring **Confirm**'s per-item batching, 1–4 at a time)
+   whether to commit the freshly written `docs/devcycle/lessons.md` and its promotion records as one
+   scoped Conventional commit: `git add <paths> && git commit -- <paths>` with a `docs(learn): …` or
+   `chore(learn): …` subject, respecting `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s Committing
+   rule — the prompt is where the user declines on a protected branch. Never a silent `git add`: any
+   path the policy excludes, `git check-ignore` vetoes, or the user leaves declined stays written but
+   uncommitted.
+4. **Delete the source memory once its promotion lands, and only if it has one.**
 
 Finally re-render the report in outcome mode —
 `--render-report <candidates.json> --outcome` — so the proposal and the outcome are diffable, and
