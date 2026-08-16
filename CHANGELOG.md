@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.1 — 2026-08-16
+
+- perf(lessons): deliver r2 lessons on demand and add a doc-tracking policy
+
 ## 0.13.0 — 2026-08-15
 
 - feat(learn): add the cross-session learning loop with verification and lifecycle
