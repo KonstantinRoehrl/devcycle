@@ -32,6 +32,14 @@ Delegated in full to `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` — eng
 `reviewDepth`, panel invocation, the `panel→single` degradation with its disclosed reason, and
 the model export are all its rules, and none of them are restated here.
 
+Before that invocation, the coordinator matches this branch's lessons to what it changed —
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match --stage branch-review --files "<the base..branch diff's changed files>"` —
+and splices the matched lesson lines it prints (those lines alone, never a whole stage
+section) into the reviewer's dispatch as an explicit known-lesson check: *does this diff
+re-introduce any matched lesson's mistake?* Each spliced line ends in its own `--lesson <id>`
+pull hint, so the reviewer fetches the full record on demand instead of being handed it up
+front. A match that comes back empty adds no such block.
+
 Invoke it with `scope: {ref: "<base>..<branch>"}`, the spec path as `specPath`, and this
 stage's criteria — what the spec requires and forbids, plus the default criteria set — and
 record the engine line it returns **verbatim** in the report below.
