@@ -1,0 +1,13 @@
+# Write golden-path assertions to survive prose reflow, not as literal line-anchored regexes
+- promotion-type: doc-edit
+- cluster-signature: Making every prose-citation assertion robust to reflow, renumbering, and phrasing variants is a test-design overhaul (name-based location instead of l
+- files-touched: docs/devcycle/lessons.md
+- landed: 2026-08-15
+- commit: 
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: novel:golden-path-prose-regex-fragile-to-reflow
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases: 

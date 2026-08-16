@@ -1,0 +1,13 @@
+# Leave headroom below a line-ceiling budget; don't ratchet plans to an exact-fit measurement before all tasks land
+- promotion-type: doc-edit
+- cluster-signature: The arithmetic itself is already scripted (scripts/validate.mjs computes the live surface total); what recurs is a planning-discipline gap — plans rat
+- files-touched: docs/devcycle/lessons.md
+- landed: 2026-08-15
+- commit: 
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: novel:surface-line-budget-arithmetic-gap
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases: 

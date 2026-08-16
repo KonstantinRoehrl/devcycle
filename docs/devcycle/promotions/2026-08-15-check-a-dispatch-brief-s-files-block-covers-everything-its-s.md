@@ -1,0 +1,13 @@
+# Check a dispatch brief's Files block covers everything its steps touch, including decision logs and config notes
+- promotion-type: doc-edit
+- cluster-signature: Checking a Files block against everything a task's own steps touch is addable for the literal-omission case, but 'brief targets nonexistent decision l
+- files-touched: docs/devcycle/lessons.md
+- landed: 2026-08-15
+- commit: 
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: friction:incomplete-dispatch-brief
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases: 

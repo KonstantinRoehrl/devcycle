@@ -1,0 +1,13 @@
+# Before flagging a finding, confirm it's live in this diff, not a sibling's stale checkout artifact
+- promotion-type: doc-edit
+- cluster-signature: The failure mode is judgment-quality (a reviewer misattributing a sibling's shared-checkout footprint, or a stale regex outliving an authorized change
+- files-touched: docs/devcycle/lessons.md
+- landed: 2026-08-15
+- commit: 
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: friction:reviewer-role-confusion
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases: 

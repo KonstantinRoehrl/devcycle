@@ -1,0 +1,13 @@
+# Never `git stash` on a checkout a sibling task may share -- use `git diff` to scratch instead
+- promotion-type: doc-edit
+- cluster-signature: A hard prevention (denying `git stash` inside a wave dispatch's tool surface) is plausible but would also block legitimate solo-task use; this run's o
+- files-touched: docs/devcycle/lessons.md
+- landed: 2026-08-15
+- commit: 
+- plugin-version: 0.13.0
+- sourced-from-memory: false
+- culprit-id: novel:git-stash-on-shared-concurrent-checkout
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases: 
