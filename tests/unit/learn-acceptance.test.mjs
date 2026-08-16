@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoSlug } from "../../scripts/run-record.mjs";
@@ -202,6 +202,33 @@ test("acceptance (D, per R-T9-c): the doctor revert sidecar is produced and corr
   assert.ok(Array.isArray(sidecar.candidates));
   assert.equal(sidecar.candidates.length, 0,
     "no same-profile stage-scoped regression exists in the fixture — the sidecar must not false-fire");
+});
+
+// ─── End-to-end acceptance (Task 10): on-demand lesson delivery — match, pull, and the knob ──────
+// The fixture promotion `2026-08-16-affected-files-demo.md` carries `affected-files: scripts/*.mjs`,
+// so a task touching a matching file is matched and one touching an unrelated file is not; the
+// record pulls by id; an unknown id exits 1; and the docTrackingPolicy knob default is `standard`.
+test("acceptance: a fixture lesson matches a task touching its files, not otherwise", () => {
+  const { root, env } = world({});
+  writeFileSync(join(root, "docs/devcycle/lessons.md"),
+    "# Lessons\n\n## execution\n- Demo lesson [novel:affected-files-demo]\n");
+  const hit = cli(root, env, ["--match", "--stage", "execution", "--files", "scripts/demo.mjs"]);
+  assert.match(hit.stdout, /\[novel:affected-files-demo\] → node .*--lesson novel:affected-files-demo/);
+  const miss = cli(root, env, ["--match", "--stage", "execution", "--files", "docs/readme.md"]);
+  assert.equal(miss.stdout.trim(), "");
+});
+
+test("acceptance: --lesson pulls the record; unknown id exits 1", () => {
+  const { root, env } = world({});
+  const ok = cli(root, env, ["--lesson", "novel:affected-files-demo"]);
+  assert.match(ok.stdout, /# Affected files demo/);
+  const bad = cli(root, env, ["--lesson", "novel:nope"]);
+  assert.equal(bad.status, 1);
+});
+
+test("acceptance: docTrackingPolicy default is standard", () => {
+  const cfg = JSON.parse(readFileSync(new URL("../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
+  assert.equal(cfg.userConfig.docTrackingPolicy.default, "standard");
 });
 
 test("criterion 5 is asserted where the merge happens, and this harness says so", () => {
