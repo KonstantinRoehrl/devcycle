@@ -11,11 +11,12 @@ import {
   planCorpus,
   artifactFresh,
   observationsDir,
-  hasObservations,
+  isMined,
   listObservations,
   readObservations,
   extractSession,
   messageText,
+  alwaysLoadedNetBytes,
 } from "../../scripts/dream.mjs";
 
 // The promotion reader/writer moved to promotions.mjs; the record-shape tests below were
@@ -774,8 +775,8 @@ test("planCorpus: unmined lists exactly the sessions with no observation file", 
   const m = planCorpus({ repoRoot: root, projectsDir: proj, since: null });
   assert.deepEqual(m.unmined, [freshSlice], "unmined is the session-shaped work list");
   assert.deepEqual(m.observations, ["memory", minedSlice].sort(), "observations lists every slice id");
-  assert.equal(hasObservations(root, minedSlice), true);
-  assert.equal(hasObservations(root, freshSlice), false);
+  assert.equal(isMined(root, minedSlice), true, "a slice whose observation file parses is mined");
+  assert.equal(isMined(root, freshSlice), false, "a slice with no observation file is not mined");
   assert.deepEqual(listObservations(root), ["memory", minedSlice].sort());
 });
 
@@ -1731,6 +1732,17 @@ test("--render-report passes the same growth when it is paired with an eviction,
   assert.ok(m, "the net-byte line is rendered");
   assert.ok(Number(m[1]) > 1200, "the reported growth is real (>1200 bytes), not a vacuous zero");
   assert.match(res.stdout, /^# Learn Report \(proposal\)/m, "the report body still renders");
+});
+
+// #70: just-me-scoped candidates land only in the user's personal store, never in the committed
+// docs/devcycle/lessons.md the always-loaded ceiling protects, so they must not count toward the sum.
+test("alwaysLoadedNetBytes excludes just-me candidates from the always-loaded sum", () => {
+  const candidates = { candidates: [
+    { title: "repo one", culpritId: "novel:a", disposition: "landed", rung: "r2", scope: "repo-devs" },
+    { title: "just me two", culpritId: "novel:b", disposition: "landed", rung: "r2", scope: "just-me" },
+  ], evictions: [] };
+  const bytes = alwaysLoadedNetBytes(candidates, REPO_ROOT);
+  assert.equal(bytes, Buffer.byteLength("- repo one [novel:a]"));  // just-me line NOT counted
 });
 
 test("dream --match returns only file-relevant lessons with a pull hint", () => {

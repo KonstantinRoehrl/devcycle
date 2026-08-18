@@ -28,10 +28,6 @@ const statePath = (root) => join(dreamDir(root), "state.md");
 // list, and that list is what makes a marginal run cheaper rather than merely asserted to be.
 export const observationsDir = (repoRoot) => join(dreamDir(repoRoot), "observations");
 
-export function hasObservations(repoRoot, sliceId) {
-  return existsSync(join(observationsDir(repoRoot), `${sliceId}.json`));
-}
-
 // The staged corpus mines more than sessions — the memory store and each archive are slices
 // too — so the skill needs the store's actual contents to derive each stage's work list, not
 // just the session-shaped subset `unmined` reports.
@@ -65,11 +61,11 @@ function validateObservation(rec, index) {
 }
 
 // The observation store's validating reader (spec §15's 2026-08-05 amendment). Without it,
-// hasObservations' existence-only check let a truncated file left by an interrupted map
+// an existence-only check let a truncated file left by an interrupted map
 // dispatch count as mined forever, and a record missing subject/quote or carrying an
 // out-of-enum kind was caught by nothing. Throws rather than returning partial data — a
-// caller wanting the unchanged "does a file exist" semantics already has that in
-// hasObservations/listObservations.
+// caller wanting the "which slice ids have a file" listing already has that in
+// listObservations.
 export function readObservations(repoRoot, sliceId) {
   const path = join(observationsDir(repoRoot), `${sliceId}.json`);
   if (!existsSync(path)) throw new Error(`no observation file for session: ${sliceId}`);
@@ -457,10 +453,12 @@ const resolveProjectsRoot = () => process.env.CLAUDE_DREAM_PROJECTS || join(home
 // not always-loaded and never count. The pinned candidate schema (QC1) carries no landed-line
 // text, so each landed always-loaded candidate is measured by the digest line it lands — the
 // `- <title> [<culpritId>]` shape lessons.md stores (`LESSON_RE`) — which is real, title-proportional
-// growth rather than a vacuous constant.
-function alwaysLoadedNetBytes(candidates, root) {
+// growth rather than a vacuous constant. just-me-scoped candidates land only in the user's personal
+// store and never touch the committed docs/devcycle/lessons.md this ceiling protects, so they are
+// excluded from the sum.
+export function alwaysLoadedNetBytes(candidates, root) {
   const landed = (candidates.candidates ?? []).filter(
-    (c) => c.disposition === "landed" && (c.rung === "r1" || c.rung === "r2"),
+    (c) => c.disposition === "landed" && (c.rung === "r1" || c.rung === "r2") && c.scope !== "just-me",
   );
   const added = landed.reduce((n, c) => n + Buffer.byteLength(`- ${c.title} [${c.culpritId}]`), 0);
   // An eviction reclaims the exact line it removes from the capped store; read its current bytes so
