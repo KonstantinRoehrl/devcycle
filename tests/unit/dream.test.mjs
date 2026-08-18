@@ -14,6 +14,8 @@ import {
   isMined,
   listObservations,
   readObservations,
+  dedupeObservations,
+  readAllObservations,
   extractSession,
   messageText,
   alwaysLoadedNetBytes,
@@ -836,6 +838,58 @@ test("readObservations fails loudly on a truncated file left by an interrupted m
 test("readObservations fails for a session with no observation file", () => {
   const root = realpathSync(repo());
   assert.throws(() => readObservations(root, "nope"), /no observation file/);
+});
+
+// #64: one utterance mined into several sibling session/observation files is one observation,
+// not N — deduped by the verbatim quote plus the message timestamp, falling back to the quote
+// alone for older files that carry no `ts`.
+const readObservationsFixture = (records) => {
+  const root = realpathSync(repo());
+  writeObservationFile(root, "fixture", records);
+  return readObservations(root, "fixture");
+};
+
+test("dedupeObservations collapses identical (quote, ts) across sibling files", () => {
+  const recs = [
+    { kind: "correction", subject: "fps", quote: "Truncate to integer numbers", ts: "2026-07-12T18:33:23Z", target: null },
+    { kind: "correction", subject: "fps", quote: "Truncate to integer numbers", ts: "2026-07-12T18:33:23Z", target: null },
+    { kind: "correction", subject: "fps", quote: "Truncate to integer numbers", ts: "2026-07-12T18:33:23Z", target: null },
+  ];
+  assert.equal(dedupeObservations(recs).length, 1);
+});
+test("dedupeObservations keeps identical quotes with different ts distinct", () => {
+  const recs = [
+    { kind: "correction", subject: "s", quote: "same words", ts: "2026-07-12T18:33:23Z", target: null },
+    { kind: "correction", subject: "s", quote: "same words", ts: "2026-08-08T05:41:33Z", target: null },
+  ];
+  assert.equal(dedupeObservations(recs).length, 2);
+});
+test("dedupeObservations falls back to quote-hash when ts is absent", () => {
+  const recs = [
+    { kind: "correction", subject: "s", quote: "no ts here", target: null },
+    { kind: "correction", subject: "s", quote: "no ts here", target: null },
+  ];
+  assert.equal(dedupeObservations(recs).length, 1);
+});
+test("validateObservation accepts a record with and without ts", () => {
+  assert.doesNotThrow(() => readObservationsFixture([{ kind: "correction", subject: "s", quote: "q", ts: "2026-07-12T18:33:23Z", target: null }]));
+  assert.doesNotThrow(() => readObservationsFixture([{ kind: "correction", subject: "s", quote: "q", target: null }]));
+});
+test("validateObservation rejects a non-string ts", () => {
+  assert.throws(
+    () => readObservationsFixture([{ kind: "correction", subject: "s", quote: "q", ts: 123, target: null }]),
+    /ts must be an ISO-8601 string/,
+  );
+});
+test("readAllObservations concatenates every slice and dedups one utterance across siblings", () => {
+  const root = realpathSync(repo());
+  const dup = { kind: "correction", subject: "fps", quote: "Truncate to integer numbers", ts: "2026-07-12T18:33:23Z", target: null };
+  writeObservationFile(root, "parent", [dup, { kind: "correction", subject: "x", quote: "distinct one", ts: "2026-07-12T18:34:00Z", target: null }]);
+  writeObservationFile(root, "child", [dup]); // same utterance mined from a sibling transcript
+  const { total, unique, observations } = readAllObservations(root);
+  assert.equal(total, 3);
+  assert.equal(unique, 2);
+  assert.equal(observations.length, 2);
 });
 
 // G1-c: readObservations had no caller anywhere in the shipped flow. This is its consumer —
