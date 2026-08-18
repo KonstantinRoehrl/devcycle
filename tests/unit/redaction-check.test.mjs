@@ -412,19 +412,24 @@ test("an unrecognised flag in equals form fails naming the flag", () => {
 test("--auto-redact rewrites every detected class in place, then the dir scans clean", () => {
   const dir = mkdtempSync(join(tmpdir(), "redact-"));
   const f = join(dir, "artifact.md");
+  // Fixtures assembled from the fragment constants above, never literal patterns, so this test
+  // file does not itself trip the tracked-tree redaction screen CI runs.
   writeFileSync(f, [
-    "path /Users/somebody/secret/notes.md",
-    "session 12345678-1234-1234-1234-123456789abc",
-    "dir projects/-Users-somebody-Programming-thing",
+    `path ${MAC_HOME}/secret/notes.md`,
+    `session ${SESSION_ID}`,
+    `dir ${TRANSCRIPT_SLUG}`,
     "",
   ].join("\n"));
   const runCP = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
   const red = runCP(["--auto-redact", "--dir", dir]);
   assert.equal(red.status, 0, red.stderr);
   const after = readFileSync(f, "utf8");
-  assert.ok(!/\/Users\/somebody/.test(after));
-  assert.ok(!/12345678-1234-1234-1234-123456789abc/.test(after));
-  assert.ok(!/projects\/-Users-/.test(after));
+  assert.ok(!after.includes(MAC_HOME));
+  assert.ok(!after.includes(SESSION_ID));
+  assert.ok(!after.includes(TRANSCRIPT_SLUG));
+  assert.match(after, /<redacted-path>/);
+  assert.match(after, /<redacted-session>/);
+  assert.match(after, /<redacted-project>/);
   const rescan = runCP(["--dir", dir]);
   assert.equal(rescan.status, 0, rescan.stdout + rescan.stderr);
   rmSync(dir, { recursive: true, force: true });
@@ -473,7 +478,7 @@ test("--auto-redact without --dir or --file is refused (never rewrites the whole
 
 test("--auto-redact reports the spans it rewrote, per file, so a false-positive rewrite is visible", () => {
   const dir = mkdtempSync(join(tmpdir(), "redact-"));
-  writeFileSync(join(dir, "artifact.md"), "path /Users/somebody/x and session 12345678-1234-1234-1234-123456789abc\n");
+  writeFileSync(join(dir, "artifact.md"), `path ${MAC_HOME}/x and session ${SESSION_ID}\n`);
   try {
     const res = spawnSync(process.execPath, [SCRIPT, "--auto-redact", "--dir", dir], { encoding: "utf8" });
     assert.equal(res.status, 0, res.stderr);
