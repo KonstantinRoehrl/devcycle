@@ -28,10 +28,6 @@ const statePath = (root) => join(dreamDir(root), "state.md");
 // list, and that list is what makes a marginal run cheaper rather than merely asserted to be.
 export const observationsDir = (repoRoot) => join(dreamDir(repoRoot), "observations");
 
-export function hasObservations(repoRoot, sliceId) {
-  return existsSync(join(observationsDir(repoRoot), `${sliceId}.json`));
-}
-
 // The staged corpus mines more than sessions — the memory store and each archive are slices
 // too — so the skill needs the store's actual contents to derive each stage's work list, not
 // just the session-shaped subset `unmined` reports.
@@ -62,14 +58,18 @@ function validateObservation(rec, index) {
   if (!String(rec.quote ?? "").trim()) throw new Error(`record ${index}: quote is required and cannot be empty`);
   if (rec.target !== null && typeof rec.target !== "string")
     throw new Error(`record ${index}: target must be a repo-relative path or null`);
+  // Lenient on exact format — an absent/null `ts` stays valid, preserving back-compat (QC2)
+  // with observation files already on disk that predate the field.
+  if (rec.ts != null && typeof rec.ts !== "string")
+    throw new Error(`record ${index}: ts must be an ISO-8601 string or absent`);
 }
 
 // The observation store's validating reader (spec §15's 2026-08-05 amendment). Without it,
-// hasObservations' existence-only check let a truncated file left by an interrupted map
+// an existence-only check let a truncated file left by an interrupted map
 // dispatch count as mined forever, and a record missing subject/quote or carrying an
 // out-of-enum kind was caught by nothing. Throws rather than returning partial data — a
-// caller wanting the unchanged "does a file exist" semantics already has that in
-// hasObservations/listObservations.
+// caller wanting the "which slice ids have a file" listing already has that in
+// listObservations.
 export function readObservations(repoRoot, sliceId) {
   const path = join(observationsDir(repoRoot), `${sliceId}.json`);
   if (!existsSync(path)) throw new Error(`no observation file for session: ${sliceId}`);
@@ -95,6 +95,37 @@ export function isMined(repoRoot, id) {
   } catch {
     return false;
   }
+}
+
+// One utterance mined into several sibling session/observation files (a parent transcript plus
+// its subagent transcripts) is one observation, not N. Identity is the verbatim quote plus the
+// message timestamp; `ts` absent (older files) falls back to the quote alone. Normalizing
+// whitespace keeps a re-wrapped copy from reading as distinct.
+const normalizeQuote = (q) => String(q ?? "").replace(/\s+/g, " ").trim();
+export const observationKey = (rec) =>
+  createHash("sha256").update(normalizeQuote(rec.quote)).digest("hex") + "|" + (rec.ts ?? "");
+export function dedupeObservations(records) {
+  const seen = new Set();
+  const out = [];
+  for (const rec of records) {
+    const key = observationKey(rec);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(rec);
+  }
+  return out;
+}
+// Every mined slice's observations, concatenated then deduped — the reduce stage's whole view of
+// the store. Returns the raw `total`, the post-dedup `unique` count, and the deduped `observations`
+// so a caller can report how much collapsing the dedup did. Skips slices whose file no longer
+// parses (same tolerance as isMined) rather than throwing the whole reduce away for one bad file.
+export function readAllObservations(repoRoot) {
+  const all = [];
+  for (const slice of listObservations(repoRoot)) {
+    try { all.push(...readObservations(repoRoot, slice)); } catch { /* unparseable slice skipped */ }
+  }
+  const observations = dedupeObservations(all);
+  return { total: all.length, unique: observations.length, observations };
 }
 
 // `\s*` matches a newline too, so a field left blank on its own line would otherwise let
@@ -457,10 +488,12 @@ const resolveProjectsRoot = () => process.env.CLAUDE_DREAM_PROJECTS || join(home
 // not always-loaded and never count. The pinned candidate schema (QC1) carries no landed-line
 // text, so each landed always-loaded candidate is measured by the digest line it lands — the
 // `- <title> [<culpritId>]` shape lessons.md stores (`LESSON_RE`) — which is real, title-proportional
-// growth rather than a vacuous constant.
-function alwaysLoadedNetBytes(candidates, root) {
+// growth rather than a vacuous constant. just-me-scoped candidates land only in the user's personal
+// store and never touch the committed docs/devcycle/lessons.md this ceiling protects, so they are
+// excluded from the sum.
+export function alwaysLoadedNetBytes(candidates, root) {
   const landed = (candidates.candidates ?? []).filter(
-    (c) => c.disposition === "landed" && (c.rung === "r1" || c.rung === "r2"),
+    (c) => c.disposition === "landed" && (c.rung === "r1" || c.rung === "r2") && c.scope !== "just-me",
   );
   const added = landed.reduce((n, c) => n + Buffer.byteLength(`- ${c.title} [${c.culpritId}]`), 0);
   // An eviction reclaims the exact line it removes from the capped store; read its current bytes so
@@ -490,6 +523,7 @@ function main() {
     "--plan", "--commit-checkpoint", "--check-suppressed", "--extract", "--check-observations",
     "--record-promotion", "--record-lifecycle", "--check-recurrence", "--journal-events", "--legacy-similar",
     "--novel-slugs", "--lessons", "--render-report", "--match", "--lesson",
+    "--observations-deduped",
   ];
   const present = SUBCOMMANDS.filter((f) => argv.includes(f));
   if (present.length > 1) {
@@ -658,6 +692,16 @@ function main() {
     return;
   }
 
+  // The reduce stage's deduped view of the observation store: one utterance mined across sibling
+  // session files collapses to a single record here, so occurrence counts are not inflated. It
+  // legitimately reads content, unlike --check-observations, which only reports pass/fail.
+  if (argv.includes("--observations-deduped")) {
+    try {
+      console.log(JSON.stringify(readAllObservations(root), null, 2));
+    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
+    return;
+  }
+
   const legacyIdx = argv.indexOf("--legacy-similar");
   if (legacyIdx !== -1) {
     try {
@@ -748,7 +792,7 @@ function main() {
     "usage: dream.mjs --plan | --extract <session-id> | --commit-checkpoint <iso> | --record-promotion <json> | " +
       "--record-lifecycle <json> | " +
       "--check-recurrence | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
-      "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --lessons <stage> | " +
+      "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --observations-deduped | --lessons <stage> | " +
       "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
       "--render-report <candidates.json> [--outcome]",
   );

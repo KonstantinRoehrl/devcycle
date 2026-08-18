@@ -7,6 +7,7 @@ import {
   promoDir, readPromotions, recordPromotion, recordLifecycle, validatePromotion,
   suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById,
 } from "../../scripts/promotions.mjs";
+import { verify } from "../../scripts/verification.mjs";
 
 function repo(files = {}) {
   const root = mkdtempSync(join(tmpdir(), "devcycle-promo-"));
@@ -253,6 +254,50 @@ test("readPromotions returns an empty affectedFiles array for a legacy record wi
   const root = repo({ "2026-08-05-brace.md": LEGACY });
   const [p] = readPromotions(root);
   assert.deepEqual(p.affectedFiles, []);
+});
+
+test("validatePromotion accepts a bare taxonomy culprit-id", () => {
+  assert.doesNotThrow(() => validatePromotion({
+    promotionType: "doc-edit", clusterSignature: "s", landed: "2026-01-01",
+    culpritId: "fix-misses-the-convention",
+  }));
+});
+
+test("validatePromotion still accepts the colon <kind>:<slug> form", () => {
+  for (const ok of ["novel:tautological-test", "correction:foo", "friction:flaky-test-retry"]) {
+    assert.doesNotThrow(() => validatePromotion({
+      promotionType: "doc-edit", clusterSignature: "s", landed: "2026-01-01", culpritId: ok,
+    }), `${ok} must be accepted`);
+  }
+});
+
+test("validatePromotion still rejects malformed culprit-ids", () => {
+  for (const bad of ["", "UPPER", ":leading", "trailing:", "a::b"]) {
+    assert.throws(() => validatePromotion({
+      promotionType: "doc-edit", clusterSignature: "s", landed: "2026-01-01", culpritId: bad,
+    }), new RegExp("culprit-id"), `${JSON.stringify(bad)} must be rejected`);
+  }
+});
+
+test("a bare culprit-id round-trips through record → read → verify and joins its journal event", () => {
+  const root = repo();
+  recordPromotion(root, {
+    title: "Fix misses the convention",
+    promotionType: "doc-edit",
+    clusterSignature: "fix misses the convention",
+    filesTouched: ["scripts/x.mjs"],
+    landed: "2026-01-01",
+    culpritId: "fix-misses-the-convention",
+    rung: "r2",
+  });
+  const promotions = readPromotions(root);
+  const events = [
+    { runId: "a".repeat(16), culprit: "fix-misses-the-convention", ts: "2026-02-01T00:00:00Z" },
+  ];
+  const { scoreboard } = verify(promotions, events, "0.13.1", { root });
+  const row = scoreboard.find((s) => s.culpritId === "fix-misses-the-convention");
+  assert.ok(row, "the bare-slug promotion must join its journal event, not be silently dropped");
+  assert.equal(row.verdict, "recurred");
 });
 
 test("findPromotionById resolves by culprit-id, then alias, then filename slug, and returns null when nothing matches", () => {

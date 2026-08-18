@@ -45,7 +45,7 @@ export function defaultRunCheck(verifyVal, { root = process.cwd() } = {}) {
       const r = spawnSync(runner[0], runner.slice(1), { cwd: root });
       return { ran: r.status !== null, ok: r.status === 0 };
     }
-    return { ran: true, ok: true };           // present non-runnable path: statted, exists → held
+    return { ran: false, ok: false };         // present but not runnable-as-a-check: cannot verify → unmeasurable, never a stat-only "held"
   } catch { return { ran: false, ok: false }; }
 }
 // The argv for running a verify: path as a check, or null when the path is not runnable-as-a-check
@@ -68,7 +68,11 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
     if (p.rung === "r3" && p.verify && p.verify !== "journal-recurrence") {
       const { ran, ok } = runCheck(p.verify, { root });
       const verdict = !ran ? "unmeasurable" : ok ? "held" : "broken";
-      scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: 0, recurrences: 0, detail: p.verify });
+      // Annotate the reason when the check never ran, so an unmeasurable-because-unrunnable r3
+      // (a verify: path that exists but is not runnable-as-a-check) is distinguishable from a
+      // held/broken one, which carries the bare path. See #54.
+      const detail = ran ? p.verify : `${p.verify} (unrunnable: check did not execute)`;
+      scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: 0, recurrences: 0, detail });
       continue;
     }
     const after = journalEvents.filter((e) => String(e.ts).slice(0, 10) > p.landed);
