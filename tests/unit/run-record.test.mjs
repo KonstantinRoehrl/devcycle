@@ -375,6 +375,29 @@ test("an undeclared attribution value is rejected at write time", () => {
   assert.match(r.stderr, /"attributedBy" value "guessed" is not one of coordinator \| distillation/);
 });
 
+test("a stage line accepts outcome=partial alongside complete|blocked|skipped", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-stage-partial-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const base = ["append", "--run", runId, "--kind", "stage", "--stage", "execution",
+    "--startedAt", "2026-08-18T10:00:00Z", "--endedAt", "2026-08-18T10:01:00Z"];
+
+  for (const outcome of ["complete", "blocked", "skipped", "partial"]) {
+    const r = runRecord([...base, "--outcome", outcome], runs);
+    assert.equal(r.status, 0, r.stderr);
+  }
+  const file = join(runs, repoSlug(gitToplevel(process.cwd())), `${runId}.jsonl`);
+  const last = JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1));
+  assert.equal(last.outcome, "partial");
+});
+
+test("the stage subschema enumerates outcome as complete|blocked|skipped|partial", () => {
+  const schema = JSON.parse(
+    readFileSync(join(REPO_ROOT, "tests/fixtures/run-record.schema.json"), "utf8")
+  );
+  const stage = schema.oneOf.find((s) => s.properties?.kind?.const === "stage");
+  assert.deepEqual(stage.properties.outcome.enum, ["complete", "blocked", "skipped", "partial"]);
+});
+
 test("culprit lookup fails cleanly, not with a stack trace, when culprits.json is valid JSON but not an array", () => {
   // validateCulprit() resolves both tests/fixtures/run-record.schema.json and
   // references/culprits.json relative to the script's own location, so the script needs to run
