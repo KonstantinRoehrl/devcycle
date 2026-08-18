@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -405,6 +405,43 @@ test("an unrecognised flag in equals form fails naming the flag", () => {
   assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
   assert.match(res.stderr, /unrecognised flag --fil$/m,
     "the message must name the flag the caller actually typed — /--fil/ alone is satisfied by --file");
+});
+
+// --auto-redact: the same scan engine, but it first rewrites every detected class in place,
+// then re-scans so the run's exit code proves the POST-rewrite state is clean.
+test("--auto-redact rewrites every detected class in place, then the dir scans clean", () => {
+  const dir = mkdtempSync(join(tmpdir(), "redact-"));
+  const f = join(dir, "artifact.md");
+  writeFileSync(f, [
+    "path /Users/somebody/secret/notes.md",
+    "session 12345678-1234-1234-1234-123456789abc",
+    "dir projects/-Users-somebody-Programming-thing",
+    "",
+  ].join("\n"));
+  const runCP = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+  const red = runCP(["--auto-redact", "--dir", dir]);
+  assert.equal(red.status, 0, red.stderr);
+  const after = readFileSync(f, "utf8");
+  assert.ok(!/\/Users\/somebody/.test(after));
+  assert.ok(!/12345678-1234-1234-1234-123456789abc/.test(after));
+  assert.ok(!/projects\/-Users-/.test(after));
+  const rescan = runCP(["--dir", dir]);
+  assert.equal(rescan.status, 0, rescan.stdout + rescan.stderr);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("--auto-redact leaves a clean file byte-identical (no gratuitous rewrites)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "redact-"));
+  const f = join(dir, "clean.md");
+  const original = "plugin version 0.12.0, profile thorough, 4 events\n";
+  writeFileSync(f, original);
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--auto-redact", "--dir", dir], { encoding: "utf8" });
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(readFileSync(f, "utf8"), original);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("still flags a deny-listed term, read from the hashes file", () => {

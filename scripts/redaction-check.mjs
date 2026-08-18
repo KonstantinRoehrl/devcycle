@@ -15,12 +15,12 @@
 // No failure message ever reprints what it matched — a CI log is as public as the repo.
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
-const KNOWN_FLAGS = ["--file", "--dir", "--hashes"];
+const KNOWN_FLAGS = ["--file", "--dir", "--hashes", "--auto-redact"];
 // Parses both calling conventions this script supports — the space form (`--file x`) and the
 // equals form (`--file=x`) — into one map, and rejects anything that looks like a flag but isn't
 // one of the three known ones. An unrecognised flag (a typo such as `--fil`) is a hard error
@@ -83,6 +83,9 @@ const file = requireValue("--file");
 // --hashes keeps its current (cwd-relative or absolute) meaning.
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const hashesPath = requireValue("--hashes") ?? join(SCRIPT_DIR, "redaction-hashes.txt");
+// Boolean, no value: presence in argv means "rewrite in place before scanning". If parseFlags
+// captured a stray following token as its value, that value is ignored — only presence matters.
+const autoRedact = "--auto-redact" in flags;
 
 const SELF_EXEMPT = ["scripts/redaction-check.mjs", "scripts/redaction-hashes.txt"];
 const hashes = new Set(
@@ -109,6 +112,32 @@ const PATTERNS = [
     re: new RegExp("projects/-(?:" + U + "|" + H + ")-[A-Za-z0-9_.-]+"),
   },
 ];
+
+// Ordered rewrite table for --auto-redact. The project-directory form is redacted BEFORE the
+// generic home-directory path, because the project form embeds a path-like span and must be
+// collapsed as one unit before the narrower path patterns can bite into it. Each pattern is the
+// global-flag twin of its detector in PATTERNS, so what the scan flags is exactly what a rewrite
+// removes — auto-redact then re-scan cannot disagree on any class.
+const REDACTIONS = [
+  { re: new RegExp("projects/-(?:" + U + "|" + H + ")-[A-Za-z0-9_.-]+", "g"), to: "<redacted-project>" },
+  { re: new RegExp("/" + U + "/" + "[A-Za-z0-9_.-]+", "g"), to: "<redacted-path>" },
+  { re: new RegExp("/" + H + "/" + "[a-z_][a-z0-9_.-]*", "g"), to: "<redacted-path>" },
+  { re: new RegExp("[A-Za-z]:\\\\" + U + "\\\\[A-Za-z0-9_.-]*", "g"), to: "<redacted-path>" },
+  { re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, to: "<redacted-session>" },
+];
+
+// Applies every REDACTIONS substitution then the deny-term replacement, using the same tokenizer
+// and hash source the scan does, so a rewritten file re-scans clean.
+function redactText(text) {
+  let out = text;
+  for (const { re, to } of REDACTIONS) out = out.replace(re, to);
+  for (const token of new Set(out.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? [])) {
+    if (!hashes.has(sha(token))) continue;
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp("\\b" + escaped + "\\b", "gi"), "<redacted-term>");
+  }
+  return out;
+}
 
 function walk(root, base = root) {
   const out = [];
@@ -165,6 +194,15 @@ for (const f of files) {
       process.exit(1);
     }
     continue; // binary
+  }
+  // Rewrite in place first, then fall through to the normal scan so the exit code reflects the
+  // POST-rewrite state. SELF_EXEMPT files are skipped above and so are never rewritten.
+  if (autoRedact) {
+    const redacted = redactText(text);
+    if (redacted !== text) {
+      writeFileSync(join(root, f), redacted);
+      text = redacted;
+    }
   }
   for (const cls of new Set(PATTERNS.filter((p) => p.re.test(text)).map((p) => p.class)))
     errors.push(`${f}: contains ${cls} (redact it)`);
