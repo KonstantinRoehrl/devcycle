@@ -27,7 +27,11 @@ const isValidCalendarDate = (s) =>
   LANDED_RE.test(s) && !Number.isNaN(Date.parse(s)) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
 
 const RUNGS = ["r0", "r1", "r2", "r3"];
-const CULPRIT_ID_RE = /^[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$/;
+// A culprit-id is either a bare taxonomy slug (`fix-misses-the-convention`) or the
+// `<kind>:<slug>` colon form (`novel:x`). The bare slug is canonical for known-taxonomy ids,
+// matching the journal/run-record.mjs and references/culprits.json convention; the colon form
+// stays valid for novel and other kinds. lessons.mjs LESSON_RE mirrors this grammar (QC4).
+const CULPRIT_ID_RE = /^[a-z0-9][a-z0-9-]*(:[a-z0-9][a-z0-9-]*)?$/;
 export const LIFECYCLE = ["retirement", "revert"];
 
 // An r3 lesson's whole claim is "a check exists and is green", so a verify: that resolves to
@@ -56,7 +60,7 @@ export function validatePromotion(rec, { repoRoot } = {}) {
     if (!LIFECYCLE.includes(rec.lifecycle))
       throw new Error(`invalid lifecycle "${rec.lifecycle}" — must be one of: ${LIFECYCLE.join(", ")}`);
     if (!CULPRIT_ID_RE.test(rec.culpritId ?? ""))
-      throw new Error(`invalid culprit-id "${rec.culpritId}" — must be <kind>:<slug>, lowercase kebab-case`);
+      throw new Error(`invalid culprit-id "${rec.culpritId}" — must be a lowercase kebab slug or <kind>:<slug>`);
     if (!RUNGS.includes(rec.rung))
       throw new Error(`invalid rung "${rec.rung}" — must be one of: ${RUNGS.join(", ")}`);
     if (!isValidCalendarDate(rec.landed ?? ""))
@@ -76,7 +80,7 @@ export function validatePromotion(rec, { repoRoot } = {}) {
   if (rec.rung != null && !RUNGS.includes(rec.rung))
     throw new Error(`invalid rung "${rec.rung}" — must be one of: ${RUNGS.join(", ")}`);
   if (rec.culpritId != null && !CULPRIT_ID_RE.test(rec.culpritId))
-    throw new Error(`invalid culprit-id "${rec.culpritId}" — must be <kind>:<slug>, lowercase kebab-case`);
+    throw new Error(`invalid culprit-id "${rec.culpritId}" — must be a lowercase kebab slug or <kind>:<slug>`);
   validateVerify(rec, repoRoot ?? process.cwd());
 }
 

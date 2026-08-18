@@ -41,7 +41,10 @@ export const repoStorePath = (repoRoot) => join(repoRoot, "docs", "devcycle", "l
 export const userRepoStorePath = (repoRoot) => join(learningsRoot(), repoSlug(repoRoot), "lessons.md");
 export const userGlobalStorePath = () => join(learningsRoot(), "global", "lessons.md");
 
-const LESSON_RE = /^- .+ \[[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*\]$/;
+// The bracketed id mirrors promotions.mjs CULPRIT_ID_RE (QC4): either a bare taxonomy slug
+// (`[fix-misses-the-convention]`, canonical for known-taxonomy ids per culprits.json/run-record)
+// or the `<kind>:<slug>` colon form (`[novel:x]`).
+const LESSON_RE = /^- .+ \[[a-z0-9][a-z0-9-]*(:[a-z0-9][a-z0-9-]*)?\]$/;
 export const lessonId = (line) => (line.match(/\[([^\]]+)\]\s*$/) ?? [, null])[1];
 
 // A store that does not exist is empty — the normal state of every repo before its first landing,
