@@ -92,8 +92,9 @@ manifest's slice ids.
 `planCorpus`'s work list remains existence-only (`scripts/dream.mjs:490`), so a truncated
 observation file counts as mined forever.
 
-Closing this properly means rewording the resume mechanism away from "sessions that have no
-observation file", which is what currently pins `hasObservations`/`unmined` semantics.
+Closed by moving the resume mechanism away from "sessions that have no observation file" to
+"the observation file parses" (`isMined`/`readObservations`); the vestigial existence-only
+`hasObservations` export it used to pin was later removed outright (#55).
 
 ## Doctor — `scripts/doctor.mjs`
 

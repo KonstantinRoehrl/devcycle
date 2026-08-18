@@ -34,8 +34,10 @@ test("r3: runCheck ran=false renders unmeasurable, never held", () => {
   const p = [promo({ culpritId: "friction:c", rung: "r3", verify: "tests/fixtures/learn/candidates.json", landed: "2026-08-01" })];
   const skipped = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20"), runCheck: () => ({ ran: false, ok: false }) });
   assert.equal(skipped.scoreboard[0].verdict, "unmeasurable");
+  assert.match(skipped.scoreboard[0].detail, /unrunnable/); // the reason is annotated, distinct from a held/broken path
   const passed = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20"), runCheck: () => ({ ran: true, ok: true }) });
   assert.equal(passed.scoreboard[0].verdict, "held");
+  assert.equal(passed.scoreboard[0].detail, "tests/fixtures/learn/candidates.json"); // held keeps the bare path
   const broke = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20"), runCheck: () => ({ ran: true, ok: false }) });
   assert.equal(broke.scoreboard[0].verdict, "broken");
 });

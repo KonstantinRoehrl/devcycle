@@ -87,6 +87,17 @@ const hashesPath = requireValue("--hashes") ?? join(SCRIPT_DIR, "redaction-hashe
 // captured a stray following token as its value, that value is ignored — only presence matters.
 const autoRedact = "--auto-redact" in flags;
 
+// --auto-redact rewrites files in place, and a scan pattern has known false positives (a public
+// UUID, a URL containing "/Users/"). Without an explicit corpus, listFiles() falls back to
+// `git ls-files` — so an unscoped --auto-redact could silently mutate committed source on a
+// false-positive match. Require the caller to name the corpus it may rewrite.
+if (autoRedact && !dir && !file) {
+  console.error(
+    "redaction-check: --auto-redact requires an explicit --dir or --file (refusing to rewrite the whole tracked tree in place)"
+  );
+  process.exit(1);
+}
+
 const SELF_EXEMPT = ["scripts/redaction-check.mjs", "scripts/redaction-hashes.txt"];
 const hashes = new Set(
   readFileSync(hashesPath, "utf8").split("\n").map((l) => l.trim()).filter(Boolean)
@@ -127,16 +138,19 @@ const REDACTIONS = [
 ];
 
 // Applies every REDACTIONS substitution then the deny-term replacement, using the same tokenizer
-// and hash source the scan does, so a rewritten file re-scans clean.
+// and hash source the scan does, so a rewritten file re-scans clean. Returns the rewritten text
+// and how many spans it replaced, so the caller can report each mutation rather than making it
+// silently — a false-positive rewrite must be visible, not invisible.
 function redactText(text) {
   let out = text;
-  for (const { re, to } of REDACTIONS) out = out.replace(re, to);
+  let count = 0;
+  for (const { re, to } of REDACTIONS) out = out.replace(re, () => { count++; return to; });
   for (const token of new Set(out.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? [])) {
     if (!hashes.has(sha(token))) continue;
     const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    out = out.replace(new RegExp("\\b" + escaped + "\\b", "gi"), "<redacted-term>");
+    out = out.replace(new RegExp("\\b" + escaped + "\\b", "gi"), () => { count++; return "<redacted-term>"; });
   }
-  return out;
+  return { out, count };
 }
 
 function walk(root, base = root) {
@@ -181,6 +195,7 @@ if (files.length === 0) {
 }
 
 const errors = [];
+const rewritten = []; // {f, count} per file --auto-redact actually changed, for the visible summary
 for (const f of files) {
   if (SELF_EXEMPT.includes(f)) continue;
   let text;
@@ -198,16 +213,30 @@ for (const f of files) {
   // Rewrite in place first, then fall through to the normal scan so the exit code reflects the
   // POST-rewrite state. SELF_EXEMPT files are skipped above and so are never rewritten.
   if (autoRedact) {
-    const redacted = redactText(text);
+    const { out: redacted, count } = redactText(text);
     if (redacted !== text) {
       writeFileSync(join(root, f), redacted);
       text = redacted;
+      rewritten.push({ f, count });
     }
   }
   for (const cls of new Set(PATTERNS.filter((p) => p.re.test(text)).map((p) => p.class)))
     errors.push(`${f}: contains ${cls} (redact it)`);
   for (const token of new Set(text.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? []))
     if (hashes.has(sha(token))) errors.push(`${f}: contains a deny-listed term ("${token[0]}…", redact it)`);
+}
+
+// Report every in-place mutation by file and span count (never the redacted text — a log is as
+// public as the repo), so a false-positive rewrite of legitimate content is visible rather than
+// silent. Named after the scan so the summary sits with the classes that survived, if any.
+if (autoRedact) {
+  const total = rewritten.reduce((n, r) => n + r.count, 0);
+  process.stderr.write(
+    rewritten.length
+      ? `redaction-check: auto-redacted ${total} span(s) across ${rewritten.length} file(s): ` +
+          rewritten.map((r) => `${r.f} (${r.count})`).join(", ") + "\n"
+      : "redaction-check: auto-redact made no changes\n"
+  );
 }
 
 if (errors.length) {

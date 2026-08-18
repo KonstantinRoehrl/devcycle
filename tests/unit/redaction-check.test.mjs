@@ -444,6 +444,46 @@ test("--auto-redact leaves a clean file byte-identical (no gratuitous rewrites)"
   }
 });
 
+test("--auto-redact redacts a deny-listed term in place without ever printing it, then scans clean", () => {
+  const term = "forbiddenword";
+  const dir = makeFixture({
+    "a.md": `This mentions ${term} once.\n`,
+    "hashes.txt": `${createHash("sha256").update(term).digest("hex")}\n`,
+  });
+  try {
+    const hashes = join(dir, "hashes.txt");
+    const red = spawnSync(process.execPath, [SCRIPT, "--auto-redact", "--dir", dir, "--hashes", hashes], { encoding: "utf8" });
+    assert.equal(red.status, 0, red.stderr);
+    const after = readFileSync(join(dir, "a.md"), "utf8");
+    assert.ok(!after.includes(term), "the deny-listed term must be rewritten out of the file");
+    assert.match(after, /<redacted-term>/);
+    assert.ok(!red.stderr.includes(term), "the summary must never reprint the deny-listed term");
+    const rescan = spawnSync(process.execPath, [SCRIPT, "--dir", dir, "--hashes", hashes], { encoding: "utf8" });
+    assert.equal(rescan.status, 0, rescan.stdout + rescan.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--auto-redact without --dir or --file is refused (never rewrites the whole tracked tree)", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--auto-redact"], { encoding: "utf8" });
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /--auto-redact requires an explicit --dir or --file/);
+});
+
+test("--auto-redact reports the spans it rewrote, per file, so a false-positive rewrite is visible", () => {
+  const dir = mkdtempSync(join(tmpdir(), "redact-"));
+  writeFileSync(join(dir, "artifact.md"), "path /Users/somebody/x and session 12345678-1234-1234-1234-123456789abc\n");
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--auto-redact", "--dir", dir], { encoding: "utf8" });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, /auto-redacted \d+ span\(s\) across 1 file\(s\)/);
+    assert.match(res.stderr, /artifact\.md \(\d+\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("still flags a deny-listed term, read from the hashes file", () => {
   const term = "forbiddenword";
   const dir = makeFixture({
