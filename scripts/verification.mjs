@@ -45,7 +45,7 @@ export function defaultRunCheck(verifyVal, { root = process.cwd() } = {}) {
       const r = spawnSync(runner[0], runner.slice(1), { cwd: root });
       return { ran: r.status !== null, ok: r.status === 0 };
     }
-    return { ran: true, ok: true };           // present non-runnable path: statted, exists → held
+    return { ran: false, ok: false };         // present but not runnable-as-a-check: cannot verify → unmeasurable, never a stat-only "held"
   } catch { return { ran: false, ok: false }; }
 }
 // The argv for running a verify: path as a check, or null when the path is not runnable-as-a-check
