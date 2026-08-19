@@ -65,6 +65,11 @@ A self-contained task brief containing:
    resolves the finding: prefer replacing or removing wrong text over adding
    rationale, and check for existing coverage first.
 
+**Never revert a sibling's uncommitted work.** Concurrent implementers share one checkout.
+`git stash`, `git checkout -- <path>` / `git restore <path>`, and `git reset` all discard or
+unstage another task's in-progress edits across that shared tree — never run them. Your capture
+is already scoped to your own `**Files:**`, so none of them is ever needed here.
+
 ## Evidence files and report
 
 You write the evidence files yourself: capture each run's full output —
@@ -72,6 +77,7 @@ stdout and stderr together — into the before/after paths that
 `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` pins, using the `<task-id>`
 it defines, and record each run's exit status. Never hand-edit, trim, or
 reconstruct those files; they hold what the command actually printed.
+Any prose claim your report makes about source state ("X already existed", "no other caller", "the suite was already green") carries the command that proves it or is labeled an assumption — never stated as bare fact (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims).
 
 Report in the shape `references/evidence.md` pins, with `<N>` taken from
 the brief's `**Evidence tail:** <N>` line. If the brief has no such line,

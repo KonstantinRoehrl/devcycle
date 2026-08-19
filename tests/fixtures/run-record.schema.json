@@ -49,7 +49,7 @@
         },
         "startedAt": { "type": "string", "format": "date-time" },
         "endedAt": { "type": "string", "format": "date-time" },
-        "outcome": { "enum": ["complete", "blocked", "skipped"] }
+        "outcome": { "enum": ["complete", "blocked", "skipped", "partial"] }
       },
       "required": ["kind", "runId", "stage", "startedAt", "endedAt", "outcome"],
       "additionalProperties": false

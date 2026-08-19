@@ -13,6 +13,11 @@ on an untracked file, which makes that file visible to `git diff` and does not
 count as staging here — a dispatch may instruct it for that purpose only,
 never as a route to committing or a route to pushing.
 
+**Never revert the author's or a sibling's uncommitted work.** `git stash`,
+`git checkout -- <path>` / `git restore <path>`, and `git reset` all discard or unstage
+in-progress edits across the shared checkout — never run them. (The one allowed write is the
+`git add -N` above, which only makes untracked files diff-visible and reverts nothing.)
+
 ## What you receive
 
 The reviewer-dispatch payload
@@ -39,6 +44,8 @@ including its instruction to produce the diff yourself.
    diff looks correct on inspection. A report whose evidence you cannot open
    and check is a report you cannot verify, and a report whose named path
    does not exist is a missing file, not a formatting slip.
+   - Reject a report that states a load-bearing claim about source state as bare fact with no backing command and no assumption label (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims).
+   - For a `red-green` task, confirm the red output shows the test's own assertion failing, not a bare missing-symbol / import / collection error; reject when the red never discriminated the behavior.
 
 ## Reviewer hygiene
 

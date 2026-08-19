@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -405,6 +405,88 @@ test("an unrecognised flag in equals form fails naming the flag", () => {
   assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
   assert.match(res.stderr, /unrecognised flag --fil$/m,
     "the message must name the flag the caller actually typed — /--fil/ alone is satisfied by --file");
+});
+
+// --auto-redact: the same scan engine, but it first rewrites every detected class in place,
+// then re-scans so the run's exit code proves the POST-rewrite state is clean.
+test("--auto-redact rewrites every detected class in place, then the dir scans clean", () => {
+  const dir = mkdtempSync(join(tmpdir(), "redact-"));
+  const f = join(dir, "artifact.md");
+  // Fixtures assembled from the fragment constants above, never literal patterns, so this test
+  // file does not itself trip the tracked-tree redaction screen CI runs.
+  writeFileSync(f, [
+    `path ${MAC_HOME}/secret/notes.md`,
+    `session ${SESSION_ID}`,
+    `dir ${TRANSCRIPT_SLUG}`,
+    "",
+  ].join("\n"));
+  const runCP = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+  const red = runCP(["--auto-redact", "--dir", dir]);
+  assert.equal(red.status, 0, red.stderr);
+  const after = readFileSync(f, "utf8");
+  assert.ok(!after.includes(MAC_HOME));
+  assert.ok(!after.includes(SESSION_ID));
+  assert.ok(!after.includes(TRANSCRIPT_SLUG));
+  assert.match(after, /<redacted-path>/);
+  assert.match(after, /<redacted-session>/);
+  assert.match(after, /<redacted-project>/);
+  const rescan = runCP(["--dir", dir]);
+  assert.equal(rescan.status, 0, rescan.stdout + rescan.stderr);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("--auto-redact leaves a clean file byte-identical (no gratuitous rewrites)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "redact-"));
+  const f = join(dir, "clean.md");
+  const original = "plugin version 0.12.0, profile thorough, 4 events\n";
+  writeFileSync(f, original);
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--auto-redact", "--dir", dir], { encoding: "utf8" });
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(readFileSync(f, "utf8"), original);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--auto-redact redacts a deny-listed term in place without ever printing it, then scans clean", () => {
+  const term = "forbiddenword";
+  const dir = makeFixture({
+    "a.md": `This mentions ${term} once.\n`,
+    "hashes.txt": `${createHash("sha256").update(term).digest("hex")}\n`,
+  });
+  try {
+    const hashes = join(dir, "hashes.txt");
+    const red = spawnSync(process.execPath, [SCRIPT, "--auto-redact", "--dir", dir, "--hashes", hashes], { encoding: "utf8" });
+    assert.equal(red.status, 0, red.stderr);
+    const after = readFileSync(join(dir, "a.md"), "utf8");
+    assert.ok(!after.includes(term), "the deny-listed term must be rewritten out of the file");
+    assert.match(after, /<redacted-term>/);
+    assert.ok(!red.stderr.includes(term), "the summary must never reprint the deny-listed term");
+    const rescan = spawnSync(process.execPath, [SCRIPT, "--dir", dir, "--hashes", hashes], { encoding: "utf8" });
+    assert.equal(rescan.status, 0, rescan.stdout + rescan.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--auto-redact without --dir or --file is refused (never rewrites the whole tracked tree)", () => {
+  const res = spawnSync(process.execPath, [SCRIPT, "--auto-redact"], { encoding: "utf8" });
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /--auto-redact requires an explicit --dir or --file/);
+});
+
+test("--auto-redact reports the spans it rewrote, per file, so a false-positive rewrite is visible", () => {
+  const dir = mkdtempSync(join(tmpdir(), "redact-"));
+  writeFileSync(join(dir, "artifact.md"), `path ${MAC_HOME}/x and session ${SESSION_ID}\n`);
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--auto-redact", "--dir", dir], { encoding: "utf8" });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, /auto-redacted \d+ span\(s\) across 1 file\(s\)/);
+    assert.match(res.stderr, /artifact\.md \(\d+\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("still flags a deny-listed term, read from the hashes file", () => {

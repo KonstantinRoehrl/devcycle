@@ -118,7 +118,8 @@ Both then emit the handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.m
 same contents:
 
 - `Artifacts:` the checklist path and the results report path — or `none (no rendered
-  surface)` when this stage judges itself not applicable.
+  surface)` when this stage judges itself not applicable. Evidence the driver captured
+  (DOM dumps, console output, screenshots) lives under `.devcycle/evidence/`.
 - `Carry-overs:` failed items with severity, unverified residue under `auto-ok`, the skip
   reason when skipped, or `none`.
 - `Compaction hint:` n/a — clears. Failed items already carry via `Carry-overs:`.

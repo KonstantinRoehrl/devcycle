@@ -7,7 +7,7 @@ import {
   SECTION_CAP, STAGES, repoStorePath, userRepoStorePath, userGlobalStorePath,
   readSection, renderLessons, planLanding, applyLanding,
   ALWAYS_LOADED_CEILING, budgetStatus,
-  fileMatchesGlob, matchLessons, renderMatch, MATCH_CAP,
+  fileMatchesGlob, matchLessons, renderMatch, MATCH_CAP, lessonId,
 } from "../../scripts/lessons.mjs";
 import { readFileSync } from "node:fs";
 
@@ -35,6 +35,34 @@ test("readSection returns only the named stage's lines", () => {
     "- Capture the whole gate, never a subset [friction:partial-evidence-capture]",
   ]);
   assert.equal(readSection(p, "branch-review").length, 1);
+});
+
+test("readSection accepts a bare taxonomy id and the colon form, and lessonId extracts both", () => {
+  const p = storeFile(`# Lessons
+
+## execution
+- Fix misses the convention [fix-misses-the-convention]
+- Pin the model tier [novel:model-inherited-not-pinned]
+`);
+  const lines = readSection(p, "execution");
+  assert.deepEqual(lines, [
+    "- Fix misses the convention [fix-misses-the-convention]",
+    "- Pin the model tier [novel:model-inherited-not-pinned]",
+  ]);
+  assert.equal(lessonId(lines[0]), "fix-misses-the-convention");
+  assert.equal(lessonId(lines[1]), "novel:model-inherited-not-pinned");
+});
+
+test("readSection rejects malformed lesson ids (uppercase, leading/trailing colon)", () => {
+  const p = storeFile(`# Lessons
+
+## execution
+- good [fix-misses-the-convention]
+- bad upper [UPPER]
+- bad leading [:leading]
+- bad trailing [trailing:]
+`);
+  assert.deepEqual(readSection(p, "execution"), ["- good [fix-misses-the-convention]"]);
 });
 
 test("a missing store is empty, not an error", () => {

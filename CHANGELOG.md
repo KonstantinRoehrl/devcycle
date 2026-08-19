@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.14.0 — 2026-08-19
+
+- feat(pipeline): learn-loop issue closeout — script fixes, mechanics hardening, and methodology gates
+
+Closes the backlog of issues devcycle's own learn loop raised against itself, in three batches.
+**Script fixes** repair seven learn-loop bugs in `scripts/*.mjs`: verification no longer records
+an unmeasurable gate as held, observations dedupe by quote-hash and timestamp, the run record
+gains a `partial` outcome, redaction offers a scoped, visible `--auto-redact`, and doctor
+attribution and just-me scope filters are corrected. **Mechanics hardening** makes the pipeline
+safer under load: the branch-review panel auto-chunks oversize diffs at file and hunk boundaries
+instead of hitting a per-reviewer cap, the on-device driver batches its reads and saves evidence
+to disk, before/after gate evidence must carry an `(exit N)` token, and implementer and reviewer
+agents are barred from git commands that could clobber a sibling's working tree. **Methodology
+gates** add three pre-flight checks: an authored-claims contract with a discriminating red-green
+rule (so facts stated in plans and reviews are verified against source), a blast-radius gate that
+greps a changed symbol's consumers and tests into the dispatch brief, and a brief-completeness
+gate that enforces the required dispatch fields.
+
 ## 0.13.1 — 2026-08-16
 
 - perf(lessons): deliver r2 lessons on demand and add a doc-tracking policy

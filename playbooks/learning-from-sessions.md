@@ -56,7 +56,7 @@ One dispatch per unmined slice the profile admits, per
 itself, never inheriting the caller's model**. A session-sourced slice reads its text through the
 engine (`--extract <session-id>`). Each dispatch writes its slice's records to
 `.devcycle/dreaming/observations/<slice-id>.json` as an array of objects carrying
-`session`, `ts`, `kind` (`friction | correction | rule-violation | decision | contradiction-side`),
+`session`, `ts` (the message timestamp of the quoted utterance, when known, so the reduce stage can dedup one utterance mined from sibling transcripts), `kind` (`friction | correction | rule-violation | decision | contradiction-side`),
 `subject`, `target` (a repo-relative path or `null`), `quote` and `confidence`. `subject` is the
 normalized phrase the next stage clusters on across sessions; `quote` is a short verbatim excerpt
 and the grounding anchor — **an observation may state only what its quote shows**. A dispatch
@@ -79,7 +79,7 @@ unverified slice is never reported as mined.
 
 ## Cluster, screen, check recurrence
 
-A **single** dispatch reads the **full** observation store and the journal's grouped events at the
+A **single** dispatch reads the **full** observation store — via `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --observations-deduped`, which collapses one utterance mined across sibling session files so occurrence counts are not inflated — and the journal's grouped events at the
 caller's tier — the only stage where cross-session evidence and contradiction detection are
 possible at all. **It assigns every candidate a culprit-id before it clusters**: the nearest
 `${CLAUDE_PLUGIN_ROOT}/references/culprits.json` slug, or a minted `novel:<slug>` under D1's

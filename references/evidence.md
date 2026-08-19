@@ -8,9 +8,13 @@ or agent that needs any of this names this file and does not restate it.
 Every task carries an `**Evidence:**` line naming the proof its implementation must
 produce, in exactly one of these forms:
 
-- `**Evidence:** red-green` — the task adds or changes behavior: verbatim failing (red)
-  test output before the code, verbatim passing (green) output after. The default; use it
-  whenever a failing test can express the task's outcome.
+- `**Evidence:** red-green` — the task adds or changes behavior: verbatim failing (red) test
+  output before the code, verbatim passing (green) output after. The default; use it whenever a
+  failing test can express the task's outcome. The red failure must be an **assertion/behavior**
+  failure that discriminates the missing behavior — a test that fails only because a symbol does
+  not exist yet (an import/collection error) and would then pass vacuously once the symbol
+  exists does not satisfy red-green. When the symbol must exist first, write a minimal stub so
+  the red is a genuine assertion failure against a naive implementation.
 - `**Evidence:** green-green (behavior-preserving)` — refactors and other
   behavior-preserving changes, where no honest red state exists: the same suite command
   run green before the change and green after, both captured verbatim.
@@ -22,6 +26,21 @@ produce, in exactly one of these forms:
 The class is planning's call, not the implementer's: derive it from what the task actually
 changes, and never declare `red-green` where no failing test can exist — that forces the
 implementer to fake a red or the reviewer to reject correct work.
+
+## Authored claims
+
+Every authored artifact — a plan, a dispatch brief, an implementer report, a review finding, a
+diagnosis writeup — states a load-bearing claim about repo or source state (disk state,
+library/vendor behavior, a count, whether something was "already done", CI behavior, a root
+cause) in exactly one of two forms:
+
+- **verified** — the claim carries the command or grep that proves it and the output it
+  produced. "I verified X" without a captured command backing it is not a verified claim.
+- **assumption** — the claim is explicitly labeled a belief or assumption, not fact.
+
+It is never stated as bare fact. `findings.md`'s
+`Confidence: verified | suspected` field is this contract's instance on the review surface; a
+finding is the same discipline said in that file's own shape.
 
 ## Preloading a class into a brief
 
@@ -48,7 +67,10 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   declared deviation. `node scripts/evidence-completeness-check.mjs <report>` mechanizes the
   narrow-selector subset of this rule — a `cmd:` naming one test file or carrying a
   test-name filter flag — but it cannot catch every partial-gate case, so the
-  concurrent-wave whole-tree-capture case stays a human judgment call. The normal
+  concurrent-wave whole-tree-capture case stays a human judgment call. It also requires an
+  `(exit <n>)` status — read from the report line, not file contents — on any present
+  `- Before:`/`- After:` line of any class; a `red-green`/`green-green` report additionally
+  needs its `- After:` file to carry a test-runner summary line. The normal
   `red-green` case is a task whose own new tests fail that
   whole gate, so `-before.txt` exits non-zero honestly. When a task's red is instead a
   subset inside an otherwise-green suite — new tests added to a file that's part of a
@@ -80,6 +102,7 @@ an inlined evidence tail.
 - Tail (after, last <N> lines):
   <N lines>
 - Deviations: <list, or none>
+- Claims: every prose claim about source state carries its backing command, or is labeled an assumption (per § Authored claims); none stated as bare fact
 - On-device items: <list, or none>
 ```
 
@@ -99,6 +122,8 @@ report. Reject when:
 - an exit status contradicts the declared class with no explanation for it — a `red-green`
   "before" that exited 0 without an accompanying `<task-id>-red.txt` subset-red file, or a
   `green-green` "before" that did not exit 0;
+- a `red-green` before/red whose failure is a bare missing-symbol, import, or collection error
+  rather than a discriminating assertion failure — the test never proved the behavior was absent;
 - the class mismatches the diff.
 
 ## Why the evidence lives in files

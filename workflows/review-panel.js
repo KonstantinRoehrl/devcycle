@@ -222,9 +222,9 @@ function gitReadOnly(argv) {
   }
 }
 
-// The cap is legitimate — a reviewer prompt has a budget — but a silent one lets a panel
-// over a large branch read as full coverage when it saw a sample, so the note carries how
-// much actually reached the reviewers and main() puts it in the panel's own output.
+// The cap bounds a single reviewer prompt. An oversize diff is chunked across reviewer passes
+// (chunkDiff, at file then hunk boundaries) so the whole diff is reviewed, not a sample; only a
+// lone hunk larger than the cap is still truncated, and that case alone carries a coverage note.
 function truncate(text, cap, label) {
   if (text.length <= cap) return { text, note: null, truncated: false };
   const pct = ((cap / text.length) * 100).toFixed(1);
@@ -233,6 +233,80 @@ function truncate(text, cap, label) {
     note: `${label} truncated to ${cap} of ${text.length} chars (${pct}% reached the reviewers)`,
     truncated: true,
   };
+}
+
+// Split a unified diff into review chunks each <= cap chars, at file then hunk boundaries.
+// Returns { chunks, notes }. notes is non-empty only when a single hunk exceeds cap and had
+// to be truncated — the one path that still reduces coverage after chunking.
+function chunkDiff(diff, cap) {
+  const notes = [];
+  if (!diff) return { chunks: [], notes };
+  if (diff.length <= cap) return { chunks: [diff], notes };
+
+  const units = [];
+  let truncatedHunks = 0;
+  for (const fileSeg of splitByPrefix(diff, "diff --git ")) {
+    if (fileSeg.length <= cap) {
+      units.push(fileSeg);
+      continue;
+    }
+    for (const hunk of splitFileIntoHunks(fileSeg)) {
+      if (hunk.length <= cap) {
+        units.push(hunk);
+      } else {
+        const suffix = `\n[... hunk truncated at ${cap} chars ...]`;
+        units.push(hunk.slice(0, Math.max(0, cap - suffix.length)) + suffix);
+        truncatedHunks++;
+      }
+    }
+  }
+  // One consolidated note, not one per hunk: a per-hunk note repeats the same sentence in the
+  // COVERAGE WARNING banner and the report's notes array when more than one hunk is truncated.
+  if (truncatedHunks === 1) {
+    notes.push(`a single diff hunk exceeded ${cap} chars and was truncated`);
+  } else if (truncatedHunks > 1) {
+    notes.push(`${truncatedHunks} diff hunks exceeded ${cap} chars and were truncated`);
+  }
+
+  const chunks = [];
+  let cur = "";
+  for (const unit of units) {
+    if (cur && cur.length + unit.length + 1 > cap) {
+      chunks.push(cur);
+      cur = "";
+    }
+    cur = cur ? `${cur}\n${unit}` : unit;
+  }
+  if (cur) chunks.push(cur);
+  return { chunks, notes };
+}
+
+// Split text into segments each beginning at a line that starts with prefix. Any text before
+// the first such line stays attached to the first segment.
+function splitByPrefix(text, prefix) {
+  const segments = [];
+  let cur = [];
+  for (const line of text.split("\n")) {
+    if (line.startsWith(prefix) && cur.length) {
+      segments.push(cur.join("\n"));
+      cur = [];
+    }
+    cur.push(line);
+  }
+  if (cur.length) segments.push(cur.join("\n"));
+  return segments;
+}
+
+// Split one file's diff segment into hunk-sized pieces, prepending the file header (everything
+// before the first "@@ " line) to EVERY hunk so each piece is self-describing with its path — a
+// chunk that carries only later hunks must still name its file, or a lens reviewing it cannot
+// attribute a finding. A file segment always begins with a "diff --git " header, never a "@@ "
+// line, so parts[0] is always that header.
+function splitFileIntoHunks(fileSeg) {
+  const parts = splitByPrefix(fileSeg, "@@ ");
+  if (parts.length <= 1) return parts;
+  const [header, ...hunks] = parts;
+  return hunks.map((hunk) => `${header}\n${hunk}`);
 }
 
 // ---------- stage 1: lens reviewers ----------
@@ -543,32 +617,44 @@ async function main() {
 
   let scopeLabel;
   let fileList;
-  let diff = { text: null, note: null };
+  let diffChunks = [null]; // file-set branch reviews once, with no diff text
   if (args.scope.ref) {
     scopeLabel = `diff for ref ${args.scope.ref}`;
-    diff = record(truncate(gitReadOnly(["diff", args.scope.ref]), DIFF_CHAR_CAP, "diff"));
+    const { chunks, notes: chunkNotes } = chunkDiff(gitReadOnly(["diff", args.scope.ref]), DIFF_CHAR_CAP);
+    diffChunks = chunks.length ? chunks : [""];
+    for (const n of chunkNotes) {
+      notes.push(n);
+      dropped.push(n);
+      log(n);
+    }
     fileList = gitReadOnly(["diff", "--name-only", args.scope.ref]).trim();
   } else {
     scopeLabel = `file set below (${args.scope.paths.length} file(s))`;
     fileList = record(truncate(args.scope.paths.join("\n"), DIFF_CHAR_CAP, "file list")).text;
   }
 
-  const ctx = { scopeLabel, specPath: args.specPath, spec: spec.text, diff: diff.text, fileList };
+  // Verification re-reads the working tree, so it needs the scope label, not the diff text.
+  const verifyCtx = { scopeLabel, specPath: args.specPath, spec: spec.text, diff: null, fileList };
 
-  // Stage 1: lens reviewers in parallel (claude lenses + optional codex lens).
-  const lensJobs = args.lenses.map((lens) => () => runClaudeLens(lens, ctx, model));
-  if (args.crossModel) lensJobs.push(() => runCrossModelLens(ctx));
+  // Stage 1: every lens reviews every diff chunk (jobs = lenses × chunks, + optional cross-model per chunk).
+  const lensJobs = [];
+  for (const chunk of diffChunks) {
+    const ctx = { scopeLabel, specPath: args.specPath, spec: spec.text, diff: chunk, fileList };
+    for (const lens of args.lenses) lensJobs.push(() => runClaudeLens(lens, ctx, model));
+    if (args.crossModel) lensJobs.push(() => runCrossModelLens(ctx));
+  }
   const lensResults = await mapLimit(lensJobs, lensJobs.length, (job) => job());
 
   const rawFindings = lensResults.flatMap((r) => r.findings);
   for (const r of lensResults) if (r.note) notes.push(r.note);
   const failedClaudeLenses = lensResults.filter((r) => r.note && r.lens !== "cross-model").length;
-  if (failedClaudeLenses === args.lenses.length) fatal(`all lens reviewers failed: ${notes.join("; ")}`);
+  const totalClaudeLensJobs = args.lenses.length * diffChunks.length;
+  if (failedClaudeLenses === totalClaudeLensJobs) fatal(`all lens reviewers failed: ${notes.join("; ")}`);
 
   // Stage 2: adversarial verification per finding (marked, never dropped).
   log(`verifying ${rawFindings.length} finding(s)...`);
   const charter = rawFindings.length ? loadRedTeamCharter() : null;
-  const verified = await mapLimit(rawFindings, VERIFY_CONCURRENCY, (f) => verifyFinding(f, ctx, model, charter));
+  const verified = await mapLimit(rawFindings, VERIFY_CONCURRENCY, (f) => verifyFinding(f, verifyCtx, model, charter));
 
   // Stage 3: dedup by file+claim.  Stage 4: rank + reconcile.
   const deduped = dedupFindings(verified);
@@ -590,5 +676,5 @@ if (require.main === module) {
 
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
-  dedupFindings, rankFindings, truncate, fallbackSummary, mapLimit, loadRedTeamCharter, SEVERITIES,
+  dedupFindings, rankFindings, truncate, chunkDiff, fallbackSummary, mapLimit, loadRedTeamCharter, SEVERITIES,
 };
