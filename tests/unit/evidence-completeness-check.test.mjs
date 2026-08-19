@@ -173,6 +173,38 @@ test("a Before line lacking an (exit <n>) status fails", () => {
   }
 });
 
+test("a second Before line lacking an (exit <n>) status fails, not just the first", () => {
+  const body =
+    `- Evidence: red-green | cmd: ${GATE}\n` +
+    `- Before: before.txt (exit 1)\n` +
+    `- After: after.txt (exit 0)\n` +
+    `- Before: before-second.txt\n`;
+  const { dir, file } = makeReportWithEvidence(body, NODE_SUMMARY);
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /Before line is missing an \(exit/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a second After line lacking an (exit <n>) status fails, not just the first", () => {
+  const body =
+    `- Evidence: red-green | cmd: ${GATE}\n` +
+    `- Before: before.txt (exit 1)\n` +
+    `- After: after.txt (exit 0)\n` +
+    `- After: after-second.txt\n`;
+  const { dir, file } = makeReportWithEvidence(body, NODE_SUMMARY);
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /After line is missing an \(exit/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a convention report with no runner summary still passes (class-gated check a)", () => {
   const body =
     `- Evidence: convention (grep -q banned agents/implementer.md) | cmd: grep -q banned agents/implementer.md\n` +

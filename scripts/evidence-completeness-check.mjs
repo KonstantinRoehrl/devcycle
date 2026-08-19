@@ -83,26 +83,27 @@ if (flagHit) {
 
 const RUNNER_SUMMARY_RE =
   /(?:^|[#ℹ\s])(?:pass|fail)\s+\d+|\d+\s+(?:passed|failed)|tests?:.*\b(?:passed|failed)\b/im;
-const BEFORE_LINE_RE = /^-\s*Before:\s*(.*)$/m;
-const AFTER_LINE_RE = /^-\s*After:\s*(.*)$/m;
+const BEFORE_LINE_RE = /^-\s*Before:\s*(.*)$/gm;
+const AFTER_LINE_RE = /^-\s*After:\s*(.*)$/gm;
 
 const classPhrase = match[1].trim();
 const isTestClass = /^(red-green|green-green)\b/.test(classPhrase);
 
-// (b) any present Before/After line must carry an (exit <n>) status.
+// (b) EVERY present Before/After line must carry an (exit <n>) status, not just the first.
 for (const [label, re] of [["Before", BEFORE_LINE_RE], ["After", AFTER_LINE_RE]]) {
-  const m = text.match(re);
-  if (m && !/\(exit\s+-?\d+\)/.test(m[1])) {
-    console.error(`evidence-completeness-check: ${label} line is missing an (exit <n>) status`);
-    process.exit(1);
+  for (const m of text.matchAll(re)) {
+    if (!/\(exit\s+-?\d+\)/.test(m[1])) {
+      console.error(`evidence-completeness-check: ${label} line is missing an (exit <n>) status`);
+      process.exit(1);
+    }
   }
 }
 
 // (a) test-class reports need a Before and an After line, and the After file must carry a
 //     test-runner summary. Convention reports (prose gates) are exempt from the summary check.
 if (isTestClass) {
-  const beforeM = text.match(BEFORE_LINE_RE);
-  const afterM = text.match(AFTER_LINE_RE);
+  const beforeM = text.matchAll(BEFORE_LINE_RE).next().value;
+  const afterM = text.matchAll(AFTER_LINE_RE).next().value;
   if (!beforeM) {
     console.error(`evidence-completeness-check: ${classPhrase} report has no "- Before:" evidence line`);
     process.exit(1);
