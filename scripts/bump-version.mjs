@@ -28,10 +28,13 @@ const CC = /^(feat|fix|perf|docs|chore|ci|refactor|style|test|build)(\([a-z0-9-]
  *  versioning, which is why CI rejects a malformed PR title: it would ship no release. */
 export const releasingSubjects = (subjects) => subjects.filter((s) => CC.test(s));
 
-/** major on any `!` subject or a BREAKING CHANGE body trailer, minor on any feat, else patch. */
-export function bumpLevel(subjects, bodies = "") {
+/** major on any `!` subject, minor on any feat, else patch. A `BREAKING CHANGE:` trailer is
+ *  deliberately NOT a trigger: `Prepare release` takes the PR title as its only input and authors the
+ *  release PR's body itself, so no body text ever reaches versioning. `!` in the title says the same
+ *  thing and is the one signal this path can actually read. */
+export function bumpLevel(subjects) {
   const releasing = releasingSubjects(subjects);
-  if (releasing.some((s) => CC.exec(s)[3] === "!") || /BREAKING CHANGE:/.test(bodies)) return "major";
+  if (releasing.some((s) => CC.exec(s)[3] === "!")) return "major";
   if (releasing.some((s) => s.startsWith("feat"))) return "minor";
   return "patch";
 }

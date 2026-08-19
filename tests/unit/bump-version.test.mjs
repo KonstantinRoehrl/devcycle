@@ -1,5 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   bumpLevel,
   nextVersion,
@@ -20,8 +25,43 @@ test("bumpLevel: a `!` subject promotes to major even alongside a feat", () => {
   assert.equal(bumpLevel(["feat(a): x", "fix(b)!: y"]), "major");
 });
 
-test("bumpLevel: a BREAKING CHANGE body trailer promotes to major", () => {
-  assert.equal(bumpLevel(["fix(a): x"], "BREAKING CHANGE: the flag is gone"), "major");
+// `Prepare release` passes ONE thing to this script: the PR title (.github/workflows/
+// prepare-release.yml:66-71). These two drive that real path via a subprocess rather than calling
+// bumpLevel directly — the previous test passed a `bodies` argument no caller supplies, so it
+// proved a branch production could never reach.
+function bumpFixture() {
+  const dir = mkdtempSync(join(tmpdir(), "bump-"));
+  mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
+  writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ version: "0.14.0" }) + "\n");
+  return dir;
+}
+
+const SCRIPT = fileURLToPath(new URL("../../scripts/bump-version.mjs", import.meta.url));
+
+test("release path: a `!` title is the major trigger, end to end", () => {
+  const dir = bumpFixture();
+  const r = spawnSync(process.execPath, [SCRIPT, "--subject", "feat(x)!: y", "--dry-run"], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "major 1.0.0");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("release path: a BREAKING CHANGE trailer is NOT a trigger — no body reaches versioning", () => {
+  // The release PR's body is authored by the workflow itself (gh pr create --body, prepare-release.yml
+  // :140-147), so no body text exists for the script to read. A title without `!` stays a patch even
+  // when the words appear in it. CONTRIBUTING.md documents `!` as the sole trigger for this reason.
+  const dir = bumpFixture();
+  const r = spawnSync(
+    process.execPath,
+    [SCRIPT, "--subject", "fix(x): drop the flag — BREAKING CHANGE: the flag is gone", "--dry-run"],
+    { cwd: dir, encoding: "utf8" },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "patch 0.14.1");
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test("bumpLevel: subjects that are not Conventional Commits are invisible to versioning", () => {
