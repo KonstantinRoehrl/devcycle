@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { makeRepo } from "./helpers.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/resume-check.mjs");
 const run = (statePath) => spawnSync("node", [SCRIPT, "--state", statePath], { encoding: "utf8" });
@@ -85,4 +86,125 @@ test("fails on an invalid stage enum value", () => {
   assert.notEqual(r.status, 0);
   assert.match(r.stdout + r.stderr, /stage/i);
   rmSync(dir, { recursive: true, force: true });
+});
+
+// --- C2: the ownership check (references/resume.md:41-47) ---
+
+test("a state file whose root: names another checkout exits non-zero naming both paths", () => {
+  const repo = makeRepo();
+  const foreign = mkdtempSync(join(tmpdir(), "resume-check-foreign-"));
+  try {
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        [
+          "- stage: planning",
+          `- root: ${foreign}`,
+          "- request: build the thing",
+          "- spec: none",
+          "- plan: none",
+          "- checklist: none",
+        ].join("\n") +
+        "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.notEqual(r.status, 0);
+    const out = r.stdout + r.stderr;
+    assert.ok(out.includes(realpathSync(foreign)), `recorded root missing from:\n${out}`);
+    assert.ok(out.includes(realpathSync(repo)), `actual root missing from:\n${out}`);
+    assert.match(out, /build the thing/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(foreign, { recursive: true, force: true });
+  }
+});
+
+test("a matching root: passes, even when it is written in unresolved symlink form", () => {
+  const repo = makeRepo(); // mkdtemp path: /var/... on macOS, whose realpath is /private/var/...
+  try {
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        ["- stage: planning", `- root: ${repo}`, "- spec: none", "- plan: none", "- checklist: none"].join("\n") +
+        "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("the ownership check reports nothing else — a foreign root short-circuits artifact checks", () => {
+  const repo = makeRepo();
+  const foreign = mkdtempSync(join(tmpdir(), "resume-check-foreign-"));
+  try {
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        [
+          "- stage: planning",
+          `- root: ${foreign}`,
+          "- request: build the thing",
+          "- spec: docs/definitely-gone.md",
+          "- plan: none",
+          "- checklist: none",
+        ].join("\n") +
+        "\n",
+      "utf8"
+    );
+    const out = run(state).stdout + run(state).stderr;
+    assert.ok(!out.includes("definitely-gone.md"), `artifact verdicts leaked through:\n${out}`);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(foreign, { recursive: true, force: true });
+  }
+});
+
+test("a state file in a non-git directory skips the ownership check rather than failing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "resume-check-"));
+  try {
+    const state = makeState(dir, [
+      "- stage: planning",
+      "- root: /somewhere/else/entirely",
+      "- spec: none",
+      "- plan: none",
+      "- checklist: none",
+    ]);
+    const r = run(state);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a state file with no root: line is not treated as foreign", () => {
+  const repo = makeRepo();
+  try {
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" + ["- stage: planning", "- spec: none", "- plan: none", "- checklist: none"].join("\n") + "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("--state with no value is a usage error", () => {
+  const r = spawnSync("node", [SCRIPT, "--state"], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stdout + r.stderr, /usage/i);
 });
