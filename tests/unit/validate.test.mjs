@@ -1220,3 +1220,68 @@ test("4b: one file with two bare invocations is reported once per invocation, no
   const hits = res.stderr.split("\n").filter((l) => l.includes("node scripts/doctor.mjs"));
   assert.equal(hits.length, 1, `expected one de-duplicated report, got:\n${hits.join("\n")}`);
 });
+
+test("4b: a bare workflows/ dispatch is caught too — workflows/ ships engines just as scripts/ does", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node workflows/review-panel.js` on the branch.\n");
+  failsWith(
+    runValidate(dir),
+    /playbooks\/demoing-things\.md/,
+    /node workflows\/review-panel\.js/,
+    /\$\{CLAUDE_PLUGIN_ROOT\}\/workflows\/review-panel\.js/
+  );
+});
+
+test("4b: a runner flag between node and the path does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node --experimental-strip-types scripts/doctor.mjs` first.\n");
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: a sentence-initial capitalised Node does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Node scripts/doctor.mjs is how the gate runs today.\n");
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: a shell line-continuation between node and the path does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "```bash\nnode \\\n  scripts/doctor.mjs --lessons planning\n```\n");
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: a nested target keeps its subdirectory, so the suggested fix names a real file", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node scripts/lib/doctor.mjs` first.\n");
+  const res = runValidate(dir);
+  assert.equal(res.status, 1, res.stdout + res.stderr);
+  assert.match(res.stderr, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/lib\/doctor\.mjs/);
+});
+
+test("4b: trailing sentence punctuation is stripped from the suggested target", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "The gate runs via node scripts/doctor.mjs.\n");
+  const res = runValidate(dir);
+  assert.equal(res.status, 1, res.stdout + res.stderr);
+  assert.match(res.stderr, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs(?!\.)/);
+  assert.ok(
+    !res.stderr.includes("${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs."),
+    `suggested target kept the sentence period:\n${res.stderr}`
+  );
+});
+
+// Controls for the widened check: the prescribed form must never be flagged, quoted or bare,
+// in either engine directory. These are the regression the widening could plausibly cause.
+test("4b control: the ${CLAUDE_PLUGIN_ROOT} form stays clean in both engine directories, quoted and unquoted", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "scripts/doctor.mjs", "// fixture script\n");
+  writeInto(dir, "scripts/redaction-check.mjs", "// fixture script\n");
+  writeInto(dir, "workflows/review-panel.js", "// fixture engine\n");
+  playbook(
+    dir,
+    'Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --lessons planning`.\n\n' +
+      "Then `node ${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir .devcycle`.\n\n" +
+      "Then `node ${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js`.\n"
+  );
+  ok(runValidate(dir));
+});
