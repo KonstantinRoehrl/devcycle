@@ -151,6 +151,22 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       if (!existsSync(abs) || !statSync(abs).isFile())
         once(`root:${target}`, `${rel(p)}: \${CLAUDE_PLUGIN_ROOT}/${target} names no file in the plugin`);
     }
+
+    // 4b. Check 4 validates the ${CLAUDE_PLUGIN_ROOT} paths that are written; this catches the
+    //     form it structurally cannot see. Surface text runs from the INSTALLED plugin, where the
+    //     cwd is the user's repo, so a repo-relative `node scripts/<engine>.mjs` resolves to
+    //     nothing and the gate it dispatches silently never runs. This is the enforcement point
+    //     for CONTRIBUTING.md's rule, which until now was stated with nothing behind it. Only
+    //     `node` is matched: widening to other runners risks false hits on prose about shell
+    //     scripts, and there is no instance to justify it. No exemption marker — a surface file
+    //     that ever genuinely needs the literal form changes this check, visibly, in review.
+    for (const [hit, , target] of text.matchAll(/node\s+(["']?)(?:\.\/)?(scripts\/[A-Za-z0-9._-]+)\1/g)) {
+      once(
+        `barenode:${target}`,
+        `${rel(p)}: \`${hit}\` uses the repo-relative form — surface text runs from the installed ` +
+          `plugin, not this repo; use \${CLAUDE_PLUGIN_ROOT}/${target}`
+      );
+    }
   }
 
   // 5. A playbook that emits a handoff block must name the reference that owns its shape.

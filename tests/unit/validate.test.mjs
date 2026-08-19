@@ -1179,3 +1179,44 @@ test("workflow re-auth check: a bare git push with no persist-credentials: false
   );
   ok(runValidate(dir));
 });
+
+// --- C2: check 4b, repo-relative engine dispatch in the surface ---
+
+test("4b: a surface file invoking an engine repo-relatively fails", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node scripts/doctor.mjs --lessons planning` before starting.\n");
+  failsWith(
+    runValidate(dir),
+    /playbooks\/demoing-things\.md/,
+    /node scripts\/doctor\.mjs/,
+    /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/
+  );
+});
+
+test("4b: the ${CLAUDE_PLUGIN_ROOT} form passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "scripts/doctor.mjs", "// fixture script\n");
+  playbook(dir, 'Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --lessons planning`.\n');
+  ok(runValidate(dir));
+});
+
+test("4b: a leading ./ does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node ./scripts/doctor.mjs` first.\n");
+  failsWith(runValidate(dir), /node \.\/scripts\/doctor\.mjs/);
+});
+
+test("4b: a quoted repo-relative path does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, 'Run `node "scripts/doctor.mjs"` first.\n');
+  failsWith(runValidate(dir), /node "scripts\/doctor\.mjs"/);
+});
+
+test("4b: one file with two bare invocations is reported once per invocation, not per line", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node scripts/doctor.mjs`.\n\nThen run `node scripts/doctor.mjs` again.\n");
+  const res = runValidate(dir);
+  assert.equal(res.status, 1, res.stdout + res.stderr);
+  const hits = res.stderr.split("\n").filter((l) => l.includes("node scripts/doctor.mjs"));
+  assert.equal(hits.length, 1, `expected one de-duplicated report, got:\n${hits.join("\n")}`);
+});
