@@ -152,6 +152,19 @@ if (isTestClass) {
     );
     process.exit(1);
   }
+  // #75 (cont.): agreeing with each other is not enough — two captures sharing an
+  // identical command that is narrower than the report's declared cmd: still pass the
+  // equality check above yet are a partial-gate capture. references/evidence.md pins the
+  // capture's first line as "the exact command", and that command is the whole gate the
+  // report declares, so each header must also match cmd:. (beforeCmd === afterCmd here,
+  // so testing one covers both.)
+  if (beforeCmd !== cmd) {
+    console.error(
+      `evidence-completeness-check: capture command differs from the declared cmd: — ` +
+        `cmd: ${cmd} | captured: ${beforeCmd}`,
+    );
+    process.exit(1);
+  }
 }
 
 console.log(`evidence-completeness-check: ok — cmd: ${cmd}`);

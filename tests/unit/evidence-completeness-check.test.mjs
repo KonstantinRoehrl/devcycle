@@ -21,16 +21,17 @@ function run(reportPath) {
 // Node --test green summary block, assembled from fragments (never a literal the redaction check flags).
 const NODE_SUMMARY = ["ℹ pass 11", "ℹ fail 0", "ℹ duration_ms 42.0"].join("\n");
 
-// The command-header line (references/evidence.md §File-backed evidence) that the check now
-// compares between the before- and after-capture. Both fixtures carry the identical header so
-// these cases exercise the other checks, not the #75 command-equality one.
-const CMD_HEADER = "# devcycle-cmd: node --test tests/unit/*.test.mjs\n";
-
+// The capture's command header (references/evidence.md §File-backed evidence) must be the
+// exact command the report declares in cmd:. Derive it from the report body so every fixture
+// is contract-faithful by construction — the check now compares each header against cmd:,
+// not merely before against after.
 function makeReportWithEvidence(reportBody, afterContent) {
   const dir = mkdtempSync(join(tmpdir(), "evidence-completeness-check-"));
   const file = join(dir, "report.md");
-  writeFileSync(join(dir, "before.txt"), CMD_HEADER + "before output\n", "utf8");
-  if (afterContent !== null) writeFileSync(join(dir, "after.txt"), CMD_HEADER + afterContent, "utf8");
+  const declaredCmd = (reportBody.match(/\bcmd:\s*(.+)/)?.[1] ?? "").trim();
+  const header = `# devcycle-cmd: ${declaredCmd}\n`;
+  writeFileSync(join(dir, "before.txt"), header + "before output\n", "utf8");
+  if (afterContent !== null) writeFileSync(join(dir, "after.txt"), header + afterContent, "utf8");
   writeFileSync(file, reportBody, "utf8");
   return { dir, file };
 }
@@ -256,6 +257,32 @@ test("accepts before/after evidence captured with identical command headers", ()
   writeFileSync(join(dir, "after.txt"), "# devcycle-cmd: npm test\nPASS\nTests: 42 passed\n");
   const r = run(file);
   assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+});
+
+test("rejects captures whose header is identical but narrower than the declared whole-gate cmd", () => {
+  // The partial-gate false pass: both captures carry the SAME header (so the
+  // before==after equality check is satisfied), yet that command is narrower than the
+  // whole gate the report declares in cmd:. The declared cmd is a full, non-narrow gate,
+  // so the narrow-selector guard on cmd sees nothing wrong either — only a header-vs-cmd
+  // check catches it.
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      `- Evidence: red-green | cmd: ${GATE}`,
+      "- Before: before.txt (exit 1)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  const narrower = "# devcycle-cmd: node --test tests/unit/*.test.mjs\n";
+  writeFileSync(join(dir, "before.txt"), narrower + "ℹ pass 3\nℹ fail 0\n");
+  writeFileSync(join(dir, "after.txt"), narrower + "ℹ pass 11\nℹ fail 0\n");
+  try {
+    const r = run(file);
+    assert.notEqual(r.status, 0, `stdout: ${r.stdout}`);
+    assert.match(r.stderr + r.stdout, /differ.*declared cmd|does not match.*declared/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a convention report with no runner summary still passes (class-gated check a)", () => {
