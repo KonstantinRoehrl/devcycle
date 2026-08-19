@@ -129,3 +129,112 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { chan
   assert.match(report.skipped[0].reason, /deletions are not applied/);
   assert.ok(readFileSync(join(repo, "a.js"), "utf8").includes("const a = 1;"), "real file must survive");
 });
+
+// `references/sweep-execution.md:38-39` makes the caller branch on two different
+// exit-1 shapes: a hard stop is "exit 1 with a stdout report" (the coordinator
+// ledgers a rejected verdict) and a fatal is "exit 1 without a report" (it
+// ledgers no verdict at all). Both are pinned here so the distinction cannot be
+// erased by accident.
+
+test("baseline verification failure hard-stops before any edit: exit 1 WITH a stdout report", () => {
+  const repo = repoWithJsFiles();
+  const bin = makeFakeBin("claude", WELL_BEHAVED_EDITOR);
+  const res = runScript(
+    SCRIPT,
+    { files: ["a.js", "b.js"], instruction: "append marker", verifyCommand: "false" },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 1);
+  const report = JSON.parse(res.stdout);
+  assert.deepEqual(report.applied, []);
+  assert.equal(report.skipped.length, 2, "every target is reported, not just the one that tripped it");
+  for (const s of report.skipped) {
+    assert.match(s.reason, /baseline verification failed before any edits \(exit 1\)/);
+  }
+  assert.ok(!readFileSync(join(repo, "a.js"), "utf8").includes("swept"), "real tree must be untouched");
+});
+
+test("an argument error is a fatal exit 1 with NO stdout report", () => {
+  const repo = repoWithJsFiles();
+  const bin = makeFakeBin("claude", WELL_BEHAVED_EDITOR);
+  const res = runScript(
+    SCRIPT,
+    { files: [], instruction: "append marker", verifyCommand: "true" },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 1);
+  assert.equal(res.stdout, "", "a fatal prints no report — the caller logs no verdict for it");
+  assert.match(res.stderr, /args\.files must be a non-empty array of strings/);
+});
+
+// Every editor failure is `hard`, so hitting one inside the pilot hard-stops the
+// sweep: exit 1 with a report that names which branch failed and marks the
+// untried remainder. One test per branch of runEditorAgent's failure ladder.
+
+for (const c of [
+  {
+    name: "an is_error envelope",
+    body: `process.stdout.write(JSON.stringify({ is_error: true, result: "model refused" }))`,
+    reason: /editor agent failed: editor agent error: model refused/,
+  },
+  {
+    name: "unparseable output",
+    body: `process.stdout.write("not json at all")`,
+    reason: /editor agent failed: unparseable editor output: not json at all/,
+  },
+]) {
+  test(`editor failure — ${c.name}: hard stop, exit 1, report names the reason`, () => {
+    const repo = repoWithJsFiles();
+    const bin = makeFakeBin("claude", c.body);
+    const res = runScript(
+      SCRIPT,
+      { files: ["a.js", "b.js"], instruction: "append marker", verifyCommand: "true" },
+      { cwd: repo, binDirs: [bin] }
+    );
+    assert.equal(res.status, 1);
+    const report = JSON.parse(res.stdout);
+    assert.deepEqual(report.applied, []);
+    assert.match(report.skipped[0].reason, c.reason);
+    assert.match(report.skipped[1].reason, /not attempted: pilot hard-stopped/);
+  });
+}
+
+test("editor failure — the claude CLI cannot be spawned: reported as not runnable, never a silent skip", () => {
+  const repo = repoWithJsFiles();
+  // No fake bin AND an isolated PATH, so `claude` is genuinely absent. Prepending
+  // a non-executable fake would NOT reach this branch: PATH lookup skips it and
+  // finds the developer's real CLI instead.
+  const res = runScript(
+    SCRIPT,
+    { files: ["a.js"], instruction: "append marker", verifyCommand: "true" },
+    { cwd: repo, binDirs: [], isolatePath: true }
+  );
+  assert.equal(res.status, 1);
+  const report = JSON.parse(res.stdout);
+  assert.deepEqual(report.applied, []);
+  assert.match(report.skipped[0].reason, /editor agent failed: claude CLI not runnable: .*ENOENT/);
+});
+
+test("an editor that reports no change skips the file with its reason and does not hard-stop", () => {
+  const repo = repoWithJsFiles();
+  const bin = makeFakeBin(
+    "claude",
+    `process.stdout.write(JSON.stringify({ is_error: false, structured_output: { changed: false, note: "does not apply" } }))`
+  );
+  const res = runScript(
+    SCRIPT,
+    { files: ["a.js", "b.js"], instruction: "append marker", verifyCommand: "true" },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.deepEqual(report.applied, []);
+  assert.equal(report.skipped.length, 2, "a benign no-change skip must not trip the pilot gate");
+  assert.match(report.skipped[0].reason, /agent made no change: does not apply/);
+});
+
+// The remaining runEditorAgent branch — the agent timing out — is not reachable
+// from here: the timeout is a 15-minute module constant with no injection point,
+// and adding a production knob to test it would be worse than the gap. It is
+// covered directly in tests/unit/agent-cli.test.mjs once `run` is a callable
+// module export, by calling run() with a short timeoutMs.
