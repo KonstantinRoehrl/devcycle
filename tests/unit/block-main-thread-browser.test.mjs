@@ -1,5 +1,5 @@
-// Field contract confirmed against the installed Claude Code binary (2.1.235,
-// /Users/konstantin/.local/share/claude/versions/2.1.235): `strings -a` on the binary surfaced
+// Field contract confirmed against the installed Claude Code binary (2.1.235): `strings -a`
+// on the binary surfaced
 // the un-minified-enough source of the hook-input builder `Ly(e,t,r,n)`, which returns
 // `{ session_id, transcript_path, cwd, prompt_id, permission_mode, agent_id: n?.agentId,
 // agent_type: o, effort }` where `o = n?.agentType ?? Z$()`. On the main thread `Z$()` resolves
