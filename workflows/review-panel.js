@@ -53,6 +53,10 @@ const AGENT_TIMEOUT_MS = 15 * 60 * 1000;
 const DIFF_CHAR_CAP = 60_000;
 const SPEC_CHAR_CAP = 30_000;
 const VERIFY_CONCURRENCY = 4;
+// Stage 1 fans out lenses x diff-chunks; an oversize diff split into N chunks
+// would otherwise spawn lenses*N claude processes at once, plus one codex per
+// chunk under crossModel. Same cap as stage 2's verification, same reason.
+const LENS_CONCURRENCY = 4;
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const LENS_CHARTERS = {
   spec:
@@ -643,7 +647,7 @@ async function main() {
     for (const lens of args.lenses) lensJobs.push(() => runClaudeLens(lens, ctx, model));
     if (args.crossModel) lensJobs.push(() => runCrossModelLens(ctx));
   }
-  const lensResults = await mapLimit(lensJobs, lensJobs.length, (job) => job());
+  const lensResults = await mapLimit(lensJobs, LENS_CONCURRENCY, (job) => job());
 
   const rawFindings = lensResults.flatMap((r) => r.findings);
   for (const r of lensResults) if (r.note) notes.push(r.note);
@@ -676,5 +680,6 @@ if (require.main === module) {
 
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
-  dedupFindings, rankFindings, truncate, chunkDiff, fallbackSummary, mapLimit, loadRedTeamCharter, SEVERITIES,
+  dedupFindings, rankFindings, truncate, chunkDiff, fallbackSummary, mapLimit, loadRedTeamCharter,
+  SEVERITIES, LENS_CONCURRENCY,
 };
