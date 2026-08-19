@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.0 — 2026-08-19
+
+- feat(pipeline): learn-loop issue closeout — script fixes, mechanics hardening, and methodology gates
+
 ## 0.13.1 — 2026-08-16
 
 - perf(lessons): deliver r2 lessons on demand and add a doc-tracking policy
