@@ -96,7 +96,17 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
   const scored = promotions.filter((p) => !p.lifecycle && p.culpritId);
   const scoreboard = [], escalation = [], retirement = [];
   for (const p of scored) {
-    const ids = new Set([p.culpritId, ...(p.aliases ?? [])]);
+    // A promotion's culprit-id/aliases may hold a bare slug, novel:<slug>, or <kind>:<slug>
+    // (promotions.mjs CULPRIT_ID_RE), but run-record.mjs's validateCulprit only ever writes a
+    // bare culprits.json slug or novel:<slug> into a journal event's culprit field. Normalize
+    // every declared id the same way promotions.mjs:126 already does (strip the kind prefix)
+    // and admit both the bare and novel: forms, so all three declared shapes match a real event.
+    const ids = new Set();
+    for (const raw of [p.culpritId, ...(p.aliases ?? [])]) {
+      const slug = raw.split(":").pop();
+      ids.add(slug);
+      ids.add(`novel:${slug}`);
+    }
     if (p.rung === "r3" && p.verify && p.verify !== "journal-recurrence") {
       const { status, detail: reason } = runCheck(p.verify, { root, timeoutMs, maxBuffer });
       const verdict = VERDICT_BY_STATUS[status] ?? "unmeasurable";

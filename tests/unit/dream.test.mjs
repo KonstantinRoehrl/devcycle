@@ -1527,8 +1527,8 @@ test("--check-recurrence reports held with its run count, and recurred when the 
   const { root, runsDir } = corpusWithJournal({
     promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
     events: [
-      { culprit: "friction:y", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) },
-      { culprit: "friction:y", ts: "2026-03-01T00:00:00Z", runId: "b".repeat(16) },
+      { culprit: "y", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) },
+      { culprit: "y", ts: "2026-03-01T00:00:00Z", runId: "b".repeat(16) },
     ],
   });
   const held = JSON.parse(run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir }).stdout).scoreboard[0];
@@ -1537,7 +1537,7 @@ test("--check-recurrence reports held with its run count, and recurred when the 
 
   const { root: r2, runsDir: d2 } = corpusWithJournal({
     promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
-    events: [{ culprit: "friction:x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
+    events: [{ culprit: "x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
   });
   const recurred = JSON.parse(run(["--check-recurrence"], r2, { DEVCYCLE_RUNS_DIR: d2 }).stdout).scoreboard[0];
   assert.equal(recurred.verdict, "recurred");
@@ -1654,7 +1654,7 @@ test("--check-recurrence ignores journal events dated on or before the promotion
 test("--check-recurrence output matches the pinned engine shape and carries no record prose", () => {
   const { root, runsDir } = corpusWithJournal({
     promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
-    events: [{ culprit: "friction:x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
+    events: [{ culprit: "x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
   });
   const res = run(["--check-recurrence"], root, { DEVCYCLE_RUNS_DIR: runsDir });
   const out = JSON.parse(res.stdout);

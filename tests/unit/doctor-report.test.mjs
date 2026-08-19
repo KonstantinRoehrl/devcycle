@@ -650,7 +650,7 @@ const PROMOTED_PROMOTIONS = [
   { culpritId: "friction:broken-one", rung: "r3", verify: "false", landed: "2026-07-01", lifecycle: null, aliases: [] },
 ];
 const PROMOTED_JOURNAL = [
-  { event: "gate-fail", culprit: "friction:recurred-one", ts: "2026-07-15T10:00:00.000Z", runId: "run-1" },
+  { event: "gate-fail", culprit: "recurred-one", ts: "2026-07-15T10:00:00.000Z", runId: "run-1" },
 ];
 const PROMOTED_VERIFICATION = verify(PROMOTED_PROMOTIONS, PROMOTED_JOURNAL, "0.14.0", { runCheck: defaultRunCheck });
 

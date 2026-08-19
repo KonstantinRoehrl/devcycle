@@ -15,13 +15,22 @@ test("r0-r2: zero runs after landed is unmeasurable, never held", () => {
 });
 
 test("r0-r2: a run with no recurrence is held; a recurrence is recurred + escalation", () => {
+  // The promotion's culprit-id is the <kind>:<slug> form; run-record.mjs only ever writes the
+  // bare slug into a journal event's culprit field (never "friction:a"), so the recurrence must
+  // be found through that shape or this test is vacuous.
   const runs = [ev(null, "2026-08-05T00:00:00Z", "r1")];
   const held = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(held.scoreboard[0].verdict, "held");
   const recur = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })],
-    [...runs, ev("friction:a", "2026-08-06T00:00:00Z", "r2")], "0.14.0", { now: Date.parse("2026-08-20") });
+    [...runs, ev("a", "2026-08-06T00:00:00Z", "r2")], "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(recur.scoreboard[0].verdict, "recurred");
   assert.equal(recur.candidates.escalation[0].culpritId, "friction:a");
+});
+
+test("r0-r2: the novel:<slug> form still matches after normalization (do not break it)", () => {
+  const runs = [ev(null, "2026-08-05T00:00:00Z", "r1"), ev("novel:foo-bar", "2026-08-06T00:00:00Z", "r2")];
+  const out = verify([promo({ culpritId: "novel:foo-bar", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(out.scoreboard[0].verdict, "recurred");
 });
 
 test("retirement fires on held past 10 runs OR 90 days", () => {
@@ -192,7 +201,7 @@ test("F4: a real timestamp after the landed date is still counted", () => {
   const promotions = [{
     culpritId: "friction:x", rung: "r2", landed: "2026-08-15", aliases: [], lifecycle: null,
   }];
-  const events = [{ runId: "d".repeat(16), event: "gate-fail", culprit: "friction:x", ts: "2026-08-16T09:00:00.000Z" }];
+  const events = [{ runId: "d".repeat(16), event: "gate-fail", culprit: "x", ts: "2026-08-16T09:00:00.000Z" }];
   const { scoreboard } = verify(promotions, events, "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(scoreboard[0].runsObserved, 1);
   assert.equal(scoreboard[0].verdict, "recurred");
