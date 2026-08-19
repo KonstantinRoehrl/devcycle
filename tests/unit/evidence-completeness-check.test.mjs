@@ -21,10 +21,16 @@ function run(reportPath) {
 // Node --test green summary block, assembled from fragments (never a literal the redaction check flags).
 const NODE_SUMMARY = ["ℹ pass 11", "ℹ fail 0", "ℹ duration_ms 42.0"].join("\n");
 
+// The command-header line (references/evidence.md §File-backed evidence) that the check now
+// compares between the before- and after-capture. Both fixtures carry the identical header so
+// these cases exercise the other checks, not the #75 command-equality one.
+const CMD_HEADER = "# devcycle-cmd: node --test tests/unit/*.test.mjs\n";
+
 function makeReportWithEvidence(reportBody, afterContent) {
   const dir = mkdtempSync(join(tmpdir(), "evidence-completeness-check-"));
   const file = join(dir, "report.md");
-  if (afterContent !== null) writeFileSync(join(dir, "after.txt"), afterContent, "utf8");
+  writeFileSync(join(dir, "before.txt"), CMD_HEADER + "before output\n", "utf8");
+  if (afterContent !== null) writeFileSync(join(dir, "after.txt"), CMD_HEADER + afterContent, "utf8");
   writeFileSync(file, reportBody, "utf8");
   return { dir, file };
 }
@@ -203,6 +209,53 @@ test("a second After line lacking an (exit <n>) status fails, not just the first
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("rejects before/after evidence captured with non-identical commands", () => {
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      "- Evidence: green-green | cmd: npm test",
+      "- Before: before.txt (exit 0)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  writeFileSync(join(dir, "before.txt"), "# devcycle-cmd: npm test -- --run foo\nPASS\nTests: 1 passed\n");
+  writeFileSync(join(dir, "after.txt"), "# devcycle-cmd: npm test\nPASS\nTests: 42 passed\n");
+  const r = run(file);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr + r.stdout, /non-identical command|command.*mismatch/i);
+});
+
+test("rejects evidence files missing the # devcycle-cmd: header", () => {
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      "- Evidence: green-green | cmd: npm test",
+      "- Before: before.txt (exit 0)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  writeFileSync(join(dir, "before.txt"), "PASS\nTests: 1 passed\n");
+  writeFileSync(join(dir, "after.txt"), "PASS\nTests: 42 passed\n");
+  const r = run(file);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr + r.stdout, /devcycle-cmd|missing.*header/i);
+});
+
+test("accepts before/after evidence captured with identical command headers", () => {
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      "- Evidence: green-green | cmd: npm test",
+      "- Before: before.txt (exit 0)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  writeFileSync(join(dir, "before.txt"), "# devcycle-cmd: npm test\nPASS\nTests: 42 passed\n");
+  writeFileSync(join(dir, "after.txt"), "# devcycle-cmd: npm test\nPASS\nTests: 42 passed\n");
+  const r = run(file);
+  assert.equal(r.status, 0, `stderr: ${r.stderr}`);
 });
 
 test("a convention report with no runner summary still passes (class-gated check a)", () => {

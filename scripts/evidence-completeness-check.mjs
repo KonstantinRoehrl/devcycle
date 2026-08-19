@@ -122,6 +122,36 @@ if (isTestClass) {
     console.error(`evidence-completeness-check: after-evidence file ${afterPath} has no test-runner summary line`);
     process.exit(1);
   }
+
+  // #75: the before-capture and after-capture must be the identical command string.
+  // The capture writes it as the first line "# devcycle-cmd: <cmd>" (references/evidence.md §File-backed evidence).
+  const beforePath = beforeM[1].trim().split(/\s+/)[0];
+  const resolvedBeforePath = resolveEvidence(beforePath, reportPath);
+  if (!existsSync(resolvedBeforePath)) {
+    console.error(`evidence-completeness-check: before-evidence file not found: ${beforePath}`);
+    process.exit(1);
+  }
+  const cmdHeader = (filePath) => {
+    const first = readFileSync(filePath, "utf8").split("\n", 1)[0] ?? "";
+    const m = first.match(/^#\s*devcycle-cmd:\s*(.+?)\s*$/);
+    return m ? m[1] : null;
+  };
+  const beforeCmd = cmdHeader(resolvedBeforePath);
+  const afterCmd = cmdHeader(resolved);
+  if (beforeCmd === null || afterCmd === null) {
+    console.error(
+      "evidence-completeness-check: evidence file missing '# devcycle-cmd: <cmd>' header line " +
+        "(add it as the first line of each -before/-after capture per references/evidence.md §File-backed evidence)",
+    );
+    process.exit(1);
+  }
+  if (beforeCmd !== afterCmd) {
+    console.error(
+      `evidence-completeness-check: before/after captured with non-identical commands — ` +
+        `before: ${beforeCmd} | after: ${afterCmd}`,
+    );
+    process.exit(1);
+  }
 }
 
 console.log(`evidence-completeness-check: ok — cmd: ${cmd}`);
