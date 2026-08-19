@@ -29,8 +29,9 @@ its resolution order; none of it is repeated here. What this stage consumes:
 ## Engine selection
 
 Delegated in full to `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` — engine choice from
-`reviewDepth`, panel invocation, the `panel→single` degradation with its disclosed reason, and
-the model export are all its rules, and none of them are restated here.
+`reviewDepth`, panel invocation, the `panel→single` degradation with its disclosed reason, the
+model export, and how an oversize diff is chunked so the branch is reviewed in full rather than
+sampled are all its rules, and none of them are restated here.
 
 Before that invocation, the coordinator matches this branch's lessons to what it changed —
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match --stage branch-review --files "<the base..branch diff's changed files>"` —

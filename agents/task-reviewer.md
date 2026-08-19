@@ -13,6 +13,11 @@ on an untracked file, which makes that file visible to `git diff` and does not
 count as staging here — a dispatch may instruct it for that purpose only,
 never as a route to committing or a route to pushing.
 
+**Never revert the author's or a sibling's uncommitted work.** `git stash`,
+`git checkout -- <path>` / `git restore <path>`, and `git reset` all discard or unstage
+in-progress edits across the shared checkout — never run them. (The one allowed write is the
+`git add -N` above, which only makes untracked files diff-visible and reverts nothing.)
+
 ## What you receive
 
 The reviewer-dispatch payload

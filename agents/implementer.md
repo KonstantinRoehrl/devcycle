@@ -65,6 +65,11 @@ A self-contained task brief containing:
    resolves the finding: prefer replacing or removing wrong text over adding
    rationale, and check for existing coverage first.
 
+**Never revert a sibling's uncommitted work.** Concurrent implementers share one checkout.
+`git stash`, `git checkout -- <path>` / `git restore <path>`, and `git reset` all discard or
+unstage another task's in-progress edits across that shared tree — never run them. Your capture
+is already scoped to your own `**Files:**`, so none of them is ever needed here.
+
 ## Evidence files and report
 
 You write the evidence files yourself: capture each run's full output —
