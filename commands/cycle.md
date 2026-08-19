@@ -81,8 +81,9 @@ stage enum's single source of truth — `scripts/validate.mjs` reads its literal
    ends at the report, no change selected, closes there.
 3. **diagnosis** (bugs only) — `superpowers:systematic-debugging` (upstream, unmodified):
    reproduce the failure, then isolate the root cause. The stage ends by writing a root-cause
-   report to `.devcycle/diagnosis.md` — reproduction steps, the established cause with its
-   evidence, the surfaces involved — recorded on the `diagnosis:` line, and pinned precisely
+   report to `.devcycle/diagnosis.md` — reproduction steps, the established cause stated with the
+   command or output that establishes it (per evidence.md § Authored claims), the surfaces
+   involved — recorded on the `diagnosis:` line, and pinned precisely
    enough for planning to turn the reproduction into the fix task's failing test. How to fix it
    belongs to brainstorm, which takes the report as its context; if diagnosis overturns the
    confirmed scope, return to scoping.

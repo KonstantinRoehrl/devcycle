@@ -40,6 +40,8 @@ unreadable.
 | Confidence | `verified` or `suspected` — never omitted, never upgraded because the pattern is familiar |
 | Measured against | a named repo convention, or a named external source, per `quality-criteria.md` § Precedence |
 
+The `Confidence` field is this file's instance of the Authored-claims contract that `evidence.md` owns: a `verified` finding carries the traced path or command that proves it; `suspected` is the labeled-assumption form.
+
 A surface with a compact output shape (a verdict list, the panel's JSON) carries these
 fields in its own shape rather than as headed prose; the fields themselves are not
 optional.

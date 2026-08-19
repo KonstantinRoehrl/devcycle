@@ -12,6 +12,7 @@
 // checkout).
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, resolve, isAbsolute } from "node:path";
+import { TEST_FILE_SUFFIXES } from "./task-files.mjs";
 
 const [, , reportPath] = process.argv;
 
@@ -45,7 +46,6 @@ if (cmd === "") {
 // selects one file's tests, not the gate's whole suite. A glob token such as
 // `tests/unit/*.test.mjs` still ends in one of these suffixes but selects every file the
 // glob matches, so tokens carrying a glob character are exempt.
-const TEST_FILE_SUFFIXES = [".test.mjs", ".test.js", ".test.ts", "_test.py"];
 const GLOB_CHARS = /[*?[\]]/;
 function narrowTestFileToken(cmdStr) {
   return cmdStr
