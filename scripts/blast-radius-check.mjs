@@ -5,7 +5,7 @@
 // warning. Language-agnostic; conservative. See playbooks/planning-waves.md.
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, basename, extname, relative, sep } from "node:path";
-import { extractFiles } from "./task-files.mjs";
+import { extractFiles, TEST_FILE_SUFFIXES } from "./task-files.mjs";
 
 const [, , planPath, repoRootArg] = process.argv;
 if (!planPath) {
@@ -20,7 +20,7 @@ const repoRoot = repoRootArg || process.cwd();
 
 const TASK_HEADING_RE = /^### Task (\d+):.*$/gm;
 const FILES_BLOCK_RE = /\*\*Files:\*\*\n([\s\S]*?)(?=\n\*\*|\n###|$)/;
-const TEST_SUFFIXES = [".test.mjs", ".test.js", ".test.ts", ".test.jsx", ".test.tsx", "_test.py", ".spec.ts", ".spec.js"];
+const TEST_SUFFIXES = [...TEST_FILE_SUFFIXES, ".test.jsx", ".test.tsx", ".spec.ts", ".spec.js"];
 const CODE_EXT = new Set([".mjs", ".js", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".py"]);
 const IGNORE_DIRS = new Set(["node_modules", ".git", "dist", "build", "coverage", ".devcycle"]);
 
@@ -60,7 +60,7 @@ const hardFails = [];
 const warnings = [];
 for (const chg of changed) {
   const base = basename(chg, extname(chg));
-  const tokenRe = new RegExp(`\\b${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+  const tokenRe = new RegExp(`[/.'"\`]${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
   for (const cand of codeFiles) {
     if (cand === chg || declared.has(cand)) continue;
     let content;

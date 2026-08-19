@@ -2,6 +2,10 @@
 // check (a **Files:** block) and dream.mjs --match (a --files "a,b" CSV) so both agree.
 const LABELS = new Set(["Create", "Modify", "Test"]);
 
+// Single owner for the base test-file suffixes, consumed by evidence-completeness-check.mjs
+// (narrow-selector detection) and blast-radius-check.mjs (which extends it with a few more).
+export const TEST_FILE_SUFFIXES = [".test.mjs", ".test.js", ".test.ts", "_test.py"];
+
 // `trusted` skips only the path-shape gate — used by the explicit --files CSV, where the caller
 // has already asserted every token is a file, so a top-level extensionless name (Dockerfile,
 // Makefile, LICENSE) must survive. The **Files:**-block path leaves it off, keeping the gate that
