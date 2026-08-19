@@ -44,6 +44,8 @@ including its instruction to produce the diff yourself.
    diff looks correct on inspection. A report whose evidence you cannot open
    and check is a report you cannot verify, and a report whose named path
    does not exist is a missing file, not a formatting slip.
+   - Reject a report that states a load-bearing claim about source state as bare fact with no backing command and no assumption label (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims).
+   - For a `red-green` task, confirm the red output shows the test's own assertion failing, not a bare missing-symbol / import / collection error; reject when the red never discriminated the behavior.
 
 ## Reviewer hygiene
 
