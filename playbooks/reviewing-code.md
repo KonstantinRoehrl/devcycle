@@ -108,11 +108,21 @@ the last-resort truncation of a single hunk still over the cap.
 **`single`** — the same lenses as inline read-only reviewers, same refutation pass, same finding
 shape; a complete review in its own right, not a degraded panel.
 
-**Dirty-tree backstop.** Before running the single inline read-only reviewer, record
-`git status --porcelain`; record it again after. A reviewer that left the tree dirtier than it
-found it mutated the code it was assessing, so the review is invalid — file it as a blocking
-process finding in `${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s shape, discard that verdict,
-and re-run from the clean tree.
+**Reviewers never write the working tree — the owner of that rule for every reviewer, inline or
+dispatched; the reviewer agents and the branch-review stage name it and do not restate it.** A
+reviewer's `Bash` is read-only, so it never runs a command that writes the tree: `prettier
+--write`, `eslint --fix`, `dotnet format` (without `--verify-no-changes`), `black`, `ruff --fix`,
+`gofmt -w`, or any formatter/codemod in write mode. Formatters and linters run in check mode only
+(`--check`, `--verify-no-changes`, `--list-different`); reformatting the code under review destroys
+the review's independence. The one permitted write is a `task-reviewer` `git add -N` on an
+untracked file, which only makes it diff-visible and reverts nothing.
+
+**Dirty-tree backstop.** Snapshot `git status --porcelain` before the reviewer runs — the single
+inline reviewer here, a dispatched reviewer subagent in the branch-review stage — and again after.
+A reviewer that left the tree dirtier than it found it, beyond that permitted `git add -N`, mutated
+the code it was assessing, so the review is invalid: file it as a blocking process finding in
+`${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s shape, discard that verdict, and re-run from the
+clean tree.
 
 **`panel→single` degradation is a first-class path, not an apology.** A missing or non-zero
 `review-panel.js` means the panel is unavailable: **exit 1 means the panel failed, never that findings

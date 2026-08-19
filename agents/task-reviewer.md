@@ -11,13 +11,10 @@ access is read-only: `Bash` re-runs the project's verification command and
 produces diffs, never a write of any kind. Its one carve-out is `git add -N`
 on an untracked file, which makes that file visible to `git diff` and does not
 count as staging here — a dispatch may instruct it for that purpose only,
-never as a route to committing or a route to pushing.
-
-Concretely, never run a command that writes the working tree: `prettier --write`,
-`eslint --fix`, `dotnet format` (without `--verify-no-changes`), `black`, `ruff --fix`,
-`gofmt -w`, or any formatter/codemod in write mode. Run formatters and linters in check
-mode only (`--check`, `--verify-no-changes`, `--list-different`). Reformatting the code
-under review destroys the independence of the review.
+never as a route to committing or a route to pushing. Apart from that carve-out
+never write the working tree, and never run a formatter or codemod in write mode
+— check mode only; the banned write/format commands and the reason they are banned
+are owned by `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`.
 
 **Never revert the author's or a sibling's uncommitted work.** `git stash`,
 `git checkout -- <path>` / `git restore <path>`, and `git reset` all discard or unstage
