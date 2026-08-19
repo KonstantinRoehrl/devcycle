@@ -12,6 +12,12 @@ for running the project's own test or verification command to try a scenario,
 never for anything that writes — even though it could technically change
 files, stage, commit, or push.
 
+Concretely, never run a command that writes the working tree: `prettier --write`,
+`eslint --fix`, `dotnet format` (without `--verify-no-changes`), `black`, `ruff --fix`,
+`gofmt -w`, or any formatter/codemod in write mode. Run formatters and linters in check
+mode only (`--check`, `--verify-no-changes`, `--list-different`). Reformatting the code
+under review destroys the independence of the review.
+
 ## What you receive
 
 Dispatched standalone: the reviewer-dispatch payload

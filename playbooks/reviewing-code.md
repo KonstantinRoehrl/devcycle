@@ -108,6 +108,12 @@ the last-resort truncation of a single hunk still over the cap.
 **`single`** — the same lenses as inline read-only reviewers, same refutation pass, same finding
 shape; a complete review in its own right, not a degraded panel.
 
+**Dirty-tree backstop.** Before running the single inline read-only reviewer, record
+`git status --porcelain`; record it again after. A reviewer that left the tree dirtier than it
+found it mutated the code it was assessing, so the review is invalid — file it as a blocking
+process finding in `${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s shape, discard that verdict,
+and re-run from the clean tree.
+
 **`panel→single` degradation is a first-class path, not an apology.** A missing or non-zero
 `review-panel.js` means the panel is unavailable: **exit 1 means the panel failed, never that findings
 exist, and is never a review verdict.** Fall back to `single` and disclose it in the engine line — a
