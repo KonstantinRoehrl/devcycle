@@ -9,3 +9,8 @@ docs/superpowers/
 docs/overhaul/
 graphify-out/
 docs/block-e-instrumentation/
+
+# Audit reports are one-run records: written locally, never shipped to installers.
+# The v0.12 disposition register is a closure ledger DECISIONS.md and known-issues.md cite.
+docs/audits/
+!docs/audits/2026-08-06-disposition-register.md
