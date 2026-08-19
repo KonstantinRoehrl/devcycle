@@ -5,34 +5,7 @@
 // parser. They do not run the workflow; GitHub Actions syntax validity is not proven here.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-
-const root = process.cwd();
-const read = (p) => readFileSync(join(root, p), "utf8");
-
-// Splits the `jobs:` section into { jobId: bodyText }, one entry per top-level (2-space
-// indented) job key. Relies on this repo's own workflows being written with plain 2-space
-// YAML indentation throughout (true of every workflow under .github/workflows/ today).
-function parseJobs(yaml) {
-  const bodyStart = yaml.indexOf("\njobs:\n");
-  assert.ok(bodyStart !== -1, "no top-level `jobs:` key found");
-  const lines = yaml.slice(bodyStart + 1).split("\n");
-  const jobs = {};
-  let current = null;
-  for (const line of lines.slice(1)) {
-    const jobHeader = line.match(/^ {2}([a-z][\w-]*):\s*$/);
-    if (jobHeader) {
-      current = jobHeader[1];
-      jobs[current] = [];
-      continue;
-    }
-    if (current === null) continue;
-    if (line.length && !/^\s/.test(line)) break; // dedented past the jobs: block entirely
-    jobs[current].push(line);
-  }
-  return jobs;
-}
+import { read, parseJobs } from "./workflow-yaml.mjs";
 
 test("prepare-release: validate.yml is called from a job-level `uses:`, not a step", () => {
   const yaml = read(".github/workflows/prepare-release.yml");
