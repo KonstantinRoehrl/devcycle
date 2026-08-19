@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runsObserved } from "./journal.mjs";
+import { runsObserved, isIso } from "./journal.mjs";
 import { cmpSemver, SEMVER_RE } from "./semver.mjs";
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -83,6 +83,12 @@ const VERDICT_BY_STATUS = {
   ok: "held", failed: "broken", errored: "errored", unrunnable: "unmeasurable", skipped: "unmeasurable",
 };
 
+// Both scoring paths measure "events after a boundary date" and both used a bare string compare.
+// An event with no parseable ts — doctor.mjs:1455,1457 emits ts: null — must fall OUTSIDE every
+// window: "null" sorts after every real date, so the unguarded form silently admitted all of them.
+const eventsAfter = (events, boundary) =>
+  events.filter((e) => isIso(e.ts) && String(e.ts).slice(0, 10) > boundary);
+
 export function verify(promotions, journalEvents, installed, opts = {}) {
   const { now = Date.now(), runCheck = skipRunCheck, vocab = loadVocab(), root = process.cwd(),
     timeoutMs = VERIFY_TIMEOUT_MS, maxBuffer = VERIFY_MAX_BUFFER,
@@ -100,7 +106,7 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
       scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: 0, recurrences: 0, detail });
       continue;
     }
-    const after = journalEvents.filter((e) => String(e.ts).slice(0, 10) > p.landed);
+    const after = eventsAfter(journalEvents, p.landed);
     const runs = runsObserved(after);
     const recurrences = after.filter((e) => e.culprit && ids.has(e.culprit)).length;
     const verdict = runs === 0 ? "unmeasurable" : recurrences > 0 ? "recurred" : "held";
@@ -112,13 +118,18 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
     }
   }
   const resolvedIn = vocab.filter((e) => e && e["resolved-in"]).map((e) => {
-    const id = `${e.kind}:${e.slug}`;
+    // The journal stores a culprit as a bare culprits.json slug or as novel:<slug>
+    // (scripts/run-record.mjs:20-34,87-88 is its only writer). A `<kind>:<slug>` id is a shape it
+    // never holds, so comparing against one could never match. doctor.mjs:1894 keys the same
+    // vocabulary by bare slug; this renders and matches the same way.
+    const id = e.slug;
+    const novelId = `novel:${e.slug}`;
     const rv = e["resolved-in"];
     const reached = installed && SEMVER_RE.test(installed) && cmpSemver(installed, rv) >= 0;
     const since = reached ? (relDates.get(rv) ?? null) : null;   // CHANGELOG date of the resolving version
-    const after = since ? journalEvents.filter((ev) => String(ev.ts).slice(0, 10) > since) : [];
+    const after = since ? eventsAfter(journalEvents, since) : [];
     const runs = runsObserved(after);
-    const recurrences = after.filter((ev) => ev.culprit === id).length;
+    const recurrences = after.filter((ev) => ev.culprit === id || ev.culprit === novelId).length;
     const verdict = (!reached || !since || runs === 0) ? "unmeasurable" : recurrences > 0 ? "recurred" : "held";
     return { culpritId: id, resolvedIn: rv, verdict, runsObserved: runs };
   });

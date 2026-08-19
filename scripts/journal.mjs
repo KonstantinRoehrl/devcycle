@@ -33,7 +33,9 @@ export function readJournal(toplevel) {
   return { runs: files.length, lines };
 }
 
-const isIso = (s) => typeof s === "string" && !Number.isNaN(Date.parse(s));
+// Exported because scripts/verification.mjs guards its observation windows with the same
+// predicate; one definition, two callers — the same rule scripts/semver.mjs:2 already follows.
+export const isIso = (s) => typeof s === "string" && !Number.isNaN(Date.parse(s));
 
 export function journalEvents({ toplevel, since = null }) {
   const { runs, lines } = readJournal(toplevel);

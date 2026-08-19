@@ -172,7 +172,7 @@ test("acceptance (C, module-level per R-T9-a): resolved-in recurs once installed
   const vocab = JSON.parse(readFileSync(join(FIXTURES, "culprits.json"), "utf8"));
   const entry = vocab.find((e) => e && e["resolved-in"]);
   assert.ok(entry, "the fixture vocab carries a resolved-in entry");
-  const id = `${entry.kind}:${entry.slug}`;
+  const id = entry.slug;
   const releaseDates = new Map([[entry["resolved-in"], "2026-08-05"]]);
   const runs = [{ event: "gate-fail", culprit: id, ts: "2026-08-10T00:00:00Z", runId: "r1" }];
   const at = verify([], runs, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });

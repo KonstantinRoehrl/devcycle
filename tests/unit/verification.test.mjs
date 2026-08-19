@@ -45,7 +45,7 @@ test("r3: runCheck status unrunnable renders unmeasurable, never held", () => {
 test("resolved-in: recurrence after installed reached resolved-in is recurred; installed below is unmeasurable", () => {
   const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
   const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
-  const runs = [ev("friction:flaky-test-retry", "2026-08-10T00:00:00Z", "r1")];
+  const runs = [ev("flaky-test-retry", "2026-08-10T00:00:00Z", "r1")];
   const below = verify([], runs, "0.13.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
   assert.equal(below.resolvedIn[0].verdict, "unmeasurable");
   const at = verify([], runs, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
@@ -55,7 +55,7 @@ test("resolved-in: recurrence after installed reached resolved-in is recurred; i
 test("resolved-in: a post-release run for a different culprit is held (the previously-dead path)", () => {
   const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
   const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
-  const runs = [ev("friction:other", "2026-08-10T00:00:00Z", "r1")];
+  const runs = [ev("other-slug", "2026-08-10T00:00:00Z", "r1")];
   const out = verify([], runs, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
   assert.equal(out.resolvedIn[0].verdict, "held");
 });
@@ -159,4 +159,69 @@ test("F48: verify() maps an errored check to the errored verdict, distinct from 
 test("defaultRunCheck bounds are exported so callers cannot spawn unbounded", () => {
   assert.equal(typeof VERIFY_TIMEOUT_MS, "number");
   assert.ok(VERIFY_TIMEOUT_MS > 0 && VERIFY_TIMEOUT_MS <= 120_000);
+});
+
+// F4: doctor.mjs:1455,1457 emits derived review-reject / first-round-accept events with ts: null.
+// The old filter compared raw strings, and "null" > "2026-08-15" is true, so every such event fell
+// inside every promotion's window, inflating runsObserved. Derived events carry no culprit, so
+// recurrences stayed 0 — which is exactly the combination that renders `held`.
+test("F4: a promotion whose only events carry ts:null is unmeasurable, never held", () => {
+  const promotions = [{
+    culpritId: "friction:x", rung: "r2", landed: "2026-08-15", aliases: [], lifecycle: null,
+  }];
+  const events = [
+    { runId: "a".repeat(16), event: "review-reject", culprit: null, ts: null },
+    { runId: "b".repeat(16), event: "first-round-accept", culprit: null, ts: null },
+  ];
+  const { scoreboard } = verify(promotions, events, "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(scoreboard[0].runsObserved, 0, "an event with no timestamp is outside every window");
+  assert.equal(scoreboard[0].verdict, "unmeasurable");
+  assert.notEqual(scoreboard[0].verdict, "held");
+});
+
+test("F4: the resolved-in window applies the same ts guard", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const events = [{ runId: "c".repeat(16), event: "review-reject", culprit: null, ts: null }];
+  const out = verify([], events, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(out.resolvedIn[0].runsObserved, 0);
+  assert.equal(out.resolvedIn[0].verdict, "unmeasurable");
+});
+
+test("F4: a real timestamp after the landed date is still counted", () => {
+  const promotions = [{
+    culpritId: "friction:x", rung: "r2", landed: "2026-08-15", aliases: [], lifecycle: null,
+  }];
+  const events = [{ runId: "d".repeat(16), event: "gate-fail", culprit: "friction:x", ts: "2026-08-16T09:00:00.000Z" }];
+  const { scoreboard } = verify(promotions, events, "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(scoreboard[0].runsObserved, 1);
+  assert.equal(scoreboard[0].verdict, "recurred");
+});
+
+// F5: run-record.mjs:20-34 accepts a culprit only as a bare culprits.json slug or novel:<slug>.
+// The engine built `${kind}:${slug}`, a shape the journal never stores, so the comparison could
+// never match and every resolved-in culprit read held or unmeasurable regardless of reality.
+test("F5: a journal event carrying a bare culprit slug produces recurred", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const events = [{ runId: "e".repeat(16), event: "gate-fail", culprit: "flaky-test-retry", ts: "2026-08-10T00:00:00Z" }];
+  const out = verify([], events, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(out.resolvedIn[0].verdict, "recurred");
+  assert.equal(out.resolvedIn[0].culpritId, "flaky-test-retry", "the id is rendered as the bare slug");
+});
+
+test("F5: the novel:<slug> form matches the same vocabulary entry", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const events = [{ runId: "f".repeat(16), event: "gate-fail", culprit: "novel:flaky-test-retry", ts: "2026-08-10T00:00:00Z" }];
+  const out = verify([], events, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(out.resolvedIn[0].verdict, "recurred");
+});
+
+test("F5: an unrelated bare slug does not match", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const events = [{ runId: "g".repeat(16), event: "gate-fail", culprit: "other-slug", ts: "2026-08-10T00:00:00Z" }];
+  const out = verify([], events, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(out.resolvedIn[0].verdict, "held");
 });
