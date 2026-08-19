@@ -14,7 +14,7 @@ import {
   parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
   renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates,
 } from "../../scripts/doctor.mjs";
-import { verify, releaseDates } from "../../scripts/verification.mjs";
+import { verify, releaseDates, defaultRunCheck } from "../../scripts/verification.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
@@ -652,7 +652,7 @@ const PROMOTED_PROMOTIONS = [
 const PROMOTED_JOURNAL = [
   { event: "gate-fail", culprit: "friction:recurred-one", ts: "2026-07-15T10:00:00.000Z", runId: "run-1" },
 ];
-const PROMOTED_VERIFICATION = verify(PROMOTED_PROMOTIONS, PROMOTED_JOURNAL, "0.14.0");
+const PROMOTED_VERIFICATION = verify(PROMOTED_PROMOTIONS, PROMOTED_JOURNAL, "0.14.0", { runCheck: defaultRunCheck });
 
 const ctx = (over = {}) => ({
   repo: "devcycle", today: "2026-08-13", scope: "every devcycle-tagged session",

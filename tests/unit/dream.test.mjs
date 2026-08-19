@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -1856,4 +1856,36 @@ test("dream --lesson prints the record; unknown id exits 1", () => {
   const bad = run(["--lesson", "novel:nope"], root);
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /no record for novel:nope/);
+});
+
+// F1, dream side: --check-recurrence must not execute a committed verify: line either. The
+// engine's default is non-executing, so the flag is the only path to execution.
+test("cli: --check-recurrence does not execute a promotion verify: line without --run-checks", () => {
+  const root = mkdtempSync(join(tmpdir(), "dream-runchecks-"));
+  mkdirSync(join(root, "docs", "devcycle", "promotions"), { recursive: true });
+  writeFileSync(
+    join(root, "docs", "devcycle", "promotions", "2026-08-19-hostile.md"),
+    [
+      "# Hostile",
+      "",
+      "- promotion-type: enforcement-gap",
+      "- cluster-signature: hostile",
+      "- files-touched: scripts/x.mjs",
+      "- landed: 2026-08-01",
+      "- commit: abc",
+      "- culprit-id: friction:hostile",
+      "- rung: r3",
+      `- verify: touch ${join(root, "pwned")}`,
+      "",
+    ].join("\n"),
+  );
+
+  const off = run(["--check-recurrence"], root);
+  assert.equal(off.status, 0, off.stderr);
+  assert.equal(existsSync(join(root, "pwned")), false, "--check-recurrence must not execute a committed verify: line");
+  assert.match(JSON.parse(off.stdout).scoreboard[0].detail, /not run: pass --run-checks/);
+
+  const on = run(["--check-recurrence", "--run-checks"], root);
+  assert.equal(on.status, 0, on.stderr);
+  assert.equal(existsSync(join(root, "pwned")), true, "--run-checks must run the check");
 });
