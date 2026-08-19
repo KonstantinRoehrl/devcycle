@@ -11,6 +11,7 @@
 // whole-tree-capture case (a scoped diff standing in for a full run across a shared
 // checkout).
 import { readFileSync, existsSync } from "node:fs";
+import { dirname, resolve, isAbsolute } from "node:path";
 
 const [, , reportPath] = process.argv;
 
@@ -27,14 +28,14 @@ if (!existsSync(reportPath)) {
 const text = readFileSync(reportPath, "utf8");
 
 // The report shape references/evidence.md pins: "- Evidence: <class> | cmd: <exact command>".
-const EVIDENCE_LINE_RE = /^-\s*Evidence:.*\|\s*cmd:\s*(.*)$/m;
+const EVIDENCE_LINE_RE = /^-\s*Evidence:\s*(.*?)\s*\|\s*cmd:\s*(.*)$/m;
 const match = text.match(EVIDENCE_LINE_RE);
 if (!match) {
   console.error(`evidence-completeness-check: no evidence line found in ${reportPath}`);
   process.exit(1);
 }
 
-const cmd = match[1].trim();
+const cmd = match[2].trim();
 if (cmd === "") {
   console.error(`evidence-completeness-check: cmd is empty in ${reportPath}`);
   process.exit(1);
@@ -78,4 +79,57 @@ if (flagHit) {
   process.exit(1);
 }
 
+// --- #61: additive completeness checks on the report's captured evidence ---
+
+const RUNNER_SUMMARY_RE =
+  /(?:^|[#ℹ\s])(?:pass|fail)\s+\d+|\d+\s+(?:passed|failed)|tests?:.*\b(?:passed|failed)\b/im;
+const BEFORE_LINE_RE = /^-\s*Before:\s*(.*)$/m;
+const AFTER_LINE_RE = /^-\s*After:\s*(.*)$/m;
+
+const classPhrase = match[1].trim();
+const isTestClass = /^(red-green|green-green)\b/.test(classPhrase);
+
+// (b) any present Before/After line must carry an (exit <n>) status.
+for (const [label, re] of [["Before", BEFORE_LINE_RE], ["After", AFTER_LINE_RE]]) {
+  const m = text.match(re);
+  if (m && !/\(exit\s+-?\d+\)/.test(m[1])) {
+    console.error(`evidence-completeness-check: ${label} line is missing an (exit <n>) status`);
+    process.exit(1);
+  }
+}
+
+// (a) test-class reports need a Before and an After line, and the After file must carry a
+//     test-runner summary. Convention reports (prose gates) are exempt from the summary check.
+if (isTestClass) {
+  const beforeM = text.match(BEFORE_LINE_RE);
+  const afterM = text.match(AFTER_LINE_RE);
+  if (!beforeM) {
+    console.error(`evidence-completeness-check: ${classPhrase} report has no "- Before:" evidence line`);
+    process.exit(1);
+  }
+  if (!afterM) {
+    console.error(`evidence-completeness-check: ${classPhrase} report has no "- After:" evidence line`);
+    process.exit(1);
+  }
+  const afterPath = afterM[1].trim().split(/\s+/)[0];
+  const resolved = resolveEvidence(afterPath, reportPath);
+  if (!existsSync(resolved)) {
+    console.error(`evidence-completeness-check: after-evidence file not found: ${afterPath}`);
+    process.exit(1);
+  }
+  if (!RUNNER_SUMMARY_RE.test(readFileSync(resolved, "utf8"))) {
+    console.error(`evidence-completeness-check: after-evidence file ${afterPath} has no test-runner summary line`);
+    process.exit(1);
+  }
+}
+
 console.log(`evidence-completeness-check: ok — cmd: ${cmd}`);
+
+function resolveEvidence(p, reportFile) {
+  if (isAbsolute(p) && existsSync(p)) return p;
+  const relCwd = resolve(process.cwd(), p);
+  if (existsSync(relCwd)) return relCwd;
+  const relReport = resolve(dirname(reportFile), p);
+  if (existsSync(relReport)) return relReport;
+  return relCwd; // report the cwd-relative form in the not-found error
+}

@@ -48,7 +48,10 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   declared deviation. `node scripts/evidence-completeness-check.mjs <report>` mechanizes the
   narrow-selector subset of this rule — a `cmd:` naming one test file or carrying a
   test-name filter flag — but it cannot catch every partial-gate case, so the
-  concurrent-wave whole-tree-capture case stays a human judgment call. The normal
+  concurrent-wave whole-tree-capture case stays a human judgment call. It also requires an
+  `(exit <n>)` status — read from the report line, not file contents — on any present
+  `- Before:`/`- After:` line of any class; a `red-green`/`green-green` report additionally
+  needs its `- After:` file to carry a test-runner summary line. The normal
   `red-green` case is a task whose own new tests fail that
   whole gate, so `-before.txt` exits non-zero honestly. When a task's red is instead a
   subset inside an otherwise-green suite — new tests added to a file that's part of a
