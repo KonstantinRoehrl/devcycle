@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, readFileSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdtempSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { makeRepo, commitAll, makeFakeBin, runScript } from "./helpers.mjs";
 
@@ -238,3 +239,40 @@ test("an editor that reports no change skips the file with its reason and does n
 // and adding a production knob to test it would be worse than the gap. It is
 // covered directly in tests/unit/agent-cli.test.mjs once `run` is a callable
 // module export, by calling run() with a short timeoutMs.
+
+// The claude CLI's --tools is a VARIADIC option: in the two-element form it
+// greedily consumes following positionals, so the prompt gets swallowed into
+// the tools list. review-panel.js has documented and used the equals form since
+// it was written; the sweep's copied subprocess layer had silently reverted to
+// the two-element form, surviving only because --permission-mode happened to
+// follow it. This test makes the invariant hold for the sweep by assertion, not
+// by argument order.
+test("the editor agent is invoked with the equals form of --tools", () => {
+  const repo = repoWithJsFiles();
+  const argvLog = join(mkdtempSync(join(tmpdir(), "devcycle-sweep-argv-")), "argv.json");
+  const bin = makeFakeBin(
+    "claude",
+    `
+const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)));
+const prompt = process.argv[process.argv.length - 1];
+const target = prompt.match(/^file: (.+)$/m)[1];
+fs.appendFileSync(target, "// swept\\n");
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: { changed: true, note: "ok" } }));
+`
+  );
+  const res = runScript(
+    SCRIPT,
+    { files: ["a.js"], instruction: "append marker", verifyCommand: SYNTAX_VERIFY },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const argv = JSON.parse(readFileSync(argvLog, "utf8"));
+  assert.ok(
+    argv.includes("--tools=Read,Grep,Glob,Edit,Write"),
+    `--tools must use the equals form or the variadic flag swallows the prompt; got: ${argv.join(" ")}`
+  );
+  assert.ok(!argv.includes("--tools"), "the bare two-element --tools form must never come back");
+  // The whole point of the equals form: the prompt survives as the final positional.
+  assert.match(argv[argv.length - 1], /^You are performing one step of a mechanical sweep/);
+});
