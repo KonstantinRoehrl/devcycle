@@ -1,18 +1,39 @@
 #!/usr/bin/env node
-// Lints the JS/mjs code blocks pasted into local planning scratch — docs/superpowers/plans/
-// and docs/superpowers/specs/ — before they reach a task brief. Both directories are
-// gitignored, local-only, and normally absent (including in this repo's own CI); their
-// absence is the expected case, not an error. Each ```js/```javascript/```mjs fenced block
-// is written to a temp .mjs file and syntax-checked with `node --check`, which treats the
-// .mjs extension as ESM — matching what plan snippets in this all-ESM repo actually are.
+// Lints the JS/mjs code blocks pasted into a plan or spec before they reach a task brief. Given a
+// plan path it lints exactly that file, wherever it lives; with no path it sweeps the local
+// planning scratch — docs/superpowers/plans/ and docs/superpowers/specs/ — under --dir or the cwd.
+// Both scan directories are gitignored, local-only, and normally absent (including in this repo's
+// own CI); their absence is the expected case for a sweep, not an error. An explicit path that
+// names nothing IS an error: a gate pointed at a target that found nothing has not passed.
 import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
 const args = process.argv.slice(2);
-const dirFlagIdx = args.indexOf("--dir");
-const root = dirFlagIdx === -1 ? process.cwd() : args[dirFlagIdx + 1];
+const USAGE =
+  "lint-plan-code-blocks: usage: lint-plan-code-blocks.mjs <plan-path> | [--dir <root>]";
+const die = (msg) => { console.error(msg); process.exit(1); };
+
+let root = null;
+let explicitPath = null;
+for (let i = 0; i < args.length; i += 1) {
+  if (args[i] === "--dir") {
+    // A flag whose value is missing is a usage error, never a silently absent flag.
+    if (i + 1 >= args.length) die(`${USAGE}\nlint-plan-code-blocks: --dir requires a value`);
+    root = args[i + 1];
+    i += 1;
+  } else if (explicitPath === null) {
+    explicitPath = args[i];
+  } else {
+    die(`${USAGE}\nlint-plan-code-blocks: unexpected extra argument "${args[i]}"`);
+  }
+}
+// The two name different targets; preferring one silently is the defect class this gate exists
+// to catch, so the combination is refused rather than resolved.
+if (explicitPath !== null && root !== null)
+  die(`${USAGE}\nlint-plan-code-blocks: a plan path and --dir name different targets — pass one`);
+if (root === null) root = process.cwd();
 
 const SCAN_DIRS = ["docs/superpowers/plans", "docs/superpowers/specs"];
 const LINTED_LANGS = new Set(["js", "javascript", "mjs"]);
@@ -27,11 +48,21 @@ function mdFiles(dir) {
     .map((name) => join(dir, name));
 }
 
-const files = SCAN_DIRS.flatMap((d) => mdFiles(join(root, d)));
-
-if (files.length === 0) {
-  console.log("lint-plan-code-blocks: no plan/spec files found");
-  process.exit(0);
+let files;
+if (explicitPath !== null) {
+  // Handed a target and unable to read it: a gate that was pointed at something and found
+  // nothing has not passed.
+  if (!existsSync(explicitPath))
+    die(`lint-plan-code-blocks: ${explicitPath}: no such file`);
+  files = [explicitPath];
+} else {
+  files = SCAN_DIRS.flatMap((d) => mdFiles(join(root, d)));
+  if (files.length === 0) {
+    // The scan dirs are gitignored and normally absent; a discovery sweep that finds nothing
+    // is the expected case, not a failure. Only an explicit target makes emptiness an error.
+    console.log(`lint-plan-code-blocks: no plan/spec files found under ${root}`);
+    process.exit(0);
+  }
 }
 
 const failures = [];

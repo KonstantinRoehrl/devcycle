@@ -109,8 +109,10 @@ fixing what it finds inline as you go; no re-review pass.
 5. **No count-only enumeration:** never cite an enumeration by count alone ("all four guardrails");
    one that more than one task reproduces belongs in Global Constraints, verbatim in every brief.
 6. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
-7. **Pasted-code lint:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/lint-plan-code-blocks.mjs"` over the
-   plan just written and fix any JS/mjs code block it flags before a task brief carries it forward.
+7. **Pasted-code lint:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/lint-plan-code-blocks.mjs" <plan-path>`
+   over the plan just written and fix any JS/mjs code block it flags before a task brief carries it
+   forward. Passing the path is what makes this gate non-vacuous: invoked bare it sweeps two
+   directories the plan need not be in.
 8. **Brief completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/brief-completeness-check.mjs" <plan-path>` — every task carries Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, and the Dispatch Map lists every task. Fix any gap it reports.
 9. **Blast-radius completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/blast-radius-check.mjs" <plan-path>` — it hard-fails on a test file that references a task's changed file but is in no Files block, and warns on a non-test referencer. Add each flagged file to the right task's Files block, or record an explicit override with the reason (e.g. referenced only in a comment).
 10. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch.
