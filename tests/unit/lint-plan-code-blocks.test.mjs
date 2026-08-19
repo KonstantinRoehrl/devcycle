@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -133,7 +133,7 @@ const runFail = (args, opts = {}) => {
 test("an explicit plan path outside the scan dirs is linted, and a broken block fails", () => {
   const dir = makeFixture({ "elsewhere/my-plan.md": "# Plan\n\n```js\nconst x = ;\n```\n" });
   try {
-    const out = runFail([join(dir, "elsewhere/my-plan.md")]);
+    const out = runFail([join(dir, "elsewhere/my-plan.md")], { cwd: dir });
     assert.match(out, /my-plan\.md: block 1/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -143,7 +143,7 @@ test("an explicit plan path outside the scan dirs is linted, and a broken block 
 test("an explicit plan path with a valid block passes", () => {
   const dir = makeFixture({ "elsewhere/my-plan.md": "# Plan\n\n```js\nconst x = 1;\n```\n" });
   try {
-    const out = execFileSync(process.execPath, [SCRIPT, join(dir, "elsewhere/my-plan.md")], PIPE);
+    const out = execFileSync(process.execPath, [SCRIPT, join(dir, "elsewhere/my-plan.md")], { ...PIPE, cwd: dir });
     assert.match(out, /ok/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -153,7 +153,7 @@ test("an explicit plan path with a valid block passes", () => {
 test("an explicit plan path with no lintable blocks passes", () => {
   const dir = makeFixture({ "elsewhere/my-plan.md": "# Plan\n\nProse only.\n" });
   try {
-    const out = execFileSync(process.execPath, [SCRIPT, join(dir, "elsewhere/my-plan.md")], PIPE);
+    const out = execFileSync(process.execPath, [SCRIPT, join(dir, "elsewhere/my-plan.md")], { ...PIPE, cwd: dir });
     assert.match(out, /ok/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -163,7 +163,7 @@ test("an explicit plan path with no lintable blocks passes", () => {
 test("an explicit plan path that names nothing exits 1 naming the path", () => {
   const dir = makeFixture({});
   try {
-    const out = runFail([join(dir, "nope.md")]);
+    const out = runFail([join(dir, "nope.md")], { cwd: dir });
     assert.match(out, /nope\.md/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -176,9 +176,38 @@ test("an explicit plan path is linted alone, ignoring a broken block in the scan
     "docs/superpowers/plans/broken.md": "# Plan\n\n```js\nconst y = ;\n```\n",
   });
   try {
-    const out = execFileSync(process.execPath, [SCRIPT, join(dir, "elsewhere/my-plan.md")], PIPE);
+    const out = execFileSync(process.execPath, [SCRIPT, join(dir, "elsewhere/my-plan.md")], { ...PIPE, cwd: dir });
     assert.match(out, /ok/);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an explicit plan path that is a directory exits 1 naming the path, with no stack trace", () => {
+  const dir = makeFixture({ "elsewhere/my-plan.md": "# Plan\n" });
+  try {
+    const out = runFail([join(dir, "elsewhere")], { cwd: dir });
+    assert.ok(out.includes(join(dir, "elsewhere")), `expected the path in the message, got: ${out}`);
+    assert.doesNotMatch(out, /^\s+at /m, `expected a clean message, got a stack trace: ${out}`);
+    assert.doesNotMatch(out, /EISDIR/, `expected a clean message, got a raw errno: ${out}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// mode 0o000 is not enforced for root, so the read would succeed and the test could not discriminate.
+const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+test("an explicit plan path that exists but cannot be read exits 1 naming the path, with no stack trace", { skip: isRoot ? "mode 0o000 is not enforced for root" : false }, () => {
+  const dir = makeFixture({ "elsewhere/my-plan.md": "# Plan\n\n```js\nconst x = 1;\n```\n" });
+  const plan = join(dir, "elsewhere/my-plan.md");
+  try {
+    chmodSync(plan, 0o000);
+    const out = runFail([plan], { cwd: dir });
+    assert.ok(out.includes(plan), `expected the path in the message, got: ${out}`);
+    assert.doesNotMatch(out, /^\s+at /m, `expected a clean message, got a stack trace: ${out}`);
+    assert.doesNotMatch(out, /EACCES/, `expected a clean message, got a raw errno: ${out}`);
+  } finally {
+    chmodSync(plan, 0o600);
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -5,7 +5,10 @@
 // Both scan directories are gitignored, local-only, and normally absent (including in this repo's
 // own CI); their absence is the expected case for a sweep, not an error. An explicit path that
 // names nothing IS an error: a gate pointed at a target that found nothing has not passed.
-import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import {
+  readFileSync, readdirSync, existsSync, statSync, accessSync, constants,
+  mkdtempSync, writeFileSync, rmSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -54,6 +57,16 @@ if (explicitPath !== null) {
   // nothing has not passed.
   if (!existsSync(explicitPath))
     die(`lint-plan-code-blocks: ${explicitPath}: no such file`);
+  // existsSync is equally true for a directory and for a file this process may not open, and
+  // both reach readFileSync below, where they throw a raw Node stack trace that reads as a
+  // broken tool rather than a failed gate. Refuse them here in the same path-naming style.
+  if (!statSync(explicitPath).isFile())
+    die(`lint-plan-code-blocks: ${explicitPath}: not a file`);
+  try {
+    accessSync(explicitPath, constants.R_OK);
+  } catch {
+    die(`lint-plan-code-blocks: ${explicitPath}: not readable`);
+  }
   files = [explicitPath];
 } else {
   files = SCAN_DIRS.flatMap((d) => mdFiles(join(root, d)));
