@@ -140,6 +140,49 @@ test("chunkDiff truncates only a single hunk that alone exceeds the cap, and not
   assert.match(notes[0], /single diff hunk exceeded 300 chars/);
 });
 
+// #5: when one file splits across chunks, EVERY chunk carrying hunk bodies must name its
+// file, or a lens reviewing a later chunk cannot attribute its finding to the right path.
+test("chunkDiff keeps every split chunk self-describing with its file header (#5)", () => {
+  const big = fileDiff("big.js", 6, 150); // one file, several hunks, over the cap below
+  const cap = 400;
+  const { chunks } = panel.chunkDiff(big, cap);
+  assert.ok(chunks.length >= 2, "oversize file should split across chunks");
+  for (const ch of chunks) {
+    if (/@@ /.test(ch)) {
+      assert.match(ch, /--- a\/big\.js/, "a chunk carrying hunk bodies must name its file");
+    }
+  }
+});
+
+// #5, truncation path: a later hunk that alone exceeds the cap is still truncated, but the
+// truncated chunk must keep the file header so the finding stays attributable.
+test("chunkDiff keeps the file header on a truncated later hunk (#5)", () => {
+  const header = `diff --git a/g.js b/g.js\nindex 000..111 100644\n--- a/g.js\n+++ b/g.js\n`;
+  const smallHunk = `@@ -1,3 +1,3 @@ a\n+small\n`;
+  const hugeHunk = `@@ -50,3 +50,3 @@ b\n+${"y".repeat(2_000)}\n`; // alone larger than the cap
+  const cap = 300;
+  const { chunks, notes } = panel.chunkDiff(header + smallHunk + hugeHunk, cap);
+  const truncated = chunks.find((c) => /hunk truncated at 300 chars/.test(c));
+  assert.ok(truncated, "the oversize later hunk should be truncated");
+  assert.match(truncated, /--- a\/g\.js/, "a truncated later hunk must still carry its file header");
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /single diff hunk exceeded 300 chars/);
+});
+
+// #6: two hunks truncated must yield ONE consolidated note, not the same sentence twice, so
+// the COVERAGE WARNING banner and the report's notes array do not repeat it N times.
+test("chunkDiff consolidates multiple truncations into one note (#6)", () => {
+  const two = fileDiff("f1.js", 1, 2_000) + fileDiff("f2.js", 1, 2_000);
+  const cap = 300;
+  const { chunks, notes } = panel.chunkDiff(two, cap);
+  assert.equal(notes.length, 1, `expected a single consolidated note, got ${notes.length}: ${JSON.stringify(notes)}`);
+  assert.match(notes[0], /2 diff hunks exceeded 300 chars and were truncated/);
+  // both truncated chunks still name their file (guards #5 on the truncation path too)
+  const joined = chunks.join("\n");
+  assert.match(joined, /--- a\/f1\.js/);
+  assert.match(joined, /--- a\/f2\.js/);
+});
+
 // ---------- end-to-end against a stubbed claude CLI ----------
 
 test("panel end-to-end: lenses find, verifier confirms, dedup collapses, report on stdout", () => {
@@ -175,6 +218,69 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: out })
   assert.equal(report.findings[0].severity, "high");
   assert.match(report.findings[0].verification, /also reported by/);
   assert.ok(report.summary.length > 0);
+});
+
+// A fake claude for the multi-chunk fan-out test: it attributes one finding to each file
+// present in ITS chunk's diff, tagging the finding with the chunk's file signature so the
+// test can count how many distinct chunks were reviewed. A chunk that carries hunk bodies
+// but no "diff --git" file header (the #5 failure mode) yields an UNATTRIBUTED finding.
+const multiChunkClaude = `
+const prompt = process.argv[process.argv.length - 1];
+let out;
+if (prompt.includes("You are one lens")) {
+  const i = prompt.indexOf("## Diff");
+  const diff = i >= 0 ? prompt.slice(i) : "";
+  const files = [...diff.matchAll(/diff --git a\\/(\\S+) b\\//g)].map((m) => m[1]);
+  if (files.length) {
+    const sig = files.join("+");
+    out = { findings: files.map((f) => ({
+      file: f, line: 1,
+      claim: "finding in " + f + " chunk<" + sig + ">",
+      severity: "medium", measuredAgainst: "repo convention",
+    })) };
+  } else if (/@@ /.test(diff)) {
+    out = { findings: [{ file: "UNATTRIBUTED", line: 1, claim: "orphan hunk with no file header", severity: "medium", measuredAgainst: "repo convention" }] };
+  } else {
+    out = { findings: [] };
+  }
+} else if (prompt.includes("adversarial verifier")) {
+  out = { verified: true, verification: "confirmed" };
+} else {
+  out = { summary: "multi-chunk fan-out summary." };
+}
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+`;
+
+// #4: exercise main()'s diffChunks fan-out, its totalClaudeLensJobs guard, and cross-chunk
+// finding flattening in their n>1 form. The diff is many files, each well under the cap but
+// together over it, so whole-file packing yields >=2 chunks with no single-hunk truncation.
+test("panel fans out over a multi-chunk diff: all findings merge, correctly attributed, no coverage warning (#4)", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  const names = ["f1.js", "f2.js", "f3.js", "f4.js"];
+  for (const n of names) writeFileSync(join(repo, "src", n), "// base\n");
+  commitAll(repo, "base");
+  // Each file's diff is well under DIFF_CHAR_CAP (60k); together they exceed it.
+  for (const n of names) writeFileSync(join(repo, "src", n), "// x\n".repeat(3_800));
+
+  const bin = makeFakeBin("claude", multiChunkClaude);
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+
+  // (a) more than one chunk was actually reviewed
+  const sigs = new Set(report.findings.map((f) => (f.claim.match(/chunk<([^>]*)>/) || [])[1]));
+  assert.ok(sigs.size >= 2, `expected >=2 chunks reviewed, got ${sigs.size}: ${[...sigs]}`);
+
+  // (b) fully chunked, so no coverage reduction is disclosed anywhere
+  assert.doesNotMatch(report.summary, /COVERAGE WARNING/);
+  assert.ok(!report.notes.some((n) => /truncat/i.test(n)), `unexpected truncation note: ${JSON.stringify(report.notes)}`);
+
+  // (c) findings from every chunk reached the merged report, each attributed to its own file
+  const foundFiles = new Set(report.findings.map((f) => f.file));
+  assert.ok(!foundFiles.has("UNATTRIBUTED"), "every reviewed chunk must name its file");
+  for (const n of names) assert.ok(foundFiles.has("src/" + n), `missing finding for src/${n}`);
+  for (const f of report.findings) assert.ok(f.claim.includes(f.file), `finding misattributed: ${JSON.stringify(f)}`);
 });
 
 test("panel exits 1 when every lens reviewer fails (unusable CLI output)", () => {

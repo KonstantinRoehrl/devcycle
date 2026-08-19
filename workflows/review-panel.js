@@ -244,6 +244,7 @@ function chunkDiff(diff, cap) {
   if (diff.length <= cap) return { chunks: [diff], notes };
 
   const units = [];
+  let truncatedHunks = 0;
   for (const fileSeg of splitByPrefix(diff, "diff --git ")) {
     if (fileSeg.length <= cap) {
       units.push(fileSeg);
@@ -255,9 +256,16 @@ function chunkDiff(diff, cap) {
       } else {
         const suffix = `\n[... hunk truncated at ${cap} chars ...]`;
         units.push(hunk.slice(0, Math.max(0, cap - suffix.length)) + suffix);
-        notes.push(`a single diff hunk exceeded ${cap} chars and was truncated`);
+        truncatedHunks++;
       }
     }
+  }
+  // One consolidated note, not one per hunk: a per-hunk note repeats the same sentence in the
+  // COVERAGE WARNING banner and the report's notes array when more than one hunk is truncated.
+  if (truncatedHunks === 1) {
+    notes.push(`a single diff hunk exceeded ${cap} chars and was truncated`);
+  } else if (truncatedHunks > 1) {
+    notes.push(`${truncatedHunks} diff hunks exceeded ${cap} chars and were truncated`);
   }
 
   const chunks = [];
@@ -289,15 +297,16 @@ function splitByPrefix(text, prefix) {
   return segments;
 }
 
-// Split one file's diff segment into hunk-sized pieces, keeping the file header (everything
-// before the first "@@ " line) attached to the first hunk. A file segment always begins with
-// a "diff --git " header, never a "@@ " line, so parts[0] is always that header.
+// Split one file's diff segment into hunk-sized pieces, prepending the file header (everything
+// before the first "@@ " line) to EVERY hunk so each piece is self-describing with its path — a
+// chunk that carries only later hunks must still name its file, or a lens reviewing it cannot
+// attribute a finding. A file segment always begins with a "diff --git " header, never a "@@ "
+// line, so parts[0] is always that header.
 function splitFileIntoHunks(fileSeg) {
   const parts = splitByPrefix(fileSeg, "@@ ");
   if (parts.length <= 1) return parts;
   const [header, ...hunks] = parts;
-  hunks[0] = `${header}\n${hunks[0]}`;
-  return hunks;
+  return hunks.map((hunk) => `${header}\n${hunk}`);
 }
 
 // ---------- stage 1: lens reviewers ----------
