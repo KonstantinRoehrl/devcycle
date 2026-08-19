@@ -4,10 +4,22 @@
 import { readFileSync, existsSync } from "node:fs";
 import { isAbsolute, join, dirname } from "node:path";
 
-const VALID_STAGES = new Set([
-  "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
-  "branch-review", "on-device", "fast-path", "sweep", "finish", "done",
-]);
+// The stage enum's single source of truth is the `- stage: <a|b|c>` line in
+// commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
+// keeps a second copy that can silently drift when a stage is added. Resolved relative to
+// this script's own location (not the cwd) so it holds however resume-check is invoked. If
+// the enum can't be read — a packaging fault that scripts/validate.mjs owns, not this
+// guard's concern — the set is empty and the stage-membership check below is skipped
+// rather than blocking a legitimate resume on a stage it simply could not confirm.
+const VALID_STAGES = (() => {
+  try {
+    const cyclePath = new URL("../commands/cycle.md", import.meta.url);
+    const m = readFileSync(cyclePath, "utf8").match(/stage:\s*<([a-z|-]+)>/);
+    return new Set(m ? m[1].split("|") : []);
+  } catch {
+    return new Set();
+  }
+})();
 const NONE = new Set(["none", "<tbd>", ""]);
 
 const args = process.argv.slice(2);
@@ -25,7 +37,8 @@ const field = (name) => {
 
 const errors = [];
 const stage = field("stage");
-if (!stage || !VALID_STAGES.has(stage)) errors.push(`stage: "${stage}" is not a valid devcycle stage`);
+if (!stage || (VALID_STAGES.size > 0 && !VALID_STAGES.has(stage)))
+  errors.push(`stage: "${stage}" is not a valid devcycle stage`);
 
 const root = field("root");
 const baseForRel = root && !NONE.has(root) ? root : dirname(statePath);
