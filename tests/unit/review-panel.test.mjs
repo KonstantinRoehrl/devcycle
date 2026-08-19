@@ -88,6 +88,58 @@ test("fallbackSummary counts critical findings", () => {
   assert.match(s, /1 critical/);
 });
 
+// ---------- chunkDiff (#65) ----------
+
+// Build a diff segment for one file with `hunks` hunks of roughly `hunkLen` chars each.
+function fileDiff(name, hunks, hunkLen) {
+  const header = `diff --git a/${name} b/${name}\nindex 000..111 100644\n--- a/${name}\n+++ b/${name}\n`;
+  let body = "";
+  for (let h = 0; h < hunks; h++) {
+    body += `@@ -${h * 10},3 +${h * 10},3 @@ ctx\n`;
+    body += `+${"x".repeat(hunkLen)}\n`;
+  }
+  return header + body;
+}
+
+test("chunkDiff returns a single chunk when the diff is within the cap", () => {
+  const diff = fileDiff("a.js", 1, 20);
+  const { chunks, notes } = panel.chunkDiff(diff, 10_000);
+  assert.deepEqual(chunks, [diff]);
+  assert.deepEqual(notes, []);
+});
+
+test("chunkDiff packs multiple files into cap-sized chunks with no truncation", () => {
+  const a = fileDiff("a.js", 1, 300);
+  const b = fileDiff("b.js", 1, 300);
+  const c = fileDiff("c.js", 1, 300);
+  const cap = 500;
+  const { chunks, notes } = panel.chunkDiff(a + b + c, cap);
+  assert.ok(chunks.length >= 2, `expected packing into multiple chunks, got ${chunks.length}`);
+  for (const ch of chunks) assert.ok(ch.length <= cap, `chunk over cap: ${ch.length}`);
+  const joined = chunks.join("\n");
+  for (const f of ["a.js", "b.js", "c.js"]) assert.match(joined, new RegExp(f));
+  assert.deepEqual(notes, []);
+});
+
+test("chunkDiff splits one oversize file at hunk boundaries without truncating", () => {
+  const big = fileDiff("big.js", 6, 150); // one file, several hunks, over the cap below
+  const cap = 400;
+  const { chunks, notes } = panel.chunkDiff(big, cap);
+  assert.ok(chunks.length >= 2, "oversize file should split across chunks");
+  for (const ch of chunks) assert.ok(ch.length <= cap, `chunk over cap: ${ch.length}`);
+  assert.deepEqual(notes, [], "hunk-splitting alone must not truncate");
+});
+
+test("chunkDiff truncates only a single hunk that alone exceeds the cap, and notes it", () => {
+  const huge = fileDiff("huge.js", 1, 2_000); // one hunk larger than the cap
+  const cap = 300;
+  const { chunks, notes } = panel.chunkDiff(huge, cap);
+  assert.equal(chunks.length, 1);
+  assert.match(chunks[0], /hunk truncated at 300 chars/);
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /single diff hunk exceeded 300 chars/);
+});
+
 // ---------- end-to-end against a stubbed claude CLI ----------
 
 test("panel end-to-end: lenses find, verifier confirms, dedup collapses, report on stdout", () => {
@@ -291,15 +343,17 @@ test("a truncated diff is disclosed in the panel's own output, not only in the r
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   // The stubbed reconciler returns its own summary, so a disclosure that depends on the
-  // reconciler repeating a note would be missing here.
+  // reconciler repeating a note would be missing here. This fixture's whole diff is one
+  // file changed in one hunk, so chunking alone can't help — it's the one path chunkDiff
+  // still truncates.
   assert.match(report.summary, /COVERAGE WARNING/);
-  assert.match(report.summary, /diff truncated to 60000 of \d+ chars/);
+  assert.match(report.summary, /a single diff hunk exceeded 60000 chars and was truncated/);
   assert.ok(Array.isArray(report.notes), "the panel's notes must reach the caller as a field");
   assert.ok(
-    report.notes.some((n) => /diff truncated to 60000 of \d+ chars/.test(n)),
+    report.notes.some((n) => /a single diff hunk exceeded 60000 chars and was truncated/.test(n)),
     `notes did not carry the truncation: ${JSON.stringify(report.notes)}`
   );
-  assert.match(res.stderr, /diff truncated to 60000 of \d+ chars/);
+  assert.match(res.stderr, /a single diff hunk exceeded 60000 chars and was truncated/);
 });
 
 test("an untruncated panel run carries no coverage warning", () => {
