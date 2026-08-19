@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import {
   nextVersion,
   notesForVersion,
   changelogWithSection,
+  changelogWithReleasedMarkers,
   releasingSubjects,
 } from "../../scripts/bump-version.mjs";
 
@@ -146,4 +147,72 @@ test("changelogWithSection refuses a date that is not YYYY-MM-DD rather than wri
     () => changelogWithSection("# Changelog\n", "1.2.0", "- feat(x): new", "13-08-2026"),
     /not a YYYY-MM-DD date/,
   );
+});
+
+// references/config-changelog.md:12-13 promises the release step replaces `version: "unreleased"`
+// with the version the change landed in. Before this, no script and no workflow did it — four
+// records sat permanently unreleased. These pin the promise.
+const FIXTURE_CHANGELOG = `# Config changelog
+
+Prose above the block.
+
+\`\`\`yaml
+- version: "0.8.0"
+  change: added
+  key: gitPolicy
+- version: "unreleased"
+  change: added
+  key: implementerModel
+  note: "pool support"
+- version: "unreleased"
+  change: added
+  key: taskReviewerModel
+\`\`\`
+
+## A section below the block
+
+Prose that happens to mention version: "unreleased" and must not be touched.
+`;
+
+test("changelogWithReleasedMarkers: stamps every pending record with the released version", () => {
+  const out = changelogWithReleasedMarkers(FIXTURE_CHANGELOG, "0.15.0");
+  assert.equal((out.match(/version: "0\.15\.0"/g) ?? []).length, 2);
+  assert.ok(!/- version: "unreleased"/.test(out), "a record still carries the unreleased marker");
+});
+
+test("changelogWithReleasedMarkers: leaves the released records and the prose below the block alone", () => {
+  const out = changelogWithReleasedMarkers(FIXTURE_CHANGELOG, "0.15.0");
+  assert.match(out, /- version: "0\.8\.0"/, "an already-released record was rewritten");
+  assert.match(
+    out,
+    /Prose that happens to mention version: "unreleased" and must not be touched\./,
+    "text outside the first yaml block was rewritten — only the block doctor parses may be stamped"
+  );
+});
+
+test("changelogWithReleasedMarkers: no pending record is the common case and returns the input unchanged", () => {
+  const settled = FIXTURE_CHANGELOG.replaceAll('- version: "unreleased"', '- version: "0.9.0"');
+  assert.equal(changelogWithReleasedMarkers(settled, "0.15.0"), settled);
+});
+
+test("release path: a real bump stamps the config changelog alongside plugin.json and CHANGELOG.md", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bump-"));
+  mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
+  mkdirSync(join(dir, "references"), { recursive: true });
+  writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ version: "0.14.0" }) + "\n");
+  writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\n## 0.14.0 — 2026-08-19\n\n- old\n");
+  writeFileSync(join(dir, "references", "config-changelog.md"), FIXTURE_CHANGELOG);
+
+  const r = spawnSync(
+    process.execPath,
+    [SCRIPT, "--subject", "feat(x): y", "--date", "2026-09-01"],
+    { cwd: dir, encoding: "utf8" },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "0.15.0");
+
+  const stamped = readFileSync(join(dir, "references", "config-changelog.md"), "utf8");
+  assert.equal((stamped.match(/version: "0\.15\.0"/g) ?? []).length, 2);
+  assert.ok(!/- version: "unreleased"/.test(stamped), "the release left a pending marker behind");
+  rmSync(dir, { recursive: true, force: true });
 });

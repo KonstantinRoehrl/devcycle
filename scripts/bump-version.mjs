@@ -17,11 +17,12 @@
 //   --dry-run          print "<level> <version>" and change nothing
 //   --notes-for <ver>  print that version's CHANGELOG section and exit (used at tag time)
 //   --date <YYYY-MM-DD>  the release date stamped on the CHANGELOG heading; defaults to today (UTC)
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const PLUGIN_PATH = ".claude-plugin/plugin.json";
 const CHANGELOG_PATH = "CHANGELOG.md";
+const CONFIG_CHANGELOG_PATH = "references/config-changelog.md";
 const CC = /^(feat|fix|perf|docs|chore|ci|refactor|style|test|build)(\([a-z0-9-]+\))?(!)?: /;
 
 /** Subjects a release counts. A subject that is not a Conventional Commit is invisible to
@@ -74,6 +75,18 @@ export const changelogWithSection = (changelog, version, notes, date) => {
   return changelog.replace(/^# Changelog\n/, `# Changelog\n\n## ${version} — ${date}\n\n${notes}\n`);
 };
 
+/** Stamps every `version: "unreleased"` record with the version now being released, keeping the
+ *  promise references/config-changelog.md:12-13 makes. Scoped to the FIRST fenced yaml block — the
+ *  only one `scripts/doctor.mjs:556` parses for config drift — so the prose below it is never
+ *  rewritten. A file with no pending record is the common case, not an error, and comes back
+ *  unchanged. */
+export function changelogWithReleasedMarkers(text, version) {
+  const fence = text.match(/```yaml\n[\s\S]*?```/);
+  if (!fence) return text;
+  const stamped = fence[0].replace(/^(\s*-\s+version:\s*)"unreleased"\s*$/gm, `$1"${version}"`);
+  return text.slice(0, fence.index) + stamped + text.slice(fence.index + fence[0].length);
+}
+
 function main() {
   const argv = process.argv.slice(2);
 
@@ -115,6 +128,14 @@ function main() {
     CHANGELOG_PATH,
     changelogWithSection(readFileSync(CHANGELOG_PATH, "utf8"), version, `- ${subject}`, date),
   );
+  // The one step references/config-changelog.md:12-13 promises and nobody used to perform: a record
+  // written before its release carries `version: "unreleased"` until the release computes the number.
+  // Skipped when the file is absent so the script stays runnable against a minimal fixture.
+  if (existsSync(CONFIG_CHANGELOG_PATH)) {
+    const before = readFileSync(CONFIG_CHANGELOG_PATH, "utf8");
+    const after = changelogWithReleasedMarkers(before, version);
+    if (after !== before) writeFileSync(CONFIG_CHANGELOG_PATH, after);
+  }
   console.log(version);
 }
 

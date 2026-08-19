@@ -59,22 +59,28 @@ marker with the version the change lands in, since only the release computes tha
   change: added
   key: reviewDepth
   note: "depth-gate and model-routing predicates refined per the token-audit follow-through (#28/#29) — not a new key, a behavior refinement of the existing one"
-- version: "unreleased"
+- version: "0.13.0"
   change: added
   key: implementerModel
   note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
-- version: "unreleased"
+- version: "0.13.0"
   change: added
   key: taskReviewerModel
   note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
-- version: "unreleased"
+- version: "0.13.0"
   change: added
   key: walkthroughModel
   note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
-- version: "unreleased"
+- version: "0.13.0"
   change: added
   key: branchReviewModel
   note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
+- version: "0.13.1"
+  change: added
+  key: docTrackingPolicy
+  values: [standard, all-local, all-tracked]
+  default: standard
+  note: "settles which devcycle artifacts a host repo commits — lessons and promotions tracked, single-run specs and plans kept local; the repo's own .gitignore always wins"
 ```
 
 ## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)
