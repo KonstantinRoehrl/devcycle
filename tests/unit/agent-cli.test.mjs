@@ -25,6 +25,35 @@ async function withPath(value, fn) {
   }
 }
 
+// claudeStructured pins its own agent timeout — a 15-minute module constant with
+// no parameter — so a test cannot pass it a short timeoutMs the way the `run`
+// test below does. Shortening the clock the shared runner reads is the same
+// technique from the other side, and keeps a production knob out of agent-cli.js.
+// Nothing else in these tests schedules a timer while `fn` runs.
+async function withShortAgentTimeout(ms, fn) {
+  const saved = globalThis.setTimeout;
+  globalThis.setTimeout = (cb, delay, ...rest) => saved(cb, Math.min(delay ?? 0, ms), ...rest);
+  try {
+    return await fn();
+  } finally {
+    globalThis.setTimeout = saved;
+  }
+}
+
+// A fake `claude` that never answers: `body` runs first, then it sleeps far past
+// any timeout under test and is SIGKILLed. It is exec'd once with a flag it exits
+// on before being handed out, because the very first run of a freshly written
+// executable costs 200-400ms of one-time OS work here — a cold first attempt
+// would be killed before `body` could record that it ran.
+async function makeStalledClaude(body = "") {
+  const dir = makeFakeBin(
+    "claude",
+    `if (process.argv.includes("--warmup")) process.exit(0);\n${body}\nAtomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);`
+  );
+  await run(join(dir, "claude"), ["--warmup"]);
+  return dir;
+}
+
 test("run surfaces a missing binary as spawnError instead of rejecting", async () => {
   const res = await run("devcycle-no-such-binary", []);
   assert.ok(res.spawnError, "a missing binary must land on the resolved value, not as a throw");
@@ -110,6 +139,45 @@ test("claudeStructured reports an unreachable CLI with the shared not-runnable m
   );
   assert.equal(res.ok, false);
   assert.match(res.error, /^claude CLI not runnable: .*ENOENT/);
+});
+
+test("claudeStructured reports an agent that outlives its timeout in the caller's vocabulary", async () => {
+  const bin = await makeStalledClaude();
+  const res = await withPath(isolatedPath([bin]), () =>
+    withShortAgentTimeout(50, () =>
+      claudeStructured({
+        prompt: "p",
+        tools: "Read",
+        schema: { type: "object" },
+        attempts: 1,
+        errors: { agent: "editor agent", output: "editor", cap: 400 },
+      })
+    )
+  );
+  assert.equal(res.ok, false);
+  assert.equal(res.error, "editor agent timed out", "the sweep surfaces this string verbatim; a generic one would hide which agent hung");
+});
+
+// 200ms, not the 50ms above: here each attempt has to survive long enough for a
+// warm Node to reach its first line (~30-50ms measured), because the count of
+// those lines is the assertion.
+test("claudeStructured retries a timed-out agent and reports the timeout after the last attempt", async () => {
+  const tries = join(mkdtempSync(join(tmpdir(), "devcycle-agent-cli-timeout-tries-")), "tries.log");
+  const bin = await makeStalledClaude(`require("node:fs").appendFileSync(${JSON.stringify(tries)}, "x");`);
+  const res = await withPath(isolatedPath([bin]), () =>
+    withShortAgentTimeout(200, () =>
+      claudeStructured({
+        prompt: "p",
+        tools: "Read",
+        schema: { type: "object" },
+        attempts: 2,
+        errors: { agent: "claude subagent", output: "claude", cap: 500 },
+      })
+    )
+  );
+  assert.equal(res.ok, false);
+  assert.equal(res.error, "claude subagent timed out");
+  assert.equal(readFileSync(tries, "utf8").length, 2, "a timeout is retried, and only the last attempt returns the error");
 });
 
 test("makeLogger tags every line with its engine's name", () => {

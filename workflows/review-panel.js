@@ -72,7 +72,7 @@ const LENS_CHARTERS = {
 
 const { log, fatal } = makeLogger("review-panel");
 
-// ---------- generic subprocess helpers ----------
+// ---------- bounded-concurrency helper ----------
 
 async function mapLimit(items, limit, fn) {
   const results = new Array(items.length);

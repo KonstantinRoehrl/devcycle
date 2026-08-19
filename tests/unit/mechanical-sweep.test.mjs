@@ -237,8 +237,9 @@ test("an editor that reports no change skips the file with its reason and does n
 // The remaining runEditorAgent branch — the agent timing out — is not reachable
 // from here: the timeout is a 15-minute module constant with no injection point,
 // and adding a production knob to test it would be worse than the gap. It is
-// covered directly in tests/unit/agent-cli.test.mjs once `run` is a callable
-// module export, by calling run() with a short timeoutMs.
+// covered directly in tests/unit/agent-cli.test.mjs, which drives run() with a
+// short timeoutMs and claudeStructured() with a shortened clock, for both the
+// single-attempt and the retried shape.
 
 // The claude CLI's --tools is a VARIADIC option: in the two-element form it
 // greedily consumes following positionals, so the prompt gets swallowed into
