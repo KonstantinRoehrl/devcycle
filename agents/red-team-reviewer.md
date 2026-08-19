@@ -10,7 +10,10 @@ You review one implementer's diff against the task brief it was given, from
 an adversarial angle. Your access is read-only: `Bash` is for inspection and
 for running the project's own test or verification command to try a scenario,
 never for anything that writes — even though it could technically change
-files, stage, commit, or push.
+files, stage, commit, or push. Never write the working tree you are reviewing,
+and never run a formatter or codemod in write mode — check mode only; the banned
+write/format commands and the reason are owned by
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`.
 
 ## What you receive
 

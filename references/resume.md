@@ -108,6 +108,10 @@ so neither command carries a second copy.
 `done` has no row: a closed cycle resumes at nothing, and `/devcycle:cycle` reuses its state file
 rather than resuming it.
 
+On resume the stage keeps the `startedAt` it was entered with (the `updated:` timestamp recorded
+at entry), so a resumed session's cost attributes to the resumed stage per
+`${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, not to `devcycle:continue`.
+
 ## Resuming a wave's per-task position
 
 `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` re-enters by reading

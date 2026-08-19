@@ -29,6 +29,13 @@ recollection, including the user's.
    ${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append --run <that id> --kind session
    --sessionId "$CLAUDE_CODE_SESSION_ID"` — one append per real session, never a merge or
    update of a prior line, since a `/clear` always mints a new `$CLAUDE_CODE_SESSION_ID`.
+2a. Validate the state file against on-disk reality before trusting it — `node
+   ${CLAUDE_PLUGIN_ROOT}/scripts/resume-check.mjs --state <the chosen state file>`. A non-zero exit
+   means `state.md` is stale (a recorded spec/plan/checklist artifact is gone, or the stage is not a
+   real enum value): surface the specific finding and ask the user how to proceed rather than
+   continuing on the stale record. For any stage with a human-required step (per
+   `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § Resuming at the recorded stage), re-walk that step
+   on resume rather than assuming a stale `state.md` already cleared it.
 3. Read the ledger it names (`.devcycle/ledger.md`) and the plan/spec/
    checklist paths it records, where present.
 4. Settle the branch and derive position from git evidence per
