@@ -165,14 +165,23 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     //     scripts, and there is no instance to justify it. No exemption marker — a surface file
     //     that ever genuinely needs the literal form changes this check, visibly, in review.
     //     The prescribed ${CLAUDE_PLUGIN_ROOT} form can never match, quoted or bare: the path must
-    //     start with an engine directory, and that form starts with `${`. A separator is
-    //     horizontal whitespace or a `\`-continuation, never a bare newline, so a paragraph break
-    //     cannot join unrelated prose into a hit; the two alternatives begin with different
-    //     characters, so a run of them parses one way only and cannot backtrack. The target class
-    //     and the trailing-punctuation strip match check 4's, so a nested path keeps its
+    //     start with an engine directory, and that form starts with `${`. That, not the quoting,
+    //     is what keeps the prescribed form clean — so an opening quote is optional and its closing
+    //     one is consumed only if it is there. Detection never depends on the quotes balancing: an
+    //     unterminated quote, or one closing past the path (`node "scripts/x.mjs --flag"`), is the
+    //     same broken dispatch. A separator is horizontal whitespace, a `\`-continuation, or a
+    //     single line break with any indentation after it — so an invocation markdown-wraps across
+    //     a line and is still caught — but never a line break followed by a blank line, so a
+    //     paragraph break cannot join unrelated prose into a hit. The alternatives begin with
+    //     different characters, so a run of them parses one way only and cannot backtrack. The
+    //     target class and the trailing-punctuation strip match check 4's, so a nested path keeps its
     //     subdirectory and un-backticked prose does not suggest a fix ending in a sentence period.
-    const BARE_DISPATCH =
-      /(?<![A-Za-z0-9_-])[Nn]ode(?:(?:[ \t]|\\\r?\n)+-{1,2}[A-Za-z0-9][A-Za-z0-9._=-]*)*(?:[ \t]|\\\r?\n)+(["']?)(?:\.\/)?((?:scripts|workflows)\/[A-Za-z0-9._/-]+)\1/g;
+    const SEP = String.raw`(?:[ \t]|\\\r?\n|\r?\n(?![ \t]*\r?\n))`;
+    const BARE_DISPATCH = new RegExp(
+      String.raw`(?<![A-Za-z0-9_-])[Nn]ode(?:${SEP}+-{1,2}[A-Za-z0-9][A-Za-z0-9._=-]*)*` +
+        String.raw`${SEP}+(["']?)(?:\./)?((?:scripts|workflows)/[A-Za-z0-9._/-]+)\1?`,
+      "g"
+    );
     for (const [hit, , raw] of text.matchAll(BARE_DISPATCH)) {
       const target = raw.replace(/[.,;:]+$/, "");
       once(

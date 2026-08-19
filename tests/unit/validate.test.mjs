@@ -1285,3 +1285,42 @@ test("4b control: the ${CLAUDE_PLUGIN_ROOT} form stays clean in both engine dire
   );
   ok(runValidate(dir));
 });
+
+// Round 2: three shapes of the banned class that a balanced-quote requirement let through,
+// plus the hard-wrapped invocation a newline-free separator let through.
+test("4b: an unterminated opening quote does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, 'Run `node "scripts/doctor.mjs` before starting.\n');
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: an unterminated single quote does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node 'scripts/doctor.mjs` before starting.\n");
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: a quote closing after the arguments, out of the path's reach, does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, 'Run `node "scripts/doctor.mjs --lessons planning"` before starting.\n');
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: an invocation hard-wrapped across a line does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "The completeness gate runs as `node\nscripts/doctor.mjs` before the handoff.\n");
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b control: a hard-wrapped ${CLAUDE_PLUGIN_ROOT} invocation stays clean", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "scripts/doctor.mjs", "// fixture script\n");
+  playbook(dir, "The completeness gate runs as `node\n${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs --lessons planning`.\n");
+  ok(runValidate(dir));
+});
+
+test("4b control: a paragraph break is not a separator, so prose either side of it is not stapled into a hit", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "The gate is dispatched with node\n\nscripts/doctor.mjs is the engine it names.\n");
+  ok(runValidate(dir));
+});
