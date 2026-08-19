@@ -27,9 +27,10 @@ test("bumpLevel: a `!` subject promotes to major even alongside a feat", () => {
 });
 
 // `Prepare release` passes ONE thing to this script: the PR title (.github/workflows/
-// prepare-release.yml:66-71). These two drive that real path via a subprocess rather than calling
-// bumpLevel directly — the previous test passed a `bodies` argument no caller supplies, so it
-// proved a branch production could never reach.
+// prepare-release.yml:66-71). The two tests below drive that real path via a subprocess, which pins
+// its input contract — not the removal of bumpLevel's `bodies` parameter, which no subprocess test
+// can see, because main() has always called bumpLevel([subject]) with a single argument. The
+// direct-call test after them is the one that discriminates the removal.
 function bumpFixture() {
   const dir = mkdtempSync(join(tmpdir(), "bump-"));
   mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
@@ -63,6 +64,12 @@ test("release path: a BREAKING CHANGE trailer is NOT a trigger — no body reach
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), "patch 0.14.1");
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("bumpLevel: everything past the subjects argument is ignored, so `bodies` cannot come back", () => {
+  // The removed second parameter made a `BREAKING CHANGE:` trailer a major trigger, so this exact
+  // call returned "major" before the removal. Nothing in the release path can supply a body.
+  assert.equal(bumpLevel(["fix(a): x"], ["BREAKING CHANGE: the flag is gone"]), "patch");
 });
 
 test("bumpLevel: subjects that are not Conventional Commits are invisible to versioning", () => {
@@ -172,12 +179,25 @@ Prose above the block.
 ## A section below the block
 
 Prose that happens to mention version: "unreleased" and must not be touched.
+
+\`\`\`yaml
+- version: "unreleased"
+  change: added
+  key: illustrativeExample
+\`\`\`
 `;
+
+/** The fixture's first fenced block — everything above the prose section. Assertions about what
+ *  was stamped scope to it, because the block below it is deliberately left pending. */
+const firstBlockOf = (text) => text.slice(0, text.indexOf("## A section below the block"));
 
 test("changelogWithReleasedMarkers: stamps every pending record with the released version", () => {
   const out = changelogWithReleasedMarkers(FIXTURE_CHANGELOG, "0.15.0");
   assert.equal((out.match(/version: "0\.15\.0"/g) ?? []).length, 2);
-  assert.ok(!/- version: "unreleased"/.test(out), "a record still carries the unreleased marker");
+  assert.ok(
+    !/- version: "unreleased"/.test(firstBlockOf(out)),
+    "a record in the parsed block still carries the unreleased marker",
+  );
 });
 
 test("changelogWithReleasedMarkers: leaves the released records and the prose below the block alone", () => {
@@ -193,6 +213,32 @@ test("changelogWithReleasedMarkers: leaves the released records and the prose be
 test("changelogWithReleasedMarkers: no pending record is the common case and returns the input unchanged", () => {
   const settled = FIXTURE_CHANGELOG.replaceAll('- version: "unreleased"', '- version: "0.9.0"');
   assert.equal(changelogWithReleasedMarkers(settled, "0.15.0"), settled);
+});
+
+test("changelogWithReleasedMarkers: a later fenced block is left pending — only the first is the drift record", () => {
+  const out = changelogWithReleasedMarkers(FIXTURE_CHANGELOG, "0.15.0");
+  assert.match(
+    out,
+    /- version: "unreleased"\n  change: added\n  key: illustrativeExample/,
+    "a record in a later fenced block was stamped — scripts/doctor.mjs:556 parses only the first",
+  );
+});
+
+test("changelogWithReleasedMarkers: a triple backtick inside a field value does not end the block", () => {
+  // Unanchored, the closing-fence match stopped at the first ``` anywhere in the block, so every
+  // record below a `note:` quoting a code span went silently unstamped — the rot F13 exists to end.
+  const quoting = FIXTURE_CHANGELOG.replace('note: "pool support"', 'note: "written as ``` fenced yaml"');
+  const out = changelogWithReleasedMarkers(quoting, "0.15.0");
+  assert.equal((out.match(/version: "0\.15\.0"/g) ?? []).length, 2);
+});
+
+test("changelogWithReleasedMarkers: a CRLF file is stamped rather than falling into the no-op path", () => {
+  // "No fence matched" and "no pending record" both return the input unchanged, so a CRLF file
+  // would rot exactly as the unowned marker did, with nothing to distinguish it from a clean run.
+  const crlf = FIXTURE_CHANGELOG.replaceAll("\n", "\r\n");
+  const out = changelogWithReleasedMarkers(crlf, "0.15.0");
+  assert.equal((out.match(/version: "0\.15\.0"/g) ?? []).length, 2);
+  assert.ok(!/[^\r]\n/.test(out), "a stamped line lost its CRLF ending");
 });
 
 test("release path: a real bump stamps the config changelog alongside plugin.json and CHANGELOG.md", () => {
@@ -213,6 +259,9 @@ test("release path: a real bump stamps the config changelog alongside plugin.jso
 
   const stamped = readFileSync(join(dir, "references", "config-changelog.md"), "utf8");
   assert.equal((stamped.match(/version: "0\.15\.0"/g) ?? []).length, 2);
-  assert.ok(!/- version: "unreleased"/.test(stamped), "the release left a pending marker behind");
+  assert.ok(
+    !/- version: "unreleased"/.test(firstBlockOf(stamped)),
+    "the release left a pending marker behind",
+  );
   rmSync(dir, { recursive: true, force: true });
 });

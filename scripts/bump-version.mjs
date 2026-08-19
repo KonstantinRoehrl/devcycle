@@ -81,9 +81,14 @@ export const changelogWithSection = (changelog, version, notes, date) => {
  *  rewritten. A file with no pending record is the common case, not an error, and comes back
  *  unchanged. */
 export function changelogWithReleasedMarkers(text, version) {
-  const fence = text.match(/```yaml\n[\s\S]*?```/);
+  // The closing fence is anchored to a line start, so a ``` inside a field's value cannot end
+  // the block early and leave every record below it silently unstamped. `\r?` so a CRLF file is
+  // stamped rather than falling into the no-op path, which looks identical to having nothing pending.
+  const fence = text.match(/```yaml\r?\n[\s\S]*?^```/m);
   if (!fence) return text;
-  const stamped = fence[0].replace(/^(\s*-\s+version:\s*)"unreleased"\s*$/gm, `$1"${version}"`);
+  // `[ \t]*$` rather than `\s*$`: on a CRLF file `\s*` swallows the line's `\r`, leaving the
+  // stamped records the only LF-terminated lines in the file.
+  const stamped = fence[0].replace(/^(\s*-\s+version:\s*)"unreleased"[ \t]*$/gm, `$1"${version}"`);
   return text.slice(0, fence.index) + stamped + text.slice(fence.index + fence[0].length);
 }
 
