@@ -805,8 +805,14 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     hook must cover is policy, asserted in tests/unit/golden-path.test.mjs.
   //     The `hooksParsed` flag follows check 9's baseline pattern: a document that failed to parse
   //     must report that and stop, never fall through and leave the registration unchecked at exit 0.
+  const hooksDir = join(root, "hooks");
   const hooksPath = join(root, "hooks/hooks.json");
-  if (existsSync(hooksPath)) {
+  if (existsSync(hooksDir) && !existsSync(hooksPath)) {
+    fail(
+      "hooks/hooks.json is missing but hooks/ ships a component — a hook script with no registration " +
+        "never fires; deleting or renaming this file is the exact disarm this check exists to catch"
+    );
+  } else if (existsSync(hooksPath)) {
     let hooksDoc, hooksParsed = true;
     try {
       hooksDoc = JSON.parse(readFileSync(hooksPath, "utf8"));
@@ -827,12 +833,27 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           const at = `hooks/hooks.json: ${event}[${i}]`;
           if (typeof entry?.matcher !== "string" || entry.matcher.trim() === "")
             fail(`${at}: matcher must be a non-empty string — an empty matcher registers a hook that never fires`);
+          else {
+            try {
+              new RegExp(entry.matcher);
+            } catch (e) {
+              fail(
+                `${at}: matcher "${entry.matcher}" is not a valid regular expression (${e.message}) — the ` +
+                  "registered hook can never fire"
+              );
+            }
+          }
           const commands = Array.isArray(entry?.hooks) ? entry.hooks : null;
           if (!commands || commands.length === 0) {
             fail(`${at}: hooks must be a non-empty array of commands`);
             continue;
           }
           for (const [j, h] of commands.entries()) {
+            if (h?.type !== "command")
+              fail(
+                `${at}.hooks[${j}]: type must be "command" — dropping or misspelling it means this entry is not ` +
+                  "a command hook, so the harness never registers it and the guard is unregistered"
+              );
             const cmd = typeof h?.command === "string" ? h.command : "";
             if (cmd.trim() === "") {
               fail(`${at}.hooks[${j}]: command must be a non-empty string`);

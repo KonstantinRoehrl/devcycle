@@ -1399,3 +1399,29 @@ test("hooks check: malformed JSON fails rather than skipping the guard", () => {
 test("hooks check: a hooks.json with no hooks object fails", () => {
   failsWith(runValidate(hooksFixture(makePluginFixture(), { PreToolUse: [] })), /hooks\/hooks\.json/, /"hooks" object/);
 });
+
+test("hooks check: hooks/ ships but hooks.json is missing fails rather than validating clean", () => {
+  const dir = makePluginFixture();
+  // hooks/ exists (a script ships) but hooks.json itself was deleted or renamed — the exact
+  // disarm this check exists to catch, so it must not fall through to exit 0.
+  writeInto(dir, "hooks/guard.mjs", "process.exit(0);\n");
+  failsWith(runValidate(dir), /hooks\/hooks\.json/, /missing/);
+});
+
+test("hooks check: a command entry with no type field fails — it is not a command hook", () => {
+  const doc = JSON.parse(JSON.stringify(goodHooks));
+  delete doc.hooks.PreToolUse[0].hooks[0].type;
+  failsWith(runValidate(hooksFixture(makePluginFixture(), doc)), /PreToolUse\[0\]\.hooks\[0\]/, /type must be "command"/);
+});
+
+test("hooks check: a command entry with a misspelt type fails — it is not a command hook", () => {
+  const doc = JSON.parse(JSON.stringify(goodHooks));
+  doc.hooks.PreToolUse[0].hooks[0].type = "comand";
+  failsWith(runValidate(hooksFixture(makePluginFixture(), doc)), /PreToolUse\[0\]\.hooks\[0\]/, /type must be "command"/);
+});
+
+test("hooks check: a matcher that does not compile as a regular expression fails", () => {
+  const doc = JSON.parse(JSON.stringify(goodHooks));
+  doc.hooks.PreToolUse[0].matcher = "mcp__claude-in-chrome__[(";
+  failsWith(runValidate(hooksFixture(makePluginFixture(), doc)), /PreToolUse\[0\]/, /not a valid regular expression/);
+});
