@@ -159,24 +159,30 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     //     for CONTRIBUTING.md's rule, which until now was stated with nothing behind it. Both
     //     engine directories count: `workflows/` ships dispatched engines exactly as `scripts/`
     //     does. Everything the defect can wear between `node` and the path is matched with it —
-    //     runner flags (`node --experimental-strip-types …`), a sentence-initial capital
-    //     (`Node …`), a shell line-continuation — since each hides the same broken dispatch. Only
-    //     `node` is matched: widening to other runners risks false hits on prose about shell
-    //     scripts, and there is no instance to justify it. No exemption marker — a surface file
-    //     that ever genuinely needs the literal form changes this check, visibly, in review.
+    //     runner flags (`node --experimental-strip-types …`) and a sentence-initial capital
+    //     (`Node …`) — since each hides the same broken dispatch. Only `node` is matched:
+    //     widening to other runners risks false hits on prose about shell scripts, and there is
+    //     no instance to justify it. No exemption marker — a surface file that ever genuinely
+    //     needs the literal form changes this check, visibly, in review.
     //     The prescribed ${CLAUDE_PLUGIN_ROOT} form can never match, quoted or bare: the path must
     //     start with an engine directory, and that form starts with `${`. That, not the quoting,
     //     is what keeps the prescribed form clean — so an opening quote is optional and its closing
     //     one is consumed only if it is there. Detection never depends on the quotes balancing: an
     //     unterminated quote, or one closing past the path (`node "scripts/x.mjs --flag"`), is the
-    //     same broken dispatch. A separator is horizontal whitespace, a `\`-continuation, or a
-    //     single line break with any indentation after it — so an invocation markdown-wraps across
-    //     a line and is still caught — but never a line break followed by a blank line, so a
-    //     paragraph break cannot join unrelated prose into a hit. The alternatives begin with
-    //     different characters, so a run of them parses one way only and cannot backtrack. The
-    //     target class and the trailing-punctuation strip match check 4's, so a nested path keeps its
-    //     subdirectory and un-backticked prose does not suggest a fix ending in a sentence period.
-    const SEP = String.raw`(?:[ \t]|\\\r?\n|\r?\n(?![ \t]*\r?\n))`;
+    //     same broken dispatch. A separator is horizontal whitespace or a single line break with
+    //     any indentation after it — so an invocation markdown-wraps across a line and is still
+    //     caught — but never a line break followed by a blank line, so a paragraph break cannot
+    //     join unrelated prose into a hit. A `\` before the line ending is deliberately NOT a
+    //     separator, and re-adding it would be a regression: that is CommonMark's hard-break
+    //     syntax as much as it is a shell continuation, the two are textually identical, and with
+    //     no exemption marker prose that merely hard-breaks near a `scripts/` path would fail CI
+    //     with no way out but rewording. The cost accepted for that is missing `node \` + newline
+    //     + path, a form that realistically appears only inside fenced code blocks. The
+    //     alternatives begin with different characters, so a run of them parses one way only and
+    //     cannot backtrack. The target class and the trailing-punctuation strip match check 4's,
+    //     so a nested path keeps its subdirectory and un-backticked prose does not suggest a fix
+    //     ending in a sentence period.
+    const SEP = String.raw`(?:[ \t]|\r?\n(?![ \t]*\r?\n))`;
     const BARE_DISPATCH = new RegExp(
       String.raw`(?<![A-Za-z0-9_-])[Nn]ode(?:${SEP}+-{1,2}[A-Za-z0-9][A-Za-z0-9._=-]*)*` +
         String.raw`${SEP}+(["']?)(?:\./)?((?:scripts|workflows)/[A-Za-z0-9._/-]+)\1?`,

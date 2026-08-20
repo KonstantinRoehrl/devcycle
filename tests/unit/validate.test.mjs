@@ -1244,10 +1244,21 @@ test("4b: a sentence-initial capitalised Node does not evade the check", () => {
   failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
 });
 
-test("4b: a shell line-continuation between node and the path does not evade the check", () => {
+// A `\` before a line ending is CommonMark's hard-break syntax as well as a shell continuation,
+// and the two are textually identical — so matching it flags ordinary prose that dispatches
+// nothing, with no exemption marker to silence the false positive. The form is excluded on
+// purpose; do not "fix" it back. The accepted cost is the two tests below, in that order: the
+// continuation goes unflagged so the prose hard break stays clean.
+test("4b: a `\\`-continuation is deliberately NOT matched — it is indistinguishable from a GFM hard break", () => {
   const dir = makePluginFixture();
   playbook(dir, "```bash\nnode \\\n  scripts/doctor.mjs --lessons planning\n```\n");
-  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+  ok(runValidate(dir));
+});
+
+test("4b control: prose hard-breaking after the word node, ahead of a scripts/ path, stays clean", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "- probe: the word node\\\nscripts/legacy-report.sh is unrelated tooling.\n");
+  ok(runValidate(dir));
 });
 
 test("4b: a nested target keeps its subdirectory, so the suggested fix names a real file", () => {
@@ -1309,6 +1320,12 @@ test("4b: a quote closing after the arguments, out of the path's reach, does not
 test("4b: an invocation hard-wrapped across a line does not evade the check", () => {
   const dir = makePluginFixture();
   playbook(dir, "The completeness gate runs as `node\nscripts/doctor.mjs` before the handoff.\n");
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: a hard wrap whose next line is indented does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "The completeness gate runs as `node\n  scripts/doctor.mjs --lessons planning`.\n");
   failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
 });
 
