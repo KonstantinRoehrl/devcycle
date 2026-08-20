@@ -23,7 +23,7 @@ const browserCall = (extra) => ({
   ...extra,
 });
 
-test("denies a main-thread browser call (no agent_type)", () => {
+test("denies a main-thread browser call (empty agent_type)", () => {
   const r = call(browserCall({ agent_type: "", agent_id: "" }));
   const out = JSON.parse(r.stdout);
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
@@ -42,4 +42,36 @@ test("denies a browser call from any other subagent", () => {
   const r = call(browserCall({ agent_type: "implementer", agent_id: "def456" }));
   const out = JSON.parse(r.stdout);
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+});
+
+test("allows the on-device-driver subagent under the plugin-namespaced agent type", () => {
+  const r = call(browserCall({ agent_type: "devcycle:on-device-driver", agent_id: "abc123" }));
+  const decision = r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput?.permissionDecision : undefined;
+  assert.notEqual(decision, "deny");
+  assert.equal(r.status, 0);
+});
+
+// QC3: the allowlist is two literals rather than a `<plugin>:` prefix strip, so a same-named
+// agent from a different plugin stays denied. A strip-based fix passes every other test here.
+test("denies another plugin's agent that shares the driver's bare name", () => {
+  const r = call(browserCall({ agent_type: "otherplugin:on-device-driver", agent_id: "ghi789" }));
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+});
+
+// F29: the real main-thread shape. `agent_type` is absent from the stdin JSON entirely (see this
+// file's header), not an empty string — the case the suite named but never sent.
+test("denies a main-thread browser call when agent_type is absent entirely", () => {
+  const r = call(browserCall({}));
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /on-device-driver/);
+});
+
+// F29: the malformed-stdin fallback at block-main-thread-browser.mjs:9 must deny, not throw.
+test("denies when stdin is not valid JSON", () => {
+  const r = spawnSync("node", [HOOK], { input: "{not json", encoding: "utf8" });
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+  assert.equal(r.status, 0);
 });
