@@ -1092,6 +1092,17 @@ function aggregate(summaries) {
   return agg;
 }
 
+// The cache-TTL disclosure, in both its forms. Assembled once because formatReport and caveatLines
+// rendered identical text differing only by a leading bullet, and a reader must be able to tell a
+// band that was checked and found exact from one that was never checked.
+function cacheBandLine(band) {
+  return band.collapsed
+    ? "Cost is exact: every cache write in this corpus carries its TTL split."
+    : `Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
+        `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
+        `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`;
+}
+
 export function formatReport(summaries) {
   const vintage = `prices as of ${PRICING.asOf}`;
   if (!summaries.length) return `no sessions matched.\n\n${vintage}\n`;
@@ -1120,15 +1131,7 @@ export function formatReport(summaries) {
   // concurrent-wave turn whose agentId matches no dispatch renders `attributionSource: "inferred"`
   // in attributeFromRecord's own output — permanent, not conditional on any later dispatch
   // eventually being recorded.
-  const band = agg.cacheBand;
-  if (band.collapsed)
-    lines.push("Cost is exact: every cache write in this corpus carries its TTL split.");
-  else
-    lines.push(
-      `Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
-        `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
-        `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`,
-    );
+  lines.push(cacheBandLine(agg.cacheBand));
   for (const s of summaries)
     if (s.attributionSource === "forward-filled")
       lines.push(`  ${s.id}: stage costs are inferred (forward-filled — no run record).`);
@@ -2083,13 +2086,7 @@ function caveatLines(summaries, agg) {
   const band = agg.cacheBand;
   for (const [model, count] of unpriced)
     out.push(`- UNPRICED MODEL: ${model} (${count} requests)`);
-  out.push(
-    band.collapsed
-      ? "- Cost is exact: every cache write in this corpus carries its TTL split."
-      : `- Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
-          `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
-          `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`,
-  );
+  out.push(`- ${cacheBandLine(band)}`);
   if (filled > 0)
     out.push(
       `- ${filled} session(s) have inferred stage costs (forward-filled — no run record); the ` +

@@ -2,18 +2,18 @@
 // batch is read against and the outcome written after Land, so the two are diffable by
 // construction rather than by discipline. Pure — it is handed data and returns markdown.
 
+import { median } from "./doctor.mjs";
+
+// doctor's median returns 0 for an empty list and does not round. Both matter here and neither
+// belongs in a second implementation: a span of zero days is a real measurement, so "nothing
+// measured" must stay distinguishable as null, and a fractional day count would render wrong.
+const spanMedian = (xs) => (xs.length ? Math.round(median(xs)) : null);
+
 const RUNGS = ["r3", "r2", "r1", "r0"];
 const RUNG_LABEL = { r3: "r3 mechanical", r2: "r2 digest line", r1: "r1 always-loaded", r0: "r0 memory" };
 
 const usd = (n) => (typeof n === "number" ? `$${n.toFixed(2)}` : "unmeasurable");
 const days = (from, to) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
-
-function median(xs) {
-  if (!xs.length) return null;
-  const s = [...xs].sort((a, b) => a - b);
-  const mid = s.length >> 1;
-  return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
-}
 
 export function allTimeRollup(promotions) {
   const byRung = Object.fromEntries(RUNGS.map((r) => [r, { landed: 0, retired: 0, net: 0 }]));
@@ -52,7 +52,7 @@ export function allTimeRollup(promotions) {
     const to = records.filter((p) => p.rung === "r3").map((p) => p.landed).sort().at(-1);
     if (from && to && to > from) spans.push(days(from, to));
   }
-  return { byRung, sourced, transitions: { r2r3: median(spans), r2retired: median(retirementDeltas) }, unbucketed };
+  return { byRung, sourced, transitions: { r2r3: spanMedian(spans), r2retired: spanMedian(retirementDeltas) }, unbucketed };
 }
 
 function summaryTable(cands, roll) {
