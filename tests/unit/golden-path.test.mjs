@@ -1845,3 +1845,21 @@ test("DESIGN.md §10 no longer rejects the hooks that ship", () => {
     "the non-goal was reversed on 2026-08-20 (docs/DECISIONS.md); a shipped component cannot sit in §10"
   );
 });
+
+// --- C6: surface-agreement assertions ---
+// The audit's largest class: a document that describes a surface the code no longer has. Each
+// leg here pins one document to a fact a reader can re-derive, so the next drift is a test
+// failure rather than a wrong answer given to an installer.
+
+test("C6: docs/known-issues.md records open defects only — no fixed entry survives", () => {
+  const fixed = read("docs/known-issues.md")
+    .split("\n")
+    .filter((line) => /^#{2,3} .*—\s*fixed\b/.test(line));
+  assert.deepEqual(
+    fixed,
+    [],
+    "CONTRIBUTING.md:138-139 owns this rule and wins: fixing a defect deletes its entry. A " +
+      "heading still carrying a fixed-marker is an entry that should have been deleted, in a " +
+      "file README.md:509 links as \"Open defects\""
+  );
+});
