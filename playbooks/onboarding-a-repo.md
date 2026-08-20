@@ -63,13 +63,13 @@ package directory its own `CLAUDE.md` stub, in addition to the root file.
    green gate and this repo's CI find it. No separate state file.
 
 5. **`.gitignore` doc-tracking setup.** Resolve `${user_config.docTrackingPolicy}` per
-   `${CLAUDE_PLUGIN_ROOT}/references/config.md`, then add lines to the host repo's
-   `.gitignore` (creating it if absent) so the resolved policy "just works" with no manual
-   edit: `standard` ignores `docs/superpowers/` and `.devcycle/` while leaving
-   `docs/devcycle/` trackable; `all-local` additionally ignores `docs/devcycle/`;
-   `all-tracked` additionally leaves `docs/superpowers/` trackable. Append only the lines the
-   policy calls for — never touch existing entries, and never add a line already covered by
-   one already there; the repo's own `.gitignore` always wins over anything devcycle proposes.
+   `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, then read down that table's
+   column for the resolved policy: each row whose cell keeps the artifact out of a commit
+   contributes that row's path as one line in the host repo's `.gitignore` (creating it if
+   absent), and every other row is left trackable — so the resolved policy "just works" with
+   no manual edit. Append only the lines the policy calls for — never touch existing entries,
+   and never add a line already covered by one already there; the repo's own `.gitignore`
+   always wins over anything devcycle proposes.
 
 6. **Commit the scaffold**, scoped per
    `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit": the root
