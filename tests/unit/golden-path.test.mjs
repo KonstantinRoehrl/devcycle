@@ -1694,3 +1694,81 @@ test("C3 leg 6: every agents/*.md is named by the surface or read by a workflow 
   });
   assert.deepEqual(unreachable, [], "an agent no surface file names and no workflow reads can never be invoked");
 });
+
+// --- C4: hook-guard assertions ---------------------------------------------------------------
+// The browser guard is the only component in this plugin that can deny a tool call, and it works
+// by matching three spellings that live in three different files: the allowlist literal in the
+// hook, the `name:` in the agent's frontmatter, and the plugin id the harness prefixes onto that
+// name at dispatch. Nothing else in the repo reads hooks/hooks.json or that literal, so before
+// these assertions a rename in any one of the three disarmed the guard silently while the whole
+// suite stayed green. scripts/validate.mjs check 22 covers hooks.json well-formedness; what is
+// asserted here is the policy that check deliberately leaves alone.
+
+const HOOK_SRC = "hooks/block-main-thread-browser.mjs";
+
+const allowedAgentTypes = () => {
+  const m = read(HOOK_SRC).match(/const ALLOWED_AGENT_TYPES = \[([^\]]*)\];/);
+  assert.ok(m, `${HOOK_SRC} must declare ALLOWED_AGENT_TYPES as a single-line array literal`);
+  return [...m[1].matchAll(/"([^"]+)"/g)].map(([, v]) => v);
+};
+
+test("the browser guard's allowlist is the driver's frontmatter name and its namespaced form", () => {
+  const name = read("agents/on-device-driver.md").match(/^name:\s*(\S+)\s*$/m)?.[1];
+  assert.ok(name, "agents/on-device-driver.md must carry a frontmatter name:");
+  const plugin = JSON.parse(read(".claude-plugin/plugin.json")).name;
+  assert.deepEqual(
+    allowedAgentTypes(),
+    [name, `${plugin}:${name}`],
+    `${HOOK_SRC}'s allowlist must be exactly the agent's frontmatter name and its ${plugin}:-namespaced ` +
+      "form — the harness passes the namespaced spelling (docs/platform-notes.md § (e)), and admitting " +
+      "anything beyond these two widens a guard whose only job is to narrow"
+  );
+});
+
+test("the browser guard is registered on PreToolUse over every browser tool the driver is granted", () => {
+  const doc = JSON.parse(read("hooks/hooks.json"));
+  const entry = (doc.hooks?.PreToolUse ?? []).find((e) =>
+    (e.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(HOOK_SRC))
+  );
+  assert.ok(entry, `hooks/hooks.json must register ${HOOK_SRC} on PreToolUse`);
+  const granted = (read("agents/on-device-driver.md").match(/^tools:\s*(.+)$/m)?.[1] ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.startsWith("mcp__claude-in-chrome__"));
+  assert.ok(granted.length, "agents/on-device-driver.md must grant at least one browser tool");
+  for (const tool of granted)
+    assert.match(tool, new RegExp(entry.matcher), `hooks.json's matcher "${entry.matcher}" must cover ${tool}`);
+});
+
+test("every shipped agent is named by DESIGN.md's blueprint, DESIGN.md §13, and README's machinery table", () => {
+  const design = read("DESIGN.md");
+  const readme = read("README.md");
+  for (const f of readdirSync(join(root, "agents"))) {
+    if (!f.endsWith(".md")) continue;
+    const id = f.replace(/\.md$/, "");
+    assert.ok(design.includes(f), `DESIGN.md §3's tree must list ${f}`);
+    assert.ok(design.includes(`devcycle:${id}`), `DESIGN.md §13's agent list must name devcycle:${id}`);
+    assert.match(
+      readme,
+      new RegExp(`^\\| Agent \`${id}\` \\|`, "m"),
+      `README.md's machinery table must carry a row for agent ${id} — a bare mention elsewhere in the file does not satisfy this: the Hook row's prose also names the driver`
+    );
+  }
+});
+
+test("the browser guard is named by DESIGN.md's blueprint and README's machinery table", () => {
+  assert.match(read("DESIGN.md"), /^├── hooks\//m, "DESIGN.md §3's tree must list hooks/");
+  assert.match(
+    read("README.md"),
+    /block-main-thread-browser/,
+    "README.md's machinery table must carry a row for the hook — it is the one component no command loads"
+  );
+});
+
+test("DESIGN.md §10 no longer rejects the hooks that ship", () => {
+  assert.doesNotMatch(
+    read("DESIGN.md"),
+    /^- \*\*Hooks in the public plugin\*\*/m,
+    "the non-goal was reversed on 2026-08-20 (docs/DECISIONS.md); a shipped component cannot sit in §10"
+  );
+});
