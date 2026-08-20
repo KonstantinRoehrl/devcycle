@@ -68,9 +68,15 @@ const SYNTHETIC_MODEL = "<synthetic>";
 // Tool calls that dispatch a subagent; a call with no explicit model inherits the caller's.
 const DISPATCH_TOOLS = new Set(["Task", "Agent"]);
 
-const KNOWN_FLAGS = [
-  "--dir", "--since", "--until", "--json", "--all", "--depth", "--run-checks", "--drift", "--issue-body",
-];
+// Each flag names its arity, so cli-flags.mjs knows which of them take the next token. The four
+// valueless ones are why that matters here: while they were assumed value-taking, `--json
+// /fixture` -- the natural slip for `--json --dir /fixture` -- ate the path and profiled the
+// operator's real home corpus instead.
+const KNOWN_FLAGS = {
+  "--dir": "value", "--since": "value", "--until": "value",
+  "--json": "none", "--all": "none", "--depth": "none", "--run-checks": "none",
+  "--drift": "value", "--issue-body": "value",
+};
 
 // Throws rather than exiting on a usage error: doctor.mjs is imported by dream.mjs, so a
 // process.exit inside the parser would take the importer down with it. main() catches and prints

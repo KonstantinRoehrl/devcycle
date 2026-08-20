@@ -747,6 +747,35 @@ test("parseArgs: --all and --depth are read", () => {
   assert.equal(parseArgs([]).depth, false);
 });
 
+// `doctor.mjs --json /fixture` is the natural slip for `--json --dir /fixture`. While the parser
+// treated every flag as value-taking, --json swallowed the path, the token never became a
+// positional, and doctor profiled the operator's real ~/.claude/projects while printing a
+// confident report about the wrong sessions -- with --json's machine output making it look
+// authoritative. Each of doctor's valueless flags must leave the path alone so the bare token is
+// refused instead.
+test("parseArgs: a valueless flag before a bare path never resolves the home corpus", () => {
+  for (const flag of ["--json", "--all", "--depth", "--run-checks"]) {
+    assert.throws(
+      () => parseArgs([flag, "/tmp/doctor-fixture"]),
+      /unexpected argument "\/tmp\/doctor-fixture"/,
+      `${flag} must not consume the path`,
+    );
+  }
+});
+
+test("parseArgs: a valueless flag still reads beside the --dir it was meant to accompany", () => {
+  const a = parseArgs(["--json", "--dir", "/tmp/doctor-fixture"]);
+  assert.equal(a.json, true);
+  assert.equal(a.dir, "/tmp/doctor-fixture");
+  const b = parseArgs(["--dir", "/tmp/doctor-fixture", "--run-checks"]);
+  assert.equal(b.runChecks, true);
+  assert.equal(b.dir, "/tmp/doctor-fixture");
+});
+
+test("parseArgs: a valueless flag handed a value is a usage error, not a silent truthy", () => {
+  assert.throws(() => parseArgs(["--json=true"]), /--json takes no value/);
+});
+
 // --- the depth probe: budgetBand and resolveDepth ---
 
 function turnWithUsage(model, u) {

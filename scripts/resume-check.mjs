@@ -25,7 +25,7 @@ const VALID_STAGES = (() => {
 const NONE = new Set(["none", "<tbd>", ""]);
 
 const args = process.argv.slice(2);
-const KNOWN_FLAGS = ["--state"];
+const KNOWN_FLAGS = { "--state": "value" };
 let statePath = ".devcycle/state.md";
 try {
   const { flags } = parseFlags(args, KNOWN_FLAGS);

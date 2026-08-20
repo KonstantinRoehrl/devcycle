@@ -87,7 +87,9 @@ export function resolveModel({ value, signalCount = 0, orchestratorId, table }) 
 // Every flag this CLI reads. Anything else is an operator error, not a no-op: an unrecognised
 // flag that parsed silently -- `--signal` for `--signals` -- resolved a different model than
 // the caller asked for.
-const KNOWN_FLAGS = ["--value", "--orchestrator", "--signals", "--table"];
+const KNOWN_FLAGS = {
+  "--value": "value", "--orchestrator": "value", "--signals": "value", "--table": "value",
+};
 
 // CLI only, so the pure helpers above stay importable by tests — the guard scripts/bump-version.mjs
 // already uses. references/config.md § Model tiers owns when a caller runs this: only for a knob

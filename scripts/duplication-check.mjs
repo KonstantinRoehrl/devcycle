@@ -32,7 +32,7 @@ const STOPWORDS = new Set(
 );
 
 const args = process.argv.slice(2);
-const KNOWN_FLAGS = ["--dir"];
+const KNOWN_FLAGS = { "--dir": "value" };
 const root = process.cwd();
 // A flag this script never read is a false green waiting to happen: a typo, or a dropped flag
 // name leaving a bare token, would otherwise scan the cwd and report it clean. cli-flags.mjs owns

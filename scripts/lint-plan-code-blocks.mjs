@@ -19,7 +19,7 @@ const USAGE =
   "lint-plan-code-blocks: usage: lint-plan-code-blocks.mjs <plan-path> | [--dir <root>]";
 const die = (msg) => { console.error(msg); process.exit(1); };
 
-const KNOWN_FLAGS = ["--dir"];
+const KNOWN_FLAGS = { "--dir": "value" };
 let root = null;
 let explicitPath = null;
 try {

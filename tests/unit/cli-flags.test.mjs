@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseFlags, requireValue } from "../../scripts/cli-flags.mjs";
 
-const KNOWN = ["--dir", "--file"];
+// Every consumer declares each flag's arity beside its name: "value" for a flag that takes the
+// next token, "none" for one whose presence is the whole meaning. There is no default, so a
+// seventh consumer cannot add a flag without saying which kind it is.
+const KNOWN = { "--dir": "value", "--file": "value" };
+const WITH_VALUELESS = { "--dir": "value", "--json": "none" };
 
 test("parses the space form and the equals form alike", () => {
   assert.deepEqual(parseFlags(["--dir", "x"], KNOWN).flags, { "--dir": "x" });
@@ -57,4 +61,58 @@ test("requireValue names what the flag wants, and still says a path by default",
   assert.throws(() => requireValue(parseFlags(["--file"], KNOWN).flags, "--file", "a date"), /--file requires a date$/);
   assert.throws(() => requireValue(parseFlags(["--file="], KNOWN).flags, "--file", "a value"), /--file requires a value$/);
   assert.equal(requireValue(parseFlags(["--file", "x"], KNOWN).flags, "--file", "a date"), "x");
+});
+
+// --- arity: a valueless flag must not eat the next token ---
+//
+// The whole point of the refusal above is defeated when a valueless flag swallows the bare token
+// that was supposed to trigger it: `doctor.mjs --json /fixture` then profiles the operator's real
+// ~/.claude/projects and prints a confident report about the wrong sessions. A flag that takes no
+// value records its presence and leaves the following token alone.
+test("a valueless flag leaves the next token to the positional path, which refuses it", () => {
+  assert.throws(
+    () => parseFlags(["--json", "/fixture"], WITH_VALUELESS),
+    /unexpected argument "\/fixture"/,
+  );
+});
+
+test("a valueless flag on its own is present and is not an error", () => {
+  const { flags } = parseFlags(["--json"], WITH_VALUELESS);
+  assert.equal("--json" in flags, true);
+});
+
+test("a valueless flag does not disturb a value-taking flag on either side of it", () => {
+  const before = parseFlags(["--json", "--dir", "/fixture"], WITH_VALUELESS).flags;
+  assert.equal("--json" in before, true);
+  assert.equal(before["--dir"], "/fixture");
+
+  const after = parseFlags(["--dir", "/fixture", "--json"], WITH_VALUELESS).flags;
+  assert.equal(after["--dir"], "/fixture");
+  assert.equal("--json" in after, true);
+});
+
+// `--json=true` is an operator who believes the flag takes a value. Accepting it silently teaches
+// the wrong shape, and the same operator writes `--json true` next time — which the parser cannot
+// distinguish from a bare path.
+test("a valueless flag given a value in the equals form is a usage error", () => {
+  assert.throws(() => parseFlags(["--json=true"], WITH_VALUELESS), /--json takes no value/);
+  assert.throws(() => parseFlags(["--json="], WITH_VALUELESS), /--json takes no value/);
+});
+
+// The unknown-flag message is the more specific one -- it names something the operator can only
+// have mistyped -- so it must survive a preceding valueless flag rather than being pre-empted by
+// the positional refusal that the unknown flag's own value would otherwise trigger.
+test("an unrecognised flag after a valueless one still wins over the positional refusal", () => {
+  assert.throws(() => parseFlags(["--json", "--dirr", "x"], WITH_VALUELESS), /unrecognised flag --dirr/);
+});
+
+// A flat list of names has no room to say which flags take a value, so every consumer that passed
+// one inherited the swallowing default. Rejecting the old shape outright is what keeps a seventh
+// consumer from re-introducing it.
+test("a bare list of flag names is refused, because it cannot declare arity", () => {
+  assert.throws(() => parseFlags(["--dir", "x"], ["--dir"]), /arity/);
+});
+
+test("a flag declared with an arity that is neither kind is refused", () => {
+  assert.throws(() => parseFlags(["--dir", "x"], { "--dir": "path" }), /--dir declares an unknown arity/);
 });

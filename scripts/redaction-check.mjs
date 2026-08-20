@@ -21,7 +21,12 @@ import { fileURLToPath } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 
 const args = process.argv.slice(2);
-const KNOWN_FLAGS = ["--file", "--dir", "--hashes", "--auto-redact"];
+// --auto-redact is the only valueless flag here; --hashes names a deny-list file and takes one.
+// Declaring that arity is what stops `--dir <clean> --auto-redact <leaky>` from scanning only the
+// clean corpus and printing `redaction: ok` over a leaky one it never opened.
+const KNOWN_FLAGS = {
+  "--file": "value", "--dir": "value", "--hashes": "value", "--auto-redact": "none",
+};
 // Flag parsing lives in cli-flags.mjs, which owns it for every script here. This script keeps its
 // own message prefix and exit code by catching what that module throws: an unknown flag (a typo
 // such as `--fil`) and a flag whose value is missing or blank are both hard errors rather
@@ -57,8 +62,8 @@ const file = read("--file");
 // --hashes keeps its current (cwd-relative or absolute) meaning.
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const hashesPath = read("--hashes") ?? join(SCRIPT_DIR, "redaction-hashes.txt");
-// Boolean, no value: presence in argv means "rewrite in place before scanning". If parseFlags
-// captured a stray following token as its value, that value is ignored — only presence matters.
+// Declared valueless above, so presence in argv is the whole meaning: "rewrite in place before
+// scanning". A token following it is not its value and is refused as an unexpected argument.
 const autoRedact = "--auto-redact" in flags;
 
 // --auto-redact rewrites files in place, and a scan pattern has known false positives (a public

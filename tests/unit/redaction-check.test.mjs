@@ -269,6 +269,60 @@ test("--dir immediately followed by another flag fails naming the missing argume
   assert.match(res.stderr, /--dir/);
 });
 
+// --auto-redact takes no value, but while the parser treated every flag as value-taking it
+// swallowed whatever followed. `--dir <clean> --auto-redact <leaky>` therefore scanned only the
+// clean dir and printed `redaction: ok` while the named leaky corpus was never opened -- a false
+// green on the privacy gate itself. The token must fall through to the positional refusal.
+test("a valueless flag never swallows a corpus, leaving it unscanned under a green report", () => {
+  const clean = makeFixture({ "a.md": "Nothing sensitive here at all.\n" });
+  const leaky = makeFixture({ "b.md": `Session ${SESSION_ID} carried the run.\n` });
+  try {
+    const res = spawnSync(
+      process.execPath,
+      [SCRIPT, "--dir", clean, "--hashes", HASHES, "--auto-redact", leaky],
+      { encoding: "utf8", cwd: process.cwd() },
+    );
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.doesNotMatch(res.stdout, /redaction: ok/);
+    assert.match(res.stderr, /unexpected argument/);
+  } finally {
+    rmSync(clean, { recursive: true, force: true });
+    rmSync(leaky, { recursive: true, force: true });
+  }
+});
+
+// The same slip with no --dir alongside errors today only because --auto-redact refuses to rewrite
+// an unnamed corpus -- and it then sends the operator looking for the --dir they did type.
+test("a bare corpus after --auto-redact is named as the unexpected token", () => {
+  const dir = makeFixture({ "a.md": "Nothing sensitive here at all.\n" });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--auto-redact", dir], {
+      encoding: "utf8",
+      cwd: process.cwd(),
+    });
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /unexpected argument/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --hashes, by contrast, does take a path and must keep doing so: the playbook invokes this script
+// from inside the user's own repo and names the shipped deny-list explicitly.
+test("--hashes still takes its path, and is not swept up as a valueless flag", () => {
+  const dir = makeFixture({ "a.md": "Nothing sensitive here at all.\n" });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--dir", dir, "--hashes", HASHES], {
+      encoding: "utf8",
+      cwd: process.cwd(),
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout, /redaction: ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --hashes with no value falls back to the shipped deny-list today, which is benign, but it is
 // the same silent widening as --file/--dir and must fail the same way for consistency.
 test("--hashes with no value fails naming the missing argument, rather than falling back silently", () => {
