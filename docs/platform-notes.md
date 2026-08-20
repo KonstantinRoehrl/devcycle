@@ -207,3 +207,47 @@ enabled still hit `dependency-unsatisfied` under the `superpowers-marketplace` p
 (reproduced in an isolated config; a bare `"superpowers"` entry resolves as
 `superpowers@devcycle` and also fails). The marketplace `description` was added in the
 same change. See `docs/DECISIONS.md`.]
+
+## (e) The `agent_type` a plugin hook receives inside a subagent
+
+**What was tried.** The browser guard (`hooks/block-main-thread-browser.mjs`) allowlists the
+`on-device-driver` subagent by comparing the hook input's `agent_type`. Whether the harness passes
+the bare frontmatter `name:` or the plugin-namespaced dispatch id decides whether the guard permits
+the one agent it exists to permit, and no unit test in this repo can observe it.
+
+1. The field's provenance was already pinned from the installed binary (header of
+   `tests/unit/block-main-thread-browser.test.mjs`, Claude Code 2.1.235): the hook-input builder
+   emits `agent_type: o` where `o = n?.agentType ?? hookRegistry.mainThreadAgentType()`. The hook
+   therefore receives whatever the session records as `agentType`.
+
+2. That same field is written into every transcript record, so the shape can be counted directly.
+   Over this repo's own sessions, 2026-08-20:
+
+   ```
+   ❯ grep -roh '"agentType":"[^"]*"' ~/.claude/projects/<this repo's transcript dir> \
+       | sort | uniq -c | sort -rn
+     449 "agentType":"devcycle:implementer"
+     342 "agentType":"devcycle:task-reviewer"
+     141 "agentType":"general-purpose"
+     108 "agentType":"workflow-subagent"
+      42 "agentType":"Explore"
+      23 "agentType":"devcycle:red-team-reviewer"
+       5 "agentType":"fork"
+       1 "agentType":"claude-code-guide"
+   ```
+
+   Every plugin-provided agent appears namespaced; a bare `implementer`, `task-reviewer` or
+   `red-team-reviewer` never appears. Built-in agent types (`general-purpose`, `Explore`, `fork`)
+   carry no prefix, which is exactly what the namespace disambiguates.
+
+**Exact result.** A plugin agent's `agent_type` is `<plugin>:<frontmatter name>` —
+`devcycle:on-device-driver` for this plugin's driver. On the main thread the key is absent from the
+stdin JSON entirely (binary-derived, above), not an empty string.
+
+**Consequence for the plan.** The guard's original `agentType === "on-device-driver"` comparison
+matched nothing it ever saw: it denied the driver as readily as the main thread, so the on-device
+stage could not run at all. Both spellings are now pinned in `ALLOWED_AGENT_TYPES` and asserted in
+`tests/unit/golden-path.test.mjs` against the agent's frontmatter `name:` and the plugin's own name.
+The bare spelling is kept because it is what the frontmatter declares and what a future harness
+change could plausibly pass; stripping a `<plugin>:` prefix instead was rejected because it would
+also admit another plugin's agent that happens to share the name.

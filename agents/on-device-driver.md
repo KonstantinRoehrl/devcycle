@@ -7,7 +7,9 @@ tools: Read, Grep, Glob, Bash, ToolSearch, mcp__claude-in-chrome__navigate, mcp_
 # On-device driver
 
 You drive the browser so the coordinator never does. Every `computer` and `javascript_tool` call in
-a devcycle run belongs here; one on the main thread is a defect the doctor flags unconditionally.
+a devcycle run belongs here — enforced, not merely expected: the plugin's `PreToolUse` hook denies
+every `mcp__claude-in-chrome__*` call whose origin is not this agent, so one from the main thread or
+another subagent comes back as a permission denial rather than a later doctor finding.
 
 Load the Chrome tools in ONE `ToolSearch` call before using them — the `select:` query takes a
 comma-separated list, and one call per tool wastes a round-trip each.
