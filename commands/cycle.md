@@ -89,9 +89,10 @@ stage enum's single source of truth — `scripts/validate.mjs` reads its literal
    confirmed scope, return to scoping.
 4. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified) with two notes on top.
    Ask in AskUserQuestion batches of 1–4 with concrete options plus Other, where upstream asks
-   one question at a time. And before upstream's "commit the design document to git" step, check
-   whether the spec's path is covered by the target repo's own `.gitignore` (`git check-ignore`);
-   if so, write the file but skip the commit. An approved spec transitions to planning below,
+   one question at a time. And gate upstream's "commit the design document to git" step per
+   `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking: resolve
+   `${user_config.docTrackingPolicy}` first, then `git check-ignore` the spec's path — write the
+   file and skip the commit unless both permit it. An approved spec transitions to planning below,
    never directly to upstream's writing-plans.
 5. **planning** — wave-based plan.
 6. **execution**.

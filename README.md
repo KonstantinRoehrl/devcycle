@@ -90,15 +90,19 @@ Resume any time with:
 
 **Add `.devcycle/` to the target repo's `.gitignore`** — none of it belongs in git history.
 Most of what devcycle writes there is scratch for the run in progress: the state file, the
-ledger, per-task evidence files, sweep reports. The artifacts worth keeping in git land
-outside it: the spec and plan under `docs/`, an audit under `docs/audits/`, the on-device
-checklist next to the feature, and promotion records under `docs/devcycle/promotions/`.
-Before committing any artifact it writes, devcycle asks `git check-ignore` first and skips
-the commit if your repo ignores that path — your ignore rules decide what enters history,
-not the plugin. Two things under `.devcycle/` are durable rather than scratch and should
-survive even a manual cleanup of the directory: `.devcycle/dreaming/` (the cross-session
-checkpoint, the dated artifacts, and the observation store `/devcycle:learn` mines — deleting
-it forces the next run to re-mine from scratch) and each cycle's
+ledger, per-task evidence files, sweep reports. What it attempts to commit *outside* that
+directory is `docTrackingPolicy`'s call, one row per artifact, in the artifact→policy table
+[`references/config.md`](references/config.md) owns under § "Doc tracking — what each policy
+commits". Five artifacts move with the policy: the spec, the plan, the lessons file, promotion
+records and the audit report. The default `standard` commits the lessons file, promotion records
+and the audit report, and keeps the spec and plan local; `all-local` keeps all five local;
+`all-tracked` commits all five. Every other row of that table reads the same under all three
+policies. `git check-ignore` then runs over whatever the policy permitted — your ignore rules
+decide what actually lands in history, not the plugin.
+Two things under `.devcycle/` are durable rather than scratch and should survive even a manual
+cleanup of the directory: `.devcycle/dreaming/` (the cross-session checkpoint, the dated
+artifacts, and the observation store `/devcycle:learn` mines — deleting it forces the next run
+to re-mine from scratch) and each cycle's
 `.devcycle/archive-<date>-<branch-slug>/` (finish's copy of the run's audit trail).
 
 ## The pipeline
@@ -371,31 +375,25 @@ again; answer *customize* instead and it asks the five behavioral options in one
 | `reviewDepth` | How the branch review runs | `single` / `panel` / `auto` | `single` |
 | `crossModelReview` | Adds a second-model lens to the panel | `true` / `false` | `false` |
 | `onDeviceGate` | Whether a human must finish the on-device checklist | `human-required` / `auto-ok` / `auto` | `human-required` |
-| `implementerModel` | Model for implementer subagents | `auto` / model id | `auto` (derived per task; set a model id to pin) |
-| `taskReviewerModel` | Model for per-task reviewers | `auto` / model id | `auto` (derived per task; set a model id to pin) |
-| `branchReviewModel` | Model for the whole-branch review | `auto` / model id | `auto` (inherits your session's model; set a model id to pin) |
-| `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id | `auto` (a fast model; set a model id to pin) |
+| `implementerModel` | Model for implementer subagents | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
+| `taskReviewerModel` | Model for per-task reviewers | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
+| `branchReviewModel` | Model for the whole-branch review | `auto` / model id / comma-separated pool | `auto` (inherits your session's model; set a model id to pin) |
+| `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id / comma-separated pool | `auto` (a fast model; set a model id to pin) |
 
-**`profile`** is the one knob most people need. It is a preset that sizes the whole run —
-which engines the stages use, how deep the review goes, how much evidence reports carry —
-so you don't tune six options to say "cheaper" or "be thorough":
-
-| | `lean` | `standard` | `thorough` |
-| --- | --- | --- | --- |
-| planning / execution engine | devcycle-native compact | devcycle-native compact | upstream overlays |
-| branch review engine | `single` | `single` | `panel` |
-| on-device gate | `auto-ok` | `human-required` | `human-required` |
-| evidence tail in reports | 10 lines | 20 lines | 50 lines |
-| branch-review round cap | 2 | 3 | 5 |
-| audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
-| learn depth | memory store only | + archives / findings / ledgers + user-correction turns | + raw transcripts |
+**`profile`** is the one knob most people need. It is a preset that sizes the whole run — which
+engines the stages use, how deep the review goes, how much evidence reports carry — so you don't
+tune options one at a time to say "cheaper" or "be thorough". `lean` is the cheapest pass,
+`standard` is the default, and `thorough` is the most rigorous: it swaps in the upstream planning
+and execution overlays, runs the branch review as a panel, and carries the longest evidence
+tails. The dimension-by-dimension matrix — every stage dimension against all three profiles —
+lives in [`references/config.md`](references/config.md) § The profile, which owns it.
 
 Resolution order, in one rule: **an option you configured explicitly wins verbatim, always;
-anything left at its default takes the profile's column value.** So the `Default` column in
-the table above is really the `standard` column — switch to `thorough` and the branch review
-becomes `panel` on its own, unless you pinned `reviewDepth: single` yourself, in which case
-your value stands and the profile never moves it. A `profile` that is unset or set to
-anything outside the three reads as `standard`.
+anything left at its default takes the profile's column value.** So the `Default` column in the
+table above is really the `standard` column of the profile matrix `references/config.md` owns —
+switch to `thorough` and the branch review becomes `panel` on its own, unless you pinned
+`reviewDepth: single` yourself, in which case your value stands and the profile never moves it. A
+`profile` that is unset or set to anything outside the three reads as `standard`.
 
 What the profile never touches: the state file, handoff blocks, evidence classes, the
 coordinator's green gate re-run, the `gitPolicy` clamps, branch discipline, the
@@ -411,10 +409,10 @@ you answered "use defaults, don't ask again" — and an explicit option wins ver
 forever. Set `profile: thorough` on top of that and the branch review stays `single`, with
 nothing to tell you why.
 
-Two of the four can shadow a profile, because only they appear in the table above:
-`reviewDepth` and `onDeviceGate`. (`gitPolicy` and `crossModelReview` are outside the
-profile, so an explicit value there shadows nothing and needs no change.) Hand a shadowing
-option back to the profile by setting it to `auto`:
+Two of the four can shadow a profile, because only they have a row in the profile matrix
+`references/config.md` owns: `reviewDepth` and `onDeviceGate`. (`gitPolicy` and
+`crossModelReview` are outside the profile, so an explicit value there shadows nothing and
+needs no change.) Hand a shadowing option back to the profile by setting it to `auto`:
 
 ```
 claude plugin install devcycle@devcycle --config reviewDepth=auto --config onDeviceGate=auto

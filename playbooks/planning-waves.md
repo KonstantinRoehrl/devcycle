@@ -166,3 +166,10 @@ the stage to resume at — and the `plan:` path; after a NO-GO, keep `stage: pla
 stage's handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with
 `Stage completed: planning` and the plan path (or the NO-GO report) as its artifact. The plan carries
 everything execution needs, so the context action is `Clear + /devcycle:continue`.
+
+Committing the saved plan is gated the way the spec's commit is: resolve
+`${user_config.docTrackingPolicy}` against `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc
+tracking, then `git check-ignore` the plan's path, and commit with an explicit pathspec only when
+both permit it — otherwise the plan stays written and uncommitted. This paragraph is outside the
+Plan mechanics section, so it binds at `thorough` too, where the upstream skill has no
+plan-commit step of its own and `all-tracked` would otherwise never track a plan.

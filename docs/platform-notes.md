@@ -95,9 +95,9 @@ and a `claude -p "/context"` probe.
   larger-context models scale up (the `/context` probe ran at 967k tokens → ~38.7k chars).
   On overflow, Claude Code truncates descriptions starting with the least-invoked skills.
 - `claude -p "/context"` works non-interactively and reported the whole Skills category at
-  ~4k tokens with this machine's full plugin set installed; devcycle's three agents cost
-  36/56/48 tokens always-on. `claude plugin details devcycle` projects ~115 always-on tokens
-  for the current (agents-only) plugin.
+  ~4k tokens with this machine's full plugin set installed. Per-component token readouts are
+  deliberately not recorded here: they cannot be reproduced headlessly, and a number no reader
+  can re-derive is what let this section's own measurement rot.
 
 **Consequence for the plan.** `DESCRIPTION_BUDGET_TOTAL = 6000` in `scripts/validate.mjs` is
 **kept**: there is no platform hard limit it violates (it sits under the worst-case 8,000-char
@@ -107,15 +107,15 @@ per-description constraint). Note that the binding constraint in practice is ≤
 200k-model's shared 8,000-char listing would crowd out other plugins' descriptions — keep
 descriptions lean.
 
-**Confirmed at the full-scenario regression pass (v1 complete, all skills/commands committed).**
-Measured description totals: executing-waves 164 + planning-waves 131 + reviewing-the-branch 126
-+ scoping-interview 143 + verifying-on-device 173 + cycle 140 + continue 92 = **969 chars**
-consumed of the 6,000-char `DESCRIPTION_BUDGET_TOTAL` (16%). Combined with the upstream
-superpowers plugin (6.1.1: 14 skill/command descriptions, 1,962 chars), the shared listing
-holds **2,931 chars ≈ 733 tokens at 4 chars/token** — 37% of the worst-case 8,000-char
-whole-listing budget on a 200k-token model. Derived arithmetically from the frontmatter
-strings (an interactive `/context` readout is not available in the headless environment the
-check ran in); `node scripts/validate.mjs` independently sums the same budget and passes.
+**Re-derived from this repo's frontmatter, 2026-08-20.** Seven commands — `continue` 92 +
+`cycle` 140 + `doctor` 262 + `learn` 215 + `onboard` 309 + `review` 147 + `verify` 112 =
+**1,277 chars** — 21% of the 6,000-char `DESCRIPTION_BUDGET_TOTAL` and 16% of the worst-case
+8,000-char shared listing on a 200k-token model. Four agents carry 57 + 167 + 107 + 112 =
+**443 chars**, and those sit outside that budget: `scripts/validate.mjs` sums `commands/`
+frontmatter and nothing else, because playbooks are loaded by path, appear in no roster, and
+carry no frontmatter at all (`scripts/validate.mjs:58-60` says so in its own comment).
+Reproduce by summing the `description:` field of every file in `commands/` and in `agents/`;
+`node scripts/validate.mjs` independently sums the commands half and fails above 6,000.
 
 ## (c) `workflows/*.js` invocation from the plugin cache path
 
@@ -187,7 +187,7 @@ After correcting `plugin.json` to:
 and reinstalling, `claude plugin list --json` shows `devcycle@devcycle` enabled with **no
 `errors` field** (the marker for `dependency-unsatisfied` and friends), resolving against the
 already-installed `superpowers@superpowers-marketplace` 6.1.1. A live `claude -p` session
-confirms the plugin is active (its three agents appear in `/context` output).
+confirms the plugin is active (its agents appear in `/context` output).
 
 **Consequence for the plan.** The corrected dependency object form is now in
 `.claude-plugin/plugin.json` and must be preserved. Users without the superpowers marketplace
