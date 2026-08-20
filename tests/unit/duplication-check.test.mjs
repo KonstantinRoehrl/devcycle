@@ -222,7 +222,7 @@ test("a --dir with no value fails instead of reporting a clean corpus", () => {
     const res = runCheck(["--dir"], dir);
     assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
     assert.doesNotMatch(res.stdout, /duplication-check: ok/);
-    assert.match(res.stderr, /--dir needs a directory path/);
+    assert.match(res.stderr, /--dir requires a path argument/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -317,4 +317,28 @@ test("flags the real learn.md/learning-from-sessions.md restatement the audit fo
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("an unrecognised flag is an error, not a silent scan of the default corpus", () => {
+  const dir = makeFixture({ "references/a.md": "# A\n" });
+  assert.throws(
+    () => execFileSync("node", [SCRIPT, "--dirr", dir], { cwd: dir, ...PIPE }),
+    (err) => {
+      assert.equal(err.status, 1);
+      assert.match(err.stderr, /duplication-check: unrecognised flag --dirr/);
+      return true;
+    },
+  );
+});
+
+test("--dir with no value is a usage error", () => {
+  const dir = makeFixture({ "references/a.md": "# A\n" });
+  assert.throws(
+    () => execFileSync("node", [SCRIPT, "--dir"], { cwd: dir, ...PIPE }),
+    (err) => {
+      assert.equal(err.status, 1);
+      assert.match(err.stderr, /duplication-check: --dir requires a path argument/);
+      return true;
+    },
+  );
 });

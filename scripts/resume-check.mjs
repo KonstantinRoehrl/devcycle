@@ -4,6 +4,7 @@
 import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { isAbsolute, join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
+import { parseFlags, requireValue } from "./cli-flags.mjs";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -24,13 +25,18 @@ const VALID_STAGES = (() => {
 const NONE = new Set(["none", "<tbd>", ""]);
 
 const args = process.argv.slice(2);
-const stateFlag = args.indexOf("--state");
-if (stateFlag >= 0 && stateFlag + 1 >= args.length) {
-  // A flag whose value is missing is a usage error, never a silently absent flag.
-  console.error("resume-check: usage: resume-check.mjs [--state <path>] — --state requires a value");
+const KNOWN_FLAGS = ["--state"];
+let statePath = ".devcycle/state.md";
+try {
+  const { flags } = parseFlags(args, KNOWN_FLAGS);
+  statePath = requireValue(flags, "--state") ?? statePath;
+} catch (err) {
+  // A flag whose value is missing, or that was never read at all, is a usage error -- never a
+  // silently absent flag resolving to the default state file.
+  console.error(`resume-check: ${err.message}`);
+  console.error("resume-check: usage: resume-check.mjs [--state <path>]");
   process.exit(1);
 }
-const statePath = stateFlag >= 0 ? args[stateFlag + 1] : ".devcycle/state.md";
 
 let text;
 try { text = readFileSync(statePath, "utf8"); }

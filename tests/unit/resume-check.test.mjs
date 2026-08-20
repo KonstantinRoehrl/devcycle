@@ -208,3 +208,9 @@ test("--state with no value is a usage error", () => {
   assert.equal(r.status, 1);
   assert.match(r.stdout + r.stderr, /usage/i);
 });
+
+test("an unrecognised flag is an error, not a silent fallback to the default state file", () => {
+  const r = spawnSync("node", [SCRIPT, "--stat", "somewhere.md"], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /resume-check: unrecognised flag --stat/);
+});
