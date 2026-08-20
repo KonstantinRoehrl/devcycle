@@ -222,3 +222,13 @@ test("cli: a valueless flag asks for what that flag actually takes, not a path",
   const table = cli("--value", POOL, "--orchestrator", "claude-opus-5", "--table");
   assert.match(table.stderr, /model-pool: --table requires .*path/, "--table really is a path");
 });
+
+// The other half of F37: dropping a flag *name* leaves a bare token the parser collects as a
+// positional. model-pool takes no positional arguments, so discarding it resolved rung 1 while the
+// caller had asked for rung 6 — the same silently-different-model outcome as the typo'd flag.
+test("cli: a stray positional is an error, not a silently different model", () => {
+  const res = cli("--value", POOL, "--orchestrator", "claude-opus-5", "5");
+  assert.notEqual(res.status, 0, "a token nothing reads must not resolve a model");
+  assert.equal(res.stdout, "");
+  assert.match(res.stderr, /model-pool: unexpected argument "5"/);
+});

@@ -89,7 +89,7 @@ export function parseArgs(argv) {
     depth: "--depth" in flags,
     runChecks: "--run-checks" in flags,
     drift: valued("--drift"),
-    issueBody: valued("--issue-body", "a value"),
+    issueBody: valued("--issue-body", "a culprit name"),
   };
 }
 

@@ -94,7 +94,11 @@ const KNOWN_FLAGS = ["--value", "--orchestrator", "--signals", "--table"];
 // that resolves to a pin or a pool, since parsePool reads `auto` and an unsubstituted placeholder
 // as unset and there is nothing for this module to decide.
 function cliResolve(argv) {
-  const { flags } = parseFlags(argv, KNOWN_FLAGS);
+  const { flags, positionals } = parseFlags(argv, KNOWN_FLAGS);
+  // This CLI takes no positional arguments, so a bare token is a dropped flag name -- `--signals 5`
+  // typed as `5` -- and discarding it resolves rung 1 for a caller who asked for rung 6. Same
+  // silently-different-model outcome as an unrecognised flag, so it fails the same way.
+  if (positionals.length) throw new Error(`unexpected argument "${positionals[0]}"`);
   const value = requireValue(flags, "--value", "a model id or pool");
   if (value === undefined) throw new Error("--value is required");
   const orchestratorId = requireValue(flags, "--orchestrator", "a model id");

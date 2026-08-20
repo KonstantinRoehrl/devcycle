@@ -1972,7 +1972,7 @@ test("parseArgs rejects a --dir with no value", () => {
 test("a valueless --since asks for a date, not a path", () => {
   assert.throws(() => parseArgs(["--since"]), /--since requires a date$/);
   assert.throws(() => parseArgs(["--until"]), /--until requires a date$/);
-  assert.throws(() => parseArgs(["--issue-body"]), /--issue-body requires a value$/);
+  assert.throws(() => parseArgs(["--issue-body"]), /--issue-body requires a culprit name$/);
   // --drift does take a path, so its wording is right as it stands.
   assert.throws(() => parseArgs(["--drift"]), /--drift requires a path argument$/);
 });
