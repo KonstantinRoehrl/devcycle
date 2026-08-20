@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // The r2 rung's three stores and the cap that keeps them finite: the repo's committed
 // docs/devcycle/lessons.md, the user's per-repo store, and the user's global store. Reads and
 // merges for a stage; proposes an eviction when a section is full. Never writes: the caller
@@ -176,23 +175,4 @@ export function renderMatch(matches) {
   return matches
     .map((m) => `${m.line} → node "\${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lesson ${m.id}`)
     .join("\n");
-}
-
-// Pure: returns the store's new text. The caller writes it, after screening — spec §7's user
-// stores are written outside the repo, where nothing else would catch a credential.
-export function applyLanding(path, stage, line, eviction) {
-  const text = existsSync(path) ? readFileSync(path, "utf8") : "# Lessons\n";
-  let lines = text.split("\n");
-  if (eviction) lines = lines.filter((l) => lessonId(l) !== eviction.culpritId);
-  let start = lines.findIndex((l) => l.trim() === `## ${stage}`);
-  if (start === -1) {
-    while (lines.length && lines.at(-1).trim() === "") lines.pop();
-    lines.push("", `## ${stage}`, line, "");
-    return lines.join("\n");
-  }
-  let end = start + 1;
-  while (end < lines.length && !lines[end].startsWith("## ")) end++;
-  while (end > start + 1 && lines[end - 1].trim() === "") end--;
-  lines.splice(end, 0, line);
-  return lines.join("\n");
 }

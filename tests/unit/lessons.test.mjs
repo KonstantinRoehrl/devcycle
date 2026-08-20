@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import {
   SECTION_CAP, STAGES, repoStorePath, userRepoStorePath, userGlobalStorePath,
-  readSection, renderLessons, planLanding, applyLanding,
+  readSection, renderLessons, planLanding,
   ALWAYS_LOADED_CEILING, budgetStatus,
   fileMatchesGlob, matchLessons, renderMatch, MATCH_CAP, lessonId,
 } from "../../scripts/lessons.mjs";
@@ -128,23 +128,6 @@ test("a line whose id has neither a recurrence nor a landed date sorts oldest-fi
   const b = planLanding({ stage: "execution", line: "- N [friction:n]", culpritId: "friction:n", existing, events: [], promotions: [] });
   assert.deepEqual(a.eviction, b.eviction, "two identical calls must propose the same eviction");
   assert.equal(a.eviction.culpritId, "friction:l0");
-});
-
-test("applyLanding removes the evicted line and appends the new one under its stage", () => {
-  const p = storeFile(TWO);
-  const text = applyLanding(p, "executing-waves", "- New lesson [friction:new]", {
-    culpritId: "friction:model-inherited-not-pinned", section: "executing-waves", reason: "cap",
-  });
-  assert.doesNotMatch(text, /model-inherited-not-pinned/);
-  assert.match(text, /^- New lesson \[friction:new\]$/m);
-  assert.match(text, /Re-review the blocking finding/, "another stage's section is untouched");
-});
-
-test("applyLanding creates the stage section when the store has none", () => {
-  const p = storeFile("# Lessons\n");
-  const text = applyLanding(p, "finish", "- Archive briefs before deleting them [friction:x]", null);
-  assert.match(text, /^## finish$/m);
-  assert.match(text, /^- Archive briefs before deleting them \[friction:x\]$/m);
 });
 
 test("STAGES matches the stage enum the run-record schema declares, in the same order", () => {
