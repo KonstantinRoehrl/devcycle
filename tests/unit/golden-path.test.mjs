@@ -1863,3 +1863,43 @@ test("C6: docs/known-issues.md records open defects only — no fixed entry surv
       "file README.md:509 links as \"Open defects\""
   );
 });
+
+// `CONTRIBUTING.md:108-111` concedes that the config knobs are hand-kept in three places and
+// that validate "checks only that the key exists". F13, F15 and F16 were three live instances
+// of that class. Set equality across the three is what stops the fourth. Each parse is scoped
+// to its own table's header row, never to prose: C10 moves 134 lines out of references/config.md,
+// and an assertion coupled to wording would break on an innocent edit and be deleted rather
+// than fixed. A table header is a structure that move can carry intact.
+const firstCells = (text, header) => {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => line.trim() === header);
+  if (start === -1) return [];
+  const keys = [];
+  for (const line of lines.slice(start + 2)) {
+    if (!line.startsWith("|")) break;
+    const cell = line.split("|")[1].trim();
+    const backticked = cell.match(/^`([A-Za-z]+)`$/);
+    if (backticked) keys.push(backticked[1]);
+  }
+  return keys;
+};
+
+test("C6: plugin.json, README and references/config.md agree on the knob set", () => {
+  const manifest = Object.keys(JSON.parse(read(".claude-plugin/plugin.json")).userConfig);
+  const readme = firstCells(read("README.md"), "| Option | What it controls | Values | Default |");
+  const config = firstCells(read("references/config.md"), "| Knob | Owner | Falls back to |");
+  const sorted = (keys) => [...keys].sort();
+
+  assert.deepEqual(
+    sorted(readme),
+    sorted(manifest),
+    "README.md's config table and .claude-plugin/plugin.json's userConfig must carry the same keys"
+  );
+  assert.deepEqual(
+    sorted(config),
+    sorted(manifest),
+    "references/config.md calls itself the single owner of knob resolution, so its knob roster " +
+      "must enumerate exactly the keys the manifest ships — an owner that does not list what it " +
+      "owns is how F15 and F16 drifted unnoticed"
+  );
+});

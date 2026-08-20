@@ -35,6 +35,30 @@ models and review depth and the on-device gate by their stages).
    one for it — same-session substitution cannot refresh, so `--config` writes only
    reach future sessions.
 
+## The knob roster
+
+Every knob devcycle ships, the surface that owns how it resolves — a playbook, or a section of
+this file — and what an unset value falls back to.
+This set is hand-kept in three places — this table, README's config table, and
+`.claude-plugin/plugin.json`'s `userConfig` — so `tests/unit/golden-path.test.mjs` asserts the
+three carry the same keys; without it the copies drift one release at a time.
+
+| Knob | Owner | Falls back to |
+| --- | --- | --- |
+| `profile` | § The profile, below | `standard` |
+| `gitPolicy` | `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` | `local-commits-only` |
+| `docTrackingPolicy` | § Doc tracking, below | `standard` |
+| `reviewDepth` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` | the profile's branch-review row |
+| `crossModelReview` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` | `false` |
+| `onDeviceGate` | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` | the profile's on-device row |
+| `implementerModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` | `auto` — § Model tiers derives it per task |
+| `taskReviewerModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` | `auto` — § Model tiers derives it per task |
+| `branchReviewModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` | `auto` — the session's own model |
+| `walkthroughModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` | `auto` — a fast model |
+
+An unset knob is a literal `${user_config...}` placeholder or `auto`; the resolution order above
+owns what "unset" then resolves to, and this column only names the endpoint.
+
 ## The state file's `configured:` line
 
 `.devcycle/state.md` carries one `configured:` line, written in the form
