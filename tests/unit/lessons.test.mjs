@@ -94,7 +94,7 @@ test("landing into a section under the cap needs no eviction", () => {
   assert.equal(res.eviction, null);
 });
 
-test("landing into a full section proposes the least-recently-recurred line", () => {
+test("landing into a full section proposes a never-recurred line over any line that has recurred", () => {
   const existing = Array.from({ length: SECTION_CAP }, (_, i) => `- Lesson ${i} [friction:l${i}]`);
   const events = [
     { runId: "a".repeat(16), culprit: "friction:l0", ts: "2026-08-01T00:00:00Z" },
@@ -105,10 +105,28 @@ test("landing into a full section proposes the least-recently-recurred line", ()
     existing, events, promotions: [],
   });
   assert.equal(res.fits, false);
-  assert.deepEqual(res.eviction, { culpritId: "friction:l0", section: "execution", reason: "cap" });
+  // l0 and l1 recurred, so both are protected; l10 is the alphabetically-first id among the
+  // 13 never-recurred lines (l2..l9, l10..l14), which the tiebreak proposes first.
+  assert.deepEqual(res.eviction, { culpritId: "friction:l10", section: "execution", reason: "cap" });
 });
 
-test("with an empty journal the tiebreak is the oldest landed date, not an undefined order", () => {
+test("a line that recurred survives eviction even when it is the only line with any signal at all", () => {
+  const existing = Array.from({ length: SECTION_CAP }, (_, i) => `- Lesson ${i} [friction:l${i}]`);
+  const events = [
+    { runId: "a".repeat(16), culprit: "friction:l7", ts: "2026-08-19T00:00:00Z" },
+  ];
+  const res = planLanding({
+    stage: "execution", line: "- New [friction:new]", culpritId: "friction:new",
+    existing, events, promotions: [],
+  });
+  assert.equal(res.fits, false);
+  assert.notEqual(res.eviction.culpritId, "friction:l7",
+    "recurrence is evidence the line is still live — it must not be evicted just because it is the only line with any signal");
+  assert.equal(res.eviction.culpritId, "friction:l0",
+    "on the unified axis a never-recurred line is staler than any line that has ever recurred, so it is proposed first");
+});
+
+test("with an empty journal, a line with neither recurrence nor a landed date outranks one with a landed date", () => {
   const existing = Array.from({ length: SECTION_CAP }, (_, i) => `- Lesson ${i} [friction:l${i}]`);
   const promotions = [
     { culpritId: "friction:l5", landed: "2026-01-01", aliases: [] },
@@ -118,8 +136,42 @@ test("with an empty journal the tiebreak is the oldest landed date, not an undef
     stage: "execution", line: "- New [friction:new]", culpritId: "friction:new",
     existing, events: [], promotions,
   });
-  assert.equal(res.eviction.culpritId, "friction:l5",
-    "cold start is exactly when this ordering must be defined");
+  // l5 and l2 at least have a landed date; the other 13 have neither signal at all and so are
+  // staler than either of them — l0 is the alphabetically-first id among those 13.
+  assert.equal(res.eviction.culpritId, "friction:l0",
+    "a line with no recurrence and no landed date sorts oldest of all, staler than any landed-only line");
+});
+
+test("with an empty journal and every row landed, the sole eviction proposal is the oldest landed date", () => {
+  const existing = Array.from({ length: SECTION_CAP }, (_, i) => `- Lesson ${i} [friction:l${i}]`);
+  const promotions = [
+    { culpritId: "friction:l0", landed: "2026-05-10", aliases: [] },
+    { culpritId: "friction:l1", landed: "2026-03-22", aliases: [] },
+    { culpritId: "friction:l2", landed: "2026-07-01", aliases: [] },
+    { culpritId: "friction:l3", landed: "2026-01-15", aliases: [] },
+    { culpritId: "friction:l4", landed: "2026-09-09", aliases: [] },
+    { culpritId: "friction:l5", landed: "2026-02-28", aliases: [] },
+    { culpritId: "friction:l6", landed: "2026-11-11", aliases: [] },
+    { culpritId: "friction:l7", landed: "2026-04-04", aliases: [] },
+    { culpritId: "friction:l8", landed: "2026-08-08", aliases: [] },
+    { culpritId: "friction:l9", landed: "2026-06-06", aliases: [] },
+    { culpritId: "friction:l10", landed: "2026-12-12", aliases: [] },
+    { culpritId: "friction:l11", landed: "2026-01-01", aliases: [] },
+    { culpritId: "friction:l12", landed: "2026-10-10", aliases: [] },
+    { culpritId: "friction:l13", landed: "2026-03-03", aliases: [] },
+    { culpritId: "friction:l14", landed: "2026-07-07", aliases: [] },
+  ];
+  const res = planLanding({
+    stage: "execution", line: "- New [friction:new]", culpritId: "friction:new",
+    existing, events: [], promotions,
+  });
+  // Every row has a distinct landed date and none has recurred, so all 15 sit in the same
+  // "landed, never recurred" group; the rule orders that group by landed date, oldest first.
+  // friction:l11 landed 2026-01-01, earlier than every other date above (the next-earliest,
+  // friction:l3, landed 2026-01-15) — no id tiebreak is exercised, so this isolates the
+  // landed-date comparison itself rather than the id fallback.
+  assert.equal(res.eviction.culpritId, "friction:l11",
+    "among rows that all landed and never recurred, the oldest landed date is proposed first");
 });
 
 test("a line whose id has neither a recurrence nor a landed date sorts oldest-first, deterministically", () => {

@@ -80,10 +80,15 @@ export function renderLessons(stage, stores) {
   return out.join("\n") + "\n";
 }
 
-// Least-recently-recurred, with the cold-start case defined rather than left to sort stability:
+// A single recency axis, with the cold-start case defined rather than left to sort stability:
 // no journal event for an id means nothing has recurred, so its promotion's `landed` date orders
-// it; an id with neither sorts oldest of all, and ties break on the id itself so two identical
-// calls always propose the same eviction.
+// it, staler than any id that has ever recurred; an id with neither sorts oldest of all, and ties
+// break on the id itself so two identical calls always propose the same eviction. Deliberate
+// choice, not an oversight: a line that has recurred even once is evidence it is still live, so it
+// always outranks every line that has never recurred, regardless of how long ago that recurrence
+// was — the alternative (partition by whether *any* line in the section has recurred) let a
+// section's one recurred line get evicted just for being the only line with any signal, while
+// lines nobody has looked at stayed fully protected.
 function evictionOrder(existing, events, promotions) {
   const lastByCulprit = new Map();
   for (const e of events) {
@@ -100,7 +105,7 @@ function evictionOrder(existing, events, promotions) {
     }
   }
   const rows = existing
-    .map((line, index) => ({ line, index, id: lessonId(line) }))
+    .map((line) => ({ line, id: lessonId(line) }))
     .filter((r) => r.id)
     .map((r) => ({
       ...r,
@@ -108,19 +113,14 @@ function evictionOrder(existing, events, promotions) {
       landed: landedByCulprit.get(r.id) ?? null,
     }));
 
-  // Rank only among lines with an actual signal at each tier — absence of evidence is not
-  // evidence of staleness (the F1 lesson, restated for eviction), so a line with no recorded
-  // recurrence or landed date is protected rather than treated as infinitely old. Only when no
-  // line carries any signal at all does the tiebreak fall back to insertion order.
-  const withRecurred = rows.filter((r) => r.recurred);
-  if (withRecurred.length)
-    return withRecurred.sort((a, b) => a.recurred.localeCompare(b.recurred) || a.id.localeCompare(b.id));
-
-  const withLanded = rows.filter((r) => r.landed);
-  if (withLanded.length)
-    return withLanded.sort((a, b) => a.landed.localeCompare(b.landed) || a.id.localeCompare(b.id));
-
-  return rows.sort((a, b) => a.index - b.index);
+  // One comparison over every row, not a tiered fallback: a recurred row ranks by its most recent
+  // recurrence (oldest recurrence first); a row that has never recurred ranks by its landed date
+  // instead, staler than every recurred row no matter how old that recurrence is; a row with
+  // neither is staler still — evicted before anything that has ever landed or recurred. The rank
+  // prefix encodes that group order directly, so a single lexical sort produces it; ties within a
+  // group break on the id.
+  const rank = (r) => (r.recurred ? `2:${r.recurred}` : r.landed ? `1:${r.landed}` : "0");
+  return rows.sort((a, b) => rank(a).localeCompare(rank(b)) || a.id.localeCompare(b.id));
 }
 
 export function planLanding({ stage, line, culpritId, existing, events = [], promotions = [] }) {
