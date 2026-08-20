@@ -38,13 +38,17 @@ export function parseFlags(argv, knownFlags) {
   return { flags, positionals };
 }
 
-// A flag's value must be an explicit, non-empty path: a missing value (the flag was the last token,
-// or is immediately followed by another flag) and an empty or whitespace-only value are the same
+// A flag's value must be explicit and non-empty: a missing value (the flag was the last token, or
+// is immediately followed by another flag) and an empty or whitespace-only value are the same
 // operator mistake in two guises -- e.g. `--file "$draft"` for an unset shell variable -- and both
 // must fail loudly, naming the flag, rather than silently widening the scan to the whole corpus.
-export function requireValue(flags, name) {
+//
+// `noun` completes the sentence `<flag> requires <noun>`, so a caller whose flag takes something
+// other than a path -- doctor's `--since` takes a date -- says so instead of sending the operator
+// looking for a file that was never involved. Most flags here are paths, so that stays the default.
+export function requireValue(flags, name, noun = "a path argument") {
   if (!(name in flags)) return undefined;
   const v = flags[name];
-  if (v == null || v.trim() === "") throw new Error(`${name} requires a path argument`);
+  if (v == null || v.trim() === "") throw new Error(`${name} requires ${noun}`);
   return v;
 }

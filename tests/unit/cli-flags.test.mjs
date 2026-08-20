@@ -32,3 +32,12 @@ test("requireValue rejects a present-but-empty value and passes an absent flag t
   assert.throws(() => requireValue(parseFlags(["--dir="], KNOWN).flags, "--dir"), /--dir requires a path argument/);
   assert.equal(requireValue(parseFlags(["--dir", "x"], KNOWN).flags, "--dir"), "x");
 });
+
+// Not every consumer's flags are paths: doctor's --since is a date. A caller can name what its
+// flag wants, and a caller that names nothing keeps the path wording every other script relies on.
+test("requireValue names what the flag wants, and still says a path by default", () => {
+  assert.throws(() => requireValue(parseFlags(["--file"], KNOWN).flags, "--file"), /--file requires a path argument$/);
+  assert.throws(() => requireValue(parseFlags(["--file"], KNOWN).flags, "--file", "a date"), /--file requires a date$/);
+  assert.throws(() => requireValue(parseFlags(["--file="], KNOWN).flags, "--file", "a value"), /--file requires a value$/);
+  assert.equal(requireValue(parseFlags(["--file", "x"], KNOWN).flags, "--file", "a date"), "x");
+});

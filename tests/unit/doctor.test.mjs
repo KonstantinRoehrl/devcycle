@@ -1966,6 +1966,17 @@ test("parseArgs rejects a --dir with no value", () => {
   assert.throws(() => parseArgs(["--dir"]), /--dir requires a path argument/);
 });
 
+// The message an operator reads has to name what the flag actually wants. `--since` and `--until`
+// are dates and `--issue-body` is a culprit name, so telling any of them to supply "a path"
+// sends the operator looking for a file that was never involved.
+test("a valueless --since asks for a date, not a path", () => {
+  assert.throws(() => parseArgs(["--since"]), /--since requires a date$/);
+  assert.throws(() => parseArgs(["--until"]), /--until requires a date$/);
+  assert.throws(() => parseArgs(["--issue-body"]), /--issue-body requires a value$/);
+  // --drift does take a path, so its wording is right as it stands.
+  assert.throws(() => parseArgs(["--drift"]), /--drift requires a path argument$/);
+});
+
 test("parseArgs still returns every documented flag with its default", () => {
   const a = parseArgs(["--dir", "/x", "--since", "2026-01-01", "--json", "--all", "--depth", "--run-checks"]);
   assert.equal(a.dir, "/x");

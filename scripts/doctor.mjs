@@ -77,17 +77,19 @@ const KNOWN_FLAGS = [
 // with doctor's own prefix.
 export function parseArgs(argv) {
   const { flags } = parseFlags(argv, KNOWN_FLAGS);
-  const valued = (name) => requireValue(flags, name) ?? null;
+  // Each flag says what it wants: --since/--until are dates and --issue-body is a culprit name,
+  // so only --dir and --drift take the parser's default "a path argument" wording.
+  const valued = (name, noun) => requireValue(flags, name, noun) ?? null;
   return {
     dir: requireValue(flags, "--dir") ?? join(homedir(), ".claude", "projects"),
-    since: valued("--since"),
-    until: valued("--until"),
+    since: valued("--since", "a date"),
+    until: valued("--until", "a date"),
     json: "--json" in flags,
     all: "--all" in flags,
     depth: "--depth" in flags,
     runChecks: "--run-checks" in flags,
     drift: valued("--drift"),
-    issueBody: valued("--issue-body"),
+    issueBody: valued("--issue-body", "a value"),
   };
 }
 
