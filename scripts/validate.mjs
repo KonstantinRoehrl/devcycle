@@ -796,6 +796,67 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       }
     }
 
+  // 22. hooks/hooks.json is machinery Claude loads at runtime, but it is JSON, so the surface walk
+  //     above — scoped to .md under playbooks/ commands/ agents/ references/ — structurally cannot
+  //     see it, and check 4's ${CLAUDE_PLUGIN_ROOT} resolution rides on that same walk. Until this
+  //     check, renaming a hook script or emptying a matcher silently disarmed a registered hook
+  //     while every other check, and every hook test, stayed green. What is asserted here is
+  //     well-formedness and resolvability only, the JSON analogue of check 4; WHICH tools a given
+  //     hook must cover is policy, asserted in tests/unit/golden-path.test.mjs.
+  //     The `hooksParsed` flag follows check 9's baseline pattern: a document that failed to parse
+  //     must report that and stop, never fall through and leave the registration unchecked at exit 0.
+  const hooksPath = join(root, "hooks/hooks.json");
+  if (existsSync(hooksPath)) {
+    let hooksDoc, hooksParsed = true;
+    try {
+      hooksDoc = JSON.parse(readFileSync(hooksPath, "utf8"));
+    } catch (e) {
+      hooksParsed = false;
+      fail(`hooks/hooks.json: not valid JSON — ${e.message}`);
+    }
+    const events = hooksDoc?.hooks;
+    if (hooksParsed && (typeof events !== "object" || events === null || Array.isArray(events)))
+      fail(`hooks/hooks.json: must carry a "hooks" object keyed by event name, got ${JSON.stringify(events)}`);
+    else if (hooksParsed)
+      for (const [event, entries] of Object.entries(events)) {
+        if (!Array.isArray(entries) || entries.length === 0) {
+          fail(`hooks/hooks.json: ${event} must be a non-empty array of matcher entries`);
+          continue;
+        }
+        for (const [i, entry] of entries.entries()) {
+          const at = `hooks/hooks.json: ${event}[${i}]`;
+          if (typeof entry?.matcher !== "string" || entry.matcher.trim() === "")
+            fail(`${at}: matcher must be a non-empty string — an empty matcher registers a hook that never fires`);
+          const commands = Array.isArray(entry?.hooks) ? entry.hooks : null;
+          if (!commands || commands.length === 0) {
+            fail(`${at}: hooks must be a non-empty array of commands`);
+            continue;
+          }
+          for (const [j, h] of commands.entries()) {
+            const cmd = typeof h?.command === "string" ? h.command : "";
+            if (cmd.trim() === "") {
+              fail(`${at}.hooks[${j}]: command must be a non-empty string`);
+              continue;
+            }
+            const paths = [...cmd.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([A-Za-z0-9._/-]+)/g)];
+            if (!paths.length) {
+              fail(
+                `${at}.hooks[${j}]: command names no \${CLAUDE_PLUGIN_ROOT}/<path> — a hook runs with the user's ` +
+                  `repo as cwd, so a repo-relative command resolves to nothing and the hook silently never fires`
+              );
+              continue;
+            }
+            for (const [, raw] of paths) {
+              const target = raw.replace(/[.,;:]+$/, "");
+              const abs = join(root, target);
+              if (!existsSync(abs) || !statSync(abs).isFile())
+                fail(`${at}.hooks[${j}]: \${CLAUDE_PLUGIN_ROOT}/${target} names no file in the plugin`);
+            }
+          }
+        }
+      }
+  }
+
   lessonsTrackingErrors(process.cwd()).forEach(fail);
 
   if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
