@@ -42,11 +42,20 @@ if (blocks.length === 0) {
   console.error(`blast-radius-check: no "### Task N" blocks found in ${planPath}`);
   process.exit(1);
 }
-const declared = new Set([...taskFileMap(text).values()].flatMap((files) => [...files]));
+const filesByTask = taskFileMap(text);
+const declared = new Set([...filesByTask.values()].flatMap((files) => [...files]));
 // The walk below reasons over `declared`, not over the blocks: a plan whose tasks name no files
 // at all matches nothing and would print ok against an empty list just as a heading-less one would.
 if (declared.size === 0) {
-  console.error(`blast-radius-check: no "**Files:**" blocks found in ${planPath}`);
+  // The same split, from the same map, as wave-disjointness-check's -- and deliberately the same
+  // sentence. Both gates read one taskFileMap, so a plan whose blocks say "none" that made one
+  // gate report the blocks missing and the other report them empty sent the author to two repairs
+  // for one plan.
+  const message =
+    filesByTask.size === 0
+      ? `no "**Files:**" blocks found in ${planPath}`
+      : `no task in ${planPath} declares a file -- its "**Files:**" blocks are present but empty`;
+  console.error(`blast-radius-check: ${message}`);
   process.exit(1);
 }
 const changed = [...declared].filter((f) => !isTestFile(f));

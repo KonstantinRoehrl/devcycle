@@ -204,3 +204,22 @@ test("extractFiles reads the declaration in a Files block and none of the prose 
   const block = "Modify `scripts/a.mjs` -- the loader, e.g. the cache band. Node.js. 0.5. etc.";
   assert.deepEqual([...extractFiles(block)], ["scripts/a.mjs"]);
 });
+
+test("the trusted path drops a trailing period the caller typed, so the lesson still matches", () => {
+  // --files is caller-asserted: every token IS a file, so a sentence-final period is never part of
+  // the name. Keeping it made matchLessons -- exact string or glob -- miss a lesson recorded
+  // against CHANGELOG.md, and the brief reported "**Lessons:** none".
+  assert.deepEqual(parseFileList("CHANGELOG.md."), ["CHANGELOG.md"]);
+  assert.deepEqual(parseFileList("Dockerfile."), ["Dockerfile"]);
+  assert.deepEqual(parseFileList("scripts/a.mjs., CHANGELOG.md."), ["scripts/a.mjs", "CHANGELOG.md"]);
+  // Tokens that are nothing but punctuation still drop out rather than becoming "".
+  assert.deepEqual(parseFileList("..., .."), []);
+  // The untrusted path keeps its prose gate unchanged: that is what stops "e.g." becoming a
+  // phantom file, and it is why a bare "CHANGELOG.md." there stays prose while the same token
+  // announced as a path does not.
+  assert.equal(normalizeFileToken("CHANGELOG.md."), null);
+  assert.equal(normalizeFileToken("`CHANGELOG.md`."), "CHANGELOG.md");
+  assert.equal(normalizeFileToken("docs/CHANGELOG.md."), "docs/CHANGELOG.md");
+  assert.equal(normalizeFileToken("e.g."), null);
+  assert.equal(normalizeFileToken("Node.js."), null);
+});

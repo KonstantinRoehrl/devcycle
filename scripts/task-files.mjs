@@ -16,10 +16,13 @@ export const TEST_FILE_SUFFIXES = [".test.mjs", ".test.js", ".test.ts", "_test.p
 // But only for a token that already announced itself as a path, by code-span backticks or a `/`:
 // in prose the trailing period belongs to the word, and stripping it off "e.g." or "Node.js."
 // leaves something the extension gate below accepts, so surrounding prose became a declared file.
+// On the trusted path there is no prose to disambiguate -- the caller asserted every token is a
+// file -- so the period always comes off: "CHANGELOG.md." kept it, and matchLessons (exact string
+// or glob) then withheld every lesson recorded against CHANGELOG.md.
 export function normalizeFileToken(raw, { trusted = false } = {}) {
   const text = String(raw);
-  const declaresAPath = text.includes("`") || text.includes("/");
-  let tok = text.replace(/^[`(),]+/, "").replace(declaresAPath ? /[`(),.]+$/ : /[`(),]+$/, "");
+  const stripsTrailingPeriod = trusted || text.includes("`") || text.includes("/");
+  let tok = text.replace(/^[`(),]+/, "").replace(stripsTrailingPeriod ? /[`(),.]+$/ : /[`(),]+$/, "");
   tok = tok.replace(/:\d+-\d+$/, "").replace(/:$/, "");
   if (!tok || LABELS.has(tok) || tok === "-") return null;
   if (!trusted && !/\//.test(tok) && !/\.[A-Za-z0-9]+$/.test(tok)) return null;
