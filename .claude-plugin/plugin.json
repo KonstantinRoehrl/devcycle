@@ -62,7 +62,7 @@
       "type": "string",
       "title": "Review depth",
       "default": "single",
-      "description": "Branch review engine. One of: single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass), panel (multi-lens review panel workflow), or 'auto' to let the profile govern this knob."
+      "description": "Branch review engine. Unset → the profile's branch-review row (single at lean and standard, panel at thorough); set → this value, verbatim, and the profile never moves it. One of: single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass), panel (multi-lens review panel workflow), auto (identical to unset)."
     },
     "crossModelReview": {
       "type": "boolean",
@@ -74,7 +74,7 @@
       "type": "string",
       "title": "On-device gate",
       "default": "human-required",
-      "description": "Whether the on-device checklist closes only via a human walkthrough. One of: human-required, auto-ok, or 'auto' to let the profile govern this knob."
+      "description": "Whether the on-device checklist closes only via a human walkthrough. Unset → the profile's on-device row (auto-ok at lean, human-required at standard and thorough); set → this value, verbatim, and the profile never moves it. One of: human-required, auto-ok, auto (identical to unset)."
     }
   }
 }
