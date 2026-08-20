@@ -1889,3 +1889,71 @@ test("cli: --check-recurrence does not execute a promotion verify: line without 
   assert.equal(on.status, 0, on.stderr);
   assert.equal(existsSync(join(root, "pwned")), true, "--run-checks must run the check");
 });
+
+// F51: --render-report computed nothing for its verification argument, so both candidate
+// sections rendered "(none this run)" — a confident zero rather than a missing section — even
+// when the engine had candidates. An r2 promotion whose culprit reappears in the journal is
+// exactly the escalation case verification.mjs already scores.
+test("--render-report renders the escalation candidates the engine computed", () => {
+  const { root, runsDir } = corpusWithJournal({
+    promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
+    events: [{ culprit: "x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
+  });
+  const res = run(["--render-report", writeCandidateFixture()], root, { DEVCYCLE_RUNS_DIR: runsDir });
+  assert.equal(res.status, 0);
+  const escalation = res.stdout.split("### Escalation")[1] ?? "";
+  assert.match(escalation, /friction:x/, "the computed candidate reaches the report");
+  assert.doesNotMatch(
+    escalation.split("###")[0],
+    /\(none this run\)/,
+    "a computed candidate must never render as a confident zero",
+  );
+});
+
+test("--render-report still renders (none this run) when the engine computed nothing", () => {
+  const { root, runsDir } = corpusWithJournal({ promotions: [], events: [] });
+  const res = run(["--render-report", writeCandidateFixture()], root, { DEVCYCLE_RUNS_DIR: runsDir });
+  assert.equal(res.status, 0);
+  assert.match(res.stdout, /\(none this run\)/, "an empty candidate list is still reported as empty");
+});
+
+// F36: the eviction tie-break shipped twice — as this code and as prose in
+// playbooks/learning-from-sessions.md — and only the unreachable copy was tested.
+test("--plan-landing reports that a landing fits while the section is under cap", () => {
+  const root = repo();
+  const res = run(["--plan-landing", "--stage", "execution", "--line", "- Do the thing [friction:new]"], root);
+  assert.equal(res.status, 0);
+  assert.deepEqual(JSON.parse(res.stdout), { fits: true, eviction: null });
+});
+
+test("--plan-landing names the line a full section would evict", () => {
+  const root = repo();
+  mkdirSync(join(root, "docs", "devcycle"), { recursive: true });
+  const lines = Array.from({ length: 15 }, (_, i) => `- Lesson number ${i} [friction:old-${i}]`);
+  writeFileSync(join(root, "docs", "devcycle", "lessons.md"), `# Lessons\n\n## execution\n${lines.join("\n")}\n`);
+  const res = run(["--plan-landing", "--stage", "execution", "--line", "- Do the thing [friction:new]"], root);
+  assert.equal(res.status, 0);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.fits, false);
+  assert.equal(out.eviction.section, "execution");
+  assert.equal(out.eviction.reason, "cap");
+  assert.match(out.eviction.culpritId, /^friction:old-/, "the evicted id comes from the full section");
+});
+
+test("--plan-landing rejects a stage outside the enum rather than planning against nothing", () => {
+  const res = run(["--plan-landing", "--stage", "nonsense", "--line", "- x [friction:new]"], repo());
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /--stage/);
+});
+
+test("--plan-landing rejects a line carrying no culprit id", () => {
+  const res = run(["--plan-landing", "--stage", "execution", "--line", "- no id here"], repo());
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /--line/);
+});
+
+test("--plan-landing is guarded against being combined with another subcommand", () => {
+  const res = run(["--plan-landing", "--stage", "execution", "--line", "- x [friction:new]", "--novel-slugs"], repo());
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /cannot be combined/);
+});
