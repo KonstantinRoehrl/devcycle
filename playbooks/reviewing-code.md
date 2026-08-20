@@ -102,8 +102,9 @@ the CLI's default silently replaces the user's binding choice; on the session ti
 
 The panel splits an oversize diff at file — and, for a lone file past the cap, `@@` hunk —
 boundaries into chunks each within the cap and runs every lens over every chunk, so the whole diff
-is reviewed rather than sampled. The `COVERAGE WARNING` its summary can open with now fires only for
-the last-resort truncation of a single hunk still over the cap.
+is reviewed rather than sampled. The `COVERAGE WARNING` its summary can open with fires whenever any
+input reached the reviewers truncated — an oversize lone hunk, an oversize spec, or an oversize
+file list.
 
 **`single`** — the same lenses as inline read-only reviewers, same refutation pass, same finding
 shape; a complete review in its own right, not a degraded panel.

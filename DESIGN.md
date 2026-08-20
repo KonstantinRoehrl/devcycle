@@ -376,6 +376,7 @@ convention:
 | `sweep-execution.md` | how a plan task marked `**Execution:** sweep` runs inside the execution stage |
 | `commit-convention.md` | how a devcycle-driven commit's subject matches the target repo's own conventions, derived once before wave 1's first commit |
 | `config-changelog.md` | every `userConfig` addition, rename, and deprecation, and the version each landed in |
+| `impact-scoring.md` | how devcycle quantifies what a culprit cost: the attribution formula, its grouping keys, and the unmeasurable case |
 
 A consumer names one — "Read `${CLAUDE_PLUGIN_ROOT}/references/<name>.md` and follow it" —
 and does not restate its content.
