@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.2 — 2026-08-20
+
+- fix(pipeline): close the second audit batch — the browser guard and four unreachable pieces of machinery
+
 ## 0.14.1 — 2026-08-20
 
 - fix(pipeline): close the first audit batch — verification engine, silent gates, release path, and workflow engines
