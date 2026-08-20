@@ -11,6 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const HOOK = join(process.cwd(), "hooks/block-main-thread-browser.mjs");
@@ -23,7 +24,7 @@ const browserCall = (extra) => ({
   ...extra,
 });
 
-test("denies a main-thread browser call (no agent_type)", () => {
+test("denies a main-thread browser call (empty agent_type)", () => {
   const r = call(browserCall({ agent_type: "", agent_id: "" }));
   const out = JSON.parse(r.stdout);
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
@@ -40,6 +41,102 @@ test("allows an on-device-driver subagent browser call", () => {
 
 test("denies a browser call from any other subagent", () => {
   const r = call(browserCall({ agent_type: "implementer", agent_id: "def456" }));
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+});
+
+test("allows the on-device-driver subagent under the plugin-namespaced agent type", () => {
+  const r = call(browserCall({ agent_type: "devcycle:on-device-driver", agent_id: "abc123" }));
+  const decision = r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput?.permissionDecision : undefined;
+  assert.notEqual(decision, "deny");
+  assert.equal(r.status, 0);
+});
+
+// QC3: the allowlist is two literals rather than a `<plugin>:` prefix strip, so a same-named
+// agent from a different plugin stays denied. A strip-based fix passes every other test here.
+test("denies another plugin's agent that shares the driver's bare name", () => {
+  const r = call(browserCall({ agent_type: "otherplugin:on-device-driver", agent_id: "ghi789" }));
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+});
+
+// F29: the real main-thread shape. `agent_type` is absent from the stdin JSON entirely (see this
+// file's header), not an empty string — the case the suite named but never sent.
+test("denies a main-thread browser call when agent_type is absent entirely", () => {
+  const r = call(browserCall({}));
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /on-device-driver/);
+});
+
+// F29: the malformed-stdin fallback at block-main-thread-browser.mjs:9 must deny, not throw.
+test("denies when stdin is not valid JSON", () => {
+  const r = spawnSync("node", [HOOK], { input: "{not json", encoding: "utf8" });
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+  assert.equal(r.status, 0);
+});
+
+// branch-fix-1-1 (1): a body of `null` parses fine, so the try/catch never fires, and reading
+// `.agent_type` off `null` used to throw — an uncaught throw exits 1 with nothing on stdout,
+// which is a non-blocking error to the harness (the browser call proceeds). Must deny instead.
+test("denies when stdin parses to null", () => {
+  const r = spawnSync("node", [HOOK], { input: "null", encoding: "utf8" });
+  assert.equal(r.status, 0, `expected exit 0, got ${r.status} (stderr: ${r.stderr})`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+});
+
+// branch-fix-1-1 (1): a non-string agent_type used to throw on `.trim()`. None of these shapes
+// is a spelling the allowlist can hold, so all three must deny rather than crash.
+for (const [shapeName, agentType] of [
+  ["a number", 5],
+  ["an object", {}],
+  ["an array", []],
+]) {
+  test(`denies a browser call when agent_type is ${shapeName}`, () => {
+    const r = call(browserCall({ agent_type: agentType, agent_id: "abc123" }));
+    assert.equal(r.status, 0, `expected exit 0, got ${r.status} (stderr: ${r.stderr})`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+  });
+}
+
+// branch-fix-1-1 (3): a right-origin/wrong-spelling agent_type must be distinguishable in the
+// deny reason from an ordinary main-thread denial, so the reason names the value actually seen.
+test("names the received agent_type in the deny reason for a wrong-spelling origin", () => {
+  const r = call(browserCall({ agent_type: "devcycle@devcycle:on-device-driver", agent_id: "abc123" }));
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /on-device-driver/);
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /devcycle@devcycle:on-device-driver/);
+});
+
+// branch-fix-2-1 (1): the deny reason's render (describeAgentType → JSON.stringify) used to sit
+// outside the hook's only try/catch. No reachable trigger exists under real stdin (a value from
+// JSON.parse carries no throwing getter, no BigInt, no cycle, and V8 does not stack-overflow at a
+// depth a successful parse itself can reach) — so this does not send a naturally poisonous
+// agent_type. Instead it substitutes a controlled failure for the render step itself: a global
+// JSON.stringify is installed that throws only for a marked value, standing in for "rendering this
+// value cannot succeed" without depending on a specific unreachable trigger. The guard must still
+// produce a deny decision, never an uncaught throw with empty stdout (the same fail-open class
+// ba99a9c closed one line earlier).
+test("still denies when rendering the deny reason cannot succeed", () => {
+  const poisonScript = `
+    const original = JSON.stringify;
+    JSON.stringify = (value, ...rest) => {
+      if (value && typeof value === "object" && value.__poison) {
+        throw new RangeError("Maximum call stack size exceeded");
+      }
+      return original(value, ...rest);
+    };
+    await import(${JSON.stringify(pathToFileURL(HOOK).href)});
+  `;
+  const r = spawnSync("node", ["--input-type=module", "-e", poisonScript], {
+    input: JSON.stringify(browserCall({ agent_type: { __poison: true } })),
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, `expected exit 0 even when rendering throws, got ${r.status} (stderr: ${r.stderr})`);
   const out = JSON.parse(r.stdout);
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
 });

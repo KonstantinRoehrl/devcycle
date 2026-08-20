@@ -1341,3 +1341,96 @@ test("4b control: a paragraph break is not a separator, so prose either side of 
   playbook(dir, "The gate is dispatched with node\n\nscripts/doctor.mjs is the engine it names.\n");
   ok(runValidate(dir));
 });
+
+// --- check 22: hooks/hooks.json registration ---
+
+const hooksFixture = (dir, doc, { withScript = true } = {}) => {
+  if (withScript) writeInto(dir, "hooks/guard.mjs", "process.exit(0);\n");
+  writeInto(dir, "hooks/hooks.json", typeof doc === "string" ? doc : JSON.stringify(doc, null, 2) + "\n");
+  return dir;
+};
+
+const goodHooks = {
+  hooks: {
+    PreToolUse: [
+      {
+        matcher: "mcp__claude-in-chrome__.*",
+        hooks: [{ type: "command", command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs"', timeout: 5 }],
+      },
+    ],
+  },
+};
+
+test("hooks check: a well-formed registration whose command resolves passes", () => {
+  ok(runValidate(hooksFixture(makePluginFixture(), goodHooks)));
+});
+
+test("hooks check: a tree with no hooks/ directory at all passes", () => {
+  ok(runValidate(makePluginFixture()));
+});
+
+test("hooks check: a command naming a script that does not ship fails", () => {
+  const dir = hooksFixture(makePluginFixture(), goodHooks, { withScript: false });
+  failsWith(runValidate(dir), /hooks\/hooks\.json/, /hooks\/guard\.mjs names no file/);
+});
+
+test("hooks check: an empty matcher fails — it registers a hook that never fires", () => {
+  const doc = JSON.parse(JSON.stringify(goodHooks));
+  doc.hooks.PreToolUse[0].matcher = "   ";
+  failsWith(runValidate(hooksFixture(makePluginFixture(), doc)), /PreToolUse\[0\]/, /matcher must be a non-empty string/);
+});
+
+test("hooks check: a repo-relative command fails — a hook's cwd is the user's repo, not the plugin", () => {
+  const doc = JSON.parse(JSON.stringify(goodHooks));
+  doc.hooks.PreToolUse[0].hooks[0].command = "node hooks/guard.mjs";
+  failsWith(runValidate(hooksFixture(makePluginFixture(), doc)), /PreToolUse\[0\]\.hooks\[0\]/, /CLAUDE_PLUGIN_ROOT/);
+});
+
+test("hooks check: an entry with no commands fails", () => {
+  const doc = JSON.parse(JSON.stringify(goodHooks));
+  doc.hooks.PreToolUse[0].hooks = [];
+  failsWith(runValidate(hooksFixture(makePluginFixture(), doc)), /PreToolUse\[0\]/, /non-empty array of commands/);
+});
+
+test("hooks check: malformed JSON fails rather than skipping the guard", () => {
+  failsWith(runValidate(hooksFixture(makePluginFixture(), "{not json")), /hooks\/hooks\.json/, /not valid JSON/);
+});
+
+test("hooks check: a hooks.json with no hooks object fails", () => {
+  failsWith(runValidate(hooksFixture(makePluginFixture(), { PreToolUse: [] })), /hooks\/hooks\.json/, /"hooks" object/);
+});
+
+test("hooks check: hooks/ ships but hooks.json is missing fails rather than validating clean", () => {
+  const dir = makePluginFixture();
+  // hooks/ exists (a script ships) but hooks.json itself was deleted or renamed — the exact
+  // disarm this check exists to catch, so it must not fall through to exit 0.
+  writeInto(dir, "hooks/guard.mjs", "process.exit(0);\n");
+  failsWith(runValidate(dir), /hooks\/hooks\.json/, /missing/);
+});
+
+test("hooks check: a command entry with no type field fails — it is not a command hook", () => {
+  const doc = JSON.parse(JSON.stringify(goodHooks));
+  delete doc.hooks.PreToolUse[0].hooks[0].type;
+  failsWith(runValidate(hooksFixture(makePluginFixture(), doc)), /PreToolUse\[0\]\.hooks\[0\]/, /type must be "command"/);
+});
+
+test("hooks check: a command entry with a misspelt type fails — it is not a command hook", () => {
+  const doc = JSON.parse(JSON.stringify(goodHooks));
+  doc.hooks.PreToolUse[0].hooks[0].type = "comand";
+  failsWith(runValidate(hooksFixture(makePluginFixture(), doc)), /PreToolUse\[0\]\.hooks\[0\]/, /type must be "command"/);
+});
+
+test("hooks check: a matcher that does not compile as a regular expression fails", () => {
+  const doc = JSON.parse(JSON.stringify(goodHooks));
+  doc.hooks.PreToolUse[0].matcher = "mcp__claude-in-chrome__[(";
+  failsWith(runValidate(hooksFixture(makePluginFixture(), doc)), /PreToolUse\[0\]/, /not a valid regular expression/);
+});
+
+test('hooks check: the documented match-all matcher "*" passes rather than failing to compile', () => {
+  // "*" is not valid regex syntax (`new RegExp("*")` throws "Nothing to repeat"), but the harness
+  // documents it as a literal meaning "match every tool" — a registration using it must not be
+  // rejected with a message asserting the hook can never fire, when in fact it fires on everything.
+  const doc = JSON.parse(JSON.stringify(goodHooks));
+  doc.hooks.PreToolUse[0].matcher = "*";
+  ok(runValidate(hooksFixture(makePluginFixture(), doc)));
+});

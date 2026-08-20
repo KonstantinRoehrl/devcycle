@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Reads devcycle's friction journal — the run records scripts/run-record.mjs appends — as the
 // learn loop's first corpus. Structured lines only: ids, enum values and timestamps, so nothing
 // here can carry message text into a caller's transcript.

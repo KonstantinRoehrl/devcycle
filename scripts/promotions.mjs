@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // The single reader and writer of devcycle's promotion records — one file per landed lesson under
 // docs/devcycle/promotions/. Lives here rather than in dream.mjs because doctor.mjs reads these
 // records too, and importing them from dream.mjs made the two scripts a cycle.

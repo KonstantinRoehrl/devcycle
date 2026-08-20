@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.14.2 — 2026-08-20
+
+- fix(pipeline): close the second audit batch — the browser guard and four unreachable pieces of machinery
+
+The second of five batches remediating a 54-finding whole-repo audit. **The browser guard**
+shipped in 0.14.1 denying everything, including the one agent it exists to admit: it compared
+`agent_type` against the bare `"on-device-driver"` while the harness sends the plugin-namespaced
+`"devcycle:on-device-driver"`, so the comparison could never match and the on-device stage could
+not run at all. Both spellings are now pinned — not a prefix strip, which would widen the guard
+to another plugin's same-named agent — and the guard fails closed on every stdin shape it can
+receive, where a `null` body or a non-string `agent_type` used to exit 1 with no decision at all.
+`hooks/hooks.json` is inside `validate`'s surface walk, and new assertions tie the allowlist
+literal to the agent's frontmatter `name:` and to the plugin id, so a rename in any one of those
+three files can no longer disarm the guard while the suite stays green. The fix was verified on
+the running harness rather than deduced: under it the driver reaches the extension while the main
+thread and a general-purpose subagent are both denied with their origins named, and with 0.14.1
+restored the same driver making the same call is denied. **Four unreachable pieces of machinery**
+are wired up or removed — the audit's headline class, code that ships, is tested, and is called by
+nothing. `model-pool.mjs` gains a CLI and a caller; `dream --record-lifecycle` and
+`--render-report`'s verification argument are named by the playbook that should invoke them;
+`lessons.mjs`'s `planLanding` is exposed as `--plan-landing`, and the never-called `applyLanding`
+is deleted along with the prose rule it implemented. **A reachability gate** stops the class from
+returning: six golden-path legs assert that every shipped engine, subcommand, script, workflow and
+agent is named or read by at least one surface file in its `${CLAUDE_PLUGIN_ROOT}` form — checking
+importers rather than text, since being *named* is what let `model-pool.mjs` look reachable for the
+whole period it had no caller. Each leg states its own boundary instead of implying an airtight
+guarantee; the agent leg took three review rounds because the first two fixes closed the reported
+instance rather than the class, which a mutually-naming pair of orphaned agents defeats.
+
 ## 0.14.1 — 2026-08-20
 
 - fix(pipeline): close the first audit batch — verification engine, silent gates, release path, and workflow engines

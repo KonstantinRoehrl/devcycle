@@ -5,6 +5,24 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-20 — hooks ship in the public plugin, for one guard only
+
+**Decision:** The plugin ships exactly one hook. `hooks/block-main-thread-browser.mjs`, registered
+in `hooks/hooks.json` on `PreToolUse` over `mcp__claude-in-chrome__.*`, denies every browser tool
+call whose origin is not the `on-device-driver` subagent — the main thread included. Hooks stay
+closed to everything else: a second hook needs its own entry in this log.
+**Why:** Issue #84 measured 187 `mcp__claude-in-chrome__*` calls made from the main thread with no
+driver dispatch recorded, each running at the main thread's median 51,690-token startup floor
+instead of the driver's 10,342.5. Prose in a playbook had not stopped it, and could not: the rule
+is only enforceable at the moment of the call, which is what a `PreToolUse` hook is. The original
+non-goal's stated reason — that hooks "fire for every user on every matched tool call" — is what
+makes this one correct rather than what disqualifies it: the matcher is a single MCP namespace,
+and firing on every matched call is the enforcement.
+**Supersedes:** `DESIGN.md` §10's non-goal *"**Hooks in the public plugin** — they fire for every
+user on every matched tool call; skills + commands suffice"*, removed from that list in this
+change. §3's blueprint tree and §13's agent list, and `README.md`'s Machinery table, gain the
+component in the same change.
+
 ## 2026-08-12 — the routing table is not runtime surface
 
 `references/routing.md` moved to `docs/routing.md`. Measured before the move: zero surface files
