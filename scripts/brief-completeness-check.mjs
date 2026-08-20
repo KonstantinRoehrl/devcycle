@@ -4,7 +4,7 @@
 // every task. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
 // implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
-import { taskBlocks, parseDispatchMap } from "./task-files.mjs";
+import { taskBlocks, parseDispatchMap, filesFieldValue } from "./task-files.mjs";
 
 const planPath = process.argv[2];
 if (!planPath) {
@@ -26,6 +26,12 @@ function fieldValue(block, field) {
   return m ? m[1].trim() : null;
 }
 
+// **Files:** is read by task-files.mjs, which owns that grammar for every plan gate. Deciding it
+// here too is how this gate came to accept declarations wave-disjointness then called missing.
+function readField(block, field) {
+  return field === "Files" ? filesFieldValue(block) : fieldValue(block, field);
+}
+
 const errors = [];
 const blocks = taskBlocks(text);
 if (blocks.length === 0) {
@@ -35,7 +41,7 @@ if (blocks.length === 0) {
 
 for (const { num, text: block } of blocks) {
   for (const field of REQUIRED_FIELDS) {
-    const val = fieldValue(block, field);
+    const val = readField(block, field);
     if (val === null) errors.push(`Task ${num}: missing **${field}:** field`);
     else if (val === "") errors.push(`Task ${num}: **${field}:** field is empty`);
   }

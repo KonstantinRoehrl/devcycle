@@ -88,3 +88,30 @@ test("a plan whose tasks carry no **Files:** block is an error, not an ok", () =
   assert.equal(code, 1);
   assert.match(out, /no "\*\*Files:\*\*" blocks found/);
 });
+
+const INLINE_PLAN = `# Plan
+### Task 1: Change widget
+**Files:** Modify \`src/widget.mjs\`, Test: \`tests/unit/widget.test.mjs\`
+## Dispatch Map
+- Wave 1: Task 1
+`;
+
+test("a Files field written inline on its own label line is read, not reported as missing", () => {
+  const repo = makeRepo({
+    "src/widget.mjs": "export function widget() {}",
+    "tests/unit/widget.test.mjs": "import { widget } from '../../src/widget.mjs';",
+  });
+  const r = run(INLINE_PLAN, repo);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /ok/);
+});
+
+test("an unlisted test consumer is still a hard failure when the Files field is inline", () => {
+  const repo = makeRepo({
+    "src/widget.mjs": "export function widget() {}",
+    "tests/unit/widget.test.mjs": "import { widget } from '../../src/widget.mjs';",
+  });
+  const r = run("# Plan\n### Task 1: Change widget\n**Files:** Modify `src/widget.mjs`\n## Dispatch Map\n- Wave 1: Task 1\n", repo);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /widget\.test\.mjs.*references/s);
+});

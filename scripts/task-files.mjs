@@ -40,7 +40,18 @@ export function parseFileList(csv) {
 // change to the heading format silently emptied two of them. Consumers: brief-completeness-check,
 // wave-disjointness-check, blast-radius-check.
 const TASK_HEADING_RE = /^### Task (\d+):.*$/gm;
-const FILES_BLOCK_RE = /\*\*Files:\*\*\n([\s\S]*?)(?=\n\*\*|\n###|$)/;
+// The value may begin on the line after the label or on the label's own line -- plans write both,
+// and a grammar that accepted only the first read every inline declaration as no files at all,
+// while brief-completeness-check read the same line as a valid field. The terminator is the one
+// every other field uses: the next **Field:**, the next ### heading, or end of input.
+const FILES_FIELD_RE = /\*\*Files:\*\*([\s\S]*?)(?=\n\*\*|\n###|$)/;
+
+// The one reader for a task's **Files:** field. Returns null when the field is absent and "" when
+// it is present but carries no value, so a caller can tell those two apart.
+export function filesFieldValue(block) {
+  const m = block.match(FILES_FIELD_RE);
+  return m ? m[1].trim() : null;
+}
 
 export function taskBlocks(planText) {
   const headings = [...planText.matchAll(TASK_HEADING_RE)];
@@ -56,8 +67,8 @@ export function taskBlocks(planText) {
 export function taskFileMap(planText) {
   const map = new Map();
   for (const { num, text } of taskBlocks(planText)) {
-    const m = text.match(FILES_BLOCK_RE);
-    if (m) map.set(num, extractFiles(m[1]));
+    const value = filesFieldValue(text);
+    if (value !== null) map.set(num, extractFiles(value));
   }
   return map;
 }

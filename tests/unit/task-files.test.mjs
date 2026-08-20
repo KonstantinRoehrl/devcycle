@@ -7,6 +7,7 @@ import {
   taskBlocks,
   taskFileMap,
   parseDispatchMap,
+  filesFieldValue,
 } from "../../scripts/task-files.mjs";
 
 test("normalizeFileToken strips ranges, backticks, and rejects non-paths", () => {
@@ -87,4 +88,51 @@ test("parseDispatchMap returns null when no Dispatch Map heading exists", () => 
 
 test("taskBlocks returns an empty array for a document with no task headings", () => {
   assert.deepEqual(taskBlocks("# Not a plan\n\nProse only.\n"), []);
+});
+
+// A plan writes the same declaration two ways: the value on the line after the label (block form)
+// and the value on the label's own line (inline form -- the form
+// docs/superpowers/plans/2026-07-26-compact-profile-driven-devcycle.md writes every Files field
+// in). One grammar owns both, so neither may parse to a different file set than the other.
+const INLINE_PLAN = [
+  "### Task 1: First",
+  "",
+  "**Files:** Modify `scripts/a.mjs`, Test: `tests/unit/a.test.mjs`",
+  "",
+  "**Evidence:** red-green",
+  "",
+  "## Dispatch Map",
+  "- Wave 1: Task 1",
+  "",
+].join("\n");
+
+test("taskFileMap reads a Files field whose value starts on the label's own line", () => {
+  const files = taskFileMap(INLINE_PLAN).get(1) ?? new Set();
+  assert.deepEqual([...files].sort(), ["scripts/a.mjs", "tests/unit/a.test.mjs"]);
+});
+
+test("the inline and block forms of one declaration parse to the same file set", () => {
+  const decl = "Modify `scripts/a.mjs`. Test: `tests/unit/a.test.mjs`";
+  const inline = `### Task 1: T\n**Files:** ${decl}\n\n**Evidence:** red-green\n`;
+  const block = `### Task 1: T\n**Files:**\n${decl}\n\n**Evidence:** red-green\n`;
+  const inlineFiles = taskFileMap(inline).get(1) ?? new Set();
+  assert.ok(inlineFiles.size > 0, "the inline form must not parse to an empty file set");
+  assert.deepEqual([...inlineFiles], [...taskFileMap(block).get(1)]);
+});
+
+test("filesFieldValue tells an absent Files field apart from an empty one", () => {
+  assert.equal(filesFieldValue("### Task 1: T\n**Interfaces:** none\n"), null);
+  assert.equal(filesFieldValue("### Task 1: T\n**Files:**\n**Interfaces:** none\n"), "");
+  assert.equal(filesFieldValue("### Task 1: T\n**Files:** `a.mjs`\n"), "`a.mjs`");
+});
+
+test("the Files field ends at the next bolded field, the next task heading, or end of input", () => {
+  assert.equal(filesFieldValue("**Files:** `a.mjs`\n**Interfaces:** none\n"), "`a.mjs`");
+  assert.equal(filesFieldValue("**Files:** `a.mjs`\n### Task 2: Next\n**Files:** `b.mjs`\n"), "`a.mjs`");
+  assert.equal(filesFieldValue("**Files:** `a.mjs`\n"), "`a.mjs`");
+});
+
+test("a task with no Files field at all is absent from the map, so the gates can still hard-fail", () => {
+  const noFiles = "### Task 1: T\n**Interfaces:** none\n\n## Dispatch Map\n- Wave 1: Task 1\n";
+  assert.equal(taskFileMap(noFiles).size, 0);
 });

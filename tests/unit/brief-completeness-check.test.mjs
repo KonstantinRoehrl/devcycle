@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { taskFileMap } from "../../scripts/task-files.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/brief-completeness-check.mjs");
 
@@ -106,4 +107,26 @@ test("fails when a required field is present but blank", () => {
   const r = run(COMPLETE.replace("**Dependencies:** none (completely independent)", "**Dependencies:**"));
   assert.equal(r.code, 1);
   assert.match(r.out, /\*\*Dependencies:\*\* field is empty/);
+});
+
+const INLINE_FILES = COMPLETE.replace("**Files:**\n- Create: `a.mjs`", "**Files:** Create `a.mjs`");
+
+test("the Files field this gate accepts is the same one the plan gates parse", () => {
+  // One grammar owns **Files:**. If this gate accepts a declaration the shared owner cannot see,
+  // a plan passes brief-completeness and then dies in wave-disjointness on a "no blocks found".
+  const r = run(INLINE_FILES);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual([...(taskFileMap(INLINE_FILES).get(1) ?? new Set())], ["a.mjs"]);
+});
+
+test("a missing Files field is still named as missing", () => {
+  const r = run(COMPLETE.replace("**Files:**\n- Create: `a.mjs`\n", ""));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Task 1: missing \*\*Files:\*\* field/);
+});
+
+test("a Files field present but blank is still named as empty", () => {
+  const r = run(COMPLETE.replace("**Files:**\n- Create: `a.mjs`", "**Files:**"));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Task 1: \*\*Files:\*\* field is empty/);
 });

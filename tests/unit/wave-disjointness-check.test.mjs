@@ -185,3 +185,61 @@ test("a plan whose tasks carry no **Files:** block is an error naming that condi
     },
   );
 });
+
+test("a Files field written inline on its own label line is read, not reported as missing", () => {
+  const { dir, planPath } = makeFixture(
+    `# Fixture Plan
+
+### Task 1: First
+**Files:** Create \`scripts/one.mjs\`, Test: \`tests/unit/one.test.mjs\`
+
+**Interfaces:** none
+
+### Task 2: Second
+**Files:** Create \`scripts/two.mjs\`
+
+**Interfaces:** none
+
+## Dispatch Map
+- Wave 1: Task 1, Task 2 (file-disjoint, no dependencies)
+`
+  );
+  try {
+    const out = execFileSync(process.execPath, [SCRIPT, planPath], PIPE);
+    assert.match(out, /ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a same-wave overlap is still caught when both tasks declare their files inline", () => {
+  const { dir, planPath } = makeFixture(
+    `# Fixture Plan
+
+### Task 1: First
+**Files:** Create \`scripts/shared.mjs\`
+
+**Interfaces:** none
+
+### Task 2: Second
+**Files:** Modify \`scripts/shared.mjs\`
+
+**Interfaces:** none
+
+## Dispatch Map
+- Wave 1: Task 1, Task 2 (file-disjoint, no dependencies)
+`
+  );
+  try {
+    let stderr = "";
+    assert.throws(() => {
+      execFileSync(process.execPath, [SCRIPT, planPath], PIPE);
+    }, (err) => {
+      stderr = (err.stdout ?? "") + (err.stderr ?? "");
+      return err.status === 1;
+    });
+    assert.match(stderr, /Wave 1 -- Task 1 and Task 2 both list scripts\/shared\.mjs/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
