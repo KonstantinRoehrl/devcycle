@@ -91,11 +91,12 @@ reason to re-promote it. With nothing scored yet, the section renders the single
   <verdict>` — one per culprit whose vocabulary entry claims a `resolved-in` version, verdict
   `unmeasurable` until the installed version reaches that mark and a run is observed against it.
 
-An r3 lesson's `verify:` check is not executed by a report: `node scripts/doctor.mjs` and
-`node scripts/dream.mjs --check-recurrence` both need an explicit `--run-checks` to run it, and
-without the flag the row reads `unmeasurable — <check> (not run: pass --run-checks)`. Promotion
-records are committed markdown, so running one is a deliberate act rather than a side effect of
-asking for a report.
+An r3 lesson's `verify:` check is not executed by a report: both
+`node ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs` and
+`node ${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs --check-recurrence` need an explicit
+`--run-checks` to run it, and without the flag the row reads `unmeasurable — <check> (not run:
+pass --run-checks)`. Promotion records are committed markdown, so running one is a deliberate
+act rather than a side effect of asking for a report.
 
 - A `recurred` r2 culprit also renders an escalation entry point in the same section —
   `Actionability — /devcycle:cycle re-address <culprit-id> (recurred N×; escalate from r2)` — and,
