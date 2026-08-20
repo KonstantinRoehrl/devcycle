@@ -173,11 +173,12 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
      test: if the lesson still reads correctly with every repo-specific noun replaced by "the
      project", it is also mirrored to the user's global store.
    - A `legacyDuplicateOf` hint is shown to the user as a hint and never acted on automatically.
-5. **Resolve every eviction before landing.** A landing into a full section arrives with an
-   `evictions[]` entry naming the line it would displace, least-recently-recurred first — the
-   oldest `landed` date breaks the tie when the journal is cold. Show it as "landing X evicts Y".
-   **The edit cannot land unresolved**: either the user approves the eviction or the landing is
-   deferred.
+5. **Resolve every eviction before landing.** Ask the engine which line a landing displaces rather
+   than working the ordering out: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --plan-landing
+   --stage <stage> --line "<the candidate's lesson line>" [--store repo|user-repo|user-global]`.
+   It prints `{"fits": true, "eviction": null}` while the section is under cap, and otherwise
+   names the displaced line's culprit-id. Show it as "landing X evicts Y". **The edit cannot land
+   unresolved**: either the user approves the eviction or the landing is deferred.
 6. **Surface any retirement or revert candidates** raised since the last run, proposed exactly like
    fresh candidates — this runs live. A **retirement** candidate is a `held` r1/r2 lesson past 10
    runs or 90 days; it proposes deleting the line and writing a **retirement** lifecycle record. A
@@ -186,6 +187,13 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
    predate squash-merging and often do not resolve on the integration branch. Both carry the
    prior-lifecycle hint: a lifecycle record surfaces here as advice, never a hard suppression (the
    D-5 hint pattern), so re-proposing a retired or reverted lesson stays a human call.
+
+   Write either record with the lifecycle writer, which tags it so it never reads back as a
+   landing: write the JSON to a scratch file and pass it as
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --record-lifecycle "$(cat <scratch-file>)"`.
+   `--record-promotion` would write a promotion-shaped record instead, so a retirement or revert
+   recorded through it never suppresses re-proposal and never reaches the report's retirement
+   counts.
 
    The rendered report's summary carries an `Always-loaded budget: <n> bytes (within budget)` line —
    the net bytes this run adds to the always-loaded surfaces — which reads `over budget — a same-run
