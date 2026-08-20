@@ -1860,7 +1860,7 @@ test("C6: docs/known-issues.md records open defects only — no fixed entry surv
     [],
     "CONTRIBUTING.md:138-139 owns this rule and wins: fixing a defect deletes its entry. A " +
       "heading still carrying a fixed-marker is an entry that should have been deleted, in a " +
-      "file README.md:509 links as \"Open defects\""
+      "file README.md links to as \"Open defects\""
   );
 });
 
