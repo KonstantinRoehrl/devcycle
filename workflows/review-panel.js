@@ -87,6 +87,8 @@ async function mapLimit(items, limit, fn) {
   return results;
 }
 
+// ---------- shared agent CLI binding ----------
+
 // Panel-side binding of the shared structured-agent call: two attempts, so one
 // transport or validation failure is retried, and the panel's own error
 // vocabulary. Its three call sites are unchanged.

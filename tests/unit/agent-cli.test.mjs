@@ -158,14 +158,18 @@ test("claudeStructured reports an agent that outlives its timeout in the caller'
   assert.equal(res.error, "editor agent timed out", "the sweep surfaces this string verbatim; a generic one would hide which agent hung");
 });
 
-// 200ms, not the 50ms above: here each attempt has to survive long enough for a
-// warm Node to reach its first line (~30-50ms measured), because the count of
-// those lines is the assertion.
+// 1500ms, not the 50ms above: here the number of attempts is the assertion, so
+// every attempt has to survive long enough to spawn a fresh Node, run its
+// shebang and append its line (~30-50ms measured). Each retry gets its own
+// independent timer, so the window is per attempt, not a shared budget. The
+// margin is deliberately ~30x that baseline rather than a snug one: a loaded
+// runner that misses the window makes a correct retry loop fail the count. The
+// cost of that headroom is ~3s of suite time, two attempts of 1500ms each.
 test("claudeStructured retries a timed-out agent and reports the timeout after the last attempt", async () => {
   const tries = join(mkdtempSync(join(tmpdir(), "devcycle-agent-cli-timeout-tries-")), "tries.log");
   const bin = await makeStalledClaude(`require("node:fs").appendFileSync(${JSON.stringify(tries)}, "x");`);
   const res = await withPath(isolatedPath([bin]), () =>
-    withShortAgentTimeout(200, () =>
+    withShortAgentTimeout(1500, () =>
       claudeStructured({
         prompt: "p",
         tools: "Read",
