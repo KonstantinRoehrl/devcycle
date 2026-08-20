@@ -10,8 +10,11 @@ export const TEST_FILE_SUFFIXES = [".test.mjs", ".test.js", ".test.ts", "_test.p
 // has already asserted every token is a file, so a top-level extensionless name (Dockerfile,
 // Makefile, LICENSE) must survive. The **Files:**-block path leaves it off, keeping the gate that
 // rejects surrounding prose. The label and :N-M/`:` stripping are shared by both paths.
+// The trailing class includes `.` because an inline declaration ends its clause with one
+// ("Modify `scripts/a.mjs`. Test: ..."); a token that keeps it is a different string from its
+// bare twin, and wave-disjointness — which keys on the exact string — then misses the collision.
 export function normalizeFileToken(raw, { trusted = false } = {}) {
-  let tok = String(raw).replace(/^[`(),]+/, "").replace(/[`(),]+$/, "");
+  let tok = String(raw).replace(/^[`(),]+/, "").replace(/[`(),.]+$/, "");
   tok = tok.replace(/:\d+-\d+$/, "").replace(/:$/, "");
   if (!tok || LABELS.has(tok) || tok === "-") return null;
   if (!trusted && !/\//.test(tok) && !/\.[A-Za-z0-9]+$/.test(tok)) return null;
@@ -44,7 +47,12 @@ const TASK_HEADING_RE = /^### Task (\d+):.*$/gm;
 // and a grammar that accepted only the first read every inline declaration as no files at all,
 // while brief-completeness-check read the same line as a valid field. The terminator is the one
 // every other field uses: the next **Field:**, the next ### heading, or end of input.
-const FILES_FIELD_RE = /\*\*Files:\*\*([\s\S]*?)(?=\n\*\*|\n###|$)/;
+// The label is anchored to line start: a mid-line mention of the literal **Files:** in a task's
+// prose or a fenced example would otherwise be a match candidate, and the non-global .match below
+// takes the FIRST one — so the prose parsed instead of the declaration. The anchor is written as
+// an alternation rather than the `m` flag, which would also redefine the `$` in the terminator
+// lookahead and move where a field ends.
+const FILES_FIELD_RE = /(?:^|(?<=\n))\*\*Files:\*\*([\s\S]*?)(?=\n\*\*|\n###|$)/;
 
 // The one reader for a task's **Files:** field. Returns null when the field is absent and "" when
 // it is present but carries no value, so a caller can tell those two apart.

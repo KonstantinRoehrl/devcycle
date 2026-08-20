@@ -31,7 +31,11 @@ if (taskBlocks(text).length === 0) {
   console.error(`wave-disjointness-check: no "### Task N" blocks found in ${planPath}`);
   process.exit(1);
 }
-if (filesByTask.size === 0) {
+// Counted in files, not in tasks carrying the field: a task declaring "**Files:** none" puts an
+// empty set in the map, so a task count called that plan clean while blast-radius-check -- which
+// counts the same normalized tokens this line now counts -- hard-failed on it.
+const declaredFileCount = [...filesByTask.values()].reduce((n, files) => n + files.size, 0);
+if (declaredFileCount === 0) {
   console.error(`wave-disjointness-check: no "**Files:**" blocks found in ${planPath}`);
   process.exit(1);
 }

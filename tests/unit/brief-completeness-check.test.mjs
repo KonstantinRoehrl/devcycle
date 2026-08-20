@@ -130,3 +130,16 @@ test("a Files field present but blank is still named as empty", () => {
   assert.equal(r.code, 1);
   assert.match(r.out, /Task 1: \*\*Files:\*\* field is empty/);
 });
+
+test("a mid-line mention of the Files label is not a Files field -- the shared-owner delegation, pinned", () => {
+  // readField hands **Files:** to task-files.mjs, whose grammar anchors the label to line start;
+  // this gate's own generic field regex does not. So a brief that only mentions the label in
+  // prose reads as a present, non-empty field the moment that delegation is reverted.
+  const prose = COMPLETE.replace(
+    "**Files:**\n- Create: `a.mjs`\n",
+    "Every task's **Files:** list is authoritative.\n",
+  );
+  const r = run(prose);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: missing \*\*Files:\*\* field/);
+});
