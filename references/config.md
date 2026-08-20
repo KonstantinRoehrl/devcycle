@@ -291,13 +291,21 @@ the orchestrator — resolution dispatches with no model override at all, the on
 form that cannot exceed the orchestrator by construction. A clamp is logged, never
 silent.
 
-`${CLAUDE_PLUGIN_ROOT}/scripts/model-pool.mjs` is this policy's single implementation:
-`parsePool`, `rungFor`, `rank` and `resolveModel` decide exactly what is written
-above — the pin, pool, ladder and ceiling arithmetic, and nothing else. The `auto`
-predicates above stay with the caller, which is why an unset knob returns `model
-session (auto)` from that module rather than a derived tier: the caller derives, the
-module only keeps the result under the ceiling. Its `outcome` return value is the
-audit string below. This text owns the policy; that module owns the arithmetic.
+**Resolving a configured knob.** When a `*Model` knob resolves to a single id or a
+comma-separated pool — never for `auto` or an unsubstituted `${user_config…}` placeholder, which
+this section already treats as unset — run the pin, pool, ladder and ceiling arithmetic rather
+than reasoning it out:
+
+    node "${CLAUDE_PLUGIN_ROOT}/scripts/model-pool.mjs" --value "<the knob's value>" \
+      --orchestrator "<this session's own model id>" --signals <escalation signals fired>
+
+It prints one line of JSON — `{"model": "<id>"|null, "outcome": "<audit string>"}`. Dispatch on
+`model`, with `null` meaning dispatch with no model override at all, and record `outcome` verbatim
+as the ledger event's `outcome=` field: it is already written in every form the Auditability
+paragraph below enumerates. Pass `--signals Infinity` for `walkthroughModel` and
+`branchReviewModel`, which have no complexity predicate and saturate the ladder. The `auto`
+predicates above stay with the caller — the caller derives, this module only keeps the result
+under the ceiling, which is why an unset knob needs no invocation at all.
 
 Upstream's Model Selection tiers are background only; these predicates
 decide. Auditability: every dispatch's ledger event records the decision and
