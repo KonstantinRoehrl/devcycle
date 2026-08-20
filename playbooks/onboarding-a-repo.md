@@ -62,14 +62,18 @@ package directory its own `CLAUDE.md` stub, in addition to the root file.
 4. **The verification command** is the scaffolded `CLAUDE.md`'s own `Test:` line — where the
    green gate and this repo's CI find it. No separate state file.
 
-5. **`.gitignore` doc-tracking setup.** Resolve `${user_config.docTrackingPolicy}` per
-   `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, then read down that table's
-   column for the resolved policy: each row whose cell keeps the artifact out of a commit
-   contributes that row's path as one line in the host repo's `.gitignore` (creating it if
-   absent), and every other row is left trackable — so the resolved policy "just works" with
-   no manual edit. Append only the lines the policy calls for — never touch existing entries,
-   and never add a line already covered by one already there; the repo's own `.gitignore`
-   always wins over anything devcycle proposes.
+5. **`.gitignore` doc-tracking setup.** Into the host repo's `.gitignore` (creating it if
+   absent) goes `.devcycle/` unconditionally — run scratch no policy tracks. For the rest,
+   resolve `${user_config.docTrackingPolicy}` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`
+   § Doc tracking and read down that table's column for the resolved policy, taking **only rows
+   whose cell in it reads `local` or `commit`**: a cell in any other vocabulary states a
+   boundary, not a policy, and contributes no line under any policy. Each `local` cell
+   contributes its row's path verbatim, never widened to the tree around it — that path is what
+   devcycle writes, while the enclosing directory also holds the host's own files and sibling
+   artifacts this same table marks `commit`. `commit` cells stay trackable, so the resolved
+   policy "just works" with no manual edit. Append only the lines the policy calls for — never
+   touch existing entries, and never add a line already covered by one already there; the
+   repo's own `.gitignore` always wins over anything devcycle proposes.
 
 6. **Commit the scaffold**, scoped per
    `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit": the root
