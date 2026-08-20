@@ -213,15 +213,35 @@ same change. See `docs/DECISIONS.md`.]
 **What was tried.** The browser guard (`hooks/block-main-thread-browser.mjs`) allowlists the
 `on-device-driver` subagent by comparing the hook input's `agent_type`. Whether the harness passes
 the bare frontmatter `name:` or the plugin-namespaced dispatch id decides whether the guard permits
-the one agent it exists to permit, and no unit test in this repo can observe it.
+the one agent it exists to permit, and no unit test in this repo can observe it: every unit test
+feeds the hook a hand-written body.
 
-1. The field's provenance was already pinned from the installed binary (header of
+The field was therefore read off the running harness, in the on-device stage of the cycle that
+fixed the guard (Claude Code 2.1.237, macOS arm64, 2026-08-20). Because the hook renders
+`agent_type` only on its deny path, the reading took two passes over the installed plugin's hook
+file — first a copy whose `ALLOWED_AGENT_TYPES` was emptied, so every origin was denied and named
+itself, then the real one. The installed file was restored afterwards and verified by sha against
+`git show 58e5611:hooks/block-main-thread-browser.mjs`.
+
+1. **Observed, all three origins.** Under the emptied allowlist:
+
+   ```
+   coordinator main thread          (agent_type seen: (absent))
+   devcycle:on-device-driver        (agent_type seen: "devcycle:on-device-driver")
+   general-purpose                  (agent_type seen: "general-purpose")
+   ```
+
+   `(absent)` is the hook's rendering for `undefined`; an empty or whitespace-only string renders
+   `(empty)`. So on the main thread the key is missing from the stdin JSON entirely.
+
+2. **Corroborated from the installed binary** (header of
    `tests/unit/block-main-thread-browser.test.mjs`, Claude Code 2.1.235): the hook-input builder
    emits `agent_type: o` where `o = n?.agentType ?? hookRegistry.mainThreadAgentType()`. The hook
-   therefore receives whatever the session records as `agentType`.
+   therefore receives whatever the session records as `agentType` — which is why the counts below
+   describe the same field the readings above came from.
 
-2. That same field is written into every transcript record, so the shape can be counted directly.
-   Over this repo's own sessions, 2026-08-20:
+3. That same field is written into every transcript record, so the shape can be counted across
+   agents this walkthrough did not dispatch. Over this repo's own sessions, 2026-08-20:
 
    ```
    ❯ grep -roh '"agentType":"[^"]*"' ~/.claude/projects/<this repo's transcript dir> \
@@ -241,13 +261,26 @@ the one agent it exists to permit, and no unit test in this repo can observe it.
    carry no prefix, which is exactly what the namespace disambiguates.
 
 **Exact result.** A plugin agent's `agent_type` is `<plugin>:<frontmatter name>` —
-`devcycle:on-device-driver` for this plugin's driver. On the main thread the key is absent from the
-stdin JSON entirely (binary-derived, above), not an empty string.
+`devcycle:on-device-driver` for this plugin's driver, read off the running harness. On the main
+thread the key is absent from the stdin JSON entirely, not an empty string.
 
 **Consequence for the plan.** The guard's original `agentType === "on-device-driver"` comparison
 matched nothing it ever saw: it denied the driver as readily as the main thread, so the on-device
-stage could not run at all. Both spellings are now pinned in `ALLOWED_AGENT_TYPES` and asserted in
+stage could not run at all. That is not a deduction — it was reproduced against the released hook
+in the same session, one file apart:
+
+| installed hook | main thread | `devcycle:on-device-driver` | `general-purpose` |
+| --- | --- | --- | --- |
+| released 0.14.1 | denied | **denied** — the bug | denied |
+| fixed (this file's guard) | denied | **permitted, reached Chrome** | denied |
+
+The released hook's denial also carries no `(agent_type seen: …)` suffix, so on that version a
+spelling mismatch was indistinguishable from an ordinary main-thread denial — which is why the
+defect surfaced in an audit rather than as a symptom.
+
+Both spellings are now pinned in `ALLOWED_AGENT_TYPES` and asserted in
 `tests/unit/golden-path.test.mjs` against the agent's frontmatter `name:` and the plugin's own name.
 The bare spelling is kept because it is what the frontmatter declares and what a future harness
-change could plausibly pass; stripping a `<plugin>:` prefix instead was rejected because it would
-also admit another plugin's agent that happens to share the name.
+change could plausibly pass — a by-hand run confirms the guard admits it today, so the fix does not
+depend on the harness continuing to namespace. Stripping a `<plugin>:` prefix instead was rejected
+because it would also admit another plugin's agent that happens to share the name.
