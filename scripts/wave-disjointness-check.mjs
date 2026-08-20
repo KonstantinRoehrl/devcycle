@@ -36,7 +36,13 @@ if (taskBlocks(text).length === 0) {
 // counts the same normalized tokens this line now counts -- hard-failed on it.
 const declaredFileCount = [...filesByTask.values()].reduce((n, files) => n + files.size, 0);
 if (declaredFileCount === 0) {
-  console.error(`wave-disjointness-check: no "**Files:**" blocks found in ${planPath}`);
+  // A plan whose blocks say "**Files:** none" is a different repair from one with no blocks at
+  // all, and telling that author the blocks are missing sends them looking for a field they wrote.
+  const message =
+    filesByTask.size === 0
+      ? `no "**Files:**" blocks found in ${planPath}`
+      : `no task in ${planPath} declares a file -- its "**Files:**" blocks are present but empty`;
+  console.error(`wave-disjointness-check: ${message}`);
   process.exit(1);
 }
 

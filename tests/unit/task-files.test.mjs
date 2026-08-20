@@ -169,3 +169,38 @@ test("a task with no Files field at all is absent from the map, so the gates can
   const noFiles = "### Task 1: T\n**Interfaces:** none\n\n## Dispatch Map\n- Wave 1: Task 1\n";
   assert.equal(taskFileMap(noFiles).size, 0);
 });
+
+test("a trailing period comes off a path-shaped token and stays on a prose abbreviation", () => {
+  // The period strip exists so "Modify `scripts/a.mjs`." is the same token as its bare twin. Run
+  // unconditionally it also rewrites prose: "e.g." became "e.g", which the extension gate then
+  // accepted, so two tasks that merely both wrote "e.g." collided on a file that does not exist.
+  const table = [
+    ["`scripts/a.mjs`.", "scripts/a.mjs"],
+    ["`README.md`.", "README.md"],
+    ["a/b.mjs.", "a/b.mjs"],
+    ["scripts/a.mjs:12-40.", "scripts/a.mjs"],
+    ["scripts/a.mjs", "scripts/a.mjs"],
+    ["docs/x.md,", "docs/x.md"],
+    ["./x.mjs", "./x.mjs"],
+    ["../rel/p.mjs", "../rel/p.mjs"],
+    ["a.b.c.mjs", "a.b.c.mjs"],
+    ["e.g.", null],
+    ["i.e.", null],
+    ["Node.js.", null],
+    ["0.5.", null],
+    ["etc.", null],
+    ["...", null],
+    ["..", null],
+    // A bare extensionless basename stays prose on this path (F55, owned by C9).
+    ["Dockerfile", null],
+    ["Makefile", null],
+  ];
+  for (const [raw, expected] of table) {
+    assert.equal(normalizeFileToken(raw), expected, `normalizeFileToken(${JSON.stringify(raw)})`);
+  }
+});
+
+test("extractFiles reads the declaration in a Files block and none of the prose around it", () => {
+  const block = "Modify `scripts/a.mjs` -- the loader, e.g. the cache band. Node.js. 0.5. etc.";
+  assert.deepEqual([...extractFiles(block)], ["scripts/a.mjs"]);
+});

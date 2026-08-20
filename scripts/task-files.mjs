@@ -13,8 +13,13 @@ export const TEST_FILE_SUFFIXES = [".test.mjs", ".test.js", ".test.ts", "_test.p
 // The trailing class includes `.` because an inline declaration ends its clause with one
 // ("Modify `scripts/a.mjs`. Test: ..."); a token that keeps it is a different string from its
 // bare twin, and wave-disjointness — which keys on the exact string — then misses the collision.
+// But only for a token that already announced itself as a path, by code-span backticks or a `/`:
+// in prose the trailing period belongs to the word, and stripping it off "e.g." or "Node.js."
+// leaves something the extension gate below accepts, so surrounding prose became a declared file.
 export function normalizeFileToken(raw, { trusted = false } = {}) {
-  let tok = String(raw).replace(/^[`(),]+/, "").replace(/[`(),.]+$/, "");
+  const text = String(raw);
+  const declaresAPath = text.includes("`") || text.includes("/");
+  let tok = text.replace(/^[`(),]+/, "").replace(declaresAPath ? /[`(),.]+$/ : /[`(),]+$/, "");
   tok = tok.replace(/:\d+-\d+$/, "").replace(/:$/, "");
   if (!tok || LABELS.has(tok) || tok === "-") return null;
   if (!trusted && !/\//.test(tok) && !/\.[A-Za-z0-9]+$/.test(tok)) return null;

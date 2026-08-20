@@ -291,10 +291,35 @@ test("a plan whose Files fields are present but name no file is an error, not an
       () => execFileSync(process.execPath, [SCRIPT, planPath], PIPE),
       (err) => {
         assert.equal(err.status, 1);
-        assert.match(err.stderr, /no "\*\*Files:\*\*" blocks found/);
+        assert.match(err.stderr, /"\*\*Files:\*\*" blocks are present but empty/);
+        // The blocks ARE there and say "none": reporting them missing sends the plan author
+        // looking for a field that is already written.
+        assert.doesNotMatch(err.stderr, /no "\*\*Files:\*\*" blocks found/);
         return true;
       },
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("two same-wave tasks whose Files prose both says \"e.g.\" are not a collision", () => {
+  // A trailing period stripped off prose left "e.g" -- a token the path-shape gate accepts -- so
+  // both tasks declared the same nonexistent file and this gate blocked a disjoint plan.
+  const { dir, planPath } = makeFixture(
+    `### Task 1: A
+**Files:** Modify \`scripts/one.mjs\` -- the loader, e.g. the cache band.
+
+### Task 2: B
+**Files:** Modify \`scripts/two.mjs\` -- the writer, e.g. the run record.
+
+## Dispatch Map
+- Wave 1: Task 1, Task 2
+`
+  );
+  try {
+    const out = execFileSync(process.execPath, [SCRIPT, planPath], PIPE);
+    assert.match(out, /ok/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
