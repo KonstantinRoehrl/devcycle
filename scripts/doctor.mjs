@@ -75,6 +75,10 @@ const KNOWN_FLAGS = [
 // Throws rather than exiting on a usage error: doctor.mjs is imported by dream.mjs, so a
 // process.exit inside the parser would take the importer down with it. main() catches and prints
 // with doctor's own prefix.
+//
+// Only flags are read here, and cli-flags.mjs refuses a bare token by default, so `doctor.mjs
+// /fixture` -- the natural slip for `--dir /fixture` -- is a usage error rather than a clean
+// report about the operator's real home corpus.
 export function parseArgs(argv) {
   const { flags } = parseFlags(argv, KNOWN_FLAGS);
   // Each flag says what it wants: --since/--until are dates and --issue-body is a culprit name,

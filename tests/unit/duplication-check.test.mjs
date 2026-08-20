@@ -342,3 +342,21 @@ test("--dir with no value is a usage error", () => {
     },
   );
 });
+
+// Dropping the flag name leaves a bare token with nothing misspelled to notice: the token used
+// to be discarded, so the run scanned the cwd instead of the directory the caller named and
+// reported that unrelated corpus clean.
+test("a bare path is an error, not a silent scan of the cwd", () => {
+  const dir = makeFixture({ "references/a.md": "# A\n" });
+  assert.throws(
+    () => execFileSync("node", [SCRIPT, dir], { cwd: dir, ...PIPE }),
+    (err) => {
+      assert.equal(err.status, 1);
+      assert.ok(
+        err.stderr.includes(`duplication-check: unexpected argument "${dir}"`),
+        `stderr must name the token it refused, got: ${err.stderr}`,
+      );
+      return true;
+    },
+  );
+});

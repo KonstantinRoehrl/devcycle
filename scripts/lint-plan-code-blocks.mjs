@@ -23,7 +23,9 @@ const KNOWN_FLAGS = ["--dir"];
 let root = null;
 let explicitPath = null;
 try {
-  const { flags, positionals } = parseFlags(args, KNOWN_FLAGS);
+  // The only script here that legitimately takes a positional, so it is the only one that opts
+  // out of cli-flags.mjs's default refusal of bare tokens.
+  const { flags, positionals } = parseFlags(args, KNOWN_FLAGS, { allowPositionals: true });
   if (positionals.length > 1) die(`${USAGE}\nlint-plan-code-blocks: unexpected extra argument "${positionals[1]}"`);
   root = requireValue(flags, "--dir") ?? null;
   explicitPath = positionals[0] ?? null;

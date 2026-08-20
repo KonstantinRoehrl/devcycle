@@ -20,10 +20,27 @@ test("a flag followed by another flag has a missing value, not a borrowed one", 
   assert.equal(flags["--file"], "f");
 });
 
-test("positionals are collected, not discarded", () => {
-  const { flags, positionals } = parseFlags(["plan.md", "--dir", "x", "extra"], KNOWN);
+// A dropped flag *name* leaves a bare token behind -- `--dir /fixture` typed as `/fixture` --
+// and a consumer that destructures only `{ flags }` runs against its default corpus while
+// reporting a confident green. That is the same failure as a misspelled flag, so the owner
+// refuses it by default rather than leaving each consumer to remember the check.
+test("an unconsumed positional throws by default, naming the token", () => {
+  assert.throws(() => parseFlags(["/fixture"], KNOWN), /unexpected argument "\/fixture"/);
+  assert.throws(() => parseFlags(["--dir", "x", "extra"], KNOWN), /unexpected argument "extra"/);
+});
+
+// The one legitimate positional-taking consumer -- lint-plan-code-blocks, which takes a plan
+// path alongside --dir -- opts in and still gets every positional, in argv order.
+test("a caller that takes positionals opts in and still gets them all", () => {
+  const { flags, positionals } = parseFlags(["plan.md", "--dir", "x", "extra"], KNOWN, {
+    allowPositionals: true,
+  });
   assert.deepEqual(positionals, ["plan.md", "extra"]);
   assert.equal(flags["--dir"], "x");
+});
+
+test("the default still returns the documented shape, with no positionals", () => {
+  assert.deepEqual(parseFlags(["--dir", "x"], KNOWN), { flags: { "--dir": "x" }, positionals: [] });
 });
 
 test("requireValue rejects a present-but-empty value and passes an absent flag through", () => {

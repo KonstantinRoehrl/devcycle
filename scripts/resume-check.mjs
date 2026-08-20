@@ -31,8 +31,9 @@ try {
   const { flags } = parseFlags(args, KNOWN_FLAGS);
   statePath = requireValue(flags, "--state") ?? statePath;
 } catch (err) {
-  // A flag whose value is missing, or that was never read at all, is a usage error -- never a
-  // silently absent flag resolving to the default state file.
+  // A flag whose value is missing, that was never read at all, or whose name was dropped so only
+  // a bare path arrived, is a usage error -- never a silently absent flag resolving to the default
+  // state file while the caller had named a different one.
   console.error(`resume-check: ${err.message}`);
   console.error("resume-check: usage: resume-check.mjs [--state <path>]");
   process.exit(1);

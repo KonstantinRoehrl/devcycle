@@ -27,7 +27,9 @@ const KNOWN_FLAGS = ["--file", "--dir", "--hashes", "--auto-redact"];
 // such as `--fil`) and a flag whose value is missing or blank are both hard errors rather
 // than silent pass-throughs — `--dir .devcycle` is this script's privacy gate over files
 // `git ls-files` cannot see, and a caller whose flag was never read still gets `redaction: ok`
-// against the wrong corpus.
+// against the wrong corpus. A dropped flag name is the same false green: this script takes no
+// positional, so cli-flags.mjs refuses the bare token in `redaction-check.mjs .devcycle` rather
+// than falling back to `git ls-files` and reporting a corpus it never opened clean.
 let flags;
 try {
   ({ flags } = parseFlags(args, KNOWN_FLAGS));

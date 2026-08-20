@@ -1966,6 +1966,18 @@ test("parseArgs rejects a --dir with no value", () => {
   assert.throws(() => parseArgs(["--dir"]), /--dir requires a path argument/);
 });
 
+// Dropping the flag *name* is the same failure with no misspelling to notice: `doctor.mjs
+// /fixture` is the natural slip for `--dir /fixture`, and the bare token used to be collected
+// and discarded, so doctor profiled the operator's real ~/.claude/projects and printed a clean
+// report about a corpus they never asked about.
+test("parseArgs rejects a bare path instead of profiling the real home corpus", () => {
+  assert.throws(() => parseArgs(["/tmp/fixture"]), /unexpected argument "\/tmp\/fixture"/);
+  assert.throws(
+    () => parseArgs(["--since", "2026-07-01", "/tmp/fixture"]),
+    /unexpected argument "\/tmp\/fixture"/,
+  );
+});
+
 // The message an operator reads has to name what the flag actually wants. `--since` and `--until`
 // are dates and `--issue-body` is a culprit name, so telling any of them to supply "a path"
 // sends the operator looking for a file that was never involved.

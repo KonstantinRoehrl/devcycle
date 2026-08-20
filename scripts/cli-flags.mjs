@@ -9,7 +9,15 @@
 // Parses both calling conventions the scripts use -- the space form (`--file x`) and the equals
 // form (`--file=x`) -- and returns non-flag tokens separately so a caller taking a positional path
 // still sees it.
-export function parseFlags(argv, knownFlags) {
+//
+// A bare token is refused by default, because dropping a flag *name* is the same false green as
+// misspelling one and has nothing misspelled to notice: `doctor.mjs /fixture` is the natural slip
+// for `--dir /fixture`, and a caller that destructured only `{ flags }` profiled its default corpus
+// -- the operator's real ~/.claude/projects -- and printed a confident, clean report about it. The
+// rule therefore lives here rather than in each consumer's memory. `allowPositionals` opts in the
+// one script that genuinely takes one, lint-plan-code-blocks, which takes a plan path alongside
+// --dir; every other consumer inherits the safe default.
+export function parseFlags(argv, knownFlags, { allowPositionals = false } = {}) {
   const flags = {};
   const positionals = [];
   for (let i = 0; i < argv.length; i++) {
@@ -35,6 +43,11 @@ export function parseFlags(argv, knownFlags) {
       flags[name] = undefined;
     }
   }
+  // Checked after the whole vector is walked, so an unrecognised flag later in argv still reports
+  // the more specific message. Only the first offending token is named: it is the one the operator
+  // has to fix, and listing the rest buries it.
+  if (!allowPositionals && positionals.length)
+    throw new Error(`unexpected argument "${positionals[0]}"`);
   return { flags, positionals };
 }
 

@@ -407,6 +407,26 @@ test("an unrecognised flag in equals form fails naming the flag", () => {
     "the message must name the flag the caller actually typed — /--fil/ alone is satisfied by --file");
 });
 
+// Dropping the flag name entirely is the same false green with nothing misspelled to notice:
+// `redaction-check.mjs .devcycle` is the natural slip for `--dir .devcycle`, and this is the
+// privacy gate — the bare token used to be discarded, so the run silently scanned `git ls-files`
+// (which cannot see gitignored `.devcycle/`) and printed `redaction: ok` about a corpus it never
+// opened.
+test("a bare path fails naming the token, rather than scanning git ls-files and printing ok", () => {
+  const dir = makeFixture({ "leaky.md": `path ${MAC_HOME}/secret/notes.md\n` });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, dir], { encoding: "utf8", cwd: process.cwd() });
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.doesNotMatch(res.stdout, /redaction: ok/);
+    assert.ok(
+      res.stderr.includes(`redaction-check: unexpected argument "${dir}"`),
+      `stderr must name the token it refused, got: ${res.stderr}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --auto-redact: the same scan engine, but it first rewrites every detected class in place,
 // then re-scans so the run's exit code proves the POST-rewrite state is clean.
 test("--auto-redact rewrites every detected class in place, then the dir scans clean", () => {

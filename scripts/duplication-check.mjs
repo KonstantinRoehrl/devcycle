@@ -34,9 +34,10 @@ const STOPWORDS = new Set(
 const args = process.argv.slice(2);
 const KNOWN_FLAGS = ["--dir"];
 const root = process.cwd();
-// A flag this script never read is a false green waiting to happen: a typo would otherwise scan
-// the default corpus and report it clean. cli-flags.mjs owns both the unknown-flag check and the
-// missing-value one; this script only owns the message prefix and the exit code.
+// A flag this script never read is a false green waiting to happen: a typo, or a dropped flag
+// name leaving a bare token, would otherwise scan the cwd and report it clean. cli-flags.mjs owns
+// the unknown-flag check, the missing-value one, and — since this script takes no positional —
+// the bare-token one; this script only owns the message prefix and the exit code.
 let explicitDir = null;
 try {
   const { flags } = parseFlags(args, KNOWN_FLAGS);
