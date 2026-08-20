@@ -44,15 +44,19 @@
 
 "use strict";
 
-const { spawn, execFileSync } = require("node:child_process");
+const { execFileSync } = require("node:child_process");
 const { readFileSync, existsSync, mkdtempSync, rmSync } = require("node:fs");
 const { join } = require("node:path");
 const os = require("node:os");
+const { makeLogger, run, claudeStructured: claudeStructuredCli } = require("./lib/agent-cli.js");
 
-const AGENT_TIMEOUT_MS = 15 * 60 * 1000;
 const DIFF_CHAR_CAP = 60_000;
 const SPEC_CHAR_CAP = 30_000;
 const VERIFY_CONCURRENCY = 4;
+// Stage 1 fans out lenses x diff-chunks; an oversize diff split into N chunks
+// would otherwise spawn lenses*N claude processes at once, plus one codex per
+// chunk under crossModel. Same cap as stage 2's verification, same reason.
+const LENS_CONCURRENCY = 4;
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const LENS_CHARTERS = {
   spec:
@@ -66,38 +70,9 @@ const LENS_CHARTERS = {
     "alternative that preserves behavior. Only report simplifications worth acting on.",
 };
 
-const log = (msg) => process.stderr.write(`[review-panel] ${msg}\n`);
-const fatal = (msg) => {
-  process.stderr.write(`[review-panel] ERROR: ${msg}\n`);
-  process.exit(1);
-};
+const { log, fatal } = makeLogger("review-panel");
 
-// ---------- generic subprocess helpers ----------
-
-function run(cmd, args, { cwd, timeoutMs, input } = {}) {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, timeoutMs ?? AGENT_TIMEOUT_MS);
-    child.stdout.on("data", (d) => (stdout += d));
-    child.stderr.on("data", (d) => (stderr += d));
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      resolve({ code: null, stdout, stderr: String(err), timedOut, spawnError: err });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr, timedOut });
-    });
-    if (input) child.stdin.write(input);
-    child.stdin.end();
-  });
-}
+// ---------- bounded-concurrency helper ----------
 
 async function mapLimit(items, limit, fn) {
   const results = new Array(items.length);
@@ -112,47 +87,13 @@ async function mapLimit(items, limit, fn) {
   return results;
 }
 
-// Run a claude print-mode subagent with a schema-validated structured output.
-// Retries once on transport/validation failure. Returns { ok, value | error }.
-async function claudeStructured({ prompt, tools, schema, model }) {
-  // --tools is a VARIADIC option in the claude CLI: in the space-separated
-  // form ("--tools", value) it greedily consumes following positionals, so if
-  // its value is the last thing before the prompt, the prompt is swallowed
-  // into the tools list and the call fails. The equals-form pins exactly one
-  // value to the flag — never change this back to the two-element form.
-  const argv = [
-    "-p",
-    "--output-format", "json",
-    "--no-session-persistence",
-    "--json-schema", JSON.stringify(schema),
-    `--tools=${tools}`,
-  ];
-  if (model) argv.push("--model", model);
-  argv.push(prompt);
+// ---------- shared agent CLI binding ----------
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const res = await run("claude", argv);
-    if (res.spawnError) return { ok: false, error: `claude CLI not runnable: ${res.stderr}` };
-    if (res.timedOut) {
-      if (attempt === 2) return { ok: false, error: "claude subagent timed out" };
-      continue;
-    }
-    try {
-      const envelope = JSON.parse(res.stdout);
-      if (!envelope.is_error && envelope.structured_output !== undefined) {
-        return { ok: true, value: envelope.structured_output };
-      }
-      if (attempt === 2) {
-        return { ok: false, error: `claude subagent error: ${envelope.result ?? res.stderr}`.slice(0, 500) };
-      }
-    } catch {
-      if (attempt === 2) {
-        return { ok: false, error: `unparseable claude output: ${(res.stderr || res.stdout).slice(0, 300)}` };
-      }
-    }
-  }
-  return { ok: false, error: "unreachable" };
-}
+// Panel-side binding of the shared structured-agent call: two attempts, so one
+// transport or validation failure is retried, and the panel's own error
+// vocabulary. Its three call sites are unchanged.
+const PANEL_ERRORS = { agent: "claude subagent", output: "claude", cap: 500 };
+const claudeStructured = (opts) => claudeStructuredCli({ ...opts, attempts: 2, errors: PANEL_ERRORS });
 
 // ---------- args + repo inputs ----------
 
@@ -643,7 +584,7 @@ async function main() {
     for (const lens of args.lenses) lensJobs.push(() => runClaudeLens(lens, ctx, model));
     if (args.crossModel) lensJobs.push(() => runCrossModelLens(ctx));
   }
-  const lensResults = await mapLimit(lensJobs, lensJobs.length, (job) => job());
+  const lensResults = await mapLimit(lensJobs, LENS_CONCURRENCY, (job) => job());
 
   const rawFindings = lensResults.flatMap((r) => r.findings);
   for (const r of lensResults) if (r.note) notes.push(r.note);
@@ -676,5 +617,6 @@ if (require.main === module) {
 
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
-  dedupFindings, rankFindings, truncate, chunkDiff, fallbackSummary, mapLimit, loadRedTeamCharter, SEVERITIES,
+  dedupFindings, rankFindings, truncate, chunkDiff, fallbackSummary, mapLimit, loadRedTeamCharter,
+  SEVERITIES, LENS_CONCURRENCY,
 };
