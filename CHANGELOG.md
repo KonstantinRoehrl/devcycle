@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.1 — 2026-08-20
+
+- fix(pipeline): close the first audit batch — verification engine, silent gates, release path, and workflow engines
+
 ## 0.14.0 — 2026-08-19
 
 - feat(pipeline): learn-loop issue closeout — script fixes, mechanics hardening, and methodology gates
