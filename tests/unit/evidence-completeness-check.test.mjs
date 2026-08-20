@@ -298,3 +298,39 @@ test("a convention report with no runner summary still passes (class-gated check
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- C2 / F30: the three exit-1 branches no test reached ---
+
+test("no argument at all fails with a usage message", () => {
+  const res = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8" });
+  assert.equal(res.status, 1, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /usage/i);
+});
+
+test("a red-green report missing the Before evidence line fails", () => {
+  const body = `- Evidence: red-green | cmd: ${GATE}\n- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, NODE_SUMMARY);
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /Before/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a red-green report whose Before evidence file is missing fails naming the path", () => {
+  const body =
+    `- Evidence: red-green | cmd: ${GATE}\n` +
+    `- Before: before.txt (exit 1)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, NODE_SUMMARY);
+  try {
+    rmSync(join(dir, "before.txt"));
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /before-evidence file not found: before\.txt/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

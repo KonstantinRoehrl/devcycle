@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Validates a devcycle state file against on-disk reality before /devcycle:continue trusts it (#79):
 // every named artifact path (spec/plan/checklist) exists, and stage: is a real enum value.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { isAbsolute, join, dirname } from "node:path";
+import { spawnSync } from "node:child_process";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -24,6 +25,11 @@ const NONE = new Set(["none", "<tbd>", ""]);
 
 const args = process.argv.slice(2);
 const stateFlag = args.indexOf("--state");
+if (stateFlag >= 0 && stateFlag + 1 >= args.length) {
+  // A flag whose value is missing is a usage error, never a silently absent flag.
+  console.error("resume-check: usage: resume-check.mjs [--state <path>] — --state requires a value");
+  process.exit(1);
+}
 const statePath = stateFlag >= 0 ? args[stateFlag + 1] : ".devcycle/state.md";
 
 let text;
@@ -34,6 +40,35 @@ const field = (name) => {
   const m = text.match(new RegExp(`^- ${name}:\\s*(.+?)\\s*$`, "m"));
   return m ? m[1] : null;
 };
+
+// references/resume.md § The ownership check: root: pins the file to one checkout, and a
+// differing root: means the file was copied or leaked from another project — never resume it.
+// This runs FIRST and exits on mismatch: every artifact path below is resolved against root:,
+// so once root: is wrong those verdicts are noise, not findings. The script reports; the
+// adopt-or-leave decision is the user's, per that same section.
+const recordedRoot = field("root");
+if (recordedRoot && !NONE.has(recordedRoot)) {
+  // Derived from the state file's OWN directory, not the cwd: the question is whether this file
+  // belongs to the checkout it sits in, which is what makes it correct for nested checkouts and
+  // for git worktrees, whose toplevel is the worktree rather than the main repo.
+  const git = spawnSync("git", ["-C", dirname(statePath), "rev-parse", "--show-toplevel"], {
+    encoding: "utf8",
+  });
+  // Not a repo, or no git at all: a precondition the guard could not confirm never blocks a
+  // legitimate resume — the same posture VALID_STAGES takes toward an unreadable enum.
+  if (git.status === 0) {
+    const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+    const actualRoot = real(git.stdout.trim());
+    if (real(recordedRoot) !== actualRoot) {
+      console.error("resume-check: this state file belongs to another checkout — do not resume it:");
+      console.error(`  - its root:  ${real(recordedRoot)}`);
+      console.error(`  - you are in: ${actualRoot}`);
+      console.error(`  - its request: ${field("request") ?? "(none recorded)"}`);
+      console.error("  Adopt it (rewrite root:, keep everything else) or leave it alone — the user decides.");
+      process.exit(1);
+    }
+  }
+}
 
 const errors = [];
 const stage = field("stage");
