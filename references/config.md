@@ -6,8 +6,9 @@ that needs any of this names this file and does not restate it.
 ## Knob resolution
 
 Knob values arrive via `${user_config.KEY}` placeholders, each read by the stage
-skill that consumes it (gitPolicy by `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md`, models and
-review depth and the on-device gate by their stages).
+skill that consumes it (gitPolicy by `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md`,
+docTrackingPolicy by every stage that writes an artifact — § Doc tracking below owns which —
+models and review depth and the on-device gate by their stages).
 
 **Resolution order — binding, and stated only here.** For every knob, in order:
 
@@ -219,6 +220,41 @@ because the customize path writes a moved knob without writing `profile`: withou
 marker that user renders the upgrade offer's exact signature on their next cycle, and
 would be invited to convert to `auto` the knob they had just deliberately pinned. Either
 way the line stops reading `no`, so the walkthrough is offered once and not again.
+
+## Doc tracking — what each policy commits
+
+`docTrackingPolicy` ∈ `all-local | standard | all-tracked`, default `standard`. It sits outside
+the profile matrix, so no profile column moves it. This table is the single owner of what each
+policy does with each artifact devcycle writes; a stage that writes one names this table instead
+of deciding for itself.
+
+| Artifact | `all-local` | `standard` (default) | `all-tracked` |
+| --- | --- | --- | --- |
+| spec — `docs/superpowers/specs/` | local | local | commit |
+| plan — `docs/superpowers/plans/` | local | local | commit |
+| lessons — `docs/devcycle/lessons.md` | local | commit | commit |
+| promotion records — `docs/devcycle/promotions/` | local | commit | commit |
+| audit report — `docs/audits/` | local | commit | commit |
+| on-device checklist, in-cycle — `docs/<feature>/` | rides its execution task's commit | rides its execution task's commit | rides its execution task's commit |
+| onboarding scaffold — `CLAUDE.md`, `.gitignore` lines | exempt | exempt | exempt |
+| run scratch — `.devcycle/` | never committed | never committed | never committed |
+
+**`git check-ignore` vetoes every `commit` cell, always**, and it is consulted second: the policy
+states what devcycle attempts, the host repo's own ignore rules decide what lands. The order is
+not interchangeable — a repo where `/devcycle:onboard` never ran has no ignore lines at all, so
+gating on `check-ignore` alone fails open.
+
+Three rows state a boundary rather than a policy, which is why their cells agree across all
+three columns. The in-cycle checklist is written by an
+implementer during execution and lands in that task's commit, the way a test file the same task
+writes does — there is no separate gate to attach a policy to. Onboarding is exempt because
+gating the installer on the policy it installs is circular, and under `all-local` it would leave
+the ignore lines the policy depends on unwritten. And `.devcycle/` is run scratch that no policy ever tracks, so there is no cell to vary.
+
+A site that commits an artifact resolves the policy, checks this table permits tracking, checks
+`git check-ignore` vetoes nothing, names the side effect, asks the user, then commits with an
+explicit pathspec. `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`'s step 3 is the
+reference implementation of that order.
 
 ## Model tiers
 

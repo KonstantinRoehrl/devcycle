@@ -166,8 +166,10 @@ code), and a **PR link** when one exists. Locations inside findings stay plain `
 Write `docs/audits/YYYY-MM-DD-<topic>.md` and commit it scoped per
 `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit":
 `git add docs/audits/… && git commit -- docs/audits/…`. The `git add` is not optional — a pathspec
-naming a path git does not know yet aborts the commit. If `git check-ignore` covers the path, write
-the file and skip the commit: the repo's own ignore rules decide what lands in history.
+naming a path git does not know yet aborts the commit. That commit is gated per
+`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking: resolve
+`${user_config.docTrackingPolicy}` first, then `git check-ignore` the path — write the file and
+skip the commit unless both permit it.
 
 Branch discipline follows `${CLAUDE_PLUGIN_ROOT}/references/branch.md`. **In-cycle** (a
 `.devcycle/state.md` exists and this cycle owns it): follow it in full including the `branch:`-line
