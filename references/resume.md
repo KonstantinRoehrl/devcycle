@@ -9,7 +9,7 @@ A cycle's file lives at `<repo root>/.devcycle/state.md`, where repo root is
 `git rev-parse --show-toplevel` of the working directory: never adopt one found in a
 parent directory or another project's checkout. `commands/continue.md` enumerates every
 `.devcycle/state.md` under this repo root, since a nested checkout or subproject may hold
-one of its own; the ownership check below is what decides which of them belongs here.
+one of its own; which of them to resume is the user's answer at its "ask which one" gate.
 `/devcycle:cycle` writes it as its first action and every stage rewrites it at every
 transition, in this shape:
 
@@ -39,10 +39,12 @@ forward unchanged when a new cycle reuses the file; `references/config.md` owns 
 its values mean.
 
 **The ownership check, run before trusting anything else in the file.** `root:` and
-`request:` pin it to one project and one goal, so every reader verifies `root:` against
-its own `git rev-parse --show-toplevel` first. A differing `root:` means the file
-belongs to another checkout or leaked from another project: never resume it and never
-silently reset it — report what its `root:` and `request:` say versus where you are,
+`request:` pin it to one project and one goal, so every reader asks whether the file
+belongs to the checkout it sits in: verify `root:` against `git rev-parse --show-toplevel`
+of the state file's OWN directory, not the caller's cwd — worktrees and nested checkouts
+have a toplevel of their own. A differing `root:` means the file was copied from another
+checkout or leaked from another project: never resume it and never silently reset it —
+report what its `root:` and `request:` say versus where you are,
 and let the user choose between adopting it (the repo genuinely moved: rewrite `root:`,
 keep everything else) and leaving it alone. The adopt-or-leave answer is the user's to
 give, and an Other answer to it appends `user-correction-at-gate` to the run record a
@@ -107,6 +109,10 @@ so neither command carries a second copy.
 
 `done` has no row: a closed cycle resumes at nothing, and `/devcycle:cycle` reuses its state file
 rather than resuming it.
+
+On resume the stage keeps the `startedAt` it was entered with (the `updated:` timestamp recorded
+at entry), so a resumed session's cost attributes to the resumed stage per
+`${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, not to `devcycle:continue`.
 
 ## Resuming a wave's per-task position
 

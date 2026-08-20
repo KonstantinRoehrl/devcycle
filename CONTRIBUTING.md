@@ -103,7 +103,7 @@ that the description text is current.
 **PR titles must be Conventional Commits** (`type(scope)?!: subject`), and so must every
 commit subject on the PR — CI checks both. PRs are
 squash-merged and the title becomes the squash subject, which drives the semver bump
-(`fix:`→patch, `feat:`→minor, `!`/`BREAKING CHANGE`→major), the changelog entry, and the
+(`fix:`→patch, `feat:`→minor, `!`→major), the changelog entry, and the
 release tag (`devcycle--vX.Y.Z`). Reserve `feat:` for substantial user-facing
 improvements; routine work — engine swaps, doc edits, refactors, small fixes — takes
 `refactor:`/`fix:`/`docs:`/`chore:` so the automated bump reflects real impact. A
@@ -132,7 +132,8 @@ deleting its entry in the same commit.
 
 Run the **Prepare release** workflow from `dev`, giving it the release PR title. The title is
 the whole input: it must be a Conventional Commit, its type sets the bump (`feat` → minor,
-`fix`/`perf` → patch, `!` or a `BREAKING CHANGE:` trailer → major), and it becomes both the
+`fix`/`perf` → patch, `!` → major — a `BREAKING CHANGE:` trailer is not a trigger, because the
+release PR's body is written by the workflow and never reaches versioning), and it becomes both the
 `CHANGELOG.md` entry and — because the PR is squash-merged — `main`'s commit subject. A title
 outside the convention is refused rather than treated as a patch, since it would ship no bump.
 

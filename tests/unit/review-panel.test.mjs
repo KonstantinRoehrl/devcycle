@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, mkdtempSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 import panel from "../../workflows/review-panel.js";
 import { makeRepo, commitAll, makeFakeBin, runScript } from "./helpers.mjs";
 
@@ -505,4 +506,51 @@ test("a finding with no integer line round-trips as line: null, and no line reac
   assert.ok("line" in report.findings[0], "the line key is emitted, per references/findings.md");
   assert.equal(report.findings[0].line, null);
   assert.equal(report.findings[0].verification, "no line reached the verifier");
+});
+
+// F49: stage 2's per-finding verification has been capped at VERIFY_CONCURRENCY
+// since it was written, while stage 1 passed `lensJobs.length` as its own limit
+// — so a large branch review, the case chunking was added to serve, spawned the
+// most processes. Eight lens jobs each dwelling 150 ms make an uncapped fan-out
+// record eight concurrent processes; a capped one cannot exceed the cap.
+test("stage 1 caps concurrent lens subprocesses instead of spawning one per job", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 3;\n"); // the diff under review
+
+  const eventLog = join(mkdtempSync(join(tmpdir(), "devcycle-lens-conc-")), "events.log");
+  const bin = makeFakeBin(
+    "claude",
+    `
+const fs = require("node:fs");
+const prompt = process.argv[process.argv.length - 1];
+if (prompt.includes("You are one lens")) {
+  // Small O_APPEND writes are atomic, so the file's line order IS the event order.
+  fs.appendFileSync(${JSON.stringify(eventLog)}, "S\\n");
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+  fs.appendFileSync(${JSON.stringify(eventLog)}, "E\\n");
+  process.stdout.write(JSON.stringify({ is_error: false, structured_output: { findings: [] } }));
+} else {
+  process.stdout.write(JSON.stringify({ is_error: false, structured_output: { summary: "no findings" } }));
+}
+`
+  );
+
+  const lenses = Array.from({ length: 8 }, (_, i) => ({ key: `l${i}`, charter: `Charter ${i}.` }));
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+
+  const events = readFileSync(eventLog, "utf8").trim().split("\n");
+  assert.equal(events.filter((e) => e === "S").length, 8, "every lens still runs — a cap is not a drop");
+
+  let live = 0;
+  let peak = 0;
+  for (const e of events) {
+    live += e === "S" ? 1 : -1;
+    if (live > peak) peak = live;
+  }
+  assert.ok(peak <= 4, `stage 1 peaked at ${peak} concurrent lens processes; the cap is 4`);
+  assert.equal(panel.LENS_CONCURRENCY, 4, "the cap is the VERIFY_CONCURRENCY value it follows");
 });

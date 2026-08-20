@@ -21,10 +21,17 @@ function run(reportPath) {
 // Node --test green summary block, assembled from fragments (never a literal the redaction check flags).
 const NODE_SUMMARY = ["ℹ pass 11", "ℹ fail 0", "ℹ duration_ms 42.0"].join("\n");
 
+// The capture's command header (references/evidence.md §File-backed evidence) must be the
+// exact command the report declares in cmd:. Derive it from the report body so every fixture
+// is contract-faithful by construction — the check now compares each header against cmd:,
+// not merely before against after.
 function makeReportWithEvidence(reportBody, afterContent) {
   const dir = mkdtempSync(join(tmpdir(), "evidence-completeness-check-"));
   const file = join(dir, "report.md");
-  if (afterContent !== null) writeFileSync(join(dir, "after.txt"), afterContent, "utf8");
+  const declaredCmd = (reportBody.match(/\bcmd:\s*(.+)/)?.[1] ?? "").trim();
+  const header = `# devcycle-cmd: ${declaredCmd}\n`;
+  writeFileSync(join(dir, "before.txt"), header + "before output\n", "utf8");
+  if (afterContent !== null) writeFileSync(join(dir, "after.txt"), header + afterContent, "utf8");
   writeFileSync(file, reportBody, "utf8");
   return { dir, file };
 }
@@ -205,6 +212,79 @@ test("a second After line lacking an (exit <n>) status fails, not just the first
   }
 });
 
+test("rejects before/after evidence captured with non-identical commands", () => {
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      "- Evidence: green-green | cmd: npm test",
+      "- Before: before.txt (exit 0)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  writeFileSync(join(dir, "before.txt"), "# devcycle-cmd: npm test -- --run foo\nPASS\nTests: 1 passed\n");
+  writeFileSync(join(dir, "after.txt"), "# devcycle-cmd: npm test\nPASS\nTests: 42 passed\n");
+  const r = run(file);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr + r.stdout, /non-identical command|command.*mismatch/i);
+});
+
+test("rejects evidence files missing the # devcycle-cmd: header", () => {
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      "- Evidence: green-green | cmd: npm test",
+      "- Before: before.txt (exit 0)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  writeFileSync(join(dir, "before.txt"), "PASS\nTests: 1 passed\n");
+  writeFileSync(join(dir, "after.txt"), "PASS\nTests: 42 passed\n");
+  const r = run(file);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr + r.stdout, /devcycle-cmd|missing.*header/i);
+});
+
+test("accepts before/after evidence captured with identical command headers", () => {
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      "- Evidence: green-green | cmd: npm test",
+      "- Before: before.txt (exit 0)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  writeFileSync(join(dir, "before.txt"), "# devcycle-cmd: npm test\nPASS\nTests: 42 passed\n");
+  writeFileSync(join(dir, "after.txt"), "# devcycle-cmd: npm test\nPASS\nTests: 42 passed\n");
+  const r = run(file);
+  assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+});
+
+test("rejects captures whose header is identical but narrower than the declared whole-gate cmd", () => {
+  // The partial-gate false pass: both captures carry the SAME header (so the
+  // before==after equality check is satisfied), yet that command is narrower than the
+  // whole gate the report declares in cmd:. The declared cmd is a full, non-narrow gate,
+  // so the narrow-selector guard on cmd sees nothing wrong either — only a header-vs-cmd
+  // check catches it.
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      `- Evidence: red-green | cmd: ${GATE}`,
+      "- Before: before.txt (exit 1)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  const narrower = "# devcycle-cmd: node --test tests/unit/*.test.mjs\n";
+  writeFileSync(join(dir, "before.txt"), narrower + "ℹ pass 3\nℹ fail 0\n");
+  writeFileSync(join(dir, "after.txt"), narrower + "ℹ pass 11\nℹ fail 0\n");
+  try {
+    const r = run(file);
+    assert.notEqual(r.status, 0, `stdout: ${r.stdout}`);
+    assert.match(r.stderr + r.stdout, /differ.*declared cmd|does not match.*declared/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a convention report with no runner summary still passes (class-gated check a)", () => {
   const body =
     `- Evidence: convention (grep -q banned agents/implementer.md) | cmd: grep -q banned agents/implementer.md\n` +
@@ -214,6 +294,42 @@ test("a convention report with no runner summary still passes (class-gated check
   try {
     const res = run(file);
     assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- C2 / F30: the three exit-1 branches no test reached ---
+
+test("no argument at all fails with a usage message", () => {
+  const res = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8" });
+  assert.equal(res.status, 1, `stdout: ${res.stdout}`);
+  assert.match(res.stderr, /usage/i);
+});
+
+test("a red-green report missing the Before evidence line fails", () => {
+  const body = `- Evidence: red-green | cmd: ${GATE}\n- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, NODE_SUMMARY);
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /Before/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a red-green report whose Before evidence file is missing fails naming the path", () => {
+  const body =
+    `- Evidence: red-green | cmd: ${GATE}\n` +
+    `- Before: before.txt (exit 1)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, NODE_SUMMARY);
+  try {
+    rmSync(join(dir, "before.txt"));
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /before-evidence file not found: before\.txt/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

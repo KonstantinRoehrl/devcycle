@@ -106,6 +106,7 @@ devcycle/                (public GitHub repo)
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
 ├── scripts/                      # L4 — validate.mjs, doctor.mjs, dream.mjs, the checkers, bump-version.mjs
 ├── workflows/                    # L4
+│   ├── lib/agent-cli.js          # shared subprocess layer: tagged logger, run(), claudeStructured()
 │   ├── review-panel.js           # multi-lens review → adversarial verify → dedup → reconcile
 │   └── mechanical-sweep.js       # pipeline over file list, worktree isolation, verify stage
 │                                 # (invoked by the sweep stage and **Execution:** sweep tasks)

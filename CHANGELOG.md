@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.14.1 — 2026-08-20
+
+- fix(pipeline): close the first audit batch — verification engine, silent gates, release path, and workflow engines
+
+The first of five batches remediating a 54-finding whole-repo audit, plus the last of the
+learn-loop issue closeout. **The verification engine** stops executing authored shell: every r3
+promotion's `- verify:` line used to run through `/bin/sh -c` on any `doctor` report or
+`dream --check-recurrence`, so asking for a report over a freshly cloned repo ran that repo's
+committed markdown — the audit's only critical finding. Execution is now opt-in behind an
+explicit `--run-checks` flag and bounded by a timeout and a max buffer, a new `errored` verdict
+keeps a broken harness from reading as a clean bill of health, and verification windows are
+scored honestly with culprit ids matched as bare slugs. **Three silent gates** now check
+something: the evidence-completeness gate was dispatched by a repo-relative path that resolves
+to nothing from an installed plugin, so it never ran for any user; the plan linter discarded the
+path it was handed and linted a default; and resume-check never performed the `root:` ownership
+check it documented. A new `validate` check bans the repo-relative dispatch form across the
+surface directories so the first class cannot return. **The release path** makes `!` the sole
+major-bump trigger — the `BREAKING CHANGE:` trailer branch was unreachable, so a release PR
+announcing a breaking change shipped a patch — and pins the tag and back-merge workflows against
+a permissions widening or a lost retry cap. **The workflow engines** share one subprocess layer,
+restoring a `--tools=` invariant lost between two copies, and cap stage-1 lens fan-out at four so
+a chunked oversize diff no longer spawns lenses x chunks processes at once. **Pipeline guards**
+close six learn-loop issues: a `PreToolUse` hook denies browser calls from anywhere but the
+on-device driver, and the surface line and per-file byte budgets gain reviewed headroom.
+
 ## 0.14.0 — 2026-08-19
 
 - feat(pipeline): learn-loop issue closeout — script fixes, mechanics hardening, and methodology gates

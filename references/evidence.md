@@ -62,10 +62,16 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
 - When the verification command chains multiple steps with `&&`, brace-group them before
   redirecting — `{ c1 && c2; } > file 2>&1` — never the bare `c1 && c2 > file 2>&1` form,
   which redirects only the last command and silently drops every earlier command's output.
+- Each `-before.txt`/`-after.txt`/`-red.txt` capture begins with the exact command as its
+  first line: `{ echo "# devcycle-cmd: <the exact command>"; <the exact command>; } > file 2>&1`.
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/evidence-completeness-check.mjs"` reads that header from
+  the before and after files and rejects the report when the two command strings differ — a
+  narrower before-command than after-command is a partial-gate defect even when both exit 0.
 - The captured command for `-before.txt` and `-after.txt` is always the repo's whole
   verification gate; capturing fewer commands than the gate runs in either file is a
-  declared deviation. `node scripts/evidence-completeness-check.mjs <report>` mechanizes the
-  narrow-selector subset of this rule — a `cmd:` naming one test file or carrying a
+  declared deviation.
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/evidence-completeness-check.mjs" <report>` mechanizes
+  the narrow-selector subset of this rule — a `cmd:` naming one test file or carrying a
   test-name filter flag — but it cannot catch every partial-gate case, so the
   concurrent-wave whole-tree-capture case stays a human judgment call. It also requires an
   `(exit <n>)` status — read from the report line, not file contents — on any present

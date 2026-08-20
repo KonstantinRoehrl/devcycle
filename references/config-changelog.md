@@ -59,20 +59,46 @@ marker with the version the change lands in, since only the release computes tha
   change: added
   key: reviewDepth
   note: "depth-gate and model-routing predicates refined per the token-audit follow-through (#28/#29) — not a new key, a behavior refinement of the existing one"
-- version: "unreleased"
+- version: "0.13.0"
   change: added
   key: implementerModel
   note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
-- version: "unreleased"
+- version: "0.13.0"
   change: added
   key: taskReviewerModel
   note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
-- version: "unreleased"
+- version: "0.13.0"
   change: added
   key: walkthroughModel
   note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
-- version: "unreleased"
+- version: "0.13.0"
   change: added
   key: branchReviewModel
   note: "allowed values widened: alongside `auto` and a single model id, a comma-separated pool of ids resolved by complexity band, with every path clamped to the orchestrator's own tier"
+- version: "0.13.1"
+  change: added
+  key: docTrackingPolicy
+  values: [standard, all-local, all-tracked]
+  default: standard
+  note: "settles which devcycle artifacts a host repo commits — lessons and promotions tracked, single-run specs and plans kept local; the repo's own .gitignore always wins"
 ```
+
+## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)
+
+Not a `userConfig` change, so it stays below the fenced knob history above rather than inside it
+(only the first fenced YAML block is parsed for config drift). This section deliberately names
+`handoff.md` in bare prose, not as a `${CLAUDE_PLUGIN_ROOT}` citation, so the context-budget
+walker does not pull handoff's reference subtree into every playbook that cites this file.
+
+`devcycle:continue`'s measured cost regression at 0.12.0 is the v0.12 playbook-architecture
+overhaul: pre-0.12 `continue` was an inline command; post-0.12 it runs the full resume protocol
+and loads the recorded stage's playbook (assumption — attributed to the v0.12 overhaul, not
+re-measured here). It is compounded by forward-fill attribution of the 132 pre-instrumentation
+sessions predating trustworthy run records (instrumentation landed in commit `b25b51c`,
+`feat(instrumentation): add trustworthy run-record instrumentation (#45)` — verified; the
+132 count is an assumption carried from prior profiling). Cost joins to the
+`[startedAt, endedAt)` stage window at `scripts/doctor.mjs:727-737` (`within(t, s.startedAt,
+s.endedAt)` — verified), so the entry-time `startedAt` fix (handoff.md's stage-record paragraph)
+attributes resume cost correctly going forward; the historical no-record sessions cannot be
+re-measured retroactively. The actual context-load reduction is a deferred, measurement-driven
+follow-up.

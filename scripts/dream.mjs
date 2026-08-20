@@ -15,7 +15,7 @@ import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
 import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch } from "./lessons.mjs";
 import { parseFileList } from "./task-files.mjs";
-import { verify, installedVersion } from "./verification.mjs";
+import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
 import { renderLearnReport } from "./learn-report.mjs";
 
 const CAP = 100;
@@ -533,6 +533,9 @@ function main() {
 
   const hasPlan = argv.includes("--plan");
   const hasCheckRecurrence = argv.includes("--check-recurrence");
+  // A modifier, not a subcommand: deliberately outside SUBCOMMANDS so it does not trip the
+  // mutual-exclusivity check above.
+  const hasRunChecks = argv.includes("--run-checks");
   const commitIdx = argv.indexOf("--commit-checkpoint");
   const hasCommit = commitIdx !== -1;
   const suppressedIdx = argv.indexOf("--check-suppressed");
@@ -638,7 +641,8 @@ function main() {
     try {
       console.log(
         JSON.stringify(
-          verify(readPromotions(root), journalEvents({ toplevel: root }).events, installedVersion(), { root }),
+          verify(readPromotions(root), journalEvents({ toplevel: root }).events, installedVersion(),
+            { root, ...(hasRunChecks ? { runCheck: defaultRunCheck } : {}) }),
           null,
           2,
         ),
@@ -791,7 +795,7 @@ function main() {
   console.error(
     "usage: dream.mjs --plan | --extract <session-id> | --commit-checkpoint <iso> | --record-promotion <json> | " +
       "--record-lifecycle <json> | " +
-      "--check-recurrence | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
+      "--check-recurrence [--run-checks] | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
       "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --observations-deduped | --lessons <stage> | " +
       "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
       "--render-report <candidates.json> [--outcome]",

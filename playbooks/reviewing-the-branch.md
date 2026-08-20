@@ -45,6 +45,11 @@ Invoke it with `scope: {ref: "<base>..<branch>"}`, the spec path as `specPath`, 
 stage's criteria — what the spec requires and forbids, plus the default criteria set — and
 record the engine line it returns **verbatim** in the report below.
 
+**Dirty-tree backstop.** The reviewers this stage dispatches are read-only; snapshot `git status
+--porcelain` before each subagent and check it again after. The backstop itself — what a tree left
+dirtier means, and that its verdict is discarded and re-run — is owned by
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` and not restated here.
+
 The built-in `code-review` skill is user-invocation-only in current Claude Code — an agent
 cannot launch it, so never plan a review around it. It is an opportunistic fold-in only: if the
 user has run it on the branch independently, fold its findings in and record the engine as

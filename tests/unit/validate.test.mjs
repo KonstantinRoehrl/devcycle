@@ -1179,3 +1179,165 @@ test("workflow re-auth check: a bare git push with no persist-credentials: false
   );
   ok(runValidate(dir));
 });
+
+// --- C2: check 4b, repo-relative engine dispatch in the surface ---
+
+test("4b: a surface file invoking an engine repo-relatively fails", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node scripts/doctor.mjs --lessons planning` before starting.\n");
+  failsWith(
+    runValidate(dir),
+    /playbooks\/demoing-things\.md/,
+    /node scripts\/doctor\.mjs/,
+    /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/
+  );
+});
+
+test("4b: the ${CLAUDE_PLUGIN_ROOT} form passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "scripts/doctor.mjs", "// fixture script\n");
+  playbook(dir, 'Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --lessons planning`.\n');
+  ok(runValidate(dir));
+});
+
+test("4b: a leading ./ does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node ./scripts/doctor.mjs` first.\n");
+  failsWith(runValidate(dir), /node \.\/scripts\/doctor\.mjs/);
+});
+
+test("4b: a quoted repo-relative path does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, 'Run `node "scripts/doctor.mjs"` first.\n');
+  failsWith(runValidate(dir), /node "scripts\/doctor\.mjs"/);
+});
+
+test("4b: one file with two bare invocations is reported once per invocation, not per line", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node scripts/doctor.mjs`.\n\nThen run `node scripts/doctor.mjs` again.\n");
+  const res = runValidate(dir);
+  assert.equal(res.status, 1, res.stdout + res.stderr);
+  const hits = res.stderr.split("\n").filter((l) => l.includes("node scripts/doctor.mjs"));
+  assert.equal(hits.length, 1, `expected one de-duplicated report, got:\n${hits.join("\n")}`);
+});
+
+test("4b: a bare workflows/ dispatch is caught too — workflows/ ships engines just as scripts/ does", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node workflows/review-panel.js` on the branch.\n");
+  failsWith(
+    runValidate(dir),
+    /playbooks\/demoing-things\.md/,
+    /node workflows\/review-panel\.js/,
+    /\$\{CLAUDE_PLUGIN_ROOT\}\/workflows\/review-panel\.js/
+  );
+});
+
+test("4b: a runner flag between node and the path does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node --experimental-strip-types scripts/doctor.mjs` first.\n");
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: a sentence-initial capitalised Node does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Node scripts/doctor.mjs is how the gate runs today.\n");
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+// A `\` before a line ending is CommonMark's hard-break syntax as well as a shell continuation,
+// and the two are textually identical — so matching it flags ordinary prose that dispatches
+// nothing, with no exemption marker to silence the false positive. The form is excluded on
+// purpose; do not "fix" it back. The accepted cost is the two tests below, in that order: the
+// continuation goes unflagged so the prose hard break stays clean.
+test("4b: a `\\`-continuation is deliberately NOT matched — it is indistinguishable from a GFM hard break", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "```bash\nnode \\\n  scripts/doctor.mjs --lessons planning\n```\n");
+  ok(runValidate(dir));
+});
+
+test("4b control: prose hard-breaking after the word node, ahead of a scripts/ path, stays clean", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "- probe: the word node\\\nscripts/legacy-report.sh is unrelated tooling.\n");
+  ok(runValidate(dir));
+});
+
+test("4b: a nested target keeps its subdirectory, so the suggested fix names a real file", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node scripts/lib/doctor.mjs` first.\n");
+  const res = runValidate(dir);
+  assert.equal(res.status, 1, res.stdout + res.stderr);
+  assert.match(res.stderr, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/lib\/doctor\.mjs/);
+});
+
+test("4b: trailing sentence punctuation is stripped from the suggested target", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "The gate runs via node scripts/doctor.mjs.\n");
+  const res = runValidate(dir);
+  assert.equal(res.status, 1, res.stdout + res.stderr);
+  assert.match(res.stderr, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs(?!\.)/);
+  assert.ok(
+    !res.stderr.includes("${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs."),
+    `suggested target kept the sentence period:\n${res.stderr}`
+  );
+});
+
+// Controls for the widened check: the prescribed form must never be flagged, quoted or bare,
+// in either engine directory. These are the regression the widening could plausibly cause.
+test("4b control: the ${CLAUDE_PLUGIN_ROOT} form stays clean in both engine directories, quoted and unquoted", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "scripts/doctor.mjs", "// fixture script\n");
+  writeInto(dir, "scripts/redaction-check.mjs", "// fixture script\n");
+  writeInto(dir, "workflows/review-panel.js", "// fixture engine\n");
+  playbook(
+    dir,
+    'Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --lessons planning`.\n\n' +
+      "Then `node ${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir .devcycle`.\n\n" +
+      "Then `node ${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js`.\n"
+  );
+  ok(runValidate(dir));
+});
+
+// Round 2: three shapes of the banned class that a balanced-quote requirement let through,
+// plus the hard-wrapped invocation a newline-free separator let through.
+test("4b: an unterminated opening quote does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, 'Run `node "scripts/doctor.mjs` before starting.\n');
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: an unterminated single quote does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "Run `node 'scripts/doctor.mjs` before starting.\n");
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: a quote closing after the arguments, out of the path's reach, does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, 'Run `node "scripts/doctor.mjs --lessons planning"` before starting.\n');
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: an invocation hard-wrapped across a line does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "The completeness gate runs as `node\nscripts/doctor.mjs` before the handoff.\n");
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b: a hard wrap whose next line is indented does not evade the check", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "The completeness gate runs as `node\n  scripts/doctor.mjs --lessons planning`.\n");
+  failsWith(runValidate(dir), /scripts\/doctor\.mjs/, /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/doctor\.mjs/);
+});
+
+test("4b control: a hard-wrapped ${CLAUDE_PLUGIN_ROOT} invocation stays clean", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "scripts/doctor.mjs", "// fixture script\n");
+  playbook(dir, "The completeness gate runs as `node\n${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs --lessons planning`.\n");
+  ok(runValidate(dir));
+});
+
+test("4b control: a paragraph break is not a separator, so prose either side of it is not stapled into a hit", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "The gate is dispatched with node\n\nscripts/doctor.mjs is the engine it names.\n");
+  ok(runValidate(dir));
+});
