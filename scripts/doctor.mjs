@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Re-measures devcycle's token cost from session transcripts: turn counts, main-thread
 // vs subagent split, context depth, tool mix, and dollar cost by model, stage, and agent.
-// Read-only. Emits counts, dollars, model ids, tool names, and skill names only.
+// Read-only by default — it emits counts, dollars, model ids, tool names, and skill names only,
+// and runs no promotion `- verify:` check unless invoked with --run-checks.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -15,7 +16,7 @@ import { readPromotions } from "./promotions.mjs";
 // The shared verification engine (Wave 2): the one source of the promotion scoreboard, the
 // escalation/retirement candidates and the resolved-in lines, plus the installed plugin version.
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
-import { verify, installedVersion, releaseDates } from "./verification.mjs";
+import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // references/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -72,6 +73,7 @@ export function parseArgs(argv) {
     json: false,
     all: false,
     depth: false,
+    runChecks: false,
     drift: null,
     issueBody: null,
   };
@@ -83,6 +85,7 @@ export function parseArgs(argv) {
     else if (a === "--json") args.json = true;
     else if (a === "--all") args.all = true;
     else if (a === "--depth") args.depth = true;
+    else if (a === "--run-checks") args.runChecks = true;
     else if (a === "--drift") args.drift = argv[++i];
     else if (a === "--issue-body") args.issueBody = argv[++i];
   }
@@ -2237,7 +2240,7 @@ export function renderReport(summaries, ctx) {
 
   section("## Previously promoted — did it hold", "promoted");
   // The verification engine computes every verdict; this only renders it. One line per scoreboard
-  // entry (held / recurred / unmeasurable / broken), then the resolved-in lines, then the
+  // entry (held / recurred / unmeasurable / broken / errored), then the resolved-in lines, then the
   // Actionability menu — each recurred lesson the engine flagged for escalation becomes a
   // `/devcycle:cycle` entry point the reader can run (playbooks/profiling-sessions.md).
   const v = verification ?? { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] };
@@ -2246,7 +2249,10 @@ export function renderReport(summaries, ctx) {
     L.push("_No promoted lesson has been measured against a run yet._");
   } else {
     for (const s of v.scoreboard)
-      L.push(`- ${s.culpritId} (${s.rung}): ${s.verdict}${overRuns(s.runsObserved)}`);
+      // The engine's detail carries WHY, and a verdict without it reads as a measurement nobody
+      // took: a skipped check (no --run-checks), an unrunnable path and an errored harness all
+      // land on "unmeasurable"/"errored" and are only told apart by this suffix.
+      L.push(`- ${s.culpritId} (${s.rung}): ${s.verdict}${overRuns(s.runsObserved)}${s.detail ? ` — ${s.detail}` : ""}`);
     for (const r of v.resolvedIn)
       L.push(`- ${r.culpritId}: resolved in ${r.resolvedIn} — ${r.verdict}${overRuns(r.runsObserved)}`);
     for (const e of v.candidates.escalation)
@@ -2373,7 +2379,7 @@ function reportContext(args, result) {
     promotions,
     outerLoop: outerLoop(join(process.cwd(), ".devcycle", "doctor")),
     compiledKnowledge: compiledKnowledge(promotions),
-    verification: promotionVerification(promotions),
+    verification: promotionVerification(promotions, args.runChecks),
   };
 }
 
@@ -2382,11 +2388,13 @@ function reportContext(args, result) {
 // count distinct runs, and hand them to verify() with the installed plugin version. A missing runs
 // directory or an unreadable plugin.json degrades to an empty verification rather than aborting the
 // whole report (QC7 — the same fail-safe safePromotions gives the promotion records).
-function promotionVerification(promotions) {
+function promotionVerification(promotions, runChecks = false) {
   try {
     const events = [...readRunRecords().values()].flatMap((rec) =>
       journalEvents(rec).map((e) => ({ ...e, runId: e.runId ?? rec.runId })));
-    return verify(promotions, events, installedVersion());
+    // Opt-in only: without --run-checks the engine's non-executing default stands, so a report
+    // over a freshly cloned repo cannot be made to run that repo's committed `- verify:` lines.
+    return verify(promotions, events, installedVersion(), runChecks ? { runCheck: defaultRunCheck } : {});
   } catch {
     return { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] };
   }

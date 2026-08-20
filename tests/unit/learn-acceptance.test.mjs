@@ -133,10 +133,10 @@ test("criterion 11: an r3 promotion whose verify does not resolve is refused", (
 // (A) The full scoreboard over the fixture world, journal present — CLI-driven. Asserts the real
 // fixture rows non-vacuously: the r2 journal-recurrence row recurs (raising an escalation
 // candidate), and the r3 row is broken because its verify: path is absent in the temp root and so
-// is shell-exec'd and fails ({ran:true,ok:false}).
+// is shell-exec'd and fails (status "failed"). Execution is opt-in, hence --run-checks.
 test("acceptance (A): the fixture scoreboard recurs the r2 row, breaks the r3 row, and raises exactly the escalation candidate", () => {
   const { root, env } = world();
-  const out = JSON.parse(cli(root, env, ["--check-recurrence"]).stdout);
+  const out = JSON.parse(cli(root, env, ["--check-recurrence", "--run-checks"]).stdout);
   const r2 = out.scoreboard.find((s) => s.culpritId === "friction:partial-evidence-capture");
   assert.ok(r2, "the r2 journal-recurrence promotion is scored");
   assert.equal(r2.verdict, "recurred");
@@ -149,15 +149,16 @@ test("acceptance (A): the fixture scoreboard recurs the r2 row, breaks the r3 ro
   assert.equal(out.candidates.retirement.length, 0);
 });
 
-// (B) r3 "did-not-execute → unmeasurable" — module-level (Ruling R-T9-b). The shipped CLI cannot
-// force ran:false deterministically (defaultRunCheck shell-execs the verify: path), so this verdict
-// is asserted at the engine boundary with an injected runCheck, mirroring verification.test.mjs.
+// (B) r3 "did-not-execute → unmeasurable" — module-level (Ruling R-T9-b). Asserted at the engine
+// boundary with an injected runCheck, mirroring verification.test.mjs.
 test("acceptance (B, module-level per R-T9-b): an r3 check that did not execute is unmeasurable, never held", () => {
   const p = [{
     culpritId: "friction:redaction-unknown-flag", rung: "r3",
     verify: "tests/fixtures/learn/candidates.json", landed: "2026-08-01", aliases: [], lifecycle: null,
   }];
-  const out = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20"), runCheck: () => ({ ran: false, ok: false }) });
+  const out = verify(p, [], "0.14.0", {
+    now: Date.parse("2026-08-20"), runCheck: () => ({ status: "unrunnable", detail: "unrunnable: check did not execute" }),
+  });
   assert.equal(out.scoreboard[0].verdict, "unmeasurable");
   assert.notEqual(out.scoreboard[0].verdict, "held");
 });
@@ -171,7 +172,7 @@ test("acceptance (C, module-level per R-T9-a): resolved-in recurs once installed
   const vocab = JSON.parse(readFileSync(join(FIXTURES, "culprits.json"), "utf8"));
   const entry = vocab.find((e) => e && e["resolved-in"]);
   assert.ok(entry, "the fixture vocab carries a resolved-in entry");
-  const id = `${entry.kind}:${entry.slug}`;
+  const id = entry.slug;
   const releaseDates = new Map([[entry["resolved-in"], "2026-08-05"]]);
   const runs = [{ event: "gate-fail", culprit: id, ts: "2026-08-10T00:00:00Z", runId: "r1" }];
   const at = verify([], runs, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runsObserved } from "./journal.mjs";
+import { runsObserved, isIso } from "./journal.mjs";
 import { cmpSemver, SEMVER_RE } from "./semver.mjs";
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,21 +32,40 @@ function loadReleaseDates() {
   catch { return new Map(); }
 }
 
-export function defaultRunCheck(verifyVal, { root = process.cwd() } = {}) {
+// Bounded like every other child this repo spawns (workflows/review-panel.js:52,
+// workflows/mechanical-sweep.js:49-50). Tighter than those 15-minute agent bounds because a
+// doctor report runs every r3 check in sequence while a human waits on it.
+export const VERIFY_TIMEOUT_MS = 120_000;
+export const VERIFY_MAX_BUFFER = 8 * 1024 * 1024;
+
+// The engine's default: execute nothing. A promotion record is committed markdown that arrives
+// through a PR or a merge, so running its `- verify:` line is an explicit per-invocation act
+// (`--run-checks`) and never a side effect of asking for a report.
+export function skipRunCheck() {
+  return { status: "skipped", detail: "not run: pass --run-checks" };
+}
+
+// The opt-in runner. Returns a status rather than two booleans: "no flag", "present but not
+// runnable" and "the harness blew up" are three different things and must reach three different
+// report lines.
+export function defaultRunCheck(verifyVal, opts = {}) {
+  const { root = process.cwd(), timeoutMs = VERIFY_TIMEOUT_MS, maxBuffer = VERIFY_MAX_BUFFER } = opts;
   const target = join(root, verifyVal);
   const isCommand = verifyVal.includes(" ") || !existsSafe(target);
+  const argv = isCommand ? ["/bin/sh", "-c", verifyVal] : runnableCheck(verifyVal, target);
+  // Present but not runnable-as-a-check (a data file, statted rather than executed): cannot
+  // verify → unmeasurable, never a stat-only "held".
+  if (!argv) return { status: "unrunnable", detail: "unrunnable: check did not execute" };
   try {
-    if (isCommand) {
-      const r = spawnSync("/bin/sh", ["-c", verifyVal], { cwd: root });
-      return { ran: r.status !== null, ok: r.status === 0 };
-    }
-    const runner = runnableCheck(verifyVal, target);
-    if (runner) {                             // present runnable script/test: run it, use its exit code
-      const r = spawnSync(runner[0], runner.slice(1), { cwd: root });
-      return { ran: r.status !== null, ok: r.status === 0 };
-    }
-    return { ran: false, ok: false };         // present but not runnable-as-a-check: cannot verify → unmeasurable, never a stat-only "held"
-  } catch { return { ran: false, ok: false }; }
+    const r = spawnSync(argv[0], argv.slice(1), { cwd: root, timeout: timeoutMs, maxBuffer });
+    // A timeout (ETIMEDOUT), an output overflow (ENOBUFS) or a spawn failure is a broken harness,
+    // not a measurement: reporting it as unmeasurable files it as a missing run instead.
+    if (r.error) return { status: "errored", detail: `errored: ${r.error.code ?? r.error.message}` };
+    if (r.status === null) return { status: "errored", detail: `errored: killed by ${r.signal ?? "unknown signal"}` };
+    return { status: r.status === 0 ? "ok" : "failed", detail: null };
+  } catch (e) {
+    return { status: "errored", detail: `errored: ${e.code ?? e.message}` };
+  }
 }
 // The argv for running a verify: path as a check, or null when the path is not runnable-as-a-check
 // (statted instead). Test files run under the node test runner; other scripts run directly.
@@ -58,24 +77,46 @@ function runnableCheck(verifyVal, target) {
 }
 function existsSafe(p) { try { readFileSync(p); return true; } catch { return false; } }
 
+// The whole status→verdict mapping, in one place. `errored` is its own word: a check that blew up
+// is neither a clean bill of health nor a measurement nobody took.
+const VERDICT_BY_STATUS = {
+  ok: "held", failed: "broken", errored: "errored", unrunnable: "unmeasurable", skipped: "unmeasurable",
+};
+
+// Both scoring paths measure "events after a boundary date" and both used a bare string compare.
+// An event with no parseable ts — doctor.mjs:1455,1457 emits ts: null — must fall OUTSIDE every
+// window: "null" sorts after every real date, so the unguarded form silently admitted all of them.
+const eventsAfter = (events, boundary) =>
+  events.filter((e) => isIso(e.ts) && String(e.ts).slice(0, 10) > boundary);
+
 export function verify(promotions, journalEvents, installed, opts = {}) {
-  const { now = Date.now(), runCheck = defaultRunCheck, vocab = loadVocab(), root = process.cwd(),
+  const { now = Date.now(), runCheck = skipRunCheck, vocab = loadVocab(), root = process.cwd(),
+    timeoutMs = VERIFY_TIMEOUT_MS, maxBuffer = VERIFY_MAX_BUFFER,
     releaseDates: relDates = loadReleaseDates() } = opts;
   const scored = promotions.filter((p) => !p.lifecycle && p.culpritId);
   const scoreboard = [], escalation = [], retirement = [];
   for (const p of scored) {
-    const ids = new Set([p.culpritId, ...(p.aliases ?? [])]);
+    // A promotion's culprit-id/aliases may hold a bare slug, novel:<slug>, or <kind>:<slug>
+    // (promotions.mjs CULPRIT_ID_RE), but run-record.mjs's validateCulprit only ever writes a
+    // bare culprits.json slug or novel:<slug> into a journal event's culprit field. Normalize
+    // every declared id the same way promotions.mjs:126 already does (strip the kind prefix)
+    // and admit both the bare and novel: forms, so all three declared shapes match a real event.
+    const ids = new Set();
+    for (const raw of [p.culpritId, ...(p.aliases ?? [])]) {
+      const slug = raw.split(":").pop();
+      ids.add(slug);
+      ids.add(`novel:${slug}`);
+    }
     if (p.rung === "r3" && p.verify && p.verify !== "journal-recurrence") {
-      const { ran, ok } = runCheck(p.verify, { root });
-      const verdict = !ran ? "unmeasurable" : ok ? "held" : "broken";
-      // Annotate the reason when the check never ran, so an unmeasurable-because-unrunnable r3
-      // (a verify: path that exists but is not runnable-as-a-check) is distinguishable from a
-      // held/broken one, which carries the bare path. See #54.
-      const detail = ran ? p.verify : `${p.verify} (unrunnable: check did not execute)`;
+      const { status, detail: reason } = runCheck(p.verify, { root, timeoutMs, maxBuffer });
+      const verdict = VERDICT_BY_STATUS[status] ?? "unmeasurable";
+      // Annotate why, so a skipped check, an unrunnable one and an errored one are distinguishable
+      // in the report; a held/broken row carries the bare path. See #54 and audit F1/F48.
+      const detail = reason ? `${p.verify} (${reason})` : p.verify;
       scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: 0, recurrences: 0, detail });
       continue;
     }
-    const after = journalEvents.filter((e) => String(e.ts).slice(0, 10) > p.landed);
+    const after = eventsAfter(journalEvents, p.landed);
     const runs = runsObserved(after);
     const recurrences = after.filter((e) => e.culprit && ids.has(e.culprit)).length;
     const verdict = runs === 0 ? "unmeasurable" : recurrences > 0 ? "recurred" : "held";
@@ -87,13 +128,18 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
     }
   }
   const resolvedIn = vocab.filter((e) => e && e["resolved-in"]).map((e) => {
-    const id = `${e.kind}:${e.slug}`;
+    // The journal stores a culprit as a bare culprits.json slug or as novel:<slug>
+    // (scripts/run-record.mjs:20-34,87-88 is its only writer). A `<kind>:<slug>` id is a shape it
+    // never holds, so comparing against one could never match. doctor.mjs:1894 keys the same
+    // vocabulary by bare slug; this renders and matches the same way.
+    const id = e.slug;
+    const novelId = `novel:${e.slug}`;
     const rv = e["resolved-in"];
     const reached = installed && SEMVER_RE.test(installed) && cmpSemver(installed, rv) >= 0;
     const since = reached ? (relDates.get(rv) ?? null) : null;   // CHANGELOG date of the resolving version
-    const after = since ? journalEvents.filter((ev) => String(ev.ts).slice(0, 10) > since) : [];
+    const after = since ? eventsAfter(journalEvents, since) : [];
     const runs = runsObserved(after);
-    const recurrences = after.filter((ev) => ev.culprit === id).length;
+    const recurrences = after.filter((ev) => ev.culprit === id || ev.culprit === novelId).length;
     const verdict = (!reached || !since || runs === 0) ? "unmeasurable" : recurrences > 0 ? "recurred" : "held";
     return { culpritId: id, resolvedIn: rv, verdict, runsObserved: runs };
   });

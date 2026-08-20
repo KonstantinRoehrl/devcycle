@@ -2,7 +2,7 @@
 // against synthetic transcripts. No real session transcript is ever read.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, chmodSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, chmodSync, readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,7 +68,7 @@ test("parseArgs: defaults resolve the transcript dir under the home directory", 
 
 test("parseArgs: every flag is read", () => {
   const a = parseArgs(["--dir", "/tmp/x", "--since", "2026-07-01", "--until", "2026-07-31", "--json"]);
-  assert.deepEqual(a, { dir: "/tmp/x", since: "2026-07-01", until: "2026-07-31", json: true, all: false, depth: false, drift: null, issueBody: null });
+  assert.deepEqual(a, { dir: "/tmp/x", since: "2026-07-01", until: "2026-07-31", json: true, all: false, depth: false, runChecks: false, drift: null, issueBody: null });
 });
 
 test("isDevcycleSession: a devcycle attributionSkill includes the session", () => {
@@ -1901,4 +1901,57 @@ test("a round the green gate rejects after the reviewer passed it scores as a re
   };
   const derived = deriveEvents(record).map((e) => e.event);
   assert.deepEqual(derived, ["review-reject"]);
+});
+
+// F1 end-to-end: a promotion record is committed markdown that arrives through a PR. Running the
+// report over a repo that holds a hostile one must have no effect on the filesystem.
+test("cli: a hostile promotion verify: line does not execute without --run-checks, and does with it", () => {
+  const transcripts = mkdtempSync(join(tmpdir(), "doctor-runchecks-dir-"));
+  const slug = join(transcripts, "-Users-x-proj");
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(
+    join(slug, "sess-rc01.jsonl"),
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) + "\n",
+  );
+  const repo = mkdtempSync(join(tmpdir(), "doctor-runchecks-repo-"));
+  mkdirSync(join(repo, "docs", "devcycle", "promotions"), { recursive: true });
+  writeFileSync(
+    join(repo, "docs", "devcycle", "promotions", "2026-08-19-hostile.md"),
+    [
+      "# Hostile",
+      "",
+      "- promotion-type: enforcement-gap",
+      "- cluster-signature: hostile",
+      "- files-touched: scripts/x.mjs",
+      "- landed: 2026-08-01",
+      "- commit: abc",
+      "- culprit-id: friction:hostile",
+      "- rung: r3",
+      `- verify: touch ${join(repo, "pwned")}`,
+      "",
+    ].join("\n"),
+  );
+
+  const off = run(["--dir", transcripts], { PATH: process.env.PATH }, repo);
+  assert.equal(off.status, 0, off.stderr);
+  assert.equal(existsSync(join(repo, "pwned")), false, "the report must not execute a committed verify: line");
+  assert.match(off.stdout, /not run: pass --run-checks/);
+
+  const on = run(["--dir", transcripts, "--run-checks"], { PATH: process.env.PATH }, repo);
+  assert.equal(on.status, 0, on.stderr);
+  assert.equal(existsSync(join(repo, "pwned")), true, "--run-checks must run the check");
+});
+
+test("parseArgs: --run-checks is read and defaults to false", () => {
+  assert.equal(parseArgs(["--run-checks"]).runChecks, true);
+  assert.equal(parseArgs([]).runChecks, false);
+});
+
+// The header is the promise a reader relies on before running the script; leaving it claiming an
+// unconditional read-only run while the code can execute a check is the docs-vs-reality defect
+// this cycle exists to remove (QC5).
+test("the doctor header states that verify: checks run only under --run-checks", () => {
+  const header = readFileSync(SCRIPT, "utf8").split("\n").slice(0, 6).join("\n");
+  assert.match(header, /Read-only by default/);
+  assert.match(header, /--run-checks/);
 });

@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { verify, defaultRunCheck } from "../../scripts/verification.mjs";
+import { verify, defaultRunCheck, skipRunCheck, VERIFY_TIMEOUT_MS } from "../../scripts/verification.mjs";
 
 const ev = (culprit, ts, runId) => ({ event: "gate-fail", culprit, ts, runId });
 const promo = (o) => ({ verify: "journal-recurrence", aliases: [], lifecycle: null, ...o });
@@ -15,13 +15,22 @@ test("r0-r2: zero runs after landed is unmeasurable, never held", () => {
 });
 
 test("r0-r2: a run with no recurrence is held; a recurrence is recurred + escalation", () => {
+  // The promotion's culprit-id is the <kind>:<slug> form; run-record.mjs only ever writes the
+  // bare slug into a journal event's culprit field (never "friction:a"), so the recurrence must
+  // be found through that shape or this test is vacuous.
   const runs = [ev(null, "2026-08-05T00:00:00Z", "r1")];
   const held = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(held.scoreboard[0].verdict, "held");
   const recur = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })],
-    [...runs, ev("friction:a", "2026-08-06T00:00:00Z", "r2")], "0.14.0", { now: Date.parse("2026-08-20") });
+    [...runs, ev("a", "2026-08-06T00:00:00Z", "r2")], "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(recur.scoreboard[0].verdict, "recurred");
   assert.equal(recur.candidates.escalation[0].culpritId, "friction:a");
+});
+
+test("r0-r2: the novel:<slug> form still matches after normalization (do not break it)", () => {
+  const runs = [ev(null, "2026-08-05T00:00:00Z", "r1"), ev("novel:foo-bar", "2026-08-06T00:00:00Z", "r2")];
+  const out = verify([promo({ culpritId: "novel:foo-bar", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(out.scoreboard[0].verdict, "recurred");
 });
 
 test("retirement fires on held past 10 runs OR 90 days", () => {
@@ -30,22 +39,22 @@ test("retirement fires on held past 10 runs OR 90 days", () => {
   assert.equal(out.candidates.retirement[0].culpritId, "friction:a");
 });
 
-test("r3: runCheck ran=false renders unmeasurable, never held", () => {
+test("r3: runCheck status unrunnable renders unmeasurable, never held", () => {
   const p = [promo({ culpritId: "friction:c", rung: "r3", verify: "tests/fixtures/learn/candidates.json", landed: "2026-08-01" })];
-  const skipped = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20"), runCheck: () => ({ ran: false, ok: false }) });
+  const skipped = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20"), runCheck: () => ({ status: "unrunnable", detail: "unrunnable: check did not execute" }) });
   assert.equal(skipped.scoreboard[0].verdict, "unmeasurable");
   assert.match(skipped.scoreboard[0].detail, /unrunnable/); // the reason is annotated, distinct from a held/broken path
-  const passed = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20"), runCheck: () => ({ ran: true, ok: true }) });
+  const passed = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20"), runCheck: () => ({ status: "ok", detail: null }) });
   assert.equal(passed.scoreboard[0].verdict, "held");
   assert.equal(passed.scoreboard[0].detail, "tests/fixtures/learn/candidates.json"); // held keeps the bare path
-  const broke = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20"), runCheck: () => ({ ran: true, ok: false }) });
+  const broke = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20"), runCheck: () => ({ status: "failed", detail: null }) });
   assert.equal(broke.scoreboard[0].verdict, "broken");
 });
 
 test("resolved-in: recurrence after installed reached resolved-in is recurred; installed below is unmeasurable", () => {
   const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
   const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
-  const runs = [ev("friction:flaky-test-retry", "2026-08-10T00:00:00Z", "r1")];
+  const runs = [ev("flaky-test-retry", "2026-08-10T00:00:00Z", "r1")];
   const below = verify([], runs, "0.13.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
   assert.equal(below.resolvedIn[0].verdict, "unmeasurable");
   const at = verify([], runs, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
@@ -55,7 +64,7 @@ test("resolved-in: recurrence after installed reached resolved-in is recurred; i
 test("resolved-in: a post-release run for a different culprit is held (the previously-dead path)", () => {
   const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
   const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
-  const runs = [ev("friction:other", "2026-08-10T00:00:00Z", "r1")];
+  const runs = [ev("other-slug", "2026-08-10T00:00:00Z", "r1")];
   const out = verify([], runs, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
   assert.equal(out.resolvedIn[0].verdict, "held");
 });
@@ -83,22 +92,145 @@ test("defaultRunCheck runs an existing runnable script/test and uses its exit co
   writeFileSync(join(root, "fail.sh"), "exit 3\n");
   writeFileSync(join(root, "pass.sh"), "exit 0\n");
   writeFileSync(join(root, "data.json"), "{}\n");
-  assert.deepEqual(defaultRunCheck("fail.sh", { root }), { ran: true, ok: false });
-  assert.deepEqual(defaultRunCheck("pass.sh", { root }), { ran: true, ok: true });
-  assert.deepEqual(defaultRunCheck("data.json", { root }), { ran: false, ok: false });
+  assert.deepEqual(defaultRunCheck("fail.sh", { root }), { status: "failed", detail: null });
+  assert.deepEqual(defaultRunCheck("pass.sh", { root }), { status: "ok", detail: null });
+  assert.deepEqual(defaultRunCheck("data.json", { root }), { status: "unrunnable", detail: "unrunnable: check did not execute" });
 });
 
 test("defaultRunCheck reports an existing but non-runnable verify: path as unmeasurable, not held", () => {
   const dir = mkdtempSync(join(tmpdir(), "verif-"));
   writeFileSync(join(dir, "fixture.json"), "{}\n");           // exists, not runnable-as-a-check
   const r = defaultRunCheck("fixture.json", { root: dir });
-  assert.deepEqual(r, { ran: false, ok: false });
+  assert.deepEqual(r, { status: "unrunnable", detail: "unrunnable: check did not execute" });
 });
 
 test("verify() maps a non-runnable r3 verify: path to unmeasurable", () => {
   const promotions = [{ culpritId: "x:y", rung: "r3", verify: "fixture.json", landed: "2026-01-01" }];
   const dir = mkdtempSync(join(tmpdir(), "verif-"));
   writeFileSync(join(dir, "fixture.json"), "{}\n");
-  const { scoreboard } = verify(promotions, [], "0.13.1", { root: dir });
+  const { scoreboard } = verify(promotions, [], "0.13.1", { root: dir, runCheck: defaultRunCheck });
   assert.equal(scoreboard[0].verdict, "unmeasurable");
+});
+
+test("F1: verify() executes nothing by default — a hostile verify: line has no side effect", () => {
+  const root = mkdtempSync(join(tmpdir(), "verif-f1-"));
+  const promotions = [{
+    culpritId: "friction:hostile", rung: "r3", verify: `touch ${join(root, "pwned")}`,
+    landed: "2026-01-01", aliases: [], lifecycle: null,
+  }];
+  const { scoreboard } = verify(promotions, [], "0.14.0", { root });
+  assert.equal(existsSync(join(root, "pwned")), false, "the default runCheck must not execute anything");
+  assert.equal(scoreboard[0].verdict, "unmeasurable");
+  assert.match(scoreboard[0].detail, /not run: pass --run-checks/);
+});
+
+test("F1: passing defaultRunCheck explicitly opts back into execution", () => {
+  const root = mkdtempSync(join(tmpdir(), "verif-f1-optin-"));
+  const promotions = [{
+    culpritId: "friction:hostile", rung: "r3", verify: `touch ${join(root, "pwned")}`,
+    landed: "2026-01-01", aliases: [], lifecycle: null,
+  }];
+  const { scoreboard } = verify(promotions, [], "0.14.0", { root, runCheck: defaultRunCheck });
+  assert.equal(existsSync(join(root, "pwned")), true, "--run-checks must actually run the check");
+  assert.equal(scoreboard[0].verdict, "held");
+});
+
+test("skipRunCheck reports skipped and names the flag", () => {
+  assert.deepEqual(skipRunCheck(), { status: "skipped", detail: "not run: pass --run-checks" });
+});
+
+test("F48: a check that outlives its timeout is errored, not unmeasurable and not broken", () => {
+  const root = mkdtempSync(join(tmpdir(), "verif-timeout-"));
+  const r = defaultRunCheck("sleep 30", { root, timeoutMs: 250 });
+  assert.equal(r.status, "errored");
+  assert.match(r.detail, /errored:/);
+});
+
+test("F48: a check that floods stdout past maxBuffer is errored, not unmeasurable", () => {
+  const root = mkdtempSync(join(tmpdir(), "verif-enobuf-"));
+  const r = defaultRunCheck("yes hello", { root, timeoutMs: 5000, maxBuffer: 64 });
+  assert.equal(r.status, "errored");
+  assert.match(r.detail, /errored:/);
+});
+
+test("F48: verify() maps an errored check to the errored verdict, distinct from unmeasurable", () => {
+  const promotions = [{
+    culpritId: "friction:slow", rung: "r3", verify: "sleep 30",
+    landed: "2026-01-01", aliases: [], lifecycle: null,
+  }];
+  const { scoreboard } = verify(promotions, [], "0.14.0", {
+    root: mkdtempSync(join(tmpdir(), "verif-errored-")), runCheck: defaultRunCheck, timeoutMs: 250,
+  });
+  assert.equal(scoreboard[0].verdict, "errored");
+  assert.match(scoreboard[0].detail, /\(errored: /);
+});
+
+test("defaultRunCheck bounds are exported so callers cannot spawn unbounded", () => {
+  assert.equal(typeof VERIFY_TIMEOUT_MS, "number");
+  assert.ok(VERIFY_TIMEOUT_MS > 0 && VERIFY_TIMEOUT_MS <= 120_000);
+});
+
+// F4: doctor.mjs:1455,1457 emits derived review-reject / first-round-accept events with ts: null.
+// The old filter compared raw strings, and "null" > "2026-08-15" is true, so every such event fell
+// inside every promotion's window, inflating runsObserved. Derived events carry no culprit, so
+// recurrences stayed 0 — which is exactly the combination that renders `held`.
+test("F4: a promotion whose only events carry ts:null is unmeasurable, never held", () => {
+  const promotions = [{
+    culpritId: "friction:x", rung: "r2", landed: "2026-08-15", aliases: [], lifecycle: null,
+  }];
+  const events = [
+    { runId: "a".repeat(16), event: "review-reject", culprit: null, ts: null },
+    { runId: "b".repeat(16), event: "first-round-accept", culprit: null, ts: null },
+  ];
+  const { scoreboard } = verify(promotions, events, "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(scoreboard[0].runsObserved, 0, "an event with no timestamp is outside every window");
+  assert.equal(scoreboard[0].verdict, "unmeasurable");
+  assert.notEqual(scoreboard[0].verdict, "held");
+});
+
+test("F4: the resolved-in window applies the same ts guard", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const events = [{ runId: "c".repeat(16), event: "review-reject", culprit: null, ts: null }];
+  const out = verify([], events, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(out.resolvedIn[0].runsObserved, 0);
+  assert.equal(out.resolvedIn[0].verdict, "unmeasurable");
+});
+
+test("F4: a real timestamp after the landed date is still counted", () => {
+  const promotions = [{
+    culpritId: "friction:x", rung: "r2", landed: "2026-08-15", aliases: [], lifecycle: null,
+  }];
+  const events = [{ runId: "d".repeat(16), event: "gate-fail", culprit: "x", ts: "2026-08-16T09:00:00.000Z" }];
+  const { scoreboard } = verify(promotions, events, "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(scoreboard[0].runsObserved, 1);
+  assert.equal(scoreboard[0].verdict, "recurred");
+});
+
+// F5: run-record.mjs:20-34 accepts a culprit only as a bare culprits.json slug or novel:<slug>.
+// The engine built `${kind}:${slug}`, a shape the journal never stores, so the comparison could
+// never match and every resolved-in culprit read held or unmeasurable regardless of reality.
+test("F5: a journal event carrying a bare culprit slug produces recurred", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const events = [{ runId: "e".repeat(16), event: "gate-fail", culprit: "flaky-test-retry", ts: "2026-08-10T00:00:00Z" }];
+  const out = verify([], events, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(out.resolvedIn[0].verdict, "recurred");
+  assert.equal(out.resolvedIn[0].culpritId, "flaky-test-retry", "the id is rendered as the bare slug");
+});
+
+test("F5: the novel:<slug> form matches the same vocabulary entry", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const events = [{ runId: "f".repeat(16), event: "gate-fail", culprit: "novel:flaky-test-retry", ts: "2026-08-10T00:00:00Z" }];
+  const out = verify([], events, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(out.resolvedIn[0].verdict, "recurred");
+});
+
+test("F5: an unrelated bare slug does not match", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const events = [{ runId: "g".repeat(16), event: "gate-fail", culprit: "other-slug", ts: "2026-08-10T00:00:00Z" }];
+  const out = verify([], events, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(out.resolvedIn[0].verdict, "held");
 });
