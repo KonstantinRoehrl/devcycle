@@ -1694,3 +1694,154 @@ test("C3 leg 6: every agents/*.md is named by the surface or read by a workflow 
   });
   assert.deepEqual(unreachable, [], "an agent no surface file names and no workflow reads can never be invoked");
 });
+
+// --- C4: hook-guard assertions ---------------------------------------------------------------
+// The browser guard is the only component in this plugin that can deny a tool call, and it works
+// by matching three spellings that live in three different files: the allowlist literal in the
+// hook, the `name:` in the agent's frontmatter, and the plugin id the harness prefixes onto that
+// name at dispatch. Nothing else in the repo reads hooks/hooks.json or that literal, so before
+// these assertions a rename in any one of the three disarmed the guard silently while the whole
+// suite stayed green. scripts/validate.mjs check 22 covers hooks.json well-formedness; what is
+// asserted here is the policy that check deliberately leaves alone.
+
+const HOOK_SRC = "hooks/block-main-thread-browser.mjs";
+const CHROME_NS = "mcp__claude-in-chrome__";
+
+// ASSUMPTION (not verified from this repo, and load-bearing for the negative leg below): a
+// PreToolUse matcher is compiled and tested against a bare tool name UNANCHORED. The basis is an
+// inference from observed behaviour, not a quoted document: a bare matcher such as `Edit` is
+// reported to also fire on `MultiEdit` and `NotebookEdit`, which only substring testing explains.
+// That is specifically the one question this repo's own empirical playbook has not settled here:
+// the hook input's shape was recovered from the installed binary (this file's own sibling,
+// tests/unit/block-main-thread-browser.test.mjs's header) and agent_type namespacing was settled
+// by counting transcript records (docs/platform-notes.md § (e)), but neither method observes the
+// harness's internal matcher-test control flow — no stdin capture or transcript record exposes it.
+// Every leg below asks that same question via `matches`. If the harness ever turns out to
+// full-match instead, it is the must-not-reach leg that stays sound — unanchored-false is implied
+// by anchored-false (equivalently, anchored-true implies unanchored-true, so a real full match
+// would already have shown up unanchored) — while the two must-cover legs become the unsound ones,
+// NOT the safe direction: an unanchored-true found here does not imply an anchored-true, so a
+// matcher with its `.*` dropped (e.g. `mcp__claude-in-chrome__` alone) could pass both must-cover
+// legs by substring-matching every tool name while a full-matching harness would treat it as
+// covering none of them. An earlier version of this file anchored the test to a full match
+// (`^(?:pattern)$`) on the theory that "(not) match" should mean "(not) describes the whole tool
+// name". That reasoning is half right: anchored-true does imply unanchored-true, so it was sound
+// for the two must-cover legs. It is backwards for the must-not-reach leg, because anchored-false
+// does NOT imply unanchored-false — a matcher such as `mcp__claude-in-chrome__.*|Ba` fails a full
+// match against "Bash" (the trailing "sh" breaks the `$` anchor) while still testing true
+// unanchored, which is what the harness actually evaluates: that registration fires on Bash and
+// denies it. Anchoring hid exactly the degenerate-matcher class this leg exists to catch.
+// "*" is a further special case, consistent with scripts/validate.mjs check 22: the harness
+// documents it as a literal meaning "match every tool", not regex syntax (`new RegExp("*")`
+// throws "Nothing to repeat"), so compiling it unconditionally would make every leg below throw a
+// SyntaxError instead of failing the assertion it exists for.
+const matches = (pattern, name) => (pattern === "*" ? true : new RegExp(pattern).test(name));
+
+const findHookEntry = () => {
+  const doc = JSON.parse(read("hooks/hooks.json"));
+  const entry = (doc.hooks?.PreToolUse ?? []).find((e) =>
+    (e.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(HOOK_SRC))
+  );
+  assert.ok(entry, `hooks/hooks.json must register ${HOOK_SRC} on PreToolUse`);
+  return entry;
+};
+
+const allowedAgentTypes = () => {
+  const m = read(HOOK_SRC).match(/const ALLOWED_AGENT_TYPES = \[([^\]]*)\];/);
+  assert.ok(m, `${HOOK_SRC} must declare ALLOWED_AGENT_TYPES as a single-line array literal`);
+  return [...m[1].matchAll(/"([^"]+)"/g)].map(([, v]) => v);
+};
+
+test("the browser guard's allowlist is the driver's frontmatter name and its namespaced form", () => {
+  const name = read("agents/on-device-driver.md").match(/^name:\s*(\S+)\s*$/m)?.[1];
+  assert.ok(name, "agents/on-device-driver.md must carry a frontmatter name:");
+  const plugin = JSON.parse(read(".claude-plugin/plugin.json")).name;
+  assert.deepEqual(
+    allowedAgentTypes(),
+    [name, `${plugin}:${name}`],
+    `${HOOK_SRC}'s allowlist must be exactly the agent's frontmatter name and its ${plugin}:-namespaced ` +
+      "form — the harness passes the namespaced spelling (docs/platform-notes.md § (e)), and admitting " +
+      "anything beyond these two widens a guard whose only job is to narrow"
+  );
+});
+
+test("the browser guard is registered on PreToolUse over every browser tool the driver is granted", () => {
+  const entry = findHookEntry();
+  const granted = (read("agents/on-device-driver.md").match(/^tools:\s*(.+)$/m)?.[1] ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.startsWith(CHROME_NS));
+  assert.ok(granted.length, "agents/on-device-driver.md must grant at least one browser tool");
+  for (const tool of granted)
+    assert.ok(
+      matches(entry.matcher, tool),
+      `hooks.json's matcher "${entry.matcher}" must cover ${tool} — it is one of the browser tools the driver is granted`
+    );
+});
+
+test("the browser guard's matcher covers the mcp__claude-in-chrome__ namespace, not today's enumeration", () => {
+  const entry = findHookEntry();
+  // Deliberately not in the driver's current frontmatter (see the tools: line above): this
+  // stands in for a browser tool the MCP server adds tomorrow. A matcher narrowed to an
+  // enumeration of today's granted tools passes leg 4 above unchanged while leaving that future
+  // tool unguarded — this assertion is what turns such a narrowing red.
+  const futureTool = `${CHROME_NS}scroll`;
+  assert.ok(
+    matches(entry.matcher, futureTool),
+    `hooks.json's matcher "${entry.matcher}" must cover the whole ${CHROME_NS} namespace, including tools the ` +
+      `driver's frontmatter does not list today (e.g. ${futureTool}) — narrowing the matcher to an enumeration ` +
+      "of today's tools would leave a newly added browser tool unguarded"
+  );
+});
+
+test("the browser guard's matcher does not reach ordinary main-thread tools", () => {
+  const entry = findHookEntry();
+  // This samples five ordinary tool names plus one MCP tool from a different server; it cannot
+  // see a matcher scoped to some sixth ordinary name or another MCP server none of them happen to
+  // be, so a pass here is evidence against this sample, not exhaustive proof the matcher is safe
+  // over every non-browser tool. The MCP sample matters on its own: a matcher widened from
+  // mcp__claude-in-chrome__.* to mcp__.* passes every other leg here (the sample was previously
+  // all non-MCP names, so it could not see this) while denying every MCP tool call in the session,
+  // from every MCP server — a far more plausible degenerate edit than a sixth ordinary name.
+  for (const tool of ["Bash", "Read", "Edit", "Write", "Task", "mcp__playwright__navigate"])
+    assert.ok(
+      !matches(entry.matcher, tool),
+      `hooks.json's matcher "${entry.matcher}" must NOT match ${tool} (checked against this sample of ordinary ` +
+        "tool names plus one other MCP server's tool, not exhaustively) — a matcher that reaches ordinary " +
+        "main-thread tools or another MCP server's tools registers a deny over every one of them, not just " +
+        "the browser MCP namespace"
+    );
+});
+
+test("every shipped agent is named by DESIGN.md's blueprint, DESIGN.md §13, and README's machinery table", () => {
+  const design = read("DESIGN.md");
+  const readme = read("README.md");
+  for (const f of readdirSync(join(root, "agents"))) {
+    if (!f.endsWith(".md")) continue;
+    const id = f.replace(/\.md$/, "");
+    assert.ok(design.includes(f), `DESIGN.md §3's tree must list ${f}`);
+    assert.ok(design.includes(`devcycle:${id}`), `DESIGN.md §13's agent list must name devcycle:${id}`);
+    assert.match(
+      readme,
+      new RegExp(`^\\| Agent \`${id}\` \\|`, "m"),
+      `README.md's machinery table must carry a row for agent ${id} — a bare mention elsewhere in the file does not satisfy this: the Hook row's prose also names the driver`
+    );
+  }
+});
+
+test("the browser guard is named by DESIGN.md's blueprint and README's machinery table", () => {
+  assert.match(read("DESIGN.md"), /^├── hooks\//m, "DESIGN.md §3's tree must list hooks/");
+  assert.match(
+    read("README.md"),
+    /block-main-thread-browser/,
+    "README.md's machinery table must carry a row for the hook — it is the one component no command loads"
+  );
+});
+
+test("DESIGN.md §10 no longer rejects the hooks that ship", () => {
+  assert.doesNotMatch(
+    read("DESIGN.md"),
+    /^- \*\*Hooks in the public plugin\*\*/m,
+    "the non-goal was reversed on 2026-08-20 (docs/DECISIONS.md); a shipped component cannot sit in §10"
+  );
+});

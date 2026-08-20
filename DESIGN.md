@@ -101,8 +101,13 @@ devcycle/                (public GitHub repo)
 ├── agents/                       # L2
 │   ├── implementer.md            # brief-driven implementer template
 │   ├── task-reviewer.md          # per-task reviewer; read-only tools allowlist
-│   └── red-team-reviewer.md      # adversarial charter; read-only allowlist; spliced into
-│                                 # review-panel's per-finding verification pass
+│   ├── red-team-reviewer.md      # adversarial charter; read-only allowlist; spliced into
+│   │                             # review-panel's per-finding verification pass
+│   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
+│                                 # origin the browser guard below permits
+├── hooks/                        # L4 — the one hook that ships (docs/DECISIONS.md, 2026-08-20)
+│   ├── hooks.json                # registers the guard on PreToolUse over mcp__claude-in-chrome__.*
+│   └── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
 ├── scripts/                      # L4 — validate.mjs, doctor.mjs, dream.mjs, the checkers, bump-version.mjs
 ├── workflows/                    # L4
@@ -275,7 +280,6 @@ Names are the shipped `playbooks/` files (§3); the ordering is the historical p
 ## 10. Non-Goals (explicitly rejected)
 
 - **Second plugin for the company repo** — the repo tier is better served in-repo (zero drift, no second repo).
-- **Hooks in the public plugin** — they fire for every user on every matched tool call; skills + commands suffice.
 - **`/retro` machinery** — memory-as-inbox + promotion sessions chosen instead.
 - **Forking superpowers skills** — thin overlay with declared dependency.
 - **RPI "3 specialist planning docs"** — source is promotional, unverified; wave planning covers the substance.
@@ -333,7 +337,11 @@ full-history secret scan.
 - Playbooks: verb-first gerunds, listed in §3. They are addressed by path, never as
   `devcycle:<name>`, so a playbook name is never a user-typed string.
 - Agents: `devcycle:implementer`, `devcycle:task-reviewer`,
-  `devcycle:red-team-reviewer`.
+  `devcycle:red-team-reviewer`, `devcycle:on-device-driver`. The plugin id is not decoration:
+  the harness passes `<plugin>:<name>` as a subagent's `agent_type`, which is the spelling the
+  browser guard's allowlist must carry (`docs/platform-notes.md` § (e)).
+- Hooks: one, `block-main-thread-browser`, named for what it denies rather than what it guards —
+  the only surface component that is not loaded by a command.
 
 ## 14. Open Questions (deferred to implementation)
 
