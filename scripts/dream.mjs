@@ -13,7 +13,7 @@ import { pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, readRecords, inWindow } from "./doctor.mjs";
 import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
-import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch } from "./lessons.mjs";
+import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding } from "./lessons.mjs";
 import { parseFileList } from "./task-files.mjs";
 import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
 import { renderLearnReport } from "./learn-report.mjs";
@@ -523,7 +523,7 @@ function main() {
     "--plan", "--commit-checkpoint", "--check-suppressed", "--extract", "--check-observations",
     "--record-promotion", "--record-lifecycle", "--check-recurrence", "--journal-events", "--legacy-similar",
     "--novel-slugs", "--lessons", "--render-report", "--match", "--lesson",
-    "--observations-deduped",
+    "--observations-deduped", "--plan-landing",
   ];
   const present = SUBCOMMANDS.filter((f) => argv.includes(f));
   if (present.length > 1) {
@@ -785,10 +785,63 @@ function main() {
         );
         process.exit(1);
       }
+      // The verification engine's own candidates, not a default: without this argument
+      // learn-report.mjs falls back to empty arrays and both candidate sections render
+      // "(none this run)" for candidates the engine did compute. No --run-checks mode is
+      // plumbed here on purpose — verification.mjs:110-117 skips every r3 row with a runnable
+      // check before the escalation and retirement pushes, so a run check cannot change one
+      // byte of this report.
+      const verification = verify(
+        readPromotions(root),
+        journalEvents({ toplevel: root }).events,
+        installedVersion(),
+        { root },
+      );
       process.stdout.write(renderLearnReport({
-        candidates, promotions: readPromotions(root), outcome: argv.includes("--outcome"), budget,
+        candidates, promotions: readPromotions(root), outcome: argv.includes("--outcome"),
+        verification, budget,
       }));
     } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
+    return;
+  }
+
+  // The eviction tie-break has one owner: this module. It used to ship twice — as
+  // lessons.mjs's planLanding and as prose telling the model to apply the same ordering by
+  // hand — and only the unreachable copy was tested. The culprit-id is read off the line
+  // rather than passed alongside it: a separate argument could disagree with the line it
+  // describes.
+  const planLandingIdx = argv.indexOf("--plan-landing");
+  if (planLandingIdx !== -1) {
+    try {
+      const flag = (name) => {
+        const i = argv.indexOf(name);
+        return i === -1 ? null : argv[i + 1] ?? null;
+      };
+      const stage = flag("--stage");
+      if (!stage || !STAGES.includes(stage))
+        throw new Error(`--stage must name a stage in the enum, got ${stage ?? "nothing"}`);
+      const line = flag("--line");
+      const culpritId = line ? lessonId(line) : null;
+      if (!culpritId) throw new Error("--line requires a lesson line ending in a [culprit-id]");
+      const store = flag("--store") ?? "repo";
+      const paths = {
+        repo: () => repoStorePath(root),
+        "user-repo": () => userRepoStorePath(root),
+        "user-global": () => userGlobalStorePath(),
+      };
+      if (!paths[store]) throw new Error(`--store must be repo, user-repo or user-global, got ${store}`);
+      console.log(JSON.stringify(planLanding({
+        stage,
+        line,
+        culpritId,
+        existing: readSection(paths[store](), stage),
+        events: journalEvents({ toplevel: root }).events,
+        promotions: readPromotions(root),
+      })));
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
     return;
   }
 
@@ -798,7 +851,8 @@ function main() {
       "--check-recurrence [--run-checks] | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
       "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --observations-deduped | --lessons <stage> | " +
       "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
-      "--render-report <candidates.json> [--outcome]",
+      "--render-report <candidates.json> [--outcome] | " +
+      "--plan-landing --stage <stage> --line \"<lesson line>\" [--store repo|user-repo|user-global]",
   );
   process.exit(1);
 }

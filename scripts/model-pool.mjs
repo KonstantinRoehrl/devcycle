@@ -7,7 +7,7 @@
 // orchestrator's own model and therefore cannot exceed it. Every unresolvable case converges on
 // that one form, because it is the only dispatch that cannot break the ceiling invariant.
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const DEFAULT_TABLE = fileURLToPath(new URL("../references/model-tiers.json", import.meta.url));
 
@@ -81,4 +81,35 @@ export function resolveModel({ value, signalCount = 0, orchestratorId, table }) 
     model: clamped,
     outcome: `model ${clamped} (pooled: rung ${rungIndex}/${len}, clamped from ${requested})`,
   };
+}
+
+// CLI only, so the pure helpers above stay importable by tests — the guard scripts/bump-version.mjs
+// already uses. references/config.md § Model tiers owns when a caller runs this: only for a knob
+// that resolves to a pin or a pool, since parsePool reads `auto` and an unsubstituted placeholder
+// as unset and there is nothing for this module to decide.
+function cliResolve(argv) {
+  const flag = (name) => {
+    const i = argv.indexOf(name);
+    return i === -1 ? null : argv[i + 1] ?? null;
+  };
+  const value = flag("--value");
+  if (value === null) throw new Error("--value is required");
+  const orchestratorId = flag("--orchestrator");
+  if (!orchestratorId) throw new Error("--orchestrator is required");
+  const rawSignals = flag("--signals");
+  const signalCount = rawSignals === null ? 0 : Number(rawSignals);
+  if (Number.isNaN(signalCount))
+    throw new Error(`--signals must be a number or Infinity, got ${rawSignals}`);
+  const tablePath = flag("--table");
+  const table = tablePath === null ? loadTable() : loadTable(tablePath);
+  return resolveModel({ value, signalCount, orchestratorId, table });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    console.log(JSON.stringify(cliResolve(process.argv.slice(2))));
+  } catch (e) {
+    console.error(`model-pool: ${e.message}`);
+    process.exit(1);
+  }
 }

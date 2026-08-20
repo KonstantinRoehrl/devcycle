@@ -1533,3 +1533,164 @@ test("the lessons line is short enough that duplication-check exempts it", () =>
     }
   }
 });
+
+// --- C3: reachability assertions ---
+// The audit's headline class: machinery that ships, is tested, and is called by nothing. Being
+// *named* on the surface is not being reachable — references/config.md named model-pool.mjs in
+// its ${CLAUDE_PLUGIN_ROOT} form throughout the whole period it had no caller — so leg 2 checks
+// importers rather than text. Legs 3 and 4 work together: 4 makes the shebang mean "this file
+// has a CLI", which is what lets 3 know which files must be invoked. This repo's CLI scripts run
+// top-level side effects rather than a uniform main(), so nothing else distinguishes them.
+
+const scriptFiles = () => readdirSync(join(root, "scripts")).filter((f) => f.endsWith(".mjs"));
+const hasShebang = (f) => read(`scripts/${f}`).startsWith("#!");
+
+// The invocation surface is wider than validate.mjs's four directories, and must be:
+// CONTRIBUTING.md:84-86 records that surface text uses the ${CLAUDE_PLUGIN_ROOT} form because it
+// runs from the installed plugin, while CI and contributor docs run from a checkout and correctly
+// use the repo-relative form. This leg checks reachability only; C2's validate.mjs check 4b owns
+// the form, in the one place a form can be wrong.
+const invocationSurface = () => [
+  ...surfaceFiles(),
+  ...readdirSync(join(root, ".github/workflows")).map((f) => `.github/workflows/${f}`),
+  "CONTRIBUTING.md",
+];
+
+test("C3 leg 1: every dream.mjs subcommand is named by at least one surface file", () => {
+  const block = read("scripts/dream.mjs").match(/const SUBCOMMANDS = \[([\s\S]*?)\];/);
+  assert.ok(block, "SUBCOMMANDS array not found in scripts/dream.mjs");
+  const subcommands = [...block[1].matchAll(/"(--[a-z-]+)"/g)].map((m) => m[1]);
+  assert.ok(subcommands.length >= 16, `expected the full subcommand list, got ${subcommands.length}`);
+  const surface = surfaceFiles().map(read).join("\n");
+  // A bare substring test lets a longer flag's mention shield a shorter one: any surface mention
+  // of `--plan-landing` would satisfy `surface.includes("--plan")` even with every genuine
+  // `--plan` invocation deleted, and `--lessons` shields `--lesson` the same way. A flag is
+  // `--[a-z-]+`, so requiring the character after the match not to continue that alphabet closes
+  // both collisions without needing to know every flag pair in advance.
+  const named = (flag) => new RegExp(`${flag}(?![a-zA-Z0-9-])`).test(surface);
+  const unnamed = subcommands.filter((flag) => !named(flag));
+  assert.deepEqual(unnamed, [], "a subcommand no surface file names can never be invoked");
+});
+
+test("C3 leg 2: every module-only script has a non-test importer", () => {
+  const modules = scriptFiles().filter((f) => !hasShebang(f));
+  const consumers = [
+    ...scriptFiles().map((f) => `scripts/${f}`),
+    ...readdirSync(join(root, "workflows")).filter((f) => f.endsWith(".js")).map((f) => `workflows/${f}`),
+  ];
+  const orphans = modules.filter((mod) =>
+    !consumers.some((c) => c !== `scripts/${mod}` && read(c).includes(`/${mod}"`)),
+  );
+  assert.deepEqual(orphans, [], "a module nothing imports and nothing runs is dead code");
+});
+
+// A real invocation's own syntax is the bound, not an arbitrary character budget: `node`,
+// then only whitespace (which \s matches across a line break too, so a prose wrap such as
+// commands/continue.md:29-31 and :32-33, commands/cycle.md:24-25 still matches — CommonMark
+// itself treats that line break as a plain space when the citation renders) and an optional
+// quote and `${CLAUDE_PLUGIN_ROOT}/`, then `scripts/<file>` directly — never "node, then
+// anything, eventually scripts/<file>" the way leg 3 first read it. That looser shape had two
+// failure modes a tighter one avoids for free, with no magic-number budget to justify: (1) a
+// false negative on the exact wrap above, since a plain `[^\n]*` never re-crosses the newline;
+// (2) two false positives a "no intervening backtick" bound (the alternative considered here)
+// would not have caught, because neither sits inside a single-backtick span at all —
+// CONTRIBUTING.md's fenced `node scripts/*.mjs` table lists one command per line with no
+// enclosing backticks, so a backtick-bounded search could still pair one line's `node` with a
+// later line's unrelated script path; and playbooks/finishing-the-cycle.md's redaction-check
+// citation embeds `node -e "import('...run-record.mjs')…"` inside the *same* single-backtick
+// span as a genuine `node …/redaction-check.mjs` call, so a backtick bound alone would credit
+// run-record.mjs with an invocation it doesn't have. Requiring direct adjacency after `node`
+// rules out both: a table line's `node` is never directly followed by a different line's path,
+// and `node -e "import(…)` is never directly followed by `scripts/`, so it is never counted as
+// invoking the module it merely imports — counting an import as a CLI call would be exactly the
+// named-vs-reachable confusion this cycle exists to end. (run-record.mjs still passes this leg
+// on its own genuine invocations in commands/continue.md and commands/cycle.md.)
+test("C3 leg 3: every CLI script is invoked from the surface", () => {
+  const text = invocationSurface().map(read).join("\n");
+  const uninvoked = scriptFiles()
+    .filter(hasShebang)
+    .filter(
+      (f) =>
+        !new RegExp(
+          String.raw`node\s+["']?(?:\$\{CLAUDE_PLUGIN_ROOT\}/)?scripts/${f.replace(".", "\\.")}`,
+        ).test(text),
+    );
+  assert.deepEqual(uninvoked, [], "a CLI nothing invokes is unreachable, however well documented");
+});
+
+test("C3 leg 4: a shebang means the file has a CLI, and only a CLI file carries one", () => {
+  const wrong = scriptFiles()
+    .map((f) => ({ f, shebang: hasShebang(f), argv: read(`scripts/${f}`).includes("process.argv") }))
+    .filter((r) => r.shebang !== r.argv)
+    .map((r) => `${r.f} (shebang=${r.shebang}, reads argv=${r.argv})`);
+  assert.deepEqual(wrong, [], "the shebang is what legs 2 and 3 read to tell a CLI from a module");
+});
+
+// Legs 1-4 scope every check to `scripts/*.mjs` through scriptFiles(), but `workflows/*.js`
+// and `agents/*.md` ship the same way and were uncovered: nothing above would have caught an
+// orphaned workflow engine or an orphaned agent definition dropped into the tree. There is no
+// live orphan today — both workflow files are named from the surface and
+// `agents/red-team-reviewer.md` is reached only through workflows/review-panel.js's charter
+// loader — so these two legs close the guarantee gap rather than any currently-hidden dead code.
+
+const workflowFiles = () => readdirSync(join(root, "workflows")).filter((f) => f.endsWith(".js"));
+const workflowLibFiles = () => readdirSync(join(root, "workflows/lib")).filter((f) => f.endsWith(".js"));
+
+test("C3 leg 5: every workflows/*.js is invoked from the surface or imported by another module", () => {
+  // workflows/lib/ (agent-cli.js today) holds library files, not engines: they carry no shebang,
+  // so they can never satisfy "invoked from the surface", and they import nothing else under
+  // workflows/ themselves, so they never discharge another file's half of this check either.
+  // They are targets only — reachable exclusively through another workflow file's import — never
+  // consumers, which is why they still need naming here even though scriptFiles()'s CLI/module
+  // split (legs 2-4) has no equivalent for them.
+  const surfaceText = invocationSurface().map(read).join("\n");
+  const targets = [
+    ...workflowFiles().map((f) => ({ path: `workflows/${f}`, name: f })),
+    ...workflowLibFiles().map((f) => ({ path: `workflows/lib/${f}`, name: f })),
+  ];
+  const consumers = [...scriptFiles().map((f) => `scripts/${f}`), ...targets.map((t) => t.path)];
+  const invoked = (name) =>
+    new RegExp(String.raw`node\s+["']?(?:\$\{CLAUDE_PLUGIN_ROOT\}/)?workflows/${name.replace(".", "\\.")}`).test(
+      surfaceText,
+    );
+  const imported = (path, name) => consumers.some((c) => c !== path && read(c).includes(`/${name}"`));
+  const unreachable = targets.filter((t) => !invoked(t.name) && !imported(t.path, t.name)).map((t) => t.path);
+  assert.deepEqual(unreachable, [], "a workflow engine nothing invokes and nothing imports is unreachable");
+});
+
+test("C3 leg 6: every agents/*.md is named by the surface or read by a workflow file", () => {
+  // An agent spliced into a prompt by a workflow at runtime (agents/red-team-reviewer.md via
+  // workflows/review-panel.js's charter loader) is reachable even though no surface file ever
+  // names its path — the splice IS the invocation, so a workflow file reading the agent's
+  // filename counts exactly like a surface mention does.
+  //
+  // The credit must come from OUTSIDE the population under scrutiny, not merely outside the
+  // one file being checked: excluding only the file under test still lets two orphaned agents
+  // name each other (agents/a.md says devcycle:b, agents/b.md says devcycle:a) and both would
+  // pass, fully unreachable from anywhere real. One agent naming another proves nothing about
+  // whether either can be reached, the same way a file naming itself proves nothing — so the
+  // whole agents/ set is dropped from the corpus, exactly as leg 2 counts only non-test
+  // importers: a consumer inside the population under scrutiny never discharges the question.
+  const agentPaths = surfaceFiles().filter((p) => p.startsWith("agents/"));
+  const outsideAgentsText = surfaceFiles()
+    .filter((p) => !p.startsWith("agents/"))
+    .map(read)
+    .join("\n");
+  const workflowText = [
+    ...workflowFiles().map((f) => `workflows/${f}`),
+    ...workflowLibFiles().map((f) => `workflows/lib/${f}`),
+  ]
+    .map(read)
+    .join("\n");
+  const namedOutside = (path) => {
+    const name = path.replace(/^agents\//, "").replace(/\.md$/, "");
+    return new RegExp(`(?:${path.replace(".", "\\.")}|devcycle:${name})(?![a-zA-Z0-9-])`).test(
+      outsideAgentsText,
+    );
+  };
+  const unreachable = agentPaths.filter((p) => {
+    const file = p.replace(/^agents\//, "");
+    return !namedOutside(p) && !workflowText.includes(file);
+  });
+  assert.deepEqual(unreachable, [], "an agent no surface file names and no workflow reads can never be invoked");
+});

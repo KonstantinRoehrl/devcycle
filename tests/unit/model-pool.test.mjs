@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { parsePool, rungFor, rank, resolveModel, loadTable } from "../../scripts/model-pool.mjs";
 
 const TABLE = [
@@ -126,4 +130,65 @@ test("the shipped table loads and ranks the families the ceiling rule names", ()
   );
   assert.ok(rank("claude-haiku-4-5", shipped) < rank("claude-sonnet-5", shipped));
   assert.ok(rank("claude-sonnet-5", shipped) < rank("claude-opus-5", shipped));
+});
+
+const CLI = new URL("../../scripts/model-pool.mjs", import.meta.url).pathname;
+const cli = (...args) => spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8" });
+
+// The module is the ceiling policy's only implementation; until it had a CLI, nothing could
+// invoke it, which is exactly what audit finding F6 measured.
+test("cli: a pool resolves by rung and prints the audit outcome string", () => {
+  const res = cli("--value", POOL, "--orchestrator", "claude-opus-5", "--signals", "1");
+  assert.equal(res.status, 0);
+  assert.deepEqual(JSON.parse(res.stdout), {
+    model: "claude-sonnet-5",
+    outcome: "model claude-sonnet-5 (pooled: rung 2/3)",
+  });
+});
+
+test("cli: an unset knob resolves to the session tier without an override", () => {
+  const res = cli("--value", "auto", "--orchestrator", "claude-opus-5");
+  assert.equal(res.status, 0);
+  assert.deepEqual(JSON.parse(res.stdout), { model: null, outcome: "model session (auto)" });
+});
+
+test("cli: a pin above the orchestrator's tier is clamped, never dispatched", () => {
+  const res = cli("--value", "claude-opus-5", "--orchestrator", "claude-sonnet-5");
+  assert.equal(res.status, 0);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.model, "claude-sonnet-5");
+  assert.match(out.outcome, /clamped from claude-opus-5/);
+});
+
+test("cli: --signals accepts Infinity, the form a knob with no complexity predicate passes", () => {
+  const res = cli("--value", POOL, "--orchestrator", "claude-opus-5", "--signals", "Infinity");
+  assert.equal(res.status, 0);
+  assert.equal(JSON.parse(res.stdout).model, "claude-opus-5", "saturates at the top rung");
+});
+
+test("cli: a missing --orchestrator fails loudly rather than assuming a tier", () => {
+  const res = cli("--value", POOL);
+  assert.notEqual(res.status, 0);
+  assert.equal(res.stdout, "");
+  assert.match(res.stderr, /--orchestrator is required/);
+});
+
+test("cli: a missing --value fails loudly rather than defaulting to unset", () => {
+  const res = cli("--orchestrator", "claude-opus-5");
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /--value is required/);
+});
+
+test("cli: a non-numeric --signals is rejected rather than silently counted as zero", () => {
+  const res = cli("--value", POOL, "--orchestrator", "claude-opus-5", "--signals", "many");
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /--signals/);
+});
+
+test("cli: --table overrides the shipped tier table", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "model-pool-table-")), "tiers.json");
+  writeFileSync(path, JSON.stringify([{ family: "sonnet", rank: 1, match: "sonnet" }]));
+  const res = cli("--value", "claude-sonnet-5", "--orchestrator", "claude-sonnet-5", "--table", path);
+  assert.equal(res.status, 0);
+  assert.equal(JSON.parse(res.stdout).model, "claude-sonnet-5");
 });
