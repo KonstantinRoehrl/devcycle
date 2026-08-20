@@ -22,10 +22,24 @@ const agentType = typeof rawAgentType === "string" ? rawAgentType.trim() : "";
 // and "present but not a spelling the allowlist holds" — so a deny reason names the origin the
 // harness reported instead of leaving a spelling mismatch indistinguishable from an ordinary
 // main-thread denial.
+// The render is wrapped and bounded rather than a bare JSON.stringify: no real trigger is known
+// (a value from JSON.parse carries no throwing getter, no BigInt, no cycle, and V8 does not
+// stack-overflow at a depth a successful parse can itself reach), but the render sits on the
+// deny path, and any render failure escaping uncaught would exit non-zero with empty stdout —
+// exactly the fail-open a PreToolUse harness reads as "no decision", the same class ba99a9c
+// closed for `null` and non-string shapes one line earlier. Catching here makes that structurally
+// impossible regardless of how the value's shape changes; the length cap keeps an unbounded
+// harness-supplied value out of the message on its own merits.
+const MAX_AGENT_TYPE_RENDER = 200;
+const bounded = (s) => (s.length > MAX_AGENT_TYPE_RENDER ? `${s.slice(0, MAX_AGENT_TYPE_RENDER)}…` : s);
 const describeAgentType = (value) => {
-  if (value === undefined) return "(absent)";
-  if (typeof value === "string") return value.trim() === "" ? "(empty)" : JSON.stringify(value);
-  return `(non-string: ${JSON.stringify(value)})`;
+  try {
+    if (value === undefined) return "(absent)";
+    if (typeof value === "string") return value.trim() === "" ? "(empty)" : bounded(JSON.stringify(value));
+    return `(non-string: ${bounded(JSON.stringify(value))})`;
+  } catch {
+    return "(unrenderable)";
+  }
 };
 
 // The harness passes the PLUGIN-NAMESPACED agent type, not the bare frontmatter name. Observed

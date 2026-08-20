@@ -800,9 +800,11 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     above — scoped to .md under playbooks/ commands/ agents/ references/ — structurally cannot
   //     see it, and check 4's ${CLAUDE_PLUGIN_ROOT} resolution rides on that same walk. Until this
   //     check, renaming a hook script or emptying a matcher silently disarmed a registered hook
-  //     while every other check, and every hook test, stayed green. What is asserted here is
-  //     well-formedness and resolvability only, the JSON analogue of check 4; WHICH tools a given
-  //     hook must cover is policy, asserted in tests/unit/golden-path.test.mjs.
+  //     while every other check, and every hook test, stayed green. What is asserted here is that
+  //     the registration exists at all, and is well-formed and resolvable — every command entry
+  //     carries type: "command", every matcher is non-empty and compiles (or is the documented "*"
+  //     literal), and every ${CLAUDE_PLUGIN_ROOT} path resolves — the JSON analogue of check 4;
+  //     WHICH tools a given hook must cover is policy, asserted in tests/unit/golden-path.test.mjs.
   //     The `hooksParsed` flag follows check 9's baseline pattern: a document that failed to parse
   //     must report that and stop, never fall through and leave the registration unchecked at exit 0.
   const hooksDir = join(root, "hooks");
@@ -833,7 +835,12 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           const at = `hooks/hooks.json: ${event}[${i}]`;
           if (typeof entry?.matcher !== "string" || entry.matcher.trim() === "")
             fail(`${at}: matcher must be a non-empty string — an empty matcher registers a hook that never fires`);
-          else {
+          // "*" is a literal the harness documents specially, meaning "match every tool" — it is
+          // not regex syntax (`new RegExp("*")` throws "Nothing to repeat"), so compiling it here
+          // would reject the documented match-all matcher with a message asserting the hook can
+          // never fire, when in fact it fires on everything. Every other matcher is still required
+          // to compile as a regular expression.
+          else if (entry.matcher !== "*") {
             try {
               new RegExp(entry.matcher);
             } catch (e) {

@@ -11,6 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const HOOK = join(process.cwd(), "hooks/block-main-thread-browser.mjs");
@@ -109,4 +110,33 @@ test("names the received agent_type in the deny reason for a wrong-spelling orig
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
   assert.match(out.hookSpecificOutput.permissionDecisionReason, /on-device-driver/);
   assert.match(out.hookSpecificOutput.permissionDecisionReason, /devcycle@devcycle:on-device-driver/);
+});
+
+// branch-fix-2-1 (1): the deny reason's render (describeAgentType → JSON.stringify) used to sit
+// outside the hook's only try/catch. No reachable trigger exists under real stdin (a value from
+// JSON.parse carries no throwing getter, no BigInt, no cycle, and V8 does not stack-overflow at a
+// depth a successful parse itself can reach) — so this does not send a naturally poisonous
+// agent_type. Instead it substitutes a controlled failure for the render step itself: a global
+// JSON.stringify is installed that throws only for a marked value, standing in for "rendering this
+// value cannot succeed" without depending on a specific unreachable trigger. The guard must still
+// produce a deny decision, never an uncaught throw with empty stdout (the same fail-open class
+// ba99a9c closed one line earlier).
+test("still denies when rendering the deny reason cannot succeed", () => {
+  const poisonScript = `
+    const original = JSON.stringify;
+    JSON.stringify = (value, ...rest) => {
+      if (value && typeof value === "object" && value.__poison) {
+        throw new RangeError("Maximum call stack size exceeded");
+      }
+      return original(value, ...rest);
+    };
+    await import(${JSON.stringify(pathToFileURL(HOOK).href)});
+  `;
+  const r = spawnSync("node", ["--input-type=module", "-e", poisonScript], {
+    input: JSON.stringify(browserCall({ agent_type: { __poison: true } })),
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, `expected exit 0 even when rendering throws, got ${r.status} (stderr: ${r.stderr})`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
 });

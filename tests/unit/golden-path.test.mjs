@@ -1708,13 +1708,22 @@ const HOOK_SRC = "hooks/block-main-thread-browser.mjs";
 const CHROME_NS = "mcp__claude-in-chrome__";
 
 // ASSUMPTION (not verified from this repo, and load-bearing for the negative leg below): a
-// PreToolUse matcher is compiled and tested against a bare tool name UNANCHORED. The basis is the
-// documented behaviour of a bare matcher such as `Edit` firing on `MultiEdit` and `NotebookEdit`,
-// which only substring testing explains; the harness itself is closed-source, so no command here
-// can settle it. Every leg below asks that same question via `matches`. If the harness ever turns
-// out to full-match instead, the two must-cover legs stay sound — unanchored-true is implied by
-// anchored-true — and only the must-not-reach leg would become stricter than reality, which is the
-// safe direction for a guard. An earlier version of this file anchored the test to a full match
+// PreToolUse matcher is compiled and tested against a bare tool name UNANCHORED. The basis is an
+// inference from observed behaviour, not a quoted document: a bare matcher such as `Edit` is
+// reported to also fire on `MultiEdit` and `NotebookEdit`, which only substring testing explains.
+// That is specifically the one question this repo's own empirical playbook has not settled here:
+// the hook input's shape was recovered from the installed binary (this file's own sibling,
+// tests/unit/block-main-thread-browser.test.mjs's header) and agent_type namespacing was settled
+// by counting transcript records (docs/platform-notes.md § (e)), but neither method observes the
+// harness's internal matcher-test control flow — no stdin capture or transcript record exposes it.
+// Every leg below asks that same question via `matches`. If the harness ever turns out to
+// full-match instead, it is the must-not-reach leg that stays sound — unanchored-false is implied
+// by anchored-false (equivalently, anchored-true implies unanchored-true, so a real full match
+// would already have shown up unanchored) — while the two must-cover legs become the unsound ones,
+// NOT the safe direction: an unanchored-true found here does not imply an anchored-true, so a
+// matcher with its `.*` dropped (e.g. `mcp__claude-in-chrome__` alone) could pass both must-cover
+// legs by substring-matching every tool name while a full-matching harness would treat it as
+// covering none of them. An earlier version of this file anchored the test to a full match
 // (`^(?:pattern)$`) on the theory that "(not) match" should mean "(not) describes the whole tool
 // name". That reasoning is half right: anchored-true does imply unanchored-true, so it was sound
 // for the two must-cover legs. It is backwards for the must-not-reach leg, because anchored-false
@@ -1722,7 +1731,11 @@ const CHROME_NS = "mcp__claude-in-chrome__";
 // match against "Bash" (the trailing "sh" breaks the `$` anchor) while still testing true
 // unanchored, which is what the harness actually evaluates: that registration fires on Bash and
 // denies it. Anchoring hid exactly the degenerate-matcher class this leg exists to catch.
-const matches = (pattern, name) => new RegExp(pattern).test(name);
+// "*" is a further special case, consistent with scripts/validate.mjs check 22: the harness
+// documents it as a literal meaning "match every tool", not regex syntax (`new RegExp("*")`
+// throws "Nothing to repeat"), so compiling it unconditionally would make every leg below throw a
+// SyntaxError instead of failing the assertion it exists for.
+const matches = (pattern, name) => (pattern === "*" ? true : new RegExp(pattern).test(name));
 
 const findHookEntry = () => {
   const doc = JSON.parse(read("hooks/hooks.json"));
@@ -1783,15 +1796,20 @@ test("the browser guard's matcher covers the mcp__claude-in-chrome__ namespace, 
 
 test("the browser guard's matcher does not reach ordinary main-thread tools", () => {
   const entry = findHookEntry();
-  // This samples five ordinary tool names; it cannot see a matcher scoped to some sixth name none
-  // of them happen to be, so a pass here is evidence against these five, not exhaustive proof the
-  // matcher is safe over every non-browser tool.
-  for (const tool of ["Bash", "Read", "Edit", "Write", "Task"])
+  // This samples five ordinary tool names plus one MCP tool from a different server; it cannot
+  // see a matcher scoped to some sixth ordinary name or another MCP server none of them happen to
+  // be, so a pass here is evidence against this sample, not exhaustive proof the matcher is safe
+  // over every non-browser tool. The MCP sample matters on its own: a matcher widened from
+  // mcp__claude-in-chrome__.* to mcp__.* passes every other leg here (the sample was previously
+  // all non-MCP names, so it could not see this) while denying every MCP tool call in the session,
+  // from every MCP server — a far more plausible degenerate edit than a sixth ordinary name.
+  for (const tool of ["Bash", "Read", "Edit", "Write", "Task", "mcp__playwright__navigate"])
     assert.ok(
       !matches(entry.matcher, tool),
       `hooks.json's matcher "${entry.matcher}" must NOT match ${tool} (checked against this sample of ordinary ` +
-        "tool names, not exhaustively) — a matcher that reaches ordinary main-thread tools registers a deny " +
-        "over every one of them, not just the browser MCP namespace"
+        "tool names plus one other MCP server's tool, not exhaustively) — a matcher that reaches ordinary " +
+        "main-thread tools or another MCP server's tools registers a deny over every one of them, not just " +
+        "the browser MCP namespace"
     );
 });
 

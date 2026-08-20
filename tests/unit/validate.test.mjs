@@ -1425,3 +1425,12 @@ test("hooks check: a matcher that does not compile as a regular expression fails
   doc.hooks.PreToolUse[0].matcher = "mcp__claude-in-chrome__[(";
   failsWith(runValidate(hooksFixture(makePluginFixture(), doc)), /PreToolUse\[0\]/, /not a valid regular expression/);
 });
+
+test('hooks check: the documented match-all matcher "*" passes rather than failing to compile', () => {
+  // "*" is not valid regex syntax (`new RegExp("*")` throws "Nothing to repeat"), but the harness
+  // documents it as a literal meaning "match every tool" — a registration using it must not be
+  // rejected with a message asserting the hook can never fire, when in fact it fires on everything.
+  const doc = JSON.parse(JSON.stringify(goodHooks));
+  doc.hooks.PreToolUse[0].matcher = "*";
+  ok(runValidate(hooksFixture(makePluginFixture(), doc)));
+});
