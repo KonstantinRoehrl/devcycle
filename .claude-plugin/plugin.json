@@ -32,7 +32,7 @@
       "type": "string",
       "title": "Doc-tracking policy",
       "default": "standard",
-      "description": "What devcycle attempts to commit in a host repo (the repo's own .gitignore always wins). One of: standard (commit lessons + promotions, keep specs + plans local), all-local (commit nothing devcycle produces), all-tracked (also commit specs + plans)."
+      "description": "What devcycle attempts to commit of the specs, plans, lessons, promotion records and audit reports it writes (the repo's own .gitignore always wins, and a few artifacts sit outside the policy). One of: all-local (commit none of them), standard (commit lessons, promotion records and audit reports; keep specs + plans local), all-tracked (also commit specs + plans). ${CLAUDE_PLUGIN_ROOT}/references/config.md § Doc tracking owns the full artifact-by-artifact table."
     },
     "implementerModel": {
       "type": "string",
