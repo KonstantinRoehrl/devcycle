@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // D9's report, rendered once and used twice: the same function produces the proposal a Confirm
 // batch is read against and the outcome written after Land, so the two are diffable by
 // construction rather than by discipline. Pure — it is handed data and returns markdown.
