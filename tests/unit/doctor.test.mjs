@@ -1100,9 +1100,9 @@ function installDoctor(changelog) {
   // version shipped, so a copy without it cannot be loaded at all. This list is doctor.mjs's whole
   // load-time import closure — a copy missing any of it cannot be loaded, so --drift would report a
   // module-not-found stack rather than the doctor: diagnostic these tests pin. doctor → verification
-  // → {journal → run-record, semver}, plus pricing and promotions.
+  // → {journal → run-record, semver}, plus pricing, promotions and cli-flags.
   for (const name of [
-    "doctor.mjs", "pricing.mjs", "promotions.mjs",
+    "doctor.mjs", "pricing.mjs", "promotions.mjs", "cli-flags.mjs",
     "verification.mjs", "journal.mjs", "semver.mjs", "run-record.mjs",
   ])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
@@ -1954,4 +1954,27 @@ test("the doctor header states that verify: checks run only under --run-checks",
   const header = readFileSync(SCRIPT, "utf8").split("\n").slice(0, 6).join("\n");
   assert.match(header, /Read-only by default/);
   assert.match(header, /--run-checks/);
+});
+
+// An unknown flag used to be silently ignored, so `--dirr /fixture` profiled the default corpus
+// under the home directory and reported a confident green about the wrong sessions.
+test("parseArgs rejects an unrecognised flag instead of profiling the default corpus", () => {
+  assert.throws(() => parseArgs(["--dirr", "/tmp/fixture"]), /unrecognised flag --dirr/);
+});
+
+test("parseArgs rejects a --dir with no value", () => {
+  assert.throws(() => parseArgs(["--dir"]), /--dir requires a path argument/);
+});
+
+test("parseArgs still returns every documented flag with its default", () => {
+  const a = parseArgs(["--dir", "/x", "--since", "2026-01-01", "--json", "--all", "--depth", "--run-checks"]);
+  assert.equal(a.dir, "/x");
+  assert.equal(a.since, "2026-01-01");
+  assert.equal(a.json, true);
+  assert.equal(a.all, true);
+  assert.equal(a.depth, true);
+  assert.equal(a.runChecks, true);
+  assert.equal(a.until, null);
+  assert.equal(a.drift, null);
+  assert.equal(a.issueBody, null);
 });

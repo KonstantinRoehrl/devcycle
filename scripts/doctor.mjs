@@ -9,6 +9,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// The one owner of CLI flag parsing across the scripts; an unrecognised flag is fatal here rather
+// than a silent no-op that would profile the default corpus instead of the one asked for.
+import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { PRICING, priceFor } from "./pricing.mjs";
 // The one reader of this repo's promotion records; doctor's Cost-by-version "Shipped" column
 // names what each version shipped rather than parsing those records a second time here.
@@ -65,31 +68,27 @@ const SYNTHETIC_MODEL = "<synthetic>";
 // Tool calls that dispatch a subagent; a call with no explicit model inherits the caller's.
 const DISPATCH_TOOLS = new Set(["Task", "Agent"]);
 
+const KNOWN_FLAGS = [
+  "--dir", "--since", "--until", "--json", "--all", "--depth", "--run-checks", "--drift", "--issue-body",
+];
+
+// Throws rather than exiting on a usage error: doctor.mjs is imported by dream.mjs, so a
+// process.exit inside the parser would take the importer down with it. main() catches and prints
+// with doctor's own prefix.
 export function parseArgs(argv) {
-  const args = {
-    dir: join(homedir(), ".claude", "projects"),
-    since: null,
-    until: null,
-    json: false,
-    all: false,
-    depth: false,
-    runChecks: false,
-    drift: null,
-    issueBody: null,
+  const { flags } = parseFlags(argv, KNOWN_FLAGS);
+  const valued = (name) => requireValue(flags, name) ?? null;
+  return {
+    dir: requireValue(flags, "--dir") ?? join(homedir(), ".claude", "projects"),
+    since: valued("--since"),
+    until: valued("--until"),
+    json: "--json" in flags,
+    all: "--all" in flags,
+    depth: "--depth" in flags,
+    runChecks: "--run-checks" in flags,
+    drift: valued("--drift"),
+    issueBody: valued("--issue-body"),
   };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--dir") args.dir = argv[++i];
-    else if (a === "--since") args.since = argv[++i];
-    else if (a === "--until") args.until = argv[++i];
-    else if (a === "--json") args.json = true;
-    else if (a === "--all") args.all = true;
-    else if (a === "--depth") args.depth = true;
-    else if (a === "--run-checks") args.runChecks = true;
-    else if (a === "--drift") args.drift = argv[++i];
-    else if (a === "--issue-body") args.issueBody = argv[++i];
-  }
-  return args;
 }
 
 export function isDevcycleSession(records) {
@@ -1354,7 +1353,13 @@ function run(args) {
 }
 
 function main() {
-  const args = parseArgs(process.argv.slice(2));
+  let args;
+  try {
+    args = parseArgs(process.argv.slice(2));
+  } catch (err) {
+    console.error(`doctor: ${err.message}`);
+    process.exit(1);
+  }
   if (args.drift) {
     let result;
     try {
