@@ -3,14 +3,19 @@ node_modules/
 scripts/redaction-terms.local.txt
 .devcycle/
 .superpowers/
-docs/superpowers/
 .DS_Store
 .worktrees/
-docs/overhaul/
 graphify-out/
-docs/block-e-instrumentation/
 
-# Audit reports are one-run records: written locally, never shipped to installers.
-# The v0.12 disposition register is a closure ledger DECISIONS.md and known-issues.md cite.
-docs/audits/
+# Everything under docs/ is ignored and each tracked surface is re-included by name, so a new
+# scaffolding directory is ignored by default and a new tracked doc is a deliberate line — the
+# inverse of naming each stale directory individually and missing the next one.
+# Audit reports are one-run records: written locally, never shipped to installers. The v0.12
+# disposition register is a closure ledger docs/DECISIONS.md cites, so it is the one exception.
+docs/*
+!docs/*.md
+!docs/comparisons/
+!docs/devcycle/
+!docs/audits/
+docs/audits/*
 !docs/audits/2026-08-06-disposition-register.md
