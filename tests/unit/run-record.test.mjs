@@ -431,3 +431,31 @@ test("culprit lookup fails cleanly, not with a stack trace, when culprits.json i
     rmSync(treeDir, { recursive: true, force: true });
   }
 });
+
+import { validate, validateCulprit, subSchemaFor } from "../../scripts/run-record.mjs";
+
+test("validate reports every violation of a sub-schema", () => {
+  const sub = {
+    properties: { kind: { const: "run" }, n: { type: "integer", minimum: 1 } },
+    required: ["kind", "n"],
+  };
+  assert.deepEqual(validate({ kind: "run", n: 3 }, sub), []);
+  assert.deepEqual(validate({ kind: "run", n: 0 }, sub), ['"n" must be >= 1, got 0']);
+  assert.deepEqual(validate({ kind: "run" }, sub), ['missing required field "n"']);
+});
+
+test("subSchemaFor selects by kind from an already-parsed schema", () => {
+  const schema = { oneOf: [{ properties: { kind: { const: "a" } } }, { properties: { kind: { const: "b" } } }] };
+  assert.equal(subSchemaFor(schema, "b").properties.kind.const, "b");
+  assert.equal(subSchemaFor(schema, "missing"), null);
+});
+
+test("validateCulprit reads the vocabulary from the path it is given", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "culprits-")));
+  const p = join(dir, "culprits.json");
+  writeFileSync(p, JSON.stringify([{ slug: "known-slug" }]));
+  assert.deepEqual(validateCulprit("known-slug", p), []);
+  assert.deepEqual(validateCulprit("novel:something-new", p), []);
+  assert.equal(validateCulprit("unknown-slug", p).length, 1);
+  rmSync(dir, { recursive: true, force: true });
+});

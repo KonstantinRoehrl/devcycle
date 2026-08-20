@@ -747,6 +747,35 @@ test("parseArgs: --all and --depth are read", () => {
   assert.equal(parseArgs([]).depth, false);
 });
 
+// `doctor.mjs --json /fixture` is the natural slip for `--json --dir /fixture`. While the parser
+// treated every flag as value-taking, --json swallowed the path, the token never became a
+// positional, and doctor profiled the operator's real ~/.claude/projects while printing a
+// confident report about the wrong sessions -- with --json's machine output making it look
+// authoritative. Each of doctor's valueless flags must leave the path alone so the bare token is
+// refused instead.
+test("parseArgs: a valueless flag before a bare path never resolves the home corpus", () => {
+  for (const flag of ["--json", "--all", "--depth", "--run-checks"]) {
+    assert.throws(
+      () => parseArgs([flag, "/tmp/doctor-fixture"]),
+      /unexpected argument "\/tmp\/doctor-fixture"/,
+      `${flag} must not consume the path`,
+    );
+  }
+});
+
+test("parseArgs: a valueless flag still reads beside the --dir it was meant to accompany", () => {
+  const a = parseArgs(["--json", "--dir", "/tmp/doctor-fixture"]);
+  assert.equal(a.json, true);
+  assert.equal(a.dir, "/tmp/doctor-fixture");
+  const b = parseArgs(["--dir", "/tmp/doctor-fixture", "--run-checks"]);
+  assert.equal(b.runChecks, true);
+  assert.equal(b.dir, "/tmp/doctor-fixture");
+});
+
+test("parseArgs: a valueless flag handed a value is a usage error, not a silent truthy", () => {
+  assert.throws(() => parseArgs(["--json=true"]), /--json takes no value/);
+});
+
 // --- the depth probe: budgetBand and resolveDepth ---
 
 function turnWithUsage(model, u) {
@@ -1100,9 +1129,9 @@ function installDoctor(changelog) {
   // version shipped, so a copy without it cannot be loaded at all. This list is doctor.mjs's whole
   // load-time import closure — a copy missing any of it cannot be loaded, so --drift would report a
   // module-not-found stack rather than the doctor: diagnostic these tests pin. doctor → verification
-  // → {journal → run-record, semver}, plus pricing and promotions.
+  // → {journal → run-record, semver}, plus pricing, promotions and cli-flags.
   for (const name of [
-    "doctor.mjs", "pricing.mjs", "promotions.mjs",
+    "doctor.mjs", "pricing.mjs", "promotions.mjs", "cli-flags.mjs",
     "verification.mjs", "journal.mjs", "semver.mjs", "run-record.mjs",
   ])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
@@ -1954,4 +1983,50 @@ test("the doctor header states that verify: checks run only under --run-checks",
   const header = readFileSync(SCRIPT, "utf8").split("\n").slice(0, 6).join("\n");
   assert.match(header, /Read-only by default/);
   assert.match(header, /--run-checks/);
+});
+
+// An unknown flag used to be silently ignored, so `--dirr /fixture` profiled the default corpus
+// under the home directory and reported a confident green about the wrong sessions.
+test("parseArgs rejects an unrecognised flag instead of profiling the default corpus", () => {
+  assert.throws(() => parseArgs(["--dirr", "/tmp/fixture"]), /unrecognised flag --dirr/);
+});
+
+test("parseArgs rejects a --dir with no value", () => {
+  assert.throws(() => parseArgs(["--dir"]), /--dir requires a path argument/);
+});
+
+// Dropping the flag *name* is the same failure with no misspelling to notice: `doctor.mjs
+// /fixture` is the natural slip for `--dir /fixture`, and the bare token used to be collected
+// and discarded, so doctor profiled the operator's real ~/.claude/projects and printed a clean
+// report about a corpus they never asked about.
+test("parseArgs rejects a bare path instead of profiling the real home corpus", () => {
+  assert.throws(() => parseArgs(["/tmp/fixture"]), /unexpected argument "\/tmp\/fixture"/);
+  assert.throws(
+    () => parseArgs(["--since", "2026-07-01", "/tmp/fixture"]),
+    /unexpected argument "\/tmp\/fixture"/,
+  );
+});
+
+// The message an operator reads has to name what the flag actually wants. `--since` and `--until`
+// are dates and `--issue-body` is a culprit name, so telling any of them to supply "a path"
+// sends the operator looking for a file that was never involved.
+test("a valueless --since asks for a date, not a path", () => {
+  assert.throws(() => parseArgs(["--since"]), /--since requires a date$/);
+  assert.throws(() => parseArgs(["--until"]), /--until requires a date$/);
+  assert.throws(() => parseArgs(["--issue-body"]), /--issue-body requires a culprit name$/);
+  // --drift does take a path, so its wording is right as it stands.
+  assert.throws(() => parseArgs(["--drift"]), /--drift requires a path argument$/);
+});
+
+test("parseArgs still returns every documented flag with its default", () => {
+  const a = parseArgs(["--dir", "/x", "--since", "2026-01-01", "--json", "--all", "--depth", "--run-checks"]);
+  assert.equal(a.dir, "/x");
+  assert.equal(a.since, "2026-01-01");
+  assert.equal(a.json, true);
+  assert.equal(a.all, true);
+  assert.equal(a.depth, true);
+  assert.equal(a.runChecks, true);
+  assert.equal(a.until, null);
+  assert.equal(a.drift, null);
+  assert.equal(a.issueBody, null);
 });

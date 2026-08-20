@@ -6,6 +6,7 @@ import { join, relative, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { SEMVER_RE, cmpSemver } from "./semver.mjs";
+import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run-record.mjs";
 
 
 // The learn loop's compiled memory must stay tracked: README/DECISIONS say lessons + promotion
@@ -427,31 +428,18 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           if (!exercised.has(k))
             fail(`tests/fixtures/run-record.golden.jsonl: schema declares kind "${k}" that no golden line exercises`);
         for (const [i, obj] of parsed.entries()) {
-          const sub = subs.find((s) => s.properties?.kind?.const === obj.kind);
+          const sub = subSchemaFor(schema, obj.kind);
           if (!sub) {
             fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: kind "${obj.kind}" is not declared in the schema`);
             continue;
           }
-          for (const req of sub.required ?? [])
-            if (!(req in obj) || obj[req] === undefined)
-              fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: missing required field "${req}"`);
-          for (const key of Object.keys(obj)) {
-            const prop = sub.properties?.[key];
-            if (!prop) {
-              fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: field "${key}" is not declared for kind "${obj.kind}"`);
-              continue;
-            }
-            if (prop.enum && !prop.enum.includes(obj[key]))
-              fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" value "${obj[key]}" is not one of ${prop.enum.join(" | ")}`);
-            if (prop.const !== undefined && obj[key] !== prop.const)
-              fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be ${JSON.stringify(prop.const)}`);
-            if (prop.pattern && !new RegExp(prop.pattern).test(String(obj[key])))
-              fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" does not match ${prop.pattern}`);
-            if (prop.type === "integer" && !Number.isInteger(obj[key]))
-              fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be an integer`);
-            if (typeof prop.minimum === "number" && obj[key] < prop.minimum)
-              fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: "${key}" must be >= ${prop.minimum}`);
-          }
+          // One validator, two moments: run-record.mjs guards every real append, this guards the declared
+          // shape in CI. They were separate implementations and had already drifted on the minimum guard.
+          const errors = [
+            ...validateRecord(obj, sub),
+            ...validateCulprit(obj.culprit, join(root, "references/culprits.json")),
+          ];
+          for (const err of errors) fail(`tests/fixtures/run-record.golden.jsonl:${i + 1}: ${err}`);
         }
         for (const sub of subs) {
           const exercisedFields = new Set(

@@ -71,3 +71,74 @@ test("passes when the referencing test file is already in a Files block", () => 
   assert.equal(r.code, 0);
   assert.match(r.out, /ok/);
 });
+
+test("a plan with no task headings is an error, not an ok", () => {
+  const repo = makeRepo({ "src/widget.mjs": "export const a = 1;\n" });
+  const { code, out } = run("# Prose only, no tasks\n", repo);
+  assert.equal(code, 1);
+  assert.match(out, /no "### Task N" blocks found/);
+});
+
+test("a plan whose tasks carry no **Files:** block is an error, not an ok", () => {
+  const repo = makeRepo({ "src/widget.mjs": "export const a = 1;\n" });
+  const { code, out } = run(
+    "# Plan\n### Task 1: No files block\n**Interfaces:** none\n## Dispatch Map\n- Wave 1: Task 1\n",
+    repo,
+  );
+  assert.equal(code, 1);
+  assert.match(out, /no "\*\*Files:\*\*" blocks found/);
+});
+
+const INLINE_PLAN = `# Plan
+### Task 1: Change widget
+**Files:** Modify \`src/widget.mjs\`, Test: \`tests/unit/widget.test.mjs\`
+## Dispatch Map
+- Wave 1: Task 1
+`;
+
+test("a Files field written inline on its own label line is read, not reported as missing", () => {
+  const repo = makeRepo({
+    "src/widget.mjs": "export function widget() {}",
+    "tests/unit/widget.test.mjs": "import { widget } from '../../src/widget.mjs';",
+  });
+  const r = run(INLINE_PLAN, repo);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /ok/);
+});
+
+test("an unlisted test consumer is still a hard failure when the Files field is inline", () => {
+  const repo = makeRepo({
+    "src/widget.mjs": "export function widget() {}",
+    "tests/unit/widget.test.mjs": "import { widget } from '../../src/widget.mjs';",
+  });
+  const r = run("# Plan\n### Task 1: Change widget\n**Files:** Modify `src/widget.mjs`\n## Dispatch Map\n- Wave 1: Task 1\n", repo);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /widget\.test\.mjs.*references/s);
+});
+
+// The two pre-flight gates read the same taskFileMap, so a plan whose blocks say "none" must send
+// the plan author to one repair, not two: blast-radius-check used to report the blocks missing for
+// a plan that had written them, while wave-disjointness-check reported them present but empty.
+const WAVE_SCRIPT = join(process.cwd(), "scripts/wave-disjointness-check.mjs");
+const NO_FILES_DECLARED_PLAN =
+  "# Plan\n### Task 1: Declares nothing\n**Files:** none\n\n### Task 2: Also nothing\n**Files:** none\n\n## Dispatch Map\n- Wave 1: Task 1, Task 2\n";
+
+test('a plan whose **Files:** blocks are present but declare no file says so, not "blocks found"', () => {
+  const repo = makeRepo({ "src/widget.mjs": "export const a = 1;\n" });
+  const { code, out } = run(NO_FILES_DECLARED_PLAN, repo);
+  assert.equal(code, 1);
+  assert.match(out, /"\*\*Files:\*\*" blocks are present but empty/);
+  assert.doesNotMatch(out, /no "\*\*Files:\*\*" blocks found/);
+});
+
+test("both gates give the same diagnosis for a plan that declares no file", () => {
+  const repo = makeRepo({ "src/widget.mjs": "export const a = 1;\n" });
+  const plan = join(repo, "plan.md");
+  writeFileSync(plan, NO_FILES_DECLARED_PLAN);
+  const blast = spawnSync("node", [SCRIPT, plan, repo], { encoding: "utf8" });
+  const wave = spawnSync("node", [WAVE_SCRIPT, plan], { encoding: "utf8" });
+  assert.equal(blast.status, 1);
+  assert.equal(wave.status, 1);
+  const diagnosis = (r) => r.stderr.trim().split("\n").pop().replace(/^\S+-check: /, "");
+  assert.equal(diagnosis(blast), diagnosis(wave));
+});

@@ -4,6 +4,7 @@
 // every task. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
 // implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
+import { taskBlocks, parseDispatchMap, filesFieldValue } from "./task-files.mjs";
 
 const planPath = process.argv[2];
 if (!planPath) {
@@ -16,25 +17,19 @@ if (!existsSync(planPath)) {
 }
 
 const text = readFileSync(planPath, "utf8");
-const TASK_HEADING_RE = /^### Task (\d+):.*$/gm;
 const REQUIRED_FIELDS = ["Files", "Interfaces", "Dependencies", "Evidence", "Quality constraints"];
 const VALID_EVIDENCE_CLASSES = ["red-green", "green-green", "convention"];
-
-function taskBlocks(planText) {
-  const headings = [...planText.matchAll(TASK_HEADING_RE)];
-  const blocks = [];
-  for (let i = 0; i < headings.length; i++) {
-    const start = headings[i].index;
-    const end = i + 1 < headings.length ? headings[i + 1].index : planText.length;
-    blocks.push({ num: Number(headings[i][1]), text: planText.slice(start, end) });
-  }
-  return blocks;
-}
 
 function fieldValue(block, field) {
   const re = new RegExp(`\\*\\*${field}:\\*\\*([\\s\\S]*?)(?=\\n\\*\\*|\\n###|$)`);
   const m = block.match(re);
   return m ? m[1].trim() : null;
+}
+
+// **Files:** is read by task-files.mjs, which owns that grammar for every plan gate. Deciding it
+// here too is how this gate came to accept declarations wave-disjointness then called missing.
+function readField(block, field) {
+  return field === "Files" ? filesFieldValue(block) : fieldValue(block, field);
 }
 
 const errors = [];
@@ -46,7 +41,7 @@ if (blocks.length === 0) {
 
 for (const { num, text: block } of blocks) {
   for (const field of REQUIRED_FIELDS) {
-    const val = fieldValue(block, field);
+    const val = readField(block, field);
     if (val === null) errors.push(`Task ${num}: missing **${field}:** field`);
     else if (val === "") errors.push(`Task ${num}: **${field}:** field is empty`);
   }
@@ -59,22 +54,11 @@ for (const { num, text: block } of blocks) {
   }
 }
 
-// Only a task named in a wave's own task list counts as "assigned" -- a mention inside another
-// wave's dependency parenthetical, e.g. "- Wave 2: Task 3 (needs Task 1 and Task 2)", is a
-// reference to a dependency, not an assignment to that wave. Mirrors wave-disjointness-check's
-// parseDispatchMap: only the substring before the first "(" on each "- Wave N:" line is scanned.
-const mapIdx = text.indexOf("## Dispatch Map");
-if (mapIdx === -1) {
+const waves = parseDispatchMap(text);
+if (waves === null) {
   errors.push('missing "## Dispatch Map" section');
 } else {
-  const mapSection = text.slice(mapIdx);
-  const mapped = new Set();
-  for (const m of mapSection.matchAll(/^- Wave (\d+):\s*(.+)$/gm)) {
-    const rest = m[2];
-    const parenIdx = rest.indexOf("(");
-    const taskListText = parenIdx === -1 ? rest : rest.slice(0, parenIdx);
-    for (const t of taskListText.matchAll(/Task (\d+)/g)) mapped.add(Number(t[1]));
-  }
+  const mapped = new Set([...waves.values()].flat());
   for (const { num } of blocks) {
     if (!mapped.has(num)) errors.push(`Task ${num}: not listed in the ## Dispatch Map`);
   }

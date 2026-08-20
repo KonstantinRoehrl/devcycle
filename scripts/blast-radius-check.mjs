@@ -5,7 +5,7 @@
 // warning. Language-agnostic; conservative. See playbooks/planning-waves.md.
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, basename, extname, relative, sep } from "node:path";
-import { extractFiles, TEST_FILE_SUFFIXES } from "./task-files.mjs";
+import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES } from "./task-files.mjs";
 
 const [, , planPath, repoRootArg] = process.argv;
 if (!planPath) {
@@ -18,25 +18,11 @@ if (!existsSync(planPath)) {
 }
 const repoRoot = repoRootArg || process.cwd();
 
-const TASK_HEADING_RE = /^### Task (\d+):.*$/gm;
-const FILES_BLOCK_RE = /\*\*Files:\*\*\n([\s\S]*?)(?=\n\*\*|\n###|$)/;
 const TEST_SUFFIXES = [...TEST_FILE_SUFFIXES, ".test.jsx", ".test.tsx", ".spec.ts", ".spec.js"];
 const CODE_EXT = new Set([".mjs", ".js", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".py"]);
 const IGNORE_DIRS = new Set(["node_modules", ".git", "dist", "build", "coverage", ".devcycle"]);
 
 const isTestFile = (p) => TEST_SUFFIXES.some((s) => p.endsWith(s));
-
-function declaredFiles(planText) {
-  const set = new Set();
-  const headings = [...planText.matchAll(TASK_HEADING_RE)];
-  for (let i = 0; i < headings.length; i++) {
-    const start = headings[i].index;
-    const end = i + 1 < headings.length ? headings[i + 1].index : planText.length;
-    const m = planText.slice(start, end).match(FILES_BLOCK_RE);
-    if (m) for (const f of extractFiles(m[1])) set.add(f);
-  }
-  return set;
-}
 
 function walk(dir, acc = []) {
   for (const name of readdirSync(dir)) {
@@ -49,7 +35,29 @@ function walk(dir, acc = []) {
 }
 
 const text = readFileSync(planPath, "utf8");
-const declared = declaredFiles(text);
+const blocks = taskBlocks(text);
+// A plan that yields no tasks is a parse failure, not a plan with no blast radius: without this
+// the walk below has nothing to match and prints ok against an empty list.
+if (blocks.length === 0) {
+  console.error(`blast-radius-check: no "### Task N" blocks found in ${planPath}`);
+  process.exit(1);
+}
+const filesByTask = taskFileMap(text);
+const declared = new Set([...filesByTask.values()].flatMap((files) => [...files]));
+// The walk below reasons over `declared`, not over the blocks: a plan whose tasks name no files
+// at all matches nothing and would print ok against an empty list just as a heading-less one would.
+if (declared.size === 0) {
+  // The same split, from the same map, as wave-disjointness-check's -- and deliberately the same
+  // sentence. Both gates read one taskFileMap, so a plan whose blocks say "none" that made one
+  // gate report the blocks missing and the other report them empty sent the author to two repairs
+  // for one plan.
+  const message =
+    filesByTask.size === 0
+      ? `no "**Files:**" blocks found in ${planPath}`
+      : `no task in ${planPath} declares a file -- its "**Files:**" blocks are present but empty`;
+  console.error(`blast-radius-check: ${message}`);
+  process.exit(1);
+}
 const changed = [...declared].filter((f) => !isTestFile(f));
 
 const codeFiles = walk(repoRoot)

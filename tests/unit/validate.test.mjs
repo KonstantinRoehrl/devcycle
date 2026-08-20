@@ -640,6 +640,37 @@ test("check 13 rule 2 fails when no surface instruction names --knob for the kno
   assert.strictEqual(rPass.status, 0, rPass.stdout + rPass.stderr);
 });
 
+test("check 13 catches a minimum that is not a number", () => {
+  const dir = mkdtempSync(join(tmpdir(), "validate-runrecord-badmin-"));
+  cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  const schemaPath = join(dir, "tests/fixtures/run-record.schema.json");
+  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
+  const sub = schema.oneOf.find((s) => s.properties?.kind?.const === "verdict");
+  sub.properties.round.minimum = "1";
+  writeFileSync(schemaPath, JSON.stringify(schema, null, 2) + "\n");
+  const goldenPath = join(dir, "tests/fixtures/run-record.golden.jsonl");
+  const lines = readFileSync(goldenPath, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  for (const obj of lines) if (obj.kind === "verdict") obj.round = 0;
+  writeFileSync(goldenPath, lines.map((o) => JSON.stringify(o)).join("\n") + "\n");
+  const r = spawnSync(process.execPath, [join(dir, "scripts/validate.mjs")], { cwd: dir, encoding: "utf8" });
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /must be >= 1/);
+});
+
+test("check 13 rejects a golden line naming an unknown culprit slug", () => {
+  const dir = mkdtempSync(join(tmpdir(), "validate-runrecord-culprit-"));
+  cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
+  const goldenPath = join(dir, "tests/fixtures/run-record.golden.jsonl");
+  const lines = readFileSync(goldenPath, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  const carrier = lines.find((o) => "culprit" in o);
+  assert.ok(carrier, "the golden fixture must carry a culprit field for this test to mean anything");
+  carrier.culprit = "not-a-real-slug";
+  writeFileSync(goldenPath, lines.map((o) => JSON.stringify(o)).join("\n") + "\n");
+  const r = spawnSync(process.execPath, [join(dir, "scripts/validate.mjs")], { cwd: dir, encoding: "utf8" });
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /is neither a culprits\.json slug nor a novel: slug/);
+});
+
 // --- check 14: the culprit vocabulary is well-formed ---
 
 const culprits = (dir, entries) => writeInto(dir, "references/culprits.json", JSON.stringify(entries));
