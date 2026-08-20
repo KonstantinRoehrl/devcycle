@@ -9,12 +9,12 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 
 **Decision:** `surfaceTotal` moves from **4,050 to 4,150** and `commandMax` from **104 to 110**
 (`tests/fixtures/surface-budget.json`); eleven of the twelve entries in
-`tests/fixtures/context-budget.json` are raised by 2–4 kB each. `playbookMax` (268) and
+`tests/fixtures/context-budget.json` are raised by 4.2–5.5 kB each. `playbookMax` (268) and
 `playbooks/profiling-sessions.md`'s context entry are deliberately unchanged.
 
 **Why:** audit-remediation cycle C6 makes `references/config.md` the owner of two things it
 described but never enumerated — an artifact→policy table for `docTrackingPolicy` and a roster of
-every knob — which grows that one file by 58 lines. Two ceilings sat too close for that. The
+every knob — which grows that one file by 60 lines. Two ceilings sat too close for that. The
 runtime surface stood at 4,027 lines with 23 lines of headroom, and `commands/cycle.md` sat
 exactly on the 104-line `commandMax`, so F12's gate could not be stated there at all without one
 more line. Separately, `validate`'s check 15 counts each playbook plus every reference reachable
