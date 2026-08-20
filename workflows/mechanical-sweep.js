@@ -41,47 +41,22 @@
 
 "use strict";
 
-const { spawn, execFileSync } = require("node:child_process");
+const { execFileSync } = require("node:child_process");
 const { existsSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } = require("node:fs");
 const { join, dirname, resolve, relative, isAbsolute, sep } = require("node:path");
 const os = require("node:os");
+const { makeLogger, run, claudeStructured } = require("./lib/agent-cli.js");
 
-const AGENT_TIMEOUT_MS = 15 * 60 * 1000;
 const VERIFY_TIMEOUT_MS = 15 * 60 * 1000;
 const PILOT_MAX = 3;
 // Committing sweep checkpoints inside the worktree must not depend on the
 // user's git identity being configured.
 const GIT_IDENT = ["-c", "user.name=devcycle-sweep", "-c", "user.email=sweep@devcycle.invalid"];
+// The sweep's editor agent runs single-attempt: a retry would re-run an agent
+// that may already have partially edited the worktree.
+const SWEEP_ERRORS = { agent: "editor agent", output: "editor", cap: 400 };
 
-const log = (msg) => process.stderr.write(`[mechanical-sweep] ${msg}\n`);
-const fatal = (msg) => {
-  process.stderr.write(`[mechanical-sweep] ERROR: ${msg}\n`);
-  process.exit(1);
-};
-
-function runAsync(cmd, args, { cwd, timeoutMs } = {}) {
-  return new Promise((resolvePromise) => {
-    const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, timeoutMs ?? AGENT_TIMEOUT_MS);
-    child.stdout.on("data", (d) => (stdout += d));
-    child.stderr.on("data", (d) => (stderr += d));
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      resolvePromise({ code: null, stdout, stderr: String(err), timedOut, spawnError: err });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolvePromise({ code, stdout, stderr, timedOut });
-    });
-    child.stdin.end();
-  });
-}
+const { log, fatal } = makeLogger("mechanical-sweep");
 
 function git(argv, cwd) {
   return execFileSync("git", argv, { cwd, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
@@ -109,29 +84,16 @@ async function runEditorAgent(relPath, instruction, worktree, model) {
     `If the instruction does not apply to this file, change nothing and explain why`,
     `in "note". Report changed=true only if you actually edited the file.`,
   ].join("\n");
-  const argv = [
-    "-p",
-    "--output-format", "json",
-    "--no-session-persistence",
-    "--json-schema", JSON.stringify(EDIT_SCHEMA),
-    "--tools", "Read,Grep,Glob,Edit,Write",
-    "--permission-mode", "acceptEdits",
-  ];
-  if (model) argv.push("--model", model);
-  argv.push(prompt);
-
-  const res = await runAsync("claude", argv, { cwd: worktree });
-  if (res.spawnError) return { ok: false, error: `claude CLI not runnable: ${res.stderr}` };
-  if (res.timedOut) return { ok: false, error: "editor agent timed out" };
-  try {
-    const envelope = JSON.parse(res.stdout);
-    if (envelope.is_error || envelope.structured_output === undefined) {
-      return { ok: false, error: `editor agent error: ${envelope.result ?? res.stderr}`.slice(0, 400) };
-    }
-    return { ok: true, value: envelope.structured_output };
-  } catch {
-    return { ok: false, error: `unparseable editor output: ${(res.stderr || res.stdout).slice(0, 300)}` };
-  }
+  return claudeStructured({
+    prompt,
+    tools: "Read,Grep,Glob,Edit,Write",
+    schema: EDIT_SCHEMA,
+    model,
+    cwd: worktree,
+    permissionMode: "acceptEdits",
+    attempts: 1,
+    errors: SWEEP_ERRORS,
+  });
 }
 
 function changedPaths(worktree) {
@@ -154,7 +116,7 @@ function revertWorktree(worktree) {
 }
 
 async function runVerify(verifyCommand, worktree) {
-  const res = await runAsync("/bin/sh", ["-c", verifyCommand], { cwd: worktree, timeoutMs: VERIFY_TIMEOUT_MS });
+  const res = await run("/bin/sh", ["-c", verifyCommand], { cwd: worktree, timeoutMs: VERIFY_TIMEOUT_MS });
   if (res.timedOut) return { ok: false, detail: "verify command timed out" };
   if (res.code === 0) return { ok: true };
   const tail = (res.stderr || res.stdout).trim().split("\n").slice(-5).join(" | ").slice(0, 400);

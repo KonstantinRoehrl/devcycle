@@ -79,7 +79,9 @@ shared verification engine directly from the run-record journal, never from a dr
 never by re-running the mining loop — so this playbook stays runnable standalone and pays none of
 the mining cost. The engine scores each promotion and the section carries one line per scored
 promotion — `<culprit-id> (<rung>): <verdict>` — with its verdict one of: `held` (runs observed,
-no recurrence), `recurred` (the pattern came back), `unmeasurable` (zero runs observed, never read
+no recurrence), `recurred` (the pattern came back), `errored` (the check itself failed to run to
+completion — a timeout, an output overflow, or a spawn failure; a broken harness, never a verdict
+on the lesson), `unmeasurable` (zero runs observed, never read
 as `held`), or `broken` (an r3 check that now fails). Each `recurred` hit is its own finding,
 ranked like everything above: a reappearance means the promotion did not fix the pattern, not a
 reason to re-promote it. With nothing scored yet, the section renders the single line
@@ -88,6 +90,13 @@ reason to re-promote it. With nothing scored yet, the section renders the single
 - Beneath the verdicts come the `resolved-in` lines — `<culprit-id>: resolved in <version> —
   <verdict>` — one per culprit whose vocabulary entry claims a `resolved-in` version, verdict
   `unmeasurable` until the installed version reaches that mark and a run is observed against it.
+
+An r3 lesson's `verify:` check is not executed by a report: `node scripts/doctor.mjs` and
+`node scripts/dream.mjs --check-recurrence` both need an explicit `--run-checks` to run it, and
+without the flag the row reads `unmeasurable — <check> (not run: pass --run-checks)`. Promotion
+records are committed markdown, so running one is a deliberate act rather than a side effect of
+asking for a report.
+
 - A `recurred` r2 culprit also renders an escalation entry point in the same section —
   `Actionability — /devcycle:cycle re-address <culprit-id> (recurred N×; escalate from r2)` — and,
   being its own finding, its `/devcycle:cycle` entry point is also offered through the Actionability

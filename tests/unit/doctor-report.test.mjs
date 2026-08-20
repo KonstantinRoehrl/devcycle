@@ -14,7 +14,7 @@ import {
   parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
   renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates,
 } from "../../scripts/doctor.mjs";
-import { verify, releaseDates } from "../../scripts/verification.mjs";
+import { verify, releaseDates, defaultRunCheck } from "../../scripts/verification.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
@@ -650,9 +650,9 @@ const PROMOTED_PROMOTIONS = [
   { culpritId: "friction:broken-one", rung: "r3", verify: "false", landed: "2026-07-01", lifecycle: null, aliases: [] },
 ];
 const PROMOTED_JOURNAL = [
-  { event: "gate-fail", culprit: "friction:recurred-one", ts: "2026-07-15T10:00:00.000Z", runId: "run-1" },
+  { event: "gate-fail", culprit: "recurred-one", ts: "2026-07-15T10:00:00.000Z", runId: "run-1" },
 ];
-const PROMOTED_VERIFICATION = verify(PROMOTED_PROMOTIONS, PROMOTED_JOURNAL, "0.14.0");
+const PROMOTED_VERIFICATION = verify(PROMOTED_PROMOTIONS, PROMOTED_JOURNAL, "0.14.0", { runCheck: defaultRunCheck });
 
 const ctx = (over = {}) => ({
   repo: "devcycle", today: "2026-08-13", scope: "every devcycle-tagged session",
@@ -1261,6 +1261,49 @@ test("a corpus with nothing measured yet renders the section without throwing", 
     verification: { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] },
   })));
   assert.match(section, /## Previously promoted — did it hold/);
+});
+
+// The engine annotates WHY a check produced its verdict. Dropping that annotation left a reader
+// of a bare "unmeasurable" with no way to learn that --run-checks exists, which made the opt-in
+// invisible in the one place it needed to be visible.
+test("a skipped r3 check renders its reason, not a bare unmeasurable", () => {
+  const section = promotedSection(renderReport([sum()], ctx({
+    verification: {
+      scoreboard: [{
+        culpritId: "friction:skipped-one", rung: "r3", verdict: "unmeasurable",
+        runsObserved: 0, recurrences: 0, detail: "tests/unit/x.test.mjs (not run: pass --run-checks)",
+      }],
+      candidates: { escalation: [], retirement: [] }, resolvedIn: [],
+    },
+  })));
+  assert.match(section, /not run: pass --run-checks/);
+});
+
+test("an errored r3 check renders the errored verdict and its reason", () => {
+  const section = promotedSection(renderReport([sum()], ctx({
+    verification: {
+      scoreboard: [{
+        culpritId: "friction:errored-one", rung: "r3", verdict: "errored",
+        runsObserved: 0, recurrences: 0, detail: "npm test (errored: ETIMEDOUT)",
+      }],
+      candidates: { escalation: [], retirement: [] }, resolvedIn: [],
+    },
+  })));
+  assert.match(section, /\berrored\b/);
+  assert.match(section, /ETIMEDOUT/);
+});
+
+test("a row with no detail renders unchanged, with no trailing separator", () => {
+  const section = promotedSection(renderReport([sum()], ctx({
+    verification: {
+      scoreboard: [{
+        culpritId: "friction:plain-one", rung: "r2", verdict: "held",
+        runsObserved: 3, recurrences: 0, detail: null,
+      }],
+      candidates: { escalation: [], retirement: [] }, resolvedIn: [],
+    },
+  })));
+  assert.match(section, /- friction:plain-one \(r2\): held over 3 runs\n/);
 });
 
 // --- revert candidates: cost-driven, same-profile, stage-scoped, written as a sidecar ---

@@ -130,8 +130,18 @@ export function runValidate(cwd) {
 
 // Runs a workflow script as a subprocess, exactly as a playbook would invoke it,
 // with fake CLI dirs prepended to PATH.
-export function runScript(scriptPath, jsonArgs, { cwd, binDirs = [] } = {}) {
-  const PATH = [...binDirs, process.env.PATH].join(delimiter);
+//
+// `isolatePath` REPLACES PATH instead of prepending to it. Prepending a fake
+// that is not executable does not shadow the real CLI — PATH lookup skips it
+// and falls through to the developer's real `claude`, which then makes a live
+// model call. A test that needs `claude` to be unreachable therefore has to
+// remove it from PATH entirely. The replacement keeps the running node's own
+// directory (the fake bins' `#!/usr/bin/env node` shebang needs it) plus
+// /usr/bin and /bin (for `git` and `/bin/sh`).
+export function runScript(scriptPath, jsonArgs, { cwd, binDirs = [], isolatePath = false } = {}) {
+  const PATH = isolatePath
+    ? [...binDirs, dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter)
+    : [...binDirs, process.env.PATH].join(delimiter);
   return spawnSync(process.execPath, [scriptPath, JSON.stringify(jsonArgs)], {
     cwd,
     encoding: "utf8",
