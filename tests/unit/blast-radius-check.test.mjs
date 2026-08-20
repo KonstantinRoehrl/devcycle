@@ -71,3 +71,20 @@ test("passes when the referencing test file is already in a Files block", () => 
   assert.equal(r.code, 0);
   assert.match(r.out, /ok/);
 });
+
+test("a plan with no task headings is an error, not an ok", () => {
+  const repo = makeRepo({ "src/widget.mjs": "export const a = 1;\n" });
+  const { code, out } = run("# Prose only, no tasks\n", repo);
+  assert.equal(code, 1);
+  assert.match(out, /no "### Task N" blocks found/);
+});
+
+test("a plan whose tasks carry no **Files:** block is an error, not an ok", () => {
+  const repo = makeRepo({ "src/widget.mjs": "export const a = 1;\n" });
+  const { code, out } = run(
+    "# Plan\n### Task 1: No files block\n**Interfaces:** none\n## Dispatch Map\n- Wave 1: Task 1\n",
+    repo,
+  );
+  assert.equal(code, 1);
+  assert.match(out, /no "\*\*Files:\*\*" blocks found/);
+});

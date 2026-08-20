@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeFileToken, extractFiles, parseFileList } from "../../scripts/task-files.mjs";
+import {
+  normalizeFileToken,
+  extractFiles,
+  parseFileList,
+  taskBlocks,
+  taskFileMap,
+  parseDispatchMap,
+} from "../../scripts/task-files.mjs";
 
 test("normalizeFileToken strips ranges, backticks, and rejects non-paths", () => {
   assert.equal(normalizeFileToken("`scripts/a.mjs:12-20`"), "scripts/a.mjs");
@@ -33,4 +40,51 @@ test("extractFiles still rejects a bare extensionless token as prose (the asymme
   // The **Files:**-block parse path stays strict: an extensionless word with no slash reads as
   // surrounding prose, so wave-disjointness parity is unchanged.
   assert.deepEqual([...extractFiles("Dockerfile is the build entrypoint")], []);
+});
+
+const PLAN = [
+  "### Task 1: First",
+  "",
+  "**Files:**",
+  "- Modify: `scripts/a.mjs`",
+  "",
+  "**Evidence:** red-green",
+  "",
+  "### Task 2: Second",
+  "",
+  "**Files:**",
+  "- Modify: `scripts/b.mjs`",
+  "",
+  "## Dispatch Map",
+  "- Wave 1: Task 1, Task 2 (file-disjoint)",
+  "- Wave 2: Task 3 (needs Task 1 and Task 2)",
+  "",
+].join("\n");
+
+test("taskBlocks numbers each block and slices to the next heading", () => {
+  const blocks = taskBlocks(PLAN);
+  assert.deepEqual(blocks.map((b) => b.num), [1, 2]);
+  assert.ok(blocks[0].text.includes("scripts/a.mjs"));
+  assert.ok(!blocks[0].text.includes("scripts/b.mjs"), "block 1 must stop at the next heading");
+});
+
+test("taskFileMap maps each task number to its declared files", () => {
+  const map = taskFileMap(PLAN);
+  assert.deepEqual([...map.get(1)], ["scripts/a.mjs"]);
+  assert.deepEqual([...map.get(2)], ["scripts/b.mjs"]);
+});
+
+test("parseDispatchMap reads only the text before the first paren", () => {
+  const waves = parseDispatchMap(PLAN);
+  assert.deepEqual(waves.get(1), [1, 2]);
+  assert.deepEqual(waves.get(3), undefined);
+  assert.deepEqual(waves.get(2), [3], "a dependency parenthetical is not a wave assignment");
+});
+
+test("parseDispatchMap returns null when no Dispatch Map heading exists", () => {
+  assert.equal(parseDispatchMap("### Task 1: Only\n"), null);
+});
+
+test("taskBlocks returns an empty array for a document with no task headings", () => {
+  assert.deepEqual(taskBlocks("# Not a plan\n\nProse only.\n"), []);
 });

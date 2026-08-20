@@ -159,3 +159,29 @@ test("a line-range suffix and surrounding punctuation on a Files entry does not 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a plan with no task headings is an error, not an ok", () => {
+  const { dir, planPath } = makeFixture("# Prose only\n\n## Dispatch Map\n- Wave 1: Task 1\n");
+  assert.throws(
+    () => execFileSync("node", [SCRIPT, planPath], { cwd: dir, ...PIPE }),
+    (err) => {
+      assert.equal(err.status, 1);
+      assert.match(err.stderr, /no "### Task N" blocks found/);
+      return true;
+    },
+  );
+});
+
+test("a plan whose tasks carry no **Files:** block is an error naming that condition", () => {
+  const { dir, planPath } = makeFixture(
+    "### Task 1: No files block\n\n**Interfaces:** none\n\n## Dispatch Map\n- Wave 1: Task 1\n",
+  );
+  assert.throws(
+    () => execFileSync("node", [SCRIPT, planPath], { cwd: dir, ...PIPE }),
+    (err) => {
+      assert.equal(err.status, 1);
+      assert.match(err.stderr, /no "\*\*Files:\*\*" blocks found/);
+      return true;
+    },
+  );
+});

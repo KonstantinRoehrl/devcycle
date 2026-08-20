@@ -35,3 +35,46 @@ export function parseFileList(csv) {
   }
   return out;
 }
+
+// The plan-file grammar, owned here because three pre-flight gates parsed it separately and a
+// change to the heading format silently emptied two of them. Consumers: brief-completeness-check,
+// wave-disjointness-check, blast-radius-check.
+const TASK_HEADING_RE = /^### Task (\d+):.*$/gm;
+const FILES_BLOCK_RE = /\*\*Files:\*\*\n([\s\S]*?)(?=\n\*\*|\n###|$)/;
+
+export function taskBlocks(planText) {
+  const headings = [...planText.matchAll(TASK_HEADING_RE)];
+  const blocks = [];
+  for (let i = 0; i < headings.length; i++) {
+    const start = headings[i].index;
+    const end = i + 1 < headings.length ? headings[i + 1].index : planText.length;
+    blocks.push({ num: Number(headings[i][1]), text: planText.slice(start, end) });
+  }
+  return blocks;
+}
+
+export function taskFileMap(planText) {
+  const map = new Map();
+  for (const { num, text } of taskBlocks(planText)) {
+    const m = text.match(FILES_BLOCK_RE);
+    if (m) map.set(num, extractFiles(m[1]));
+  }
+  return map;
+}
+
+// Only a task named in a wave's own task list counts as assigned: a mention inside a dependency
+// parenthetical, e.g. "- Wave 2: Task 3 (needs Task 1 and Task 2)", is a reference, not an
+// assignment. Returns null -- distinct from an empty Map -- when no heading exists at all, which
+// wave-disjointness-check reports as "cannot verify" rather than as a violation.
+export function parseDispatchMap(planText) {
+  const idx = planText.indexOf("## Dispatch Map");
+  if (idx === -1) return null;
+  const waves = new Map();
+  for (const m of planText.slice(idx).matchAll(/^- Wave (\d+):\s*(.+)$/gm)) {
+    const rest = m[2];
+    const parenIdx = rest.indexOf("(");
+    const taskListText = parenIdx === -1 ? rest : rest.slice(0, parenIdx);
+    waves.set(Number(m[1]), [...taskListText.matchAll(/Task (\d+)/g)].map((t) => Number(t[1])));
+  }
+  return waves;
+}
