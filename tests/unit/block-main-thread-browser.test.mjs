@@ -75,3 +75,38 @@ test("denies when stdin is not valid JSON", () => {
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
   assert.equal(r.status, 0);
 });
+
+// branch-fix-1-1 (1): a body of `null` parses fine, so the try/catch never fires, and reading
+// `.agent_type` off `null` used to throw — an uncaught throw exits 1 with nothing on stdout,
+// which is a non-blocking error to the harness (the browser call proceeds). Must deny instead.
+test("denies when stdin parses to null", () => {
+  const r = spawnSync("node", [HOOK], { input: "null", encoding: "utf8" });
+  assert.equal(r.status, 0, `expected exit 0, got ${r.status} (stderr: ${r.stderr})`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+});
+
+// branch-fix-1-1 (1): a non-string agent_type used to throw on `.trim()`. None of these shapes
+// is a spelling the allowlist can hold, so all three must deny rather than crash.
+for (const [shapeName, agentType] of [
+  ["a number", 5],
+  ["an object", {}],
+  ["an array", []],
+]) {
+  test(`denies a browser call when agent_type is ${shapeName}`, () => {
+    const r = call(browserCall({ agent_type: agentType, agent_id: "abc123" }));
+    assert.equal(r.status, 0, `expected exit 0, got ${r.status} (stderr: ${r.stderr})`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+  });
+}
+
+// branch-fix-1-1 (3): a right-origin/wrong-spelling agent_type must be distinguishable in the
+// deny reason from an ordinary main-thread denial, so the reason names the value actually seen.
+test("names the received agent_type in the deny reason for a wrong-spelling origin", () => {
+  const r = call(browserCall({ agent_type: "devcycle@devcycle:on-device-driver", agent_id: "abc123" }));
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /on-device-driver/);
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /devcycle@devcycle:on-device-driver/);
+});
