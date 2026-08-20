@@ -1533,3 +1533,89 @@ test("the lessons line is short enough that duplication-check exempts it", () =>
     }
   }
 });
+
+// --- C3: reachability assertions ---
+// The audit's headline class: machinery that ships, is tested, and is called by nothing. Being
+// *named* on the surface is not being reachable — references/config.md named model-pool.mjs in
+// its ${CLAUDE_PLUGIN_ROOT} form throughout the whole period it had no caller — so leg 2 checks
+// importers rather than text. Legs 3 and 4 work together: 4 makes the shebang mean "this file
+// has a CLI", which is what lets 3 know which files must be invoked. This repo's CLI scripts run
+// top-level side effects rather than a uniform main(), so nothing else distinguishes them.
+
+const scriptFiles = () => readdirSync(join(root, "scripts")).filter((f) => f.endsWith(".mjs"));
+const hasShebang = (f) => read(`scripts/${f}`).startsWith("#!");
+
+// The invocation surface is wider than validate.mjs's four directories, and must be:
+// CONTRIBUTING.md:84-86 records that surface text uses the ${CLAUDE_PLUGIN_ROOT} form because it
+// runs from the installed plugin, while CI and contributor docs run from a checkout and correctly
+// use the repo-relative form. This leg checks reachability only; C2's validate.mjs check 4b owns
+// the form, in the one place a form can be wrong.
+const invocationSurface = () => [
+  ...surfaceFiles(),
+  ...readdirSync(join(root, ".github/workflows")).map((f) => `.github/workflows/${f}`),
+  "CONTRIBUTING.md",
+];
+
+test("C3 leg 1: every dream.mjs subcommand is named by at least one surface file", () => {
+  const block = read("scripts/dream.mjs").match(/const SUBCOMMANDS = \[([\s\S]*?)\];/);
+  assert.ok(block, "SUBCOMMANDS array not found in scripts/dream.mjs");
+  const subcommands = [...block[1].matchAll(/"(--[a-z-]+)"/g)].map((m) => m[1]);
+  assert.ok(subcommands.length >= 16, `expected the full subcommand list, got ${subcommands.length}`);
+  const surface = surfaceFiles().map(read).join("\n");
+  const unnamed = subcommands.filter((flag) => !surface.includes(flag));
+  assert.deepEqual(unnamed, [], "a subcommand no surface file names can never be invoked");
+});
+
+test("C3 leg 2: every module-only script has a non-test importer", () => {
+  const modules = scriptFiles().filter((f) => !hasShebang(f));
+  const consumers = [
+    ...scriptFiles().map((f) => `scripts/${f}`),
+    ...readdirSync(join(root, "workflows")).filter((f) => f.endsWith(".js")).map((f) => `workflows/${f}`),
+  ];
+  const orphans = modules.filter((mod) =>
+    !consumers.some((c) => c !== `scripts/${mod}` && read(c).includes(`/${mod}"`)),
+  );
+  assert.deepEqual(orphans, [], "a module nothing imports and nothing runs is dead code");
+});
+
+// A real invocation's own syntax is the bound, not an arbitrary character budget: `node`,
+// then only whitespace (which \s matches across a line break too, so a prose wrap such as
+// commands/continue.md:29-31 and :32-33, commands/cycle.md:24-25 still matches — CommonMark
+// itself treats that line break as a plain space when the citation renders) and an optional
+// quote and `${CLAUDE_PLUGIN_ROOT}/`, then `scripts/<file>` directly — never "node, then
+// anything, eventually scripts/<file>" the way leg 3 first read it. That looser shape had two
+// failure modes a tighter one avoids for free, with no magic-number budget to justify: (1) a
+// false negative on the exact wrap above, since a plain `[^\n]*` never re-crosses the newline;
+// (2) two false positives a "no intervening backtick" bound (the alternative considered here)
+// would not have caught, because neither sits inside a single-backtick span at all —
+// CONTRIBUTING.md's fenced `node scripts/*.mjs` table lists one command per line with no
+// enclosing backticks, so a backtick-bounded search could still pair one line's `node` with a
+// later line's unrelated script path; and playbooks/finishing-the-cycle.md's redaction-check
+// citation embeds `node -e "import('...run-record.mjs')…"` inside the *same* single-backtick
+// span as a genuine `node …/redaction-check.mjs` call, so a backtick bound alone would credit
+// run-record.mjs with an invocation it doesn't have. Requiring direct adjacency after `node`
+// rules out both: a table line's `node` is never directly followed by a different line's path,
+// and `node -e "import(…)` is never directly followed by `scripts/`, so it is never counted as
+// invoking the module it merely imports — counting an import as a CLI call would be exactly the
+// named-vs-reachable confusion this cycle exists to end. (run-record.mjs still passes this leg
+// on its own genuine invocations in commands/continue.md and commands/cycle.md.)
+test("C3 leg 3: every CLI script is invoked from the surface", () => {
+  const text = invocationSurface().map(read).join("\n");
+  const uninvoked = scriptFiles()
+    .filter(hasShebang)
+    .filter(
+      (f) =>
+        !new RegExp(
+          String.raw`node\s+["']?(?:\$\{CLAUDE_PLUGIN_ROOT\}/)?scripts/${f.replace(".", "\\.")}`,
+        ).test(text),
+    );
+  assert.deepEqual(uninvoked, [], "a CLI nothing invokes is unreachable, however well documented");
+});
+
+test("C3 leg 4: a shebang means the file has a CLI, and only a CLI file carries one", () => {
+  const wrong = scriptFiles()
+    .map((f) => ({ f, shebang: hasShebang(f), argv: read(`scripts/${f}`).includes("process.argv") }))
+    .filter((r) => r.shebang !== r.argv)
+    .map((r) => `${r.f} (shebang=${r.shebang}, reads argv=${r.argv})`);
+  assert.deepEqual(wrong, [], "the shebang is what legs 2 and 3 read to tell a CLI from a module");
+});
