@@ -42,6 +42,16 @@ executables placed first on `PATH`, so a full pipeline is exercised without a mo
 you change `review-panel.js`, `mechanical-sweep.js`, or any `scripts/*.mjs`, extend that
 script's suite with the behavior you changed.
 
+### Give a script a shebang only if it is a CLI
+
+Add `#!/usr/bin/env node` to a `scripts/*.mjs` file only when something outside it invokes it
+as `node …/<file>.mjs` — from the surface, from CI, or from a contributor doc. A file with no
+shebang is a module instead: give it that shape by having another non-test module import it.
+`tests/unit/golden-path.test.mjs`'s C3 legs enforce both directions by reading the shebang, so
+forgetting one on a new CLI script fails leg 2 first, with the misleading "a module nothing
+imports and nothing runs is dead code" — leg 4's "the shebang is what legs 2 and 3 read to tell
+a CLI from a module" names the actual fix: add the shebang.
+
 ## One owner per concept
 
 A rule lives in exactly one file, and every other file that needs it names that file by path
