@@ -16,6 +16,7 @@ import { PRICING, priceFor } from "./pricing.mjs";
 // The one reader of this repo's promotion records; doctor's Cost-by-version "Shipped" column
 // names what each version shipped rather than parsing those records a second time here.
 import { readPromotions } from "./promotions.mjs";
+import { atomicWrite } from "./atomic-write.mjs";
 // The shared verification engine (Wave 2): the one source of the promotion scoreboard, the
 // escalation/retirement candidates and the resolved-in lines, plus the installed plugin version.
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
@@ -2454,7 +2455,7 @@ export function revertCandidates(summaries, promotions, { root = process.cwd() }
   try {
     const dir = join(root, ".devcycle", "doctor");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "revert-candidates.json"), JSON.stringify(out, null, 2) + "\n");
+    atomicWrite(join(dir, "revert-candidates.json"), JSON.stringify(out, null, 2) + "\n");
   } catch { /* QC7: the sidecar write must never abort the report */ }
   return out;
 }

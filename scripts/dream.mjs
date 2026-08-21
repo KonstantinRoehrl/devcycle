@@ -18,6 +18,7 @@ import { parseFileList } from "./task-files.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
 import { renderLearnReport } from "./learn-report.mjs";
+import { atomicWrite } from "./atomic-write.mjs";
 
 const CAP = 100;
 const dreamDir = (root) => join(root, ".devcycle", "dreaming");
@@ -151,7 +152,7 @@ export function readCheckpoint(repoRoot) {
 
 export function writeCheckpoint(repoRoot, { lastDreamedThrough, lastArtifact }) {
   mkdirSync(dreamDir(repoRoot), { recursive: true });
-  writeFileSync(
+  atomicWrite(
     statePath(repoRoot),
     "# dreaming checkpoint\n" +
       `- last-dreamed-through: ${lastDreamedThrough ?? "never"}\n` +
