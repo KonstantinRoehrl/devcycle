@@ -15,6 +15,7 @@ import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
 import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding } from "./lessons.mjs";
 import { parseFileList } from "./task-files.mjs";
+import { parseFlags } from "./cli-flags.mjs";
 import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
 import { renderLearnReport } from "./learn-report.mjs";
 
@@ -736,16 +737,22 @@ function main() {
   const matchIdx = argv.indexOf("--match");
   if (matchIdx !== -1) {
     try {
-      const argVal = (name) => { const i = argv.indexOf(name); return i !== -1 ? argv[i + 1] : undefined; };
-      const stage = argVal("--stage");
+      const KNOWN = {
+        "--match": "none", "--stage": "value", "--files": "value",
+        "--culprits": "value", "--keywords": "value",
+      };
+      const { flags } = parseFlags(argv, KNOWN);
+      const stage = flags["--stage"];
       if (!STAGES.includes(stage)) throw new Error(`--match needs a valid --stage (one of ${STAGES.join(", ")})`);
-      const files = parseFileList(argVal("--files") ?? "");
+      const files = parseFileList(flags["--files"] ?? "");
+      const culprits = parseFileList(flags["--culprits"] ?? "");
+      const keywords = (flags["--keywords"] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
       const lessonLines = [
         ...readSection(repoStorePath(root), stage),
         ...readSection(userRepoStorePath(root), stage),
         ...readSection(userGlobalStorePath(), stage),
       ];
-      const out = renderMatch(matchLessons({ lessonLines, promotions: readPromotions(root), files }));
+      const out = renderMatch(matchLessons({ lessonLines, promotions: readPromotions(root), files, culprits, keywords }));
       if (out) process.stdout.write(out + "\n");
       return;
     } catch (e) {
