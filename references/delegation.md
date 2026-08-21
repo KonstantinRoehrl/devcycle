@@ -1,7 +1,7 @@
 # Delegation — coordinator duties, the stage budget, research dispatches, return envelopes
 
 The single owner of who does the work inside a devcycle stage. `references/handoff.md` owns
-what happens at a boundary; this file owns what happens between them. Stage skills point here
+what happens at a boundary; this file owns what happens between them. Stage playbooks point here
 rather than restating any of it.
 
 ## Coordinator duties

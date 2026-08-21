@@ -1,6 +1,6 @@
 # Impact scoring
 
-The single owner of how devcycle quantifies what a culprit cost. A skill, command, or agent
+The single owner of how devcycle quantifies what a culprit cost. A playbook, command, or agent
 that needs any of this names this file and does not restate it.
 
 ## The formula

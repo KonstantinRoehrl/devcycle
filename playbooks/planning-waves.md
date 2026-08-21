@@ -11,7 +11,7 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
 Resolve `profile` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`. At **`lean` / `standard`** do NOT
 load `superpowers:writing-plans` — the Plan mechanics section below is self-contained. At
 **`thorough`** it is a REQUIRED SUB-SKILL for all plan-writing mechanics; where the two disagree this
-skill wins, and two of that section's rules always override it — the plan header's "For agentic workers"
+playbook wins, and two of that section's rules always override it — the plan header's "For agentic workers"
 line names `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` as the executor (never upstream's
 subagent-vs-inline execution choice), and no task gets a commit step. Everything outside that one
 section is unconditional, so a finished plan has the same shape whichever engine produced it.

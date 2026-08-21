@@ -5,9 +5,9 @@
 Resolve `profile` first — read `${CLAUDE_PLUGIN_ROOT}/references/config.md` and follow it; it also
 owns model routing for this stage's two knobs, `${user_config.implementerModel}` and
 `${user_config.taskReviewerModel}` (`walkthroughModel` and `branchReviewModel` belong to later
-stages). Every agent this skill dispatches reports per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
+stages). Every agent this playbook dispatches reports per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 What the coordinator does itself and what it delegates — including the stage budget, which binds this
-skill hardest — is owned by `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`: read it and follow it.
+playbook hardest — is owned by `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`: read it and follow it.
 
 Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons execution`. No store, no output.
 
@@ -133,7 +133,7 @@ Progress is written to `.devcycle/ledger.md`; pre-flight steps 1–2 supply its 
 
 Never claim a rendered or on-device outcome from a script, test, or report. **Trigger: the moment a
 task produces rendered changes** — generate or update the on-device checklist in that same wave, never
-deferred to the end of the wave or the branch. That trigger is this skill's own; everything else about
+deferred to the end of the wave or the branch. That trigger is this playbook's own; everything else about
 a checklist — its path and state-file record, its item shape, the dimensions it covers, and the
 `(auto)` boundary that decides what may ever be checked off without a human — is
 `${CLAUDE_PLUGIN_ROOT}/references/checklist.md`: read it and follow it. The later walkthrough of that
@@ -146,7 +146,7 @@ session should resume at — `execution` while waves remain, `branch-review` at 
 artifact paths, timestamp), then emit the handoff block per
 `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`: read it and follow it, including which first-field
 label the boundary takes, the context action, and the gate that stops the run until the user acts.
-After the last wave's handoff this skill ends; the next stage is
+After the last wave's handoff this playbook ends; the next stage is
 **${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md** (REQUIRED — the branch gate before
 finishing).
 

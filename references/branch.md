@@ -19,8 +19,8 @@ to `main` or `master` if one of those branches exists and neither command is ava
 pre-flight before wave 1, the fast path, the sweep path, re-entry via `/devcycle:continue`
 (per `${CLAUDE_PLUGIN_ROOT}/references/resume.md`, which settles the recorded branch first
 and falls back here only when no topic branch was ever recorded), and every standalone,
-side-effectful skill that writes and commits outside any cycle — `onboarding-a-repo` (the
-scaffold write) and `learning-from-sessions` (promotion edits) among them. A standalone skill owns no
+side-effectful playbook that writes and commits outside any cycle — `onboarding-a-repo` (the
+scaffold write) and `learning-from-sessions` (promotion edits) among them. A standalone playbook owns no
 `.devcycle/state.md`, so it follows the rule above minus the `branch:`-line write: check
 the branch, create a topic branch off the default or an integration branch when needed,
 and commit there.

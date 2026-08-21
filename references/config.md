@@ -1,12 +1,12 @@
 # Configuration — knobs, profile, model tiers
 
-The single owner of how devcycle resolves configuration. A skill, command, or agent
+The single owner of how devcycle resolves configuration. A playbook, command, or agent
 that needs any of this names this file and does not restate it.
 
 ## Knob resolution
 
 Knob values arrive via `${user_config.KEY}` placeholders, each read by the stage
-skill that consumes it (gitPolicy by `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md`,
+playbook that consumes it (gitPolicy by `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md`,
 docTrackingPolicy by every stage that writes an artifact — § Doc tracking below owns which —
 models and review depth and the on-device gate by their stages).
 
@@ -21,7 +21,7 @@ models and review depth and the on-device gate by their stages).
 2. **Everything else falls back** — a literal placeholder and `auto` are unset, a
    value outside the knob's allowed set is invalid, and both take the same route.
    `auto` is sanctioned on every knob, not only the `*Model` ones: it is how a user
-   says *let the profile govern this* without deleting the key. Where a stage skill
+   says *let the profile govern this* without deleting the key. Where a stage playbook
    enumerates a knob's allowed values (e.g. `single` | `panel`), that names what the
    knob resolves *to* — `auto` is settled here, before that enumeration applies, and
    is never the invalid case. A knob with a row in the profile matrix below falls
@@ -164,12 +164,12 @@ resolves the same way:
   directory | file` — so the comma is the ordering, not a workaround.
 
 Derivation picks between two tiers — defined by capability, never by a
-model id written here, because ids in skill prose rot as models change:
+model id written here, because ids in playbook prose rot as models change:
 
 - **session tier** — dispatch with NO model override, so the subagent
   inherits this coordinator session's own model: the strongest model the
   user has already sanctioned, tracking model generations without this
-  skill naming any. This only works when the agent definition itself carries
+  playbook naming any. This only works when the agent definition itself carries
   no `model:` frontmatter key — an omitted dispatch-time override resolves to
   the agent definition's own frontmatter model when it has one, and only
   falls through to the caller's model when the definition names none. The
