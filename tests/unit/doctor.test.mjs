@@ -15,7 +15,7 @@ import {
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
   emitComplianceCandidates, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
   reviewDepthCohortTable, deriveEvents, attributedCost, impactScores,
-  bandFor, recencyBand, inBand, runAggregates,
+  bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -2057,4 +2057,78 @@ test("runAggregates joins sessions by runId and excludes run-less sessions", () 
   assert.equal(runs[0].costUSD, 15);
   assert.equal(runs[0].workloadBand, "M");   // 150 changed lines
   assert.equal(runs[0].changedLines, 150);
+});
+
+// --- round-2 fixes: Turns/task population, lifecycle vocabulary, dead-code sweep ---
+
+// A session-summary shaped for versionProfileTable: only the fields it reads, defaulted.
+const vpSum = (over = {}) => ({
+  id: "vpaaaaaa", runId: null, pluginVersion: "0.12.0", profile: "thorough",
+  inFlight: false, costUSD: 1, costByStage: { execution: 1 }, costByAgentType: { main: 1 },
+  mainTurns: 0, subagentTurns: 0, medianDepth: 40000, quality: null, workload: null, ...over,
+});
+
+test("versionProfileTable scopes Turns/task to workload-bearing sessions only", () => {
+  // One workload-bearing session (30 turns, 3 tasks) and one workload-less session (100 turns).
+  // Turns/task must reflect only the run where task data exists: 30/3 = 10, not (30+100)/3 ≈ 43.
+  const withWorkload = vpSum({
+    id: "w", mainTurns: 20, subagentTurns: 10,
+    workload: { requestKind: "feature", plannedTaskCount: 3, insertions: 1, deletions: 1 },
+  });
+  const withoutWorkload = vpSum({ id: "n", mainTurns: 100, subagentTurns: 0 });
+  const [row] = versionProfileTable([withWorkload, withoutWorkload]);
+  assert.equal(row.turnsPerTask, 10);
+});
+
+test("versionProfileTable keeps Turns/task null, never 0, when no session carries task data", () => {
+  const [row] = versionProfileTable([vpSum({ id: "a", mainTurns: 5, subagentTurns: 5 })]);
+  assert.equal(row.turnsPerTask, null);
+});
+
+test("lifecycle only emits the three states the corpus can currently evidence", () => {
+  const dates = new Map([
+    ["0.13.0", "2026-08-10"], ["0.14.0", "2026-08-15"], ["0.14.1", "2026-08-18"],
+    ["0.14.2", "2026-08-20"], ["0.14.3", "2026-08-21"],
+  ]);
+  const band = recencyBand("0.14.3", dates, 2); // [0.14.1, 0.14.2, 0.14.3]
+  const allowed = new Set(["active", "legacy", "unresolved"]);
+  const cases = [["0.14.2"], ["0.14.0"], ["0.13.0"], ["0.14.3", "0.13.0"], ["0.14.0", "0.14.2"], []];
+  for (const seen of cases) {
+    const got = lifecycle(seen, band, dates);
+    assert.ok(allowed.has(got), `${JSON.stringify(seen)} produced ${got}, outside the emitted three`);
+    assert.notEqual(got, "fixed");     // deferred: no shipped-fix data threaded in this cycle
+    assert.notEqual(got, "regressed"); // deferred: gated on promotion culpritId capture
+  }
+});
+
+test("runAggregates takes only the summaries argument (dead runRecords param removed)", () => {
+  assert.equal(runAggregates.length, 1);
+});
+
+test("culpritTable rows do not leak the dead row-level impactPerSession field", () => {
+  const s = {
+    id: "a", pluginVersion: "0.12.0", profile: "thorough", costByStage: { execution: 5 },
+    impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 1, impact: 5 }],
+    culpritsByKey: { "gate-fail:execution": ["some-culprit"] },
+  };
+  const [row] = culpritTable([s], []);
+  assert.ok(row, "expected a culprit row");
+  assert.ok(!("impactPerSession" in row), "the row still leaks the dead impactPerSession field into --json");
+});
+
+test("formatCandidate prints a version-regression span once, not as a duplicated versions=[..]", () => {
+  const out = formatCandidate({
+    type: "version-regression", version_from: "0.11.0", version_to: "0.12.0",
+    versions: ["0.11.0", "0.12.0"], delta_pct: 10, sessions_sampled: 3,
+  });
+  assert.match(out, /0\.11\.0->0\.12\.0/, "the canonical from->to span is missing");
+  assert.ok(!/versions=\[/.test(out), "the redundant versions=[..] span is still rendered");
+});
+
+test("formatCandidate keeps versions=[..] for a candidate with no from->to span", () => {
+  const out = formatCandidate({
+    type: "depth-outlier", version_from: null, version_to: null,
+    versions: ["0.12.0", "0.12.0"], dollars: 15, sessions_sampled: 1,
+  });
+  assert.match(out, /versions=\[0\.12\.0\.\.0\.12\.0\]/);
 });

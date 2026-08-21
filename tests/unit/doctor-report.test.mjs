@@ -778,8 +778,10 @@ test("both playbook anchors render, in their specified positions", () => {
 test("the section order is fixed", () => {
   const out = renderReport([sum()], ctx());
   const order = [
-    "# Doctor Report", "## Read this first", "## At a glance", "## Highlights", "## Cost by version",
-    "## Cost by stage", "### Cost by stage (this window)", "## Your culprits", "### Compliance",
+    "# Doctor Report", "## Read this first", "## At a glance", "## Highlights",
+    "## Workload (observed)", "## Cost by version",
+    "## Cost by stage", "### Cost by stage (this window)", "## Outcome (observed)",
+    "## Your culprits", "### Compliance",
     "## Your wins", "## Cost anomalies", "## Previously promoted — did it hold", "## Outer loop",
     "## Compiled knowledge", "## Findings", "## Appendix",
   ];
@@ -809,6 +811,51 @@ test("the report leads with an At a glance workload-adjusted step, carrying its 
   assert.match(glance, new RegExp(`${vOld}→${vNew}`), "the matched step is missing");
   assert.match(glance, /\+20\.0%/, "the cost delta is missing");
   assert.match(glance, /\blow\b/, "the confidence label is missing");
+});
+
+test("the At a glance percentage column carries no $ glyph over a percent (issue #114)", () => {
+  const out = renderReport([sum()], ctx());
+  const glance = out.slice(out.indexOf("## At a glance"), out.indexOf("## Highlights"));
+  assert.ok(!/workload-adj \$ Δ/.test(glance), "a $ glyph still sits over the percentage cell");
+  assert.match(glance, /workload-adj cost Δ% \(derived\)/, "the honest percentage header is missing");
+});
+
+test("the report renders observed workload and outcome families, each metric tagged observed", () => {
+  const workload = {
+    requestKind: "feature", filesChanged: 4, insertions: 80, deletions: 20,
+    plannedTaskCount: 3, waveCount: 2,
+  };
+  const quality = {
+    tasks: 3, reviewRounds: 2, retries: 1, blockingFindings: 0,
+    conformanceFailures: 0, roundsPerTask: 0.67,
+  };
+  const runId = "r1".padEnd(16, "0");
+  const out = renderReport([
+    sum({ id: "r1aaaaaa", runId, pluginVersion: "0.12.0", profile: "thorough",
+      costUSD: 10, mainTurns: 10, subagentTurns: 4, medianDepth: 40000, workload, quality }),
+    sum({ id: "r1bbbbbb", runId, pluginVersion: "0.12.0", profile: "thorough",
+      costUSD: 8, mainTurns: 8, subagentTurns: 3, medianDepth: 40000, workload, quality }),
+  ], ctx());
+  const at = (n) => out.indexOf(n);
+  assert.ok(at("## Workload (observed)") !== -1, "the Workload (observed) section is missing");
+  assert.ok(at("## Outcome (observed)") !== -1, "the Outcome (observed) section is missing");
+  // Workload family: raw counts, tagged observed, the changed-lines total actually rendered.
+  const wl = out.slice(at("## Workload (observed)"), at("## Cost by version"));
+  assert.match(wl, /Changed lines \(observed\)/, "the changed-lines column is untagged or missing");
+  assert.match(wl, /Tasks \(observed\)/, "the tasks column is untagged or missing");
+  assert.match(wl, /\| 100 \|/, "the raw changed-lines figure (80+20) is not rendered");
+  // Outcome family: raw verdicts/counts, tagged observed.
+  const oc = out.slice(at("## Outcome (observed)"), at("## Your culprits"));
+  assert.match(oc, /Conformance pass \(observed\)/, "the conformance column is untagged or missing");
+  assert.match(oc, /Review rounds \(observed\)/, "the review-rounds column is untagged or missing");
+});
+
+test("compliance candidates carry the source session's version range (spec C5)", () => {
+  const out = renderReport([
+    sum({ id: "z", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5 }] }),
+  ], ctx());
+  assert.match(out, /CANDIDATE: inherited-model inherited=2\/5 versions=\[0\.12\.0\.\.0\.12\.0\]/);
 });
 
 test("every section carries a one-line gloss", () => {
@@ -909,8 +956,8 @@ test("every legacy line-class still has a home in the rendered report", () => {
     // Your culprits — out to the row's end, for the same reason as the cohort row above: a
     // needle that stopped at the Δ column still matched after the Trend column was deleted.
     "| partial-evidence-capture | friction | $6.00 | 2 | first seen | insufficient data | 0.12.0..0.12.0 | legacy |",
-    // Compliance
-    "- CANDIDATE: inherited-model inherited=2/5",
+    // Compliance — now version-scoped from the source session (spec C5)
+    "- CANDIDATE: inherited-model inherited=2/5 versions=[0.12.0..0.12.0]",
     // Your wins: a win event, and a version-over-version improvement
     "| first-round-clean-accept | $9.00 | 3 |",
     "| execution 0.11.0→0.12.0 | $5.00 | 4 | down |",
@@ -918,7 +965,8 @@ test("every legacy line-class still has a home in the rendered report", () => {
     // cost-outlier is retired — issue #114 — and its role is the matched-cohort EXCESS-COST residual,
     // which this run-less corpus produces no rows for).
     "- CANDIDATE: depth-outlier dollars=$15.00 sessions=1 versions=[0.12.0..0.12.0] low confidence: n=1",
-    "- CANDIDATE: version-regression skill=planning 0.11.0->0.12.0 delta=+$9.00 (900.0%) dollars=$10.00 sessions=3 versions=[0.11.0..0.12.0]",
+    // The from->to span is canonical for a version-regression; the redundant versions=[..] is suppressed (item 6c).
+    "- CANDIDATE: version-regression skill=planning 0.11.0->0.12.0 delta=+$9.00 (900.0%) dollars=$10.00 sessions=3",
     "- CANDIDATE: unpriced-model model=some-unpriced-model count=3 sessions=1 low confidence: n=1",
     // Appendix
     "claude-opus-5 $48.00",
