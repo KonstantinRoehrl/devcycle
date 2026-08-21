@@ -983,35 +983,10 @@ test("emitCandidates does not flag a depth-outlier when medianDepth is within 3x
   assert.equal(outlier, undefined);
 });
 
-// Standalone cost-outlier: must fire on an anomalously expensive run relative to its peers
-// even when there is only one version cohort — unlike version-regression, which requires
-// two adjacent cohorts to compare.
-test("emitCandidates flags a cost-outlier for a skill whose cost is far above its peers, with a single version cohort", () => {
-  const summaries = [
-    { id: "s1", costByStage: { "devcycle:cycle": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s2", costByStage: { "devcycle:cycle": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s3", costByStage: { "devcycle:cycle": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s4", costByStage: { "devcycle:cycle": 5.0 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-  ];
-  const candidates = emitCandidates(summaries);
-  const outlier = candidates.find(
-    (c) => c.type === "cost-outlier" && c.skill === "devcycle:cycle"
-  );
-  assert.ok(outlier, "expected a cost-outlier candidate");
-  assert.strictEqual(outlier.dollars, 5.0);
-});
-
-test("emitCandidates does not flag a cost-outlier when costs are uniform across runs", () => {
-  const summaries = [
-    { id: "s1", costByStage: { "devcycle:cycle": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s2", costByStage: { "devcycle:cycle": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s3", costByStage: { "devcycle:cycle": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s4", costByStage: { "devcycle:cycle": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-  ];
-  const candidates = emitCandidates(summaries);
-  const outlier = candidates.find((c) => c.type === "cost-outlier");
-  assert.equal(outlier, undefined);
-});
+// The global-median cost-outlier is retired (issue #114): a run dear against a skill's global
+// median conflated user-driven session size with per-unit cost. Its role is now the matched-cohort
+// residual — excessCost / the `EXCESS-COST:` lines — covered in doctor-report.test.mjs. The
+// depth-outlier below is a distinct per-session signal excessCost does not replace and is retained.
 
 test("a main-thread browser call is flagged unconditionally", () => {
   const c = emitComplianceCandidates([
@@ -1416,9 +1391,18 @@ test("the low-confidence marker reaches the machine shape, not the text report a
   ]).find((x) => x.type === "depth-outlier");
   assert.strictEqual(lone.sessions_sampled, 1);
   assert.strictEqual(lone.low_confidence, true);
+  // The retired cost-outlier used to carry the multi-session (low_confidence === false) half. The
+  // depth-outlier that replaces its per-session role is structurally single-session (its
+  // sessions_sampled is always 1), so a still-emitted multi-session candidate — version-regression,
+  // whose sessions_sampled is the size of the newer cohort — carries the false-branch assertion.
   const sampled = emitCandidates([
-    { costByStage: { s: 1 } }, { costByStage: { s: 1 } }, { costByStage: { s: 100 } },
-  ]).find((x) => x.type === "cost-outlier");
+    { costByStage: { s: 1 }, pluginVersion: "0.11.0", unpriced: {} },
+    { costByStage: { s: 1 }, pluginVersion: "0.11.0", unpriced: {} },
+    { costByStage: { s: 1 }, pluginVersion: "0.11.0", unpriced: {} },
+    { costByStage: { s: 10 }, pluginVersion: "0.12.0", unpriced: {} },
+    { costByStage: { s: 10 }, pluginVersion: "0.12.0", unpriced: {} },
+    { costByStage: { s: 10 }, pluginVersion: "0.12.0", unpriced: {} },
+  ]).find((x) => x.type === "version-regression");
   assert.strictEqual(sampled.sessions_sampled, 3);
   assert.strictEqual(sampled.low_confidence, false);
 });

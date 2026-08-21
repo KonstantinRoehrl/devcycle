@@ -588,38 +588,11 @@ export function emitCandidates(summaries) {
     }
   }
 
-  // Cost outliers — a run costing far more than its peers for the same skill, independent
-  // of any version-cohort comparison (fires even with a single version observed, unlike
-  // version-regression above, which needs two adjacent cohorts to compare).
-  const costsBySkill = new Map(); // skill -> [{ dollars, version }]
-  for (const s of settled) {
-    for (const [skill, dollars] of Object.entries(s.costByStage ?? {})) {
-      if (!costsBySkill.has(skill)) costsBySkill.set(skill, []);
-      costsBySkill.get(skill).push({ dollars, version: s.pluginVersion });
-    }
-  }
-  for (const [skill, entries] of costsBySkill) {
-    if (entries.length < 3) continue; // too few runs to call anything a peer outlier
-    const skillMedian = median(entries.map((e) => e.dollars));
-    if (skillMedian <= 0) continue;
-    // The version span of the skill's peer set — the range the outlier is measured within.
-    const skillVersions = entries.map((e) => e.version).filter((v) => v && v !== "unknown").sort(compareVersions);
-    const versions = skillVersions.length ? [skillVersions[0], skillVersions.at(-1)] : null;
-    for (const { dollars: d } of entries) {
-      if (d > skillMedian * 3) {
-        candidates.push({
-          type: "cost-outlier",
-          skill,
-          version_from: null,
-          version_to: null,
-          versions,
-          delta_pct: ((d - skillMedian) / skillMedian) * 100,
-          dollars: d,
-          sessions_sampled: entries.length,
-        });
-      }
-    }
-  }
+  // The global-median cost-outlier is retired (issue #114): a run dear against a skill's global
+  // median conflated user-driven session size with per-unit cost. Its role is now the matched-cohort
+  // residual, emitted by excessCost and rendered as the `EXCESS-COST:` lines in `## Cost anomalies`.
+  // The depth-outlier above is a distinct per-session depth signal excessCost does not replace, and
+  // stays.
 
   for (const c of candidates) c.low_confidence = isLowConfidence(c);
   return candidates;
@@ -1753,6 +1726,98 @@ const byImpactDesc = (a, b) =>
 
 // What a cycle cost under each version and profile, and whether that is better or worse than the
 // last version run the same way.
+// The benchmarking unit is the run, not the session (issue #114): a run's matchKey pins the three
+// things that make two runs comparable — the profile it ran under, the kind of request, and the
+// workload size band. Only runs carrying both a requestKind and a band are matchable (GC5/GC6): a
+// run with no workload record is observational and never enters a cohort. Cohorts of one are kept
+// (so excessCost can report them as "no expectation") rather than dropped.
+const matchKeyOf = (r) => `${r.profile}|${r.requestKind}|${r.workloadBand}`;
+
+export function matchedCohorts(runs) {
+  const map = new Map();
+  for (const r of runs ?? []) {
+    if (r.requestKind == null || r.workloadBand == null) continue;
+    const key = matchKeyOf(r);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+  }
+  return map;
+}
+
+// A run's cost measured against what its matched cohort actually cost, so a version is judged on
+// its per-unit efficiency rather than on how long or how many its sessions happened to be. The
+// expected figure is the cohort's median cost; the excess is the residual above it. A cohort of
+// one has no peer to set an expectation, so it is reported as "no expectation" (expected/excess
+// null, QC1) rather than as an outlier. Confidence rises with the cohort's size.
+export function excessCost(runs) {
+  const cohorts = matchedCohorts(runs);
+  const out = [];
+  for (const r of runs ?? []) {
+    if (r.requestKind == null || r.workloadBand == null) continue; // observational only (GC5/GC6)
+    const matchKey = matchKeyOf(r);
+    const cohortN = cohorts.get(matchKey)?.length ?? 0;
+    const expected = cohortN >= 2 ? median(cohorts.get(matchKey).map((c) => c.costUSD)) : null;
+    const excess = expected == null ? null : r.costUSD - expected;
+    out.push({
+      runId: r.runId, version: r.version, profile: r.profile, matchKey,
+      actual: r.costUSD, expected, excess, cohortN,
+      confidence: cohortN >= 5 ? "high" : cohortN >= 2 ? "low" : "insufficient",
+    });
+  }
+  return out;
+}
+
+// A percentage move that reports its direction instead of dividing by a zero or absent baseline.
+const pctDelta = (from, to) =>
+  from == null || to == null || from === 0 ? null : ((to - from) / from) * 100;
+
+// Adjacent version steps inside the recency band, workload-adjusted: for each adjacent version
+// pair in `band` and each matchKey both versions carry with >=2 runs, how the like-for-like cost
+// (and its main/sub turn counts, depth, and conformance) moved. A delta is emitted only where both
+// sides have >=2 runs — never fabricated across a single run (QC1). The turn and depth deltas are
+// per-run medians (run-level cost is not split by agent type, so a $/turn split is not derivable
+// here); the cost delta is the like-for-like median cost move.
+export function workloadAdjustedSteps(runs, band) {
+  const matchable = (runs ?? []).filter(
+    (r) => inBand(r.version, band) && r.requestKind != null && r.workloadBand != null);
+  const byVersionKey = (version) => {
+    const m = new Map();
+    for (const r of matchable.filter((r) => r.version === version)) {
+      const k = matchKeyOf(r);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(r);
+    }
+    return m;
+  };
+  const rows = [];
+  for (let i = 0; i + 1 < band.length; i++) {
+    const from = band[i], to = band[i + 1];
+    const fromKeys = byVersionKey(from), toKeys = byVersionKey(to);
+    for (const [matchKey, fRuns] of fromKeys) {
+      const tRuns = toKeys.get(matchKey);
+      if (!tRuns || fRuns.length < 2 || tRuns.length < 2) continue; // never fabricate a delta
+      const medOf = (list, key) => median(list.map((r) => r[key] ?? 0));
+      const conformanceRate = (list) => {
+        const signalled = list.filter((r) => r.conformancePass != null);
+        return signalled.length ? signalled.filter((r) => r.conformancePass).length / signalled.length : null;
+      };
+      const fromConf = conformanceRate(fRuns), toConf = conformanceRate(tRuns);
+      const n = Math.min(fRuns.length, tRuns.length);
+      rows.push({
+        from, to, matchKey,
+        costDeltaPct: pctDelta(medOf(fRuns, "costUSD"), medOf(tRuns, "costUSD")),
+        mainTurnDeltaPct: pctDelta(medOf(fRuns, "mainTurns"), medOf(tRuns, "mainTurns")),
+        subTurnDeltaPct: pctDelta(medOf(fRuns, "subagentTurns"), medOf(tRuns, "subagentTurns")),
+        depthDeltaPct: pctDelta(medOf(fRuns, "medianDepth"), medOf(tRuns, "medianDepth")),
+        conformanceDelta: fromConf == null || toConf == null ? null : toConf - fromConf,
+        n,
+        confidence: n >= 5 ? "high" : "low",
+      });
+    }
+  }
+  return rows;
+}
+
 export function versionProfileTable(summaries, promotions = []) {
   const groups = new Map();
   for (const s of summaries.filter((x) => !x.inFlight)) {
@@ -1770,12 +1835,25 @@ export function versionProfileTable(summaries, promotions = []) {
         stageTotals.set(stage, (stageTotals.get(stage) ?? 0) + dollars);
     const priciest = [...stageTotals.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
     const depths = g.members.map((s) => s.medianDepth).filter((d) => typeof d === "number");
+    // Decomposed $/turn (issue #114): a blended $/turn hides whether the money went to the main
+    // thread or its subagents, and conflates the two turn populations. main dollars are the
+    // agent-type-keyed "main" cost; everything else the session cost is sub-thread. Each rate is
+    // null, never 0, when its denominator is 0 (QC1).
+    const mainDollars = g.members.reduce((n, s) => n + (s.costByAgentType?.main ?? 0), 0);
+    const totalDollars = g.members.reduce((n, s) => n + (s.costUSD ?? 0), 0);
+    const subDollars = totalDollars - mainDollars;
+    const mainTurns = g.members.reduce((n, s) => n + (s.mainTurns ?? 0), 0);
+    const subagentTurns = g.members.reduce((n, s) => n + (s.subagentTurns ?? 0), 0);
+    const tasks = g.members.reduce((n, s) => n + (s.workload?.plannedTaskCount ?? 0), 0);
     return {
       version: g.version,
       profile: g.profile,
       sessions: g.members.length,
       cycles: cycles.length,
       medianCostPerCycle: median(cycles.map((c) => c.cost)),
+      dollarsPerMainTurn: mainTurns ? mainDollars / mainTurns : null,
+      dollarsPerSubTurn: subagentTurns ? subDollars / subagentTurns : null,
+      turnsPerTask: tasks ? (mainTurns + subagentTurns) / tasks : null,
       delta: { state: "first-seen", pct: null },
       priciestStage: priciest ? priciest[0] : null,
       medianDepth: depths.length ? median(depths) : null,
@@ -1875,11 +1953,14 @@ function impactRows(summaries, vocab = [], band = [], dates = new Map()) {
       agg.slugLists.push(s.culpritsByKey?.[scored.key] ?? []);
       const cohortKey = `${version} ${profile}`;
       if (!agg.cohorts.has(cohortKey))
-        agg.cohorts.set(cohortKey, { version, profile, sessions: 0, total: 0, measurable: true });
+        agg.cohorts.set(cohortKey, { version, profile, sessions: 0, total: 0, values: [], measurable: true });
       const cohort = agg.cohorts.get(cohortKey);
       cohort.sessions += 1;
       if (scored.impact === null) cohort.measurable = false;
-      else cohort.total += scored.impact;
+      // Keep both: the summed total ranks/displays this key (GC1), and the per-session values feed
+      // the version-over-version comparison so a version is never flagged a regression for session
+      // count alone (issue #114).
+      else { cohort.total += scored.impact; cohort.values.push(scored.impact); }
     }
   }
   return [...byKey.values()].map((agg) => {
@@ -1888,14 +1969,18 @@ function impactRows(summaries, vocab = [], band = [], dates = new Map()) {
     const cohorts = orderVersionProfileRows([...agg.cohorts.values()].map((c) => ({
       version: c.version, profile: c.profile,
       impact: c.measurable ? c.total : null,
+      // Per-session median (derived): null, not 0, when the cohort priced nothing (QC1).
+      impactPerSession: c.values.length ? median(c.values) : null,
       lowConfidence: c.sessions < MIN_COHORT,
     })));
+    // The trend and delta run on the per-session median per version, not the summed total: every
+    // session that priced this key on a version contributes one value, and the version's figure is
+    // their median (QC2), so eight cheap sessions never read dearer than two of the same cost.
+    const versionValues = new Map();
+    for (const c of [...agg.cohorts.values()].filter((c) => c.version !== "unknown"))
+      versionValues.set(c.version, [...(versionValues.get(c.version) ?? []), ...c.values]);
     const byVersion = new Map();
-    for (const c of cohorts.filter((c) => c.version !== "unknown")) {
-      const running = byVersion.get(c.version);
-      byVersion.set(c.version, running === undefined ? c.impact
-        : running === null || c.impact === null ? null : running + c.impact);
-    }
+    for (const [v, vals] of versionValues) byVersion.set(v, vals.length ? median(vals) : null);
     // The version span this key was observed across, and its temporal standing against the band.
     const versionsSeen = [...byVersion.keys()].sort(compareVersions);
     return {
@@ -1906,12 +1991,17 @@ function impactRows(summaries, vocab = [], band = [], dates = new Map()) {
       kind: entry?.kind ?? "unclassified",
       isWin: WIN_EVENTS.has(agg.event) || entry?.kind === "win",
       impact: agg.measurable ? agg.impact : null,
+      // The per-session median across every version this key was priced on (derived, QC1).
+      impactPerSession: (() => {
+        const all = [...versionValues.values()].flat();
+        return all.length ? median(all) : null;
+      })(),
       occurrences: agg.occurrences,
       // Absent, not zero (QC1): a key seen only under an undetectable version has no range.
       versions: versionsSeen.length ? [versionsSeen[0], versionsSeen.at(-1)] : null,
       lifecycle: versionsSeen.length ? lifecycle(versionsSeen, band, dates) : null,
       delta: cohorts.length
-        ? deltaAgainstPrevious(cohorts, cohorts.length - 1, (r) => r.impact)
+        ? deltaAgainstPrevious(cohorts, cohorts.length - 1, (r) => r.impactPerSession)
         : { state: "first-seen", pct: null },
       trend: trendAcross(versionsSeen.map((v) => byVersion.get(v))),
     };
@@ -1927,8 +2017,8 @@ export function culpritTable(summaries, vocab) {
   const band = recencyBand(installedVersion(), dates);
   return impactRows(summaries, vocab, band, dates)
     .filter((r) => !r.isWin)
-    .map(({ name, kind, impact, occurrences, delta, trend, versions, lifecycle: life }) =>
-      ({ culprit: name, kind, impact, occurrences, delta, trend, versions, lifecycle: life }))
+    .map(({ name, kind, impact, impactPerSession, occurrences, delta, trend, versions, lifecycle: life }) =>
+      ({ culprit: name, kind, impact, impactPerSession, occurrences, delta, trend, versions, lifecycle: life }))
     // Live problems first, then by money at stake: a culprit still occurring in the recency band
     // is what the reader can act on, ahead of one a newer release has likely moved past.
     .sort((a, b) => (b.lifecycle === "active") - (a.lifecycle === "active") || byImpactDesc(a, b));
@@ -2111,6 +2201,9 @@ export function compiledKnowledge(promotions = []) {
 // its gloss cannot drift apart, and so the renderer has no place to improvise one.
 const GLOSSES = {
   "read-this-first": "Caveats that qualify every number below. Each one says what it excludes and why.",
+  ataglance:
+    "Workload-adjusted, matched-cohort cost movement across the recency band (derived) — like-for-" +
+    "like runs only, so session length or count can't masquerade as a cost change.",
   highlights: "The three things worth knowing before reading any table.",
   "cost-by-version":
     "What a cycle costs on each plugin version, compared only against the same profile — so a " +
@@ -2119,14 +2212,16 @@ const GLOSSES = {
   "cost-by-stage-window": "Where this window's money actually went.",
   culprits:
     "Recurring problems, priced. The dollar figure is what each one actually cost you, summed " +
-    "over every occurrence — not a severity guess.",
+    "over every occurrence — not a severity guess. The Δ and Trend are per-session (derived), so " +
+    "a version is never flagged a regression for running more sessions alone.",
   compliance: "Rules devcycle states but could not enforce, and how often they were broken.",
   wins:
     "What went right, priced the same way — a system that only counts failures cannot tell you " +
     "whether it is improving.",
   anomalies:
     "Individual cost defects: a model with no price, a run far dearer than its peers, a session " +
-    "running far deeper than its own startup floor, a stage whose cost jumped between versions.",
+    "running far deeper than its own startup floor, a stage whose cost jumped between versions, and " +
+    "each run's excess over its matched cohort (unmatched when the cohort has no peer).",
   promoted: "Whether lessons this repo already adopted actually stopped the problem recurring.",
   "outer-loop": "Whether filing issues from this report is actually producing fixes.",
   "compiled-knowledge":
@@ -2283,6 +2378,14 @@ export function renderReport(summaries, ctx) {
   const section = (heading, glossKey) => { L.push("", heading, "", `*${GLOSSES[glossKey]}*`, ""); };
   const agg = aggregate(summaries);
   const candidates = emitCandidates(summaries);
+  // The run-level, workload-adjusted view (issue #114): run aggregates over the settled corpus,
+  // the recency band the comparison ranges over (reusing recencyBand/releaseDates — QC2), the
+  // matched-cohort step deltas, and each run's excess over its cohort. Runs with no runId/workload
+  // never reach these (GC5/GC6) — runAggregates already excludes run-less sessions.
+  const settledRuns = runAggregates(summaries.filter((s) => !s.inFlight));
+  const glanceBand = recencyBand(installedVersion(), releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8")));
+  const glanceSteps = workloadAdjustedSteps(settledRuns, glanceBand);
+  const excess = excessCost(settledRuns);
 
   L.push(
     `# Doctor Report — ${repo} — ${today}`,
@@ -2294,12 +2397,30 @@ export function renderReport(summaries, ctx) {
   section("## Read this first", "read-this-first");
   L.push(...caveatLines(summaries, agg));
 
+  section("## At a glance", "ataglance");
+  const pctText = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
+  L.push(...markdownTable(
+    ["Step", "matchKey", "n", "conf", "workload-adj $ Δ (derived)", "main-turn Δ",
+      "sub-turn Δ", "depth Δ", "conformance Δ"],
+    glanceSteps.map((r) => [
+      `${r.from}→${r.to}`, r.matchKey, r.n, r.confidence, pctText(r.costDeltaPct),
+      pctText(r.mainTurnDeltaPct), pctText(r.subTurnDeltaPct), pctText(r.depthDeltaPct),
+      r.conformanceDelta == null ? null : `${r.conformanceDelta >= 0 ? "+" : ""}${(r.conformanceDelta * 100).toFixed(0)}pp`,
+    ]),
+    "no matched cohort spans two adjacent in-band versions yet",
+  ));
+  const priciestOverall = Object.entries(agg.costByStage).sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
+  L.push("", priciestOverall
+    ? `Priciest stage overall (derived): ${priciestOverall[0]} (${usd(priciestOverall[1])}).`
+    : "Priciest stage overall (derived): — (no stage cost recorded).");
+
   section("## Highlights", "highlights");
   L.push(HIGHLIGHTS_ANCHOR);
 
   section("## Cost by version", "cost-by-version");
   L.push(...markdownTable(
-    ["Version", "Profile", "Sessions", "Cycles", "Median $/cycle", "Δ vs previous",
+    ["Version", "Profile", "Sessions", "Cycles", "Median $/cycle",
+      "$/main-turn (derived)", "$/sub-turn (derived)", "Turns/task (derived)", "Δ vs previous",
       "Priciest stage", "Median depth", "Quality", "Shipped"],
     versionProfileTable(summaries, promotions).map((r) => [
       r.version,
@@ -2307,6 +2428,9 @@ export function renderReport(summaries, ctx) {
       cohortSessionsText(r),
       r.cycles,
       usd(r.medianCostPerCycle),
+      r.dollarsPerMainTurn === null ? null : usd(r.dollarsPerMainTurn),
+      r.dollarsPerSubTurn === null ? null : usd(r.dollarsPerSubTurn),
+      r.turnsPerTask === null ? null : r.turnsPerTask.toFixed(1),
       deltaText(r.delta),
       r.priciestStage,
       r.medianDepth,
@@ -2380,8 +2504,19 @@ export function renderReport(summaries, ctx) {
   const anomalies = candidates
     .filter((c) => c.type !== "version-improvement")
     .sort((a, b) => anomalyWeight(b) - anomalyWeight(a));
-  L.push(...(anomalies.length
-    ? anomalies.map((c) => `- ${formatCandidate(c)}`)
+  // The run-level residual (issue #114): a run dearer than its matched cohort, ranked by the excess.
+  // A run in a cohort of one has no peer to set an expectation, so it is reported as unmatched
+  // rather than as an outlier (QC1). Cheaper-than-cohort runs are not anomalies and drop out.
+  const excessLines = excess
+    .filter((r) => r.confidence === "insufficient" || (r.excess ?? 0) > 0)
+    .sort((a, b) => (b.excess ?? -Infinity) - (a.excess ?? -Infinity))
+    .map((r) => r.confidence === "insufficient"
+      ? `- EXCESS-COST: ${r.matchKey} version=${r.version} unmatched — no expectation (cohort n=${r.cohortN})`
+      : `- EXCESS-COST: ${r.matchKey} version=${r.version} actual=${usd(r.actual)} ` +
+        `expected=${usd(r.expected)} excess=${usd(r.excess)} (${r.confidence}, n=${r.cohortN})`);
+  const anomalyLines = [...anomalies.map((c) => `- ${formatCandidate(c)}`), ...excessLines];
+  L.push(...(anomalyLines.length
+    ? anomalyLines
     : ["_No rows: no cost anomalies in this corpus._"]));
 
   section("## Previously promoted — did it hold", "promoted");

@@ -14,6 +14,7 @@ import {
   parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
   renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates,
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
+  matchedCohorts, excessCost, workloadAdjustedSteps,
 } from "../../scripts/doctor.mjs";
 import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
 
@@ -222,6 +223,63 @@ test("a promotion carrying no culprit id contributes nothing rather than an empt
   assert.deepEqual(row.shipped, []);
 });
 
+test("versionProfileTable emits stratified $/turn that reconstructs cost, never blended", () => {
+  const s = sum({ id:"aaaa", runId:"r".repeat(16), pluginVersion:"0.14.3", profile:"thorough",
+    costUSD:15, mainTurns:100, subagentTurns:50,
+    costByAgentType:{ main:10, subagent:5 } });
+  const [row] = versionProfileTable([s]);
+  assert.ok("dollarsPerMainTurn" in row && "dollarsPerSubTurn" in row);
+  assert.ok(!("dollarsPerTurn" in row));
+  assert.ok(Math.abs(row.dollarsPerMainTurn - 10/100) < 1e-9);
+  assert.ok(Math.abs(row.dollarsPerSubTurn - 5/50) < 1e-9);
+});
+
+test("excessCost is a residual vs the matched cohort, and size-1 cohorts get no expectation", () => {
+  const mk = (id, cost) => ({ runId:id.padEnd(16,"0"), version:"0.14.3", profile:"thorough",
+    requestKind:"feature", workloadBand:"M", costUSD:cost, mainTurns:1, subagentTurns:0 });
+  const runs = [mk("a",10), mk("b",12), mk("c",30)];        // one M-feature-thorough cohort, n=3
+  const res = excessCost(runs);
+  const c = res.find((r) => r.runId.startsWith("c"));
+  assert.equal(c.expected, 12);                              // median(10,12,30)
+  assert.equal(c.excess, 18);
+  assert.equal(c.confidence, "low");                         // 2<=n<5
+  const solo = excessCost([mk("z",99)])[0];
+  assert.equal(solo.expected, null);
+  assert.equal(solo.confidence, "insufficient");
+});
+
+test("matchedCohorts groups only runs carrying both a requestKind and a workload band", () => {
+  const mk = (id, over) => ({ runId:id.padEnd(16,"0"), version:"0.14.3", profile:"thorough",
+    requestKind:"feature", workloadBand:"M", costUSD:1, ...over });
+  const cohorts = matchedCohorts([
+    mk("a"), mk("b"),
+    mk("c", { requestKind: null }),          // observational — no requestKind
+    mk("d", { workloadBand: null }),         // observational — no band
+  ]);
+  assert.deepEqual([...cohorts.keys()], ["thorough|feature|M"]);
+  assert.equal(cohorts.get("thorough|feature|M").length, 2);
+});
+
+test("workloadAdjustedSteps emits a delta only where both adjacent versions have >=2 matched runs", () => {
+  const mk = (id, version, cost) => ({ runId:id.padEnd(16,"0"), version, profile:"thorough",
+    requestKind:"feature", workloadBand:"M", costUSD:cost, mainTurns:10, subagentTurns:4,
+    medianDepth:40000, conformancePass:true });
+  const band = ["0.14.2", "0.14.3"];
+  const runs = [
+    mk("a","0.14.2",10), mk("b","0.14.2",10),
+    mk("c","0.14.3",12), mk("d","0.14.3",12),
+  ];
+  const [step] = workloadAdjustedSteps(runs, band);
+  assert.equal(step.from, "0.14.2");
+  assert.equal(step.to, "0.14.3");
+  assert.equal(step.matchKey, "thorough|feature|M");
+  assert.ok(Math.abs(step.costDeltaPct - 20) < 1e-9);
+  assert.equal(step.n, 2);
+  assert.equal(step.confidence, "low");
+  // A single run on one side fabricates no delta.
+  assert.deepEqual(workloadAdjustedSteps(runs.slice(0, 3), band), []);
+});
+
 test("stageByVersionTable renders at most the six most recent versions, oldest first", () => {
   const summaries = ["0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.10.0", "0.11.0", "0.12.0"]
     .map((v, i) => sum({ id: `s${i}`, pluginVersion: v }));
@@ -344,6 +402,23 @@ test("culprit impact figures come from impactScores and from no second formula",
   const [row] = culpritTable([s], VOCAB);
   assert.equal(row.impact, expected.impact);
   assert.equal(row.occurrences, expected.frequency);
+});
+
+test("the cross-version culprit delta is per-session, so more sessions alone is not a regression", () => {
+  // Same culprit, equal per-session impact ($10) on both versions, but version B ran four times
+  // as many sessions. The version-over-version delta must read ~0, not the +166% a summed total
+  // would show — while the ranking/display impact still reflects the totals (30 + 80).
+  const mk = (id, version) => sum({
+    id, pluginVersion: version,
+    impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 1, impact: 10 }],
+    culpritsByKey: { "gate-fail:execution": ["culprit-x"] },
+  });
+  const a = [1, 2, 3].map((n) => mk(`a${n}`, "0.11.0"));
+  const b = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => mk(`b${n}`, "0.12.0"));
+  const [row] = culpritTable([...a, ...b], []);
+  assert.equal(row.delta.state, "compared");
+  assert.ok(Math.abs(row.delta.pct) < 1e-9, `expected ~0 per-session delta, got ${row.delta.pct}`);
+  assert.equal(row.impact, 110);   // summed total, ranking value unchanged (GC1)
 });
 
 test("lifecycle classifies by occurrence versions against the band", () => {
@@ -691,8 +766,9 @@ test("both playbook anchors render, in their specified positions", () => {
   const at = (needle) => out.indexOf(needle);
   assert.ok(at("<!-- devcycle:highlights -->") !== -1, "the highlights anchor is missing");
   assert.ok(at("<!-- devcycle:findings -->") !== -1, "the findings anchor is missing");
-  // Highlights sits between the caveat block and Cost by version.
-  assert.ok(at("## Read this first") < at("<!-- devcycle:highlights -->"));
+  // At a glance sits between the caveat block and Highlights; Highlights before Cost by version.
+  assert.ok(at("## Read this first") < at("## At a glance"));
+  assert.ok(at("## At a glance") < at("<!-- devcycle:highlights -->"));
   assert.ok(at("<!-- devcycle:highlights -->") < at("## Cost by version"));
   // Findings sits between Compiled knowledge and the Appendix.
   assert.ok(at("## Compiled knowledge") < at("<!-- devcycle:findings -->"));
@@ -702,7 +778,7 @@ test("both playbook anchors render, in their specified positions", () => {
 test("the section order is fixed", () => {
   const out = renderReport([sum()], ctx());
   const order = [
-    "# Doctor Report", "## Read this first", "## Highlights", "## Cost by version",
+    "# Doctor Report", "## Read this first", "## At a glance", "## Highlights", "## Cost by version",
     "## Cost by stage", "### Cost by stage (this window)", "## Your culprits", "### Compliance",
     "## Your wins", "## Cost anomalies", "## Previously promoted — did it hold", "## Outer loop",
     "## Compiled knowledge", "## Findings", "## Appendix",
@@ -710,6 +786,29 @@ test("the section order is fixed", () => {
   const positions = order.map((h) => out.indexOf(h));
   assert.ok(positions.every((p) => p !== -1), `a section is missing: ${order.filter((h, i) => positions[i] === -1)}`);
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b), "sections are out of order");
+});
+
+test("the report leads with an At a glance workload-adjusted step, carrying its confidence", () => {
+  const dates = releaseDates(readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8"));
+  const band = recencyBand(installedVersion(), dates);
+  const [vOld, vNew] = [band.at(-2), band.at(-1)];
+  const workload = { requestKind: "feature", insertions: 100, deletions: 100, plannedTaskCount: 3 };
+  const run = (id, version, cost) => sum({
+    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough",
+    costUSD: cost, mainTurns: 10, subagentTurns: 4, medianDepth: 40000, workload,
+  });
+  const out = renderReport([
+    run("o1", vOld, 10), run("o2", vOld, 10),
+    run("n1", vNew, 12), run("n2", vNew, 12),
+  ], ctx());
+  const at = (needle) => out.indexOf(needle);
+  assert.ok(at("## At a glance") !== -1, "the At a glance section is missing");
+  assert.ok(at("## Read this first") < at("## At a glance"));
+  assert.ok(at("## At a glance") < at("## Highlights"));
+  const glance = out.slice(at("## At a glance"), at("## Highlights"));
+  assert.match(glance, new RegExp(`${vOld}→${vNew}`), "the matched step is missing");
+  assert.match(glance, /\+20\.0%/, "the cost delta is missing");
+  assert.match(glance, /\blow\b/, "the confidence label is missing");
 });
 
 test("every section carries a one-line gloss", () => {
@@ -803,7 +902,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "- 1 session(s) still in flight (newest record < 30 min old) — in-flight sessions have only part of their cost recorded",
     // Cost by version — the whole row, out to its last cell: a needle that stopped at the depth
     // column still matched after the Quality and Shipped columns were deleted.
-    `| 0.12.0 | thorough | 4 | 4 | $15.00 | +36.4% | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
+    `| 0.12.0 | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | +36.4% | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
     // Cost by stage, across versions and within this window
     "| execution | $10.00 | $5.00 | down |",
     "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
@@ -815,8 +914,9 @@ test("every legacy line-class still has a home in the rendered report", () => {
     // Your wins: a win event, and a version-over-version improvement
     "| first-round-clean-accept | $9.00 | 3 |",
     "| execution 0.11.0→0.12.0 | $5.00 | 4 | down |",
-    // Cost anomalies, one line per candidate type the report can raise
-    "- CANDIDATE: cost-outlier skill=execution delta=900.0% dollars=$100.00 sessions=7 versions=[0.11.0..0.12.0]",
+    // Cost anomalies, one line per candidate type the report can raise (the global-median
+    // cost-outlier is retired — issue #114 — and its role is the matched-cohort EXCESS-COST residual,
+    // which this run-less corpus produces no rows for).
     "- CANDIDATE: depth-outlier dollars=$15.00 sessions=1 versions=[0.12.0..0.12.0] low confidence: n=1",
     "- CANDIDATE: version-regression skill=planning 0.11.0->0.12.0 delta=+$9.00 (900.0%) dollars=$10.00 sessions=3 versions=[0.11.0..0.12.0]",
     "- CANDIDATE: unpriced-model model=some-unpriced-model count=3 sessions=1 low confidence: n=1",
@@ -871,7 +971,7 @@ test("the Shipped cell renders the culprit id the version's promotion recorded",
   }));
   assert.ok(
     out.includes(
-      "| 0.12.0 | thorough | 3 | 3 | $1.00 | first seen | execution | 40000 | " +
+      "| 0.12.0 | thorough | 3 | 3 | $1.00 | — | — | — | first seen | execution | 40000 | " +
         "unavailable (no run record) | partial-evidence-capture |",
     ),
     "the cohort row does not carry the culprit its version shipped",
