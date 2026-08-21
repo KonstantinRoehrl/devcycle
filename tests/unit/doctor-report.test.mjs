@@ -868,7 +868,7 @@ test("every rendered metric column in the pre-existing tables is tagged observed
   const stage = out.slice(out.indexOf("## Cost by stage"), out.indexOf("### Cost by stage (this window)"));
   assert.match(stage, /\| Trend \(derived\) \|/, "Cost by stage's Trend column is not tagged");
   assert.ok(
-    stage.includes("_Dollar cells are observed per-version sums; Trend is derived._"),
+    stage.includes("_Dollar cells are derived per-version medians; Trend is derived._"),
     "the Cost by stage caption is missing",
   );
 

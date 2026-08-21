@@ -2494,7 +2494,7 @@ export function renderReport(summaries, ctx) {
     ]),
     "no version-tagged sessions to compare across releases",
   ));
-  L.push("", "_Dollar cells are observed per-version sums; Trend is derived._");
+  L.push("", "_Dollar cells are derived per-version medians; Trend is derived._");
   // stageByVersionTable drops the undetectable-version cohort from every column and every trend,
   // because "unknown" cannot sit on a version axis — right, but silent, and an omission nobody
   // names reads as a clean bill of health. cohortTable is the sibling that keeps that bucket,
