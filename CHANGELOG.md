@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.3 — 2026-08-21
+
+- fix(pipeline): close the remaining audit batches — reuse, surface, robustness, instruction cost, and vocabulary
+
 ## 0.14.2 — 2026-08-20
 
 - fix(pipeline): close the second audit batch — the browser guard and four unreachable pieces of machinery
