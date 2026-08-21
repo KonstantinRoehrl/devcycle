@@ -4,6 +4,30 @@
 
 - fix(pipeline): close the remaining audit batches — reuse, surface, robustness, instruction cost, and vocabulary
 
+The last three of five batches remediating a 54-finding whole-repo audit. With this release **all
+eleven remediation cycles are complete and no audit finding remains open.**
+
+**Batch 3 — surface drift and script reuse.** The documented surface is reconciled with the shipped
+one: the config table, the Use section, the delete-vs-close guidance, and a raft of stale
+command/agent/hook references now describe what actually ships, not what an earlier version did
+(F11, F12, F14–F18, F21, F22, F25, F44). Separately, five script components that had been
+re-implemented beside an existing one are collapsed onto a single owner — plan-file parsing (written
+three times), the schema validator copied into `validate.mjs`, per-script CLI flag parsing (now
+`scripts/cli-flags.mjs`), and `doctor.mjs`'s duplicated cache-band sentence and `median` helper
+(F31, F32, F37, F38, F39). Behaviour is unchanged; the duplication is gone.
+
+**Batch 4 — robustness and instruction economy.** Five failure modes in devcycle's own scripts are
+hardened — flag parsing that swallowed the next bare token, extension-less path handling, the
+`.worktrees` walk, and more (F47, F50, F52, F53, F54, F55). The instruction surface is cut where it
+had grown redundant, and several one-owner violations — two files describing the same rule — are
+resolved so each rule has exactly one home (F40, F34, F35, F41, F42, F45, F27).
+
+**Batch 5 — vocabulary.** Eight reference files and two playbooks still called a devcycle pipeline
+*stage* a "skill", though devcycle has shipped none since 0.12.0, when `skills/` was dissolved into
+`playbooks/`. The devcycle-stage sense of the word is swept to "playbook" across the live surface,
+per-occurrence rather than globally — the same files use "skill" correctly in its upstream Claude
+Code sense in adjacent sentences, and every such use is left intact (F46).
+
 ## 0.14.2 — 2026-08-20
 
 - fix(pipeline): close the second audit batch — the browser guard and four unreachable pieces of machinery
