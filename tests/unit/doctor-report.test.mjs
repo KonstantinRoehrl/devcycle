@@ -850,6 +850,46 @@ test("the report renders observed workload and outcome families, each metric tag
   assert.match(oc, /Review rounds \(observed\)/, "the review-rounds column is untagged or missing");
 });
 
+test("every rendered metric column in the pre-existing tables is tagged observed or derived (spec C3)", () => {
+  // Cost by version, Cost by stage (+ its window sibling), and Your culprits predate the
+  // observed/derived convention; this pins that the whole report now meets it, not just the
+  // two new observed families. Dimension/key columns (Version, Profile, Stage, Culprit, Kind)
+  // stay untagged on purpose.
+  const out = renderReport([sum()], ctx());
+  const version = out.slice(out.indexOf("## Cost by version"), out.indexOf("## Cost by stage"));
+  assert.match(version, /\| Sessions \(observed\) \| Cycles \(observed\) \| Median \$\/cycle \(derived\) \|/,
+    "Sessions/Cycles/Median $/cycle are not tagged");
+  assert.match(version, /Δ vs previous \(derived\)/, "Δ vs previous is not tagged");
+  assert.match(version, /Priciest stage \(derived\)/, "Priciest stage is not tagged");
+  assert.match(version, /Median depth \(derived\)/, "Median depth is not tagged");
+  assert.match(version, /Quality \(derived\)/, "Quality is not tagged");
+  assert.match(version, /Shipped \(observed\)/, "Shipped is not tagged");
+
+  const stage = out.slice(out.indexOf("## Cost by stage"), out.indexOf("### Cost by stage (this window)"));
+  assert.match(stage, /\| Trend \(derived\) \|/, "Cost by stage's Trend column is not tagged");
+  assert.ok(
+    stage.includes("_Dollar cells are observed per-version sums; Trend is derived._"),
+    "the Cost by stage caption is missing",
+  );
+
+  const window = out.slice(
+    out.indexOf("### Cost by stage (this window)"),
+    out.indexOf("## Outcome (observed)"),
+  );
+  assert.match(
+    window,
+    /\| Cost \(observed\) \| % of window \(derived\) \| Median depth \(derived\) \| Trend vs previous window \(derived\) \|/,
+    "Cost by stage (this window) columns are not tagged",
+  );
+
+  const culprits = out.slice(out.indexOf("## Your culprits"), out.indexOf("### Compliance"));
+  assert.match(
+    culprits,
+    /\| Cost \(observed\) \| Occurrences \(observed\) \| Δ vs previous \(derived\) \| Trend \(derived\) \| Versions \(observed\) \| Lifecycle \(derived\) \|/,
+    "Your culprits columns are not tagged",
+  );
+});
+
 test("compliance candidates carry the source session's version range (spec C5)", () => {
   const out = renderReport([
     sum({ id: "z", pluginVersion: "0.12.0",
@@ -1034,7 +1074,7 @@ test("compiled knowledge and the shipped column render empty rather than throwin
   assert.match(out, /fills in from the release that records/);
   // The Shipped column exists and its cell is the em dash, never a blank that reads as
   // "nothing shipped".
-  assert.match(out, /\| Shipped \|/);
+  assert.match(out, /\| Shipped \(observed\) \|/);
 });
 
 // The shipped report's own direction-of-travel line. Its only assertion used to sit on

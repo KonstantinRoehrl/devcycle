@@ -2462,9 +2462,9 @@ export function renderReport(summaries, ctx) {
 
   section("## Cost by version", "cost-by-version");
   L.push(...markdownTable(
-    ["Version", "Profile", "Sessions", "Cycles", "Median $/cycle",
-      "$/main-turn (derived)", "$/sub-turn (derived)", "Turns/task (derived)", "Δ vs previous",
-      "Priciest stage", "Median depth", "Quality", "Shipped"],
+    ["Version", "Profile", "Sessions (observed)", "Cycles (observed)", "Median $/cycle (derived)",
+      "$/main-turn (derived)", "$/sub-turn (derived)", "Turns/task (derived)", "Δ vs previous (derived)",
+      "Priciest stage (derived)", "Median depth (derived)", "Quality (derived)", "Shipped (observed)"],
     versionProfileTable(summaries, promotions).map((r) => [
       r.version,
       r.profile,
@@ -2486,7 +2486,7 @@ export function renderReport(summaries, ctx) {
   section("## Cost by stage", "cost-by-stage");
   const stageTrend = stageByVersionTable(summaries);
   L.push(...markdownTable(
-    ["Stage", ...stageTrend.versions, "Trend"],
+    ["Stage", ...stageTrend.versions, "Trend (derived)"],
     stageTrend.rows.map((r) => [
       r.stage,
       ...stageTrend.versions.map((v) => (r.byVersion[v] === null ? null : usd(r.byVersion[v]))),
@@ -2494,6 +2494,7 @@ export function renderReport(summaries, ctx) {
     ]),
     "no version-tagged sessions to compare across releases",
   ));
+  L.push("", "_Dollar cells are observed per-version sums; Trend is derived._");
   // stageByVersionTable drops the undetectable-version cohort from every column and every trend,
   // because "unknown" cannot sit on a version axis — right, but silent, and an omission nobody
   // names reads as a clean bill of health. cohortTable is the sibling that keeps that bucket,
@@ -2509,7 +2510,8 @@ export function renderReport(summaries, ctx) {
 
   section("### Cost by stage (this window)", "cost-by-stage-window");
   L.push(...markdownTable(
-    ["Stage", "Cost", "% of window", "Median depth", "Trend vs previous window"],
+    ["Stage", "Cost (observed)", "% of window (derived)", "Median depth (derived)",
+      "Trend vs previous window (derived)"],
     stageWindowTable(summaries, previousSummaries).map((r) => [
       r.stage, usd(r.total), `${r.pctOfWindow.toFixed(1)}%`, r.medianDepth, r.trend,
     ]),
@@ -2534,7 +2536,8 @@ export function renderReport(summaries, ctx) {
 
   section("## Your culprits", "culprits");
   L.push(...markdownTable(
-    ["Culprit", "Kind", "Cost", "Occurrences", "Δ vs previous", "Trend", "Versions", "Lifecycle"],
+    ["Culprit", "Kind", "Cost (observed)", "Occurrences (observed)", "Δ vs previous (derived)",
+      "Trend (derived)", "Versions (observed)", "Lifecycle (derived)"],
     culpritTable(summaries, vocab).map((r) => [
       r.culprit, r.kind, impactText(r.impact), r.occurrences, deltaText(r.delta), r.trend,
       r.versions ? `${r.versions[0]}..${r.versions[1]}` : null, r.lifecycle,
