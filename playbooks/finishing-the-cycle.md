@@ -67,6 +67,25 @@ identity, `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --auto-redac
 dir>` rewrites the flagged spans in place (it requires an explicit `--dir`/`--file`); re-run the
 screen after.
 
+**Record the run's workload signature (before closing the state file).** Recover the run id
+from `.devcycle/state.md`'s `run:` line and the branch base from its `branch:` line, which
+records `(cut from <base-branch> at <sha>)` (the ledger's `Branch:` line carries the same). Pass
+that `<sha>` as `--base`; the `<base-branch>` name works too, since git accepts `<base>...HEAD`
+with a branch name. Read `requestKind` from the confirmed triage kind on the `request:`/`scope:`
+lines. Then append the workload record:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs" workload \
+  --run <runId> --base <base-sha> --requestKind <feature|bug|refactor|audit|docs|chore> \
+  --planned-task-count <count from the plan's Dispatch Map, 0 if execution was never reached> \
+  --wave-count <wave count from the plan's Dispatch Map, 0 if none>
+```
+
+`diffStats` derives the file and line counts from git itself, so pass no line counts. A cycle
+with no branch or no diff — an audit-only cycle, or a fast path that reached no commit — records
+nothing; doctor treats a missing workload record as *workload-unknown*, never as zero work. This
+append is counts-and-enums only: it never carries paths, prose, or diff content.
+
 As this stage's final state-file write, set `stage: done` and a fresh `updated:` timestamp —
 nothing remains to resume.
 

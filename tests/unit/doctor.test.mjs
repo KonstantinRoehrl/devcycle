@@ -15,6 +15,7 @@ import {
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
   emitComplianceCandidates, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
   reviewDepthCohortTable, deriveEvents, attributedCost, impactScores,
+  bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -982,35 +983,10 @@ test("emitCandidates does not flag a depth-outlier when medianDepth is within 3x
   assert.equal(outlier, undefined);
 });
 
-// Standalone cost-outlier: must fire on an anomalously expensive run relative to its peers
-// even when there is only one version cohort — unlike version-regression, which requires
-// two adjacent cohorts to compare.
-test("emitCandidates flags a cost-outlier for a skill whose cost is far above its peers, with a single version cohort", () => {
-  const summaries = [
-    { id: "s1", costByStage: { "devcycle:cycle": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s2", costByStage: { "devcycle:cycle": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s3", costByStage: { "devcycle:cycle": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s4", costByStage: { "devcycle:cycle": 5.0 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-  ];
-  const candidates = emitCandidates(summaries);
-  const outlier = candidates.find(
-    (c) => c.type === "cost-outlier" && c.skill === "devcycle:cycle"
-  );
-  assert.ok(outlier, "expected a cost-outlier candidate");
-  assert.strictEqual(outlier.dollars, 5.0);
-});
-
-test("emitCandidates does not flag a cost-outlier when costs are uniform across runs", () => {
-  const summaries = [
-    { id: "s1", costByStage: { "devcycle:cycle": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s2", costByStage: { "devcycle:cycle": 0.11 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s3", costByStage: { "devcycle:cycle": 0.09 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-    { id: "s4", costByStage: { "devcycle:cycle": 0.1 }, pluginVersion: "0.9.2", medianDepth: 10000, unpriced: {} },
-  ];
-  const candidates = emitCandidates(summaries);
-  const outlier = candidates.find((c) => c.type === "cost-outlier");
-  assert.equal(outlier, undefined);
-});
+// The global-median cost-outlier is retired (issue #114): a run dear against a skill's global
+// median conflated user-driven session size with per-unit cost. Its role is now the matched-cohort
+// residual — excessCost / the `EXCESS-COST:` lines — covered in doctor-report.test.mjs. The
+// depth-outlier below is a distinct per-session signal excessCost does not replace and is retained.
 
 test("a main-thread browser call is flagged unconditionally", () => {
   const c = emitComplianceCandidates([
@@ -1415,9 +1391,18 @@ test("the low-confidence marker reaches the machine shape, not the text report a
   ]).find((x) => x.type === "depth-outlier");
   assert.strictEqual(lone.sessions_sampled, 1);
   assert.strictEqual(lone.low_confidence, true);
+  // The retired cost-outlier used to carry the multi-session (low_confidence === false) half. The
+  // depth-outlier that replaces its per-session role is structurally single-session (its
+  // sessions_sampled is always 1), so a still-emitted multi-session candidate — version-regression,
+  // whose sessions_sampled is the size of the newer cohort — carries the false-branch assertion.
   const sampled = emitCandidates([
-    { costByStage: { s: 1 } }, { costByStage: { s: 1 } }, { costByStage: { s: 100 } },
-  ]).find((x) => x.type === "cost-outlier");
+    { costByStage: { s: 1 }, pluginVersion: "0.11.0", unpriced: {} },
+    { costByStage: { s: 1 }, pluginVersion: "0.11.0", unpriced: {} },
+    { costByStage: { s: 1 }, pluginVersion: "0.11.0", unpriced: {} },
+    { costByStage: { s: 10 }, pluginVersion: "0.12.0", unpriced: {} },
+    { costByStage: { s: 10 }, pluginVersion: "0.12.0", unpriced: {} },
+    { costByStage: { s: 10 }, pluginVersion: "0.12.0", unpriced: {} },
+  ]).find((x) => x.type === "version-regression");
   assert.strictEqual(sampled.sessions_sampled, 3);
   assert.strictEqual(sampled.low_confidence, false);
 });
@@ -2029,4 +2014,121 @@ test("parseArgs still returns every documented flag with its default", () => {
   assert.equal(a.until, null);
   assert.equal(a.drift, null);
   assert.equal(a.issueBody, null);
+});
+
+// --- run-level model: recency band, workload band, run aggregation ---
+
+// A session-summary-shaped fixture for the run-level tests: only the fields runAggregates
+// reads, defaulted so a test names just what it cares about.
+const sum = ({ id = "sess", runId = null, costUSD = 0, mainTurns = 0, subagentTurns = 0,
+  medianDepth = 0, pluginVersion = "unknown", profile = "unknown", quality = null,
+  workload = null } = {}) => ({
+  id, runId, costUSD, mainTurns, subagentTurns, medianDepth, pluginVersion, profile, quality,
+  workload,
+});
+
+test("recencyBand returns installed + N prior released versions, newest last", () => {
+  const dates = new Map([["0.13.0","2026-08-10"],["0.14.0","2026-08-15"],
+    ["0.14.1","2026-08-18"],["0.14.2","2026-08-20"],["0.14.3","2026-08-21"]]);
+  assert.deepEqual(recencyBand("0.14.3", dates, 2), ["0.14.1","0.14.2","0.14.3"]);
+  assert.deepEqual(recencyBand(null, dates, 2), []);
+  assert.equal(inBand("0.14.0", recencyBand("0.14.3", dates, 2)), false);
+  assert.equal(inBand("0.14.2", recencyBand("0.14.3", dates, 2)), true);
+});
+
+test("bandFor buckets changed lines by the published thresholds", () => {
+  assert.equal(bandFor(0), "XS");
+  assert.equal(bandFor(19), "XS");
+  assert.equal(bandFor(20), "S");
+  assert.equal(bandFor(499), "M");
+  assert.equal(bandFor(2000), "XL");
+  assert.equal(bandFor(null), null);
+});
+
+test("runAggregates joins sessions by runId and excludes run-less sessions", () => {
+  const wl = { kind:"workload", runId:"a".repeat(16), requestKind:"feature",
+    filesChanged:3, filesCreated:1, filesDeleted:0, insertions:120, deletions:30,
+    plannedTaskCount:2, waveCount:1 };
+  const s1 = sum({ id:"aaaa", runId:"a".repeat(16), costUSD:10, mainTurns:40, subagentTurns:60, workload:wl });
+  const s2 = sum({ id:"bbbb", runId:"a".repeat(16), costUSD:5,  mainTurns:20, subagentTurns:10, workload:null });
+  const orphan = sum({ id:"cccc", runId:null, costUSD:99 });
+  const runs = runAggregates([s1, s2, orphan]);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].costUSD, 15);
+  assert.equal(runs[0].workloadBand, "M");   // 150 changed lines
+  assert.equal(runs[0].changedLines, 150);
+});
+
+// --- round-2 fixes: Turns/task population, lifecycle vocabulary, dead-code sweep ---
+
+// A session-summary shaped for versionProfileTable: only the fields it reads, defaulted.
+const vpSum = (over = {}) => ({
+  id: "vpaaaaaa", runId: null, pluginVersion: "0.12.0", profile: "thorough",
+  inFlight: false, costUSD: 1, costByStage: { execution: 1 }, costByAgentType: { main: 1 },
+  mainTurns: 0, subagentTurns: 0, medianDepth: 40000, quality: null, workload: null, ...over,
+});
+
+test("versionProfileTable scopes Turns/task to workload-bearing sessions only", () => {
+  // One workload-bearing session (30 turns, 3 tasks) and one workload-less session (100 turns).
+  // Turns/task must reflect only the run where task data exists: 30/3 = 10, not (30+100)/3 ≈ 43.
+  const withWorkload = vpSum({
+    id: "w", mainTurns: 20, subagentTurns: 10,
+    workload: { requestKind: "feature", plannedTaskCount: 3, insertions: 1, deletions: 1 },
+  });
+  const withoutWorkload = vpSum({ id: "n", mainTurns: 100, subagentTurns: 0 });
+  const [row] = versionProfileTable([withWorkload, withoutWorkload]);
+  assert.equal(row.turnsPerTask, 10);
+});
+
+test("versionProfileTable keeps Turns/task null, never 0, when no session carries task data", () => {
+  const [row] = versionProfileTable([vpSum({ id: "a", mainTurns: 5, subagentTurns: 5 })]);
+  assert.equal(row.turnsPerTask, null);
+});
+
+test("lifecycle only emits the three states the corpus can currently evidence", () => {
+  const dates = new Map([
+    ["0.13.0", "2026-08-10"], ["0.14.0", "2026-08-15"], ["0.14.1", "2026-08-18"],
+    ["0.14.2", "2026-08-20"], ["0.14.3", "2026-08-21"],
+  ]);
+  const band = recencyBand("0.14.3", dates, 2); // [0.14.1, 0.14.2, 0.14.3]
+  const allowed = new Set(["active", "legacy", "unresolved"]);
+  const cases = [["0.14.2"], ["0.14.0"], ["0.13.0"], ["0.14.3", "0.13.0"], ["0.14.0", "0.14.2"], []];
+  for (const seen of cases) {
+    const got = lifecycle(seen, band, dates);
+    assert.ok(allowed.has(got), `${JSON.stringify(seen)} produced ${got}, outside the emitted three`);
+    assert.notEqual(got, "fixed");     // deferred: no shipped-fix data threaded in this cycle
+    assert.notEqual(got, "regressed"); // deferred: gated on promotion culpritId capture
+  }
+});
+
+test("runAggregates takes only the summaries argument (dead runRecords param removed)", () => {
+  assert.equal(runAggregates.length, 1);
+});
+
+test("culpritTable rows do not leak the dead row-level impactPerSession field", () => {
+  const s = {
+    id: "a", pluginVersion: "0.12.0", profile: "thorough", costByStage: { execution: 5 },
+    impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 1, impact: 5 }],
+    culpritsByKey: { "gate-fail:execution": ["some-culprit"] },
+  };
+  const [row] = culpritTable([s], []);
+  assert.ok(row, "expected a culprit row");
+  assert.ok(!("impactPerSession" in row), "the row still leaks the dead impactPerSession field into --json");
+});
+
+test("formatCandidate prints a version-regression span once, not as a duplicated versions=[..]", () => {
+  const out = formatCandidate({
+    type: "version-regression", version_from: "0.11.0", version_to: "0.12.0",
+    versions: ["0.11.0", "0.12.0"], delta_pct: 10, sessions_sampled: 3,
+  });
+  assert.match(out, /0\.11\.0->0\.12\.0/, "the canonical from->to span is missing");
+  assert.ok(!/versions=\[/.test(out), "the redundant versions=[..] span is still rendered");
+});
+
+test("formatCandidate keeps versions=[..] for a candidate with no from->to span", () => {
+  const out = formatCandidate({
+    type: "depth-outlier", version_from: null, version_to: null,
+    versions: ["0.12.0", "0.12.0"], dollars: 15, sessions_sampled: 1,
+  });
+  assert.match(out, /versions=\[0\.12\.0\.\.0\.12\.0\]/);
 });

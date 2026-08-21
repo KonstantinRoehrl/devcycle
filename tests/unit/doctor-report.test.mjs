@@ -13,8 +13,10 @@ import {
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
   parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
   renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates,
+  recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
+  matchedCohorts, excessCost, workloadAdjustedSteps,
 } from "../../scripts/doctor.mjs";
-import { verify, releaseDates, defaultRunCheck } from "../../scripts/verification.mjs";
+import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
@@ -221,6 +223,63 @@ test("a promotion carrying no culprit id contributes nothing rather than an empt
   assert.deepEqual(row.shipped, []);
 });
 
+test("versionProfileTable emits stratified $/turn that reconstructs cost, never blended", () => {
+  const s = sum({ id:"aaaa", runId:"r".repeat(16), pluginVersion:"0.14.3", profile:"thorough",
+    costUSD:15, mainTurns:100, subagentTurns:50,
+    costByAgentType:{ main:10, subagent:5 } });
+  const [row] = versionProfileTable([s]);
+  assert.ok("dollarsPerMainTurn" in row && "dollarsPerSubTurn" in row);
+  assert.ok(!("dollarsPerTurn" in row));
+  assert.ok(Math.abs(row.dollarsPerMainTurn - 10/100) < 1e-9);
+  assert.ok(Math.abs(row.dollarsPerSubTurn - 5/50) < 1e-9);
+});
+
+test("excessCost is a residual vs the matched cohort, and size-1 cohorts get no expectation", () => {
+  const mk = (id, cost) => ({ runId:id.padEnd(16,"0"), version:"0.14.3", profile:"thorough",
+    requestKind:"feature", workloadBand:"M", costUSD:cost, mainTurns:1, subagentTurns:0 });
+  const runs = [mk("a",10), mk("b",12), mk("c",30)];        // one M-feature-thorough cohort, n=3
+  const res = excessCost(runs);
+  const c = res.find((r) => r.runId.startsWith("c"));
+  assert.equal(c.expected, 12);                              // median(10,12,30)
+  assert.equal(c.excess, 18);
+  assert.equal(c.confidence, "low");                         // 2<=n<5
+  const solo = excessCost([mk("z",99)])[0];
+  assert.equal(solo.expected, null);
+  assert.equal(solo.confidence, "insufficient");
+});
+
+test("matchedCohorts groups only runs carrying both a requestKind and a workload band", () => {
+  const mk = (id, over) => ({ runId:id.padEnd(16,"0"), version:"0.14.3", profile:"thorough",
+    requestKind:"feature", workloadBand:"M", costUSD:1, ...over });
+  const cohorts = matchedCohorts([
+    mk("a"), mk("b"),
+    mk("c", { requestKind: null }),          // observational — no requestKind
+    mk("d", { workloadBand: null }),         // observational — no band
+  ]);
+  assert.deepEqual([...cohorts.keys()], ["thorough|feature|M"]);
+  assert.equal(cohorts.get("thorough|feature|M").length, 2);
+});
+
+test("workloadAdjustedSteps emits a delta only where both adjacent versions have >=2 matched runs", () => {
+  const mk = (id, version, cost) => ({ runId:id.padEnd(16,"0"), version, profile:"thorough",
+    requestKind:"feature", workloadBand:"M", costUSD:cost, mainTurns:10, subagentTurns:4,
+    medianDepth:40000, conformancePass:true });
+  const band = ["0.14.2", "0.14.3"];
+  const runs = [
+    mk("a","0.14.2",10), mk("b","0.14.2",10),
+    mk("c","0.14.3",12), mk("d","0.14.3",12),
+  ];
+  const [step] = workloadAdjustedSteps(runs, band);
+  assert.equal(step.from, "0.14.2");
+  assert.equal(step.to, "0.14.3");
+  assert.equal(step.matchKey, "thorough|feature|M");
+  assert.ok(Math.abs(step.costDeltaPct - 20) < 1e-9);
+  assert.equal(step.n, 2);
+  assert.equal(step.confidence, "low");
+  // A single run on one side fabricates no delta.
+  assert.deepEqual(workloadAdjustedSteps(runs.slice(0, 3), band), []);
+});
+
 test("stageByVersionTable renders at most the six most recent versions, oldest first", () => {
   const summaries = ["0.6.0", "0.7.0", "0.8.0", "0.9.0", "0.10.0", "0.11.0", "0.12.0"]
     .map((v, i) => sum({ id: `s${i}`, pluginVersion: v }));
@@ -343,6 +402,45 @@ test("culprit impact figures come from impactScores and from no second formula",
   const [row] = culpritTable([s], VOCAB);
   assert.equal(row.impact, expected.impact);
   assert.equal(row.occurrences, expected.frequency);
+});
+
+test("the cross-version culprit delta is per-session, so more sessions alone is not a regression", () => {
+  // Same culprit, equal per-session impact ($10) on both versions, but version B ran four times
+  // as many sessions. The version-over-version delta must read ~0, not the +166% a summed total
+  // would show — while the ranking/display impact still reflects the totals (30 + 80).
+  const mk = (id, version) => sum({
+    id, pluginVersion: version,
+    impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 1, impact: 10 }],
+    culpritsByKey: { "gate-fail:execution": ["culprit-x"] },
+  });
+  const a = [1, 2, 3].map((n) => mk(`a${n}`, "0.11.0"));
+  const b = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => mk(`b${n}`, "0.12.0"));
+  const [row] = culpritTable([...a, ...b], []);
+  assert.equal(row.delta.state, "compared");
+  assert.ok(Math.abs(row.delta.pct) < 1e-9, `expected ~0 per-session delta, got ${row.delta.pct}`);
+  assert.equal(row.impact, 110);   // summed total, ranking value unchanged (GC1)
+});
+
+test("lifecycle classifies by occurrence versions against the band", () => {
+  const dates = new Map([["0.12.0","2026-08-05"],["0.13.0","2026-08-10"],["0.14.0","2026-08-15"],
+    ["0.14.1","2026-08-18"],["0.14.2","2026-08-20"],["0.14.3","2026-08-21"]]);
+  const band = recencyBand("0.14.3", dates, 2);  // [0.14.1,0.14.2,0.14.3]
+  assert.deepEqual(band, ["0.14.1", "0.14.2", "0.14.3"]);
+  assert.equal(lifecycle(["0.14.2","0.14.3"], band, dates), "active");
+  assert.equal(lifecycle(["0.14.3"], band, dates), "active");
+  assert.equal(lifecycle(["0.12.0","0.14.1"], band, dates), "active"); // one in band
+  assert.equal(lifecycle(["0.14.0"], band, dates), "unresolved");      // immediate pre-band
+  assert.equal(lifecycle(["0.12.0"], band, dates), "legacy");          // far pre-band
+});
+
+test("emitCandidates gives a depth-outlier a version range and formatCandidate renders it", () => {
+  const s = sum({ pluginVersion: "0.13.0", startupFloor: { main: [10000] }, medianDepth: 40000 });
+  const depth = emitCandidates([s]).find((c) => c.type === "depth-outlier");
+  assert.ok(depth, "no depth-outlier candidate");
+  assert.deepEqual(depth.versions, ["0.13.0", "0.13.0"]);
+  const line = formatCandidate(depth);
+  assert.match(line, /versions=\[/);
+  assert.match(line, /0\.13\.0/);
 });
 
 test("a version-improvement candidate is a win, not a neutral candidate", () => {
@@ -668,8 +766,9 @@ test("both playbook anchors render, in their specified positions", () => {
   const at = (needle) => out.indexOf(needle);
   assert.ok(at("<!-- devcycle:highlights -->") !== -1, "the highlights anchor is missing");
   assert.ok(at("<!-- devcycle:findings -->") !== -1, "the findings anchor is missing");
-  // Highlights sits between the caveat block and Cost by version.
-  assert.ok(at("## Read this first") < at("<!-- devcycle:highlights -->"));
+  // At a glance sits between the caveat block and Highlights; Highlights before Cost by version.
+  assert.ok(at("## Read this first") < at("## At a glance"));
+  assert.ok(at("## At a glance") < at("<!-- devcycle:highlights -->"));
   assert.ok(at("<!-- devcycle:highlights -->") < at("## Cost by version"));
   // Findings sits between Compiled knowledge and the Appendix.
   assert.ok(at("## Compiled knowledge") < at("<!-- devcycle:findings -->"));
@@ -679,14 +778,124 @@ test("both playbook anchors render, in their specified positions", () => {
 test("the section order is fixed", () => {
   const out = renderReport([sum()], ctx());
   const order = [
-    "# Doctor Report", "## Read this first", "## Highlights", "## Cost by version",
-    "## Cost by stage", "### Cost by stage (this window)", "## Your culprits", "### Compliance",
+    "# Doctor Report", "## Read this first", "## At a glance", "## Highlights",
+    "## Workload (observed)", "## Cost by version",
+    "## Cost by stage", "### Cost by stage (this window)", "## Outcome (observed)",
+    "## Your culprits", "### Compliance",
     "## Your wins", "## Cost anomalies", "## Previously promoted — did it hold", "## Outer loop",
     "## Compiled knowledge", "## Findings", "## Appendix",
   ];
   const positions = order.map((h) => out.indexOf(h));
   assert.ok(positions.every((p) => p !== -1), `a section is missing: ${order.filter((h, i) => positions[i] === -1)}`);
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b), "sections are out of order");
+});
+
+test("the report leads with an At a glance workload-adjusted step, carrying its confidence", () => {
+  const dates = releaseDates(readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8"));
+  const band = recencyBand(installedVersion(), dates);
+  const [vOld, vNew] = [band.at(-2), band.at(-1)];
+  const workload = { requestKind: "feature", insertions: 100, deletions: 100, plannedTaskCount: 3 };
+  const run = (id, version, cost) => sum({
+    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough",
+    costUSD: cost, mainTurns: 10, subagentTurns: 4, medianDepth: 40000, workload,
+  });
+  const out = renderReport([
+    run("o1", vOld, 10), run("o2", vOld, 10),
+    run("n1", vNew, 12), run("n2", vNew, 12),
+  ], ctx());
+  const at = (needle) => out.indexOf(needle);
+  assert.ok(at("## At a glance") !== -1, "the At a glance section is missing");
+  assert.ok(at("## Read this first") < at("## At a glance"));
+  assert.ok(at("## At a glance") < at("## Highlights"));
+  const glance = out.slice(at("## At a glance"), at("## Highlights"));
+  assert.match(glance, new RegExp(`${vOld}→${vNew}`), "the matched step is missing");
+  assert.match(glance, /\+20\.0%/, "the cost delta is missing");
+  assert.match(glance, /\blow\b/, "the confidence label is missing");
+});
+
+test("the At a glance percentage column carries no $ glyph over a percent (issue #114)", () => {
+  const out = renderReport([sum()], ctx());
+  const glance = out.slice(out.indexOf("## At a glance"), out.indexOf("## Highlights"));
+  assert.ok(!/workload-adj \$ Δ/.test(glance), "a $ glyph still sits over the percentage cell");
+  assert.match(glance, /workload-adj cost Δ% \(derived\)/, "the honest percentage header is missing");
+});
+
+test("the report renders observed workload and outcome families, each metric tagged observed", () => {
+  const workload = {
+    requestKind: "feature", filesChanged: 4, insertions: 80, deletions: 20,
+    plannedTaskCount: 3, waveCount: 2,
+  };
+  const quality = {
+    tasks: 3, reviewRounds: 2, retries: 1, blockingFindings: 0,
+    conformanceFailures: 0, roundsPerTask: 0.67,
+  };
+  const runId = "r1".padEnd(16, "0");
+  const out = renderReport([
+    sum({ id: "r1aaaaaa", runId, pluginVersion: "0.12.0", profile: "thorough",
+      costUSD: 10, mainTurns: 10, subagentTurns: 4, medianDepth: 40000, workload, quality }),
+    sum({ id: "r1bbbbbb", runId, pluginVersion: "0.12.0", profile: "thorough",
+      costUSD: 8, mainTurns: 8, subagentTurns: 3, medianDepth: 40000, workload, quality }),
+  ], ctx());
+  const at = (n) => out.indexOf(n);
+  assert.ok(at("## Workload (observed)") !== -1, "the Workload (observed) section is missing");
+  assert.ok(at("## Outcome (observed)") !== -1, "the Outcome (observed) section is missing");
+  // Workload family: raw counts, tagged observed, the changed-lines total actually rendered.
+  const wl = out.slice(at("## Workload (observed)"), at("## Cost by version"));
+  assert.match(wl, /Changed lines \(observed\)/, "the changed-lines column is untagged or missing");
+  assert.match(wl, /Tasks \(observed\)/, "the tasks column is untagged or missing");
+  assert.match(wl, /\| 100 \|/, "the raw changed-lines figure (80+20) is not rendered");
+  // Outcome family: raw verdicts/counts, tagged observed.
+  const oc = out.slice(at("## Outcome (observed)"), at("## Your culprits"));
+  assert.match(oc, /Conformance pass \(observed\)/, "the conformance column is untagged or missing");
+  assert.match(oc, /Review rounds \(observed\)/, "the review-rounds column is untagged or missing");
+});
+
+test("every rendered metric column in the pre-existing tables is tagged observed or derived (spec C3)", () => {
+  // Cost by version, Cost by stage (+ its window sibling), and Your culprits predate the
+  // observed/derived convention; this pins that the whole report now meets it, not just the
+  // two new observed families. Dimension/key columns (Version, Profile, Stage, Culprit, Kind)
+  // stay untagged on purpose.
+  const out = renderReport([sum()], ctx());
+  const version = out.slice(out.indexOf("## Cost by version"), out.indexOf("## Cost by stage"));
+  assert.match(version, /\| Sessions \(observed\) \| Cycles \(observed\) \| Median \$\/cycle \(derived\) \|/,
+    "Sessions/Cycles/Median $/cycle are not tagged");
+  assert.match(version, /Δ vs previous \(derived\)/, "Δ vs previous is not tagged");
+  assert.match(version, /Priciest stage \(derived\)/, "Priciest stage is not tagged");
+  assert.match(version, /Median depth \(derived\)/, "Median depth is not tagged");
+  assert.match(version, /Quality \(derived\)/, "Quality is not tagged");
+  assert.match(version, /Shipped \(observed\)/, "Shipped is not tagged");
+
+  const stage = out.slice(out.indexOf("## Cost by stage"), out.indexOf("### Cost by stage (this window)"));
+  assert.match(stage, /\| Trend \(derived\) \|/, "Cost by stage's Trend column is not tagged");
+  assert.ok(
+    stage.includes("_Dollar cells are derived per-version medians; Trend is derived._"),
+    "the Cost by stage caption is missing",
+  );
+
+  const window = out.slice(
+    out.indexOf("### Cost by stage (this window)"),
+    out.indexOf("## Outcome (observed)"),
+  );
+  assert.match(
+    window,
+    /\| Cost \(observed\) \| % of window \(derived\) \| Median depth \(derived\) \| Trend vs previous window \(derived\) \|/,
+    "Cost by stage (this window) columns are not tagged",
+  );
+
+  const culprits = out.slice(out.indexOf("## Your culprits"), out.indexOf("### Compliance"));
+  assert.match(
+    culprits,
+    /\| Cost \(observed\) \| Occurrences \(observed\) \| Δ vs previous \(derived\) \| Trend \(derived\) \| Versions \(observed\) \| Lifecycle \(derived\) \|/,
+    "Your culprits columns are not tagged",
+  );
+});
+
+test("compliance candidates carry the source session's version range (spec C5)", () => {
+  const out = renderReport([
+    sum({ id: "z", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5 }] }),
+  ], ctx());
+  assert.match(out, /CANDIDATE: inherited-model inherited=2\/5 versions=\[0\.12\.0\.\.0\.12\.0\]/);
 });
 
 test("every section carries a one-line gloss", () => {
@@ -780,21 +989,23 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "- 1 session(s) still in flight (newest record < 30 min old) — in-flight sessions have only part of their cost recorded",
     // Cost by version — the whole row, out to its last cell: a needle that stopped at the depth
     // column still matched after the Quality and Shipped columns were deleted.
-    `| 0.12.0 | thorough | 4 | 4 | $15.00 | +36.4% | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
+    `| 0.12.0 | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | +36.4% | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
     // Cost by stage, across versions and within this window
     "| execution | $10.00 | $5.00 | down |",
     "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
     // Your culprits — out to the row's end, for the same reason as the cohort row above: a
     // needle that stopped at the Δ column still matched after the Trend column was deleted.
-    "| partial-evidence-capture | friction | $6.00 | 2 | first seen | insufficient data |",
-    // Compliance
-    "- CANDIDATE: inherited-model inherited=2/5",
+    "| partial-evidence-capture | friction | $6.00 | 2 | first seen | insufficient data | 0.12.0..0.12.0 | legacy |",
+    // Compliance — now version-scoped from the source session (spec C5)
+    "- CANDIDATE: inherited-model inherited=2/5 versions=[0.12.0..0.12.0]",
     // Your wins: a win event, and a version-over-version improvement
     "| first-round-clean-accept | $9.00 | 3 |",
     "| execution 0.11.0→0.12.0 | $5.00 | 4 | down |",
-    // Cost anomalies, one line per candidate type the report can raise
-    "- CANDIDATE: cost-outlier skill=execution delta=900.0% dollars=$100.00 sessions=7",
-    "- CANDIDATE: depth-outlier dollars=$15.00 sessions=1 low confidence: n=1",
+    // Cost anomalies, one line per candidate type the report can raise (the global-median
+    // cost-outlier is retired — issue #114 — and its role is the matched-cohort EXCESS-COST residual,
+    // which this run-less corpus produces no rows for).
+    "- CANDIDATE: depth-outlier dollars=$15.00 sessions=1 versions=[0.12.0..0.12.0] low confidence: n=1",
+    // The from->to span is canonical for a version-regression; the redundant versions=[..] is suppressed (item 6c).
     "- CANDIDATE: version-regression skill=planning 0.11.0->0.12.0 delta=+$9.00 (900.0%) dollars=$10.00 sessions=3",
     "- CANDIDATE: unpriced-model model=some-unpriced-model count=3 sessions=1 low confidence: n=1",
     // Appendix
@@ -848,7 +1059,7 @@ test("the Shipped cell renders the culprit id the version's promotion recorded",
   }));
   assert.ok(
     out.includes(
-      "| 0.12.0 | thorough | 3 | 3 | $1.00 | first seen | execution | 40000 | " +
+      "| 0.12.0 | thorough | 3 | 3 | $1.00 | — | — | — | first seen | execution | 40000 | " +
         "unavailable (no run record) | partial-evidence-capture |",
     ),
     "the cohort row does not carry the culprit its version shipped",
@@ -863,7 +1074,7 @@ test("compiled knowledge and the shipped column render empty rather than throwin
   assert.match(out, /fills in from the release that records/);
   // The Shipped column exists and its cell is the em dash, never a blank that reads as
   // "nothing shipped".
-  assert.match(out, /\| Shipped \|/);
+  assert.match(out, /\| Shipped \(observed\) \|/);
 });
 
 // The shipped report's own direction-of-travel line. Its only assertion used to sit on
@@ -1001,8 +1212,13 @@ test("this repo, which has no package manifest, is not a monorepo and has no kno
   assert.equal(shape.testRunner, "unknown");
 });
 
+// A draftable culprit must have been seen inside the recency band, or issueBody's version guard
+// refuses it as stale. The installed version is by definition the newest band member, so the draft
+// fixtures are pinned to it rather than to a literal that would fall out of band on the next release.
+const DRAFT_VERSION = installedVersion();
+
 const draftSummaries = [1, 2, 3].map((n) => sum({
-  id: `s${n}`, costUSD: 4, costByStage: { execution: 4 },
+  id: `s${n}`, pluginVersion: DRAFT_VERSION, costUSD: 4, costByStage: { execution: 4 },
   impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
   culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
 }));
@@ -1021,7 +1237,7 @@ test("the issue title and labels follow the fixed form", () => {
 test("the draft carries the same cohort figure the report renders for that row", () => {
   const tables = draftTables();
   const d = issueBody("partial-evidence-capture", draftSummaries, tables, repoShape(process.cwd()));
-  const row = tables.versionProfile.find((r) => r.version === "0.12.0" && r.profile === "thorough");
+  const row = tables.versionProfile.find((r) => r.version === DRAFT_VERSION && r.profile === "thorough");
   assert.ok(d.body.includes(row.medianCostPerCycle.toFixed(2)), "the draft's cohort figure differs from the table's");
   assert.ok(d.body.includes(String(row.sessions)));
 });
@@ -1030,12 +1246,12 @@ test("the draft carries the same cohort figure the report renders for that row",
 // cohort would otherwise state a figure the report that produced it declines to stand behind.
 test("a low-confidence cohort carries the report's own qualifier, not a bare count", () => {
   const summaries = [1, 2].map((n) => sum({
-    id: `s${n}`, costUSD: 4, costByStage: { execution: 4 },
+    id: `s${n}`, pluginVersion: DRAFT_VERSION, costUSD: 4, costByStage: { execution: 4 },
     impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
     culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
   }));
   const tables = { versionProfile: versionProfileTable(summaries), culprits: culpritTable(summaries, VOCAB) };
-  const row = tables.versionProfile.find((r) => r.version === "0.12.0" && r.profile === "thorough");
+  const row = tables.versionProfile.find((r) => r.version === DRAFT_VERSION && r.profile === "thorough");
   assert.equal(row.lowConfidence, true);
   const d = issueBody("partial-evidence-capture", summaries, tables, repoShape(process.cwd()));
   assert.ok(d.body.includes("2 (low confidence: n<3)"), "the draft quotes a count the report qualifies");
@@ -1083,11 +1299,40 @@ test("the draft carries no path, no machine identity, and no free text beyond th
 
 test("a culprit with no vocabulary entry is still offered a draft", () => {
   const summaries = [sum({
+    pluginVersion: DRAFT_VERSION,
     impact: [{ key: "review-reject:execution", event: "review-reject", stage: "execution", frequency: 1, impact: 2 }],
   })];
   const tables = { versionProfile: versionProfileTable(summaries), culprits: culpritTable(summaries, VOCAB) };
   const d = issueBody("review-reject:execution", summaries, tables, repoShape(process.cwd()));
   assert.match(d.title, /^\[culprit:/);
+});
+
+// The version guard: a culprit last seen outside the recency band names a problem a newer
+// release may already have addressed, so drafting an issue for it would file stale noise.
+const staleCulpritCorpus = (versions) => versions.map((v, n) => sum({
+  id: `st${n}`, pluginVersion: v, costUSD: 4, costByStage: { execution: 4 },
+  impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
+  culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
+}));
+const staleCulpritTables = (corpus) => ({
+  versionProfile: versionProfileTable(corpus),
+  culprits: culpritTable(corpus, VOCAB),
+});
+
+test("issueBody refuses a wholly-stale culprit and warns on a partial one", () => {
+  // a culprit seen only at 0.12.0 (outside the band) -> throws StaleCulpritError
+  const STALE_CORPUS = staleCulpritCorpus(["0.12.0", "0.12.0"]);
+  assert.throws(
+    () => issueBody("partial-evidence-capture", STALE_CORPUS, staleCulpritTables(STALE_CORPUS), repoShape(process.cwd())),
+    (e) => e instanceof StaleCulpritError,
+  );
+  // a culprit seen at 0.12.0 and 0.14.3 -> draft carries the STALE banner and the version range
+  const MIXED_CORPUS = staleCulpritCorpus(["0.12.0", "0.14.3"]);
+  const body = issueDraftLines(
+    issueBody("partial-evidence-capture", MIXED_CORPUS, staleCulpritTables(MIXED_CORPUS), repoShape(process.cwd())),
+  ).join("\n");
+  assert.match(body, /⚠ STALE/);
+  assert.match(body, /versions=\[0\.12\.0\.\.0\.14\.3\]/);
 });
 
 // Everything above exercises the draft as a value. The flag itself prints it, and what a filer
@@ -1106,7 +1351,7 @@ function issueBodyFixture() {
   const runs = join(dir, "runs", "some-repo");
   mkdirSync(runs, { recursive: true });
   writeFileSync(join(runs, "run.jsonl"), [
-    { kind: "run", schemaVersion: 1, runId: "0123456789abcdef", pluginVersion: "0.12.0", profile: "thorough", knobs: {} },
+    { kind: "run", schemaVersion: 1, runId: "0123456789abcdef", pluginVersion: DRAFT_VERSION, profile: "thorough", knobs: {} },
     { kind: "session", sessionHash: sha256("sess-abcdef123456") },
     { kind: "stage", stage: "execution", startedAt: "2026-07-20T09:00:00.000Z", endedAt: "2026-07-20T11:00:00.000Z", outcome: "complete" },
     { kind: "event", event: "gate-fail", stage: "execution", task: "1", culprit: "partial-evidence-capture", ts: "2026-07-20T10:00:00.000Z" },
