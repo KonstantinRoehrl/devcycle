@@ -356,12 +356,13 @@ full-history secret scan.
 
 ### 15.1 The reference layer: one owner per convention
 
-`references/` holds sixteen plain markdown files, each the sole owner of one cross-cutting
+`references/` holds seventeen plain markdown files, each the sole owner of one cross-cutting
 convention:
 
 | File | Owns |
 | --- | --- |
 | `config.md` | knob resolution, the profile matrix and its resolution order, the model tiers and their derivation predicates |
+| `first-run-config.md` | the first-run and upgrade configuration dialogue `/devcycle:cycle` runs once per repo — its sole owner |
 | `evidence.md` | the three evidence classes, the file-backed evidence contract, the implementer report and reviewer verdict shapes |
 | `resume.md` | settling the branch from the state file, git-evidence resume rules, "review acceptance is never inferable from git" |
 | `handoff.md` | the handoff block shape, the context-action table, the one-block-per-stage rule, the await gate |

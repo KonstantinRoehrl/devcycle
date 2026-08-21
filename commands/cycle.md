@@ -10,8 +10,9 @@ is a cache: every artifact is on disk, so the pipeline survives `/clear` and res
 
 ## Conventions this command does not restate
 
-- Knobs, the `profile`, model tiers, and the first-run configuration this command runs once per
-  repo — after the state file, before triage: `${CLAUDE_PLUGIN_ROOT}/references/config.md`.
+- Knobs, the `profile`, and model tiers: `${CLAUDE_PLUGIN_ROOT}/references/config.md`.
+- The first-run configuration this command runs once per repo — after the state file, before
+  triage: `${CLAUDE_PLUGIN_ROOT}/references/first-run-config.md`.
 - The state file's shape, lifecycle, ownership check: `${CLAUDE_PLUGIN_ROOT}/references/resume.md`.
 - Stage boundaries — handoff shape, context actions, await gate: `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`.
 - Branch discipline before any stage that commits: `${CLAUDE_PLUGIN_ROOT}/references/branch.md`.

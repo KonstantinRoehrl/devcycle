@@ -495,7 +495,7 @@ test("harvested: commands/continue-depth — ownership is checked first, then de
 });
 
 test("harvested: commands/first-run-config — the walkthrough is one profile question that writes only the profile", () => {
-  const t = read("references/config.md");
+  const t = read("references/first-run-config.md");
   assert.match(t, /ONE AskUserQuestion over `profile`/);
   for (const option of ["`standard` (recommended)", "`lean`", "`thorough`", "customize individual knobs"])
     assert.ok(t.includes(option), `walkthrough option missing: ${option}`);
@@ -1135,6 +1135,11 @@ const DESCRIBES_NOT_GATES = [
   // interview in `## The discipline`, which cites the write site. This section writes the summary
   // the interview produced and asks nothing of its own.
   "playbooks/scoping-the-request.md § ## Output and handoff",
+  // Describes the order a committing site follows ("names the side effect, asks the user, then
+  // commits"); the gate itself runs at that write site — `playbooks/learning-from-sessions.md`
+  // step 3, its named reference implementation, carries the real AskUserQuestion. This table owns
+  // what each policy commits, not a gate of its own.
+  "references/config.md § ## Doc tracking — what each policy commits",
 ];
 
 // A gate that runs before any run record exists must say so, rather than claim an append that
@@ -1142,7 +1147,7 @@ const DESCRIBES_NOT_GATES = [
 // and nothing in the file structure carries it — `references/config.md`'s walkthrough is reached
 // from `commands/cycle.md` exactly like the stages that do append. The list going stale is
 // guarded in the test: an entry that stops gating, or that stops running before the mint, fails.
-const PRE_MINT_SURFACES = ["references/config.md"];
+const PRE_MINT_SURFACES = ["references/first-run-config.md"];
 // The command each pre-mint entry is reached from, and the mint call its hand-off must precede —
 // listed here rather than derived for the same reason PRE_MINT_SURFACES is: "which command mints
 // after handing off to this entry" is not carried anywhere in the file structure, either. Both
