@@ -132,6 +132,16 @@ report. Reject when:
   rather than a discriminating assertion failure — the test never proved the behavior was absent;
 - the class mismatches the diff.
 
+A reviewer returns its verdict in this shape:
+
+```markdown
+Verdict: accept | needs-changes
+
+1. [severity] <finding, symptom first>
+2. [severity] <finding, symptom first>
+...
+```
+
 ## Why the evidence lives in files
 
 The coordinator's green gate re-runs the command itself and reads the exit status, so an
