@@ -147,12 +147,16 @@ export function fileMatchesGlob(file, glob) {
 
 // Pure: join each r2 lesson headline to its promotion record, glob-match the record's
 // affected-files (files-touched fallback) against `files`, dedupe by id, rank exact>glob, cap.
-export function matchLessons({ lessonLines, promotions, files, cap = MATCH_CAP }) {
+export function matchLessons({ lessonLines, promotions, files, culprits = [], keywords = [], cap = MATCH_CAP }) {
+  const culpritSet = new Set(culprits);
+  const kw = keywords.map((k) => k.toLowerCase()).filter(Boolean);
   const seen = new Set();
   const ranked = [];
   for (const line of lessonLines) {
     const id = lessonId(line);
     if (!id || seen.has(id)) continue;
+    if (culpritSet.size && !culpritSet.has(id)) continue;
+    if (kw.length && !kw.some((k) => line.toLowerCase().includes(k))) continue;
     const rec = findPromotionById(promotions, id);
     const globs = (rec && rec.affectedFiles && rec.affectedFiles.length ? rec.affectedFiles : rec && rec.filesTouched) || [];
     let rank = null; // 0 exact, 1 glob

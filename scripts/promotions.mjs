@@ -123,7 +123,8 @@ export function recordLifecycle(repoRoot, rec) {
   mkdirSync(promoDir(repoRoot), { recursive: true });
   const suffix = rec.lifecycle === "revert" ? "reverted" : "retired";
   const slug = rec.culpritId.split(":").pop();
-  const file = join(promoDir(repoRoot), `${rec.at}-${slug}-${suffix}.md`);
+  let file = join(promoDir(repoRoot), `${rec.at}-${slug}-${suffix}.md`);
+  for (let n = 2; existsSync(file); n++) file = join(promoDir(repoRoot), `${rec.at}-${slug}-${suffix}-${n}.md`);
   const lines = [
     `# ${oneLine(rec.title)}`,
     `- lifecycle: ${rec.lifecycle}`,

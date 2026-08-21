@@ -15,7 +15,7 @@
 // No failure message ever reprints what it matched — a CI log is as public as the repo.
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
@@ -74,6 +74,14 @@ if (autoRedact && !dir && !file) {
   console.error(
     "redaction-check: --auto-redact requires an explicit --dir or --file (refusing to rewrite the whole tracked tree in place)"
   );
+  process.exit(1);
+}
+
+// A --dir that names nothing, or names a file, must fail with this script's own diagnostic — not a
+// raw ENOENT/ENOTDIR thrown out of readdirSync inside walk(). --file keeps its own read-time guard
+// in the scan loop below; this guards the directory walk's entry.
+if (dir !== undefined && (!existsSync(dir) || !statSync(dir).isDirectory())) {
+  console.error(`redaction-check: --dir ${dir} is not a directory`);
   process.exit(1);
 }
 

@@ -207,6 +207,21 @@ test("recordLifecycle writes a retirement record readPromotions tags", () => {
   assert.equal(life.at, "2026-08-15");
 });
 
+test("recordLifecycle does not overwrite a same-day record for the same culprit", () => {
+  const root = repo();
+  const rec = {
+    title: "Flaky retry masks a real dependency-order bug",
+    lifecycle: "retirement", culpritId: "friction:flaky-test-retry", rung: "r2",
+    landed: "2026-05-01", at: "2026-08-15", pluginVersion: "0.14.0", reason: "first",
+  };
+  const p1 = recordLifecycle(root, rec);
+  const p2 = recordLifecycle(root, { ...rec, reason: "second" });
+  assert.notEqual(p1, p2);
+  assert.match(p2, /-2\.md$/);
+  assert.match(readFileSync(p1, "utf8"), /first/);
+  assert.match(readFileSync(p2, "utf8"), /second/);
+});
+
 test("validatePromotion rejects an unknown lifecycle value", () => {
   assert.throws(() => validatePromotion({
     title: "x", lifecycle: "deleted", culpritId: "friction:x", rung: "r2",

@@ -1131,7 +1131,7 @@ function installDoctor(changelog) {
   // module-not-found stack rather than the doctor: diagnostic these tests pin. doctor → verification
   // → {journal → run-record, semver}, plus pricing, promotions and cli-flags.
   for (const name of [
-    "doctor.mjs", "pricing.mjs", "promotions.mjs", "cli-flags.mjs",
+    "doctor.mjs", "atomic-write.mjs", "pricing.mjs", "promotions.mjs", "cli-flags.mjs",
     "verification.mjs", "journal.mjs", "semver.mjs", "run-record.mjs",
   ])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));

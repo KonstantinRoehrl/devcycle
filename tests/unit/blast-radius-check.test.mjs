@@ -142,3 +142,125 @@ test("both gates give the same diagnosis for a plan that declares no file", () =
   const diagnosis = (r) => r.stderr.trim().split("\n").pop().replace(/^\S+-check: /, "");
   assert.equal(diagnosis(blast), diagnosis(wave));
 });
+
+// F55: the matcher used to key on the extension-stripped basename ("config", not "config.md"),
+// so any file merely containing the word matched -- a false-positive flood. It also walked
+// .worktrees, and offered no way for a planner to acknowledge a referencing-but-unaffected test.
+function planChanging(changedFile, { override } = {}) {
+  const overrideLine = override ? `\n${override}` : "";
+  return `# Plan
+### Task 1: Change ${changedFile}
+**Files:**
+- Modify: \`${changedFile}\`${overrideLine}
+## Dispatch Map
+- Wave 1: Task 1
+`;
+}
+
+test("matcher does not fire on a bare word -- a suite mentioning 'config' does not reference config.md", () => {
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": "See `config` for details.\n",
+  });
+  const { code, out } = run(planChanging("references/config.md"), repo);
+  assert.equal(code, 0, out);
+});
+
+test("matcher fires on a path-shaped reference to the changed file", () => {
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": 'import x from "../references/config.md";\n',
+  });
+  const { code, out } = run(planChanging("references/config.md"), repo);
+  assert.equal(code, 1);
+  assert.match(out, /config\.md/);
+});
+
+test("a per-task override with a reason clears the hard-fail", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md — referenced only in a fixture string",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
+  assert.match(out, /override/i); // acknowledged, reason echoed
+});
+
+test("an override with no reason is itself an error", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 1);
+  assert.match(out, /malformed override|needs a reason/i);
+});
+
+// F1: the override's changed-file token must go through the same normalization
+// (normalizeFileToken) as the declaration side, or a backtick-wrapped path -- exactly how
+// planners write paths in a **Files:** block -- never matches and the override is silently
+// ignored.
+test("an override whose changed-file token is backtick-wrapped still clears the hard-fail (F1)", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: `references/config.md` — referenced only in a fixture string",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
+  assert.match(out, /override/i); // acknowledged, reason echoed
+});
+
+// F3: OVERRIDE_RE's reason group required >=2 characters, so a valid one-character reason was
+// wrongly rejected as a malformed override (spec F55: only an empty reason is an error). A
+// one-char reason separated from the em-dash by a space ("— x") happens to still match today --
+// `\s*—\s*`'s trailing `\s*` backtracks to 0 and donates that space as the reason group's first
+// character -- so the discriminating case is the em-dash directly adjacent to the single
+// character, with no whitespace left to borrow.
+test("a one-character override reason with no space after the em-dash is accepted, not rejected as malformed (F3)", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md —x",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
+  assert.match(out, /override/i);
+});
+
+// F1 guard: the `→ <test>` capture is normalized just like the changed-file capture, so a
+// pair-form override whose test token is a bare word (no path shape, normalizes to null) is a
+// loud malformed error -- not a silent widening of the override to clear every test-referencer
+// of the changed file. Without the guard this exits 0 (override acknowledged, widened to file
+// scope); with it, exit 1 malformed.
+test("a pair-form override whose test token is not a path is malformed, not a silent file-wide clear (F1 guard)", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md → config — bogus non-path test token",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 1);
+  assert.match(out, /malformed override/i);
+});
+
+test(".worktrees is not walked", () => {
+  const repo = makeRepo({
+    "scripts/x.mjs": "export const x = 1;\n",
+    ".worktrees/c99/tests/unit/x.test.mjs": 'import "../../../scripts/x.mjs";',
+  });
+  const { code } = run(planChanging("scripts/x.mjs"), repo);
+  assert.equal(code, 0);
+});

@@ -563,6 +563,35 @@ test("--auto-redact reports the spans it rewrote, per file, so a false-positive 
   }
 });
 
+// A --dir that names nothing, or names a file rather than a directory, must fail with this
+// script's own diagnostic — not a raw ENOENT/ENOTDIR stack thrown out of readdirSync in walk().
+test("redaction-check: --dir on a nonexistent path prints a named diagnostic, not a stack", () => {
+  const res = spawnSync(
+    process.execPath,
+    [SCRIPT, "--dir", join(tmpdir(), "c9-redaction-does-not-exist-xyz"), "--hashes", HASHES],
+    { encoding: "utf8", cwd: process.cwd() },
+  );
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /redaction-check: --dir .* is not a directory/);
+  assert.doesNotMatch(res.stderr, /at \w+.*\(.*:\d+:\d+\)/); // no Node stack frame
+});
+
+test("redaction-check: --dir naming a file (not a directory) prints the named diagnostic", () => {
+  const base = mkdtempSync(join(tmpdir(), "c9-redaction-"));
+  const f = join(base, "afile.txt");
+  writeFileSync(f, "hello\n");
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--dir", f, "--hashes", HASHES], {
+      encoding: "utf8",
+      cwd: process.cwd(),
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /redaction-check: --dir .* is not a directory/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("still flags a deny-listed term, read from the hashes file", () => {
   const term = "forbiddenword";
   const dir = makeFixture({

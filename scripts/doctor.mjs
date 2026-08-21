@@ -5,7 +5,7 @@
 // and runs no promotion `- verify:` check unless invoked with --run-checks.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -16,6 +16,7 @@ import { PRICING, priceFor } from "./pricing.mjs";
 // The one reader of this repo's promotion records; doctor's Cost-by-version "Shipped" column
 // names what each version shipped rather than parsing those records a second time here.
 import { readPromotions } from "./promotions.mjs";
+import { atomicWrite } from "./atomic-write.mjs";
 // The shared verification engine (Wave 2): the one source of the promotion scoreboard, the
 // escalation/retirement candidates and the resolved-in lines, plus the installed plugin version.
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
@@ -2454,7 +2455,7 @@ export function revertCandidates(summaries, promotions, { root = process.cwd() }
   try {
     const dir = join(root, ".devcycle", "doctor");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "revert-candidates.json"), JSON.stringify(out, null, 2) + "\n");
+    atomicWrite(join(dir, "revert-candidates.json"), JSON.stringify(out, null, 2) + "\n");
   } catch { /* QC7: the sidecar write must never abort the report */ }
   return out;
 }
