@@ -147,7 +147,8 @@ order. That map, the plan header, and the per-task blocks are the whole contract
 literal Files-block overlap within one wave, not the harder case of two tasks coupled only by
 editing the same shared resource's prose or assertions.
 
-Also run `node "${CLAUDE_PLUGIN_ROOT}/scripts/brief-completeness-check.mjs" <plan-path>` and `node "${CLAUDE_PLUGIN_ROOT}/scripts/blast-radius-check.mjs" <plan-path>` before handoff; a non-zero exit from either is a stop, resolved by fixing the plan (or, for blast-radius, recording an override) — never by handing off around it.
+A non-zero exit from self-review items 8 or 9 is a stop, resolved by fixing the plan (or, for
+blast-radius, recording an override) — never by handing off around it.
 
 ## Reuse before rebuild
 
