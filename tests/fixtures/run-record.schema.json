@@ -125,6 +125,25 @@
       },
       "required": ["kind", "runId", "event", "stage", "ts"],
       "additionalProperties": false
+    },
+    {
+      "title": "workload",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "workload" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "requestKind": { "enum": ["feature", "bug", "refactor", "audit", "docs", "chore"] },
+        "filesChanged": { "type": "integer", "minimum": 0 },
+        "filesCreated": { "type": "integer", "minimum": 0 },
+        "filesDeleted": { "type": "integer", "minimum": 0 },
+        "insertions": { "type": "integer", "minimum": 0 },
+        "deletions": { "type": "integer", "minimum": 0 },
+        "plannedTaskCount": { "type": "integer", "minimum": 0 },
+        "waveCount": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["kind", "runId", "requestKind", "filesChanged", "filesCreated",
+        "filesDeleted", "insertions", "deletions", "plannedTaskCount", "waveCount"],
+      "additionalProperties": false
     }
   ]
 }
