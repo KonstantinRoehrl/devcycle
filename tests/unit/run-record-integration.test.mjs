@@ -64,6 +64,34 @@ test("a real run/session/dispatch/verdict/commit chain, written via the real CLI
   assert.strictEqual(summary.pluginVersion, "0.13.0");
 });
 
+test("a workload line written by the real CLI joins onto the session's record and summary", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-wl-"));
+  const repo = mkdtempSync(join(tmpdir(), "wl-repo-")); // not a git repo → diffStats reads zeros
+  const sessionId = "session-with-a-workload";
+
+  const runId = runRecord(["new", "--repo", repo, "--plugin-version", "0.14.3",
+    "--plugin-sha", "abc1234", "--profile", "thorough"], runs).stdout.trim();
+  runRecord(["append", "--run", runId, "--repo", repo, "--kind", "session",
+    "--sessionId", sessionId], runs);
+  const wl = runRecord(["workload", "--run", runId, "--repo", repo, "--base", "HEAD",
+    "--requestKind", "feature", "--planned-task-count", "6", "--wave-count", "3"], runs);
+  assert.strictEqual(wl.status, 0, wl.stderr);
+
+  const record = readRunRecords(runs).get(hashSession(sessionId));
+  assert.ok(record, "the session must be readable back under its single hash");
+  assert.ok(record.workload, "the workload line must surface on the merged record");
+  assert.strictEqual(record.workload.requestKind, "feature");
+  assert.strictEqual(record.workload.plannedTaskCount, 6);
+
+  // The join must reach the session summary — doctor's downstream run model reads it there.
+  const summary = summarizeSession(sessionId, [{
+    timestamp: "2026-08-21T10:02:00Z", isSidechain: false,
+    message: { model: "claude-sonnet-5", usage: {}, content: [] },
+  }], readRunRecords(runs));
+  assert.ok(summary.workload, "summarizeSession must expose the joined workload");
+  assert.strictEqual(summary.workload.requestKind, "feature");
+});
+
 test("event lines written by the real CLI survive into doctor's read path, across two sessions", () => {
   const runs = mkdtempSync(join(tmpdir(), "rr-e2e-"));
   const sessionA = "session-a", sessionB = "session-b";

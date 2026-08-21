@@ -126,11 +126,34 @@ export function gitToplevel(cwd) {
   return r.status === 0 ? r.stdout.trim() : cwd;
 }
 
+// Derives workload counts from git itself rather than the caller, so a workload line always
+// reflects what actually landed between base and HEAD — never a self-reported count.
+export function diffStats(base, cwd = process.cwd()) {
+  const num = spawnSync("git", ["-C", cwd, "diff", "--numstat", `${base}...HEAD`], { encoding: "utf8" });
+  const status = spawnSync("git", ["-C", cwd, "diff", "--name-status", `${base}...HEAD`], { encoding: "utf8" });
+  let insertions = 0, deletions = 0, filesChanged = 0;
+  for (const line of (num.stdout ?? "").split("\n").filter(Boolean)) {
+    const [add, del] = line.split("\t");
+    filesChanged++;
+    if (add !== "-") insertions += Number(add);   // "-" marks a binary file
+    if (del !== "-") deletions += Number(del);
+  }
+  let filesCreated = 0, filesDeleted = 0;
+  for (const line of (status.stdout ?? "").split("\n").filter(Boolean)) {
+    const code = line[0];
+    if (code === "A") filesCreated++;
+    else if (code === "D") filesDeleted++;
+  }
+  return { filesChanged, filesCreated, filesDeleted, insertions, deletions };
+}
+
 function main() {
   const [sub, ...rest] = process.argv.slice(2);
   const { flags, knobs, objects } = parseArgs(rest);
   const toplevel = flags.repo ?? gitToplevel(process.cwd());
-  const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex"]);
+  const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex",
+    "filesChanged", "filesCreated", "filesDeleted", "insertions", "deletions",
+    "plannedTaskCount", "waveCount"]);
 
   if (sub === "new") {
     const runId = randomBytes(8).toString("hex");
@@ -160,8 +183,21 @@ function main() {
     if (obj.kind === "event" && obj.ts === undefined)
       obj.ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
     writeLine(toplevel, runId, obj);
+  } else if (sub === "workload") {
+    const runId = flags.run;
+    if (!runId) die("workload requires --run <runId>");
+    if (!flags.base) die("workload requires --base <sha>");
+    const stats = diffStats(flags.base, toplevel);
+    const obj = {
+      kind: "workload", runId,
+      requestKind: flags.requestKind ?? die("workload requires --requestKind"),
+      ...stats,
+      plannedTaskCount: Number(flags["planned-task-count"] ?? 0),
+      waveCount: Number(flags["wave-count"] ?? 0),
+    };
+    writeLine(toplevel, runId, obj);
   } else {
-    die("usage: run-record.mjs <new|append> [flags]");
+    die("usage: run-record.mjs <new|append|workload> [flags]");
   }
 }
 

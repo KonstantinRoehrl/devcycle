@@ -486,3 +486,53 @@ test("validateCulprit reads the vocabulary from the path it is given", () => {
   assert.equal(validateCulprit("unknown-slug", p).length, 1);
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("a valid workload record passes validation and rejects unknown fields", () => {
+  const schema = JSON.parse(
+    readFileSync(join(REPO_ROOT, "tests/fixtures/run-record.schema.json"), "utf8")
+  );
+  const sub = subSchemaFor(schema, "workload");
+  assert.ok(sub, "workload branch exists");
+  const good = { kind: "workload", runId: "0123456789abcdef", requestKind: "feature",
+    filesChanged: 3, filesCreated: 1, filesDeleted: 0, insertions: 42, deletions: 7,
+    plannedTaskCount: 2, waveCount: 1 };
+  assert.deepEqual(validate(good, sub), []);
+  assert.notDeepEqual(validate({ ...good, bogus: 1 }, sub), []);
+  assert.notDeepEqual(validate({ ...good, requestKind: "chore-ish" }, sub), []);
+});
+
+test("the workload subcommand computes real git diff stats and writes a schema-valid line", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  // Same temp-git-repo idiom as "new derives repoSlug from the real git toplevel" above: a real
+  // repo under tmpdir(), not the fixture-string "/tmp/demo" paths the non-git tests use, because
+  // diffStats shells out to real `git diff` against it.
+  const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-workload-")));
+  spawnSync("git", ["init", "-q"], { cwd: tempRepo });
+  spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: tempRepo });
+  spawnSync("git", ["config", "user.name", "Test"], { cwd: tempRepo });
+  writeFileSync(join(tempRepo, "base.txt"), "base\n");
+  spawnSync("git", ["add", "."], { cwd: tempRepo });
+  spawnSync("git", ["commit", "-q", "-m", "base"], { cwd: tempRepo });
+  const base = spawnSync("git", ["rev-parse", "HEAD"], { cwd: tempRepo, encoding: "utf8" }).stdout.trim();
+
+  writeFileSync(join(tempRepo, "new-file.txt"), "line one\nline two\n");
+  spawnSync("git", ["add", "."], { cwd: tempRepo });
+  spawnSync("git", ["commit", "-q", "-m", "add a file"], { cwd: tempRepo });
+
+  const runId = "0123456789abcdef";
+  const r = run(
+    ["workload", "--run", runId, "--repo", tempRepo, "--base", base,
+     "--requestKind", "feature", "--planned-task-count", "2", "--wave-count", "1"],
+    runs
+  );
+  assert.strictEqual(r.status, 0, r.stderr);
+
+  const schema = JSON.parse(
+    readFileSync(join(REPO_ROOT, "tests/fixtures/run-record.schema.json"), "utf8")
+  );
+  const sub = subSchemaFor(schema, "workload");
+  const line = JSON.parse(readFileSync(recordPath(tempRepo, runId), "utf8").trim().split("\n").at(-1));
+  assert.deepEqual(validate(line, sub), []);
+  assert.strictEqual(line.filesCreated, 1);
+  assert.ok(line.insertions >= 1);
+});

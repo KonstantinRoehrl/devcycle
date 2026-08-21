@@ -38,9 +38,14 @@ carries through byte for byte.
 
 ## Interpret, don't transcribe
 
-Highlights is what a reader who reads no further needs: the corpus's direction of travel, the
-findings with the most money behind them, and whatever the caveats qualify. Rank the findings by
-dollar impact, and give each one its concrete lever:
+Highlights is what a reader who reads no further needs. **Lead from the `## At a glance`
+section**: its band-scoped, workload-adjusted, matched-cohort figures — each carrying its own
+confidence — are the headline, because they compare like for like and cannot be moved by session
+length or count alone. The full historical corpus below (Cost by version, Cost by stage, the
+appendix cohorts) is *supporting evidence*, not the headline: cite it to explain a move `At a
+glance` surfaced, never in place of one. After that workload-adjusted read comes the corpus's
+direction of travel, the findings with the most money behind them, and whatever the caveats
+qualify. Rank the findings by dollar impact, and give each one its concrete lever:
 
 - a mispriced or unpriced model,
 - a stage running deep,

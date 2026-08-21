@@ -8,3 +8,4 @@
 {"kind":"event","runId":"0f1e2d3c4b5a6978","event":"gate-fail","stage":"execution","task":"3","culprit":null,"attributedBy":"coordinator","ts":"2026-08-07T10:30:00Z"}
 {"kind":"event","runId":"0f1e2d3c4b5a6978","event":"gate-pass-clean","stage":"execution","task":"3","culprit":null,"ts":"2026-08-07T10:35:00Z"}
 {"kind":"event","runId":"0f1e2d3c4b5a6978","event":"user-correction-at-gate","stage":"planning","task":"3","culprit":null,"ts":"2026-08-07T10:05:00Z"}
+{"kind":"workload","runId":"0f1e2d3c4b5a6978","requestKind":"feature","filesChanged":3,"filesCreated":1,"filesDeleted":0,"insertions":42,"deletions":7,"plannedTaskCount":2,"waveCount":1}

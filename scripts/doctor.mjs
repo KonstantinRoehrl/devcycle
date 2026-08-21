@@ -286,6 +286,106 @@ export function compareVersions(a, b) {
   return 0;
 }
 
+// Buckets a run's changed-line count (insertions + deletions) into a size band by the published
+// thresholds (GC6 — no invented weighted score). A null count is workload-unknown, never zero.
+export function bandFor(changedLines) {
+  if (changedLines == null) return null;
+  if (changedLines < 20) return "XS";
+  if (changedLines < 100) return "S";
+  if (changedLines < 500) return "M";
+  if (changedLines < 2000) return "L";
+  return "XL";
+}
+
+// The installed version plus up to `span` semver-prior *released* versions, newest last — the
+// recency window a like-for-like comparison ranges over. Sorts the released set with the shared
+// compareVersions (QC2), then slices the window ending at the installed version. A dev checkout's
+// version may not be in the released set, so it is appended rather than assumed present.
+export function recencyBand(installed, releaseDatesMap, span = 2) {
+  if (!installed) return [];
+  const released = [...releaseDatesMap.keys()].sort(compareVersions);
+  const idx = released.indexOf(installed);
+  const end = idx === -1 ? released.length : idx + 1;   // installed may be unreleased (dev)
+  const start = Math.max(0, end - (span + 1));
+  const window = released.slice(start, end);
+  return window.includes(installed) ? window : [...window, installed];
+}
+
+export const inBand = (version, band) => band.includes(version);
+
+// A culprit's temporal standing against the recency band: where its occurrence versions sit
+// relative to the window a like-for-like comparison ranges over (recencyBand). Any occurrence
+// inside the band means the problem is still live ("active"). Entirely before the band, the split
+// turns on the newest version it was seen at: the one release immediately below the band is
+// "unresolved" (it was happening right up to the window and may simply not have recurred yet),
+// anything older is "legacy" (a problem a newer release has very likely moved past).
+//
+// Only these three — active/legacy/unresolved — are emitted this cycle. "fixed" and "regressed"
+// are deferred: distinguishing them needs shipped-fix data threaded in per culprit, and the
+// promotion `culpritId` a "fixed" verdict would key off is not written to disk yet (see the
+// versionProfileTable `shipped` note), so classifying them now would be inert. They stay members
+// of the return type only because that later refinement — once promotion culpritId capture lands
+// — will resolve them without changing this signature.
+// @returns {"active"|"legacy"|"unresolved"} this cycle ("fixed"/"regressed" reserved, not emitted)
+export function lifecycle(versionsSeen, band, releaseDatesMap) {
+  const seen = (versionsSeen ?? []).filter((v) => v && v !== "unknown");
+  if (!seen.length) return "legacy";
+  if (seen.some((v) => inBand(v, band))) return "active";
+  // Entirely pre-band: is the newest occurrence the single release immediately below the band?
+  const released = [...(releaseDatesMap?.keys() ?? [])].sort(compareVersions);
+  const preBand = band.length ? released[released.indexOf(band[0]) - 1] : undefined;
+  const newestSeen = [...seen].sort(compareVersions).at(-1);
+  return preBand && newestSeen === preBand ? "unresolved" : "legacy";
+}
+
+// One row per distinct run, joining the run's member sessions into a run-level record. Sessions
+// with no runId stay observational and never enter a run (GC5). version/profile come from the
+// first member that actually reported one (not "unknown"); the workload fields come from the
+// joined workload record and are null when the run wrote none (GC3 — absent, not zero).
+// The workload join is already resolved onto each summary by summarizeSession, so the run
+// records themselves are never re-read here — this reads only from the summaries.
+export function runAggregates(summaries) {
+  const byRun = new Map();
+  for (const s of summaries.filter((s) => s.runId)) {
+    if (!byRun.has(s.runId)) byRun.set(s.runId, []);
+    byRun.get(s.runId).push(s);
+  }
+  const firstKnown = (members, key) =>
+    members.map((m) => m[key]).find((v) => v && v !== "unknown") ?? "unknown";
+  const out = [];
+  for (const [runId, members] of byRun) {
+    const wl = members.map((m) => m.workload).find((w) => w) ?? null;
+    const changedLines = wl ? wl.insertions + wl.deletions : null;
+    const qualities = members.map((m) => m.quality).filter(Boolean);
+    out.push({
+      runId,
+      version: firstKnown(members, "pluginVersion"),
+      profile: firstKnown(members, "profile"),
+      requestKind: wl?.requestKind ?? null,
+      workloadBand: bandFor(changedLines),
+      changedLines,
+      // Raw observed workload counts, straight off the workload record; null (never 0) when the
+      // run wrote none, so an absent record never reads as zero work (GC3).
+      filesChanged: wl?.filesChanged ?? null,
+      waveCount: wl?.waveCount ?? null,
+      costUSD: members.reduce((n, m) => n + (m.costUSD ?? 0), 0),
+      mainTurns: members.reduce((n, m) => n + (m.mainTurns ?? 0), 0),
+      subagentTurns: members.reduce((n, m) => n + (m.subagentTurns ?? 0), 0),
+      medianDepth: median(members.map((m) => m.medianDepth ?? 0)),
+      tasks: wl?.plannedTaskCount ?? null,
+      // No conformance-pass signal exists on a summary yet; derived from the quality signals when
+      // any member carries one (pass = zero conformance failures), null when none do (QC1).
+      conformancePass: qualities.length
+        ? qualities.every((q) => (q.conformanceFailures ?? 0) === 0)
+        : null,
+      reviewRounds: qualities.reduce((n, q) => n + (q.reviewRounds ?? 0), 0),
+      retries: qualities.reduce((n, q) => n + (q.retries ?? 0), 0),
+      sessionIds: members.map((m) => m.id),
+    });
+  }
+  return out;
+}
+
 // A session whose plugin version cannot be read is bucketed as "unknown" and reported, never
 // dropped. extractPluginVersion regexes the version out of transcript JSON, so dev-checkout
 // sessions — the ones that built devcycle — yielded null and were invisible to devcycle's own
@@ -462,6 +562,7 @@ export function emitCandidates(summaries) {
           skill,
           version_from: from,
           version_to: to,
+          versions: [from, to],
           delta_pct,
           from_dollars: fromMedian,
           dollars: toMedian,
@@ -487,6 +588,7 @@ export function emitCandidates(summaries) {
         skill: null,
         version_from: null,
         version_to: null,
+        versions: [s.pluginVersion, s.pluginVersion],
         delta_pct: null,
         dollars: s.costUSD ?? null,
         sessions_sampled: 1,
@@ -494,34 +596,11 @@ export function emitCandidates(summaries) {
     }
   }
 
-  // Cost outliers — a run costing far more than its peers for the same skill, independent
-  // of any version-cohort comparison (fires even with a single version observed, unlike
-  // version-regression above, which needs two adjacent cohorts to compare).
-  const costsBySkill = new Map(); // skill -> [dollars]
-  for (const s of settled) {
-    for (const [skill, dollars] of Object.entries(s.costByStage ?? {})) {
-      if (!costsBySkill.has(skill)) costsBySkill.set(skill, []);
-      costsBySkill.get(skill).push(dollars);
-    }
-  }
-  for (const [skill, dollars] of costsBySkill) {
-    if (dollars.length < 3) continue; // too few runs to call anything a peer outlier
-    const skillMedian = median(dollars);
-    if (skillMedian <= 0) continue;
-    for (const d of dollars) {
-      if (d > skillMedian * 3) {
-        candidates.push({
-          type: "cost-outlier",
-          skill,
-          version_from: null,
-          version_to: null,
-          delta_pct: ((d - skillMedian) / skillMedian) * 100,
-          dollars: d,
-          sessions_sampled: dollars.length,
-        });
-      }
-    }
-  }
+  // The global-median cost-outlier is retired (issue #114): a run dear against a skill's global
+  // median conflated user-driven session size with per-unit cost. Its role is now the matched-cohort
+  // residual, emitted by excessCost and rendered as the `EXCESS-COST:` lines in `## Cost anomalies`.
+  // The depth-outlier above is a distinct per-session depth signal excessCost does not replace, and
+  // stays.
 
   for (const c of candidates) c.low_confidence = isLowConfidence(c);
   return candidates;
@@ -699,7 +778,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
       // file and do not reset on a `session` line.
       let runId = null, pluginVersion = null, profile = null, knobs = null, schemaMismatch;
       let current = null;
-      const windows = new Map(); // sessionHash -> { stages, dispatches, verdicts, events }, file order
+      const windows = new Map(); // sessionHash -> { stages, dispatches, verdicts, events, workloads }, file order
       for (const line of readFileSync(join(dir, repo.name, f), "utf8").split("\n").filter(Boolean)) {
         let o;
         try { o = JSON.parse(line); } catch { continue; } // a torn trailing line is normal
@@ -712,21 +791,27 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         } else if (o.kind === "session") {
           current = o.sessionHash;
           if (!windows.has(current))
-            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [] });
+            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [] });
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
         else if (o.kind === "event") { if (current) windows.get(current).events.push(o); }
+        else if (o.kind === "workload") { if (current) windows.get(current).workloads.push(o); }
       }
       for (const [h, w] of windows) {
-        const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, ...w };
+        // The run's workload is the last workload line written for the session (a rerun overwrites
+        // an earlier estimate); null when the run wrote none (GC3 — workload-unknown, not zero).
+        const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, ...w,
+          workload: w.workloads.at(-1) ?? null };
         const prior = bySession.get(h);
         bySession.set(h, prior
           ? { ...rec,
               stages: [...prior.stages, ...rec.stages],
               dispatches: [...prior.dispatches, ...rec.dispatches],
               verdicts: [...prior.verdicts, ...rec.verdicts],
-              events: [...prior.events, ...rec.events] }
+              events: [...prior.events, ...rec.events],
+              workloads: [...prior.workloads, ...rec.workloads],
+              workload: rec.workload ?? prior.workload ?? null }
           : rec);
       }
     }
@@ -973,6 +1058,8 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     // The full session id is still in hand here and the record is already resolved; a summary
     // carries only `id: sessionId.slice(0, 8)`, so nothing downstream could redo this join.
     runId: record?.runId ?? null,
+    // Joined by readRunRecords from the run's workload line; null when the run wrote none (GC3).
+    workload: record?.workload ?? null,
     // References/impact-scoring.md owns the formula; this is the only call site that scores a
     // session, and every table downstream reads the result rather than recomputing it.
     impact: record ? impactScores(record, costByStage) : null,
@@ -1033,6 +1120,10 @@ export function formatCandidate(c) {
   if (c.dollars != null) parts.push(`dollars=${usd(c.dollars)}`);
   if (c.count != null) parts.push(`count=${c.count}`);
   parts.push(`sessions=${c.sessions_sampled}`);
+  // A candidate that already prints a `from->to` line (a version-regression/improvement) carries
+  // the same span twice if versions=[..] is also emitted, so the canonical from->to line wins and
+  // the redundant range is suppressed; types with no from->to line still render versions=[..].
+  if (c.versions && !c.version_from) parts.push(`versions=[${c.versions[0]}..${c.versions[1]}]`);
   if (isLowConfidence(c)) parts.push("low confidence: n=1");
   return `CANDIDATE: ${parts.join(" ")}`;
 }
@@ -1042,20 +1133,27 @@ export function formatCandidate(c) {
 // null onDevicePath (always null until Task 11 lands in cycle 3) is labelled "unrecorded" here
 // so both render sites below show a labelled value, never a bare null.
 function complianceCandidatesOf(summaries) {
-  return summaries.flatMap((s) => s.complianceCandidates ?? []).map((c) =>
-    c.type === "main-thread-browser" ? { ...c, onDevicePath: c.onDevicePath ?? "unrecorded" } : c
-  );
+  return summaries.flatMap((s) => (s.complianceCandidates ?? []).map((c) => {
+    const withPath =
+      c.type === "main-thread-browser" ? { ...c, onDevicePath: c.onDevicePath ?? "unrecorded" } : c;
+    // Version scope from the source session (spec C5): a single-session candidate spans [v, v].
+    // A version-less session (unknown) carries no range rather than a fabricated "unknown..unknown".
+    const v = s.pluginVersion;
+    return v && v !== "unknown" ? { ...withPath, versions: [v, v] } : withPath;
+  }));
 }
 
 // Distinct from formatCandidate: these three carry their own fields (calls/inherited/count,
 // no sessions_sampled or dollars), so reusing formatCandidate's field set would print a
-// meaningless "sessions=undefined" line rather than nothing.
+// meaningless "sessions=undefined" line rather than nothing. The version range, when the source
+// session carried one, renders in formatCandidate's own `versions=[min..max]` form (spec C5).
 function formatComplianceCandidate(c) {
+  const span = c.versions ? ` versions=[${c.versions[0]}..${c.versions[1]}]` : "";
   if (c.type === "main-thread-browser")
-    return `CANDIDATE: main-thread-browser calls=${c.calls} onDevicePath=${c.onDevicePath} — ${c.note}`;
+    return `CANDIDATE: main-thread-browser calls=${c.calls} onDevicePath=${c.onDevicePath}${span} — ${c.note}`;
   if (c.type === "inherited-model")
-    return `CANDIDATE: inherited-model inherited=${c.inherited}/${c.total}`;
-  return `CANDIDATE: general-purpose-search count=${c.count}/${c.total}`;
+    return `CANDIDATE: inherited-model inherited=${c.inherited}/${c.total}${span}`;
+  return `CANDIDATE: general-purpose-search count=${c.count}/${c.total}${span}`;
 }
 
 // Combines every session's cacheBand into one corpus-wide figure. Dollar edges (point/low/high)
@@ -1444,7 +1542,19 @@ function main() {
       console.error(`doctor: no culprit "${args.issueBody}" in this corpus`);
       process.exit(1);
     }
-    const draft = issueBody(args.issueBody, result.sessions, tables, repoShape(process.cwd()));
+    let draft;
+    try {
+      draft = issueBody(args.issueBody, result.sessions, tables, repoShape(process.cwd()));
+    } catch (e) {
+      // A culprit last seen outside the recency band drafts stale noise; refuse it, print why,
+      // and exit non-zero without emitting a body.
+      if (e instanceof StaleCulpritError) {
+        console.error(`doctor: ${e.message}`);
+        process.exitCode = 1;
+        return;
+      }
+      throw e;
+    }
     for (const line of issueDraftLines(draft)) console.log(line);
     return;
   }
@@ -1634,6 +1744,98 @@ const byImpactDesc = (a, b) =>
 
 // What a cycle cost under each version and profile, and whether that is better or worse than the
 // last version run the same way.
+// The benchmarking unit is the run, not the session (issue #114): a run's matchKey pins the three
+// things that make two runs comparable — the profile it ran under, the kind of request, and the
+// workload size band. Only runs carrying both a requestKind and a band are matchable (GC5/GC6): a
+// run with no workload record is observational and never enters a cohort. Cohorts of one are kept
+// (so excessCost can report them as "no expectation") rather than dropped.
+const matchKeyOf = (r) => `${r.profile}|${r.requestKind}|${r.workloadBand}`;
+
+export function matchedCohorts(runs) {
+  const map = new Map();
+  for (const r of runs ?? []) {
+    if (r.requestKind == null || r.workloadBand == null) continue;
+    const key = matchKeyOf(r);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+  }
+  return map;
+}
+
+// A run's cost measured against what its matched cohort actually cost, so a version is judged on
+// its per-unit efficiency rather than on how long or how many its sessions happened to be. The
+// expected figure is the cohort's median cost; the excess is the residual above it. A cohort of
+// one has no peer to set an expectation, so it is reported as "no expectation" (expected/excess
+// null, QC1) rather than as an outlier. Confidence rises with the cohort's size.
+export function excessCost(runs) {
+  const cohorts = matchedCohorts(runs);
+  const out = [];
+  for (const r of runs ?? []) {
+    if (r.requestKind == null || r.workloadBand == null) continue; // observational only (GC5/GC6)
+    const matchKey = matchKeyOf(r);
+    const cohortN = cohorts.get(matchKey)?.length ?? 0;
+    const expected = cohortN >= 2 ? median(cohorts.get(matchKey).map((c) => c.costUSD)) : null;
+    const excess = expected == null ? null : r.costUSD - expected;
+    out.push({
+      runId: r.runId, version: r.version, profile: r.profile, matchKey,
+      actual: r.costUSD, expected, excess, cohortN,
+      confidence: cohortN >= 5 ? "high" : cohortN >= 2 ? "low" : "insufficient",
+    });
+  }
+  return out;
+}
+
+// A percentage move that reports its direction instead of dividing by a zero or absent baseline.
+const pctDelta = (from, to) =>
+  from == null || to == null || from === 0 ? null : ((to - from) / from) * 100;
+
+// Adjacent version steps inside the recency band, workload-adjusted: for each adjacent version
+// pair in `band` and each matchKey both versions carry with >=2 runs, how the like-for-like cost
+// (and its main/sub turn counts, depth, and conformance) moved. A delta is emitted only where both
+// sides have >=2 runs — never fabricated across a single run (QC1). The turn and depth deltas are
+// per-run medians (run-level cost is not split by agent type, so a $/turn split is not derivable
+// here); the cost delta is the like-for-like median cost move.
+export function workloadAdjustedSteps(runs, band) {
+  const matchable = (runs ?? []).filter(
+    (r) => inBand(r.version, band) && r.requestKind != null && r.workloadBand != null);
+  const byVersionKey = (version) => {
+    const m = new Map();
+    for (const r of matchable.filter((r) => r.version === version)) {
+      const k = matchKeyOf(r);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(r);
+    }
+    return m;
+  };
+  const rows = [];
+  for (let i = 0; i + 1 < band.length; i++) {
+    const from = band[i], to = band[i + 1];
+    const fromKeys = byVersionKey(from), toKeys = byVersionKey(to);
+    for (const [matchKey, fRuns] of fromKeys) {
+      const tRuns = toKeys.get(matchKey);
+      if (!tRuns || fRuns.length < 2 || tRuns.length < 2) continue; // never fabricate a delta
+      const medOf = (list, key) => median(list.map((r) => r[key] ?? 0));
+      const conformanceRate = (list) => {
+        const signalled = list.filter((r) => r.conformancePass != null);
+        return signalled.length ? signalled.filter((r) => r.conformancePass).length / signalled.length : null;
+      };
+      const fromConf = conformanceRate(fRuns), toConf = conformanceRate(tRuns);
+      const n = Math.min(fRuns.length, tRuns.length);
+      rows.push({
+        from, to, matchKey,
+        costDeltaPct: pctDelta(medOf(fRuns, "costUSD"), medOf(tRuns, "costUSD")),
+        mainTurnDeltaPct: pctDelta(medOf(fRuns, "mainTurns"), medOf(tRuns, "mainTurns")),
+        subTurnDeltaPct: pctDelta(medOf(fRuns, "subagentTurns"), medOf(tRuns, "subagentTurns")),
+        depthDeltaPct: pctDelta(medOf(fRuns, "medianDepth"), medOf(tRuns, "medianDepth")),
+        conformanceDelta: fromConf == null || toConf == null ? null : toConf - fromConf,
+        n,
+        confidence: n >= 5 ? "high" : "low",
+      });
+    }
+  }
+  return rows;
+}
+
 export function versionProfileTable(summaries, promotions = []) {
   const groups = new Map();
   for (const s of summaries.filter((x) => !x.inFlight)) {
@@ -1651,12 +1853,31 @@ export function versionProfileTable(summaries, promotions = []) {
         stageTotals.set(stage, (stageTotals.get(stage) ?? 0) + dollars);
     const priciest = [...stageTotals.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
     const depths = g.members.map((s) => s.medianDepth).filter((d) => typeof d === "number");
+    // Decomposed $/turn (issue #114): a blended $/turn hides whether the money went to the main
+    // thread or its subagents, and conflates the two turn populations. main dollars are the
+    // agent-type-keyed "main" cost; everything else the session cost is sub-thread. Each rate is
+    // null, never 0, when its denominator is 0 (QC1).
+    const mainDollars = g.members.reduce((n, s) => n + (s.costByAgentType?.main ?? 0), 0);
+    const totalDollars = g.members.reduce((n, s) => n + (s.costUSD ?? 0), 0);
+    const subDollars = totalDollars - mainDollars;
+    const mainTurns = g.members.reduce((n, s) => n + (s.mainTurns ?? 0), 0);
+    const subagentTurns = g.members.reduce((n, s) => n + (s.subagentTurns ?? 0), 0);
+    // Turns/task must draw numerator and denominator from the same population, or turns from
+    // workload-less sessions inflate the rate (issue #114). Scope both the summed turns and the
+    // planned-task count to sessions that carry a workload record — the runs where task data
+    // exists — so the figure reflects only those. null (never 0) when no such session (QC1).
+    const taskBearing = g.members.filter((s) => s.workload);
+    const tasks = taskBearing.reduce((n, s) => n + (s.workload?.plannedTaskCount ?? 0), 0);
+    const taskTurns = taskBearing.reduce((n, s) => n + (s.mainTurns ?? 0) + (s.subagentTurns ?? 0), 0);
     return {
       version: g.version,
       profile: g.profile,
       sessions: g.members.length,
       cycles: cycles.length,
       medianCostPerCycle: median(cycles.map((c) => c.cost)),
+      dollarsPerMainTurn: mainTurns ? mainDollars / mainTurns : null,
+      dollarsPerSubTurn: subagentTurns ? subDollars / subagentTurns : null,
+      turnsPerTask: tasks ? taskTurns / tasks : null,
       delta: { state: "first-seen", pct: null },
       priciestStage: priciest ? priciest[0] : null,
       medianDepth: depths.length ? median(depths) : null,
@@ -1736,7 +1957,7 @@ function agreedSlug(slugLists) {
 // below, so the culprits and the wins can never disagree about what a key cost or how often it
 // fired. The dollar figures are summarizeSession's own impactScores output — this adds them up
 // and never recomputes them, per the one-formula constraint.
-function impactRows(summaries, vocab = []) {
+function impactRows(summaries, vocab = [], band = [], dates = new Map()) {
   const byKey = new Map();
   for (const s of summaries) {
     const version = s.pluginVersion ?? "unknown";
@@ -1756,11 +1977,14 @@ function impactRows(summaries, vocab = []) {
       agg.slugLists.push(s.culpritsByKey?.[scored.key] ?? []);
       const cohortKey = `${version} ${profile}`;
       if (!agg.cohorts.has(cohortKey))
-        agg.cohorts.set(cohortKey, { version, profile, sessions: 0, total: 0, measurable: true });
+        agg.cohorts.set(cohortKey, { version, profile, sessions: 0, total: 0, values: [], measurable: true });
       const cohort = agg.cohorts.get(cohortKey);
       cohort.sessions += 1;
       if (scored.impact === null) cohort.measurable = false;
-      else cohort.total += scored.impact;
+      // Keep both: the summed total ranks/displays this key (GC1), and the per-session values feed
+      // the version-over-version comparison so a version is never flagged a regression for session
+      // count alone (issue #114).
+      else { cohort.total += scored.impact; cohort.values.push(scored.impact); }
     }
   }
   return [...byKey.values()].map((agg) => {
@@ -1769,14 +1993,20 @@ function impactRows(summaries, vocab = []) {
     const cohorts = orderVersionProfileRows([...agg.cohorts.values()].map((c) => ({
       version: c.version, profile: c.profile,
       impact: c.measurable ? c.total : null,
+      // Per-session median (derived): null, not 0, when the cohort priced nothing (QC1).
+      impactPerSession: c.values.length ? median(c.values) : null,
       lowConfidence: c.sessions < MIN_COHORT,
     })));
+    // The trend and delta run on the per-session median per version, not the summed total: every
+    // session that priced this key on a version contributes one value, and the version's figure is
+    // their median (QC2), so eight cheap sessions never read dearer than two of the same cost.
+    const versionValues = new Map();
+    for (const c of [...agg.cohorts.values()].filter((c) => c.version !== "unknown"))
+      versionValues.set(c.version, [...(versionValues.get(c.version) ?? []), ...c.values]);
     const byVersion = new Map();
-    for (const c of cohorts.filter((c) => c.version !== "unknown")) {
-      const running = byVersion.get(c.version);
-      byVersion.set(c.version, running === undefined ? c.impact
-        : running === null || c.impact === null ? null : running + c.impact);
-    }
+    for (const [v, vals] of versionValues) byVersion.set(v, vals.length ? median(vals) : null);
+    // The version span this key was observed across, and its temporal standing against the band.
+    const versionsSeen = [...byVersion.keys()].sort(compareVersions);
     return {
       key: agg.key,
       name: slug ?? agg.key,
@@ -1786,10 +2016,13 @@ function impactRows(summaries, vocab = []) {
       isWin: WIN_EVENTS.has(agg.event) || entry?.kind === "win",
       impact: agg.measurable ? agg.impact : null,
       occurrences: agg.occurrences,
+      // Absent, not zero (QC1): a key seen only under an undetectable version has no range.
+      versions: versionsSeen.length ? [versionsSeen[0], versionsSeen.at(-1)] : null,
+      lifecycle: versionsSeen.length ? lifecycle(versionsSeen, band, dates) : null,
       delta: cohorts.length
-        ? deltaAgainstPrevious(cohorts, cohorts.length - 1, (r) => r.impact)
+        ? deltaAgainstPrevious(cohorts, cohorts.length - 1, (r) => r.impactPerSession)
         : { state: "first-seen", pct: null },
-      trend: trendAcross([...byVersion.keys()].sort(compareVersions).map((v) => byVersion.get(v))),
+      trend: trendAcross(versionsSeen.map((v) => byVersion.get(v))),
     };
   });
 }
@@ -1797,11 +2030,17 @@ function impactRows(summaries, vocab = []) {
 // The friction this corpus is paying for, priciest first: what it cost, how often it happened,
 // and whether it is getting better.
 export function culpritTable(summaries, vocab) {
-  return impactRows(summaries, vocab)
+  // The recency window every culprit's lifecycle is judged against, built once from the installed
+  // version and the plugin's own changelog (reusing recencyBand/releaseDates — QC2).
+  const dates = releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8"));
+  const band = recencyBand(installedVersion(), dates);
+  return impactRows(summaries, vocab, band, dates)
     .filter((r) => !r.isWin)
-    .map(({ name, kind, impact, occurrences, delta, trend }) =>
-      ({ culprit: name, kind, impact, occurrences, delta, trend }))
-    .sort(byImpactDesc);
+    .map(({ name, kind, impact, occurrences, delta, trend, versions, lifecycle: life }) =>
+      ({ culprit: name, kind, impact, occurrences, delta, trend, versions, lifecycle: life }))
+    // Live problems first, then by money at stake: a culprit still occurring in the recency band
+    // is what the reader can act on, ahead of one a newer release has likely moved past.
+    .sort((a, b) => (b.lifecycle === "active") - (a.lifecycle === "active") || byImpactDesc(a, b));
 }
 
 // What is already working, biggest first: the win events the corpus recorded, plus the
@@ -1981,7 +2220,17 @@ export function compiledKnowledge(promotions = []) {
 // its gloss cannot drift apart, and so the renderer has no place to improvise one.
 const GLOSSES = {
   "read-this-first": "Caveats that qualify every number below. Each one says what it excludes and why.",
+  ataglance:
+    "Workload-adjusted, matched-cohort cost movement across the recency band (derived) — like-for-" +
+    "like runs only, so session length or count can't masquerade as a cost change.",
   highlights: "The three things worth knowing before reading any table.",
+  "workload-observed":
+    "The raw work each run did — files changed, changed lines, planned tasks, waves — straight " +
+    "off the run's workload record (observed, never derived). A run with no workload record is " +
+    "absent here, not zero.",
+  "outcome-observed":
+    "The raw result signals per run — conformance verdict, review rounds, retries — straight off " +
+    "the run records (observed, not a computed rate).",
   "cost-by-version":
     "What a cycle costs on each plugin version, compared only against the same profile — so a " +
     "month where you happened to run `lean` more often cannot masquerade as an improvement.",
@@ -1989,14 +2238,16 @@ const GLOSSES = {
   "cost-by-stage-window": "Where this window's money actually went.",
   culprits:
     "Recurring problems, priced. The dollar figure is what each one actually cost you, summed " +
-    "over every occurrence — not a severity guess.",
+    "over every occurrence — not a severity guess. The Δ and Trend are per-session (derived), so " +
+    "a version is never flagged a regression for running more sessions alone.",
   compliance: "Rules devcycle states but could not enforce, and how often they were broken.",
   wins:
     "What went right, priced the same way — a system that only counts failures cannot tell you " +
     "whether it is improving.",
   anomalies:
     "Individual cost defects: a model with no price, a run far dearer than its peers, a session " +
-    "running far deeper than its own startup floor, a stage whose cost jumped between versions.",
+    "running far deeper than its own startup floor, a stage whose cost jumped between versions, and " +
+    "each run's excess over its matched cohort (unmatched when the cohort has no peer).",
   promoted: "Whether lessons this repo already adopted actually stopped the problem recurring.",
   "outer-loop": "Whether filing issues from this report is actually producing fixes.",
   "compiled-knowledge":
@@ -2153,6 +2404,14 @@ export function renderReport(summaries, ctx) {
   const section = (heading, glossKey) => { L.push("", heading, "", `*${GLOSSES[glossKey]}*`, ""); };
   const agg = aggregate(summaries);
   const candidates = emitCandidates(summaries);
+  // The run-level, workload-adjusted view (issue #114): run aggregates over the settled corpus,
+  // the recency band the comparison ranges over (reusing recencyBand/releaseDates — QC2), the
+  // matched-cohort step deltas, and each run's excess over its cohort. Runs with no runId/workload
+  // never reach these (GC5/GC6) — runAggregates already excludes run-less sessions.
+  const settledRuns = runAggregates(summaries.filter((s) => !s.inFlight));
+  const glanceBand = recencyBand(installedVersion(), releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8")));
+  const glanceSteps = workloadAdjustedSteps(settledRuns, glanceBand);
+  const excess = excessCost(settledRuns);
 
   L.push(
     `# Doctor Report — ${repo} — ${today}`,
@@ -2164,19 +2423,57 @@ export function renderReport(summaries, ctx) {
   section("## Read this first", "read-this-first");
   L.push(...caveatLines(summaries, agg));
 
+  section("## At a glance", "ataglance");
+  const pctText = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
+  L.push(...markdownTable(
+    ["Step", "matchKey", "n", "conf", "workload-adj cost Δ% (derived)", "main-turn Δ",
+      "sub-turn Δ", "depth Δ", "conformance Δ"],
+    glanceSteps.map((r) => [
+      `${r.from}→${r.to}`, r.matchKey, r.n, r.confidence, pctText(r.costDeltaPct),
+      pctText(r.mainTurnDeltaPct), pctText(r.subTurnDeltaPct), pctText(r.depthDeltaPct),
+      r.conformanceDelta == null ? null : `${r.conformanceDelta >= 0 ? "+" : ""}${(r.conformanceDelta * 100).toFixed(0)}pp`,
+    ]),
+    "no matched cohort spans two adjacent in-band versions yet",
+  ));
+  const priciestOverall = Object.entries(agg.costByStage).sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
+  L.push("", priciestOverall
+    ? `Priciest stage overall (derived): ${priciestOverall[0]} (${usd(priciestOverall[1])}).`
+    : "Priciest stage overall (derived): — (no stage cost recorded).");
+
   section("## Highlights", "highlights");
   L.push(HIGHLIGHTS_ANCHOR);
 
+  // The raw observed workload family (spec C3): one row per run that wrote a workload record,
+  // its raw counts straight off that record. Runs with no workload record have nothing to
+  // observe and drop out (changedLines is null exactly when no record was joined — GC3).
+  section("## Workload (observed)", "workload-observed");
+  L.push(...markdownTable(
+    ["Run", "Version", "Profile", "Request kind (observed)", "Band (derived)",
+      "Files changed (observed)", "Changed lines (observed)", "Tasks (observed)", "Waves (observed)"],
+    settledRuns
+      .filter((r) => r.changedLines != null)
+      .sort((a, b) => compareVersions(a.version, b.version) || byName(a.runId, b.runId))
+      .map((r) => [
+        r.runId.slice(0, 8), r.version, r.profile, r.requestKind, r.workloadBand,
+        r.filesChanged, r.changedLines, r.tasks, r.waveCount,
+      ]),
+    "no run carries a workload record yet",
+  ));
+
   section("## Cost by version", "cost-by-version");
   L.push(...markdownTable(
-    ["Version", "Profile", "Sessions", "Cycles", "Median $/cycle", "Δ vs previous",
-      "Priciest stage", "Median depth", "Quality", "Shipped"],
+    ["Version", "Profile", "Sessions (observed)", "Cycles (observed)", "Median $/cycle (derived)",
+      "$/main-turn (derived)", "$/sub-turn (derived)", "Turns/task (derived)", "Δ vs previous (derived)",
+      "Priciest stage (derived)", "Median depth (derived)", "Quality (derived)", "Shipped (observed)"],
     versionProfileTable(summaries, promotions).map((r) => [
       r.version,
       r.profile,
       cohortSessionsText(r),
       r.cycles,
       usd(r.medianCostPerCycle),
+      r.dollarsPerMainTurn === null ? null : usd(r.dollarsPerMainTurn),
+      r.dollarsPerSubTurn === null ? null : usd(r.dollarsPerSubTurn),
+      r.turnsPerTask === null ? null : r.turnsPerTask.toFixed(1),
       deltaText(r.delta),
       r.priciestStage,
       r.medianDepth,
@@ -2189,7 +2486,7 @@ export function renderReport(summaries, ctx) {
   section("## Cost by stage", "cost-by-stage");
   const stageTrend = stageByVersionTable(summaries);
   L.push(...markdownTable(
-    ["Stage", ...stageTrend.versions, "Trend"],
+    ["Stage", ...stageTrend.versions, "Trend (derived)"],
     stageTrend.rows.map((r) => [
       r.stage,
       ...stageTrend.versions.map((v) => (r.byVersion[v] === null ? null : usd(r.byVersion[v]))),
@@ -2197,6 +2494,7 @@ export function renderReport(summaries, ctx) {
     ]),
     "no version-tagged sessions to compare across releases",
   ));
+  L.push("", "_Dollar cells are derived per-version medians; Trend is derived._");
   // stageByVersionTable drops the undetectable-version cohort from every column and every trend,
   // because "unknown" cannot sit on a version axis — right, but silent, and an omission nobody
   // names reads as a clean bill of health. cohortTable is the sibling that keeps that bucket,
@@ -2212,18 +2510,37 @@ export function renderReport(summaries, ctx) {
 
   section("### Cost by stage (this window)", "cost-by-stage-window");
   L.push(...markdownTable(
-    ["Stage", "Cost", "% of window", "Median depth", "Trend vs previous window"],
+    ["Stage", "Cost (observed)", "% of window (derived)", "Median depth (derived)",
+      "Trend vs previous window (derived)"],
     stageWindowTable(summaries, previousSummaries).map((r) => [
       r.stage, usd(r.total), `${r.pctOfWindow.toFixed(1)}%`, r.medianDepth, r.trend,
     ]),
     "no stage cost recorded in this window",
   ));
 
+  // The raw observed outcome family (spec C3): one row per run carrying a quality signal, its
+  // raw verdicts/counts straight off the run records. conformancePass is null exactly when no
+  // member reported a quality signal, so that null is the "no outcome to observe" filter (GC3).
+  section("## Outcome (observed)", "outcome-observed");
+  L.push(...markdownTable(
+    ["Run", "Version", "Conformance pass (observed)", "Review rounds (observed)", "Retries (observed)"],
+    settledRuns
+      .filter((r) => r.conformancePass != null)
+      .sort((a, b) => compareVersions(a.version, b.version) || byName(a.runId, b.runId))
+      .map((r) => [
+        r.runId.slice(0, 8), r.version,
+        r.conformancePass ? "pass" : "fail", r.reviewRounds, r.retries,
+      ]),
+    "no run carries an outcome signal yet",
+  ));
+
   section("## Your culprits", "culprits");
   L.push(...markdownTable(
-    ["Culprit", "Kind", "Cost", "Occurrences", "Δ vs previous", "Trend"],
+    ["Culprit", "Kind", "Cost (observed)", "Occurrences (observed)", "Δ vs previous (derived)",
+      "Trend (derived)", "Versions (observed)", "Lifecycle (derived)"],
     culpritTable(summaries, vocab).map((r) => [
       r.culprit, r.kind, impactText(r.impact), r.occurrences, deltaText(r.delta), r.trend,
+      r.versions ? `${r.versions[0]}..${r.versions[1]}` : null, r.lifecycle,
     ]),
     "no scored culprit events in this corpus",
   ));
@@ -2249,8 +2566,19 @@ export function renderReport(summaries, ctx) {
   const anomalies = candidates
     .filter((c) => c.type !== "version-improvement")
     .sort((a, b) => anomalyWeight(b) - anomalyWeight(a));
-  L.push(...(anomalies.length
-    ? anomalies.map((c) => `- ${formatCandidate(c)}`)
+  // The run-level residual (issue #114): a run dearer than its matched cohort, ranked by the excess.
+  // A run in a cohort of one has no peer to set an expectation, so it is reported as unmatched
+  // rather than as an outlier (QC1). Cheaper-than-cohort runs are not anomalies and drop out.
+  const excessLines = excess
+    .filter((r) => r.confidence === "insufficient" || (r.excess ?? 0) > 0)
+    .sort((a, b) => (b.excess ?? -Infinity) - (a.excess ?? -Infinity))
+    .map((r) => r.confidence === "insufficient"
+      ? `- EXCESS-COST: ${r.matchKey} version=${r.version} unmatched — no expectation (cohort n=${r.cohortN})`
+      : `- EXCESS-COST: ${r.matchKey} version=${r.version} actual=${usd(r.actual)} ` +
+        `expected=${usd(r.expected)} excess=${usd(r.excess)} (${r.confidence}, n=${r.cohortN})`);
+  const anomalyLines = [...anomalies.map((c) => `- ${formatCandidate(c)}`), ...excessLines];
+  L.push(...(anomalyLines.length
+    ? anomalyLines
     : ["_No rows: no cost anomalies in this corpus._"]));
 
   section("## Previously promoted — did it hold", "promoted");
@@ -2582,6 +2910,11 @@ function eventCountsByStage(slug, sources) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0]));
 }
 
+// Thrown by issueBody when a culprit was last observed entirely outside the recency band: a
+// problem a newer release may already have addressed, so drafting an issue for it would file
+// stale noise. main() prints the message and exits non-zero rather than emitting a body.
+export class StaleCulpritError extends Error {}
+
 // A ready-to-paste GitHub issue for one culprit: a title, two labels, and a body of enums and
 // counts. Nothing here posts anything, and nothing here recomputes a figure — the cohort row and
 // the culprit's cost are read from the tables the report rendered.
@@ -2590,6 +2923,28 @@ export function issueBody(slug, summaries, tables, shape) {
   const entry = vocab.find((v) => v.slug === slug) ?? null;
   const named = sessionsNaming(slug, summaries ?? []);
   const row = cohortRowFor(named, tables?.versionProfile);
+
+  // Version-scope guard: judge the culprit's occurrence versions against the recency band, so a
+  // draft is never filed for a problem a newer release has already moved past. Reuses recencyBand
+  // and releaseDates (QC2). A culprit whose sessions carry no detectable version can't be judged
+  // stale, so the guard only fires when there is at least one positioned occurrence.
+  const installed = installedVersion();
+  const band = recencyBand(installed, releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8")));
+  const occVersions = [...new Set(named.map((s) => s.pluginVersion).filter((v) => v && v !== "unknown"))]
+    .sort(compareVersions);
+  const minVersion = occVersions[0];
+  const maxVersion = occVersions.at(-1);
+  const anyInBand = occVersions.some((v) => inBand(v, band));
+  if (occVersions.length && !anyInBand)
+    throw new StaleCulpritError(
+      `culprit '${slug}' not observed on installed ${installed} — last seen ${maxVersion}`);
+  const partiallyStale = occVersions.length && !occVersions.every((v) => inBand(v, band));
+  const scopeLines = [];
+  if (occVersions.length) {
+    scopeLines.push(`Version scope: versions=[${minVersion}..${maxVersion}]`);
+    if (maxVersion !== installed)
+      scopeLines.push(`- not observed on installed (${installed}) — last seen ${maxVersion}`);
+  }
   const culprit = (tables?.culprits ?? []).find((r) => r.culprit === slug) ?? null;
   const events = eventCountsByStage(slug, named);
   const wins = winTable(summaries ?? [], vocab)
@@ -2597,12 +2952,16 @@ export function issueBody(slug, summaries, tables, shape) {
     .join(", ");
 
   const L = [
+    // A partially-stale culprit — seen inside the band but also before it — leads with a banner so
+    // the reader knows the newest release may have already changed the picture.
+    ...(partiallyStale ? [`> ⚠ STALE — last seen ${maxVersion}, installed ${installed}`, ""] : []),
     `Culprit: ${slug} (${culprit?.kind ?? entry?.kind ?? "unclassified"})`,
     // Unknown, never dropped: a session whose version or profile could not be extracted renders
     // under the literal `unknown` the cohort table gives it.
     row
       ? `Plugin version: ${row.version} · Profile: ${row.profile}`
       : "Plugin version: unrecorded · Profile: unrecorded",
+    ...scopeLines,
     `Repo shape: monorepo=${shape?.monorepo ?? "unknown"} · language=${shape?.language ?? "unknown"} ` +
       `· test-runner=${shape?.testRunner ?? "unknown"}`,
     "",

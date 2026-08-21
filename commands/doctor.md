@@ -15,6 +15,10 @@ invocations:
   references in `<path>` against `references/config-changelog.md`.
 - `--json` for machine output; `--depth` for the bare depth probe.
 
+The report opens with an `At a glance` TL;DR — workload-adjusted, matched-cohort cost movement
+across the recency band — and the Cost-by-version table adds derived `$/main-turn`, `$/sub-turn`,
+and turns-per-task columns alongside the raw `$/cycle`.
+
 Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/profiling-sessions.md`. It starts no cycle and writes no state file.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

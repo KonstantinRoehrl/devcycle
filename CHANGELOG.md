@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.15.0 — 2026-08-21
+
+- feat(doctor): trustworthy version-scoped candidates and workload-adjusted cost comparison
+
+Makes `doctor`'s version and cost reporting trustworthy at face value, closing two issues where
+the comparison methodology produced misleading conclusions (#113, #114).
+
+**Version-scoped candidates with a temporal lifecycle (#113).** Candidates and issue-drafts now
+carry the version range they were observed in, so a problem already fixed in a later version stops
+generating fresh issues and a stale-issue guard marks existing drafts against the version they
+belong to. Low-confidence, current-version culprits are scoped and labelled rather than surfaced as
+if settled.
+
+**Workload-adjusted cohort comparison (#114).** Version- and stage-cost comparisons now match
+cohorts by workload signature (a diff-stat captured at cycle close) instead of comparing raw
+per-session cost, removing the confound where a longer user-driven session read as devcycle being
+less efficient. A new `workload` run-record kind and its diff-stat writer feed run-level
+aggregation, a recency band, and the workload join in `doctor.mjs`.
+
+**Report-layer honesty.** Every report metric is now tagged observed vs. derived, the raw observed
+metric families are rendered, and the Cost-by-stage caption reflects the derived medians it actually
+reports.
+
 ## 0.14.3 — 2026-08-21
 
 - fix(pipeline): close the remaining audit batches — reuse, surface, robustness, instruction cost, and vocabulary
