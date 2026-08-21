@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Splits every paragraph of the runtime surface — commands/, playbooks/, agents/,
-// references/ (or --dir's *.md files) — normalizes it, and flags near-duplicate pairs,
+// references/ (or --dir's *.md files), plus DESIGN.md and CONTRIBUTING.md — normalizes it,
+// and flags near-duplicate pairs,
 // including two paragraphs of the same file. Two passes over one normalization:
 //   - shingled Jaccard over whole paragraphs, which catches near-verbatim restatement;
 //   - Jaccard over content words alone, which catches the same rule stated in different
@@ -76,6 +77,11 @@ function targetFiles() {
     if (!existsSync(abs)) continue;
     for (const name of [...readdirSync(abs)].sort())
       if (name.endsWith(".md")) files.push(join(abs, name));
+  }
+  const ROOT_FILES = ["DESIGN.md", "CONTRIBUTING.md"];
+  for (const name of ROOT_FILES) {
+    const abs = join(root, name);
+    if (existsSync(abs)) files.push(abs);
   }
   return files;
 }

@@ -41,14 +41,13 @@ including its instruction to produce the diff yourself.
    against it (a brief with no `**Evidence:**` class line is `red-green`).
    Open the before/after files the report names and read them yourself; the
    tail in the report is a convenience copy and is never what you judge.
-   **Reject on any of that file's rejection conditions** — a named evidence
-   file missing or empty, an exit status contradicting the declared class in
-   either direction, or a class that mismatches the diff — even when the
-   diff looks correct on inspection. A report whose evidence you cannot open
-   and check is a report you cannot verify, and a report whose named path
-   does not exist is a missing file, not a formatting slip.
+   **Reject on any of `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` §
+   Reviewer verdicts' rejection conditions**, even when the diff looks
+   correct on inspection. A report whose evidence you cannot open and check
+   is a report you cannot verify, and a report whose named path does not
+   exist is a missing file, not a formatting slip.
    - Reject a report that states a load-bearing claim about source state as bare fact with no backing command and no assumption label (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims).
-   - For a `red-green` task, confirm the red output shows the test's own assertion failing, not a bare missing-symbol / import / collection error; reject when the red never discriminated the behavior.
+   - For a `red-green` task, apply `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Reviewer verdicts' discriminating-failure condition to the red/before output.
 
 ## Reviewer hygiene
 
@@ -57,18 +56,12 @@ false-positive guards that bind you. Read it before judging anything.
 
 ## Verdict format
 
-```markdown
-Verdict: accept | needs-changes
-
-1. [severity] <finding, symptom first>
-2. [severity] <finding, symptom first>
-...
-```
-
-This markdown verdict block is returned in the reviewer's envelope for the
-coordinator to persist to `.devcycle/findings/<task-id>-round-<n>.md`; the
-short envelope `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`'s `## Return
-envelopes` defines is what the dispatch actually returns.
+Return the verdict in the shape `${CLAUDE_PLUGIN_ROOT}/references/evidence.md`
+§ Reviewer verdicts defines. That markdown verdict block is returned in the
+reviewer's envelope for the coordinator to persist to
+`.devcycle/findings/<task-id>-round-<n>.md`; the short envelope
+`${CLAUDE_PLUGIN_ROOT}/references/delegation.md`'s `## Return envelopes`
+defines is what the dispatch actually returns.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`, each finding carrying
 the severity vocabulary, the core fields, and the symptom-first phrasing
