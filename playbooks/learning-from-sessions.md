@@ -222,7 +222,8 @@ mechanizable rung** and records `whyNotHigher`:
 and, where the lesson passes the skill-placement test, `~/.claude/devcycle/learnings/global/lessons.md`.
 **Screen every line with `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <path>`
 before writing either**: these files sit outside the repo, where no commit hook or CI gate will ever
-see them.
+see them. If the screen fails, `--auto-redact` with the same `--file` (or `--dir`) rewrites the
+flagged spans in place before you retry the write.
 
 Then, per adopted candidate:
 

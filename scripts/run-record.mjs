@@ -45,9 +45,12 @@ export function hashSession(sessionId) {
   return sha256(sessionId);
 }
 
-export function recordPath(toplevel, runId) {
+export function runsDirForRepo(toplevel) {
   const base = process.env.DEVCYCLE_RUNS_DIR ?? join(homedir(), ".claude", "devcycle", "runs");
-  return join(base, repoSlug(toplevel), `${runId}.jsonl`);
+  return join(base, repoSlug(toplevel));
+}
+export function recordPath(toplevel, runId) {
+  return join(runsDirForRepo(toplevel), `${runId}.jsonl`);
 }
 
 export function subSchemaFor(schema, kind) {
