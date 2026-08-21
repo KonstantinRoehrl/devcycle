@@ -13,8 +13,9 @@ import {
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
   parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
   renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates,
+  recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
 } from "../../scripts/doctor.mjs";
-import { verify, releaseDates, defaultRunCheck } from "../../scripts/verification.mjs";
+import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
@@ -343,6 +344,28 @@ test("culprit impact figures come from impactScores and from no second formula",
   const [row] = culpritTable([s], VOCAB);
   assert.equal(row.impact, expected.impact);
   assert.equal(row.occurrences, expected.frequency);
+});
+
+test("lifecycle classifies by occurrence versions against the band", () => {
+  const dates = new Map([["0.12.0","2026-08-05"],["0.13.0","2026-08-10"],["0.14.0","2026-08-15"],
+    ["0.14.1","2026-08-18"],["0.14.2","2026-08-20"],["0.14.3","2026-08-21"]]);
+  const band = recencyBand("0.14.3", dates, 2);  // [0.14.1,0.14.2,0.14.3]
+  assert.deepEqual(band, ["0.14.1", "0.14.2", "0.14.3"]);
+  assert.equal(lifecycle(["0.14.2","0.14.3"], band, dates), "active");
+  assert.equal(lifecycle(["0.14.3"], band, dates), "active");
+  assert.equal(lifecycle(["0.12.0","0.14.1"], band, dates), "active"); // one in band
+  assert.equal(lifecycle(["0.14.0"], band, dates), "unresolved");      // immediate pre-band
+  assert.equal(lifecycle(["0.12.0"], band, dates), "legacy");          // far pre-band
+});
+
+test("emitCandidates gives a depth-outlier a version range and formatCandidate renders it", () => {
+  const s = sum({ pluginVersion: "0.13.0", startupFloor: { main: [10000] }, medianDepth: 40000 });
+  const depth = emitCandidates([s]).find((c) => c.type === "depth-outlier");
+  assert.ok(depth, "no depth-outlier candidate");
+  assert.deepEqual(depth.versions, ["0.13.0", "0.13.0"]);
+  const line = formatCandidate(depth);
+  assert.match(line, /versions=\[/);
+  assert.match(line, /0\.13\.0/);
 });
 
 test("a version-improvement candidate is a win, not a neutral candidate", () => {
@@ -786,16 +809,16 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
     // Your culprits — out to the row's end, for the same reason as the cohort row above: a
     // needle that stopped at the Δ column still matched after the Trend column was deleted.
-    "| partial-evidence-capture | friction | $6.00 | 2 | first seen | insufficient data |",
+    "| partial-evidence-capture | friction | $6.00 | 2 | first seen | insufficient data | 0.12.0..0.12.0 | legacy |",
     // Compliance
     "- CANDIDATE: inherited-model inherited=2/5",
     // Your wins: a win event, and a version-over-version improvement
     "| first-round-clean-accept | $9.00 | 3 |",
     "| execution 0.11.0→0.12.0 | $5.00 | 4 | down |",
     // Cost anomalies, one line per candidate type the report can raise
-    "- CANDIDATE: cost-outlier skill=execution delta=900.0% dollars=$100.00 sessions=7",
-    "- CANDIDATE: depth-outlier dollars=$15.00 sessions=1 low confidence: n=1",
-    "- CANDIDATE: version-regression skill=planning 0.11.0->0.12.0 delta=+$9.00 (900.0%) dollars=$10.00 sessions=3",
+    "- CANDIDATE: cost-outlier skill=execution delta=900.0% dollars=$100.00 sessions=7 versions=[0.11.0..0.12.0]",
+    "- CANDIDATE: depth-outlier dollars=$15.00 sessions=1 versions=[0.12.0..0.12.0] low confidence: n=1",
+    "- CANDIDATE: version-regression skill=planning 0.11.0->0.12.0 delta=+$9.00 (900.0%) dollars=$10.00 sessions=3 versions=[0.11.0..0.12.0]",
     "- CANDIDATE: unpriced-model model=some-unpriced-model count=3 sessions=1 low confidence: n=1",
     // Appendix
     "claude-opus-5 $48.00",
@@ -1001,8 +1024,13 @@ test("this repo, which has no package manifest, is not a monorepo and has no kno
   assert.equal(shape.testRunner, "unknown");
 });
 
+// A draftable culprit must have been seen inside the recency band, or issueBody's version guard
+// refuses it as stale. The installed version is by definition the newest band member, so the draft
+// fixtures are pinned to it rather than to a literal that would fall out of band on the next release.
+const DRAFT_VERSION = installedVersion();
+
 const draftSummaries = [1, 2, 3].map((n) => sum({
-  id: `s${n}`, costUSD: 4, costByStage: { execution: 4 },
+  id: `s${n}`, pluginVersion: DRAFT_VERSION, costUSD: 4, costByStage: { execution: 4 },
   impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
   culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
 }));
@@ -1021,7 +1049,7 @@ test("the issue title and labels follow the fixed form", () => {
 test("the draft carries the same cohort figure the report renders for that row", () => {
   const tables = draftTables();
   const d = issueBody("partial-evidence-capture", draftSummaries, tables, repoShape(process.cwd()));
-  const row = tables.versionProfile.find((r) => r.version === "0.12.0" && r.profile === "thorough");
+  const row = tables.versionProfile.find((r) => r.version === DRAFT_VERSION && r.profile === "thorough");
   assert.ok(d.body.includes(row.medianCostPerCycle.toFixed(2)), "the draft's cohort figure differs from the table's");
   assert.ok(d.body.includes(String(row.sessions)));
 });
@@ -1030,12 +1058,12 @@ test("the draft carries the same cohort figure the report renders for that row",
 // cohort would otherwise state a figure the report that produced it declines to stand behind.
 test("a low-confidence cohort carries the report's own qualifier, not a bare count", () => {
   const summaries = [1, 2].map((n) => sum({
-    id: `s${n}`, costUSD: 4, costByStage: { execution: 4 },
+    id: `s${n}`, pluginVersion: DRAFT_VERSION, costUSD: 4, costByStage: { execution: 4 },
     impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
     culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
   }));
   const tables = { versionProfile: versionProfileTable(summaries), culprits: culpritTable(summaries, VOCAB) };
-  const row = tables.versionProfile.find((r) => r.version === "0.12.0" && r.profile === "thorough");
+  const row = tables.versionProfile.find((r) => r.version === DRAFT_VERSION && r.profile === "thorough");
   assert.equal(row.lowConfidence, true);
   const d = issueBody("partial-evidence-capture", summaries, tables, repoShape(process.cwd()));
   assert.ok(d.body.includes("2 (low confidence: n<3)"), "the draft quotes a count the report qualifies");
@@ -1083,11 +1111,40 @@ test("the draft carries no path, no machine identity, and no free text beyond th
 
 test("a culprit with no vocabulary entry is still offered a draft", () => {
   const summaries = [sum({
+    pluginVersion: DRAFT_VERSION,
     impact: [{ key: "review-reject:execution", event: "review-reject", stage: "execution", frequency: 1, impact: 2 }],
   })];
   const tables = { versionProfile: versionProfileTable(summaries), culprits: culpritTable(summaries, VOCAB) };
   const d = issueBody("review-reject:execution", summaries, tables, repoShape(process.cwd()));
   assert.match(d.title, /^\[culprit:/);
+});
+
+// The version guard: a culprit last seen outside the recency band names a problem a newer
+// release may already have addressed, so drafting an issue for it would file stale noise.
+const staleCulpritCorpus = (versions) => versions.map((v, n) => sum({
+  id: `st${n}`, pluginVersion: v, costUSD: 4, costByStage: { execution: 4 },
+  impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
+  culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
+}));
+const staleCulpritTables = (corpus) => ({
+  versionProfile: versionProfileTable(corpus),
+  culprits: culpritTable(corpus, VOCAB),
+});
+
+test("issueBody refuses a wholly-stale culprit and warns on a partial one", () => {
+  // a culprit seen only at 0.12.0 (outside the band) -> throws StaleCulpritError
+  const STALE_CORPUS = staleCulpritCorpus(["0.12.0", "0.12.0"]);
+  assert.throws(
+    () => issueBody("partial-evidence-capture", STALE_CORPUS, staleCulpritTables(STALE_CORPUS), repoShape(process.cwd())),
+    (e) => e instanceof StaleCulpritError,
+  );
+  // a culprit seen at 0.12.0 and 0.14.3 -> draft carries the STALE banner and the version range
+  const MIXED_CORPUS = staleCulpritCorpus(["0.12.0", "0.14.3"]);
+  const body = issueDraftLines(
+    issueBody("partial-evidence-capture", MIXED_CORPUS, staleCulpritTables(MIXED_CORPUS), repoShape(process.cwd())),
+  ).join("\n");
+  assert.match(body, /⚠ STALE/);
+  assert.match(body, /versions=\[0\.12\.0\.\.0\.14\.3\]/);
 });
 
 // Everything above exercises the draft as a value. The flag itself prints it, and what a filer
@@ -1106,7 +1163,7 @@ function issueBodyFixture() {
   const runs = join(dir, "runs", "some-repo");
   mkdirSync(runs, { recursive: true });
   writeFileSync(join(runs, "run.jsonl"), [
-    { kind: "run", schemaVersion: 1, runId: "0123456789abcdef", pluginVersion: "0.12.0", profile: "thorough", knobs: {} },
+    { kind: "run", schemaVersion: 1, runId: "0123456789abcdef", pluginVersion: DRAFT_VERSION, profile: "thorough", knobs: {} },
     { kind: "session", sessionHash: sha256("sess-abcdef123456") },
     { kind: "stage", stage: "execution", startedAt: "2026-07-20T09:00:00.000Z", endedAt: "2026-07-20T11:00:00.000Z", outcome: "complete" },
     { kind: "event", event: "gate-fail", stage: "execution", task: "1", culprit: "partial-evidence-capture", ts: "2026-07-20T10:00:00.000Z" },

@@ -313,6 +313,26 @@ export function recencyBand(installed, releaseDatesMap, span = 2) {
 
 export const inBand = (version, band) => band.includes(version);
 
+// A culprit's temporal standing against the recency band: where its occurrence versions sit
+// relative to the window a like-for-like comparison ranges over (recencyBand). Any occurrence
+// inside the band means the problem is still live ("active"). Entirely before the band, the split
+// turns on the newest version it was seen at: the one release immediately below the band is
+// "unresolved" (it was happening right up to the window and may simply not have recurred yet),
+// anything older is "legacy" (a problem a newer release has very likely moved past). "fixed" and
+// "regressed" stay members of the return type for band-relative shapes a later refinement may
+// distinguish; the classifier here resolves to the three the corpus can currently evidence.
+// @returns {"active"|"regressed"|"fixed"|"legacy"|"unresolved"}
+export function lifecycle(versionsSeen, band, releaseDatesMap) {
+  const seen = (versionsSeen ?? []).filter((v) => v && v !== "unknown");
+  if (!seen.length) return "legacy";
+  if (seen.some((v) => inBand(v, band))) return "active";
+  // Entirely pre-band: is the newest occurrence the single release immediately below the band?
+  const released = [...(releaseDatesMap?.keys() ?? [])].sort(compareVersions);
+  const preBand = band.length ? released[released.indexOf(band[0]) - 1] : undefined;
+  const newestSeen = [...seen].sort(compareVersions).at(-1);
+  return preBand && newestSeen === preBand ? "unresolved" : "legacy";
+}
+
 // One row per distinct run, joining the run's member sessions into a run-level record. Sessions
 // with no runId stay observational and never enter a run (GC5). version/profile come from the
 // first member that actually reported one (not "unknown"); the workload fields come from the
@@ -534,6 +554,7 @@ export function emitCandidates(summaries) {
           skill,
           version_from: from,
           version_to: to,
+          versions: [from, to],
           delta_pct,
           from_dollars: fromMedian,
           dollars: toMedian,
@@ -559,6 +580,7 @@ export function emitCandidates(summaries) {
         skill: null,
         version_from: null,
         version_to: null,
+        versions: [s.pluginVersion, s.pluginVersion],
         delta_pct: null,
         dollars: s.costUSD ?? null,
         sessions_sampled: 1,
@@ -569,27 +591,31 @@ export function emitCandidates(summaries) {
   // Cost outliers — a run costing far more than its peers for the same skill, independent
   // of any version-cohort comparison (fires even with a single version observed, unlike
   // version-regression above, which needs two adjacent cohorts to compare).
-  const costsBySkill = new Map(); // skill -> [dollars]
+  const costsBySkill = new Map(); // skill -> [{ dollars, version }]
   for (const s of settled) {
     for (const [skill, dollars] of Object.entries(s.costByStage ?? {})) {
       if (!costsBySkill.has(skill)) costsBySkill.set(skill, []);
-      costsBySkill.get(skill).push(dollars);
+      costsBySkill.get(skill).push({ dollars, version: s.pluginVersion });
     }
   }
-  for (const [skill, dollars] of costsBySkill) {
-    if (dollars.length < 3) continue; // too few runs to call anything a peer outlier
-    const skillMedian = median(dollars);
+  for (const [skill, entries] of costsBySkill) {
+    if (entries.length < 3) continue; // too few runs to call anything a peer outlier
+    const skillMedian = median(entries.map((e) => e.dollars));
     if (skillMedian <= 0) continue;
-    for (const d of dollars) {
+    // The version span of the skill's peer set — the range the outlier is measured within.
+    const skillVersions = entries.map((e) => e.version).filter((v) => v && v !== "unknown").sort(compareVersions);
+    const versions = skillVersions.length ? [skillVersions[0], skillVersions.at(-1)] : null;
+    for (const { dollars: d } of entries) {
       if (d > skillMedian * 3) {
         candidates.push({
           type: "cost-outlier",
           skill,
           version_from: null,
           version_to: null,
+          versions,
           delta_pct: ((d - skillMedian) / skillMedian) * 100,
           dollars: d,
-          sessions_sampled: dollars.length,
+          sessions_sampled: entries.length,
         });
       }
     }
@@ -1113,6 +1139,7 @@ export function formatCandidate(c) {
   if (c.dollars != null) parts.push(`dollars=${usd(c.dollars)}`);
   if (c.count != null) parts.push(`count=${c.count}`);
   parts.push(`sessions=${c.sessions_sampled}`);
+  if (c.versions) parts.push(`versions=[${c.versions[0]}..${c.versions[1]}]`);
   if (isLowConfidence(c)) parts.push("low confidence: n=1");
   return `CANDIDATE: ${parts.join(" ")}`;
 }
@@ -1524,7 +1551,19 @@ function main() {
       console.error(`doctor: no culprit "${args.issueBody}" in this corpus`);
       process.exit(1);
     }
-    const draft = issueBody(args.issueBody, result.sessions, tables, repoShape(process.cwd()));
+    let draft;
+    try {
+      draft = issueBody(args.issueBody, result.sessions, tables, repoShape(process.cwd()));
+    } catch (e) {
+      // A culprit last seen outside the recency band drafts stale noise; refuse it, print why,
+      // and exit non-zero without emitting a body.
+      if (e instanceof StaleCulpritError) {
+        console.error(`doctor: ${e.message}`);
+        process.exitCode = 1;
+        return;
+      }
+      throw e;
+    }
     for (const line of issueDraftLines(draft)) console.log(line);
     return;
   }
@@ -1816,7 +1855,7 @@ function agreedSlug(slugLists) {
 // below, so the culprits and the wins can never disagree about what a key cost or how often it
 // fired. The dollar figures are summarizeSession's own impactScores output — this adds them up
 // and never recomputes them, per the one-formula constraint.
-function impactRows(summaries, vocab = []) {
+function impactRows(summaries, vocab = [], band = [], dates = new Map()) {
   const byKey = new Map();
   for (const s of summaries) {
     const version = s.pluginVersion ?? "unknown";
@@ -1857,6 +1896,8 @@ function impactRows(summaries, vocab = []) {
       byVersion.set(c.version, running === undefined ? c.impact
         : running === null || c.impact === null ? null : running + c.impact);
     }
+    // The version span this key was observed across, and its temporal standing against the band.
+    const versionsSeen = [...byVersion.keys()].sort(compareVersions);
     return {
       key: agg.key,
       name: slug ?? agg.key,
@@ -1866,10 +1907,13 @@ function impactRows(summaries, vocab = []) {
       isWin: WIN_EVENTS.has(agg.event) || entry?.kind === "win",
       impact: agg.measurable ? agg.impact : null,
       occurrences: agg.occurrences,
+      // Absent, not zero (QC1): a key seen only under an undetectable version has no range.
+      versions: versionsSeen.length ? [versionsSeen[0], versionsSeen.at(-1)] : null,
+      lifecycle: versionsSeen.length ? lifecycle(versionsSeen, band, dates) : null,
       delta: cohorts.length
         ? deltaAgainstPrevious(cohorts, cohorts.length - 1, (r) => r.impact)
         : { state: "first-seen", pct: null },
-      trend: trendAcross([...byVersion.keys()].sort(compareVersions).map((v) => byVersion.get(v))),
+      trend: trendAcross(versionsSeen.map((v) => byVersion.get(v))),
     };
   });
 }
@@ -1877,11 +1921,17 @@ function impactRows(summaries, vocab = []) {
 // The friction this corpus is paying for, priciest first: what it cost, how often it happened,
 // and whether it is getting better.
 export function culpritTable(summaries, vocab) {
-  return impactRows(summaries, vocab)
+  // The recency window every culprit's lifecycle is judged against, built once from the installed
+  // version and the plugin's own changelog (reusing recencyBand/releaseDates — QC2).
+  const dates = releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8"));
+  const band = recencyBand(installedVersion(), dates);
+  return impactRows(summaries, vocab, band, dates)
     .filter((r) => !r.isWin)
-    .map(({ name, kind, impact, occurrences, delta, trend }) =>
-      ({ culprit: name, kind, impact, occurrences, delta, trend }))
-    .sort(byImpactDesc);
+    .map(({ name, kind, impact, occurrences, delta, trend, versions, lifecycle: life }) =>
+      ({ culprit: name, kind, impact, occurrences, delta, trend, versions, lifecycle: life }))
+    // Live problems first, then by money at stake: a culprit still occurring in the recency band
+    // is what the reader can act on, ahead of one a newer release has likely moved past.
+    .sort((a, b) => (b.lifecycle === "active") - (a.lifecycle === "active") || byImpactDesc(a, b));
 }
 
 // What is already working, biggest first: the win events the corpus recorded, plus the
@@ -2301,9 +2351,10 @@ export function renderReport(summaries, ctx) {
 
   section("## Your culprits", "culprits");
   L.push(...markdownTable(
-    ["Culprit", "Kind", "Cost", "Occurrences", "Δ vs previous", "Trend"],
+    ["Culprit", "Kind", "Cost", "Occurrences", "Δ vs previous", "Trend", "Versions", "Lifecycle"],
     culpritTable(summaries, vocab).map((r) => [
       r.culprit, r.kind, impactText(r.impact), r.occurrences, deltaText(r.delta), r.trend,
+      r.versions ? `${r.versions[0]}..${r.versions[1]}` : null, r.lifecycle,
     ]),
     "no scored culprit events in this corpus",
   ));
@@ -2662,6 +2713,11 @@ function eventCountsByStage(slug, sources) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0]));
 }
 
+// Thrown by issueBody when a culprit was last observed entirely outside the recency band: a
+// problem a newer release may already have addressed, so drafting an issue for it would file
+// stale noise. main() prints the message and exits non-zero rather than emitting a body.
+export class StaleCulpritError extends Error {}
+
 // A ready-to-paste GitHub issue for one culprit: a title, two labels, and a body of enums and
 // counts. Nothing here posts anything, and nothing here recomputes a figure — the cohort row and
 // the culprit's cost are read from the tables the report rendered.
@@ -2670,6 +2726,28 @@ export function issueBody(slug, summaries, tables, shape) {
   const entry = vocab.find((v) => v.slug === slug) ?? null;
   const named = sessionsNaming(slug, summaries ?? []);
   const row = cohortRowFor(named, tables?.versionProfile);
+
+  // Version-scope guard: judge the culprit's occurrence versions against the recency band, so a
+  // draft is never filed for a problem a newer release has already moved past. Reuses recencyBand
+  // and releaseDates (QC2). A culprit whose sessions carry no detectable version can't be judged
+  // stale, so the guard only fires when there is at least one positioned occurrence.
+  const installed = installedVersion();
+  const band = recencyBand(installed, releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8")));
+  const occVersions = [...new Set(named.map((s) => s.pluginVersion).filter((v) => v && v !== "unknown"))]
+    .sort(compareVersions);
+  const minVersion = occVersions[0];
+  const maxVersion = occVersions.at(-1);
+  const anyInBand = occVersions.some((v) => inBand(v, band));
+  if (occVersions.length && !anyInBand)
+    throw new StaleCulpritError(
+      `culprit '${slug}' not observed on installed ${installed} — last seen ${maxVersion}`);
+  const partiallyStale = occVersions.length && !occVersions.every((v) => inBand(v, band));
+  const scopeLines = [];
+  if (occVersions.length) {
+    scopeLines.push(`Version scope: versions=[${minVersion}..${maxVersion}]`);
+    if (maxVersion !== installed)
+      scopeLines.push(`- not observed on installed (${installed}) — last seen ${maxVersion}`);
+  }
   const culprit = (tables?.culprits ?? []).find((r) => r.culprit === slug) ?? null;
   const events = eventCountsByStage(slug, named);
   const wins = winTable(summaries ?? [], vocab)
@@ -2677,12 +2755,16 @@ export function issueBody(slug, summaries, tables, shape) {
     .join(", ");
 
   const L = [
+    // A partially-stale culprit — seen inside the band but also before it — leads with a banner so
+    // the reader knows the newest release may have already changed the picture.
+    ...(partiallyStale ? [`> ⚠ STALE — last seen ${maxVersion}, installed ${installed}`, ""] : []),
     `Culprit: ${slug} (${culprit?.kind ?? entry?.kind ?? "unclassified"})`,
     // Unknown, never dropped: a session whose version or profile could not be extracted renders
     // under the literal `unknown` the cohort table gives it.
     row
       ? `Plugin version: ${row.version} · Profile: ${row.profile}`
       : "Plugin version: unrecorded · Profile: unrecorded",
+    ...scopeLines,
     `Repo shape: monorepo=${shape?.monorepo ?? "unknown"} · language=${shape?.language ?? "unknown"} ` +
       `· test-runner=${shape?.testRunner ?? "unknown"}`,
     "",
