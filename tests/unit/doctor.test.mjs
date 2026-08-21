@@ -15,6 +15,7 @@ import {
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
   emitComplianceCandidates, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
   reviewDepthCohortTable, deriveEvents, attributedCost, impactScores,
+  bandFor, recencyBand, inBand, runAggregates,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -2029,4 +2030,47 @@ test("parseArgs still returns every documented flag with its default", () => {
   assert.equal(a.until, null);
   assert.equal(a.drift, null);
   assert.equal(a.issueBody, null);
+});
+
+// --- run-level model: recency band, workload band, run aggregation ---
+
+// A session-summary-shaped fixture for the run-level tests: only the fields runAggregates
+// reads, defaulted so a test names just what it cares about.
+const sum = ({ id = "sess", runId = null, costUSD = 0, mainTurns = 0, subagentTurns = 0,
+  medianDepth = 0, pluginVersion = "unknown", profile = "unknown", quality = null,
+  workload = null } = {}) => ({
+  id, runId, costUSD, mainTurns, subagentTurns, medianDepth, pluginVersion, profile, quality,
+  workload,
+});
+
+test("recencyBand returns installed + N prior released versions, newest last", () => {
+  const dates = new Map([["0.13.0","2026-08-10"],["0.14.0","2026-08-15"],
+    ["0.14.1","2026-08-18"],["0.14.2","2026-08-20"],["0.14.3","2026-08-21"]]);
+  assert.deepEqual(recencyBand("0.14.3", dates, 2), ["0.14.1","0.14.2","0.14.3"]);
+  assert.deepEqual(recencyBand(null, dates, 2), []);
+  assert.equal(inBand("0.14.0", recencyBand("0.14.3", dates, 2)), false);
+  assert.equal(inBand("0.14.2", recencyBand("0.14.3", dates, 2)), true);
+});
+
+test("bandFor buckets changed lines by the published thresholds", () => {
+  assert.equal(bandFor(0), "XS");
+  assert.equal(bandFor(19), "XS");
+  assert.equal(bandFor(20), "S");
+  assert.equal(bandFor(499), "M");
+  assert.equal(bandFor(2000), "XL");
+  assert.equal(bandFor(null), null);
+});
+
+test("runAggregates joins sessions by runId and excludes run-less sessions", () => {
+  const wl = { kind:"workload", runId:"a".repeat(16), requestKind:"feature",
+    filesChanged:3, filesCreated:1, filesDeleted:0, insertions:120, deletions:30,
+    plannedTaskCount:2, waveCount:1 };
+  const s1 = sum({ id:"aaaa", runId:"a".repeat(16), costUSD:10, mainTurns:40, subagentTurns:60, workload:wl });
+  const s2 = sum({ id:"bbbb", runId:"a".repeat(16), costUSD:5,  mainTurns:20, subagentTurns:10, workload:null });
+  const orphan = sum({ id:"cccc", runId:null, costUSD:99 });
+  const runs = runAggregates([s1, s2, orphan]);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].costUSD, 15);
+  assert.equal(runs[0].workloadBand, "M");   // 150 changed lines
+  assert.equal(runs[0].changedLines, 150);
 });

@@ -286,6 +286,78 @@ export function compareVersions(a, b) {
   return 0;
 }
 
+// Buckets a run's changed-line count (insertions + deletions) into a size band by the published
+// thresholds (GC6 — no invented weighted score). A null count is workload-unknown, never zero.
+export function bandFor(changedLines) {
+  if (changedLines == null) return null;
+  if (changedLines < 20) return "XS";
+  if (changedLines < 100) return "S";
+  if (changedLines < 500) return "M";
+  if (changedLines < 2000) return "L";
+  return "XL";
+}
+
+// The installed version plus up to `span` semver-prior *released* versions, newest last — the
+// recency window a like-for-like comparison ranges over. Sorts the released set with the shared
+// compareVersions (QC2), then slices the window ending at the installed version. A dev checkout's
+// version may not be in the released set, so it is appended rather than assumed present.
+export function recencyBand(installed, releaseDatesMap, span = 2) {
+  if (!installed) return [];
+  const released = [...releaseDatesMap.keys()].sort(compareVersions);
+  const idx = released.indexOf(installed);
+  const end = idx === -1 ? released.length : idx + 1;   // installed may be unreleased (dev)
+  const start = Math.max(0, end - (span + 1));
+  const window = released.slice(start, end);
+  return window.includes(installed) ? window : [...window, installed];
+}
+
+export const inBand = (version, band) => band.includes(version);
+
+// One row per distinct run, joining the run's member sessions into a run-level record. Sessions
+// with no runId stay observational and never enter a run (GC5). version/profile come from the
+// first member that actually reported one (not "unknown"); the workload fields come from the
+// joined workload record and are null when the run wrote none (GC3 — absent, not zero).
+// The workload join is already resolved onto each summary by summarizeSession, so runRecords is
+// accepted for signature parity with the run-level readers but not re-read here.
+export function runAggregates(summaries, runRecords) {
+  void runRecords;
+  const byRun = new Map();
+  for (const s of summaries.filter((s) => s.runId)) {
+    if (!byRun.has(s.runId)) byRun.set(s.runId, []);
+    byRun.get(s.runId).push(s);
+  }
+  const firstKnown = (members, key) =>
+    members.map((m) => m[key]).find((v) => v && v !== "unknown") ?? "unknown";
+  const out = [];
+  for (const [runId, members] of byRun) {
+    const wl = members.map((m) => m.workload).find((w) => w) ?? null;
+    const changedLines = wl ? wl.insertions + wl.deletions : null;
+    const qualities = members.map((m) => m.quality).filter(Boolean);
+    out.push({
+      runId,
+      version: firstKnown(members, "pluginVersion"),
+      profile: firstKnown(members, "profile"),
+      requestKind: wl?.requestKind ?? null,
+      workloadBand: bandFor(changedLines),
+      changedLines,
+      costUSD: members.reduce((n, m) => n + (m.costUSD ?? 0), 0),
+      mainTurns: members.reduce((n, m) => n + (m.mainTurns ?? 0), 0),
+      subagentTurns: members.reduce((n, m) => n + (m.subagentTurns ?? 0), 0),
+      medianDepth: median(members.map((m) => m.medianDepth ?? 0)),
+      tasks: wl?.plannedTaskCount ?? 0,
+      // No conformance-pass signal exists on a summary yet; derived from the quality signals when
+      // any member carries one (pass = zero conformance failures), null when none do (QC1).
+      conformancePass: qualities.length
+        ? qualities.every((q) => (q.conformanceFailures ?? 0) === 0)
+        : null,
+      reviewRounds: qualities.reduce((n, q) => n + (q.reviewRounds ?? 0), 0),
+      retries: qualities.reduce((n, q) => n + (q.retries ?? 0), 0),
+      sessionIds: members.map((m) => m.id),
+    });
+  }
+  return out;
+}
+
 // A session whose plugin version cannot be read is bucketed as "unknown" and reported, never
 // dropped. extractPluginVersion regexes the version out of transcript JSON, so dev-checkout
 // sessions — the ones that built devcycle — yielded null and were invisible to devcycle's own
@@ -699,7 +771,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
       // file and do not reset on a `session` line.
       let runId = null, pluginVersion = null, profile = null, knobs = null, schemaMismatch;
       let current = null;
-      const windows = new Map(); // sessionHash -> { stages, dispatches, verdicts, events }, file order
+      const windows = new Map(); // sessionHash -> { stages, dispatches, verdicts, events, workloads }, file order
       for (const line of readFileSync(join(dir, repo.name, f), "utf8").split("\n").filter(Boolean)) {
         let o;
         try { o = JSON.parse(line); } catch { continue; } // a torn trailing line is normal
@@ -712,21 +784,27 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         } else if (o.kind === "session") {
           current = o.sessionHash;
           if (!windows.has(current))
-            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [] });
+            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [] });
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
         else if (o.kind === "event") { if (current) windows.get(current).events.push(o); }
+        else if (o.kind === "workload") { if (current) windows.get(current).workloads.push(o); }
       }
       for (const [h, w] of windows) {
-        const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, ...w };
+        // The run's workload is the last workload line written for the session (a rerun overwrites
+        // an earlier estimate); null when the run wrote none (GC3 — workload-unknown, not zero).
+        const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, ...w,
+          workload: w.workloads.at(-1) ?? null };
         const prior = bySession.get(h);
         bySession.set(h, prior
           ? { ...rec,
               stages: [...prior.stages, ...rec.stages],
               dispatches: [...prior.dispatches, ...rec.dispatches],
               verdicts: [...prior.verdicts, ...rec.verdicts],
-              events: [...prior.events, ...rec.events] }
+              events: [...prior.events, ...rec.events],
+              workloads: [...prior.workloads, ...rec.workloads],
+              workload: rec.workload ?? prior.workload ?? null }
           : rec);
       }
     }
@@ -973,6 +1051,8 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     // The full session id is still in hand here and the record is already resolved; a summary
     // carries only `id: sessionId.slice(0, 8)`, so nothing downstream could redo this join.
     runId: record?.runId ?? null,
+    // Joined by readRunRecords from the run's workload line; null when the run wrote none (GC3).
+    workload: record?.workload ?? null,
     // References/impact-scoring.md owns the formula; this is the only call site that scores a
     // session, and every table downstream reads the result rather than recomputing it.
     impact: record ? impactScores(record, costByStage) : null,
