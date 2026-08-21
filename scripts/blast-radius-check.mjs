@@ -80,11 +80,14 @@ for (const { text } of blocks) {
     // every "**Files:**" token through, so an override written with backticks or trailing
     // punctuation -- exactly how planners write paths elsewhere -- still matches `chg` below.
     const file = m ? normalizeFileToken(m[1]) : null;
-    if (!m || file === null) {
+    const test = m && m[2] !== undefined ? normalizeFileToken(m[2]) : null;
+    // A present "→ <test>" whose token does not normalize to a path is malformed just as a bad
+    // changed-file token is; otherwise it would silently widen the override from the single pair
+    // to every test-referencer of the changed file.
+    if (!m || file === null || (m[2] !== undefined && test === null)) {
       console.error(`blast-radius-check: malformed override (needs "<changed-file> [→ <test>] — <reason>"): ${line.trim()}`);
       process.exit(1);
     }
-    const test = m[2] !== undefined ? normalizeFileToken(m[2]) : null;
     overrides.push({ file, test, reason: m[3] });
   }
 }

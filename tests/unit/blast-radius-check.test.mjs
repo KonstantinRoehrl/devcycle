@@ -238,6 +238,24 @@ test("a one-character override reason with no space after the em-dash is accepte
   assert.match(out, /override/i);
 });
 
+// F1 guard: the `→ <test>` capture is normalized just like the changed-file capture, so a
+// pair-form override whose test token is a bare word (no path shape, normalizes to null) is a
+// loud malformed error -- not a silent widening of the override to clear every test-referencer
+// of the changed file. Without the guard this exits 0 (override acknowledged, widened to file
+// scope); with it, exit 1 malformed.
+test("a pair-form override whose test token is not a path is malformed, not a silent file-wide clear (F1 guard)", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md → config — bogus non-path test token",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 1);
+  assert.match(out, /malformed override/i);
+});
+
 test(".worktrees is not walked", () => {
   const repo = makeRepo({
     "scripts/x.mjs": "export const x = 1;\n",
