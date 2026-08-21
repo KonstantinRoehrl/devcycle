@@ -440,11 +440,8 @@ the same wave-formation invariants, ledger events, green gate, and review cycle 
 and a run have the same shape whichever engine produced them. Only the *source* of the
 mechanics differs.
 
-**What the profile may never touch:** the state file, handoff blocks, evidence classes, the
-coordinator's green-gate re-run, the `gitPolicy` clamps, branch discipline, the
-one-`task-reviewer` floor on the short paths, and the never-assume interview rule. A `lean`
-run may skip a stage; it never fakes one, and never reports a gate as passed that did not
-run. Cost is allowed to buy less depth, never a false claim.
+**What the profile may never touch:** the list in `references/config.md` § The profile. Cost is
+allowed to buy less depth, never a false claim.
 
 ### 15.3 The audit stage
 
