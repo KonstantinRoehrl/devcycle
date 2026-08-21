@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.0 — 2026-08-21
+
+- feat(doctor): trustworthy version-scoped candidates and workload-adjusted cost comparison
+
 ## 0.14.3 — 2026-08-21
 
 - fix(pipeline): close the remaining audit batches — reuse, surface, robustness, instruction cost, and vocabulary
