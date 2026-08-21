@@ -1,6 +1,6 @@
 # Evidence — classes, the file-backed contract, report and verdict shapes
 
-The single owner of how devcycle proves a task did what it claims. A skill, command,
+The single owner of how devcycle proves a task did what it claims. A playbook, command,
 or agent that needs any of this names this file and does not restate it.
 
 ## The three evidence classes

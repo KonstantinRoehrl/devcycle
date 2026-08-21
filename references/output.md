@@ -1,6 +1,6 @@
 # Output discipline
 
-The single owner of how every devcycle agent and skill reports. A skill, command, or
+The single owner of how every devcycle agent and playbook reports. A playbook, command, or
 agent that needs this names this file and does not restate it.
 
 > Report only what the caller needs in order to act. No preamble, no restatement of the
