@@ -202,6 +202,42 @@ test("an override with no reason is itself an error", () => {
   assert.match(out, /malformed override|needs a reason/i);
 });
 
+// F1: the override's changed-file token must go through the same normalization
+// (normalizeFileToken) as the declaration side, or a backtick-wrapped path -- exactly how
+// planners write paths in a **Files:** block -- never matches and the override is silently
+// ignored.
+test("an override whose changed-file token is backtick-wrapped still clears the hard-fail (F1)", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: `references/config.md` — referenced only in a fixture string",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
+  assert.match(out, /override/i); // acknowledged, reason echoed
+});
+
+// F3: OVERRIDE_RE's reason group required >=2 characters, so a valid one-character reason was
+// wrongly rejected as a malformed override (spec F55: only an empty reason is an error). A
+// one-char reason separated from the em-dash by a space ("— x") happens to still match today --
+// `\s*—\s*`'s trailing `\s*` backtracks to 0 and donates that space as the reason group's first
+// character -- so the discriminating case is the em-dash directly adjacent to the single
+// character, with no whitespace left to borrow.
+test("a one-character override reason with no space after the em-dash is accepted, not rejected as malformed (F3)", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md —x",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
+  assert.match(out, /override/i);
+});
+
 test(".worktrees is not walked", () => {
   const repo = makeRepo({
     "scripts/x.mjs": "export const x = 1;\n",

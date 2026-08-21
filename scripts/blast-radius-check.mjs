@@ -5,7 +5,7 @@
 // warning. Language-agnostic; conservative. See playbooks/planning-waves.md.
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, basename, extname, relative, sep } from "node:path";
-import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES } from "./task-files.mjs";
+import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES, normalizeFileToken } from "./task-files.mjs";
 
 const [, , planPath, repoRootArg] = process.argv;
 if (!planPath) {
@@ -70,17 +70,22 @@ const codeFiles = walk(repoRoot)
 // File-only clears every test-referencer of that file; "→ test" clears just that pair. A missing
 // reason is an error — an unexplained override is exactly the silent walk-around this gate prevents.
 const OVERRIDE_START = /^\s*-\s*Blast-radius override:/;
-const OVERRIDE_RE = /^\s*-\s*Blast-radius override:\s*(\S+?)(?:\s*→\s*(\S+))?\s*—\s*(.+\S)\s*$/;
+const OVERRIDE_RE = /^\s*-\s*Blast-radius override:\s*(\S+?)(?:\s*→\s*(\S+))?\s*—\s*(.*\S)\s*$/;
 const overrides = [];
 for (const { text } of blocks) {
   for (const line of text.split("\n")) {
     if (!OVERRIDE_START.test(line)) continue;
     const m = line.match(OVERRIDE_RE);
-    if (!m) {
+    // Normalize both captures through the same normalizeFileToken the declaration side ran
+    // every "**Files:**" token through, so an override written with backticks or trailing
+    // punctuation -- exactly how planners write paths elsewhere -- still matches `chg` below.
+    const file = m ? normalizeFileToken(m[1]) : null;
+    if (!m || file === null) {
       console.error(`blast-radius-check: malformed override (needs "<changed-file> [→ <test>] — <reason>"): ${line.trim()}`);
       process.exit(1);
     }
-    overrides.push({ file: m[1], test: m[2] ?? null, reason: m[3] });
+    const test = m[2] !== undefined ? normalizeFileToken(m[2]) : null;
+    overrides.push({ file, test, reason: m[3] });
   }
 }
 

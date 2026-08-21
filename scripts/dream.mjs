@@ -5,7 +5,7 @@
 // The stores each have one owner, and this file is the CLI over them rather than a second
 // copy: journal.mjs (run records), promotions.mjs (landed lessons), lessons.mjs (the three
 // capped stores), learn-report.mjs (the report).
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
