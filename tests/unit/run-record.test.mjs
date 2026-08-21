@@ -431,3 +431,58 @@ test("culprit lookup fails cleanly, not with a stack trace, when culprits.json i
     rmSync(treeDir, { recursive: true, force: true });
   }
 });
+
+test("runsDirForRepo honours DEVCYCLE_RUNS_DIR and composes with recordPath", async () => {
+  const { runsDirForRepo, recordPath, repoSlug } = await import("../../scripts/run-record.mjs");
+  const top = "/tmp/example-repo";
+  const prev = process.env.DEVCYCLE_RUNS_DIR;
+  try {
+    process.env.DEVCYCLE_RUNS_DIR = "/custom/runs";
+    assert.equal(runsDirForRepo(top), `/custom/runs/${repoSlug(top)}`);
+    assert.equal(recordPath(top, "abc123"), `/custom/runs/${repoSlug(top)}/abc123.jsonl`);
+  } finally {
+    if (prev === undefined) delete process.env.DEVCYCLE_RUNS_DIR;
+    else process.env.DEVCYCLE_RUNS_DIR = prev;
+  }
+});
+
+test("runsDirForRepo falls back to ~/.claude/devcycle/runs when the env var is unset", async () => {
+  const { runsDirForRepo, repoSlug } = await import("../../scripts/run-record.mjs");
+  const { homedir } = await import("node:os");
+  const { join } = await import("node:path");
+  const prev = process.env.DEVCYCLE_RUNS_DIR;
+  try {
+    delete process.env.DEVCYCLE_RUNS_DIR;
+    assert.equal(runsDirForRepo("/tmp/r"), join(homedir(), ".claude", "devcycle", "runs", repoSlug("/tmp/r")));
+  } finally {
+    if (prev !== undefined) process.env.DEVCYCLE_RUNS_DIR = prev;
+  }
+});
+
+import { validate, validateCulprit, subSchemaFor } from "../../scripts/run-record.mjs";
+
+test("validate reports every violation of a sub-schema", () => {
+  const sub = {
+    properties: { kind: { const: "run" }, n: { type: "integer", minimum: 1 } },
+    required: ["kind", "n"],
+  };
+  assert.deepEqual(validate({ kind: "run", n: 3 }, sub), []);
+  assert.deepEqual(validate({ kind: "run", n: 0 }, sub), ['"n" must be >= 1, got 0']);
+  assert.deepEqual(validate({ kind: "run" }, sub), ['missing required field "n"']);
+});
+
+test("subSchemaFor selects by kind from an already-parsed schema", () => {
+  const schema = { oneOf: [{ properties: { kind: { const: "a" } } }, { properties: { kind: { const: "b" } } }] };
+  assert.equal(subSchemaFor(schema, "b").properties.kind.const, "b");
+  assert.equal(subSchemaFor(schema, "missing"), null);
+});
+
+test("validateCulprit reads the vocabulary from the path it is given", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "culprits-")));
+  const p = join(dir, "culprits.json");
+  writeFileSync(p, JSON.stringify([{ slug: "known-slug" }]));
+  assert.deepEqual(validateCulprit("known-slug", p), []);
+  assert.deepEqual(validateCulprit("novel:something-new", p), []);
+  assert.equal(validateCulprit("unknown-slug", p).length, 1);
+  rmSync(dir, { recursive: true, force: true });
+});

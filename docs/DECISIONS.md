@@ -5,6 +5,36 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-20 — line and context budgets raised for C6's config.md tables
+
+**Decision:** `surfaceTotal` moves from **4,050 to 4,150** and `commandMax` from **104 to 110**
+(`tests/fixtures/surface-budget.json`); eleven of the twelve entries in
+`tests/fixtures/context-budget.json` are raised by 4.2–5.5 kB each. `playbookMax` (268) and
+`playbooks/profiling-sessions.md`'s context entry are deliberately unchanged.
+
+**Why:** audit-remediation cycle C6 makes `references/config.md` the owner of two things it
+described but never enumerated — an artifact→policy table for `docTrackingPolicy` and a roster of
+every knob — which grows that one file by 60 lines. Two ceilings sat too close for that. The
+runtime surface stood at 4,027 lines with 23 lines of headroom, and `commands/cycle.md` sat
+exactly on the 104-line `commandMax`, so F12's gate could not be stated there at all without one
+more line. Separately, `validate`'s check 15 counts each playbook plus every reference reachable
+from it, and `references/config.md` is reachable from eleven of the twelve playbooks — nine cite
+it directly and two more reach it through the references they cite — so a change to one file put
+eleven budgets over at once. Reclaiming the lines instead would mean cutting real
+content across files no single task owns, which is the outcome the budget exists to prevent
+rather than the trade it exists to force (the same reasoning as the 2026-08-12 raise below).
+
+**Measured:** surface 4,027 lines at this cycle's base `204ede5`, projected to **4,096** with
+every C6 task applied — measured on a scratch copy, not estimated — leaving 54 lines of headroom
+under the new total. `commands/cycle.md` goes to 105 of 110. The eleven context projections are
+listed in the plan's Task 9; each new value carries 1.2–2.0 kB of headroom. The raise is made in
+its own commit, ahead of the growth rather than alongside it, so it is reviewable as a decision
+instead of as a line in a documentation diff.
+
+**Supersedes:** the 4,050 total and the 104-line `commandMax` in force since the v0.14 line. The
+2026-08-06 ruling that the budget counts what enters a context window, not directories, is
+unaffected and is what check 15 implements.
+
 ## 2026-08-20 — hooks ship in the public plugin, for one guard only
 
 **Decision:** The plugin ships exactly one hook. `hooks/block-main-thread-browser.mjs`, registered

@@ -71,3 +71,196 @@ test("passes when the referencing test file is already in a Files block", () => 
   assert.equal(r.code, 0);
   assert.match(r.out, /ok/);
 });
+
+test("a plan with no task headings is an error, not an ok", () => {
+  const repo = makeRepo({ "src/widget.mjs": "export const a = 1;\n" });
+  const { code, out } = run("# Prose only, no tasks\n", repo);
+  assert.equal(code, 1);
+  assert.match(out, /no "### Task N" blocks found/);
+});
+
+test("a plan whose tasks carry no **Files:** block is an error, not an ok", () => {
+  const repo = makeRepo({ "src/widget.mjs": "export const a = 1;\n" });
+  const { code, out } = run(
+    "# Plan\n### Task 1: No files block\n**Interfaces:** none\n## Dispatch Map\n- Wave 1: Task 1\n",
+    repo,
+  );
+  assert.equal(code, 1);
+  assert.match(out, /no "\*\*Files:\*\*" blocks found/);
+});
+
+const INLINE_PLAN = `# Plan
+### Task 1: Change widget
+**Files:** Modify \`src/widget.mjs\`, Test: \`tests/unit/widget.test.mjs\`
+## Dispatch Map
+- Wave 1: Task 1
+`;
+
+test("a Files field written inline on its own label line is read, not reported as missing", () => {
+  const repo = makeRepo({
+    "src/widget.mjs": "export function widget() {}",
+    "tests/unit/widget.test.mjs": "import { widget } from '../../src/widget.mjs';",
+  });
+  const r = run(INLINE_PLAN, repo);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /ok/);
+});
+
+test("an unlisted test consumer is still a hard failure when the Files field is inline", () => {
+  const repo = makeRepo({
+    "src/widget.mjs": "export function widget() {}",
+    "tests/unit/widget.test.mjs": "import { widget } from '../../src/widget.mjs';",
+  });
+  const r = run("# Plan\n### Task 1: Change widget\n**Files:** Modify `src/widget.mjs`\n## Dispatch Map\n- Wave 1: Task 1\n", repo);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /widget\.test\.mjs.*references/s);
+});
+
+// The two pre-flight gates read the same taskFileMap, so a plan whose blocks say "none" must send
+// the plan author to one repair, not two: blast-radius-check used to report the blocks missing for
+// a plan that had written them, while wave-disjointness-check reported them present but empty.
+const WAVE_SCRIPT = join(process.cwd(), "scripts/wave-disjointness-check.mjs");
+const NO_FILES_DECLARED_PLAN =
+  "# Plan\n### Task 1: Declares nothing\n**Files:** none\n\n### Task 2: Also nothing\n**Files:** none\n\n## Dispatch Map\n- Wave 1: Task 1, Task 2\n";
+
+test('a plan whose **Files:** blocks are present but declare no file says so, not "blocks found"', () => {
+  const repo = makeRepo({ "src/widget.mjs": "export const a = 1;\n" });
+  const { code, out } = run(NO_FILES_DECLARED_PLAN, repo);
+  assert.equal(code, 1);
+  assert.match(out, /"\*\*Files:\*\*" blocks are present but empty/);
+  assert.doesNotMatch(out, /no "\*\*Files:\*\*" blocks found/);
+});
+
+test("both gates give the same diagnosis for a plan that declares no file", () => {
+  const repo = makeRepo({ "src/widget.mjs": "export const a = 1;\n" });
+  const plan = join(repo, "plan.md");
+  writeFileSync(plan, NO_FILES_DECLARED_PLAN);
+  const blast = spawnSync("node", [SCRIPT, plan, repo], { encoding: "utf8" });
+  const wave = spawnSync("node", [WAVE_SCRIPT, plan], { encoding: "utf8" });
+  assert.equal(blast.status, 1);
+  assert.equal(wave.status, 1);
+  const diagnosis = (r) => r.stderr.trim().split("\n").pop().replace(/^\S+-check: /, "");
+  assert.equal(diagnosis(blast), diagnosis(wave));
+});
+
+// F55: the matcher used to key on the extension-stripped basename ("config", not "config.md"),
+// so any file merely containing the word matched -- a false-positive flood. It also walked
+// .worktrees, and offered no way for a planner to acknowledge a referencing-but-unaffected test.
+function planChanging(changedFile, { override } = {}) {
+  const overrideLine = override ? `\n${override}` : "";
+  return `# Plan
+### Task 1: Change ${changedFile}
+**Files:**
+- Modify: \`${changedFile}\`${overrideLine}
+## Dispatch Map
+- Wave 1: Task 1
+`;
+}
+
+test("matcher does not fire on a bare word -- a suite mentioning 'config' does not reference config.md", () => {
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": "See `config` for details.\n",
+  });
+  const { code, out } = run(planChanging("references/config.md"), repo);
+  assert.equal(code, 0, out);
+});
+
+test("matcher fires on a path-shaped reference to the changed file", () => {
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": 'import x from "../references/config.md";\n',
+  });
+  const { code, out } = run(planChanging("references/config.md"), repo);
+  assert.equal(code, 1);
+  assert.match(out, /config\.md/);
+});
+
+test("a per-task override with a reason clears the hard-fail", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md — referenced only in a fixture string",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
+  assert.match(out, /override/i); // acknowledged, reason echoed
+});
+
+test("an override with no reason is itself an error", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 1);
+  assert.match(out, /malformed override|needs a reason/i);
+});
+
+// F1: the override's changed-file token must go through the same normalization
+// (normalizeFileToken) as the declaration side, or a backtick-wrapped path -- exactly how
+// planners write paths in a **Files:** block -- never matches and the override is silently
+// ignored.
+test("an override whose changed-file token is backtick-wrapped still clears the hard-fail (F1)", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: `references/config.md` — referenced only in a fixture string",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
+  assert.match(out, /override/i); // acknowledged, reason echoed
+});
+
+// F3: OVERRIDE_RE's reason group required >=2 characters, so a valid one-character reason was
+// wrongly rejected as a malformed override (spec F55: only an empty reason is an error). A
+// one-char reason separated from the em-dash by a space ("— x") happens to still match today --
+// `\s*—\s*`'s trailing `\s*` backtracks to 0 and donates that space as the reason group's first
+// character -- so the discriminating case is the em-dash directly adjacent to the single
+// character, with no whitespace left to borrow.
+test("a one-character override reason with no space after the em-dash is accepted, not rejected as malformed (F3)", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md —x",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
+  assert.match(out, /override/i);
+});
+
+// F1 guard: the `→ <test>` capture is normalized just like the changed-file capture, so a
+// pair-form override whose test token is a bare word (no path shape, normalizes to null) is a
+// loud malformed error -- not a silent widening of the override to clear every test-referencer
+// of the changed file. Without the guard this exits 0 (override acknowledged, widened to file
+// scope); with it, exit 1 malformed.
+test("a pair-form override whose test token is not a path is malformed, not a silent file-wide clear (F1 guard)", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md → config — bogus non-path test token",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 1);
+  assert.match(out, /malformed override/i);
+});
+
+test(".worktrees is not walked", () => {
+  const repo = makeRepo({
+    "scripts/x.mjs": "export const x = 1;\n",
+    ".worktrees/c99/tests/unit/x.test.mjs": 'import "../../../scripts/x.mjs";',
+  });
+  const { code } = run(planChanging("scripts/x.mjs"), repo);
+  assert.equal(code, 0);
+});

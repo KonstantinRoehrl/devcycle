@@ -15,76 +15,55 @@
 // No failure message ever reprints what it matched — a CI log is as public as the repo.
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseFlags, requireValue } from "./cli-flags.mjs";
 
 const args = process.argv.slice(2);
-const KNOWN_FLAGS = ["--file", "--dir", "--hashes", "--auto-redact"];
-// Parses both calling conventions this script supports — the space form (`--file x`) and the
-// equals form (`--file=x`) — into one map, and rejects anything that looks like a flag but isn't
-// one of the three known ones. An unrecognised flag (a typo such as `--fil`) is a hard error
-// rather than a silent pass-through: `--dir .devcycle` is this script's privacy gate over files
+// --auto-redact is the only valueless flag here; --hashes names a deny-list file and takes one.
+// Declaring that arity is what stops `--dir <clean> --auto-redact <leaky>` from scanning only the
+// clean corpus and printing `redaction: ok` over a leaky one it never opened.
+const KNOWN_FLAGS = {
+  "--file": "value", "--dir": "value", "--hashes": "value", "--auto-redact": "none",
+};
+// Flag parsing lives in cli-flags.mjs, which owns it for every script here. This script keeps its
+// own message prefix and exit code by catching what that module throws: an unknown flag (a typo
+// such as `--fil`) and a flag whose value is missing or blank are both hard errors rather
+// than silent pass-throughs — `--dir .devcycle` is this script's privacy gate over files
 // `git ls-files` cannot see, and a caller whose flag was never read still gets `redaction: ok`
-// against the wrong corpus — the same false green the value guard below exists to prevent, just
-// reached by a different mistake. This narrows what the script accepts; it does not change what
-// any currently-passing invocation does, since no real caller passes flags outside this set.
-function parseFlags(argv) {
-  const values = {};
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (!arg.startsWith("--")) continue;
-    const eq = arg.indexOf("=");
-    const name = eq === -1 ? arg : arg.slice(0, eq);
-    if (!KNOWN_FLAGS.includes(name)) {
-      console.error(`redaction-check: unrecognised flag ${name}`);
-      process.exit(1);
-    }
-    if (eq !== -1) {
-      values[name] = arg.slice(eq + 1);
-      continue;
-    }
-    const next = argv[i + 1];
-    // A value that is itself another flag means this flag's value is missing, not that the
-    // next flag's token belongs to this one.
-    if (next !== undefined && !next.startsWith("--")) {
-      values[name] = next;
-      i++;
-    } else {
-      values[name] = undefined;
-    }
-  }
-  return values;
+// against the wrong corpus. A dropped flag name is the same false green: this script takes no
+// positional, so cli-flags.mjs refuses the bare token in `redaction-check.mjs .devcycle` rather
+// than falling back to `git ls-files` and reporting a corpus it never opened clean.
+let flags;
+try {
+  ({ flags } = parseFlags(args, KNOWN_FLAGS));
+} catch (err) {
+  console.error(`redaction-check: ${err.message}`);
+  process.exit(1);
 }
-const flags = parseFlags(args);
-// A flag's value must be an explicit, non-empty path: a missing value (the flag was the last
-// token, or is immediately followed by another flag) and an empty or whitespace-only value are
-// the same operator mistake in two guises — e.g. `--file "$draft"` for an unset shell variable
-// — and both must fail loudly, naming the flag, rather than silently widening the scan to the
-// whole corpus.
-function requireValue(name) {
-  if (!(name in flags)) return undefined;
-  const v = flags[name];
-  if (v == null || v.trim() === "") {
-    console.error(`redaction-check: ${name} requires a path argument`);
+const read = (name) => {
+  try {
+    return requireValue(flags, name);
+  } catch (err) {
+    console.error(`redaction-check: ${err.message}`);
     process.exit(1);
   }
-  return v;
-}
-const dir = requireValue("--dir");
+};
+const dir = read("--dir");
 // A second caller for the same engine: `--dir` and `git ls-files` both scan a corpus, and an
 // issue draft is neither — it is one untracked file that must be screened before it is shown
 // to the user. Takes precedence over --dir so a caller passing both gets the narrower scan
 // rather than a silently widened one.
-const file = requireValue("--file");
+const file = read("--file");
 // The playbook invokes this script by its absolute ${CLAUDE_PLUGIN_ROOT} path from inside the
 // *user's own repo*, so cwd is never this repo. The default must resolve against this script's
 // own directory, not cwd, or the deny-list is unreadable on every such invocation. An explicit
 // --hashes keeps its current (cwd-relative or absolute) meaning.
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const hashesPath = requireValue("--hashes") ?? join(SCRIPT_DIR, "redaction-hashes.txt");
-// Boolean, no value: presence in argv means "rewrite in place before scanning". If parseFlags
-// captured a stray following token as its value, that value is ignored — only presence matters.
+const hashesPath = read("--hashes") ?? join(SCRIPT_DIR, "redaction-hashes.txt");
+// Declared valueless above, so presence in argv is the whole meaning: "rewrite in place before
+// scanning". A token following it is not its value and is refused as an unexpected argument.
 const autoRedact = "--auto-redact" in flags;
 
 // --auto-redact rewrites files in place, and a scan pattern has known false positives (a public
@@ -95,6 +74,14 @@ if (autoRedact && !dir && !file) {
   console.error(
     "redaction-check: --auto-redact requires an explicit --dir or --file (refusing to rewrite the whole tracked tree in place)"
   );
+  process.exit(1);
+}
+
+// A --dir that names nothing, or names a file, must fail with this script's own diagnostic — not a
+// raw ENOENT/ENOTDIR thrown out of readdirSync inside walk(). --file keeps its own read-time guard
+// in the scan loop below; this guards the directory walk's entry.
+if (dir !== undefined && (!existsSync(dir) || !statSync(dir).isDirectory())) {
+  console.error(`redaction-check: --dir ${dir} is not a directory`);
   process.exit(1);
 }
 

@@ -263,6 +263,30 @@ test("matchLessons falls back to files-touched when affected-files is empty", ()
     "an empty affected-files exercises the files-touched runtime fallback");
 });
 
+test("matchLessons --culprits keeps only lessons whose bracketed id is in the set", () => {
+  const lessonLines = ["- do X [culprit-a]", "- do Y [culprit-b]"];
+  const promotions = [
+    { culpritId: "culprit-a", aliases: [], path: "p/a.md", affectedFiles: ["scripts/a.mjs"], filesTouched: ["scripts/a.mjs"] },
+    { culpritId: "culprit-b", aliases: [], path: "p/b.md", affectedFiles: ["scripts/a.mjs"], filesTouched: ["scripts/a.mjs"] },
+  ];
+  const files = ["scripts/a.mjs"];
+  const all = matchLessons({ lessonLines, promotions, files });
+  assert.equal(all.length, 2); // both file-match today
+  const only = matchLessons({ lessonLines, promotions, files, culprits: ["culprit-a"] });
+  assert.deepEqual(only.map((m) => m.id), ["culprit-a"]);
+});
+
+test("matchLessons --keywords keeps only lessons whose line contains a keyword (case-insensitive)", () => {
+  const lessonLines = ["- always Redact paths [culprit-a]", "- prefer reuse [culprit-b]"];
+  const promotions = [
+    { culpritId: "culprit-a", aliases: [], path: "p/a.md", affectedFiles: ["scripts/a.mjs"], filesTouched: ["scripts/a.mjs"] },
+    { culpritId: "culprit-b", aliases: [], path: "p/b.md", affectedFiles: ["scripts/a.mjs"], filesTouched: ["scripts/a.mjs"] },
+  ];
+  const files = ["scripts/a.mjs"];
+  const kw = matchLessons({ lessonLines, promotions, files, keywords: ["redact"] });
+  assert.deepEqual(kw.map((m) => m.id), ["culprit-a"]);
+});
+
 test("renderMatch([]) is the empty string (the Lessons: none fallback)", () => {
   assert.equal(renderMatch([]), "");
 });

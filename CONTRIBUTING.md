@@ -89,7 +89,10 @@ that are specific to how devcycle runs and that no generic scanner knows about â
 home-directory paths, session ids, and the escaped project-directory form that binds a
 transcript path to one person's machine. It reads the current tree only. Verbatim transcript
 *excerpts* are detected by neither; that class is held by review, and by keeping
-excerpt-carrying artifacts out of the tracked tree in the first place.
+excerpt-carrying artifacts out of the tracked tree in the first place. When a redaction finding
+blocks a local run, `node scripts/redaction-check.mjs --auto-redact --dir <path>` (or `--file
+<path>`) rewrites the flagged spans in place â€” it refuses to run without an explicit
+`--dir`/`--file`, so it never rewrites the whole tracked tree.
 
 The commands above use the repo-relative form (`node scripts/<engine>.mjs`), correct for
 running by hand against this checkout. An engine invocation written into a command, playbook,

@@ -1845,6 +1845,43 @@ test("dream --match delivers a lesson for a top-level extensionless file named i
     "an extensionless top-level file the caller named must not be dropped by the path-shape gate");
 });
 
+test("dream --match errors loudly on an unrecognised flag", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-match-bogus-")));
+  const res = run(["--match", "--stage", "planning", "--files", "a.mjs", "--bogus", "x"], root);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /dream: unrecognised flag --bogus/);
+});
+
+test("dream --match --culprits/--keywords narrow the matched lessons", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-match-filters-")));
+  const learnings = mkdtempSync(join(tmpdir(), "dream-match-filters-learn-"));
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/lessons.md"),
+    "# Lessons\n\n## execution\n- Guard the thing [novel:guard-thing]\n- Reuse the parser [novel:reuse-parser]\n");
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-16-guard-thing.md"),
+    "# Guard the thing\n- files-touched: scripts/x.mjs\n- affected-files: scripts/*.mjs\n- culprit-id: novel:guard-thing\n");
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-16-reuse-parser.md"),
+    "# Reuse the parser\n- files-touched: scripts/x.mjs\n- affected-files: scripts/*.mjs\n- culprit-id: novel:reuse-parser\n");
+  const all = run(["--match", "--stage", "execution", "--files", "scripts/x.mjs"], root, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.equal(all.status, 0);
+  assert.match(all.stdout, /novel:guard-thing/);
+  assert.match(all.stdout, /novel:reuse-parser/);
+  const byCulprit = run(
+    ["--match", "--stage", "execution", "--files", "scripts/x.mjs", "--culprits", "novel:guard-thing"],
+    root, { DEVCYCLE_LEARNINGS_DIR: learnings },
+  );
+  assert.equal(byCulprit.status, 0);
+  assert.match(byCulprit.stdout, /novel:guard-thing/);
+  assert.doesNotMatch(byCulprit.stdout, /novel:reuse-parser/);
+  const byKeyword = run(
+    ["--match", "--stage", "execution", "--files", "scripts/x.mjs", "--keywords", "reuse"],
+    root, { DEVCYCLE_LEARNINGS_DIR: learnings },
+  );
+  assert.equal(byKeyword.status, 0);
+  assert.match(byKeyword.stdout, /novel:reuse-parser/);
+  assert.doesNotMatch(byKeyword.stdout, /novel:guard-thing/);
+});
+
 test("dream --lesson prints the record; unknown id exits 1", () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-lesson-")));
   mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });

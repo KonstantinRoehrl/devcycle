@@ -208,3 +208,18 @@ test("--state with no value is a usage error", () => {
   assert.equal(r.status, 1);
   assert.match(r.stdout + r.stderr, /usage/i);
 });
+
+test("an unrecognised flag is an error, not a silent fallback to the default state file", () => {
+  const r = spawnSync("node", [SCRIPT, "--stat", "somewhere.md"], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /resume-check: unrecognised flag --stat/);
+});
+
+// Dropping the flag name leaves a bare token with nothing misspelled to notice: it used to be
+// discarded, so the run validated `.devcycle/state.md` while the caller had named a different
+// state file, and /devcycle:continue trusted the answer.
+test("a bare path is an error, not a silent fallback to the default state file", () => {
+  const r = spawnSync("node", [SCRIPT, "somewhere.md"], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /resume-check: unexpected argument "somewhere\.md"/);
+});

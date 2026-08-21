@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Splits every paragraph of the runtime surface — commands/, playbooks/, agents/,
-// references/ (or --dir's *.md files) — normalizes it, and flags near-duplicate pairs,
+// references/ (or --dir's *.md files), plus DESIGN.md and CONTRIBUTING.md — normalizes it,
+// and flags near-duplicate pairs,
 // including two paragraphs of the same file. Two passes over one normalization:
 //   - shingled Jaccard over whole paragraphs, which catches near-verbatim restatement;
 //   - Jaccard over content words alone, which catches the same rule stated in different
@@ -11,6 +12,7 @@
 // tree always reports the same pairs in the same order.
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
+import { parseFlags, requireValue } from "./cli-flags.mjs";
 
 const DIRS = ["agents", "commands", "playbooks", "references"];
 const THRESHOLD = 0.8; // shingle Jaccard: near-verbatim restatement
@@ -31,9 +33,21 @@ const STOPWORDS = new Set(
 );
 
 const args = process.argv.slice(2);
-const dirFlagIdx = args.indexOf("--dir");
+const KNOWN_FLAGS = { "--dir": "value" };
 const root = process.cwd();
-const targetDir = dirFlagIdx === -1 ? root : args[dirFlagIdx + 1];
+// A flag this script never read is a false green waiting to happen: a typo, or a dropped flag
+// name leaving a bare token, would otherwise scan the cwd and report it clean. cli-flags.mjs owns
+// the unknown-flag check, the missing-value one, and — since this script takes no positional —
+// the bare-token one; this script only owns the message prefix and the exit code.
+let explicitDir = null;
+try {
+  const { flags } = parseFlags(args, KNOWN_FLAGS);
+  explicitDir = requireValue(flags, "--dir") ?? null;
+} catch (err) {
+  console.error(`duplication-check: ${err.message}`);
+  process.exit(1);
+}
+const targetDir = explicitDir ?? root;
 
 const errors = [];
 const fail = (m) => errors.push(m);
@@ -43,8 +57,6 @@ const abort = (m) => {
   console.error(`duplication-check: ${m}`);
   process.exit(1);
 };
-
-if (dirFlagIdx !== -1 && !targetDir) abort("--dir needs a directory path");
 
 // Read errors propagate: a directory that cannot be listed is reported, never skipped.
 function collectFiles(dir) {
@@ -58,13 +70,18 @@ function collectFiles(dir) {
 }
 
 function targetFiles() {
-  if (dirFlagIdx !== -1) return collectFiles(targetDir);
+  if (explicitDir !== null) return collectFiles(targetDir);
   const files = [];
   for (const dir of [...DIRS].sort()) {
     const abs = join(root, dir);
     if (!existsSync(abs)) continue;
     for (const name of [...readdirSync(abs)].sort())
       if (name.endsWith(".md")) files.push(join(abs, name));
+  }
+  const ROOT_FILES = ["DESIGN.md", "CONTRIBUTING.md"];
+  for (const name of ROOT_FILES) {
+    const abs = join(root, name);
+    if (existsSync(abs)) files.push(abs);
   }
   return files;
 }

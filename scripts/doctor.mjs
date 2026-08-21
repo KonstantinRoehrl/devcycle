@@ -5,14 +5,18 @@
 // and runs no promotion `- verify:` check unless invoked with --run-checks.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// The one owner of CLI flag parsing across the scripts; an unrecognised flag is fatal here rather
+// than a silent no-op that would profile the default corpus instead of the one asked for.
+import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { PRICING, priceFor } from "./pricing.mjs";
 // The one reader of this repo's promotion records; doctor's Cost-by-version "Shipped" column
 // names what each version shipped rather than parsing those records a second time here.
 import { readPromotions } from "./promotions.mjs";
+import { atomicWrite } from "./atomic-write.mjs";
 // The shared verification engine (Wave 2): the one source of the promotion scoreboard, the
 // escalation/retirement candidates and the resolved-in lines, plus the installed plugin version.
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
@@ -65,31 +69,39 @@ const SYNTHETIC_MODEL = "<synthetic>";
 // Tool calls that dispatch a subagent; a call with no explicit model inherits the caller's.
 const DISPATCH_TOOLS = new Set(["Task", "Agent"]);
 
+// Each flag names its arity, so cli-flags.mjs knows which of them take the next token. The four
+// valueless ones are why that matters here: while they were assumed value-taking, `--json
+// /fixture` -- the natural slip for `--json --dir /fixture` -- ate the path and profiled the
+// operator's real home corpus instead.
+const KNOWN_FLAGS = {
+  "--dir": "value", "--since": "value", "--until": "value",
+  "--json": "none", "--all": "none", "--depth": "none", "--run-checks": "none",
+  "--drift": "value", "--issue-body": "value",
+};
+
+// Throws rather than exiting on a usage error: doctor.mjs is imported by dream.mjs, so a
+// process.exit inside the parser would take the importer down with it. main() catches and prints
+// with doctor's own prefix.
+//
+// Only flags are read here, and cli-flags.mjs refuses a bare token by default, so `doctor.mjs
+// /fixture` -- the natural slip for `--dir /fixture` -- is a usage error rather than a clean
+// report about the operator's real home corpus.
 export function parseArgs(argv) {
-  const args = {
-    dir: join(homedir(), ".claude", "projects"),
-    since: null,
-    until: null,
-    json: false,
-    all: false,
-    depth: false,
-    runChecks: false,
-    drift: null,
-    issueBody: null,
+  const { flags } = parseFlags(argv, KNOWN_FLAGS);
+  // Each flag says what it wants: --since/--until are dates and --issue-body is a culprit name,
+  // so only --dir and --drift take the parser's default "a path argument" wording.
+  const valued = (name, noun) => requireValue(flags, name, noun) ?? null;
+  return {
+    dir: requireValue(flags, "--dir") ?? join(homedir(), ".claude", "projects"),
+    since: valued("--since", "a date"),
+    until: valued("--until", "a date"),
+    json: "--json" in flags,
+    all: "--all" in flags,
+    depth: "--depth" in flags,
+    runChecks: "--run-checks" in flags,
+    drift: valued("--drift"),
+    issueBody: valued("--issue-body", "a culprit name"),
   };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--dir") args.dir = argv[++i];
-    else if (a === "--since") args.since = argv[++i];
-    else if (a === "--until") args.until = argv[++i];
-    else if (a === "--json") args.json = true;
-    else if (a === "--all") args.all = true;
-    else if (a === "--depth") args.depth = true;
-    else if (a === "--run-checks") args.runChecks = true;
-    else if (a === "--drift") args.drift = argv[++i];
-    else if (a === "--issue-body") args.issueBody = argv[++i];
-  }
-  return args;
 }
 
 export function isDevcycleSession(records) {
@@ -1092,6 +1104,17 @@ function aggregate(summaries) {
   return agg;
 }
 
+// The cache-TTL disclosure, in both its forms. Assembled once because formatReport and caveatLines
+// rendered identical text differing only by a leading bullet, and a reader must be able to tell a
+// band that was checked and found exact from one that was never checked.
+function cacheBandLine(band) {
+  return band.collapsed
+    ? "Cost is exact: every cache write in this corpus carries its TTL split."
+    : `Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
+        `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
+        `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`;
+}
+
 export function formatReport(summaries) {
   const vintage = `prices as of ${PRICING.asOf}`;
   if (!summaries.length) return `no sessions matched.\n\n${vintage}\n`;
@@ -1120,15 +1143,7 @@ export function formatReport(summaries) {
   // concurrent-wave turn whose agentId matches no dispatch renders `attributionSource: "inferred"`
   // in attributeFromRecord's own output — permanent, not conditional on any later dispatch
   // eventually being recorded.
-  const band = agg.cacheBand;
-  if (band.collapsed)
-    lines.push("Cost is exact: every cache write in this corpus carries its TTL split.");
-  else
-    lines.push(
-      `Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
-        `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
-        `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`,
-    );
+  lines.push(cacheBandLine(agg.cacheBand));
   for (const s of summaries)
     if (s.attributionSource === "forward-filled")
       lines.push(`  ${s.id}: stage costs are inferred (forward-filled — no run record).`);
@@ -1351,7 +1366,13 @@ function run(args) {
 }
 
 function main() {
-  const args = parseArgs(process.argv.slice(2));
+  let args;
+  try {
+    args = parseArgs(process.argv.slice(2));
+  } catch (err) {
+    console.error(`doctor: ${err.message}`);
+    process.exit(1);
+  }
   if (args.drift) {
     let result;
     try {
@@ -2083,13 +2104,7 @@ function caveatLines(summaries, agg) {
   const band = agg.cacheBand;
   for (const [model, count] of unpriced)
     out.push(`- UNPRICED MODEL: ${model} (${count} requests)`);
-  out.push(
-    band.collapsed
-      ? "- Cost is exact: every cache write in this corpus carries its TTL split."
-      : `- Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
-          `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
-          `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`,
-  );
+  out.push(`- ${cacheBandLine(band)}`);
   if (filled > 0)
     out.push(
       `- ${filled} session(s) have inferred stage costs (forward-filled — no run record); the ` +
@@ -2440,7 +2455,7 @@ export function revertCandidates(summaries, promotions, { root = process.cwd() }
   try {
     const dir = join(root, ".devcycle", "doctor");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "revert-candidates.json"), JSON.stringify(out, null, 2) + "\n");
+    atomicWrite(join(dir, "revert-candidates.json"), JSON.stringify(out, null, 2) + "\n");
   } catch { /* QC7: the sidecar write must never abort the report */ }
   return out;
 }

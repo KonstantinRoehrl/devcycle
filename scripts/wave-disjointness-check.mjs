@@ -6,7 +6,7 @@
 // it cannot see two tasks coupled only by editing the same shared resource's prose or
 // assertions without naming the same file.
 import { readFileSync, existsSync } from "node:fs";
-import { extractFiles } from "./task-files.mjs";
+import { taskBlocks, taskFileMap, parseDispatchMap } from "./task-files.mjs";
 
 const planPath = process.argv[2];
 if (!planPath) {
@@ -20,47 +20,31 @@ if (!existsSync(planPath)) {
 
 const text = readFileSync(planPath, "utf8");
 
-const TASK_HEADING_RE = /^### Task (\d+):.*$/gm;
-const FILES_BLOCK_RE = /\*\*Files:\*\*\n([\s\S]*?)(?=\n\*\*|\n###|$)/;
-
-// Maps task number -> Set of files that task's **Files:** block declares.
-function parseTaskFiles(planText) {
-  const headings = [...planText.matchAll(TASK_HEADING_RE)];
-  const map = new Map();
-  for (let i = 0; i < headings.length; i++) {
-    const taskNum = Number(headings[i][1]);
-    const start = headings[i].index;
-    const end = i + 1 < headings.length ? headings[i + 1].index : planText.length;
-    const block = planText.slice(start, end);
-    const filesMatch = block.match(FILES_BLOCK_RE);
-    if (!filesMatch) continue;
-    map.set(taskNum, extractFiles(filesMatch[1]));
-  }
-  return map;
-}
-
-// Maps wave number -> array of task numbers, parsed from "- Wave N: Task X, Task Y (...)"
-// lines. Only the text before the first "(" is scanned for "Task N" mentions, so a
-// parenthetical note like "(needs Tasks 1+2 committed)" never gets misread as membership.
-// Returns null when no "## Dispatch Map" heading exists at all.
-function parseDispatchMap(planText) {
-  const idx = planText.indexOf("## Dispatch Map");
-  if (idx === -1) return null;
-  const section = planText.slice(idx);
-  const waves = new Map();
-  for (const m of section.matchAll(/^- Wave (\d+):\s*(.+)$/gm)) {
-    const waveNum = Number(m[1]);
-    const rest = m[2];
-    const parenIdx = rest.indexOf("(");
-    const taskListText = parenIdx === -1 ? rest : rest.slice(0, parenIdx);
-    const taskNums = [...taskListText.matchAll(/Task (\d+)/g)].map((t) => Number(t[1]));
-    waves.set(waveNum, taskNums);
-  }
-  return waves;
-}
-
-const filesByTask = parseTaskFiles(text);
+const filesByTask = taskFileMap(text);
 const waves = parseDispatchMap(text);
+
+// A plan that yields no tasks is a parse failure, not a clean plan: without these the loop below
+// finds no violations and prints ok against an empty list. The two conditions are separate so the
+// message names the one that actually fired -- a heading-less document and a document whose tasks
+// declare no files send the plan author to different places.
+if (taskBlocks(text).length === 0) {
+  console.error(`wave-disjointness-check: no "### Task N" blocks found in ${planPath}`);
+  process.exit(1);
+}
+// Counted in files, not in tasks carrying the field: a task declaring "**Files:** none" puts an
+// empty set in the map, so a task count called that plan clean while blast-radius-check -- which
+// counts the same normalized tokens this line now counts -- hard-failed on it.
+const declaredFileCount = [...filesByTask.values()].reduce((n, files) => n + files.size, 0);
+if (declaredFileCount === 0) {
+  // A plan whose blocks say "**Files:** none" is a different repair from one with no blocks at
+  // all, and telling that author the blocks are missing sends them looking for a field they wrote.
+  const message =
+    filesByTask.size === 0
+      ? `no "**Files:**" blocks found in ${planPath}`
+      : `no task in ${planPath} declares a file -- its "**Files:**" blocks are present but empty`;
+  console.error(`wave-disjointness-check: ${message}`);
+  process.exit(1);
+}
 
 if (waves === null) {
   console.log(

@@ -17,12 +17,12 @@ const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
 // Read lazily: the vocabulary file is only touched when a line actually carries a culprit, so
 // the common append path does no extra I/O. Phase 1 writes null here, Phase 3 populates it.
-function validateCulprit(value) {
+export function validateCulprit(value, culpritsPath = CULPRITS_PATH) {
   if (value === null || value === undefined) return [];
   if (NOVEL_RE.test(value)) return [];
   let vocab;
   try {
-    vocab = JSON.parse(readFileSync(CULPRITS_PATH, "utf8"));
+    vocab = JSON.parse(readFileSync(culpritsPath, "utf8"));
   } catch (err) {
     return [`culprit "${value}" cannot be checked — references/culprits.json unreadable: ${err.message}`];
   }
@@ -45,19 +45,25 @@ export function hashSession(sessionId) {
   return sha256(sessionId);
 }
 
-export function recordPath(toplevel, runId) {
+export function runsDirForRepo(toplevel) {
   const base = process.env.DEVCYCLE_RUNS_DIR ?? join(homedir(), ".claude", "devcycle", "runs");
-  return join(base, repoSlug(toplevel), `${runId}.jsonl`);
+  return join(base, repoSlug(toplevel));
+}
+export function recordPath(toplevel, runId) {
+  return join(runsDirForRepo(toplevel), `${runId}.jsonl`);
+}
+
+export function subSchemaFor(schema, kind) {
+  return (schema.oneOf ?? []).find((s) => s.properties?.kind?.const === kind) ?? null;
 }
 
 function schemaFor(kind) {
-  const schema = JSON.parse(readFileSync(SCHEMA_PATH, "utf8"));
-  return (schema.oneOf ?? []).find((s) => s.properties?.kind?.const === kind) ?? null;
+  return subSchemaFor(JSON.parse(readFileSync(SCHEMA_PATH, "utf8")), kind);
 }
 
 // Validates at write time so a malformed line never reaches the file. CI's check 13 guards the
 // declared shape; this guards every real append.
-function validate(obj, sub) {
+export function validate(obj, sub) {
   const errors = [];
   for (const req of sub.required ?? [])
     if (!(req in obj) || obj[req] === undefined) errors.push(`missing required field "${req}"`);

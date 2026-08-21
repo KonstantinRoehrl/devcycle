@@ -356,12 +356,13 @@ full-history secret scan.
 
 ### 15.1 The reference layer: one owner per convention
 
-`references/` holds sixteen plain markdown files, each the sole owner of one cross-cutting
+`references/` holds seventeen plain markdown files, each the sole owner of one cross-cutting
 convention:
 
 | File | Owns |
 | --- | --- |
 | `config.md` | knob resolution, the profile matrix and its resolution order, the model tiers and their derivation predicates |
+| `first-run-config.md` | the first-run and upgrade configuration dialogue `/devcycle:cycle` runs once per repo — its sole owner |
 | `evidence.md` | the three evidence classes, the file-backed evidence contract, the implementer report and reviewer verdict shapes |
 | `resume.md` | settling the branch from the state file, git-evidence resume rules, "review acceptance is never inferable from git" |
 | `handoff.md` | the handoff block shape, the context-action table, the one-block-per-stage rule, the await gate |
@@ -376,6 +377,7 @@ convention:
 | `sweep-execution.md` | how a plan task marked `**Execution:** sweep` runs inside the execution stage |
 | `commit-convention.md` | how a devcycle-driven commit's subject matches the target repo's own conventions, derived once before wave 1's first commit |
 | `config-changelog.md` | every `userConfig` addition, rename, and deprecation, and the version each landed in |
+| `impact-scoring.md` | how devcycle quantifies what a culprit cost: the attribution formula, its grouping keys, and the unmeasurable case |
 
 A consumer names one — "Read `${CLAUDE_PLUGIN_ROOT}/references/<name>.md` and follow it" —
 and does not restate its content.
@@ -438,11 +440,8 @@ the same wave-formation invariants, ledger events, green gate, and review cycle 
 and a run have the same shape whichever engine produced them. Only the *source* of the
 mechanics differs.
 
-**What the profile may never touch:** the state file, handoff blocks, evidence classes, the
-coordinator's green-gate re-run, the `gitPolicy` clamps, branch discipline, the
-one-`task-reviewer` floor on the short paths, and the never-assume interview rule. A `lean`
-run may skip a stage; it never fakes one, and never reports a gate as passed that did not
-run. Cost is allowed to buy less depth, never a false claim.
+**What the profile may never touch:** the list in `references/config.md` § The profile. Cost is
+allowed to buy less depth, never a false claim.
 
 ### 15.3 The audit stage
 

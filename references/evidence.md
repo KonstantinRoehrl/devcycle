@@ -1,6 +1,6 @@
 # Evidence — classes, the file-backed contract, report and verdict shapes
 
-The single owner of how devcycle proves a task did what it claims. A skill, command,
+The single owner of how devcycle proves a task did what it claims. A playbook, command,
 or agent that needs any of this names this file and does not restate it.
 
 ## The three evidence classes
@@ -131,6 +131,16 @@ report. Reject when:
 - a `red-green` before/red whose failure is a bare missing-symbol, import, or collection error
   rather than a discriminating assertion failure — the test never proved the behavior was absent;
 - the class mismatches the diff.
+
+A reviewer returns its verdict in this shape:
+
+```markdown
+Verdict: accept | needs-changes
+
+1. [severity] <finding, symptom first>
+2. [severity] <finding, symptom first>
+...
+```
 
 ## Why the evidence lives in files
 

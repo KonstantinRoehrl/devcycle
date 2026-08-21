@@ -495,7 +495,7 @@ test("harvested: commands/continue-depth — ownership is checked first, then de
 });
 
 test("harvested: commands/first-run-config — the walkthrough is one profile question that writes only the profile", () => {
-  const t = read("references/config.md");
+  const t = read("references/first-run-config.md");
   assert.match(t, /ONE AskUserQuestion over `profile`/);
   for (const option of ["`standard` (recommended)", "`lean`", "`thorough`", "customize individual knobs"])
     assert.ok(t.includes(option), `walkthrough option missing: ${option}`);
@@ -705,10 +705,22 @@ test("harvested: executing-waves/green-gate-discipline — the gate is the coord
   assert.match(read("agents/implementer.md"), /NEVER run `git commit`, stage a commit, or push/);
 });
 
-test("harvested: executing-waves/handoff-block-shape — five fields, and only two sanctioned first-field labels", () => {
+test("harvested: executing-waves/handoff-block-shape — seven fields, and only two sanctioned first-field labels", () => {
   const t = read("references/handoff.md");
-  for (const field of ["- Stage completed:", "- Artifacts:", "- Carry-overs:", "- Context action:", "- Compaction hint:"])
-    assert.ok(t.includes(field), `handoff field missing: ${field}`);
+  // Derive the template rows rather than hardcoding, so the test tracks its owner.
+  const block = t.match(/```markdown\n## Handoff\n([\s\S]*?)```/)?.[1] ?? "";
+  const labels = [...block.matchAll(/^- ([^:]+):/gm)].map((m) => m[1]);
+  assert.equal(labels.length, 7, `handoff template no longer has seven rows: ${labels.join(", ")}`);
+  for (const label of ["Stage completed", "Artifacts", "Lessons read", "Carry-overs", "Context depth", "Context action", "Compaction hint"])
+    assert.ok(labels.includes(label), `handoff template row missing: ${label}`);
+  for (const label of labels)
+    assert.ok(t.includes(`- ${label}:`), `handoff field missing from the block: ${label}`);
+  // Discrimination: dropping any one row must fail the derived presence check — the gap F27 closes.
+  const dropped = block.replace(/^- Context depth:.*\n/m, "");
+  assert.notEqual(dropped, block, "the Context depth row wording changed — this discrimination check tests nothing");
+  const droppedLabels = [...dropped.matchAll(/^- ([^:]+):/gm)].map((m) => m[1]);
+  assert.equal(droppedLabels.length, 6, "removing a template row must reduce the derived label count");
+  // The two sanctioned first-field labels and the Compaction-hint shape stay pinned.
   assert.match(t, /Wave completed: <n> of\s+<m> \(stage: execution\)/);
   assert.match(t, /these are the\s+only two sanctioned first-field labels/);
   assert.match(t, /Compaction hint: Keep <X>\. Drop <Y>\./);
@@ -1033,7 +1045,7 @@ const GATES_WITHOUT_THE_TOKEN = [
 // --- what a citation claims ---------------------------------------------------------------
 // `references/ledger.md`'s rule has three outcomes, not two: a gate appends exactly when a run
 // record exists at that moment. So a surface that gates either states the append (affirmative),
-// states that no append is possible where it sits (negative — `references/config.md`'s
+// states that no append is possible where it sits (negative — `references/first-run-config.md`'s
 // walkthrough runs before `/devcycle:cycle` mints the record), or is exempt. Asking only whether
 // the token and the owner path appear could not tell the first two apart, which made a citation
 // claiming a journal that cannot happen indistinguishable from a correct one.
@@ -1081,7 +1093,7 @@ const citationVerdict = (text) => {
 // --- attributing a citation to the gate it covers -----------------------------------------
 // citationVerdict over a whole file answered "does this file cite anywhere", which a file with
 // several gates satisfies with one paragraph. Sections answer "does this gate cite". Ancestors
-// count: references/config.md states its negative polarity once, in the `## First-run
+// count: references/first-run-config.md states its negative polarity once, in the `## First-run
 // configuration` section whose three subsections do the gating, and demanding three restatements
 // of one rule is the duplication this repo's own conventions forbid.
 // Fenced blocks are skipped, because a heading-shaped line inside one is not a heading: this
@@ -1135,14 +1147,19 @@ const DESCRIBES_NOT_GATES = [
   // interview in `## The discipline`, which cites the write site. This section writes the summary
   // the interview produced and asks nothing of its own.
   "playbooks/scoping-the-request.md § ## Output and handoff",
+  // Describes the order a committing site follows ("names the side effect, asks the user, then
+  // commits"); the gate itself runs at that write site — `playbooks/learning-from-sessions.md`
+  // step 3, its named reference implementation, carries the real AskUserQuestion. This table owns
+  // what each policy commits, not a gate of its own.
+  "references/config.md § ## Doc tracking — what each policy commits",
 ];
 
 // A gate that runs before any run record exists must say so, rather than claim an append that
 // cannot happen there. Listed, not derived: "before the mint" is a fact about when the text runs,
-// and nothing in the file structure carries it — `references/config.md`'s walkthrough is reached
+// and nothing in the file structure carries it — `references/first-run-config.md`'s walkthrough is reached
 // from `commands/cycle.md` exactly like the stages that do append. The list going stale is
 // guarded in the test: an entry that stops gating, or that stops running before the mint, fails.
-const PRE_MINT_SURFACES = ["references/config.md"];
+const PRE_MINT_SURFACES = ["references/first-run-config.md"];
 // The command each pre-mint entry is reached from, and the mint call its hand-off must precede —
 // listed here rather than derived for the same reason PRE_MINT_SURFACES is: "which command mints
 // after handing off to this entry" is not carried anywhere in the file structure, either. Both
@@ -1410,7 +1427,7 @@ test("citation attribution is per section, and a section inherits its ancestors'
   );
 
   // A subsection inherits the citation of the section it sits under — which is what makes the
-  // rule correct rather than merely strict: references/config.md states its polarity once, in the
+  // rule correct rather than merely strict: references/first-run-config.md states its polarity once, in the
   // parent of the three subsections that gate.
   const nested = `# Thing\n\n## Parent\n\nThe stage ${cite}.\n\n### Child\n\nAsk the user for confirmation.\n`;
   assert.deepEqual(
@@ -1843,5 +1860,63 @@ test("DESIGN.md §10 no longer rejects the hooks that ship", () => {
     read("DESIGN.md"),
     /^- \*\*Hooks in the public plugin\*\*/m,
     "the non-goal was reversed on 2026-08-20 (docs/DECISIONS.md); a shipped component cannot sit in §10"
+  );
+});
+
+// --- C6: surface-agreement assertions ---
+// The audit's largest class: a document that describes a surface the code no longer has. Each
+// leg here pins one document to a fact a reader can re-derive, so the next drift is a test
+// failure rather than a wrong answer given to an installer.
+
+test("C6: docs/known-issues.md records open defects only — no fixed entry survives", () => {
+  const fixed = read("docs/known-issues.md")
+    .split("\n")
+    .filter((line) => /^#{2,3} .*—\s*fixed\b/.test(line));
+  assert.deepEqual(
+    fixed,
+    [],
+    "CONTRIBUTING.md:138-139 owns this rule and wins: fixing a defect deletes its entry. A " +
+      "heading still carrying a fixed-marker is an entry that should have been deleted, in a " +
+      "file README.md links to as \"Open defects\""
+  );
+});
+
+// `CONTRIBUTING.md:108-111` concedes that the config knobs are hand-kept in three places and
+// that validate "checks only that the key exists". F13, F15 and F16 were three live instances
+// of that class. Set equality across the three is what stops the fourth. Each parse is scoped
+// to its own table's header row, never to prose: C10 moves 134 lines out of references/config.md,
+// and an assertion coupled to wording would break on an innocent edit and be deleted rather
+// than fixed. A table header is a structure that move can carry intact.
+const firstCells = (text, header) => {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => line.trim() === header);
+  if (start === -1) return [];
+  const keys = [];
+  for (const line of lines.slice(start + 2)) {
+    if (!line.startsWith("|")) break;
+    const cell = line.split("|")[1].trim();
+    const backticked = cell.match(/^`([A-Za-z]+)`$/);
+    if (backticked) keys.push(backticked[1]);
+  }
+  return keys;
+};
+
+test("C6: plugin.json, README and references/config.md agree on the knob set", () => {
+  const manifest = Object.keys(JSON.parse(read(".claude-plugin/plugin.json")).userConfig);
+  const readme = firstCells(read("README.md"), "| Option | What it controls | Values | Default |");
+  const config = firstCells(read("references/config.md"), "| Knob | Owner | Falls back to |");
+  const sorted = (keys) => [...keys].sort();
+
+  assert.deepEqual(
+    sorted(readme),
+    sorted(manifest),
+    "README.md's config table and .claude-plugin/plugin.json's userConfig must carry the same keys"
+  );
+  assert.deepEqual(
+    sorted(config),
+    sorted(manifest),
+    "references/config.md calls itself the single owner of knob resolution, so its knob roster " +
+      "must enumerate exactly the keys the manifest ships — an owner that does not list what it " +
+      "owns is how F15 and F16 drifted unnoticed"
   );
 });

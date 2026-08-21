@@ -8,6 +8,7 @@
 // that one form, because it is the only dispatch that cannot break the ceiling invariant.
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseFlags, requireValue } from "./cli-flags.mjs";
 
 const DEFAULT_TABLE = fileURLToPath(new URL("../references/model-tiers.json", import.meta.url));
 
@@ -83,25 +84,33 @@ export function resolveModel({ value, signalCount = 0, orchestratorId, table }) 
   };
 }
 
+// Every flag this CLI reads. Anything else is an operator error, not a no-op: an unrecognised
+// flag that parsed silently -- `--signal` for `--signals` -- resolved a different model than
+// the caller asked for.
+const KNOWN_FLAGS = {
+  "--value": "value", "--orchestrator": "value", "--signals": "value", "--table": "value",
+};
+
 // CLI only, so the pure helpers above stay importable by tests — the guard scripts/bump-version.mjs
 // already uses. references/config.md § Model tiers owns when a caller runs this: only for a knob
 // that resolves to a pin or a pool, since parsePool reads `auto` and an unsubstituted placeholder
 // as unset and there is nothing for this module to decide.
 function cliResolve(argv) {
-  const flag = (name) => {
-    const i = argv.indexOf(name);
-    return i === -1 ? null : argv[i + 1] ?? null;
-  };
-  const value = flag("--value");
-  if (value === null) throw new Error("--value is required");
-  const orchestratorId = flag("--orchestrator");
-  if (!orchestratorId) throw new Error("--orchestrator is required");
-  const rawSignals = flag("--signals");
-  const signalCount = rawSignals === null ? 0 : Number(rawSignals);
+  // This CLI takes no positional arguments, so a bare token is a dropped flag name -- `--signals 5`
+  // typed as `5` -- and discarding it resolves rung 1 for a caller who asked for rung 6. Same
+  // silently-different-model outcome as an unrecognised flag, and cli-flags.mjs refuses it the same
+  // way for every consumer, so there is no check to repeat here.
+  const { flags } = parseFlags(argv, KNOWN_FLAGS);
+  const value = requireValue(flags, "--value", "a model id or pool");
+  if (value === undefined) throw new Error("--value is required");
+  const orchestratorId = requireValue(flags, "--orchestrator", "a model id");
+  if (orchestratorId === undefined) throw new Error("--orchestrator is required");
+  const rawSignals = requireValue(flags, "--signals", "a number");
+  const signalCount = rawSignals === undefined ? 0 : Number(rawSignals);
   if (Number.isNaN(signalCount))
     throw new Error(`--signals must be a number or Infinity, got ${rawSignals}`);
-  const tablePath = flag("--table");
-  const table = tablePath === null ? loadTable() : loadTable(tablePath);
+  const tablePath = requireValue(flags, "--table");
+  const table = tablePath === undefined ? loadTable() : loadTable(tablePath);
   return resolveModel({ value, signalCount, orchestratorId, table });
 }
 

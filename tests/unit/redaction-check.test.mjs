@@ -269,6 +269,60 @@ test("--dir immediately followed by another flag fails naming the missing argume
   assert.match(res.stderr, /--dir/);
 });
 
+// --auto-redact takes no value, but while the parser treated every flag as value-taking it
+// swallowed whatever followed. `--dir <clean> --auto-redact <leaky>` therefore scanned only the
+// clean dir and printed `redaction: ok` while the named leaky corpus was never opened -- a false
+// green on the privacy gate itself. The token must fall through to the positional refusal.
+test("a valueless flag never swallows a corpus, leaving it unscanned under a green report", () => {
+  const clean = makeFixture({ "a.md": "Nothing sensitive here at all.\n" });
+  const leaky = makeFixture({ "b.md": `Session ${SESSION_ID} carried the run.\n` });
+  try {
+    const res = spawnSync(
+      process.execPath,
+      [SCRIPT, "--dir", clean, "--hashes", HASHES, "--auto-redact", leaky],
+      { encoding: "utf8", cwd: process.cwd() },
+    );
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.doesNotMatch(res.stdout, /redaction: ok/);
+    assert.match(res.stderr, /unexpected argument/);
+  } finally {
+    rmSync(clean, { recursive: true, force: true });
+    rmSync(leaky, { recursive: true, force: true });
+  }
+});
+
+// The same slip with no --dir alongside errors today only because --auto-redact refuses to rewrite
+// an unnamed corpus -- and it then sends the operator looking for the --dir they did type.
+test("a bare corpus after --auto-redact is named as the unexpected token", () => {
+  const dir = makeFixture({ "a.md": "Nothing sensitive here at all.\n" });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--auto-redact", dir], {
+      encoding: "utf8",
+      cwd: process.cwd(),
+    });
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /unexpected argument/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --hashes, by contrast, does take a path and must keep doing so: the playbook invokes this script
+// from inside the user's own repo and names the shipped deny-list explicitly.
+test("--hashes still takes its path, and is not swept up as a valueless flag", () => {
+  const dir = makeFixture({ "a.md": "Nothing sensitive here at all.\n" });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--dir", dir, "--hashes", HASHES], {
+      encoding: "utf8",
+      cwd: process.cwd(),
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout, /redaction: ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --hashes with no value falls back to the shipped deny-list today, which is benign, but it is
 // the same silent widening as --file/--dir and must fail the same way for consistency.
 test("--hashes with no value fails naming the missing argument, rather than falling back silently", () => {
@@ -407,6 +461,26 @@ test("an unrecognised flag in equals form fails naming the flag", () => {
     "the message must name the flag the caller actually typed — /--fil/ alone is satisfied by --file");
 });
 
+// Dropping the flag name entirely is the same false green with nothing misspelled to notice:
+// `redaction-check.mjs .devcycle` is the natural slip for `--dir .devcycle`, and this is the
+// privacy gate — the bare token used to be discarded, so the run silently scanned `git ls-files`
+// (which cannot see gitignored `.devcycle/`) and printed `redaction: ok` about a corpus it never
+// opened.
+test("a bare path fails naming the token, rather than scanning git ls-files and printing ok", () => {
+  const dir = makeFixture({ "leaky.md": `path ${MAC_HOME}/secret/notes.md\n` });
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, dir], { encoding: "utf8", cwd: process.cwd() });
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.doesNotMatch(res.stdout, /redaction: ok/);
+    assert.ok(
+      res.stderr.includes(`redaction-check: unexpected argument "${dir}"`),
+      `stderr must name the token it refused, got: ${res.stderr}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --auto-redact: the same scan engine, but it first rewrites every detected class in place,
 // then re-scans so the run's exit code proves the POST-rewrite state is clean.
 test("--auto-redact rewrites every detected class in place, then the dir scans clean", () => {
@@ -486,6 +560,35 @@ test("--auto-redact reports the spans it rewrote, per file, so a false-positive 
     assert.match(res.stderr, /artifact\.md \(\d+\)/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A --dir that names nothing, or names a file rather than a directory, must fail with this
+// script's own diagnostic — not a raw ENOENT/ENOTDIR stack thrown out of readdirSync in walk().
+test("redaction-check: --dir on a nonexistent path prints a named diagnostic, not a stack", () => {
+  const res = spawnSync(
+    process.execPath,
+    [SCRIPT, "--dir", join(tmpdir(), "c9-redaction-does-not-exist-xyz"), "--hashes", HASHES],
+    { encoding: "utf8", cwd: process.cwd() },
+  );
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /redaction-check: --dir .* is not a directory/);
+  assert.doesNotMatch(res.stderr, /at \w+.*\(.*:\d+:\d+\)/); // no Node stack frame
+});
+
+test("redaction-check: --dir naming a file (not a directory) prints the named diagnostic", () => {
+  const base = mkdtempSync(join(tmpdir(), "c9-redaction-"));
+  const f = join(base, "afile.txt");
+  writeFileSync(f, "hello\n");
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, "--dir", f, "--hashes", HASHES], {
+      encoding: "utf8",
+      cwd: process.cwd(),
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /redaction-check: --dir .* is not a directory/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
   }
 });
 

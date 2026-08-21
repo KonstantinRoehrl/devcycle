@@ -192,3 +192,43 @@ test("cli: --table overrides the shipped tier table", () => {
   assert.equal(res.status, 0);
   assert.equal(JSON.parse(res.stdout).model, "claude-sonnet-5");
 });
+
+// F37: a hand-rolled `argv.indexOf` parser silently ignores a flag it does not know, so a typo
+// resolves a *different model* than the caller asked for and says nothing.
+test("cli: a typo'd flag is an error, not a silently different model", () => {
+  const res = cli("--value", POOL, "--orchestrator", "claude-opus-5", "--signal", "5");
+  assert.notEqual(res.status, 0, "a flag nothing reads must not resolve a model");
+  assert.equal(res.stdout, "");
+  assert.match(res.stderr, /model-pool: unrecognised flag --signal/);
+});
+
+test("cli: a flag followed by another flag is a missing value, never a borrowed one", () => {
+  const res = cli("--value", "--orchestrator", "claude-opus-5");
+  assert.notEqual(res.status, 0, "--value must not swallow the next flag's name as its value");
+  assert.equal(res.stdout, "");
+  assert.match(res.stderr, /model-pool: --value/);
+});
+
+// The shared parser's default noun is a path, and three of these flags take no path at all. Pinned
+// so a future change to that default cannot silently send an operator looking for a file that was
+// never involved.
+test("cli: a valueless flag asks for what that flag actually takes, not a path", () => {
+  const value = cli("--value", "--orchestrator", "claude-opus-5");
+  assert.match(value.stderr, /model-pool: --value requires a model id or pool/);
+  const orchestrator = cli("--value", POOL, "--orchestrator", "--signals", "1");
+  assert.match(orchestrator.stderr, /model-pool: --orchestrator requires a model id/);
+  const signals = cli("--value", POOL, "--orchestrator", "claude-opus-5", "--signals");
+  assert.match(signals.stderr, /model-pool: --signals requires a number/);
+  const table = cli("--value", POOL, "--orchestrator", "claude-opus-5", "--table");
+  assert.match(table.stderr, /model-pool: --table requires .*path/, "--table really is a path");
+});
+
+// The other half of F37: dropping a flag *name* leaves a bare token the parser collects as a
+// positional. model-pool takes no positional arguments, so discarding it resolved rung 1 while the
+// caller had asked for rung 6 — the same silently-different-model outcome as the typo'd flag.
+test("cli: a stray positional is an error, not a silently different model", () => {
+  const res = cli("--value", POOL, "--orchestrator", "claude-opus-5", "5");
+  assert.notEqual(res.status, 0, "a token nothing reads must not resolve a model");
+  assert.equal(res.stdout, "");
+  assert.match(res.stderr, /model-pool: unexpected argument "5"/);
+});

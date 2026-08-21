@@ -73,9 +73,8 @@ column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, 
 | on-device → finish | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
 | finish → (end) | Continue | — | — |
 
-A reviewer that watched the code being written inherits the implementer's assumptions, which is
-why `execution → branch-review` resets rather than carries: the clear is bias control as much
-as cost control.
+`execution → branch-review` resets rather than carries: the clear is bias control, per
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` § Fresh context.
 
 **When `Continue` is permitted instead.** At `scoping → brainstorm`, `scoping → diagnosis`,
 `audit → brainstorm`, `fast-path → finish`, and `sweep → finish` — and nowhere else — the

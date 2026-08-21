@@ -102,8 +102,9 @@ the CLI's default silently replaces the user's binding choice; on the session ti
 
 The panel splits an oversize diff at file — and, for a lone file past the cap, `@@` hunk —
 boundaries into chunks each within the cap and runs every lens over every chunk, so the whole diff
-is reviewed rather than sampled. The `COVERAGE WARNING` its summary can open with now fires only for
-the last-resort truncation of a single hunk still over the cap.
+is reviewed rather than sampled. The `COVERAGE WARNING` its summary can open with fires whenever any
+input reached the reviewers truncated — an oversize lone hunk, an oversize spec, or an oversize
+file list.
 
 **`single`** — the same lenses as inline read-only reviewers, same refutation pass, same finding
 shape; a complete review in its own right, not a degraded panel.
@@ -165,8 +166,10 @@ code), and a **PR link** when one exists. Locations inside findings stay plain `
 Write `docs/audits/YYYY-MM-DD-<topic>.md` and commit it scoped per
 `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit":
 `git add docs/audits/… && git commit -- docs/audits/…`. The `git add` is not optional — a pathspec
-naming a path git does not know yet aborts the commit. If `git check-ignore` covers the path, write
-the file and skip the commit: the repo's own ignore rules decide what lands in history.
+naming a path git does not know yet aborts the commit. That commit is gated per
+`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking: resolve
+`${user_config.docTrackingPolicy}` first, then `git check-ignore` the path — write the file and
+skip the commit unless both permit it.
 
 Branch discipline follows `${CLAUDE_PLUGIN_ROOT}/references/branch.md`. **In-cycle** (a
 `.devcycle/state.md` exists and this cycle owns it): follow it in full including the `branch:`-line

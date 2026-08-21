@@ -50,13 +50,9 @@ follow its false-positive guards before judging anything.
 
 ## Verdict format
 
-```markdown
-Verdict: accept | needs-changes
-
-1. [severity] <finding, symptom first — the concrete scenario and what goes wrong>
-2. [severity] <finding, symptom first>
-...
-```
+Return the verdict in the shape `${CLAUDE_PLUGIN_ROOT}/references/evidence.md`
+§ Reviewer verdicts defines, each finding symptom first — the concrete
+scenario and what goes wrong.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`, each finding carrying
 the fields and the symptom-first phrasing

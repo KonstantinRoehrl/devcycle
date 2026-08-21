@@ -12,25 +12,27 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { parseFlags, requireValue } from "./cli-flags.mjs";
 
 const args = process.argv.slice(2);
 const USAGE =
   "lint-plan-code-blocks: usage: lint-plan-code-blocks.mjs <plan-path> | [--dir <root>]";
 const die = (msg) => { console.error(msg); process.exit(1); };
 
+const KNOWN_FLAGS = { "--dir": "value" };
 let root = null;
 let explicitPath = null;
-for (let i = 0; i < args.length; i += 1) {
-  if (args[i] === "--dir") {
-    // A flag whose value is missing is a usage error, never a silently absent flag.
-    if (i + 1 >= args.length) die(`${USAGE}\nlint-plan-code-blocks: --dir requires a value`);
-    root = args[i + 1];
-    i += 1;
-  } else if (explicitPath === null) {
-    explicitPath = args[i];
-  } else {
-    die(`${USAGE}\nlint-plan-code-blocks: unexpected extra argument "${args[i]}"`);
-  }
+try {
+  // The only script here that legitimately takes a positional, so it is the only one that opts
+  // out of cli-flags.mjs's default refusal of bare tokens.
+  const { flags, positionals } = parseFlags(args, KNOWN_FLAGS, { allowPositionals: true });
+  if (positionals.length > 1) die(`${USAGE}\nlint-plan-code-blocks: unexpected extra argument "${positionals[1]}"`);
+  root = requireValue(flags, "--dir") ?? null;
+  explicitPath = positionals[0] ?? null;
+} catch (err) {
+  // A flag whose value is missing, or that was never read at all, is a usage error, never a
+  // silently absent flag.
+  die(`${USAGE}\nlint-plan-code-blocks: ${err.message}`);
 }
 // The two name different targets; preferring one silently is the defect class this gate exists
 // to catch, so the combination is refused rather than resolved.

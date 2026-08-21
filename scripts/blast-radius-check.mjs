@@ -5,7 +5,7 @@
 // warning. Language-agnostic; conservative. See playbooks/planning-waves.md.
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, basename, extname, relative, sep } from "node:path";
-import { extractFiles, TEST_FILE_SUFFIXES } from "./task-files.mjs";
+import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES, normalizeFileToken } from "./task-files.mjs";
 
 const [, , planPath, repoRootArg] = process.argv;
 if (!planPath) {
@@ -18,25 +18,11 @@ if (!existsSync(planPath)) {
 }
 const repoRoot = repoRootArg || process.cwd();
 
-const TASK_HEADING_RE = /^### Task (\d+):.*$/gm;
-const FILES_BLOCK_RE = /\*\*Files:\*\*\n([\s\S]*?)(?=\n\*\*|\n###|$)/;
 const TEST_SUFFIXES = [...TEST_FILE_SUFFIXES, ".test.jsx", ".test.tsx", ".spec.ts", ".spec.js"];
 const CODE_EXT = new Set([".mjs", ".js", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".py"]);
-const IGNORE_DIRS = new Set(["node_modules", ".git", "dist", "build", "coverage", ".devcycle"]);
+const IGNORE_DIRS = new Set(["node_modules", ".git", "dist", "build", "coverage", ".devcycle", ".worktrees"]);
 
 const isTestFile = (p) => TEST_SUFFIXES.some((s) => p.endsWith(s));
-
-function declaredFiles(planText) {
-  const set = new Set();
-  const headings = [...planText.matchAll(TASK_HEADING_RE)];
-  for (let i = 0; i < headings.length; i++) {
-    const start = headings[i].index;
-    const end = i + 1 < headings.length ? headings[i + 1].index : planText.length;
-    const m = planText.slice(start, end).match(FILES_BLOCK_RE);
-    if (m) for (const f of extractFiles(m[1])) set.add(f);
-  }
-  return set;
-}
 
 function walk(dir, acc = []) {
   for (const name of readdirSync(dir)) {
@@ -49,17 +35,68 @@ function walk(dir, acc = []) {
 }
 
 const text = readFileSync(planPath, "utf8");
-const declared = declaredFiles(text);
+const blocks = taskBlocks(text);
+// A plan that yields no tasks is a parse failure, not a plan with no blast radius: without this
+// the walk below has nothing to match and prints ok against an empty list.
+if (blocks.length === 0) {
+  console.error(`blast-radius-check: no "### Task N" blocks found in ${planPath}`);
+  process.exit(1);
+}
+const filesByTask = taskFileMap(text);
+const declared = new Set([...filesByTask.values()].flatMap((files) => [...files]));
+// The walk below reasons over `declared`, not over the blocks: a plan whose tasks name no files
+// at all matches nothing and would print ok against an empty list just as a heading-less one would.
+if (declared.size === 0) {
+  // The same split, from the same map, as wave-disjointness-check's -- and deliberately the same
+  // sentence. Both gates read one taskFileMap, so a plan whose blocks say "none" that made one
+  // gate report the blocks missing and the other report them empty sent the author to two repairs
+  // for one plan.
+  const message =
+    filesByTask.size === 0
+      ? `no "**Files:**" blocks found in ${planPath}`
+      : `no task in ${planPath} declares a file -- its "**Files:**" blocks are present but empty`;
+  console.error(`blast-radius-check: ${message}`);
+  process.exit(1);
+}
 const changed = [...declared].filter((f) => !isTestFile(f));
 
 const codeFiles = walk(repoRoot)
   .map((p) => relative(repoRoot, p).split(sep).join("/"))
   .filter((p) => CODE_EXT.has(extname(p)));
 
+// The resolution planning-waves.md documents: a planner acknowledges a referencing test that does
+// not need updating, with a reason, and the gate clears rather than being walked around in prose.
+//   - Blast-radius override: <changed-file> [→ <test-file>] — <reason>
+// File-only clears every test-referencer of that file; "→ test" clears just that pair. A missing
+// reason is an error — an unexplained override is exactly the silent walk-around this gate prevents.
+const OVERRIDE_START = /^\s*-\s*Blast-radius override:/;
+const OVERRIDE_RE = /^\s*-\s*Blast-radius override:\s*(\S+?)(?:\s*→\s*(\S+))?\s*—\s*(.*\S)\s*$/;
+const overrides = [];
+for (const { text } of blocks) {
+  for (const line of text.split("\n")) {
+    if (!OVERRIDE_START.test(line)) continue;
+    const m = line.match(OVERRIDE_RE);
+    // Normalize both captures through the same normalizeFileToken the declaration side ran
+    // every "**Files:**" token through, so an override written with backticks or trailing
+    // punctuation -- exactly how planners write paths elsewhere -- still matches `chg` below.
+    const file = m ? normalizeFileToken(m[1]) : null;
+    const test = m && m[2] !== undefined ? normalizeFileToken(m[2]) : null;
+    // A present "→ <test>" whose token does not normalize to a path is malformed just as a bad
+    // changed-file token is; otherwise it would silently widen the override from the single pair
+    // to every test-referencer of the changed file.
+    if (!m || file === null || (m[2] !== undefined && test === null)) {
+      console.error(`blast-radius-check: malformed override (needs "<changed-file> [→ <test>] — <reason>"): ${line.trim()}`);
+      process.exit(1);
+    }
+    overrides.push({ file, test, reason: m[3] });
+  }
+}
+
 const hardFails = [];
 const warnings = [];
+const acknowledged = [];
 for (const chg of changed) {
-  const base = basename(chg, extname(chg));
+  const base = basename(chg); // keep the extension: `config.md`, not `config`
   const tokenRe = new RegExp(`[/.'"\`]${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
   for (const cand of codeFiles) {
     if (cand === chg || declared.has(cand)) continue;
@@ -70,12 +107,21 @@ for (const chg of changed) {
       continue;
     }
     if (!tokenRe.test(content)) continue;
-    (isTestFile(cand) ? hardFails : warnings).push({ cand, chg });
+    if (isTestFile(cand)) {
+      const ov = overrides.find((o) => o.file === chg && (o.test === null || o.test === cand));
+      if (ov) acknowledged.push({ cand, chg, reason: ov.reason });
+      else hardFails.push({ cand, chg });
+    } else {
+      warnings.push({ cand, chg });
+    }
   }
 }
 
 for (const w of warnings) {
   console.error(`blast-radius-check: warning -- ${w.cand} references ${w.chg} but is in no task's Files block`);
+}
+for (const a of acknowledged) {
+  console.error(`blast-radius-check: override -- ${a.cand} references ${a.chg}, cleared: ${a.reason}`);
 }
 if (hardFails.length > 0) {
   for (const h of hardFails) {

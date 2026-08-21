@@ -10,8 +10,9 @@ is a cache: every artifact is on disk, so the pipeline survives `/clear` and res
 
 ## Conventions this command does not restate
 
-- Knobs, the `profile`, model tiers, and the first-run configuration this command runs once per
-  repo — after the state file, before triage: `${CLAUDE_PLUGIN_ROOT}/references/config.md`.
+- Knobs, the `profile`, and model tiers: `${CLAUDE_PLUGIN_ROOT}/references/config.md`.
+- The first-run configuration this command runs once per repo — after the state file, before
+  triage: `${CLAUDE_PLUGIN_ROOT}/references/first-run-config.md`.
 - The state file's shape, lifecycle, ownership check: `${CLAUDE_PLUGIN_ROOT}/references/resume.md`.
 - Stage boundaries — handoff shape, context actions, await gate: `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`.
 - Branch discipline before any stage that commits: `${CLAUDE_PLUGIN_ROOT}/references/branch.md`.
@@ -89,9 +90,10 @@ stage enum's single source of truth — `scripts/validate.mjs` reads its literal
    confirmed scope, return to scoping.
 4. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified) with two notes on top.
    Ask in AskUserQuestion batches of 1–4 with concrete options plus Other, where upstream asks
-   one question at a time. And before upstream's "commit the design document to git" step, check
-   whether the spec's path is covered by the target repo's own `.gitignore` (`git check-ignore`);
-   if so, write the file but skip the commit. An approved spec transitions to planning below,
+   one question at a time. And gate upstream's "commit the design document to git" step per
+   `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking: resolve
+   `${user_config.docTrackingPolicy}` first, then `git check-ignore` the spec's path — write the
+   file and skip the commit unless both permit it. An approved spec transitions to planning below,
    never directly to upstream's writing-plans.
 5. **planning** — wave-based plan.
 6. **execution**.
