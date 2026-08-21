@@ -20,7 +20,7 @@ const repoRoot = repoRootArg || process.cwd();
 
 const TEST_SUFFIXES = [...TEST_FILE_SUFFIXES, ".test.jsx", ".test.tsx", ".spec.ts", ".spec.js"];
 const CODE_EXT = new Set([".mjs", ".js", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".py"]);
-const IGNORE_DIRS = new Set(["node_modules", ".git", "dist", "build", "coverage", ".devcycle"]);
+const IGNORE_DIRS = new Set(["node_modules", ".git", "dist", "build", "coverage", ".devcycle", ".worktrees"]);
 
 const isTestFile = (p) => TEST_SUFFIXES.some((s) => p.endsWith(s));
 
@@ -64,10 +64,31 @@ const codeFiles = walk(repoRoot)
   .map((p) => relative(repoRoot, p).split(sep).join("/"))
   .filter((p) => CODE_EXT.has(extname(p)));
 
+// The resolution planning-waves.md documents: a planner acknowledges a referencing test that does
+// not need updating, with a reason, and the gate clears rather than being walked around in prose.
+//   - Blast-radius override: <changed-file> [→ <test-file>] — <reason>
+// File-only clears every test-referencer of that file; "→ test" clears just that pair. A missing
+// reason is an error — an unexplained override is exactly the silent walk-around this gate prevents.
+const OVERRIDE_START = /^\s*-\s*Blast-radius override:/;
+const OVERRIDE_RE = /^\s*-\s*Blast-radius override:\s*(\S+?)(?:\s*→\s*(\S+))?\s*—\s*(.+\S)\s*$/;
+const overrides = [];
+for (const { text } of blocks) {
+  for (const line of text.split("\n")) {
+    if (!OVERRIDE_START.test(line)) continue;
+    const m = line.match(OVERRIDE_RE);
+    if (!m) {
+      console.error(`blast-radius-check: malformed override (needs "<changed-file> [→ <test>] — <reason>"): ${line.trim()}`);
+      process.exit(1);
+    }
+    overrides.push({ file: m[1], test: m[2] ?? null, reason: m[3] });
+  }
+}
+
 const hardFails = [];
 const warnings = [];
+const acknowledged = [];
 for (const chg of changed) {
-  const base = basename(chg, extname(chg));
+  const base = basename(chg); // keep the extension: `config.md`, not `config`
   const tokenRe = new RegExp(`[/.'"\`]${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
   for (const cand of codeFiles) {
     if (cand === chg || declared.has(cand)) continue;
@@ -78,12 +99,21 @@ for (const chg of changed) {
       continue;
     }
     if (!tokenRe.test(content)) continue;
-    (isTestFile(cand) ? hardFails : warnings).push({ cand, chg });
+    if (isTestFile(cand)) {
+      const ov = overrides.find((o) => o.file === chg && (o.test === null || o.test === cand));
+      if (ov) acknowledged.push({ cand, chg, reason: ov.reason });
+      else hardFails.push({ cand, chg });
+    } else {
+      warnings.push({ cand, chg });
+    }
   }
 }
 
 for (const w of warnings) {
   console.error(`blast-radius-check: warning -- ${w.cand} references ${w.chg} but is in no task's Files block`);
+}
+for (const a of acknowledged) {
+  console.error(`blast-radius-check: override -- ${a.cand} references ${a.chg}, cleared: ${a.reason}`);
 }
 if (hardFails.length > 0) {
   for (const h of hardFails) {

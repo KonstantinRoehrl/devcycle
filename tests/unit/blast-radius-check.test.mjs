@@ -142,3 +142,71 @@ test("both gates give the same diagnosis for a plan that declares no file", () =
   const diagnosis = (r) => r.stderr.trim().split("\n").pop().replace(/^\S+-check: /, "");
   assert.equal(diagnosis(blast), diagnosis(wave));
 });
+
+// F55: the matcher used to key on the extension-stripped basename ("config", not "config.md"),
+// so any file merely containing the word matched -- a false-positive flood. It also walked
+// .worktrees, and offered no way for a planner to acknowledge a referencing-but-unaffected test.
+function planChanging(changedFile, { override } = {}) {
+  const overrideLine = override ? `\n${override}` : "";
+  return `# Plan
+### Task 1: Change ${changedFile}
+**Files:**
+- Modify: \`${changedFile}\`${overrideLine}
+## Dispatch Map
+- Wave 1: Task 1
+`;
+}
+
+test("matcher does not fire on a bare word -- a suite mentioning 'config' does not reference config.md", () => {
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": "See `config` for details.\n",
+  });
+  const { code, out } = run(planChanging("references/config.md"), repo);
+  assert.equal(code, 0, out);
+});
+
+test("matcher fires on a path-shaped reference to the changed file", () => {
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": 'import x from "../references/config.md";\n',
+  });
+  const { code, out } = run(planChanging("references/config.md"), repo);
+  assert.equal(code, 1);
+  assert.match(out, /config\.md/);
+});
+
+test("a per-task override with a reason clears the hard-fail", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md — referenced only in a fixture string",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
+  assert.match(out, /override/i); // acknowledged, reason echoed
+});
+
+test("an override with no reason is itself an error", () => {
+  const plan = planChanging("references/config.md", {
+    override: "- Blast-radius override: references/config.md",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 1);
+  assert.match(out, /malformed override|needs a reason/i);
+});
+
+test(".worktrees is not walked", () => {
+  const repo = makeRepo({
+    "scripts/x.mjs": "export const x = 1;\n",
+    ".worktrees/c99/tests/unit/x.test.mjs": 'import "../../../scripts/x.mjs";',
+  });
+  const { code } = run(planChanging("scripts/x.mjs"), repo);
+  assert.equal(code, 0);
+});
