@@ -1045,7 +1045,7 @@ const GATES_WITHOUT_THE_TOKEN = [
 // --- what a citation claims ---------------------------------------------------------------
 // `references/ledger.md`'s rule has three outcomes, not two: a gate appends exactly when a run
 // record exists at that moment. So a surface that gates either states the append (affirmative),
-// states that no append is possible where it sits (negative — `references/config.md`'s
+// states that no append is possible where it sits (negative — `references/first-run-config.md`'s
 // walkthrough runs before `/devcycle:cycle` mints the record), or is exempt. Asking only whether
 // the token and the owner path appear could not tell the first two apart, which made a citation
 // claiming a journal that cannot happen indistinguishable from a correct one.
@@ -1093,7 +1093,7 @@ const citationVerdict = (text) => {
 // --- attributing a citation to the gate it covers -----------------------------------------
 // citationVerdict over a whole file answered "does this file cite anywhere", which a file with
 // several gates satisfies with one paragraph. Sections answer "does this gate cite". Ancestors
-// count: references/config.md states its negative polarity once, in the `## First-run
+// count: references/first-run-config.md states its negative polarity once, in the `## First-run
 // configuration` section whose three subsections do the gating, and demanding three restatements
 // of one rule is the duplication this repo's own conventions forbid.
 // Fenced blocks are skipped, because a heading-shaped line inside one is not a heading: this
@@ -1156,7 +1156,7 @@ const DESCRIBES_NOT_GATES = [
 
 // A gate that runs before any run record exists must say so, rather than claim an append that
 // cannot happen there. Listed, not derived: "before the mint" is a fact about when the text runs,
-// and nothing in the file structure carries it — `references/config.md`'s walkthrough is reached
+// and nothing in the file structure carries it — `references/first-run-config.md`'s walkthrough is reached
 // from `commands/cycle.md` exactly like the stages that do append. The list going stale is
 // guarded in the test: an entry that stops gating, or that stops running before the mint, fails.
 const PRE_MINT_SURFACES = ["references/first-run-config.md"];
@@ -1427,7 +1427,7 @@ test("citation attribution is per section, and a section inherits its ancestors'
   );
 
   // A subsection inherits the citation of the section it sits under — which is what makes the
-  // rule correct rather than merely strict: references/config.md states its polarity once, in the
+  // rule correct rather than merely strict: references/first-run-config.md states its polarity once, in the
   // parent of the three subsections that gate.
   const nested = `# Thing\n\n## Parent\n\nThe stage ${cite}.\n\n### Child\n\nAsk the user for confirmation.\n`;
   assert.deepEqual(
