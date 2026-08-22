@@ -44,7 +44,7 @@
         "stage": {
           "enum": [
             "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
-            "branch-review", "on-device", "fast-path", "sweep", "finish"
+            "branch-review", "on-device", "fast-path", "sweep", "finish", "maintain"
           ]
         },
         "startedAt": { "type": "string", "format": "date-time" },
@@ -115,7 +115,7 @@
         "stage": {
           "enum": [
             "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
-            "branch-review", "on-device", "fast-path", "sweep", "finish"
+            "branch-review", "on-device", "fast-path", "sweep", "finish", "maintain"
           ]
         },
         "task": { "type": "string" },

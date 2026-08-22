@@ -30,7 +30,7 @@ export function budgetStatus(netBytes, hasRetirement) {
 // must be mirrored here, which tests/unit/lessons.test.mjs pins.
 export const STAGES = [
   "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
-  "branch-review", "on-device", "fast-path", "sweep", "finish",
+  "branch-review", "on-device", "fast-path", "sweep", "finish", "maintain",
 ];
 
 const learningsRoot = () =>

@@ -78,6 +78,16 @@ the lens charters as known risks the reviewers must weigh the scope against. The
 <id>` tail on each line lets a reviewer pull that record when a lens needs it. Nothing is
 folded in when the match returns empty.
 
+**Optional caller-supplied orientation (used by `/devcycle:maintain`, ignored otherwise).** A caller
+may hand this stage a pre-computed **orientation digest** and **hotspot file list** — the compact
+repo picture `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`'s Research-dispatch procedure produces.
+When supplied, the `--files` argument above is that hotspot list rather than the whole stabilized
+scope (at `repo` scope the stabilized set can be the entire tree, and lessons cluster on central
+files, so the hotspot list is cheaper and more relevant), and the digest is offered to the lens
+charters as shared context so each lens need not re-read the tree. When absent — every
+`/devcycle:review` and branch-review run — this stage derives the file set exactly as it does today;
+the input is additive and changes nothing for callers that omit it.
+
 Then, for every caller, read that same file — owner of the catalog, the sourcing precedence and the
 seed index — and group the criteria into **2–5 lens charters**, **by kind, not by count**: related
 criteria share a lens so each reviewer holds a charter it can actually hold ("correctness and data
