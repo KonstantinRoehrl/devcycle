@@ -39,6 +39,7 @@ unreadable.
 | Why it's wrong | the mechanism / root cause |
 | Confidence | `verified` or `suspected` — never omitted, never upgraded because the pattern is familiar |
 | Measured against | a named repo convention, or a named external source, per `quality-criteria.md` § Precedence |
+| Origin | `lens` (default; omission reads as `lens`) or `github-issue #<n>` — provenance only; **origin never affects rank or how a finding is acted on**. Set to a non-default value only by issue-sourced findings (`/devcycle:maintain` §M10). |
 
 The `Confidence` field is this file's instance of the Authored-claims contract that `evidence.md` owns: a `verified` finding carries the traced path or command that proves it; `suspected` is the labeled-assumption form.
 

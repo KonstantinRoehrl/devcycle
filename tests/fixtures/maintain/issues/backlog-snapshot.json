@@ -1,0 +1,14 @@
+[
+  { "number": 119, "title": "[culprit:review-reject:execution] review-reject:execution", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/119", "body": "auto-drafted" },
+  { "number": 118, "title": "[culprit:re-dispatch:execution] re-dispatch:execution", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/118", "body": "auto-drafted" },
+  { "number": 117, "title": "[culprit:user-correction-at-gate:execution] user-correction-at-gate:execution", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/117", "body": "auto-drafted" },
+  { "number": 112, "title": "[culprit:user-correction-at-gate:brainstorm] user-correction-at-gate:brainstorm", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/112", "body": "auto-drafted" },
+  { "number": 107, "title": "fix(pipeline): task-reviewer dispatch contract's findings-file requirement is routinely skipped", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/107", "body": "The task-reviewer sometimes skips the findings file." },
+  { "number": 106, "title": "fix(pipeline): wave planning enforces file disjointness but not content coupling", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/106", "body": "Two tasks can edit the same shared prose in one wave." },
+  { "number": 105, "title": "fix(pipeline): redaction-check's finish-stage gate can't pass on legitimate .devcycle content", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/105", "body": "The finish gate false-positives on .devcycle content." },
+  { "number": 104, "title": "fix(pipeline): a worktree cycle's run record splits across two repo slugs", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/104", "body": "Run records split across slugs in worktrees." },
+  { "number": 103, "title": "fix(pipeline): ledger and state timestamps are estimated, not measured", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/103", "body": "Timestamps are estimated rather than measured." },
+  { "number": 91, "title": "refactor(workflows): decide and record whether shared workflow modules live in lib/", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/91", "body": "Decide on a home for shared workflow modules." },
+  { "number": 90, "title": "fix(workflows): a tmpdir failure in runCrossModelLens aborts the whole stage-1 fan-out", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/90", "body": "A tmpdir failure aborts the whole fan-out." },
+  { "number": 89, "title": "test(workflows): the stage-1 concurrency cap test can pass while the cap is broken", "url": "https://github.com/KonstantinRoehrl/devcycle/issues/89", "body": "The concurrency-cap test is vacuous." }
+]

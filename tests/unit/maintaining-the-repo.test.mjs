@@ -35,11 +35,45 @@ test("history is dispatched at the fast tier within its traversal bound", () => 
 
 test("fan-out ceiling: bounded concurrent + total lenses with a hard stop", () => {
   assert.match(pb, /at most 5|5 concurrent/i);
-  assert.match(pb, /at most 6|6 total/i);
+  assert.match(pb, /at most 8|8 total/i);
   assert.match(pb, /hard stop|20%/i);
 });
 
 test("still read-only: starts no cycle, writes no state file", () => {
   assert.match(pb, /read-only/i);
   assert.match(pb, /starts no cycle|no .*state file/i);
+});
+
+test("issue-folding: fetch is read-only via issue-intake.mjs, runs at all depths", () => {
+  assert.match(pb, /issue-intake\.mjs/);
+  assert.match(pb, /read-only/i);
+  assert.match(pb, /all (profile )?depths|every depth|lean.*standard.*thorough/i);
+});
+
+test("decompose-before-classify, with the #44 shape as the worked example", () => {
+  assert.match(pb, /decompose/i);
+  assert.match(pb, /#44/);
+  assert.match(pb, /before class/i);
+});
+
+test("feature-shaped fragments are excluded from ranking but counted", () => {
+  assert.match(pb, /feature/i);
+  assert.match(pb, /exclud/i);
+  assert.match(pb, /count/i);
+});
+
+test("verification routes an in-scope fragment through existing lens methodology", () => {
+  assert.match(pb, /verif/i);
+  assert.match(pb, /lens methodology|whichever.*lens|existing lens/i);
+});
+
+test("issue findings merge into the same ranked list, tagged by origin", () => {
+  assert.match(pb, /origin/i);
+  assert.match(pb, /same (ranked )?list|alongside lens/i);
+});
+
+test("no gh issue mutation anywhere in the issue code path (playbook + script)", () => {
+  const script = readFileSync(join(root, "scripts/issue-intake.mjs"), "utf8");
+  assert.doesNotMatch(script, /"issue"\s*,\s*"(close|comment|edit|label|delete|reopen|transfer|pin|lock|unlock)"/);
+  assert.doesNotMatch(pb, /gh\s+issue\s+(close|comment|edit|label|delete|reopen)\b/);
 });
