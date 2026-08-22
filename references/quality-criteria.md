@@ -78,6 +78,53 @@ an image-upload flow, an existing client wrapper — rather than re-implementing
 beside them. **Failure to reuse is a forbidden pattern: every instance is flagged**, with the
 existing component the new code should have used named by path.
 
+## Abstraction — does an existing abstraction still earn its complexity
+
+Distinct from **Reuse before rebuild** above (write-time reuse of existing components) and from
+"architecture and separation of concerns" (whether today's layering is sound): this criterion asks
+whether an **existing** abstraction — a module, interface, wrapper, or layer already in the tree —
+still earns its complexity **over time**. It is the longitudinal question `/devcycle:maintain`
+adds; `/devcycle:review` may also select it for a single-shot audit.
+
+Two hypotheses are tested against each candidate:
+
+- **H1 — unnecessary:** it forwards without adding policy, has one implementation and one consumer,
+  isolates no volatility, protects no invariant. Its complexity is not paid for.
+- **H2 — justified:** it centralizes a shared policy, backs several implementations or consumers,
+  isolates a volatile dependency, protects an invariant, points dependencies the right way, or
+  earns its seam through testing value or a history of convergence.
+
+Weigh H1 against H2 on this evidence: consumer count, implementation count, shared policy,
+protected invariants, volatility isolation, dependency direction, testing value, and historical
+convergence.
+
+**The deletion test — perform it, don't just reason about it.** Imagine the module removed and its
+logic inlined at every call site. If the calling code's total complexity *vanishes* with it, that
+is evidence for H1 (a pass-through — `REMOVE`/`SIMPLIFY`). If the same complexity *reappears*,
+redistributed across every caller instead of centralized, that is evidence for H2 (`KEEP` — the
+abstraction was doing real work). This is a mechanical technique the lens actually runs, giving each
+verdict a specific, checkable justification rather than an impression.
+
+**Outcomes:** `KEEP | WATCH | SIMPLIFY | REMOVE | CONSOLIDATE`. **`KEEP` with a stated justification is a successful analysis, not a null result** — learning which abstractions
+have earned their keep matters as much as which have not. The lens must be structurally unable to
+develop an anti-abstraction bias: a candidate that survives the deletion test is reported as a
+defended `KEEP`, carrying the same weight a `REMOVE` does.
+
+**Historical convergence is corroborating evidence, not a precondition.** At `standard` maintenance
+depth no history agent runs (`references/config.md` § The profile); the lens then reasons from
+consumer/implementation/invariant evidence alone and **states in the finding that historical
+evidence was not available**, the same "state what wasn't checked" discipline the audit stage uses.
+At `thorough` depth the history inspector's churn and convergence signal feeds this evidence
+directly.
+
+**Vocabulary hygiene.** Findings from this criterion name the same shape of thing the same way every
+time — `module`, `interface`, `implementation`, `seam`, `adapter` — never a different generic term
+(`component`, `service`, `boundary`) per finding, so a report stays comparable across candidates,
+the same reason `culprits.json` keeps a stable vocabulary for friction patterns.
+
+Measured against: this catalog (the repo's convention owner for what a review measures against). No
+dedicated agent — this is judgment over evidence a generic read-only reviewer already gathers.
+
 ## Multi-file feature chains
 
 For any non-trivial feature, map the full chain — entry point → state → API/service layer →
