@@ -12,6 +12,10 @@ const routing = readFileSync(join(root, "docs/routing.md"), "utf8");
 const maintainRow = routing
   .split("\n")
   .find((l) => l.trimStart().startsWith("|") && /\|\s*`?maintain`?\s*\|/.test(l));
+const rowFor = (command) =>
+  routing
+    .split("\n")
+    .find((l) => l.trimStart().startsWith("|") && new RegExp(`\\|\\s*\`?${command}\`?\\s*\\|`).test(l));
 
 test("routing surface: maintain has a read-only, model-invocable row", () => {
   assert.ok(maintainRow, "docs/routing.md has no `maintain` table row");
@@ -32,4 +36,16 @@ test("routing surface: a prose disambiguation separates maintain from review/doc
   assert.match(prose, /review/, "disambiguation must distinguish maintain from review");
   assert.ok(/doctor/.test(prose) && /learn/.test(prose), "must distinguish maintain from doctor and learn too");
   assert.match(prose, /longitudinal|over time/i, "disambiguation must name the longitudinal distinction");
+});
+
+test("routing surface: maintain's longitudinal keywords don't collide with review/doctor/learn rows", () => {
+  for (const command of ["review", "doctor", "learn"]) {
+    const row = rowFor(command);
+    assert.ok(row, `docs/routing.md has no \`${command}\` table row`);
+    assert.doesNotMatch(
+      row,
+      /longitudinal|over time|health/i,
+      `\`${command}\` row must not carry maintain's distinguishing keywords`,
+    );
+  }
 });
