@@ -921,12 +921,12 @@ test("plugin-root check: a citation to a script path resolves too", () => {
 
 // --- check 17: the command count is a regression guard ---
 
-test("command ceiling: an eighth command fails", () => {
+test("command ceiling: a ninth command fails", () => {
   const dir = makePluginFixture();
-  for (const name of ["one", "two", "three", "four", "five", "six", "seven"])
+  for (const name of ["one", "two", "three", "four", "five", "six", "seven", "eight"])
     writeInto(dir, `commands/${name}.md`, `---\ndescription: "Fixture command."\n---\n\n# /devcycle:${name}\n`);
   const { stderr } = runValidate(dir);
-  assert.match(stderr, /8 commands > 7/);
+  assert.match(stderr, /9 commands > 8/);
   assert.match(stderr, /surface decision/);
 });
 
