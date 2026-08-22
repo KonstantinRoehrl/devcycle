@@ -33,8 +33,10 @@ and no GitHub issue.
 2. **Scoping gate (mandatory, before any dispatch).** Run `reviewing-code.md` § 1's criteria
    interview and resolve knobs — the batched AskUserQuestion gate. Hard STOP until the user replies.
 3. **Orientation — one shared digest, graph-first.** Compute graph availability with
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/graph-availability.mjs" --repo . --skills "<this session's skills>" --plugin-root "${CLAUDE_PLUGIN_ROOT}"`
-   (the `resolveGraphAvailability` predicate as a CLI, printing `{available,reason}`); on the graph
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/graph-availability.mjs" --repo . --skills "<comma-separated session skills, e.g. graphify,token-optimizer>" --plugin-root "${CLAUDE_PLUGIN_ROOT}"`
+   (the `resolveGraphAvailability` predicate as a CLI, printing `{available,reason}`; `--skills`
+   is split on commas only, so pass the list comma-separated — a space-separated value is read as
+   one non-matching entry and silently degrades to the `Explore` fallback); on the graph
    path dispatch the Research procedure (`${CLAUDE_PLUGIN_ROOT}/references/delegation.md`
    § Research dispatches) to read the report and query for high-centrality/high-churn nodes, else a
    bounded read-only `Explore` dispatch. Produce one compact **repo digest** and a **hotspot file
