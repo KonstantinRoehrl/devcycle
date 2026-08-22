@@ -1,15 +1,15 @@
 {
-  "playbooks/executing-waves.md": 83375,
-  "playbooks/finishing-the-cycle.md": 81000,
-  "playbooks/learning-from-sessions.md": 95000,
-  "playbooks/maintaining-the-repo.md": 3500,
-  "playbooks/onboarding-a-repo.md": 66824,
-  "playbooks/planning-waves.md": 78216,
-  "playbooks/profiling-sessions.md": 33620,
-  "playbooks/reviewing-code.md": 88425,
-  "playbooks/reviewing-the-branch.md": 82477,
-  "playbooks/scoping-the-request.md": 64238,
-  "playbooks/sweeping-mechanical-changes.md": 77018,
-  "playbooks/taking-the-fast-path.md": 70244,
-  "playbooks/verifying-on-device.md": 72731
+  "playbooks/executing-waves.md": 96763,
+  "playbooks/finishing-the-cycle.md": 86673,
+  "playbooks/learning-from-sessions.md": 98911,
+  "playbooks/maintaining-the-repo.md": 74994,
+  "playbooks/onboarding-a-repo.md": 80212,
+  "playbooks/planning-waves.md": 83727,
+  "playbooks/profiling-sessions.md": 37436,
+  "playbooks/reviewing-code.md": 94791,
+  "playbooks/reviewing-the-branch.md": 87988,
+  "playbooks/scoping-the-request.md": 77626,
+  "playbooks/sweeping-mechanical-changes.md": 90406,
+  "playbooks/taking-the-fast-path.md": 83632,
+  "playbooks/verifying-on-device.md": 86119
 }
