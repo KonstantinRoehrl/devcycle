@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
 import { field, slugify, oneLine, isValidCalendarDate, CULPRIT_ID_RE } from "./promotions.mjs";
+import { fileMatchesGlob } from "./lessons.mjs";
 
 export const maintDir = (root) => join(root, "docs", "devcycle", "maintenance-findings");
 
@@ -143,4 +144,24 @@ export function rankByTrending(findings) {
     (b.passes ?? 0) - (a.passes ?? 0) ||
     String(a.firstSeen).localeCompare(String(b.firstSeen)) ||
     id(a).localeCompare(id(b)));
+}
+
+// §M9: a file's persisting findings (held across >=2 passes), matched by affected-files, silent when
+// absent. Reuses lessons.mjs's fileMatchesGlob rather than a second glob engine (QC1). A resolved or
+// dismissed finding is settled and not surfaced; a new (one-pass) finding is not yet "known context".
+export function matchMaintenanceFindings({ records, files, cap = 5 }) {
+  const out = [];
+  for (const r of records) {
+    if (r.lifecycle) continue;      // resolved/dismissed are settled
+    if (r.passes < 2) continue;     // persisting only
+    const hit = (r.affectedFiles ?? []).some((g) => files.some((f) => g === f || fileMatchesGlob(f, g)));
+    if (hit) out.push(r);
+  }
+  return out.slice(0, cap);
+}
+
+export function renderMaintenanceMatches(matches) {
+  return matches
+    .map((m) => `- known ${m.culpritKind ?? m.findingKind} concern, persisting since ${m.firstSeen} (${m.passes} passes): ${m.title} [${m.findingId}]`)
+    .join("\n");
 }
