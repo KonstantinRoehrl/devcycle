@@ -348,6 +348,7 @@ loaded by no command at all; it fires on a matched tool call.
 | Agent `task-reviewer` | Read-only reviewer for each task during execution. |
 | Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
 | Agent `on-device-driver` | Drives claude-in-chrome for the on-device stage — navigates, reads the DOM, and reports what a checklist item actually renders. Never decides whether an item passes. |
+| Agent `history-inspector` | Read-only git-history lens for `/devcycle:maintain` — churn, bug-fix clusters, co-change coupling, long-lived debt — within a bounded traversal window. Returns evidence, never a fix. |
 | Hook `block-main-thread-browser` | The plugin's only hook. Registered on `PreToolUse` over `mcp__claude-in-chrome__.*`, it denies any browser tool call that does not come from the `on-device-driver` subagent, so the coordinator cannot drive the browser at its own context depth (`docs/DECISIONS.md`, 2026-08-20). |
 | Workflow `review-panel.js` | Multi-lens read-only review engine for `reviewDepth: panel` — over a branch diff for the review, a file set for the audit. |
 | Workflow `mechanical-sweep.js` | Pilot-first bulk edit engine behind the sweep path and `**Execution:** sweep` plan tasks. |

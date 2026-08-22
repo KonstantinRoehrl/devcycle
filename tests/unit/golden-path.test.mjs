@@ -1152,6 +1152,11 @@ const DESCRIBES_NOT_GATES = [
   // step 3, its named reference implementation, carries the real AskUserQuestion. This table owns
   // what each policy commits, not a gate of its own.
   "references/config.md § ## Doc tracking — what each policy commits",
+  // A descriptive review criterion — the judgment method a maintenance/review lens runs over
+  // evidence — not a cycle-run gate with a write site. Its outcome vocabulary trips the gate
+  // matcher, but nothing in a run writes against it; the section states as much ("No dedicated
+  // agent — this is judgment over evidence a generic read-only reviewer already gathers").
+  "references/quality-criteria.md § ## Abstraction — does an existing abstraction still earn its complexity",
 ];
 
 // A gate that runs before any run record exists must say so, rather than claim an append that
