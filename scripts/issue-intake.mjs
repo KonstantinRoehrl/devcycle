@@ -60,14 +60,20 @@ export function intake({
     kept.push({ number: it.number, title: it.title, url: it.url, body: it.body ?? "" });
   }
 
+  // Redact kept title AND body via a scratch working copy under .devcycle/ run scratch (never
+  // committed). Title and body go to SEPARATE files so each is screened and read back cleanly —
+  // a home-path/secret in a title is exactly the class this screen exists to catch. Redaction is
+  // a safety net, not a gate: a failure leaves the originals rather than dropping the issue.
   if (kept.length && scratchDir) {
     mkdirSync(scratchDir, { recursive: true });
     for (const it of kept) {
-      writeFileSync(join(scratchDir, `issue-${it.number}.md`), `# ${it.title}\n\n${it.body}\n`);
+      writeFileSync(join(scratchDir, `issue-${it.number}-title.txt`), it.title ?? "");
+      writeFileSync(join(scratchDir, `issue-${it.number}-body.md`), it.body ?? "");
     }
     try { redactRunner(scratchDir); } catch { /* keep originals */ }
     for (const it of kept) {
-      try { it.body = readFileSync(join(scratchDir, `issue-${it.number}.md`), "utf8"); } catch { /* keep original */ }
+      try { it.title = readFileSync(join(scratchDir, `issue-${it.number}-title.txt`), "utf8").replace(/\n$/, ""); } catch { /* keep original */ }
+      try { it.body = readFileSync(join(scratchDir, `issue-${it.number}-body.md`), "utf8"); } catch { /* keep original */ }
     }
   }
 
@@ -88,7 +94,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const out = intake({
       repo,
       limit: limitRaw === undefined ? 50 : Number(limitRaw),
-      scratchDir: requireValue(flags, "--scratch"),
+      // Default the scratch dir so a CLI invocation always screens third-party text, even when the
+      // caller omits --scratch (the playbook always passes it; this guards ad-hoc use).
+      scratchDir: requireValue(flags, "--scratch") ?? join(".devcycle", "issue-intake", "adhoc"),
     });
     process.stdout.write(JSON.stringify(out, null, 2) + "\n");
   } catch (e) {

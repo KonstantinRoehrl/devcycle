@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { intake, isCulpritBracketTitle } from "../../scripts/issue-intake.mjs";
@@ -60,4 +60,24 @@ test("redaction is invoked on the kept bodies when a scratch dir is given", () =
 test("the script issues no gh mutation CALL (matches an arg-array, not prose)", () => {
   const src = readFileSync(join(root, "scripts/issue-intake.mjs"), "utf8");
   assert.doesNotMatch(src, /"issue"\s*,\s*"(close|comment|edit|label|delete|reopen|transfer|pin|lock|unlock)"/);
+});
+
+test("redaction scrubs BOTH title and body, and body carries no injected header or title duplication", () => {
+  const scratch = join(root, ".devcycle", "issue-intake", "test-fix-scratch");
+  // fake redactRunner: scrub every /Users/... path in every file in the dir (mirrors --auto-redact)
+  const fakeRedact = (dir) => {
+    for (const f of readdirSync(dir)) {
+      const p = join(dir, f);
+      writeFileSync(p, readFileSync(p, "utf8").replace(/\/Users\/\S+/g, "<redacted-path>"));
+    }
+    return "";
+  };
+  const issues = [{ number: 7, title: "bug in /Users/x/secret", url: "u", body: "home is /Users/x/private\nline two" }];
+  const r = intake({ repo: "o/r", ghRunner: fakeGh(issues), redactRunner: fakeRedact, scratchDir: scratch });
+  const it = r.issues[0];
+  assert.doesNotMatch(it.title, /\/Users\//, "F1: title must be scrubbed");
+  assert.doesNotMatch(it.body, /\/Users\//, "body must be scrubbed");
+  assert.doesNotMatch(it.body, /^#\s/, "F2: body must not carry an injected markdown header");
+  assert.ok(!it.body.includes("bug in"), "F2: title must not be duplicated into body");
+  rmSync(scratch, { recursive: true, force: true });
 });
