@@ -70,6 +70,12 @@ The procedure, named rather than restated by the stages that run it:
    prompt.** A graph is available when a `graphify` skill is listed among this session's
    available skills AND the target repo (never this plugin's own repo) has `graphify-out/`
    and/or a root `GRAPH_REPORT.md`.
+   The deterministic core of this step — *is a graph available for this target repo?* —
+   is computed by `${CLAUDE_PLUGIN_ROOT}/scripts/graph-availability.mjs`
+   (`resolveGraphAvailability({ repoPath, skills, pluginRoot })`), so a caller such as
+   `/devcycle:maintain` can branch graph-vs-`Explore` in code and keep this prose and that module
+   from drifting. The same orientation dispatch doubles as `/devcycle:maintain`'s shared repo digest
+   and hotspot list.
 2. **When available**, the dispatch prompt tells the subagent to read the report and query the
    graph for what the step needs, including `document`-type nodes for relevant docs (graphify
    tags markdown separately from code).
