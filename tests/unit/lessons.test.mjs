@@ -189,6 +189,10 @@ test("STAGES matches the stage enum the run-record schema declares, in the same 
     "this module restates the enum because the schema is a JSON fixture, not a module — so the two must be pinned to each other");
 });
 
+test("STAGES recognizes the maintain stage", () => {
+  assert.ok(STAGES.includes("maintain"), "STAGES must include 'maintain'");
+});
+
 test("the user store paths sit under the learnings root, mirroring the runs store", () => {
   process.env.DEVCYCLE_LEARNINGS_DIR = "/tmp/learnings";
   assert.match(userRepoStorePath("/tmp/fake-repo"), /^\/tmp\/learnings\/fake-repo-[0-9a-f]{8}\/lessons\.md$/);
