@@ -62,8 +62,11 @@ export function intake({
 
   if (kept.length && scratchDir) {
     mkdirSync(scratchDir, { recursive: true });
+    // Scratch files hold body only — never the title — so the redaction round-trip below can't
+    // fold the title into `it.body` (it did until this fix: title and body are separate fields
+    // downstream, and redaction targets "third-party body text" per this file's own header comment).
     for (const it of kept) {
-      writeFileSync(join(scratchDir, `issue-${it.number}.md`), `# ${it.title}\n\n${it.body}\n`);
+      writeFileSync(join(scratchDir, `issue-${it.number}.md`), it.body);
     }
     try { redactRunner(scratchDir); } catch { /* keep originals */ }
     for (const it of kept) {

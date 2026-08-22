@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { intake, isCulpritBracketTitle } from "../../scripts/issue-intake.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -55,6 +56,24 @@ test("redaction is invoked on the kept bodies when a scratch dir is given", () =
   const scratch = join(root, ".devcycle", "issue-intake", "test-scratch");
   intake({ repo: "o/r", ghRunner: fakeGh([fixture("issue-44-multibug.json")]), redactRunner: spyRedact, scratchDir: scratch });
   assert.equal(called, scratch);
+});
+
+test("the redaction round-trip does not fold the title into body (regression)", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "issue-intake-title-dup-"));
+  try {
+    const noopRedact = () => ""; // simulates redaction that changes nothing in the file
+    const r = intake({
+      repo: "o/r",
+      ghRunner: fakeGh([fixture("issue-44-multibug.json")]),
+      redactRunner: noopRedact,
+      scratchDir: scratch,
+    });
+    const { title, body } = r.issues[0];
+    assert.doesNotMatch(body, new RegExp(`^# ${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    assert.doesNotMatch(body, /^#\s/, "body should never start with a markdown heading from the title");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test("the script issues no gh mutation CALL (matches an arg-array, not prose)", () => {
