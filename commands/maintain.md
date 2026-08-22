@@ -19,6 +19,12 @@ name is the concern narrowing the criteria, and is never guessed to be a branch,
 that has a branch by that name. maintain has no branch scope — longitudinal health is a
 whole-repo property, not a diff's.
 
+A pass also folds in the target repo's own **open GitHub issues** as a second input source,
+read-only (GitHub-only in v1): issues are fetched, screened, decomposed, verified against current
+code, and ranked into the same findings list, tagged by origin. Maintenance never closes,
+comments on, edits, or labels an issue; selecting an issue-sourced finding starts a
+`/devcycle:cycle` that fixes the **code** it describes, never the issue itself.
+
 Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md`. It starts no cycle and writes
 no state file.
 

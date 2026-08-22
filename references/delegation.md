@@ -96,6 +96,13 @@ the request itself, since scope is not yet confirmed; `${CLAUDE_PLUGIN_ROOT}/pla
 confirmed scope in `.devcycle/scope.md`; `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` against the confirmed
 audit criteria.
 
+**Issue intake (used by `/devcycle:maintain`).** Decomposing a fetched issue body into
+independently-fixable claims and classifying each bug/refactor/feature is a read-only judgment
+dispatch at the **fast tier** (extraction + triage, a map not a verdict). Verifying an in-scope
+fragment against current code reuses the existing reviewer dispatch (session tier), routed to
+whichever lens methodology fits the claim — no new envelope. The deterministic fetch/screen is
+`scripts/issue-intake.mjs`, not an LLM dispatch.
+
 ## Read discipline
 
 Applies to every dispatched agent and to the coordinator's own exempt reads. Measured on the
