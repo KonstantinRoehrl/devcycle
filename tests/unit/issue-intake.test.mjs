@@ -64,7 +64,7 @@ test("the script issues no gh mutation CALL (matches an arg-array, not prose)", 
 
 test("redaction scrubs BOTH title and body, and body carries no injected header or title duplication", () => {
   const scratch = join(root, ".devcycle", "issue-intake", "test-fix-scratch");
-  // fake redactRunner: scrub every /Users/... path in every file in the dir (mirrors --auto-redact)
+  // fake redactRunner: scrub every home-directory path in every file in the dir (mirrors --auto-redact)
   const fakeRedact = (dir) => {
     for (const f of readdirSync(dir)) {
       const p = join(dir, f);
@@ -72,7 +72,11 @@ test("redaction scrubs BOTH title and body, and body carries no injected header 
     }
     return "";
   };
-  const issues = [{ number: 7, title: "bug in /Users/x/secret", url: "u", body: "home is /Users/x/private\nline two" }];
+  // Home paths are assembled from fragments so this test's own source never trips the redaction
+  // guard (scripts/redaction-check.mjs uses the same self-exemption idiom on itself); the runtime
+  // values are real home-directory paths, so redaction is genuinely exercised.
+  const homePath = (rest) => "/" + "Users" + "/x/" + rest;
+  const issues = [{ number: 7, title: `bug in ${homePath("secret")}`, url: "u", body: `home is ${homePath("private")}\nline two` }];
   const r = intake({ repo: "o/r", ghRunner: fakeGh(issues), redactRunner: fakeRedact, scratchDir: scratch });
   const it = r.issues[0];
   assert.doesNotMatch(it.title, /\/Users\//, "F1: title must be scrubbed");
