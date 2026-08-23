@@ -150,3 +150,60 @@ function loadVocab() {
   try { return JSON.parse(readFileSync(join(PLUGIN_ROOT, "references", "culprits.json"), "utf8")); }
   catch { return []; }
 }
+
+// A sibling of verify() for maintenance findings. verify() is hard-wired to promotion culprit-ids and
+// journal-event recurrence, both wrong for a repo-local, pass-detected finding — so this is a new
+// export, not a branch. It takes the store's records and a pass-comparison (which finding-ids the
+// current pass detected) and derives lifecycle from re-detection. Reuses VERDICT_BY_STATUS +
+// defaultRunCheck/skipRunCheck for an optional mechanical re-check; re-detection stays the primary
+// signal. installedVersion()/releaseDates() are not wired: a repo-local finding has no resolved-in-
+// version axis, so they would be dead here.
+export function verifyMaintenance(records, passComparison, opts = {}) {
+  const { runCheck = skipRunCheck, root = process.cwd(),
+    timeoutMs = VERIFY_TIMEOUT_MS, maxBuffer = VERIFY_MAX_BUFFER } = opts;
+  const detected = passComparison?.detectedIds instanceof Set
+    ? passComparison.detectedIds
+    : new Set(passComparison?.detectedIds ?? []);
+  const scoreboard = [];
+  const sections = { persisting: [], resolved: [], regressed: [] };
+  const gaps = [];
+  const known = new Set();
+  for (const r of records) {
+    known.add(r.findingId);                         // dismissed/resolved records still count as "known"
+    if (r.lifecycle === "dismissed") continue;      // a settled fate is not re-scored (verify()'s !p.lifecycle)
+    const isDetected = detected.has(r.findingId);
+    let lifecycle;
+    if (r.lifecycle === "resolved") {
+      if (!isDetected) continue;                    // resolved-stable, still locked
+      lifecycle = "regressed";
+    } else if (isDetected) {
+      lifecycle = "persisting";                     // every stored record has passes>=1, so a re-detect is persisting
+    } else {
+      lifecycle = "resolved";
+    }
+    // Optional mechanical corroboration: only a finding carrying a verify:, only when the caller opts
+    // in (runCheck !== skipRunCheck). Reuses VERDICT_BY_STATUS verbatim (held/broken/errored/unmeasurable).
+    let verdict = null, detail = null;
+    if (r.verify) {
+      const { status, detail: reason } = runCheck(r.verify, { root, timeoutMs, maxBuffer });
+      verdict = VERDICT_BY_STATUS[status] ?? "unmeasurable";
+      detail = reason ? `${r.verify} (${reason})` : r.verify;
+    }
+    // Rename-drift is unavoidable from ids alone (the M4 known limit): an undetected-active record flips
+    // to resolved AND is emitted to gaps unless a passing check corroborates the fix, so a moved-not-
+    // fixed finding stays visible rather than reading as a clean resolve (verify-before-stating, §M6).
+    if (lifecycle === "resolved" && verdict !== "held")
+      gaps.push({ id: r.findingId, note: "no longer detected; resolution uncorroborated (possible rename/move)" });
+    const row = {
+      id: r.findingId, findingKind: r.findingKind, lifecycle,
+      passes: lifecycle === "persisting" ? r.passes + 1 : r.passes,
+      firstSeen: r.firstSeen, severity: r.severity, confidence: r.confidence, verdict, detail,
+    };
+    scoreboard.push(row);
+    sections[lifecycle].push(row);
+  }
+  // A detected id with no stored record is new — the playbook holds its finding details and writes it
+  // with passes=1. verifyMaintenance only classifies transitions of records that already exist.
+  const newIds = [...detected].filter((id) => !known.has(id));
+  return { scoreboard, sections, newIds, gaps };
+}

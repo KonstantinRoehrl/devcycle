@@ -91,6 +91,41 @@ and no GitHub issue.
      Selecting one still starts a separate `/devcycle:cycle` naming that finding; maintenance never
      touches the issue on GitHub.
 
+8. **Persistence across passes (§M5) — after the ranked findings exist.** The engine (step 6) and
+   issue-folding (step 7) produce the ranked findings; this step gives them cross-pass memory. It is
+   the only new write, still read-only toward code and issues.
+   - **Assign a repo-local id (Screen).** Each finding gets a `findingId` = `<culprit-kind>:<hash>`
+     via `scripts/maintenance-findings.mjs` `findingId(kind, canonicalLocation)`, where
+     `canonicalLocation` is built WITHOUT a line number (a symbol/heading anchor) so a finding survives
+     cosmetic line moves. An issue-sourced finding uses `github-issue:<n>`. Ids are screened for shape
+     before any write and never written to `references/culprits.json`.
+   - **Compare against the store.** Read prior records with `readMaintenanceFindings(<targetRoot>)`,
+     build `detectedIds` from this pass, and call `verifyMaintenance(records, { detectedIds })` for the
+     lifecycle transitions of records that already exist: `persisting` (report "persistent since
+     <first-seen>") / `resolved` / `regressed`. A detected id with no prior record comes back in
+     `newIds` and is a **new** finding (written with `passes: 1`). Its `gaps` list names
+     undetected-active ids whose resolution is uncorroborated (the M4 rename/move limit) — render them
+     so a moved-not-fixed finding stays visible.
+   - **Offer dismissal.** A finding may be `dismissed` only with a **load-bearing** reason captured on
+     the record (`dismissed-reason:`) — a bare skip is not a dismissal. A dismissed finding is excluded
+     from the next pass's ranked list and is **never auto-re-evaluated**; it stays dismissed until a
+     human asks maintenance to reconsider it.
+   - **Rank + report.** Keep the engine's severity-first order as primary (never lowered); within a
+     severity tier sort by the trending signal, tie-broken confidence → passes → first-seen. Add
+     three longitudinal sections to the findings document: **Previously known (persisting)**,
+     **Resolved since last pass**, **Trending**. Every lifecycle transition rendered is backed by
+     this pass's live re-detection (verify-before-stating, `planning-waves.md` item 4), never a
+     prior pass's wording.
+   - **Write the store.** Persist each finding with `recordMaintenanceFinding(<targetRoot>, rec)`
+     (idempotent by id; issue-sourced findings write a `github-issue` record the same way). Commit the
+     store by resolving `${user_config.docTrackingPolicy}` against
+     `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, then `git check-ignore`, then an
+     explicit pathspec — the order `learning-from-sessions.md` step 3 uses. Per-file, never one log.
+   - **Per-lens cost rollup (§M7).** Sum each lens's inspector `cost:` envelope and append one
+     `lens-cost` run record per lens: `run-record.mjs append --kind lens-cost --stage maintain --lens
+     <slug> --cost <dollars> --run <runId>`. Maintenance emits **no** `workload` record, so its cost
+     stays on doctor's workload-independent `## Cost by stage` / `### Cost by lens` tables only.
+
 ## Fan-out ceiling (binding)
 
 A repo-wide multi-lens pass is the unbounded fan-out shape that has historically blown up spend, so:
@@ -112,5 +147,7 @@ A repo-wide multi-lens pass is the unbounded fan-out shape that has historically
 - Issue-folding is read-only: `gh issue list`/`view` only, never `close`/`comment`/`edit`/`label`.
 - Ends at the ranked findings document, committed per `${user_config.docTrackingPolicy}` exactly as
   `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` commits it.
+- Writes one new artifact — the per-finding `docs/devcycle/maintenance-findings/` store — committed per
+  `${user_config.docTrackingPolicy}` (`references/config.md` § Doc tracking); still no code or issue mutation.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

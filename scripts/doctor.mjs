@@ -791,12 +791,13 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         } else if (o.kind === "session") {
           current = o.sessionHash;
           if (!windows.has(current))
-            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [] });
+            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [] });
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
         else if (o.kind === "event") { if (current) windows.get(current).events.push(o); }
         else if (o.kind === "workload") { if (current) windows.get(current).workloads.push(o); }
+        else if (o.kind === "lens-cost") { if (current) windows.get(current).lensCosts.push(o); }
       }
       for (const [h, w] of windows) {
         // The run's workload is the last workload line written for the session (a rerun overwrites
@@ -811,6 +812,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
               verdicts: [...prior.verdicts, ...rec.verdicts],
               events: [...prior.events, ...rec.events],
               workloads: [...prior.workloads, ...rec.workloads],
+              lensCosts: [...prior.lensCosts, ...rec.lensCosts],
               workload: rec.workload ?? prior.workload ?? null }
           : rec);
       }
@@ -936,6 +938,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   const costByModel = {};
   const costByStage = {};
   const costByAgentType = {};
+  const costByLens = {};
   const unpriced = {};
   const priced = [];
   const bandCounts = Object.fromEntries(BAND_LABELS.map((l) => [l, 0]));
@@ -977,6 +980,9 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   // (`if (!record || !record.stages?.length) return null;`) — otherwise every turn fell back to
   // attributeForwardFill uniformly, so "forward-filled" is never a per-turn mix at this level.
   const attributionSource = attributionRecord && attributionRecord.stages?.length ? "record" : "forward-filled";
+  // Coordinator-reported per-lens cost, taken straight off the run record's lens-cost lines — not
+  // joined to a transcript turn, so it does not depend on attribution trust (schemaMismatch et al.).
+  for (const lc of record?.lensCosts ?? []) bump(costByLens, lc.lens, lc.cost ?? 0);
   // One entry per tool call (not per turn — a turn can carry several), the shape
   // emitComplianceCandidates' C1 check needs.
   const toolCallEvents = [];
@@ -1045,6 +1051,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     costByModel,
     costByStage,
     costByAgentType,
+    costByLens,
     bandCounts,
     startupFloor,
     carryWeighted,
@@ -1183,6 +1190,7 @@ function aggregate(summaries) {
     costByModel: {},
     costByStage: {},
     costByAgentType: {},
+    costByLens: {},
     bandCounts: Object.fromEntries(BAND_LABELS.map((l) => [l, 0])),
     startupFloor: {},
     carryWeighted: {},
@@ -1191,7 +1199,7 @@ function aggregate(summaries) {
   };
   for (const s of summaries) {
     agg.costUSD += s.costUSD;
-    for (const key of ["costByModel", "costByStage", "costByAgentType", "carryWeighted", "unpriced"])
+    for (const key of ["costByModel", "costByStage", "costByAgentType", "costByLens", "carryWeighted", "unpriced"])
       for (const [k, v] of Object.entries(s[key] ?? {})) bump(agg[key], k, v);
     for (const [k, v] of Object.entries(s.bandCounts ?? {})) bump(agg.bandCounts, k, v);
     for (const [k, v] of Object.entries(s.startupFloor ?? {})) (agg.startupFloor[k] ??= []).push(...v);
@@ -1944,6 +1952,19 @@ export function stageWindowTable(summaries, previousSummaries) {
   return rows;
 }
 
+// Per-lens maintenance cost, summed across the corpus. Sourced from lens-cost run records (coordinator-
+// reported), not from transcript turns — so it rides the workload-independent path, never the workload
+// machinery. A maintain pass with no lens-cost records renders nothing.
+export function lensCostTable(summaries) {
+  const totals = new Map();
+  for (const s of summaries)
+    for (const [lens, dollars] of Object.entries(s.costByLens ?? {}))
+      totals.set(lens, (totals.get(lens) ?? 0) + dollars);
+  return [...totals.entries()]
+    .map(([lens, total]) => ({ lens, total }))
+    .sort((a, b) => b.total - a.total || byName(a.lens, b.lens));
+}
+
 // A key is named by its culprit slug only when every session that recorded the key named the
 // same single slug. A key two sessions blamed differently is reported by key rather than by
 // picking one of them and printing a name the corpus does not agree on.
@@ -2517,6 +2538,14 @@ export function renderReport(summaries, ctx) {
     ]),
     "no stage cost recorded in this window",
   ));
+
+  section("### Cost by lens (maintain, observed)", "cost-by-lens");
+  L.push(...markdownTable(
+    ["Lens", "Cost (observed)"],
+    lensCostTable(summaries).map((r) => [r.lens, usd(r.total)]),
+    "no per-lens cost recorded (maintain passes emit lens-cost records)",
+  ));
+  L.push("", "_Sourced from lens-cost run records; workload-independent (maintenance emits no workload record)._");
 
   // The raw observed outcome family (spec C3): one row per run carrying a quality signal, its
   // raw verdicts/counts straight off the run records. conformancePass is null exactly when no
