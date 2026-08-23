@@ -1,0 +1,14 @@
+# Ledger and state timestamps are estimated, not measured, and references/ledger.md never documents that they must be
+- finding-kind: github-issue
+- finding-id: github-issue:103
+- issue: 103
+- severity: medium
+- confidence: verified
+- affected-files: references/ledger.md, .devcycle/state.md, .devcycle/ledger.md, scripts/run-record.mjs
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: github-issue #103
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

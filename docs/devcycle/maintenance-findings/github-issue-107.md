@@ -1,0 +1,14 @@
+# Task-reviewer dispatch contract's findings-file requirement is routinely skipped
+- finding-kind: github-issue
+- finding-id: github-issue:107
+- issue: 107
+- severity: high
+- confidence: verified
+- affected-files: references/delegation.md, agents/task-reviewer.md, playbooks/executing-waves.md
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: github-issue #107
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

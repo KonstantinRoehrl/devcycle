@@ -1,0 +1,14 @@
+# The plugin's one declared dependency (superpowers) carries no version constraint
+- finding-kind: maintenance-finding
+- finding-id: unpinned-dependency:5cacc303
+- culprit-kind: unpinned-dependency
+- severity: low
+- confidence: verified
+- affected-files: .claude-plugin/plugin.json
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

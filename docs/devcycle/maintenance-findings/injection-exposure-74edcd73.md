@@ -1,0 +1,14 @@
+# Untrusted GitHub issue text reaches Bash-capable reviewer dispatches during /devcycle:maintain's issue-folding step, with only a prose (not technical) boundary
+- finding-kind: maintenance-finding
+- finding-id: injection-exposure:74edcd73
+- culprit-kind: injection-exposure
+- severity: low
+- confidence: suspected
+- affected-files: playbooks/maintaining-the-repo.md, agents/task-reviewer.md, agents/red-team-reviewer.md
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

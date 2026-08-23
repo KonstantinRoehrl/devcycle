@@ -1,0 +1,14 @@
+# The stage-1 concurrency-cap test infers peak via wall-clock markers and can false-pass under CI contention
+- finding-kind: github-issue
+- finding-id: github-issue:89
+- issue: 89
+- severity: low
+- confidence: verified
+- affected-files: tests/unit/review-panel.test.mjs
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: github-issue #89
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

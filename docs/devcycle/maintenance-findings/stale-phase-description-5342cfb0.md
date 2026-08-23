@@ -1,0 +1,14 @@
+# commands/maintain.md's own body text still frames the command as "Phase 1," describing already-shipped Phase 2-4 capability as future work
+- finding-kind: maintenance-finding
+- finding-id: stale-phase-description:5342cfb0
+- culprit-kind: stale-phase-description
+- severity: medium
+- confidence: verified
+- affected-files: commands/maintain.md
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

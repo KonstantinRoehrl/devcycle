@@ -1,0 +1,14 @@
+# A tmpdir failure in runCrossModelLens aborts the whole stage-1 fan-out instead of degrading gracefully
+- finding-kind: github-issue
+- finding-id: github-issue:90
+- issue: 90
+- severity: medium
+- confidence: verified
+- affected-files: workflows/review-panel.js
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: github-issue #90
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

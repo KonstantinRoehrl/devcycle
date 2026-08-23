@@ -1,0 +1,14 @@
+# The release PR's own CI checks (pr-title, commit-convention) sit in GitHub's approval-required state and may never run
+- finding-kind: maintenance-finding
+- finding-id: ci-gate-gap:6fd5435a
+- culprit-kind: ci-gate-gap
+- severity: medium
+- confidence: verified
+- affected-files: .github/workflows/prepare-release.yml, CONTRIBUTING.md
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

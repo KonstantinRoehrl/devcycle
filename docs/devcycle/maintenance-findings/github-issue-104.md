@@ -1,0 +1,14 @@
+# A worktree cycle's run record splits across two repo slugs (gitToplevel resolves the worktree path)
+- finding-kind: github-issue
+- finding-id: github-issue:104
+- issue: 104
+- severity: medium
+- confidence: verified
+- affected-files: scripts/run-record.mjs
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: github-issue #104
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

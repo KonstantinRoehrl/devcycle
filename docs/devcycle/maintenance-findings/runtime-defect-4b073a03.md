@@ -1,0 +1,14 @@
+# diffStats() never checks the exit status of its two git diff calls, so a failed diff silently reports as "zero changes"
+- finding-kind: maintenance-finding
+- finding-id: runtime-defect:4b073a03
+- culprit-kind: runtime-defect
+- severity: medium
+- confidence: verified
+- affected-files: scripts/run-record.mjs
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 
