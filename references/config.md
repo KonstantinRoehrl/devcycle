@@ -136,6 +136,7 @@ of deciding for itself.
 | plan — `docs/superpowers/plans/` | local | local | commit |
 | lessons — `docs/devcycle/lessons.md` | local | commit | commit |
 | promotion records — `docs/devcycle/promotions/` | local | commit | commit |
+| maintenance findings — `docs/devcycle/maintenance-findings/` | local | commit | commit |
 | audit report — `docs/audits/` | local | commit | commit |
 | on-device checklist, in-cycle — `docs/<feature>/` | never committed | never committed | never committed |
 | onboarding scaffold — `CLAUDE.md`, `.gitignore` lines | exempt | exempt | exempt |
