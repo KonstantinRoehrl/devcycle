@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.16.0 — 2026-08-23
+
+- feat(maintain): add read-only repo maintenance command (Phases 1-4)
+
 ## 0.15.0 — 2026-08-21
 
 - feat(doctor): trustworthy version-scoped candidates and workload-adjusted cost comparison
