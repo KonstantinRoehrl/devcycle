@@ -13,7 +13,8 @@ import { pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, readRecords, inWindow } from "./doctor.mjs";
 import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
-import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding } from "./lessons.mjs";
+import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding, MATCH_CAP } from "./lessons.mjs";
+import { readMaintenanceFindings, matchMaintenanceFindings, renderMaintenanceMatches } from "./maintenance-findings.mjs";
 import { parseFileList } from "./task-files.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
@@ -754,7 +755,11 @@ function main() {
         ...readSection(userGlobalStorePath(), stage),
       ];
       const out = renderMatch(matchLessons({ lessonLines, promotions: readPromotions(root), files, culprits, keywords }));
-      if (out) process.stdout.write(out + "\n");
+      const maint = renderMaintenanceMatches(
+        matchMaintenanceFindings({ records: readMaintenanceFindings(root), files, cap: MATCH_CAP }),
+      );
+      const combined = [out, maint].filter((s) => s && s.length).join("\n");
+      if (combined) process.stdout.write(combined + "\n");
       return;
     } catch (e) {
       console.error(`dream: ${e.message}`);

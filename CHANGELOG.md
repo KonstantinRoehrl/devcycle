@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.16.0 — 2026-08-23
+
+- feat(maintain): add read-only repo maintenance command (Phases 1-4)
+
+Adds `/devcycle:maintain`, a read-only repo-maintenance avenue: an eighth command that assesses
+a repo against today's quality criteria and stops — it never starts a cycle. Shipped in four
+phases, each independently gated and merged (#120, #121, #123, #124).
+
+**Phase 1 — command surface + reuse wiring.** `commands/maintain.md`, a routing entry
+disambiguated from the other seven commands with its own scenario test, and
+`playbooks/maintaining-the-repo.md` wrapping the existing review engine rather than a second one.
+
+**Phase 2 — longitudinal lenses, graph-first orientation, gated depth.** An `abstraction`
+review-charter lens judging whether existing complexity still earns its keep, a `history-inspector`
+agent reading git history read-only, graph-first orientation with a deterministic pre-pass and
+hotspot-scoped `--match`, a profile-gated depth ladder, and enforced fan-out ceilings (≤5 lenses /
+≤6 dispatches, hard-stop at 20% depth).
+
+**Phase 3 — GitHub issues as a second input.** `scripts/issue-intake.mjs` folds a repo's own open
+issues into the same ranked-findings pipeline the lenses feed: decompose-before-classify (a bundled
+issue splits into independently-true-or-false fragments), `[culprit:]`/`[doctor:]`-titled issues
+excluded before decomposition, third-party text screened via redaction, and an `Origin` field
+(`lens` / `github-issue #<n>`) that's provenance-only and never affects rank. Strictly read-only —
+no `close`/`comment`/`edit`/`label` call anywhere in the code path, enforced as a code invariant.
+
+**Phase 4 — persistence across runs.** Findings from both lenses and issues now persist in
+`docs/devcycle/maintenance-findings/`, tracked per `docTrackingPolicy`, with lifecycle derived from
+pass re-detection: `new` → `persisting` → `resolved`, or `regressed` on reappearance. A repo-local
+identity scheme (known limitation: not resilient to a file rename between passes, verified to fail
+loud rather than silently, not solved in v1) backs a `verifyMaintenance` sibling of the existing
+`verify()`, a `lens-cost` run-record kind rolling per-lens spend into `doctor`'s workload-independent
+cost views, and `--match` extended so a file with a persisting finding surfaces it on
+`/devcycle:review`.
+
+**Deliberately out of scope for v1:** a content-based identity scheme resilient to renames, and
+charter-upgrading the five pre-existing quality-criteria lenses (dead-code, test-health,
+architecture, docs, dependency) — gated on real-use evidence that their current charters
+under-carry, not queued by default.
+
 ## 0.15.0 — 2026-08-21
 
 - feat(doctor): trustworthy version-scoped candidates and workload-adjusted cost comparison

@@ -1,0 +1,6 @@
+{
+  "number": 300,
+  "title": "fix: crash when the ledger file is missing",
+  "url": "https://github.com/KonstantinRoehrl/devcycle/issues/300",
+  "body": "Running the pipeline with no .devcycle/ledger.md throws an unhandled error."
+}

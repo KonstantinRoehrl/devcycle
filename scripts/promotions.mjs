@@ -7,22 +7,22 @@ import { join, relative, isAbsolute } from "node:path";
 export const promoDir = (root) => join(root, "docs", "devcycle", "promotions");
 
 // (verbatim from scripts/dream.mjs:80-83 — one regex, not two)
-function field(text, key) {
+export function field(text, key) {
   const m = text.match(new RegExp(`^- ${key}:[ \\t]*(.*)$`, "m"));
   return m ? m[1].trim() : "";
 }
 
-const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+export const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
 // The two Unicode escapes are line terminators for `^`/`$` in JavaScript regexes; written as
 // escapes rather than literal characters so a copy cannot silently drop them, which would let a
 // value forge a phantom "- landed:" line in the record it is written into.
-const oneLine = (s) => String(s ?? "").replace(/\r\n|[\r\n\u2028\u2029]/g, " ").trim();
+export const oneLine = (s) => String(s ?? "").replace(/\r\n|[\r\n\u2028\u2029]/g, " ").trim();
 
 const PROMOTION_TYPES = new Set([
   "doc-edit", "skill-edit", "enforcement-gap", "contradiction-resolution", "config-proposal",
 ]);
 const LANDED_RE = /^\d{4}-\d{2}-\d{2}$/;
-const isValidCalendarDate = (s) =>
+export const isValidCalendarDate = (s) =>
   LANDED_RE.test(s) && !Number.isNaN(Date.parse(s)) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
 
 const RUNGS = ["r0", "r1", "r2", "r3"];
@@ -30,7 +30,7 @@ const RUNGS = ["r0", "r1", "r2", "r3"];
 // `<kind>:<slug>` colon form (`novel:x`). The bare slug is canonical for known-taxonomy ids,
 // matching the journal/run-record.mjs and references/culprits.json convention; the colon form
 // stays valid for novel and other kinds. lessons.mjs LESSON_RE mirrors this grammar (QC4).
-const CULPRIT_ID_RE = /^[a-z0-9][a-z0-9-]*(:[a-z0-9][a-z0-9-]*)?$/;
+export const CULPRIT_ID_RE = /^[a-z0-9][a-z0-9-]*(:[a-z0-9][a-z0-9-]*)?$/;
 export const LIFECYCLE = ["retirement", "revert"];
 
 // An r3 lesson's whole claim is "a check exists and is green", so a verify: that resolves to

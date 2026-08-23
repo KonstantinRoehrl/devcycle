@@ -94,6 +94,7 @@ by choice from one inherited from an older version.
 | branch-review round cap | 2 | 3 | 5 |
 | audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |
 | learn depth | journal + memory | + archives / findings / ledgers + user-correction turns | + raw transcripts |
+| maintenance depth | existing-criteria lenses only | + abstraction (degraded evidence if no history) | + history (bounded traversal) |
 
 Which column applies, and when a knob overrides it, is the resolution order above —
 this table supplies the values, not the rule for choosing them.
@@ -103,6 +104,16 @@ first: **journal → memory → archives/findings/ledgers → user-correction tu
 Gating is by profile, never by token budget or a signal heuristic — a budget gate would make
 coverage nondeterministic and destroy the marginal-vs-first-run comparison the measurement gate
 depends on.
+
+The maintenance depth row governs `/devcycle:maintain`'s longitudinal lenses: **lean** runs the
+existing criteria only; **standard** adds the Abstraction criterion
+(`${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`), which degrades to
+consumer/implementation/invariant evidence and states the gap when no history is available;
+**thorough** additionally dispatches the history inspector within its bounded traversal window.
+Resolves through the same knob order as `audit depth`. **Known gap (§M7):** a maintenance pass
+deliberately emits no `workload` run-record — it produces zero diff by design — so it is visibly
+excluded from doctor's `## At a glance` and `EXCESS-COST` views; its cost stays visible in the
+workload-independent `## Cost by stage` / `## Cost by version` tables.
 
 **Never profile-conditional:** the state file, handoff blocks, evidence classes, the
 coordinator's green gate, the `gitPolicy` clamps, branch discipline, the one-`task-reviewer`
@@ -125,6 +136,7 @@ of deciding for itself.
 | plan — `docs/superpowers/plans/` | local | local | commit |
 | lessons — `docs/devcycle/lessons.md` | local | commit | commit |
 | promotion records — `docs/devcycle/promotions/` | local | commit | commit |
+| maintenance findings — `docs/devcycle/maintenance-findings/` | local | commit | commit |
 | audit report — `docs/audits/` | local | commit | commit |
 | on-device checklist, in-cycle — `docs/<feature>/` | never committed | never committed | never committed |
 | onboarding scaffold — `CLAUDE.md`, `.gitignore` lines | exempt | exempt | exempt |

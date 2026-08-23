@@ -635,9 +635,10 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
 
   // 17. The command count is a regression guard, not a target. D7 proposed collapsing seven verbs
   //     to five; that required folding `continue` into `cycle` (declined — docs/DECISIONS.md,
-  //     2026-08-12) and removing `onboard` (never specified anywhere). Neither happened, so the
-  //     honest ceiling is today's count and the check exists to make an eighth command deliberate.
-  const COMMAND_CEILING = 7;
+  //     2026-08-12) and removing `onboard` (never specified anywhere). Neither happened. The
+  //     ceiling is today's count so an added command is a deliberate surface decision, not a file
+  //     addition; it was raised 7→8 when `maintain` landed (the deliberate eighth command).
+  const COMMAND_CEILING = 8;
   const commandCount = namesIn("commands").length;
   if (commandCount > COMMAND_CEILING)
     fail(

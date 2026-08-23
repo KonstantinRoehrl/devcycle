@@ -44,7 +44,7 @@
         "stage": {
           "enum": [
             "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
-            "branch-review", "on-device", "fast-path", "sweep", "finish"
+            "branch-review", "on-device", "fast-path", "sweep", "finish", "maintain"
           ]
         },
         "startedAt": { "type": "string", "format": "date-time" },
@@ -115,7 +115,7 @@
         "stage": {
           "enum": [
             "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
-            "branch-review", "on-device", "fast-path", "sweep", "finish"
+            "branch-review", "on-device", "fast-path", "sweep", "finish", "maintain"
           ]
         },
         "task": { "type": "string" },
@@ -143,6 +143,24 @@
       },
       "required": ["kind", "runId", "requestKind", "filesChanged", "filesCreated",
         "filesDeleted", "insertions", "deletions", "plannedTaskCount", "waveCount"],
+      "additionalProperties": false
+    },
+    {
+      "title": "lens-cost",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "lens-cost" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "stage": {
+          "enum": [
+            "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
+            "branch-review", "on-device", "fast-path", "sweep", "finish", "maintain"
+          ]
+        },
+        "lens": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "cost": { "type": "number", "minimum": 0 }
+      },
+      "required": ["kind", "runId", "stage", "lens", "cost"],
       "additionalProperties": false
     }
   ]

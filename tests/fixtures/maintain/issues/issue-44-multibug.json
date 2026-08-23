@@ -1,0 +1,6 @@
+{
+  "number": 44,
+  "title": "doctor: three cost-comparison bugs plus some enhancement ideas",
+  "url": "https://github.com/KonstantinRoehrl/devcycle/issues/44",
+  "body": "Found several problems in the per-version cost comparison:\n\n1. Versions are sorted lexicographically, not by semver, so 0.10.0 sorts before 0.9.0.\n2. The regression detector is one-sided — it flags cost increases but never improvements.\n3. Percentage deltas off a near-zero base dominate the ranking.\n\nSome ideas while we're here: it would be nice to have a --json export, and maybe a colorized TTY table, and a weekly email digest."
+}

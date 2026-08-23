@@ -154,6 +154,7 @@ function main() {
   const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex",
     "filesChanged", "filesCreated", "filesDeleted", "insertions", "deletions",
     "plannedTaskCount", "waveCount"]);
+  const floatFields = new Set(["cost"]);
 
   if (sub === "new") {
     const runId = randomBytes(8).toString("hex");
@@ -176,7 +177,7 @@ function main() {
     for (const [k, v] of Object.entries(flags)) {
       if (k === "run" || k === "kind" || k === "repo") continue;
       if (k === "sessionId") obj.sessionHash = hashSession(v);
-      else obj[k] = intFields.has(k) ? Number(v) : v;
+      else obj[k] = intFields.has(k) || floatFields.has(k) ? Number(v) : v;
     }
     for (const [k, v] of Object.entries(objects)) obj[k] = v;
     if (Object.keys(knobs).length) obj.knobs = knobs;
