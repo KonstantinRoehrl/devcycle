@@ -1,0 +1,14 @@
+# README Machinery table hand-maintains ~28 roster rows with a mechanical guard on 3
+- finding-kind: maintenance-finding
+- finding-id: unguarded-roster:d142a783
+- culprit-kind: unguarded-roster
+- severity: medium
+- confidence: verified
+- affected-files: README.md, tests/unit/golden-path.test.mjs
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

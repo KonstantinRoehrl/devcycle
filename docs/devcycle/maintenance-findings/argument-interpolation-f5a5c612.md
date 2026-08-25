@@ -1,0 +1,14 @@
+# $ARGUMENTS is interpolated into prose that names a grammar rather than referencing a value, corrupting the rule at runtime
+- finding-kind: maintenance-finding
+- finding-id: argument-interpolation:f5a5c612
+- culprit-kind: argument-interpolation
+- severity: medium
+- confidence: verified
+- affected-files: commands/maintain.md, commands/review.md, commands/verify.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

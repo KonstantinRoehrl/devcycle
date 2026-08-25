@@ -1,0 +1,14 @@
+# docs/comparisons/: one consumer, a two-versions-stale baseline, 5 of 13 coverage, shipped to every installer
+- finding-kind: maintenance-finding
+- finding-id: expired-mandate:ffdba6a8
+- culprit-kind: expired-mandate
+- severity: medium
+- confidence: verified
+- affected-files: docs/comparisons, DESIGN.md, .gitignore
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

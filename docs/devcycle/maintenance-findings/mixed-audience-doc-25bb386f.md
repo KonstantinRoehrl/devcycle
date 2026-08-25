@@ -1,0 +1,14 @@
+# DESIGN.md serves two audiences and two time-bases in one file; ~40% describes a plan, not the product
+- finding-kind: maintenance-finding
+- finding-id: mixed-audience-doc:25bb386f
+- culprit-kind: mixed-audience-doc
+- severity: high
+- confidence: verified
+- affected-files: DESIGN.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

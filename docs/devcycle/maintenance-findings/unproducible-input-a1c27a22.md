@@ -1,0 +1,14 @@
+# M7 per-lens cost rollup requires a cost: envelope no dispatch contract produces, so maintenance is invisible in every doctor cost view
+- finding-kind: maintenance-finding
+- finding-id: unproducible-input:a1c27a22
+- culprit-kind: unproducible-input
+- severity: medium
+- confidence: verified
+- affected-files: playbooks/maintaining-the-repo.md, references/config.md, references/delegation.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

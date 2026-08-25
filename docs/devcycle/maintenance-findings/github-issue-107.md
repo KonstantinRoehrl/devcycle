@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: references/delegation.md, agents/task-reviewer.md, playbooks/executing-waves.md
 - first-seen: 2026-08-23
-- last-seen: 2026-08-23
-- passes: 1
+- last-seen: 2026-08-25
+- passes: 2
 - origin: github-issue #107
 - verify: 
 - lifecycle: 

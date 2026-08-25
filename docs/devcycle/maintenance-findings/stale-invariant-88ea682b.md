@@ -1,0 +1,14 @@
+# docs/known-issues.md asserts zero open defects while 12 open records sit in the maintenance-findings store
+- finding-kind: maintenance-finding
+- finding-id: stale-invariant:88ea682b
+- culprit-kind: stale-invariant
+- severity: high
+- confidence: verified
+- affected-files: docs/known-issues.md, CONTRIBUTING.md, docs/devcycle/maintenance-findings
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

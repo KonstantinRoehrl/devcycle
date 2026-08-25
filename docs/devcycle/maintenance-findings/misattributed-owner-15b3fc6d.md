@@ -1,0 +1,14 @@
+# references/sweep-execution.md attributes a ledger line shape to config.md, which owns only one field of it
+- finding-kind: maintenance-finding
+- finding-id: misattributed-owner:15b3fc6d
+- culprit-kind: misattributed-owner
+- severity: low
+- confidence: verified
+- affected-files: references/sweep-execution.md, references/ledger.md, references/config.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

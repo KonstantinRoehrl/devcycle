@@ -3,11 +3,11 @@
 - finding-id: leaked-responsibility:2f408b8b
 - culprit-kind: leaked-responsibility
 - severity: low
-- confidence: suspected
+- confidence: verified
 - affected-files: commands/doctor.md
 - first-seen: 2026-08-23
-- last-seen: 2026-08-23
-- passes: 1
+- last-seen: 2026-08-25
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 
