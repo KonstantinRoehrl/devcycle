@@ -37,7 +37,9 @@ const abort = (m) => {
   process.exit(1);
 };
 
-// Sorted recursive walk of *.mjs / *.js under dir; a dir that cannot be listed aborts.
+// Sorted recursive walk of *.mjs under dir; a dir that cannot be listed aborts.
+// .mjs only, by spec ("plain Node ESM (.mjs)") — .js is out of the corpus for both
+// export sites and use sites.
 function collectSources(dir) {
   const out = [];
   let names;
@@ -49,7 +51,34 @@ function collectSources(dir) {
   for (const name of names) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) out.push(...collectSources(p));
-    else if (p.endsWith(".mjs") || p.endsWith(".js")) out.push(p);
+    else if (p.endsWith(".mjs")) out.push(p);
+  }
+  return out;
+}
+
+// Directories pruned from the repo-wide use-site walk. These are non-source (.git,
+// node_modules) or this tool's own run-scratch (.devcycle changes every run), so walking
+// them would break the "same tree → same findings in the same order" determinism contract.
+// Prune them here rather than widening the walk to literal-every-directory. (tests/ is
+// pruned too, and additionally filtered by isTest below — "tests do not count as use".)
+const PRUNED_USE_DIRS = new Set(["tests", ".git", "node_modules", ".devcycle"]);
+
+// Sorted recursive walk of *.mjs under dir, skipping PRUNED_USE_DIRS; used to build the
+// repo-wide use-site corpus.
+function collectUseSites(dir) {
+  const out = [];
+  let names;
+  try {
+    names = [...readdirSync(dir)].sort();
+  } catch (e) {
+    abort(`cannot read ${dir}: ${e.message}`);
+  }
+  for (const name of names) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) {
+      if (PRUNED_USE_DIRS.has(name)) continue;
+      out.push(...collectUseSites(p));
+    } else if (p.endsWith(".mjs")) out.push(p);
   }
   return out;
 }
@@ -109,24 +138,29 @@ function parseImports(src) {
 const resolveSpec = (fromDir, spec) =>
   spec && spec.startsWith(".") ? resolve(fromDir, spec) : null; // relative specs only
 
-// Collect non-test sources under scripts/ + workflows/ — both the export sites and the
-// (production) use sites. Tests live under tests/ and are never scanned, which is what makes
-// "tests do not count as use" true by construction.
-const sources = [];
+// Two decoupled corpora:
+//  - Export sites: non-test *.mjs under scripts/ + workflows/. These are the modules whose
+//    exports are judged live-or-dead, and the abort condition is keyed to THIS set — a run
+//    that cannot read any exporting module is never reported clean.
+//  - Use sites: every non-test *.mjs under scanRoot (minus PRUNED_USE_DIRS), so an import
+//    from hooks/ (or any dir) marks a scripts//workflows/ export live.
+const exportSites = [];
 for (const dirName of [...EXPORT_DIRS].sort()) {
   const abs = join(scanRoot, dirName);
   if (!existsSync(abs)) continue;
-  for (const file of collectSources(abs)) if (!isTest(file)) sources.push(file);
+  for (const file of collectSources(abs)) if (!isTest(file)) exportSites.push(file);
 }
-if (sources.length === 0)
+if (exportSites.length === 0)
   abort(`no exporting modules under ${EXPORT_DIRS.map((d) => join(scanRoot, d)).join(", ")}`);
 
-const modules = new Map(); // absPath -> { names, namespaceUsed, usedNames }
-for (const file of sources)
+const useSites = collectUseSites(scanRoot).filter((file) => !isTest(file));
+
+const modules = new Map(); // absPath -> { names, namespaceUsed, usedNames } — export sites only
+for (const file of exportSites)
   modules.set(file, { names: parseExports(readFileSync(file, "utf8")), namespaceUsed: false, usedNames: new Set() });
 
 const notes = [];
-for (const file of sources) {
+for (const file of useSites) {
   for (const imp of parseImports(readFileSync(file, "utf8"))) {
     if (imp.dynamic) {
       notes.push(`${relative(root, file)}: unresolved dynamic import`);

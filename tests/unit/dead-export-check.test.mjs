@@ -101,6 +101,37 @@ test("an empty corpus aborts non-zero instead of reporting clean", () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("an export imported only from outside scripts/+workflows/ is live (use sites are repo-wide)", () => {
+  const dir = makeFixture({
+    "scripts/a.mjs": "export const X = 1;\nexport const unusedOrphan = 2;\n",
+    "hooks/h.mjs": "import { X } from '../scripts/a.mjs';\nconsole.log(X);\n",
+  });
+  try {
+    const res = run(["--dir", dir], dir);
+    assert.equal(res.status, 0, res.stderr);
+    // X is imported from hooks/ (outside scripts/+workflows/) and must NOT be flagged dead.
+    assert.doesNotMatch(res.stdout, /a\.mjs:X\b/);
+    // Non-vacuity: a genuinely-unused export in the same module IS still flagged.
+    assert.match(res.stdout, /a\.mjs:unusedOrphan/);
+    assert.match(res.stdout, /1 export\(s\) with no non-test importer/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a .js file is ignored: it neither marks exports used nor has its own exports judged", () => {
+  const dir = makeFixture({
+    "scripts/a.mjs": "export const dead = 1;\n",
+    "scripts/consumer.js": "import { dead } from './a.mjs';\nexport const jsThing = 9;\n",
+  });
+  try {
+    const res = run(["--dir", dir], dir);
+    assert.equal(res.status, 0, res.stderr);
+    // The .js importer does not count, so `dead` has no .mjs importer and IS flagged.
+    assert.match(res.stdout, /a\.mjs:dead/);
+    // The .js file's own export is never judged, and the file never appears in output.
+    assert.doesNotMatch(res.stdout, /consumer\.js/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("a --dir with no value fails instead of scanning the cwd", () => {
   const dir = makeFixture({ "scripts/a.mjs": "export const x = 1;\n" });
   try {
