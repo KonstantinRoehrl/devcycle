@@ -42,10 +42,14 @@ and no GitHub issue.
    bounded read-only `Explore` dispatch. Produce one compact **repo digest** and a **hotspot file
    list** handed to every lens.
 4. **Deterministic-facts pre-pass.** Gather what tooling establishes exactly — dependency audit,
-   dead-export detection, lint, broken-link check, and the `duplication-check.mjs` pattern
-   (`${CLAUDE_PLUGIN_ROOT}/scripts/duplication-check.mjs`) — and hand the lenses those facts as
-   evidence. Never spend an LLM lens re-deriving a tooling fact; a tool that is unreachable has its
-   fact omitted and named in the coverage statement.
+   lint, the `duplication-check.mjs` pattern
+   (`${CLAUDE_PLUGIN_ROOT}/scripts/duplication-check.mjs`), dead-export detection
+   (`node "${CLAUDE_PLUGIN_ROOT}/scripts/dead-export-check.mjs"`), and cross-reference / broken-link
+   checking (`node "${CLAUDE_PLUGIN_ROOT}/scripts/xref-check.mjs"`) — and hand the lenses those facts
+   as evidence. The dead-export and xref checks are **advisory**: their findings print to stdout as
+   evidence and they exit 0 even with findings, so only a non-zero (`abort`) exit — the tool could not
+   run — omits the fact and is named in the coverage statement. Never spend an LLM lens re-deriving a
+   tooling fact; a tool that is unreachable has its fact omitted and named in the coverage statement.
 5. **History (thorough only).** Dispatch `devcycle:history-inspector` at the **fast tier** within its
    bounded traversal window (the smaller of the last 500 commits or 6 months, owned by the agent).
    Fold its churn/convergence signal into the Abstraction charter's historical-convergence input and

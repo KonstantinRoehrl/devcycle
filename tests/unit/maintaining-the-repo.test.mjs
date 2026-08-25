@@ -77,3 +77,9 @@ test("no gh issue mutation anywhere in the issue code path (playbook + script)",
   assert.doesNotMatch(script, /"issue"\s*,\s*"(close|comment|edit|label|delete|reopen|transfer|pin|lock|unlock)"/);
   assert.doesNotMatch(pb, /gh\s+issue\s+(close|comment|edit|label|delete|reopen)\b/);
 });
+
+test("the pre-pass also runs the dead-export and xref checks, as advisory facts", () => {
+  assert.match(pb, /dead-export-check\.mjs/);
+  assert.match(pb, /xref-check\.mjs/);
+  assert.match(pb, /advisory/i);
+});
