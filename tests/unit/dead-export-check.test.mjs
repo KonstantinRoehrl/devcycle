@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -129,6 +129,27 @@ test("a .js file is ignored: it neither marks exports used nor has its own expor
     assert.match(res.stdout, /a\.mjs:dead/);
     // The .js file's own export is never judged, and the file never appears in output.
     assert.doesNotMatch(res.stdout, /consumer\.js/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a dangling symlink under the scan root is skipped, never crashing the walk", (t) => {
+  const dir = makeFixture({
+    "scripts/a.mjs": "export const used = 1;\nexport const orphan = 2;\n",
+    "scripts/b.mjs": "import { used } from './a.mjs';\nconsole.log(used);\n",
+  });
+  try {
+    try {
+      symlinkSync("does-not-exist", join(dir, "link"));
+    } catch {
+      return t.skip("platform cannot create symlinks");
+    }
+    const res = run(["--dir", dir], dir);
+    // A dangling symlink must not crash the process with a raw ENOENT trace: the run
+    // completes with exit 0 and a clean dead-export-check summary, having done real work.
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /dead-export-check: 1 export\(s\) with no non-test importer/);
+    assert.match(res.stdout, /a\.mjs:orphan/);
+    assert.doesNotMatch(res.stderr, /ENOENT|at Object\.<anonymous>/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

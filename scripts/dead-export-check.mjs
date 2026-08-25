@@ -13,7 +13,7 @@
 // We flag exported SYMBOLS, never whole modules, so a CLI entry point invoked as
 // `node scripts/x.mjs` (never imported) is never itself flagged; only its individual exports
 // unused by production code are reported. Orphan-file detection is out of scope.
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, lstatSync, existsSync } from "node:fs";
 import { join, relative, resolve, dirname, sep } from "node:path";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 
@@ -37,6 +37,16 @@ const abort = (m) => {
   process.exit(1);
 };
 
+// Symlinks are NOT followed: we type-check entries with lstatSync (the link itself, not its
+// target). Since collectUseSites walks the whole repo, a dangling symlink would otherwise make
+// a target-following statSync throw an uncaught ENOENT (bypassing abort()'s clean contract),
+// and a directory-symlink cycle would recurse to stack overflow. With lstatSync a dangling
+// symlink neither throws nor looks like a directory, and dir-symlink cycles are structurally
+// impossible; a symlink entry is simply not a regular source file, so it is skipped. Only a
+// genuinely unreadable directory (the readdirSync catch below) aborts.
+const isRegularDir = (p) => lstatSync(p).isDirectory();
+const isRegularMjs = (p) => p.endsWith(".mjs") && lstatSync(p).isFile();
+
 // Sorted recursive walk of *.mjs under dir; a dir that cannot be listed aborts.
 // .mjs only, by spec ("plain Node ESM (.mjs)") — .js is out of the corpus for both
 // export sites and use sites.
@@ -50,8 +60,8 @@ function collectSources(dir) {
   }
   for (const name of names) {
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) out.push(...collectSources(p));
-    else if (p.endsWith(".mjs")) out.push(p);
+    if (isRegularDir(p)) out.push(...collectSources(p));
+    else if (isRegularMjs(p)) out.push(p);
   }
   return out;
 }
@@ -75,10 +85,10 @@ function collectUseSites(dir) {
   }
   for (const name of names) {
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) {
+    if (isRegularDir(p)) {
       if (PRUNED_USE_DIRS.has(name)) continue;
       out.push(...collectUseSites(p));
-    } else if (p.endsWith(".mjs")) out.push(p);
+    } else if (isRegularMjs(p)) out.push(p);
   }
   return out;
 }
