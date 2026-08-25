@@ -11,6 +11,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { DESIGN_DOC } from "../../scripts/doc-paths.mjs";
 
 const root = process.cwd();
 const read = (p) => readFileSync(join(root, p), "utf8");
@@ -1836,7 +1837,7 @@ test("the browser guard's matcher does not reach ordinary main-thread tools", ()
 });
 
 test("every shipped agent is named by DESIGN.md's blueprint, DESIGN.md §13, and README's machinery table", () => {
-  const design = read("DESIGN.md");
+  const design = read(DESIGN_DOC);
   const readme = read("README.md");
   for (const f of readdirSync(join(root, "agents"))) {
     if (!f.endsWith(".md")) continue;
@@ -1852,7 +1853,7 @@ test("every shipped agent is named by DESIGN.md's blueprint, DESIGN.md §13, and
 });
 
 test("the browser guard is named by DESIGN.md's blueprint and README's machinery table", () => {
-  assert.match(read("DESIGN.md"), /^├── hooks\//m, "DESIGN.md §3's tree must list hooks/");
+  assert.match(read(DESIGN_DOC), /^├── hooks\//m, "DESIGN.md §3's tree must list hooks/");
   assert.match(
     read("README.md"),
     /block-main-thread-browser/,
@@ -1862,7 +1863,7 @@ test("the browser guard is named by DESIGN.md's blueprint and README's machinery
 
 test("DESIGN.md §10 no longer rejects the hooks that ship", () => {
   assert.doesNotMatch(
-    read("DESIGN.md"),
+    read(DESIGN_DOC),
     /^- \*\*Hooks in the public plugin\*\*/m,
     "the non-goal was reversed on 2026-08-20 (docs/DECISIONS.md); a shipped component cannot sit in §10"
   );

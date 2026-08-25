@@ -13,9 +13,10 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, resolve, dirname } from "node:path";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
+import { DESIGN_DOC } from "./doc-paths.mjs";
 
 const DIRS = ["agents", "commands", "playbooks", "references"];
-const ROOT_FILES = ["DESIGN.md", "CONTRIBUTING.md"];
+const ROOT_FILES = [DESIGN_DOC, "CONTRIBUTING.md"];
 const args = process.argv.slice(2);
 const KNOWN_FLAGS = { "--dir": "value" };
 const root = process.cwd();
