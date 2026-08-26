@@ -292,27 +292,8 @@ gated by `userConfig.crossModelReview`.
 ### 15.1 The reference layer: one owner per convention
 
 `references/` holds seventeen plain markdown files, each the sole owner of one cross-cutting
-convention:
-
-| File | Owns |
-| --- | --- |
-| `config.md` | knob resolution, the profile matrix and its resolution order, the model tiers and their derivation predicates |
-| `first-run-config.md` | the first-run and upgrade configuration dialogue `/devcycle:cycle` runs once per repo — its sole owner |
-| `evidence.md` | the three evidence classes, the file-backed evidence contract, the implementer report and reviewer verdict shapes |
-| `resume.md` | settling the branch from the state file, git-evidence resume rules, "review acceptance is never inferable from git" |
-| `handoff.md` | the handoff block shape, the context-action table, the one-block-per-stage rule, the await gate |
-| `delegation.md` | who does the work: the coordinator's closed duty list, the stage budget's counters, the research-dispatch contract, and the return envelopes |
-| `branch.md` | branch discipline for every committing path |
-| `output.md` | output discipline for every agent and playbook |
-| `checklist.md` | the on-device checklist contract: paths, item shape, dimensions, and the `(auto)` boundary |
-| `quality-criteria.md` | what any review or plan measures against: the criteria catalog, sourcing precedence, the seed index, and the forward-use rules |
-| `findings.md` | how a finding is expressed: severity with blocking derived, the core and document field sets, evidence discipline, ordering, the machine shape |
-| `loops.md` | what every bounded loop does when it runs out of rounds: the cap, the exhaustion statuses, and how each outcome is reported |
-| `ledger.md` | the ledger's write format: its preamble records and its per-event line |
-| `sweep-execution.md` | how a plan task marked `**Execution:** sweep` runs inside the execution stage |
-| `commit-convention.md` | how a devcycle-driven commit's subject matches the target repo's own conventions, derived once before wave 1's first commit |
-| `config-changelog.md` | every `userConfig` addition, rename, and deprecation, and the version each landed in |
-| `impact-scoring.md` | how devcycle quantifies what a culprit cost: the attribution formula, its grouping keys, and the unmeasurable case |
+convention; each file and what it owns is enumerated, one line apiece, in the
+[references index](../../references/README.md).
 
 A consumer names one — "Read `${CLAUDE_PLUGIN_ROOT}/references/<name>.md` and follow it" —
 and does not restate its content.

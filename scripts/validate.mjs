@@ -341,6 +341,9 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     A reference mentioning itself is not a consumer of itself.
   const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
   for (const f of namesIn("references")) {
+    // references/README.md is the index — a consumer OF references, not a loadable reference —
+    // so nothing cites it and requiring a consumer of it would be self-defeating.
+    if (f === "README.md") continue;
     const needle = `references/${f}`;
     const consumed = [...surface, ...scripts].some(
       (p) => !rel(p).endsWith(needle) && readFileSync(p, "utf8").includes(needle)

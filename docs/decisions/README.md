@@ -5,6 +5,33 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-25 — surfaceTotal corrected and raised for the references index
+
+**Decision:** `surfaceTotal` in `tests/fixtures/surface-budget.json` is raised to **4,504** to
+admit the new `references/README.md` index (measured runtime surface is 4,483 lines with the index
+written; the baseline carries 21 lines of headroom, not an exact fit). Separately,
+`references/README.md` is exempted from `scripts/validate.mjs`'s check-11 reference-consumer gate
+(`if (f === "README.md") continue;`): the index is a consumer OF references, not a loadable
+reference, so nothing cites it and requiring a consumer of it would be self-defeating. Both are
+disclosed in the layered-docs PR.
+
+**Why:** the references index is a new always-loaded-adjacent surface file, so it pushes the
+runtime line total up and it has no consumer of its own — the two gates a plain new reference
+would trip. The exemption is the correct model of what the index is; the budget raise is a
+reviewed decision made in the same change, ahead of exact-fit ratcheting.
+
+**Correction to the log:** the newest prior entry that names `surfaceTotal` is the 2026-08-20
+raise below, which recorded **4,150**. The live fixture had since drifted to **4,457** with no
+decision-log entry recording the climb: git shows it moved 4,150 → 4,453 → 4,457 across later
+commits, the last being `a9b8b09` (dated 2026-08-25, #126, the maintain pre-pass work), which
+bumped 4,453 → 4,457. (The dispatch brief attributed the 4,457 value to a "2026-08-23 maintenance
+cycle"; git dates that commit 2026-08-25 and shows intermediate values, so that specific
+attribution is not what the history shows — this entry records the verified sequence instead.)
+This entry re-anchors the logged figure to the live, now-raised value.
+
+**Supersedes:** the stale `surfaceTotal` figure of **4,150** recorded in the 2026-08-20 entry,
+and the unlogged 4,453/4,457 values it drifted through.
+
 ## 2026-08-25 — documentation reorganized into a layered docs/ structure
 
 **Decision:** `README.md` becomes a lean entry point, with everything deeper moved under
