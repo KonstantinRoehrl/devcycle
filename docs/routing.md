@@ -27,18 +27,18 @@ its frontmatter.
 | profile cost, depth, model routing, config drift | `doctor` | read-only | yes |
 | bootstrap devcycle in a repo | `onboard` | side-effectful | no |
 
-**`cycle`'s justification.** Model-invocable by deliberate exception (`DESIGN.md` §4 amendment
-4, reversed 2026-07-24) so a wrapper skill can call the pipeline programmatically. It creates
+**`cycle`'s justification.** Model-invocable by deliberate exception (`docs/design/README.md` §4
+amendment 4, reversed 2026-07-24) so a wrapper skill can call the pipeline programmatically. It creates
 no branch and makes no commit before its first user confirmation, and it surfaces a state-file
 collision rather than overwriting one.
 
 **`maintain` vs its neighbours.** `maintain` assesses a repository's longitudinal health — how
-its abstractions and history trend over time — and in Phase 1 it does so by running a whole-repo
-audit that stops at a ranked findings document, so its behaviour is close to `review` at repo
-scope; the longitudinal difference (cross-pass memory and the abstraction/history lenses) is not
-yet behavioural and lands in a later phase. It still differs in intent from `review` (single-shot,
-the code as it stands now), from `doctor` (pipeline cost, depth and model routing — not the code),
-and from `learn` (distilling sessions into landed rules — not assessing the repo).
+its abstractions and history trend over time — by running a whole-repo audit that stops at a
+ranked findings document. Its abstraction and history lenses and its cross-pass memory are
+behavioural today, so it reads the code across passes rather than only as it stands now; that is
+what sets it apart from `review` (single-shot, the code as it stands now), from `doctor` (pipeline
+cost, depth and model routing — not the code), and from `learn` (distilling sessions into landed
+rules — not assessing the repo).
 
 **Naming.** Commands are verbs, playbooks are gerunds, agents are role nouns. `doctor` is the
 single recorded exception, justified by `brew doctor` / `flutter doctor` / `npm doctor`.

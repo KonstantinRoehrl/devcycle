@@ -395,6 +395,21 @@ test("reference check: a reference loaded only by a script has a consumer", () =
   ok(runValidate(dir));
 });
 
+test("reference check: references/README.md (the index) is exempt from the consumer gate, but a real orphan still fails", () => {
+  // The index is a consumer OF references, not a loadable reference — nothing cites it, and
+  // requiring it to have a consumer would be self-defeating. The exemption is scoped to it alone.
+  const indexed = makePluginFixture();
+  writeInto(indexed, "references/README.md", "# References\n\n- `handoff.md` — the handoff block shape.\n");
+  ok(runValidate(indexed));
+
+  // Discriminating case: any other consumer-less reference must still fail, so the exemption
+  // cannot let the whole gate pass vacuously.
+  const orphaned = makePluginFixture();
+  writeInto(orphaned, "references/README.md", "# References\n\n- `orphan.md` — a reference.\n");
+  writeInto(orphaned, "references/orphan.md", "# Orphan\n");
+  failsWith(runValidate(orphaned), /orphan\.md.*no consumer/);
+});
+
 // --- the description budget reads commands, not whatever else lands in the directory ---
 
 test("description budget: a .DS_Store beside the commands is not read as a command", () => {

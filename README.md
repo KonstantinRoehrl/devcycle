@@ -17,21 +17,26 @@ counterparts only at the `thorough` profile.
 ## Where to start
 
 ```mermaid
+---
+title: devcycle — where to start
+accDescr: Command-level map of devcycle's eight slash commands. /devcycle:onboard scaffolds a new repo before the first cycle; /devcycle:cycle runs the guided pipeline through Scope/Design, Plan, Build, Review, and Ship; /devcycle:continue resumes a stopped cycle; and /devcycle:review, /devcycle:doctor, /devcycle:verify, /devcycle:learn, and /devcycle:maintain each run standalone at any time.
+---
 flowchart LR
-    CYCLE(["/devcycle:cycle"]):::entry
-    CONT(["/devcycle:continue"]):::entry
-    ONBOARD(["/devcycle:onboard"]):::entry
-    REVIEWCMD(["/devcycle:review"]):::entry
-    DOCTOR(["/devcycle:doctor"]):::entry
-    VERIFY(["/devcycle:verify"]):::entry
-    LEARN(["/devcycle:learn"]):::entry
+    CYCLE(["/devcycle:cycle"]):::tool
+    CONT(["/devcycle:continue"]):::tool
+    ONBOARD(["/devcycle:onboard"]):::tool
+    REVIEWCMD(["/devcycle:review"]):::tool
+    DOCTOR(["/devcycle:doctor"]):::tool
+    VERIFY(["/devcycle:verify"]):::tool
+    LEARN(["/devcycle:learn"]):::tool
+    MAINTAIN(["/devcycle:maintain"]):::tool
 
     ONBOARD -. "first, in a new repo" .-> CYCLE
-    CYCLE --> SCOPE["Scope / Design"]:::orch
-    SCOPE --> PLAN["Plan"]:::orch
-    PLAN --> BUILD["Build"]:::orch
-    BUILD --> REVIEW["Review"]:::orch
-    REVIEW --> SHIP["Ship"]:::orch
+    CYCLE --> SCOPE["Scope / Design"]:::stage
+    SCOPE --> PLAN["Plan"]:::stage
+    PLAN --> BUILD["Build"]:::stage
+    BUILD --> REVIEW["Review"]:::stage
+    REVIEW --> SHIP["Ship"]:::stage
 
     CONT -. "resumes wherever the cycle stopped" .-> PLAN
 
@@ -39,13 +44,21 @@ flowchart LR
     DOCTOR -. "standalone, anytime" .-> SHIP
     VERIFY -. "standalone, anytime" .-> SHIP
     LEARN -. "standalone, anytime" .-> SHIP
+    MAINTAIN -. "standalone, anytime" .-> SHIP
 
-    classDef orch fill:#e8f0fe,stroke:#3367d6,color:#111
-    classDef entry fill:#fef7e0,stroke:#b06000,color:#111
+    classDef stage fill:#EEEDFE,stroke:#534AB7,color:#3C3489;
+    classDef tool fill:#E1F5EE,stroke:#0F6E56,color:#085041,stroke-dasharray:5 5;
+    classDef structural fill:#F1EFE8,stroke:#5F5E5A,color:#444441;
 ```
+Command-level only — for stage internals, see `docs/pipeline/`.
 
-Those seven commands are devcycle's entire surface — everything else it ships is machinery they
-load. The full pipeline, every stage and every dashed standalone tool, is diagrammed below.
+Those eight commands are devcycle's entire surface — everything else it ships is machinery they
+load. The full stage-level pipeline is in [`docs/pipeline/`](docs/pipeline/README.md).
+
+- [Install](#install)
+- [Use](#use)
+- [Troubleshooting](#troubleshooting)
+- [Go deeper](#go-deeper)
 
 ## Install
 
@@ -61,8 +74,8 @@ automatically from the official Claude Code plugin directory; afterwards
 Requires a recent Claude Code CLI — verified on 2.1.217 and later.
 
 For the on-device verification stage's automatic checks, also install the claude-in-chrome
-plugin — Claude Code's integration with your own Chrome (see below — without it, every
-checklist item falls to you).
+plugin — Claude Code's integration with your own Chrome (without it, every checklist item
+falls to you).
 
 ## Use
 
@@ -78,409 +91,21 @@ concrete options to pick from, never one-at-a-time trickles. You approve the spe
 plan; implementation, testing, and review then run without you; at the end you get a branch
 (and, for UI work, a short guided walkthrough of what to check on the running app).
 
-The pipeline saves its position to files (`.devcycle/state.md` plus its spec/plan/ledger
-artifacts) at every stage boundary, so it survives `/clear`, compaction, and new sessions.
-The state file names the repo root and the request it belongs to, and every reader
-verifies that binding first — a state file can never be mistaken for another project's.
-Resume any time with:
+The pipeline saves its position to files under `.devcycle/` at every stage boundary, so it
+survives `/clear`, compaction, and new sessions — resume any time with `/devcycle:continue`.
+How the stages hand off and how the state file is verified is covered in
+[`docs/pipeline/`](docs/pipeline/README.md).
 
-```
-/devcycle:continue
-```
+The pipeline pauses between stages by design: it stops at most stage boundaries and asks you to
+run `/clear` and then `/devcycle:continue`, so a cycle plays out as several short sessions
+rather than one long one.
 
 **Add `.devcycle/` to the target repo's `.gitignore`** — none of it belongs in git history.
-Most of what devcycle writes there is scratch for the run in progress: the state file, the
-ledger, per-task evidence files, sweep reports. What it attempts to commit *outside* that
-directory is `docTrackingPolicy`'s call, one row per artifact, in the artifact→policy table
-[`references/config.md`](references/config.md) owns under § "Doc tracking — what each policy
-commits". Five artifacts move with the policy: the spec, the plan, the lessons file, promotion
-records and the audit report. The default `standard` commits the lessons file, promotion records
-and the audit report, and keeps the spec and plan local; `all-local` keeps all five local;
-`all-tracked` commits all five. Every other row of that table reads the same under all three
-policies. `git check-ignore` then runs over whatever the policy permitted — your ignore rules
-decide what actually lands in history, not the plugin.
-Two things under `.devcycle/` are durable rather than scratch and should survive even a manual
-cleanup of the directory: `.devcycle/dreaming/` (the cross-session checkpoint, the dated
-artifacts, and the observation store `/devcycle:learn` mines — deleting it forces the next run
-to re-mine from scratch) and each cycle's
-`.devcycle/archive-<date>-<branch-slug>/` (finish's copy of the run's audit trail).
+What devcycle attempts to commit *outside* that directory is `docTrackingPolicy`'s call.
 
-## The pipeline
-
-```mermaid
-flowchart TD
-    CYCLE(["/devcycle:cycle request"]):::entry
-    CONT(["/devcycle:continue"]):::entry
-    REVIEWCMD(["/devcycle:review — branch:name, this repo, or paths"]):::entry
-    VERIFYCMD(["/devcycle:verify branch"]):::entry
-    DOCTORCMD(["/devcycle:doctor — optional --all"]):::entry
-    ONBOARDCMD(["/devcycle:onboard"]):::entry
-    LEARNCMD(["/devcycle:learn — optional --preview"]):::entry
-
-    CYCLE --> STATE["Step 0 · state file<br/>root · branch · request · first-run config"]:::orch
-    STATE --> TRIAGE{"Triage<br/>maturity · kind · size"}:::orch
-    CONT -. "re-derives position from .devcycle/state.md<br/>and re-enters at any stage below — this is how<br/>a cycle crosses nearly every boundary" .-> TRIAGE
-
-    TRIAGE -->|"rough idea"| SCOPING
-    TRIAGE -. "mature input — scoping skipped" .-> BRAINSTORM
-    TRIAGE -->|"audit-shaped request"| AUDIT
-    TRIAGE -. "trivial, after you confirm" .-> FAST
-    TRIAGE -. "bulk mechanical, after two gates" .-> SWEEP
-
-    SCOPING["Scoping<br/>batched interview · dispatched repo research · confirm the picture · hard stop"]:::orch
-    SCOPING --> A_SCOPE[/"confirmed scope"/]:::art
-    A_SCOPE --> ISBUG{"bug with no known cause?"}:::orch
-    ISBUG -->|yes| DIAG
-    ISBUG -. "no — diagnosis skipped" .-> BRAINSTORM
-
-    DIAG["Diagnosis<br/>reproduce · isolate · establish the cause"]:::orch
-    DIAG --> A_DIAG[/"root-cause report"/]:::art --> BRAINSTORM
-
-    AUDIT["Audit<br/>scope + dispatched discovery · criteria gate with audit plan · sweep · fourteen-field findings"]:::orch
-    AUDIT --> A_AUDIT[/"ranked findings document"/]:::art
-    A_AUDIT -->|"in cycle — you pick findings to act on"| BRAINSTORM
-    A_AUDIT -. "in cycle — nothing picked" .-> STOP
-    A_AUDIT -. "standalone — the audit stops here, it starts nothing" .-> AUDITSTOP(["findings document delivered"]):::entry
-    A_AUDIT -. "each finding you act on starts its own new cycle" .-> CYCLE
-
-    BRAINSTORM["Brainstorm<br/>design dialogue · approaches · spec self-review · your approval"]:::orch
-    BRAINSTORM --> A_SPEC[/"approved spec"/]:::art --> PLANNING
-
-    PLANNING["Planning<br/>feasibility gate · dispatched research · task cut · dependencies · dispatch map"]:::orch
-    PLANNING -. "NO-GO — blocking unknown" .-> STOP
-    PLANNING --> A_PLAN[/"wave plan"/]:::art --> IMPL
-
-    subgraph EXECUTION["Execution — wave by wave"]
-        IMPL["implementer<br/>one task brief · test-first"]:::sub
-        REVIEW["task-reviewer<br/>produces the diff itself · reads the evidence files"]:::sub
-        GATE{"green gate<br/>coordinator re-runs the tests itself"}:::orch
-        COMMIT["commit + ledger entry"]:::orch
-        CHK["checklist generated<br/>the moment rendered changes land"]:::orch
-        IMPL --> REVIEW
-        REVIEW -->|rejected| IMPL
-        REVIEW -->|accepted| GATE
-        GATE -->|fails| IMPL
-        GATE -->|passes| COMMIT
-        IMPL -. "rendered change" .-> CHK
-    end
-
-    COMMIT --> A_EXEC[/"committed, reviewed tasks"/]:::art
-    CHK --> A_CHK[/"on-device checklist"/]:::art
-    A_EXEC --> BREVIEW
-
-    BREVIEW["Branch review<br/>fresh reviewer, or panel + red-team verification"]:::sub
-    BREVIEW --> A_BREV[/"review verdict"/]:::art
-    A_BREV -->|"findings — bounded rounds"| IMPL
-    A_BREV -->|accepted| ONDEV
-    A_BREV -. "nothing renders — on-device skipped" .-> FINISH
-
-    ONDEV["On-device verification<br/>checklist source · (auto) structural checks · one item per question"]:::orch
-    A_CHK -.-> ONDEV
-    ONDEV --> A_ONDEV[/"results report"/]:::art
-    A_ONDEV -->|"in cycle"| FINISH
-    A_ONDEV -. "standalone — ends at the report, no cycle to finish" .-> VERIFYSTOP(["results report delivered"]):::entry
-
-    FAST["Fast path<br/>in-session implementation · one task-reviewer pass"]:::orch --> FINISH
-    SWEEP["Mechanical sweep<br/>blast-radius gate · pilot-first sweep · one reviewer pass"]:::orch --> FINISH
-
-    FINISH["Finish<br/>resolve gitPolicy · apply the external clamps · offer to clear ephemeral artifacts · hand back"]:::orch
-    FINISH --> A_FIN[/"branch, pushed branch, or PR"/]:::art --> STOP(["cycle closed"]):::entry
-
-    REVIEWCMD -. "standalone — same engine, starts no cycle" .-> AUDIT
-    VERIFYCMD -. "standalone — checklist from the branch diff" .-> ONDEV
-    DOCTORCMD -. "standalone — profiles cost/depth, starts no cycle" .-> DOCTORSTOP(["report delivered"]):::entry
-    ONBOARDCMD -. "standalone — scaffolds the repo, starts no cycle" .-> ONBOARDSTOP(["scaffold written"]):::entry
-    LEARNCMD -. "standalone — mine, propose, confirm, land; starts no cycle" .-> LEARNSTOP(["promotions applied"]):::entry
-    LEARNCMD -. "--preview — stops at the artifact, lands nothing" .-> PREVIEWSTOP(["candidates delivered"]):::entry
-
-    subgraph DELEG["Inside every stage — who does the work"]
-        DUTY["the coordinator keeps only these:<br/>interviews · dispatches · the green gate<br/>commits · ledger · state file · handoff blocks"]:::orch
-        RSCH["everything else is a dispatch:<br/>searching · mapping · reading source<br/>producing diffs · drafting fix briefs"]:::sub
-        ENV[/"returns an envelope — paths and counts,<br/>never the file contents"/]:::art
-        DUTY --> RSCH --> ENV --> DUTY
-    end
-
-    subgraph LEGEND["Legend"]
-        L1["the orchestrator does this itself"]:::orch
-        L2["dispatched to a fresh subagent"]:::sub
-        L3[/"artifact written to disk"/]:::art
-        L4(["entry point or terminal"]):::entry
-        L5["solid arrow = the default walk"]
-        L6["dashed arrow = optional, skipped, or standalone"]
-        L7["arrow back up the flow = a loop"]
-        L8["stage-to-stage arrow = also a stop:<br/>handoff written, then /clear + /devcycle:continue"]
-    end
-
-    classDef orch fill:#e8f0fe,stroke:#3367d6,color:#111
-    classDef sub fill:#fce8e6,stroke:#c5221f,color:#111
-    classDef art fill:#e6f4ea,stroke:#188038,color:#111
-    classDef entry fill:#fef7e0,stroke:#b06000,color:#111
-```
-
-1. **Scoping** — batched interview that turns your request into a precise, well-structured
-   goal: you answer questions about intent and desired outcomes; a read-only research
-   subagent establishes what the change touches and hands back a map of paths, never the
-   files themselves, and devcycle confirms that picture with you — research draws on an
-   existing graphify graph when one is available, and also looks for repo orientation docs
-   the same way. For a bug, the interview collects the symptom and reproduction (steps,
-   expected vs. actual, evidence) instead of design intent.
-2. **Audit** — for audit-shaped requests ("audit X", "review the repo for Y" — an
-   assessment of existing code rather than a change to it): devcycle interviews you for the
-   criteria to measure the repo against — never assuming them — then sweeps the repo and
-   writes a ranked findings document to `docs/audits/YYYY-MM-DD-<topic>.md`. You pick which
-   findings to act on; those become the cycle's scope and the walk continues at brainstorm.
-   The same engine is available on its own as `/devcycle:review` (below), outside any cycle.
-   The audit derives its criteria proposal from a dispatched discovery pass over the stacks
-   actually present and your repo's own convention documents — those outrank generic best
-   practice — and a
-   `branch:<name>` token scopes it to one branch, in which case it reviews that branch's diff
-   expanded to the feature's dependency graph. Every finding carries fourteen fields — among
-   them its `file:line` location, how to reproduce it, the fix direction, a
-   confidence tag, and a fix-effort estimate — so you can start work from the finding alone.
-3. **Diagnosis** — for bugs whose root cause isn't established yet: reproduce the failure,
-   then isolate the cause (upstream `superpowers:systematic-debugging`), ending in a
-   root-cause report that the fix's design builds on. A fix is never designed for an
-   undiagnosed problem.
-4. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
-   spec you approve.
-5. **Planning** — a feasibility check, then an implementation plan that doubles as the
-   execution strategy: the work is cut into small, self-contained tasks — each implementable
-   from its own brief alone, so every subagent works with a small context — dependencies are
-   derived from what each task consumes, and everything not forced into sequence by a real
-   dependency is grouped into *waves* of file-disjoint tasks that run in parallel — research
-   is dispatched the same way scoping's is, drawing on an existing graphify graph when one is
-   available and looking for implementation-scoped docs alongside it. You approve the plan.
-6. **Execution** — each task goes to a fresh implementer subagent carrying only that task's
-   brief, working test-first (failing test before code) when the task adds behavior — a
-   behavior-preserving task instead proves the suite green before and after the change, per
-   the evidence class its plan task declares. A reviewer checks every task — producing the
-   task's diff itself rather than being handed one — the coordinator re-runs the tests
-   itself before accepting (the *green gate*: the task's test command must pass in the
-   coordinator's own re-run, not just in the implementer's report), and only accepted work
-   is committed.
-7. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole
-   branch against the spec: everything the spec asked for is there, nothing it didn't ask
-   for crept in.
-8. **On-device verification** — for changes a human can see: a checklist of outcomes to
-   confirm on the running app. What a browser can structurally verify (DOM, CSS values,
-   exact text) is auto-checked through claude-in-chrome and tagged `(auto)`; everything
-   a script cannot truly see — feel, alignment, smoothness, legibility — is walked with you
-   one item at a time. The checklist comes from the plan during execution — or, for a branch
-   nobody planned in this session, from that branch's diff traced out to the screens it
-   affects.
-9. **Finish** — hands the branch back per your `gitPolicy` (below); first copies the
-   cycle's audit trail (ledger, evidence, findings, reports) into
-   `.devcycle/archive-<date>-<branch-slug>/`, unconditionally, then offers to delete the
-   files that only ever existed to pass content between this cycle's dispatches (per-task
-   reports, evidence, findings, sweep arguments). It shows the list and the total before
-   asking, removes nothing without an explicit yes, and never touches the audit trail —
-   state file, ledger, scope, spec, plan, checklist — or any file your repo tracks in git.
-
-Triage judges size, too. A request at typo, rename, or few-line-fix scale — measured against a
-strict checklist, where any doubt on any criterion means not trivial — gets called out before
-the walk begins. devcycle announces that verdict and asks; only if you confirm does the run take
-the **fast path** instead: the change is implemented in the session you're already in, under the
-same evidence discipline a planned task gets, checked by one task-reviewer pass, then handed to
-the normal finish stage. Decline, and the full pipeline runs as if the question had never come up.
-Bulk-mechanical requests — one uniform edit rule across many files — take an analogous sweep
-path: after two confirmation gates the change runs through the pilot-first mechanical-sweep
-workflow instead of implementer waves.
-
-Expect the walk to stop often. Nearly every stage boundary ends the session: devcycle halts and
-asks you to run `/clear` and then `/devcycle:continue`, so a cycle plays out as several short
-sessions rather than one long one. Nothing is lost across those stops — the scope, spec, plan,
-ledger, and state file on disk are what carry the run forward, and the conversation that
-produced them is not needed again. Compacting is deliberately not one of the options: it leaves
-the expensive part of a context behind, where clearing actually returns it.
-
-### What the coordinator does itself
-
-Cost in a pipeline like this is mostly the orchestrator's own context — every file it reads
-stays in the window for the rest of the session, and the stages that read the most are the ones
-that run first. So the coordinator's job is defined as a short, closed list: talk to you,
-dispatch subagents, run the green gate, commit, append the ledger, update the state file, emit
-handoff blocks. Everything else — searching, mapping, reading source, producing diffs, drafting
-fix briefs — is a dispatch, which makes "should I just do this inline?" a lookup rather than a
-judgment call. The few files it may always open directly are the small bounded ones it has to
-reason about itself: the state file, the ledger, the plan's dispatch map, a spec under approval.
-
-What comes back from a dispatch is an envelope — paths and counts, not content. The coordinator
-opens a report only when a decision needs something the envelope can't carry. Each stage also
-runs under a budget (roughly 30 tool calls or 15 files read); crossing it means delegate what's
-left and stop at the next boundary. On the fast and sweep paths, which are in-session by design,
-that budget is the tell that triage called the change trivial and got it wrong — devcycle says so
-and escalates to the full pipeline rather than pressing on.
-
-Why the stages are shaped this way — fresh-context reviews, files-as-state, wave
-parallelism — is covered in [DESIGN.md](DESIGN.md).
-
-## What's in the plugin
-
-**The seven commands are the whole surface** — everything below them is machinery a command
-loads by path, never something you invoke. One exception, listed with the rest: the hook is
-loaded by no command at all; it fires on a matched tool call.
-
-| Command | What it does |
-| --- | --- |
-| `/devcycle:cycle` | Runs the pipeline for a request. |
-| `/devcycle:continue` | Resumes an interrupted pipeline: lists every in-flight cycle in this repo with its branch, stage and age, and asks which one. |
-| `/devcycle:review` | Reviews a branch (`branch:<name>`, optionally `base:<name>`), this whole repository, or a file set you name, against criteria you confirm, and writes a ranked findings document. A bare argument is always the *concern* to review, never guessed to be a branch. Standalone — starts no cycle. |
-| `/devcycle:verify` | Walks an on-device checklist derived from a branch's diff — verification for code this session did not write. Standalone — starts no cycle. |
-| `/devcycle:learn` | Mines this repo's sessions and memory for recurring patterns, proposes doc and skill edits, batches them for confirmation, and deletes each promoted memory once its edit lands. `--preview` stops at the dated artifact: nothing landed, nothing deleted. Standalone — starts no cycle. |
-| `/devcycle:doctor` | Profiles token cost, context depth, model routing, and agent startup cost. With no arguments it reads every transcript under `~/.claude/projects` and keeps the sessions whose records carry a `devcycle:` attribution id, which every devcycle slash command records; `--all` widens it to every transcript, tagged or not. `--since`/`--until` narrow the window; `drift <path>` checks a file for stale config references instead; `--depth` is the bare probe the context gate calls. It reports workload-adjusted, matched-cohort comparisons (an `At a glance` TL;DR) alongside raw cost. Standalone — starts no cycle. |
-| `/devcycle:onboard` | Bootstraps tier-2 setup for this repo: detects real build/test/lint commands, scaffolds `CLAUDE.md` and per-package rules, and proposes a permission allowlist. Standalone — starts no cycle. |
-
-| Machinery | What it does |
-| --- | --- |
-| Playbook `scoping-the-request` | The batched scope interview with a hard stop before design begins. |
-| Playbook `planning-waves` | Feasibility gate + wave-structured planning (overlays `superpowers:writing-plans` at `thorough`). |
-| Playbook `executing-waves` | Parallel subagent execution with green gate, ledger, and commit discipline. |
-| Playbook `reviewing-code` | The review engine the audit and the branch review share: lens construction from the criteria, engine selection, adversarial verification, dedup, ranking — plus the criteria interview and the ranked findings document that only the audit runs. |
-| Playbook `reviewing-the-branch` | The whole-branch review gate — the spec-compliance layer and the bounded rounds loop, over the shared `reviewing-code` engine. |
-| Playbook `verifying-on-device` | Human-verified checklist for rendered/on-device outcomes, from a plan or from a branch diff. |
-| Playbook `finishing-the-cycle` | Resolves the effective git policy and hands back, pushes, or opens the PR. |
-| Playbook `taking-the-fast-path` | Mini-cycle for confirmed-trivial requests: in-session implementation, one reviewer pass, normal finish. |
-| Playbook `sweeping-mechanical-changes` | Triage-confirmed bulk sweep: blast-radius gate, one sweep run, one commit, one reviewer pass, then finish. |
-| Playbook `learning-from-sessions` | Observe → propose → confirm → land: mines transcripts and memory, clusters candidates, screens for sensitive content, and applies only what you confirm. |
-| Playbook `profiling-sessions` | Runs the token/context/routing/startup-cost analyzer and interprets it, naming the corpus every number is drawn from. |
-| Playbook `onboarding-a-repo` | Detects a repo's real build/test/lint commands, scaffolds `CLAUDE.md` and per-package rules, and proposes a permission allowlist for confirmation. |
-| Agent `implementer` | Implements one task from a brief; never commits. |
-| Agent `task-reviewer` | Read-only reviewer for each task during execution. |
-| Agent `red-team-reviewer` | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
-| Agent `on-device-driver` | Drives claude-in-chrome for the on-device stage — navigates, reads the DOM, and reports what a checklist item actually renders. Never decides whether an item passes. |
-| Agent `history-inspector` | Read-only git-history lens for `/devcycle:maintain` — churn, bug-fix clusters, co-change coupling, long-lived debt — within a bounded traversal window. Returns evidence, never a fix. |
-| Hook `block-main-thread-browser` | The plugin's only hook. Registered on `PreToolUse` over `mcp__claude-in-chrome__.*`, it denies any browser tool call that does not come from the `on-device-driver` subagent, so the coordinator cannot drive the browser at its own context depth (`docs/DECISIONS.md`, 2026-08-20). |
-| Workflow `review-panel.js` | Multi-lens read-only review engine for `reviewDepth: panel` — over a branch diff for the review, a file set for the audit. |
-| Workflow `mechanical-sweep.js` | Pilot-first bulk edit engine behind the sweep path and `**Execution:** sweep` plan tasks. |
-| Reference `delegation.md` | Who does the work inside a stage — the coordinator's closed duty list, the stage budget, the research-dispatch contract, and the return envelopes. |
-| Reference `handoff.md` | What happens at a stage boundary — the handoff block, the three-value context action, the one-block-per-stage rule, and the await gate. |
-| Reference `quality-criteria.md` | What any devcycle review or plan measures against — the criteria catalog, sourcing precedence, seed best-practice index, and how the catalog reaches planning and execution. |
-| Reference `findings.md` | How a finding is expressed — the four-value severity vocabulary with blocking derived, the core and document field sets, the evidence discipline, and the panel's machine shape. |
-| Reference `checklist.md` | The on-device checklist contract — paths, item shape, dimensions, and the `(auto)` boundary — shared by checklist generation and the on-device stage. |
-| Reference `loops.md` | What every bounded loop does when it runs out of rounds — the cap, the exhaustion statuses, and how each outcome is reported. |
-| Doc `docs/routing.md` | Which command answers which intent, what each may do before your first confirmation, and which ones a model may invoke on its own. |
-
-## Configuration
-
-Set options with `/plugin configure devcycle@devcycle` (or
-`claude plugin install devcycle@devcycle --config KEY=VALUE`). Everything has a working
-default; configure nothing and the pipeline still runs. The first time `/devcycle:cycle`
-runs with nothing configured, it asks one question — which `profile` to run — and never asks
-again; answer *customize* instead and it asks the five behavioral options in one batch.
-
-| Option | What it controls | Values | Default |
-| --- | --- | --- | --- |
-| `profile` | Cost against rigor, across every stage at once | `lean` / `standard` / `thorough` | `standard` |
-| `gitPolicy` | What the finish stage may do with git | `local-commits-only` / `push-allowed` / `open-pr` | `local-commits-only` |
-| `docTrackingPolicy` | What devcycle attempts to commit (the repo's `.gitignore` still decides what lands) | `standard` / `all-local` / `all-tracked` | `standard` |
-| `reviewDepth` | How the branch review runs | `single` / `panel` / `auto` | `single` |
-| `crossModelReview` | Adds a second-model lens to the panel | `true` / `false` | `false` |
-| `onDeviceGate` | Whether a human must finish the on-device checklist | `human-required` / `auto-ok` / `auto` | `human-required` |
-| `implementerModel` | Model for implementer subagents | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
-| `taskReviewerModel` | Model for per-task reviewers | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
-| `branchReviewModel` | Model for the whole-branch review | `auto` / model id / comma-separated pool | `auto` (inherits your session's model; set a model id to pin) |
-| `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id / comma-separated pool | `auto` (a fast model; set a model id to pin) |
-
-**`profile`** is the one knob most people need. It is a preset that sizes the whole run — which
-engines the stages use, how deep the review goes, how much evidence reports carry — so you don't
-tune options one at a time to say "cheaper" or "be thorough". `lean` is the cheapest pass,
-`standard` is the default, and `thorough` is the most rigorous: it swaps in the upstream planning
-and execution overlays, runs the branch review as a panel, and carries the longest evidence
-tails. The dimension-by-dimension matrix — every stage dimension against all three profiles —
-lives in [`references/config.md`](references/config.md) § The profile, which owns it.
-
-Resolution order, in one rule: **an option you configured explicitly wins verbatim, always;
-anything left at its default takes the profile's column value.** So the `Default` column in the
-table above is really the `standard` column of the profile matrix `references/config.md` owns —
-switch to `thorough` and the branch review becomes `panel` on its own, unless you pinned
-`reviewDepth: single` yourself, in which case your value stands and the profile never moves it. A
-`profile` that is unset or set to anything outside the three reads as `standard`.
-
-What the profile never touches: the state file, handoff blocks, evidence classes, the
-coordinator's green gate re-run, the `gitPolicy` clamps, branch discipline, the
-one-reviewer floor on the short paths, and the rule that nothing is assumed instead of
-interviewed for. A `lean` run may skip a stage; it never fakes one, and never reports a
-gate as passed that did not run.
-
-### Upgrading from a version before `profile`
-
-If you configured devcycle before the profile existed, your options may quietly outrank it.
-The old first-run walkthrough wrote all four behavioral options explicitly — including when
-you answered "use defaults, don't ask again" — and an explicit option wins verbatim and
-forever. Set `profile: thorough` on top of that and the branch review stays `single`, with
-nothing to tell you why.
-
-Two of the four can shadow a profile, because only they have a row in the profile matrix
-`references/config.md` owns: `reviewDepth` and `onDeviceGate`. (`gitPolicy` and
-`crossModelReview` are outside the profile, so an explicit value there shadows nothing and
-needs no change.) Hand a shadowing option back to the profile by setting it to `auto`:
-
-```
-claude plugin install devcycle@devcycle --config reviewDepth=auto --config onDeviceGate=auto
-```
-
-`auto` is a value, not a deletion — it means "let the profile govern this", the same way it
-already does for the four model options — so the option stays visible in
-`/plugin configure` and you can pin it again later.
-
-You don't have to spot this yourself: the first `/devcycle:cycle` after upgrading recognizes
-the combination (a profile you have never set, next to options you have) and asks once,
-before it starts any work — adopt a profile and let it govern, keep your current options as
-they are, or customize. It records the answer, so it asks once and not every cycle, and it
-never rewrites an option without asking. One wrinkle if you decline: adopting a profile
-writes one, which settles the question everywhere, but *keep* and *customize* write no
-profile, so the only record is the `.devcycle/state.md` of the repo you were in — expect the
-question once more the first time you run a cycle in a different repo.
-
-**`gitPolicy`** is the pipeline's blast radius: `local-commits-only` means it only ever
-commits on a local branch and hands it to you (never pushes); `push-allowed` lets it push
-the branch (never merge); `open-pr` lets it push and open a pull request (never merge that
-either). Merging is always yours.
-
-Configuring `push-allowed` or `open-pr` doesn't guarantee a push happens: the finish
-stage also checks two things outside this config before it pushes anything — whether
-your Claude Code permission settings deny `git push`, and whether the cycle ran on the
-repo's default branch (direct pushes there are never allowed) — and falls back to
-`local-commits-only` behavior for that run if either is true, stating why in the finish
-stage's output. `local-commits-only` is unaffected either way; it never pushes.
-
-**`reviewDepth`** picks the branch-review engine — `single` at `lean` and `standard`,
-`panel` at `thorough`, unless you set it yourself (or set it to `auto`, which hands it back
-to the profile). `single` runs the review's two to five criteria lenses as inline read-only
-reviewers, then re-verifies each finding against the code — a complete review in its own
-right, not a degraded panel. Claude Code's built-in `code-review` skill is
-user-invocation-only, so an agent cannot launch it; if you have run it on the branch
-yourself, its findings are folded in and the engine line says `single + user-run
-code-review`. `panel` runs `review-panel.js` instead: two to five read-only reviewers,
-each with a lens built from the criteria the review is measuring against (spec compliance
-when a spec governs the branch, then groupings drawn from `quality-criteria.md` and the
-repo's own conventions), whose findings are adversarially re-verified against the code and
-merged into one report — slower and more expensive, harder to fool. With
-`crossModelReview: true` the panel adds one more lens run by a non-Claude model via the
-`codex` CLI, if installed — a hedge against blind spots one model family might share.
-
-**`onDeviceGate`** governs the last verification. The checklist is hybrid by design:
-items a browser can structurally verify are auto-checked through claude-in-chrome — Claude
-Code driving your own authenticated Chrome (install the plugin and grant the extension the
-page's site permissions; without it, nothing is auto-checked and every item is yours);
-the rest need a human. `human-required` (what `standard` and `thorough` take) blocks the
-pipeline until you've walked every human item; `auto-ok` — `lean`'s value — lets it finish
-once the auto-checkable items pass, explicitly
-listing what remains unverified — it skips the human, it never fakes the checkmarks. As with
-`reviewDepth`, `auto` hands the choice back to the profile.
-
-The four **model options** trade cost against capability per role. They default to
-`auto`: for implementers and task reviewers the coordinator derives the model per task
-from what the plan makes observable (task size, dependency count, diff size) and records
-each derivation in the ledger — the session's own model where judgment matters, a fast
-one where the task is narrow and fully specified; the branch review inherits the
-session's model and the walkthrough takes a fast one. Research and exploration dispatches
-always take the fast tier, whatever the stage: their output is a map rather than a
-judgment, and the roles that must judge — review, diagnosis, design — are the ones that
-keep the session's model. Deriving by tier rather than by
-model ids written into the plugin means new model generations are picked up without a
-plugin update. Set an explicit model id to pin a role; an explicit id is binding and
-never second-guessed.
+`profile` is the one knob most people need — it sets the cost-versus-rigor level for the whole
+run at once. The full configuration surface is in
+[`docs/configuration/`](docs/configuration/README.md).
 
 ## Troubleshooting
 
@@ -493,23 +118,28 @@ never second-guessed.
   copy as well. Both work; keep one, e.g.
   `claude plugin uninstall superpowers@superpowers-marketplace`.
 - **A literal `${user_config.KEY}` string appears in output** — that option is simply
-  unset; this is expected. What the pipeline uses instead follows the resolution order
-  under [Configuration](#configuration) above. Set the option to make the value
+  unset; this is expected. What the pipeline uses instead follows the resolution order in
+  [`docs/configuration/`](docs/configuration/README.md). Set the option to make the value
   substitute.
 - **Source edits don't show up after reinstalling** — the plugin cache is keyed by
   version, and reinstalling the same version does not refresh it. Bump the version or
   uninstall and reinstall.
 
-## Learn more
+## Go deeper
 
-Design rationale and architecture: [DESIGN.md](DESIGN.md) ·
-Release history: [CHANGELOG.md](CHANGELOG.md) ·
-Decision log: [docs/DECISIONS.md](docs/DECISIONS.md) ·
-Open defects: [docs/known-issues.md](docs/known-issues.md)
+[`docs/`](docs/README.md) is the documentation hub — the design, the full pipeline, every
+playbook, the configuration surface, the decision log, and the full inventory of what the
+plugin ships. Start there.
 
-Contributing — including the golden-path fixture that holds the pipeline's wiring together:
-[CONTRIBUTING.md](CONTRIBUTING.md). `scripts/doctor.mjs` re-measures devcycle's own
-token profile from a local Claude Code session corpus, which is how the cost claims above are
-kept honest rather than assumed.
+- Design rationale and architecture: [`docs/design/`](docs/design/README.md)
+- Decision log: [`docs/decisions/`](docs/decisions/README.md)
+- How the coordinator delegates and keeps its own context small:
+  [`references/delegation.md`](references/delegation.md)
+- Open defects: [`docs/known-issues.md`](docs/known-issues.md)
+- Release history: [`CHANGELOG.md`](CHANGELOG.md)
+- Contributing, including the golden-path fixture that holds the pipeline's wiring together:
+  [`CONTRIBUTING.md`](CONTRIBUTING.md). `scripts/doctor.mjs` re-measures devcycle's own token
+  profile from a local Claude Code session corpus, which is how the cost claims are kept honest
+  rather than assumed.
 
 [superpowers]: https://github.com/obra/superpowers

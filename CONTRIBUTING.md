@@ -32,7 +32,7 @@ Behaviour that genuinely needs a model to judge has no runner in this repo, by c
 is no model credential available to GitHub Actions, and a check that can only be run by hand
 gets skipped and then ignored. Verify that class of change locally by whatever means fits and
 say in the PR how you did; the prose scenario harness that used to hold it was retired
-2026-08-06 (see `docs/DECISIONS.md`).
+2026-08-06 (see `docs/decisions/README.md`).
 
 ## Deterministic tests for the scripts and workflows
 

@@ -84,19 +84,19 @@ test("scans commands/ and agents/, not only playbooks and references", () => {
   }
 });
 
-test("scans DESIGN.md and CONTRIBUTING.md, not only the four surface dirs", () => {
+test("scans docs/design/README.md and CONTRIBUTING.md, not only the four surface dirs", () => {
   const shared =
     "The coordinator owns every commit in the cycle and the implementer never runs " +
     "git add or git commit itself, leaving all of its work unstaged in the working " +
     "tree for the coordinator to review.\n";
   const dir = makeFixture({
-    "DESIGN.md": `# Design\n\n${shared}`,
+    "docs/design/README.md": `# Design\n\n${shared}`,
     "references/delegation.md": `# D\n\n${shared}`,
   });
   try {
     assert.throws(
       () => execFileSync(process.execPath, [SCRIPT], { ...PIPE, cwd: dir }),
-      /DUPLICATION CHECK FAILED[\s\S]*references\/delegation\.md:paragraph 1 ~= DESIGN\.md:paragraph 1/
+      /DUPLICATION CHECK FAILED[\s\S]*references\/delegation\.md:paragraph 1 ~= docs\/design\/README\.md:paragraph 1/
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
