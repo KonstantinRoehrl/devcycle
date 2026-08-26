@@ -26,6 +26,13 @@ its frontmatter.
 | turn sessions and memory into landed rules | `learn` | side-effectful | no |
 | profile cost, depth, model routing, config drift | `doctor` | read-only | yes |
 | bootstrap devcycle in a repo | `onboard` | side-effectful | no |
+| triage, fix, and reply to a PR's review comments | `reconcile` | confirm-first | yes |
+
+**`reconcile`'s justification.** Model-invocable by deliberate exception so a wrapper skill can
+call the reconcile stage programmatically after a review lands. It makes no commit and posts no
+reply before its first user confirmation, and it surfaces conflicting cycle state rather than
+overwriting one. It earns its own verb rather than folding into `review` because the
+call-site names the intent — reconciling an existing PR's comments, not producing new findings.
 
 **`cycle`'s justification.** Model-invocable by deliberate exception (`docs/design/README.md` §4
 amendment 4, reversed 2026-07-24) so a wrapper skill can call the pipeline programmatically. It creates

@@ -31,6 +31,7 @@ machinery a command loads by path.
 | [`/devcycle:doctor`](../commands/doctor.md) | Profiles token cost, context depth, model routing, and agent startup cost across devcycle sessions. Standalone. |
 | [`/devcycle:onboard`](../commands/onboard.md) | Bootstraps tier-2 setup: detects real build/test/lint commands, scaffolds `CLAUDE.md`, and proposes a permission allowlist. Standalone. |
 | [`/devcycle:maintain`](../commands/maintain.md) | Assesses a repository's longitudinal health — how its abstractions and history trend over time — and writes a ranked findings document. Read-only, standalone. |
+| [`/devcycle:reconcile`](../commands/reconcile.md) | Triage, fix, and reply to a PR's review comments. |
 
 ## Playbooks
 
