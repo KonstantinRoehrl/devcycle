@@ -1,0 +1,14 @@
+# DESIGN.md section 7 is an unacknowledged fourth copy of the knob roster and has dropped docTrackingPolicy
+- finding-kind: maintenance-finding
+- finding-id: schema-drift:b0fe5873
+- culprit-kind: schema-drift
+- severity: medium
+- confidence: verified
+- affected-files: DESIGN.md, .claude-plugin/plugin.json
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

@@ -1,0 +1,14 @@
+# commands/doctor.md states report-column detail that its own owning playbook never states
+- finding-kind: maintenance-finding
+- finding-id: leaked-responsibility:2f408b8b
+- culprit-kind: leaked-responsibility
+- severity: low
+- confidence: verified
+- affected-files: commands/doctor.md
+- first-seen: 2026-08-23
+- last-seen: 2026-08-25
+- passes: 2
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

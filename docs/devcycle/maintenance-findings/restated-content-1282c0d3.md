@@ -1,0 +1,14 @@
+# playbooks/maintaining-the-repo.md names an owner and restates its value in the same sentence, twice
+- finding-kind: maintenance-finding
+- finding-id: restated-content:1282c0d3
+- culprit-kind: restated-content
+- severity: low
+- confidence: verified
+- affected-files: playbooks/maintaining-the-repo.md, agents/history-inspector.md, references/delegation.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

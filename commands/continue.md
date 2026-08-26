@@ -12,15 +12,17 @@ recollection, including the user's.
 
 ## Re-derive position from files
 
-1. Find every resumable cycle: each `.devcycle/state.md` under this repo root, searched with
-   gitignore filtering disabled — `.devcycle/` is itself gitignored by convention, so a
-   default-gitignore-aware search tool (a shell hook rewriting `find`, `rg` without
-   `--no-ignore`) can silently report none found even when a state file exists.
-   List them with branch, stage, last ledger event, and age, and **ask which
-   one** — never pick. Resuming the wrong cycle silently is the failure this
-   enumeration exists to prevent. With exactly one candidate, still name it
-   before resuming. If there are none, say so plainly ("no devcycle state file
-   found in this repo — there is no in-flight cycle to resume") and offer
+1. Enumerate every resumable cycle by running
+   `node ${CLAUDE_PLUGIN_ROOT}/scripts/find-state-files.mjs` — it Node-walks this repo for
+   every `.devcycle/state.md` and prints each with its request, branch, stage, last ledger
+   event, and age. Use its output as the candidate list; do not hand-roll a `find`/`rg`
+   search. `.devcycle/` is gitignored by convention, and a default-gitignore-aware search tool
+   (a shell hook rewriting `find`, `rg` without `--no-ignore`) silently drops paths under it —
+   the script consults no gitignore, so it cannot be blinded, which is the whole reason this
+   step runs it rather than a search. **Ask which one** — never pick. Resuming the wrong cycle
+   silently is the failure this enumeration exists to prevent. With exactly one candidate,
+   still name it before resuming. If the script reports none, say so plainly ("no devcycle
+   state file found in this repo — there is no in-flight cycle to resume") and offer
    `/devcycle:cycle <description>` to start one. Stop there.
 2. Run the ownership check on the chosen file before trusting anything in it, per
    `${CLAUDE_PLUGIN_ROOT}/references/resume.md`. A `root:` mismatch stops the

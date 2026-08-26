@@ -1,0 +1,14 @@
+# docs/platform-notes.md section (b) description-budget measurement no longer reproduces: five stale numbers
+- finding-kind: maintenance-finding
+- finding-id: measurement-rot:a199cbdb
+- culprit-kind: measurement-rot
+- severity: medium
+- confidence: verified
+- affected-files: docs/platform-notes.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

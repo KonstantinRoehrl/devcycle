@@ -1,0 +1,14 @@
+# docs/DECISIONS.md newest entry records surfaceTotal 4150 while the repo enforces 4457, with nothing marking it superseded
+- finding-kind: maintenance-finding
+- finding-id: stale-decision-entry:5a1f1423
+- culprit-kind: stale-decision-entry
+- severity: medium
+- confidence: verified
+- affected-files: docs/DECISIONS.md, tests/fixtures/surface-budget.json
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

@@ -1,0 +1,14 @@
+# redaction-check's finish-stage gate can't pass on legitimate .devcycle content (over-broad patterns)
+- finding-kind: github-issue
+- finding-id: github-issue:105
+- issue: 105
+- severity: high
+- confidence: verified
+- affected-files: scripts/redaction-check.mjs, playbooks/finishing-the-cycle.md
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: github-issue #105
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

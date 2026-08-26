@@ -395,6 +395,21 @@ test("reference check: a reference loaded only by a script has a consumer", () =
   ok(runValidate(dir));
 });
 
+test("reference check: references/README.md (the index) is exempt from the consumer gate, but a real orphan still fails", () => {
+  // The index is a consumer OF references, not a loadable reference — nothing cites it, and
+  // requiring it to have a consumer would be self-defeating. The exemption is scoped to it alone.
+  const indexed = makePluginFixture();
+  writeInto(indexed, "references/README.md", "# References\n\n- `handoff.md` — the handoff block shape.\n");
+  ok(runValidate(indexed));
+
+  // Discriminating case: any other consumer-less reference must still fail, so the exemption
+  // cannot let the whole gate pass vacuously.
+  const orphaned = makePluginFixture();
+  writeInto(orphaned, "references/README.md", "# References\n\n- `orphan.md` — a reference.\n");
+  writeInto(orphaned, "references/orphan.md", "# Orphan\n");
+  failsWith(runValidate(orphaned), /orphan\.md.*no consumer/);
+});
+
 // --- the description budget reads commands, not whatever else lands in the directory ---
 
 test("description budget: a .DS_Store beside the commands is not read as a command", () => {
@@ -1464,4 +1479,34 @@ test('hooks check: the documented match-all matcher "*" passes rather than faili
   const doc = JSON.parse(JSON.stringify(goodHooks));
   doc.hooks.PreToolUse[0].matcher = "*";
   ok(runValidate(hooksFixture(makePluginFixture(), doc)));
+});
+
+// --- continue.md resume discovery must stay hook-proof ---
+
+// commands/*.md need frontmatter with a description (validate.mjs), so each fixture continue.md
+// carries one — otherwise the positive case would fail on a frontmatter error, not the guard.
+const CONTINUE_FM = "---\ndescription: Fixture continue command.\n---\n\n";
+
+test("continue discovery guard: passes when continue.md invokes find-state-files.mjs and the script exists", () => {
+  const dir = makePluginFixture();
+  // Check 6 requires every commands/*.md to have a routing-table row (same reason every other
+  // test in this file that adds a command file also adds one, e.g. the onboard/review/sketch
+  // cases above) — otherwise this fixture would fail on the unrelated routing check rather than
+  // exercising the guard this test targets.
+  writeInto(dir, ROUTING_PATH, routing("| resume a cycle (fixture) | `continue` | read-only | yes |\n"));
+  writeInto(dir, "commands/continue.md", CONTINUE_FM + "Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/find-state-files.mjs` to enumerate.\n");
+  writeInto(dir, "scripts/find-state-files.mjs", "// stub for the guard\n");
+  ok(runValidate(dir));
+});
+
+test("continue discovery guard: fails when the discovery step drops the find-state-files.mjs reference", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "commands/continue.md", CONTINUE_FM + "Run `find . -name state.md` to enumerate.\n");
+  failsWith(runValidate(dir), /must invoke scripts\/find-state-files\.mjs/);
+});
+
+test("continue discovery guard: fails when continue.md references the script but the file is missing", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "commands/continue.md", CONTINUE_FM + "Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/find-state-files.mjs`.\n");
+  failsWith(runValidate(dir), /references scripts\/find-state-files\.mjs but that script is missing/);
 });

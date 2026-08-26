@@ -1,0 +1,14 @@
+# The four-value severity vocabulary is a three-way hand-kept copy and the test named for the coupling never reads the owner
+- finding-kind: maintenance-finding
+- finding-id: unguarded-duplication:28247907
+- culprit-kind: unguarded-duplication
+- severity: high
+- confidence: verified
+- affected-files: references/findings.md, workflows/review-panel.js, tests/unit/review-panel.test.mjs
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

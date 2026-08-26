@@ -1,0 +1,14 @@
+# DESIGN.md per-layer line budgets are fiction: stated 100/150, enforced 110/268
+- finding-kind: maintenance-finding
+- finding-id: budget-fiction:1534e392
+- culprit-kind: budget-fiction
+- severity: high
+- confidence: verified
+- affected-files: DESIGN.md, tests/fixtures/surface-budget.json, scripts/validate.mjs
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

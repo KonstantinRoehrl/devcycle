@@ -11,11 +11,16 @@ graphify-out/
 # scaffolding directory is ignored by default and a new tracked doc is a deliberate line — the
 # inverse of naming each stale directory individually and missing the next one.
 # Audit reports are one-run records: written locally, never shipped to installers. The v0.12
-# disposition register is a closure ledger docs/DECISIONS.md cites, so it is the one exception.
+# disposition register is a closure ledger docs/decisions/README.md cites, so it is the one exception.
 docs/*
 !docs/*.md
 !docs/comparisons/
 !docs/devcycle/
 !docs/audits/
+!docs/design/
+!docs/decisions/
+!docs/configuration/
+!docs/pipeline/
+!docs/playbooks/
 docs/audits/*
 !docs/audits/2026-08-06-disposition-register.md

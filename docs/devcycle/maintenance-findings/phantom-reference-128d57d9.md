@@ -1,0 +1,14 @@
+# DESIGN.md cites a section 11 comparison mandate that does not exist, leaving docs/comparisons with no stated authority
+- finding-kind: maintenance-finding
+- finding-id: phantom-reference:128d57d9
+- culprit-kind: phantom-reference
+- severity: low
+- confidence: verified
+- affected-files: DESIGN.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

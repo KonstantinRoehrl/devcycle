@@ -1,0 +1,14 @@
+# Wave planning enforces file disjointness but not content coupling between same-wave tasks
+- finding-kind: github-issue
+- finding-id: github-issue:106
+- issue: 106
+- severity: high
+- confidence: verified
+- affected-files: scripts/wave-disjointness-check.mjs, playbooks/planning-waves.md
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: github-issue #106
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

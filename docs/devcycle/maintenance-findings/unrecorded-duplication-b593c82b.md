@@ -1,0 +1,14 @@
+# duplication-check.mjs and xref-check.mjs keep two hand-copied runtime-corpus definitions that already disagree on recursion
+- finding-kind: maintenance-finding
+- finding-id: unrecorded-duplication:b593c82b
+- culprit-kind: unrecorded-duplication
+- severity: low
+- confidence: verified
+- affected-files: scripts/duplication-check.mjs, scripts/xref-check.mjs
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

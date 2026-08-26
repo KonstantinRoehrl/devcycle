@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Splits every paragraph of the runtime surface — commands/, playbooks/, agents/,
-// references/ (or --dir's *.md files), plus DESIGN.md and CONTRIBUTING.md — normalizes it,
+// references/ (or --dir's *.md files), plus docs/design/README.md and CONTRIBUTING.md — normalizes it,
 // and flags near-duplicate pairs,
 // including two paragraphs of the same file. Two passes over one normalization:
 //   - shingled Jaccard over whole paragraphs, which catches near-verbatim restatement;
@@ -13,6 +13,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
+import { DESIGN_DOC } from "./doc-paths.mjs";
 
 const DIRS = ["agents", "commands", "playbooks", "references"];
 const THRESHOLD = 0.8; // shingle Jaccard: near-verbatim restatement
@@ -78,7 +79,7 @@ function targetFiles() {
     for (const name of [...readdirSync(abs)].sort())
       if (name.endsWith(".md")) files.push(join(abs, name));
   }
-  const ROOT_FILES = ["DESIGN.md", "CONTRIBUTING.md"];
+  const ROOT_FILES = [DESIGN_DOC, "CONTRIBUTING.md"];
   for (const name of ROOT_FILES) {
     const abs = join(root, name);
     if (existsSync(abs)) files.push(abs);

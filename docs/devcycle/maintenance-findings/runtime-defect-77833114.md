@@ -1,0 +1,14 @@
+# defaultRunCheck misclassifies a directory verify: target as a shell command, producing a false "broken" verdict instead of "unmeasurable"
+- finding-kind: maintenance-finding
+- finding-id: runtime-defect:77833114
+- culprit-kind: runtime-defect
+- severity: medium
+- confidence: verified
+- affected-files: scripts/verification.mjs
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

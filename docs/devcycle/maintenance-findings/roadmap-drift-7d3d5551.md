@@ -1,0 +1,14 @@
+# DESIGN.md section 8 roadmap claims to name the shipped playbooks and omits three
+- finding-kind: maintenance-finding
+- finding-id: roadmap-drift:7d3d5551
+- culprit-kind: roadmap-drift
+- severity: medium
+- confidence: verified
+- affected-files: DESIGN.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

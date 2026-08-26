@@ -1,0 +1,14 @@
+# README.md and DESIGN.md still describe devcycle as "seven commands," omitting the shipped /devcycle:maintain
+- finding-kind: maintenance-finding
+- finding-id: docs-drift:b897b96f
+- culprit-kind: docs-drift
+- severity: high
+- confidence: verified
+- affected-files: README.md, DESIGN.md
+- first-seen: 2026-08-23
+- last-seen: 2026-08-25
+- passes: 2
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

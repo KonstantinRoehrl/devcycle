@@ -1,0 +1,14 @@
+# workflows/lib/ is the repo's sole lib/ subdirectory; no rationale or convention is recorded
+- finding-kind: github-issue
+- finding-id: github-issue:91
+- issue: 91
+- severity: low
+- confidence: verified
+- affected-files: workflows/lib/agent-cli.js, DESIGN.md
+- first-seen: 2026-08-23
+- last-seen: 2026-08-25
+- passes: 2
+- origin: github-issue #91
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

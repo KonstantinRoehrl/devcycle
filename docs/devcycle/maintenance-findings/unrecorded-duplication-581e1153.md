@@ -1,0 +1,14 @@
+# The same "- key: value" markdown-field-line parser is independently reimplemented three times, and has already drifted in edge-case behavior
+- finding-kind: maintenance-finding
+- finding-id: unrecorded-duplication:581e1153
+- culprit-kind: unrecorded-duplication
+- severity: low
+- confidence: verified
+- affected-files: scripts/dream.mjs, scripts/promotions.mjs, scripts/resume-check.mjs
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

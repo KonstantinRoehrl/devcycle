@@ -1,0 +1,14 @@
+# DESIGN.md section 3 blueprint tree omits commands/maintain.md and playbooks/maintaining-the-repo.md
+- finding-kind: maintenance-finding
+- finding-id: blueprint-drift:06ead708
+- culprit-kind: blueprint-drift
+- severity: medium
+- confidence: verified
+- affected-files: DESIGN.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

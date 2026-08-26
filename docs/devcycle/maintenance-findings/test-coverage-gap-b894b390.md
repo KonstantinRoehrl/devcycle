@@ -1,0 +1,14 @@
+# Only one of six third-party-action pin sites is guarded by a full-commit-SHA-format test
+- finding-kind: maintenance-finding
+- finding-id: test-coverage-gap:b894b390
+- culprit-kind: test-coverage-gap
+- severity: medium
+- confidence: verified
+- affected-files: tests/unit/workflows.test.mjs, .github/workflows/validate.yml, .github/workflows/prepare-release.yml, .github/workflows/back-merge.yml
+- first-seen: 2026-08-23
+- last-seen: 2026-08-23
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

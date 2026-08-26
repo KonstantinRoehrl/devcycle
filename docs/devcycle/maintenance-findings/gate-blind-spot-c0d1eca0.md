@@ -1,0 +1,14 @@
+# The duplication gate corpus excludes README.md and docs/, and README already restates references/delegation.md wholesale
+- finding-kind: maintenance-finding
+- finding-id: gate-blind-spot:c0d1eca0
+- culprit-kind: gate-blind-spot
+- severity: medium
+- confidence: verified
+- affected-files: scripts/duplication-check.mjs, README.md, references/delegation.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

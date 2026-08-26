@@ -1,0 +1,14 @@
+# agents/implementer.md hard-codes the standard profile evidence tail as its fallback
+- finding-kind: maintenance-finding
+- finding-id: hardcoded-profile-value:2fd64b4b
+- culprit-kind: hardcoded-profile-value
+- severity: low
+- confidence: verified
+- affected-files: agents/implementer.md, references/evidence.md, references/config.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

@@ -1,0 +1,14 @@
+# playbooks/reviewing-code.md caller taxonomy omits /devcycle:maintain while gating two mandatory steps on it
+- finding-kind: maintenance-finding
+- finding-id: caller-taxonomy-gap:57c6407c
+- culprit-kind: caller-taxonomy-gap
+- severity: high
+- confidence: verified
+- affected-files: playbooks/reviewing-code.md, playbooks/maintaining-the-repo.md, references/resume.md
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

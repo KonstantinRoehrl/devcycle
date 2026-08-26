@@ -1320,19 +1320,32 @@ const staleCulpritTables = (corpus) => ({
 });
 
 test("issueBody refuses a wholly-stale culprit and warns on a partial one", () => {
-  // a culprit seen only at 0.12.0 (outside the band) -> throws StaleCulpritError
-  const STALE_CORPUS = staleCulpritCorpus(["0.12.0", "0.12.0"]);
+  // Derive the fixture versions from the LIVE recency band issueBody computes internally, so this
+  // survives every version bump. Pinning absolute versions here silently rots: a version in-band at
+  // release N falls out of the (fixed-width) band at N+1, turning the partial case wholly-stale.
+  // `IN_BAND` is the band's oldest member (below installed whenever ≥2 prior releases exist); `OUT`
+  // sorts below every real release, so it is always out of band.
+  const band = recencyBand(
+    installedVersion(),
+    releaseDates(readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8")),
+  );
+  const IN_BAND = band[0];
+  const OUT = "0.0.1";
+
+  // a culprit seen only outside the band -> throws StaleCulpritError
+  const STALE_CORPUS = staleCulpritCorpus([OUT, OUT]);
   assert.throws(
     () => issueBody("partial-evidence-capture", STALE_CORPUS, staleCulpritTables(STALE_CORPUS), repoShape(process.cwd())),
     (e) => e instanceof StaleCulpritError,
   );
-  // a culprit seen at 0.12.0 and 0.14.3 -> draft carries the STALE banner and the version range
-  const MIXED_CORPUS = staleCulpritCorpus(["0.12.0", "0.14.3"]);
+  // a culprit seen once out of band and once in band -> draft carries the STALE banner and the range
+  const MIXED_CORPUS = staleCulpritCorpus([OUT, IN_BAND]);
   const body = issueDraftLines(
     issueBody("partial-evidence-capture", MIXED_CORPUS, staleCulpritTables(MIXED_CORPUS), repoShape(process.cwd())),
   ).join("\n");
   assert.match(body, /⚠ STALE/);
-  assert.match(body, /versions=\[0\.12\.0\.\.0\.14\.3\]/);
+  const expectedRange = `versions=[${OUT}..${IN_BAND}]`.replace(/[.[\]]/g, "\\$&");
+  assert.match(body, new RegExp(expectedRange));
 });
 
 // Everything above exercises the draft as a value. The flag itself prints it, and what a filer

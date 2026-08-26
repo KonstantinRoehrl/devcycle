@@ -1,0 +1,14 @@
+# All 176 reference citations in the runtime surface load a whole file for a one-row decision; zero anchored links
+- finding-kind: maintenance-finding
+- finding-id: wholesale-context-load:cc69c6ba
+- culprit-kind: wholesale-context-load
+- severity: medium
+- confidence: verified
+- affected-files: commands, playbooks, agents, references, scripts/xref-check.mjs
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

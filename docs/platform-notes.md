@@ -103,15 +103,15 @@ and a `claude -p "/context"` probe.
 **kept**: there is no platform hard limit it violates (it sits under the worst-case 8,000-char
 shared budget, and each entry is well under the 1,536-char per-entry cap given the ≤500-char
 per-description constraint). Note that the binding constraint in practice is ≤500 chars ×
-7 entries = 3,500 chars; 6000 is a generous fail-stop, and one plugin consuming most of a
+8 entries = 4,000 chars; 6000 is a generous fail-stop, and one plugin consuming most of a
 200k-model's shared 8,000-char listing would crowd out other plugins' descriptions — keep
 descriptions lean.
 
-**Re-derived from this repo's frontmatter, 2026-08-20.** Seven commands — `continue` 92 +
-`cycle` 140 + `doctor` 262 + `learn` 215 + `onboard` 309 + `review` 147 + `verify` 112 =
-**1,277 chars** — 21% of the 6,000-char `DESCRIPTION_BUDGET_TOTAL` and 16% of the worst-case
-8,000-char shared listing on a 200k-token model. Four agents carry 57 + 167 + 107 + 112 =
-**443 chars**, and those sit outside that budget: `scripts/validate.mjs` sums `commands/`
+**Re-derived from this repo's frontmatter, 2026-08-20.** Eight commands — `continue` 92 +
+`cycle` 140 + `doctor` 262 + `learn` 215 + `maintain` 225 + `onboard` 309 + `review` 147 +
+`verify` 112 = **1,502 chars** — 25% of the 6,000-char `DESCRIPTION_BUDGET_TOTAL` and 19% of
+the worst-case 8,000-char shared listing on a 200k-token model. Five agents carry
+88 + 57 + 167 + 107 + 112 = **531 chars**, and those sit outside that budget: `scripts/validate.mjs` sums `commands/`
 frontmatter and nothing else, because playbooks are loaded by path, appear in no roster, and
 carry no frontmatter at all (`scripts/validate.mjs:58-60` says so in its own comment).
 Reproduce by summing the `description:` field of every file in `commands/` and in `agents/`;
@@ -198,7 +198,7 @@ passes (one cosmetic warning: the marketplace manifest has no `description` fiel
 adding when `marketplace.json` is next touched, outside Task 2's file set).
 
 [Superseded 2026-07-23: superpowers install mechanics are deliberately linked, not
-documented — see the decision log, `docs/DECISIONS.md`.]
+documented — see the decision log, `docs/decisions/README.md`.]
 
 [Superseded 2026-07-23, second correction: the pin above moved to
 `claude-plugins-official`. superpowers is published in both marketplaces, and dependency
@@ -206,7 +206,7 @@ satisfaction is keyed on `name@marketplace` — a user with `superpowers@claude-
 enabled still hit `dependency-unsatisfied` under the `superpowers-marketplace` pin
 (reproduced in an isolated config; a bare `"superpowers"` entry resolves as
 `superpowers@devcycle` and also fails). The marketplace `description` was added in the
-same change. See `docs/DECISIONS.md`.]
+same change. See `docs/decisions/README.md`.]
 
 ## (e) The `agent_type` a plugin hook receives inside a subagent
 

@@ -199,6 +199,20 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
   }
 
+  // --- continue.md's resume discovery must stay hook-proof ---
+  // The discovery step MUST invoke scripts/find-state-files.mjs, a Node-walk that consults no
+  // gitignore, rather than an ad-hoc find/rg a gitignore-aware shell hook can silently blind
+  // (memory devcycle-state-file-not-found-culprit). Skip when the fixture has no continue.md;
+  // the real plugin always ships one.
+  const continuePath = join(root, "commands/continue.md");
+  if (existsSync(continuePath)) {
+    const continueText = readFileSync(continuePath, "utf8");
+    if (!continueText.includes("scripts/find-state-files.mjs"))
+      fail("commands/continue.md: resume discovery must invoke scripts/find-state-files.mjs (hook-proof enumeration)");
+    else if (!existsSync(join(root, "scripts/find-state-files.mjs")))
+      fail("commands/continue.md references scripts/find-state-files.mjs but that script is missing");
+  }
+
   // 5. A playbook that emits a handoff block must name the reference that owns its shape.
   //    The tree spells the same act three ways, so all three count: a heading naming the
   //    handoff (`## Handoff`, `## Output and handoff`), a bold run-in step label
@@ -341,6 +355,9 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     A reference mentioning itself is not a consumer of itself.
   const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
   for (const f of namesIn("references")) {
+    // references/README.md is the index — a consumer OF references, not a loadable reference —
+    // so nothing cites it and requiring a consumer of it would be self-defeating.
+    if (f === "README.md") continue;
     const needle = `references/${f}`;
     const consumed = [...surface, ...scripts].some(
       (p) => !rel(p).endsWith(needle) && readFileSync(p, "utf8").includes(needle)

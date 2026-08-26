@@ -1,0 +1,14 @@
+# .gitignore declares audit reports have the one exception then carries two
+- finding-kind: maintenance-finding
+- finding-id: allowlist-contradiction:8fbfbc94
+- culprit-kind: allowlist-contradiction
+- severity: medium
+- confidence: verified
+- affected-files: .gitignore, CONTRIBUTING.md, docs/audits
+- first-seen: 2026-08-25
+- last-seen: 2026-08-25
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 
