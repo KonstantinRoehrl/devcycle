@@ -21,5 +21,6 @@ docs/*
 !docs/decisions/
 !docs/configuration/
 !docs/pipeline/
+!docs/playbooks/
 docs/audits/*
 !docs/audits/2026-08-06-disposition-register.md
