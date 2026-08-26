@@ -63,6 +63,14 @@ The Node workflows the playbooks drive by path.
 | [`workflows/mechanical-sweep.js`](../workflows/mechanical-sweep.js) | Pilot-first bulk edit engine behind the sweep path. |
 | [`workflows/lib/agent-cli.js`](../workflows/lib/agent-cli.js) | The subprocess layer both workflow engines share to drive `claude` in print mode. |
 
+## Hooks
+
+The one hook the plugin ships. No command loads it; it fires on a matched tool call.
+
+| Hook | What it does |
+| --- | --- |
+| [`hooks/block-main-thread-browser.mjs`](../hooks/block-main-thread-browser.mjs) | Registered on `PreToolUse` over `mcp__claude-in-chrome__.*`, it denies any browser tool call whose origin is not the `on-device-driver` subagent — the main thread included — so the coordinator cannot drive the browser at its own context depth ([`decisions/`](decisions/README.md), 2026-08-20). |
+
 ## Agents
 
 The read-only or single-task subagents a stage dispatches.

@@ -1900,12 +1900,12 @@ test("every shipped agent is named by DESIGN.md's blueprint, DESIGN.md §13, and
   }
 });
 
-test("the browser guard is named by DESIGN.md's blueprint and README's machinery table", () => {
+test("the browser guard is named by DESIGN.md's blueprint and the hub's inventory", () => {
   assert.match(read(DESIGN_DOC), /^├── hooks\//m, "DESIGN.md §3's tree must list hooks/");
   assert.match(
-    read("README.md"),
+    read("docs/README.md"),
     /block-main-thread-browser/,
-    "README.md's machinery table must carry a row for the hook — it is the one component no command loads"
+    "docs/README.md's inventory must carry a row for the hook — it is the one component no command loads"
   );
 });
 
