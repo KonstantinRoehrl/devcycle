@@ -154,7 +154,9 @@ export const defaultGhRunner = (repo, pr, exec = execFileSync) => {
   const prLevel = asArray(api(["api", `repos/${repo}/issues/${pr}/comments`]));
   // The thread's own GraphQL node id (PRRT_…) is a disjoint id space from the REST comment ids, so
   // fetch each thread's comments' databaseId — those numeric ids DO match the REST inline comment
-  // `id`, and are what normalizeComments drops on.
+  // `id`, and are what normalizeComments drops on. Both first:100 caps are unpaginated: a PR with
+  // >100 review threads, or a resolved thread with >100 comments, leaves the overflow un-dropped —
+  // it surfaces resolved noise rather than dropping live feedback, so the failure direction is safe.
   const threadQuery =
     "query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){" +
     "pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved comments(first:100){nodes{databaseId}}}}}}}";

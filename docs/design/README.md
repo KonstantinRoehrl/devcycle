@@ -85,7 +85,8 @@ devcycle/                (public GitHub repo)
 │   ├── learn.md                  # sessions + memory → landed doc edits; --preview lands nothing
 │   ├── doctor.md                 # standalone token/context/routing profile and config drift; starts no cycle
 │   ├── maintain.md               # read-only longitudinal repo-health assessment; starts no cycle
-│   └── onboard.md                # bootstrap tier-2 in a repo; starts no cycle (see §8)
+│   ├── onboard.md                # bootstrap tier-2 in a repo; starts no cycle (see §8)
+│   └── reconcile.md              # triage/fix/reply to a PR's review comments; re-enters the branch's cycle when one exists
 ├── playbooks/                    # L1 — loaded only as ${CLAUDE_PLUGIN_ROOT}/playbooks/<name>.md
 │   ├── scoping-the-request.md    # rough idea → bounded scope; batched AskUserQuestion; nothing assumed;
 │   │                             # hands off to superpowers:brainstorming
