@@ -1480,3 +1480,33 @@ test('hooks check: the documented match-all matcher "*" passes rather than faili
   doc.hooks.PreToolUse[0].matcher = "*";
   ok(runValidate(hooksFixture(makePluginFixture(), doc)));
 });
+
+// --- continue.md resume discovery must stay hook-proof ---
+
+// commands/*.md need frontmatter with a description (validate.mjs), so each fixture continue.md
+// carries one — otherwise the positive case would fail on a frontmatter error, not the guard.
+const CONTINUE_FM = "---\ndescription: Fixture continue command.\n---\n\n";
+
+test("continue discovery guard: passes when continue.md invokes find-state-files.mjs and the script exists", () => {
+  const dir = makePluginFixture();
+  // Check 6 requires every commands/*.md to have a routing-table row (same reason every other
+  // test in this file that adds a command file also adds one, e.g. the onboard/review/sketch
+  // cases above) — otherwise this fixture would fail on the unrelated routing check rather than
+  // exercising the guard this test targets.
+  writeInto(dir, ROUTING_PATH, routing("| resume a cycle (fixture) | `continue` | read-only | yes |\n"));
+  writeInto(dir, "commands/continue.md", CONTINUE_FM + "Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/find-state-files.mjs` to enumerate.\n");
+  writeInto(dir, "scripts/find-state-files.mjs", "// stub for the guard\n");
+  ok(runValidate(dir));
+});
+
+test("continue discovery guard: fails when the discovery step drops the find-state-files.mjs reference", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "commands/continue.md", CONTINUE_FM + "Run `find . -name state.md` to enumerate.\n");
+  failsWith(runValidate(dir), /must invoke scripts\/find-state-files\.mjs/);
+});
+
+test("continue discovery guard: fails when continue.md references the script but the file is missing", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "commands/continue.md", CONTINUE_FM + "Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/find-state-files.mjs`.\n");
+  failsWith(runValidate(dir), /references scripts\/find-state-files\.mjs but that script is missing/);
+});
