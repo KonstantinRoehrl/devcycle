@@ -105,6 +105,7 @@ so neither command carries a second copy.
 | `on-device` | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` |
 | `fast-path` | `${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md` (its Resume section) |
 | `sweep` | `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md` (its Resume section) |
+| `receiving-review` | `${CLAUDE_PLUGIN_ROOT}/playbooks/receiving-review.md` — a standalone `reconcile` stage, re-entered per §6.6 of its own flow; not part of the pipeline walk |
 | `finish` | `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
 
 `done` has no row: a closed cycle resumes at nothing, and `/devcycle:cycle` reuses its state file

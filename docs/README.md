@@ -52,6 +52,7 @@ directly.
 | [`profiling-sessions`](playbooks/profiling-sessions/README.md) | Runs and interprets the token, context, routing, and startup-cost analyzer. |
 | [`onboarding-a-repo`](playbooks/onboarding-a-repo/README.md) | Detects a repo's real build/test/lint commands and scaffolds its setup. |
 | [`maintaining-the-repo`](playbooks/maintaining-the-repo/README.md) | The longitudinal-health engine behind `/devcycle:maintain`. |
+| [`receiving-review`](playbooks/receiving-review/README.md) | The standalone reconcile stage that triages a PR's review comments into fixes and consented replies. |
 
 ## Machinery
 
