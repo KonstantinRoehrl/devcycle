@@ -217,6 +217,7 @@ gated by `userConfig.crossModelReview`.
 {
   "profile": "lean | standard | thorough",
   "gitPolicy": "local-commits-only | push-allowed | open-pr",
+  "docTrackingPolicy": "standard | all-local | all-tracked",
   "reviewDepth": "single | panel | auto",
   "crossModelReview": false,
   "onDeviceGate": "human-required | auto-ok | auto",

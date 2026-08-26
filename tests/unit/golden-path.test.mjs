@@ -1836,18 +1836,66 @@ test("the browser guard's matcher does not reach ordinary main-thread tools", ()
     );
 });
 
-test("every shipped agent is named by DESIGN.md's blueprint, DESIGN.md §13, and README's machinery table", () => {
+// Every file the plugin ships under workflows/, by path relative to workflows/ — the roster
+// the docs hub's Machinery table must mirror. Walked recursively so a new nested engine (e.g.
+// lib/*) is covered, not just the top-level scripts.
+const allWorkflowFiles = () => {
+  const out = [];
+  const walk = (dir, prefix) => {
+    for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(`${dir}/${entry.name}`, rel);
+      else out.push(rel);
+    }
+  };
+  walk("workflows", "");
+  return out;
+};
+
+// The rows of a markdown table roster, as raw `|`-led lines. Row EXISTENCE (a line that anchors
+// on the component's structural path or backticked name) is what these parity walks assert, not
+// row wording — so the check survives prose reflow but still fails when a component ships with no
+// roster row at all (QC2).
+const tableRows = (text) => text.split("\n").filter((line) => line.startsWith("|"));
+
+test("#14 roster parity: every playbook and workflow has a docs-hub row, every reference a references-index row", () => {
+  const hubRows = tableRows(read("docs/README.md"));
+  for (const f of readdirSync(join(root, "playbooks"))) {
+    if (!f.endsWith(".md")) continue;
+    const name = f.replace(/\.md$/, "");
+    assert.ok(
+      hubRows.some((row) => row.includes(`playbooks/${name}/`)),
+      `docs/README.md's playbook roster has no row for playbooks/${f} — a shipped playbook with no hub row`
+    );
+  }
+  for (const rel of allWorkflowFiles()) {
+    assert.ok(
+      hubRows.some((row) => row.includes(`workflows/${rel}`)),
+      `docs/README.md's Machinery roster has no row for workflows/${rel} — a shipped workflow with no hub row`
+    );
+  }
+
+  const refRows = tableRows(read("references/README.md"));
+  for (const f of readdirSync(join(root, "references"))) {
+    if (f === "README.md") continue;
+    assert.ok(
+      refRows.some((row) => row.includes("`" + f + "`")),
+      `references/README.md's index has no row for references/${f} — a shipped reference with no index row`
+    );
+  }
+});
+
+test("every shipped agent is named by DESIGN.md's blueprint, DESIGN.md §13, and the docs hub's agent roster", () => {
   const design = read(DESIGN_DOC);
-  const readme = read("README.md");
+  const hubRows = tableRows(read("docs/README.md"));
   for (const f of readdirSync(join(root, "agents"))) {
     if (!f.endsWith(".md")) continue;
     const id = f.replace(/\.md$/, "");
     assert.ok(design.includes(f), `DESIGN.md §3's tree must list ${f}`);
     assert.ok(design.includes(`devcycle:${id}`), `DESIGN.md §13's agent list must name devcycle:${id}`);
-    assert.match(
-      readme,
-      new RegExp(`^\\| Agent \`${id}\` \\|`, "m"),
-      `README.md's machinery table must carry a row for agent ${id} — a bare mention elsewhere in the file does not satisfy this: the Hook row's prose also names the driver`
+    assert.ok(
+      hubRows.some((row) => row.includes(`agents/${id}.md`)),
+      `docs/README.md's agent roster must carry a row for agent ${id} — a bare mention elsewhere in the file does not satisfy this`
     );
   }
 });
@@ -1907,16 +1955,27 @@ const firstCells = (text, header) => {
   return keys;
 };
 
-test("C6: plugin.json, README and references/config.md agree on the knob set", () => {
+// DESIGN §7's userConfig schema, parsed from its fenced JSON block into the knob keys it
+// enumerates. Sliced structurally (heading → next `## `) so the parse tracks §7 wherever prose
+// around it reflows, and JSON.parse'd so the assertion is set membership, not a wording match.
+const designKnobs = () => {
+  const design = read(DESIGN_DOC);
+  const section = design.split("## 7. userConfig Schema")[1]?.split(/\n## /)[0] ?? "";
+  const json = section.match(/```json\n([\s\S]*?)\n```/)?.[1] ?? "";
+  return Object.keys(JSON.parse(json));
+};
+
+test("C6: plugin.json, the configuration hub, references/config.md and DESIGN §7 agree on the knob set", () => {
   const manifest = Object.keys(JSON.parse(read(".claude-plugin/plugin.json")).userConfig);
-  const readme = firstCells(read("README.md"), "| Option | What it controls | Values | Default |");
+  const options = firstCells(read("docs/configuration/README.md"), "| Option | What it controls | Values | Default |");
   const config = firstCells(read("references/config.md"), "| Knob | Owner | Falls back to |");
+  const design = designKnobs();
   const sorted = (keys) => [...keys].sort();
 
   assert.deepEqual(
-    sorted(readme),
+    sorted(options),
     sorted(manifest),
-    "README.md's config table and .claude-plugin/plugin.json's userConfig must carry the same keys"
+    "docs/configuration/README.md's option table and .claude-plugin/plugin.json's userConfig must carry the same keys"
   );
   assert.deepEqual(
     sorted(config),
@@ -1924,5 +1983,11 @@ test("C6: plugin.json, README and references/config.md agree on the knob set", (
     "references/config.md calls itself the single owner of knob resolution, so its knob roster " +
       "must enumerate exactly the keys the manifest ships — an owner that does not list what it " +
       "owns is how F15 and F16 drifted unnoticed"
+  );
+  assert.deepEqual(
+    sorted(design),
+    sorted(manifest),
+    "docs/design/README.md §7's userConfig schema must enumerate exactly the manifest's keys — " +
+      "#10 config parity; a schema section that lags the manifest is how docTrackingPolicy drifted"
   );
 });
