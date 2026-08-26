@@ -103,7 +103,7 @@ test("cycle.md itself routes every stage in its enum to a playbook that exists",
   const resumeVia = resumeRoutes();
   for (const s of stages) {
     if (s === TERMINAL) continue;
-    if (s !== "fast-path" && s !== "sweep")
+    if (s !== "fast-path" && s !== "sweep" && s !== "receiving-review")
       assert.ok(walked.get(s), `commands/cycle.md names stage "${s}" in its enum but has no numbered walk entry for it`);
     const cell = resumeVia.get(s);
     assert.ok(cell, `references/resume.md's stage table has no row for "${s}" for commands/cycle.md's walk to resume through`);

@@ -8,7 +8,7 @@ why the pipeline is shaped this way, see `docs/design/`.
 ```mermaid
 ---
 title: devcycle pipeline — stage-level flow
-accDescr: Stage-level flowchart of devcycle's full cycle, from the seven entry commands through triage, scoping, audit, diagnosis, brainstorm, planning, execution, branch review, and on-device verification, down to finish. Diamonds mark genuine decisions and gates; cylinders mark stored artifacts; pills mark standalone commands and terminal points.
+accDescr: Stage-level flowchart of devcycle's full cycle, from the eight entry commands through triage, scoping, audit, diagnosis, brainstorm, planning, execution, branch review, and on-device verification, down to finish. Diamonds mark genuine decisions and gates; cylinders mark stored artifacts; pills mark standalone commands and terminal points.
 ---
 flowchart TD
     CYCLE(["/devcycle:cycle request"]):::tool
@@ -18,6 +18,7 @@ flowchart TD
     DOCTORCMD(["/devcycle:doctor — optional --all"]):::tool
     ONBOARDCMD(["/devcycle:onboard"]):::tool
     LEARNCMD(["/devcycle:learn — optional --preview"]):::tool
+    RECONCILE(["/devcycle:reconcile"]):::tool
 
     CYCLE --> STATE("Step 0 · state file<br/>root · branch · request · first-run config"):::stage
     STATE --> TRIAGE{"Triage<br/>maturity · kind · size"}:::stage
@@ -94,6 +95,7 @@ flowchart TD
     ONBOARDCMD -. "standalone — scaffolds the repo, starts no cycle" .-> ONBOARDSTOP(["scaffold written"]):::tool
     LEARNCMD -. "standalone — mine, propose, confirm, land; starts no cycle" .-> LEARNSTOP(["promotions applied"]):::tool
     LEARNCMD -. "--preview — stops at the artifact, lands nothing" .-> PREVIEWSTOP(["candidates delivered"]):::tool
+    RECONCILE -. "standalone — triage a PR's review into fixes and consented replies, off the pipeline walk" .-> RECONCILESTOP(["fixes committed, replies posted"]):::tool
 
     subgraph DELEG["Inside every stage — who does the work"]
         DUTY["the coordinator keeps only these:<br/>interviews · dispatches · the green gate<br/>commits · ledger · state file · handoff blocks"]:::structural

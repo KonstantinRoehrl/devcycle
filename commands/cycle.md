@@ -70,11 +70,14 @@ playbook owns and runs before any agent edits.
 ## Stage walk
 
 Run these in order, rewriting the state file at every transition; two short paths bypass the walk on
-confirmation (`fast-path`, `sweep`). Each stage's playbook and its re-entry conditions live in
+confirmation (`fast-path`, `sweep`). One further stage, `receiving-review`, is off-walk in a different
+sense: it is a standalone `reconcile` stage entered directly, never reached by this pipeline
+walk, so it carries a resume row but no numbered entry below. Each stage's playbook and its re-entry
+conditions live in
 `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § Resuming at the recorded stage. The line below is the
 stage enum's single source of truth — `scripts/validate.mjs` reads its literal form:
 
-- stage: <scoping|audit|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|finish|done>
+- stage: <scoping|audit|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|receiving-review|finish|done>
 
 1. **scoping** — (skipped per triage).
 2. **audit** (audit-shaped input only) — in place of scoping. It writes
