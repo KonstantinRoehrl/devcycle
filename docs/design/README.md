@@ -61,7 +61,7 @@ from its path and enforceable per-directory rather than by convention:
 
 | layer | directory | holds | rules |
 | --- | --- | --- | --- |
-| L0 | `commands/` | the eight entry points | the only surface listed to a user; names are verbs; per-file line budget owned by tests/fixtures/surface-budget.json |
+| L0 | `commands/` | the nine entry points | the only surface listed to a user; names are verbs; per-file line budget owned by tests/fixtures/surface-budget.json |
 | L1 | `playbooks/` | orchestration prose | loaded by path, in no roster, no frontmatter; names are gerunds; per-file line budget owned by tests/fixtures/surface-budget.json |
 | L2 | `agents/` | typed workers | separately dispatched contexts; names are role nouns; no `model:` in frontmatter |
 | L3 | `references/` | shared concepts | exactly one owner, at least one consumer; loaded on demand (§15.1) |
@@ -277,10 +277,13 @@ gated by `userConfig.crossModelReview`.
 - **Commands are verbs, playbooks are gerunds, agents are role nouns.** `doctor` is the single
   recorded exception, justified by `brew doctor` / `flutter doctor` / `npm doctor` — a noun
   every developer already reads as "diagnose this".
-- Commands (the whole user-facing surface, seven from 2026-08-06, eight since 2026-08-22):
+- Commands (the whole user-facing surface, seven from 2026-08-06, eight since 2026-08-22,
+  nine since 2026-08-26):
   `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:review`, `/devcycle:verify`,
   `/devcycle:learn`, `/devcycle:doctor`, `/devcycle:maintain` (read-only longitudinal
-  repo-health assessment; starts no cycle), `/devcycle:onboard`. `docs/routing.md` maps each
+  repo-health assessment; starts no cycle), `/devcycle:onboard`, `/devcycle:reconcile`
+  (triage a PR's review comments into fixes and consented replies; re-enters the branch's
+  cycle when one exists). `docs/routing.md` maps each
   to the intent it serves and what it may do before its first confirmation.
 - Playbooks: verb-first gerunds, listed in §3. They are addressed by path, never as
   `devcycle:<name>`, so a playbook name is never a user-typed string.

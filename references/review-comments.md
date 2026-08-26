@@ -26,7 +26,7 @@ labeled-assumption form.
 | --- | --- | --- | --- | --- |
 | `actionable-valid` | a real defect confirmed against spec/convention/code | enters the fix loop (§6.5a) | none while open; on residue, the item's own carried reply | `Confidence: verified` — the cross-reference in §6.3 established the defect |
 | `already-addressed` | the comment names something the current branch already does | reply, no fix | "already handled at `file:line`" — cite the line that satisfies it | `Confidence: verified`; **fails closed** — if the referenced line is gone, it is not already-addressed |
-| `conflicts-with-spec` | the change asked for contradicts the approved spec/plan | never auto-resolves; surfaced at the gate, carries the §12.5 reopen offer | "declined — contradicts spec `file:line`", or a reopen-request if the user contests | `Confidence: verified` — names the governing spec passage |
+| `conflicts-with-spec` | the change asked for contradicts the approved spec/plan | never auto-resolves; surfaced at the gate, carries the §6.4 reopen offer | "declined — contradicts spec `file:line`", or a reopen-request if the user contests | `Confidence: verified` — names the governing spec passage |
 | `unsupported-preference` | a stylistic/opinion ask with no named convention or spec behind it | never auto-resolves; **surfaced at the gate for the user to decide** | "no supporting convention — your call" | `Confidence: suspected` unless a convention is found, in which case it is not this bucket |
 | `ambiguous` | the comment cannot be classified without more from the reviewer | reply asking for the missing specifics | "need clarification: <what>" | `Confidence: suspected` — the ambiguity is the finding |
 | `out-of-scope` | valid but outside this PR's confirmed scope | reply, no fix; nameable as a follow-up | "out of scope for this PR — track separately" | `Confidence: verified` — names the scope boundary |
@@ -84,9 +84,9 @@ flow never changes PR thread state.
 
 ```
 # primary
-gh api repos/<owner>/<repo>/pulls/<pr>/comments/<comment_id>/replies -f body=@<file>
+gh api repos/<owner>/<repo>/pulls/<pr>/comments/<comment_id>/replies -F body=@<file>
 # fallback if the replies endpoint is unavailable
-gh api repos/<owner>/<repo>/pulls/<pr>/comments -F in_reply_to=<comment_id> -f body=@<file>
+gh api repos/<owner>/<repo>/pulls/<pr>/comments -F in_reply_to=<comment_id> -F body=@<file>
 ```
 
 **Posting a top-level PR comment** (a reply with no single inline anchor):
@@ -96,7 +96,7 @@ gh pr comment <pr> --repo <owner>/<repo> --body-file <draft>
 ```
 
 **The `.devcycle/reopen-request.md` shape** (written for a contested `conflicts-with-spec`
-item, consumed at §12.5 / §6.6 to recommend a rewind to `stage: brainstorm`):
+item, consumed at §6.4 / §6.6 to recommend a rewind to `stage: brainstorm`):
 
 ```markdown
 # Reopen request

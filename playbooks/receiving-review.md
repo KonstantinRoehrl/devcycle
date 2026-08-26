@@ -83,7 +83,7 @@ beyond that, items are named and deferred, never silently truncated.
 
 - `conflicts-with-spec` and `unsupported-preference` items **never auto-resolve** — they are
   surfaced here for the user to decide.
-- A declined `conflicts-with-spec` item carries the §12.5 **reopen offer**: the user may
+- A declined `conflicts-with-spec` item carries the §6.4 **reopen offer**: the user may
   contest the spec, which records `.devcycle/reopen-request.md` per
   `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`.
 - An **Other** answer at this gate appends `user-correction-at-gate` to the run record, the

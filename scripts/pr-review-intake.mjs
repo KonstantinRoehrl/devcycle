@@ -39,15 +39,18 @@ export function commentKey({ path, line, body } = {}) {
 }
 
 // Maps the three raw gh shapes onto the uniform Comment shape and drops any thread GitHub reports
-// resolved. An inline comment's thread identity is carried by its review id, so a comment is dropped
-// when either its own id or its pull_request_review_id is in the resolved set.
+// resolved. Resolution is per-THREAD, not per-review, and GitHub only exposes it over GraphQL; the
+// runner correlates it back to REST ids via each resolved thread's comments' databaseId. So despite
+// the pinned param name, `resolvedThreadIds` holds the REST inline-comment ids (== databaseId) of
+// comments in resolved threads — an inline comment is dropped when its own id is in that set. (The
+// old pull_request_review_id heuristic was wrong: a review can span both resolved and open threads.)
 export function normalizeComments({ inline = [], reviews = [], prLevel = [], resolvedThreadIds = [] } = {}) {
   const resolved = new Set(resolvedThreadIds);
   const isResolved = (...ids) => ids.some((x) => x != null && resolved.has(x));
   const out = [];
 
   for (const c of inline) {
-    if (isResolved(c.id, c.pull_request_review_id)) continue;
+    if (isResolved(c.id)) continue;
     out.push({
       id: c.id ?? null,
       kind: "inline",
@@ -149,9 +152,12 @@ export const defaultGhRunner = (repo, pr, exec = execFileSync) => {
   const inline = asArray(api(["api", `repos/${repo}/pulls/${pr}/comments`]));
   const reviews = asArray(api(["api", `repos/${repo}/pulls/${pr}/reviews`]));
   const prLevel = asArray(api(["api", `repos/${repo}/issues/${pr}/comments`]));
+  // The thread's own GraphQL node id (PRRT_…) is a disjoint id space from the REST comment ids, so
+  // fetch each thread's comments' databaseId — those numeric ids DO match the REST inline comment
+  // `id`, and are what normalizeComments drops on.
   const threadQuery =
     "query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){" +
-    "pullRequest(number:$pr){reviewThreads(first:100){nodes{id isResolved}}}}}";
+    "pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved comments(first:100){nodes{databaseId}}}}}}}";
   const threads = api([
     "api", "graphql",
     "-f", `query=${threadQuery}`,
@@ -163,7 +169,9 @@ export const defaultGhRunner = (repo, pr, exec = execFileSync) => {
   try {
     const root = threads?.data?.repository ?? threads?.repository;
     const nodes = root?.pullRequest?.reviewThreads?.nodes ?? [];
-    resolvedThreadIds = nodes.filter((n) => n?.isResolved).map((n) => n.id);
+    resolvedThreadIds = nodes
+      .filter((n) => n?.isResolved)
+      .flatMap((n) => (n?.comments?.nodes ?? []).map((c) => c?.databaseId).filter((id) => id != null));
   } catch {
     resolvedThreadIds = [];
   }

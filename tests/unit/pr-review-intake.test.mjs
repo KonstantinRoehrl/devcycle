@@ -6,19 +6,60 @@ import {
   dedupeAgainst, priorKeysFrom, intake, defaultGhRunner,
 } from "../../scripts/pr-review-intake.mjs";
 
-test("normalizeComments drops resolved threads and keeps diff_hunk + in_reply_to", () => {
+test("normalizeComments drops resolved threads by REST comment id and keeps diff_hunk + in_reply_to", () => {
+  // resolvedThreadIds carries the REST inline-comment ids of comments in GitHub-resolved threads
+  // (databaseId of each resolved PullRequestReviewThread's comments) — the ids that match c.id.
   const out = normalizeComments({
     inline: [
-      { id: 1, user: { login: "a" }, body: "x", path: "f.js", line: 3, diff_hunk: "@@", in_reply_to_id: null, pull_request_review_id: 10 },
-      { id: 2, user: { login: "b" }, body: "y", path: "g.js", line: 4, diff_hunk: "@@2", in_reply_to_id: 1, pull_request_review_id: 11 },
+      { id: 1, user: { login: "a" }, body: "x", path: "f.js", line: 3, diff_hunk: "@@", in_reply_to_id: null },
+      { id: 2, user: { login: "b" }, body: "y", path: "g.js", line: 4, diff_hunk: "@@2", in_reply_to_id: 1 },
     ],
-    resolvedThreadIds: [11],
+    resolvedThreadIds: [2],
   });
   assert.equal(out.length, 1);
   assert.equal(out[0].id, 1);
   assert.equal(out[0].kind, "inline");
   assert.equal(out[0].diff_hunk, "@@");
   assert.equal(out[0].resolved, false);
+});
+
+test("intake drops a GitHub-resolved thread's comment against a realistic defaultGhRunner response", () => {
+  // Realistic wiring: defaultGhRunner reads inline comments (REST) plus reviewThreads (GraphQL),
+  // correlating resolution to REST ids via each resolved thread's comments' databaseId. Comment 100
+  // lives in a resolved thread; comment 200 does not. Only 100 must be dropped.
+  const inline = [
+    { id: 100, user: { login: "bot" }, body: "resolved take", path: "a.js", line: 1, diff_hunk: "@@", in_reply_to_id: null },
+    { id: 200, user: { login: "human" }, body: "open take", path: "b.js", line: 2, diff_hunk: "@@", in_reply_to_id: null },
+  ];
+  const graphql = {
+    data: {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: [
+              { isResolved: true, comments: { nodes: [{ databaseId: 100 }] } },
+              { isResolved: false, comments: { nodes: [{ databaseId: 200 }] } },
+            ],
+          },
+        },
+      },
+    },
+  };
+  const exec = (_bin, args) => {
+    if (args.includes("graphql")) return JSON.stringify(graphql);
+    if (args.some((a) => a.endsWith("/pulls/5/comments"))) return JSON.stringify(inline);
+    return "[]";
+  };
+  const env = intake({
+    repo: "o/r", pr: 5, mode: "gh", scratchDir: ".devcycle/tmp",
+    ghRunner: (repo, pr) => defaultGhRunner(repo, pr, exec),
+    redactRunner: (d) => d,
+  });
+  assert.equal(env.available, true);
+  assert.equal(env.counts.fetched, 2);
+  assert.equal(env.counts.resolvedDropped, 1);
+  assert.equal(env.comments.length, 1);
+  assert.equal(env.comments[0].id, 200);
 });
 
 test("wrapPaste makes one pr-level entry per paragraph with author (pasted)", () => {
@@ -88,4 +129,9 @@ test("the intake script never calls a mutating gh subcommand", () => {
   assert.doesNotMatch(src, /-X\s+(POST|PATCH|PUT|DELETE)/);
   assert.doesNotMatch(src, /resolveReviewThread/);
   assert.doesNotMatch(src, /\bgh\b[^\n]*\b(pr|api)\b[^\n]*\b(merge|close|edit|review|comment)\b\s+--/);
+  // A gh-api reply post is POST-by-default with a `-f/-F body=` field (or --field/--raw-field);
+  // that idiom carries no `-X POST`, so the checks above miss it. This is read-only intake: reject
+  // any field-flagged `body=` write while still permitting the reviewThreads GraphQL read (which
+  // only passes `-F owner=/name=/pr=`, never `body=`) and the three REST reads.
+  assert.doesNotMatch(src, /-(?:f|F|-field|-raw-field)\s+["']?body=/);
 });
