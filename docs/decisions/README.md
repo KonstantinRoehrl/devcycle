@@ -5,6 +5,35 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-25 — documentation reorganized into a layered docs/ structure
+
+**Decision:** `README.md` becomes a lean entry point, with everything deeper moved under
+`docs/` — a hub plus `docs/design/`, `docs/pipeline/`, `docs/configuration/`, `docs/playbooks/`,
+and `docs/decisions/` pages. `DESIGN.md` splits into `docs/design/README.md` (the live spine)
+and `docs/design/historical-2026-07-plan.md` (the frozen July plan). `docs/DECISIONS.md` moves
+to `docs/decisions/README.md` (this file). `scripts/doc-paths.mjs` is introduced as the single
+owner of both canonical paths (`DESIGN_DOC`, `DECISIONS_DOC`), so scripts and tests that need
+either path import it once rather than restating it at every call site.
+
+**Why:** the flat top-level `README.md`/`DESIGN.md`/`DECISIONS.md` layout had grown past what a
+single entry point could carry; splitting into a layered `docs/` structure keeps each surface
+scoped and gives historical content (the July plan) a frozen home separate from the spine that
+keeps changing.
+
+**Supersedes:** the flat top-level `DESIGN.md` and `DECISIONS.md` locations.
+
+## 2026-08-25 — workflows/lib/ convention recorded
+
+**Decision:** `workflows/lib/` is the recorded home for helpers shared across the orchestration
+workflow scripts. `workflows/lib/agent-cli.js` is the shared CLI helper that both
+`workflows/review-panel.js` and `workflows/mechanical-sweep.js` import.
+
+**Why:** the two orchestration workflows had converged on the same CLI plumbing; naming
+`workflows/lib/` as the shared-helper convention here gives future workflow scripts a
+documented place to add or find shared code instead of re-deriving it per script.
+
+**Supersedes:** nothing.
+
 ## 2026-08-20 — line and context budgets raised for C6's config.md tables
 
 **Decision:** `surfaceTotal` moves from **4,050 to 4,150** and `commandMax` from **104 to 110**

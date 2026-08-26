@@ -18,6 +18,7 @@ docs/*
 !docs/devcycle/
 !docs/audits/
 !docs/design/
+!docs/decisions/
 !docs/configuration/
 !docs/pipeline/
 docs/audits/*
