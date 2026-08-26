@@ -198,7 +198,7 @@ passes (one cosmetic warning: the marketplace manifest has no `description` fiel
 adding when `marketplace.json` is next touched, outside Task 2's file set).
 
 [Superseded 2026-07-23: superpowers install mechanics are deliberately linked, not
-documented — see the decision log, `docs/DECISIONS.md`.]
+documented — see the decision log, `docs/decisions/README.md`.]
 
 [Superseded 2026-07-23, second correction: the pin above moved to
 `claude-plugins-official`. superpowers is published in both marketplaces, and dependency
@@ -206,7 +206,7 @@ satisfaction is keyed on `name@marketplace` — a user with `superpowers@claude-
 enabled still hit `dependency-unsatisfied` under the `superpowers-marketplace` pin
 (reproduced in an isolated config; a bare `"superpowers"` entry resolves as
 `superpowers@devcycle` and also fails). The marketplace `description` was added in the
-same change. See `docs/DECISIONS.md`.]
+same change. See `docs/decisions/README.md`.]
 
 ## (e) The `agent_type` a plugin hook receives inside a subagent
 

@@ -43,7 +43,7 @@ Verified mechanics this design relies on (checked against official docs 2026-07-
 - Cross-marketplace dependency on superpowers requires the target marketplace in
   `allowCrossMarketplaceDependenciesOn` in the plugin's marketplace.json. Dependency
   satisfaction is keyed on `name@marketplace`, so the pin targets `claude-plugins-official`
-  (configured by default everywhere) — see `docs/DECISIONS.md`, 2026-07-23.
+  (configured by default everywhere) — see `docs/decisions/README.md`, 2026-07-23.
 - Auto-update is opt-in per marketplace for non-Anthropic marketplaces; version pinning via `plugin.json`
   `version` (bump per release; omitting it makes every commit an update).
 - Team distribution: a repo's `.claude/settings.json` can declare `extraKnownMarketplaces` + `enabledPlugins`;
@@ -61,7 +61,7 @@ from its path and enforceable per-directory rather than by convention:
 
 | layer | directory | holds | rules |
 | --- | --- | --- | --- |
-| L0 | `commands/` | the seven entry points | the only surface listed to a user; names are verbs; per-file line budget owned by tests/fixtures/surface-budget.json |
+| L0 | `commands/` | the eight entry points | the only surface listed to a user; names are verbs; per-file line budget owned by tests/fixtures/surface-budget.json |
 | L1 | `playbooks/` | orchestration prose | loaded by path, in no roster, no frontmatter; names are gerunds; per-file line budget owned by tests/fixtures/surface-budget.json |
 | L2 | `agents/` | typed workers | separately dispatched contexts; names are role nouns; no `model:` in frontmatter |
 | L3 | `references/` | shared concepts | exactly one owner, at least one consumer; loaded on demand (§15.1) |
@@ -84,6 +84,7 @@ devcycle/                (public GitHub repo)
 │   ├── verify.md                 # standalone on-device walkthrough; starts no cycle
 │   ├── learn.md                  # sessions + memory → landed doc edits; --preview lands nothing
 │   ├── doctor.md                 # standalone token/context/routing profile and config drift; starts no cycle
+│   ├── maintain.md               # read-only longitudinal repo-health assessment; starts no cycle
 │   └── onboard.md                # bootstrap tier-2 in a repo; starts no cycle (see §8)
 ├── playbooks/                    # L1 — loaded only as ${CLAUDE_PLUGIN_ROOT}/playbooks/<name>.md
 │   ├── scoping-the-request.md    # rough idea → bounded scope; batched AskUserQuestion; nothing assumed;
@@ -98,6 +99,7 @@ devcycle/                (public GitHub repo)
 │   ├── sweeping-mechanical-changes.md  # bulk uniform edits via the sweep path + **Execution:** sweep tasks
 │   ├── learning-from-sessions.md # observe → propose → confirm → land, one loop (see §8)
 │   ├── profiling-sessions.md     # token/context/routing/startup-cost analysis, ranked by impact
+│   ├── maintaining-the-repo.md   # longitudinal-health engine behind /devcycle:maintain; wraps reviewing-code
 │   └── onboarding-a-repo.md      # bootstrap tier-2 in any repo (see §8)
 ├── agents/                       # L2
 │   ├── implementer.md            # brief-driven implementer template
@@ -107,7 +109,7 @@ devcycle/                (public GitHub repo)
 │   ├── history-inspector.md      # read-only git-history lens for /devcycle:maintain; bounded traversal
 │   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
 │                                 # origin the browser guard below permits
-├── hooks/                        # L4 — the one hook that ships (docs/DECISIONS.md, 2026-08-20)
+├── hooks/                        # L4 — the one hook that ships (docs/decisions/README.md, 2026-08-20)
 │   ├── hooks.json                # registers the guard on PreToolUse over mcp__claude-in-chrome__.*
 │   └── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
@@ -275,10 +277,11 @@ gated by `userConfig.crossModelReview`.
 - **Commands are verbs, playbooks are gerunds, agents are role nouns.** `doctor` is the single
   recorded exception, justified by `brew doctor` / `flutter doctor` / `npm doctor` — a noun
   every developer already reads as "diagnose this".
-- Commands (the whole user-facing surface, seven since 2026-08-06): `/devcycle:cycle`,
-  `/devcycle:continue`, `/devcycle:review`, `/devcycle:verify`, `/devcycle:learn`,
-  `/devcycle:doctor`, `/devcycle:onboard`. `docs/routing.md` maps each to the intent it
-  serves and what it may do before its first confirmation.
+- Commands (the whole user-facing surface, seven from 2026-08-06, eight since 2026-08-22):
+  `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:review`, `/devcycle:verify`,
+  `/devcycle:learn`, `/devcycle:doctor`, `/devcycle:maintain` (read-only longitudinal
+  repo-health assessment; starts no cycle), `/devcycle:onboard`. `docs/routing.md` maps each
+  to the intent it serves and what it may do before its first confirmation.
 - Playbooks: verb-first gerunds, listed in §3. They are addressed by path, never as
   `devcycle:<name>`, so a playbook name is never a user-typed string.
 - Agents: `devcycle:implementer`, `devcycle:task-reviewer`,
