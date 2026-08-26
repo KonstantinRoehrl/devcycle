@@ -76,3 +76,10 @@ test("an unrecognised flag exits non-zero with the script's prefix", () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /find-state-files:/);
 });
+
+test("a --dir with no value exits non-zero with the script's prefix, not a raw stack trace", () => {
+  const r = spawnSync("node", [SCRIPT, "--dir"], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /find-state-files:/);
+  assert.doesNotMatch(r.stderr, /^\s+at .+:\d+:\d+/m); // no uncaught-exception stack frames
+});

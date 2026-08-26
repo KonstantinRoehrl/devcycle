@@ -92,15 +92,15 @@ function fmtAge(s) {
 }
 
 function main(argv) {
-  let flags;
+  let flags, root;
   try {
     ({ flags } = parseFlags(argv, { "--dir": "value", "--json": "none" }));
+    root = requireValue(flags, "--dir"); // throws on a present-but-valueless --dir — same usage error as a bad flag
   } catch (err) {
     console.error(`find-state-files: ${err.message}`);
     console.error("find-state-files: usage: find-state-files.mjs [--dir <root>] [--json]");
     process.exit(1);
   }
-  let root = requireValue(flags, "--dir");
   if (!root) {
     const g = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" });
     root = g.status === 0 ? g.stdout.trim() : process.cwd();

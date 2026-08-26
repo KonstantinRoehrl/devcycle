@@ -194,7 +194,10 @@ Expect the walk to stop often. Nearly every stage boundary ends the session: dev
 asks you to run `/clear` and then `/devcycle:continue`, so a cycle plays out as several short
 sessions rather than one long one. Nothing is lost across those stops — the scope, spec, plan,
 ledger, and state file on disk are what carry the run forward, and the conversation that
-produced them is not needed again. Compacting is deliberately not one of the options: it leaves
+produced them is not needed again. On re-entry `/devcycle:continue` locates that state file with
+`scripts/find-state-files.mjs`, a Node walk that consults no gitignore — so the gitignored
+`.devcycle/` directory cannot hide a state file from it the way it can from an ad-hoc
+`find`/`rg` search. Compacting is deliberately not one of the options: it leaves
 the expensive part of a context behind, where clearing actually returns it.
 
 ### What the coordinator does itself
