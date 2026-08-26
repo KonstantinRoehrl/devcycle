@@ -19,6 +19,7 @@ docs/*
 !docs/audits/
 !docs/design/
 !docs/configuration/
+!docs/pipeline/
 docs/audits/*
 !docs/audits/2026-08-06-disposition-register.md
 !docs/audits/2026-08-23-repo-maintenance.md
