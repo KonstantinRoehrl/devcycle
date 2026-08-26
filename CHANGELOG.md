@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.16.1 — 2026-08-26
+
+- fix(resume): find a gitignored .devcycle/state.md on first resume
+
 ## 0.16.0 — 2026-08-23
 
 - feat(maintain): add read-only repo maintenance command (Phases 1-4)
