@@ -19,6 +19,7 @@ under Node. The pinned Node version is in `.nvmrc`.
 - `node scripts/xref-check.mjs`
 - `node --test tests/unit/*.test.mjs`
 - `node scripts/doctor.mjs` (local only)
+- `node scripts/find-state-files.mjs` — enumerates every `.devcycle/state.md` for `/devcycle:continue`'s resume discovery; Node-walks the tree so the gitignored `.devcycle/` can't hide a state file
 
 ## Before you trust a doc
 
