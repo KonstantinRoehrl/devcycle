@@ -4,6 +4,29 @@
 
 - feat(devcycle): add the reconcile command and harden the learn/doctor loop
 
+**`/devcycle:reconcile` (#132).** A new command surface plus the `receiving-review` playbook —
+a stage that triages, fixes, and replies to PR review comments, backed by
+`scripts/pr-review-intake.mjs`. Resolved-thread lookups correlate to REST ids rather than
+guessing from position.
+
+**Learning/doctor loop hardening (#133).** Eight items across four dependency-ordered waves,
+per `docs/audits/2026-08-26-learning-doctor-loop-audit.md`:
+
+- **#103** — script-stamp all three coordinator-written timestamps from the system clock
+  instead of estimating them.
+- **#104** — canonicalize the run-record toplevel across worktrees so a worktree cycle's
+  records stop splitting across two repo slugs.
+- **#127** — normalize "direction of travel" for profile/turn-count and stop anchoring on an
+  n<3 cohort.
+- **#128** — carry a session count on compliance candidates, matching version-regression
+  candidates in the same report.
+- **L1** — add a staleness nudge for `/devcycle:learn` (5 unmined sessions or 14 days,
+  whichever comes first; configurable per repo).
+- **L2** — add a `win` observation kind so the miner can file successes, not only culprits,
+  with journal-reinforcement verification.
+- **D1** — cite the changelog when explaining a non-promotion regression.
+- **D2** — attribute and action detected wins in the doctor report.
+
 ## 0.16.1 — 2026-08-26
 
 - fix(resume): find a gitignored .devcycle/state.md on first resume
