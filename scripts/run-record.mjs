@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createHash, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { now } from "./stamp.mjs";
 
 const SCHEMA_PATH = new URL("../tests/fixtures/run-record.schema.json", import.meta.url).pathname;
 const CULPRITS_PATH = new URL("../references/culprits.json", import.meta.url).pathname;
@@ -122,8 +123,16 @@ function parseArgs(argv) {
 }
 
 export function gitToplevel(cwd) {
-  const r = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
-  return r.status === 0 ? r.stdout.trim() : cwd;
+  // Canonicalize a linked worktree to the main checkout that owns the shared .git, so every
+  // worktree of one repo resolves to one toplevel and one runs/<slug>/ dir (issue #104).
+  // --show-toplevel returns the *worktree* root; the common git dir's parent is the main root and
+  // is byte-identical to --show-toplevel on a normal checkout (QC3 — the main slug never moves).
+  const common = spawnSync(
+    "git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+    { encoding: "utf8" });
+  if (common.status === 0 && common.stdout.trim()) return dirname(common.stdout.trim());
+  const top = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+  return top.status === 0 ? top.stdout.trim() : cwd;
 }
 
 // Derives workload counts from git itself rather than the caller, so a workload line always
@@ -167,7 +176,7 @@ function main() {
       repoSlug: repoSlug(toplevel),
       profile: flags.profile,
       knobs,
-      startedAt: flags.startedAt ?? new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      startedAt: flags.startedAt ?? now(),
     });
     process.stdout.write(runId + "\n");
   } else if (sub === "append") {
@@ -182,7 +191,7 @@ function main() {
     for (const [k, v] of Object.entries(objects)) obj[k] = v;
     if (Object.keys(knobs).length) obj.knobs = knobs;
     if (obj.kind === "event" && obj.ts === undefined)
-      obj.ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+      obj.ts = now();
     writeLine(toplevel, runId, obj);
   } else if (sub === "workload") {
     const runId = flags.run;

@@ -33,6 +33,27 @@ test("r0-r2: the novel:<slug> form still matches after normalization (do not bre
   assert.equal(out.scoreboard[0].verdict, "recurred");
 });
 
+test("journal-reinforcement: recurrence after landing is held (the practice is followed)", () => {
+  const p = [promo({ culpritId: "win:clean-round-one", rung: "r2", landed: "2026-08-01",
+    verify: "journal-reinforcement" })];
+  const out = verify(p, [ev("clean-round-one", "2026-08-10T00:00:00Z", "r1")], "0.14.0",
+    { now: Date.parse("2026-08-20") });
+  assert.equal(out.scoreboard[0].verdict, "held");
+});
+test("journal-reinforcement: runs observed but no recurrence is not-adopted", () => {
+  const p = [promo({ culpritId: "win:clean-round-one", rung: "r2", landed: "2026-08-01",
+    verify: "journal-reinforcement" })];
+  const out = verify(p, [ev("friction:other", "2026-08-10T00:00:00Z", "r1")], "0.14.0",
+    { now: Date.parse("2026-08-20") });
+  assert.equal(out.scoreboard[0].verdict, "not-adopted");
+});
+test("journal-reinforcement: zero runs is unmeasurable, never not-adopted", () => {
+  const p = [promo({ culpritId: "win:clean-round-one", rung: "r2", landed: "2026-08-01",
+    verify: "journal-reinforcement" })];
+  const out = verify(p, [], "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(out.scoreboard[0].verdict, "unmeasurable");
+});
+
 test("retirement fires on held past 10 runs OR 90 days", () => {
   const runs = Array.from({ length: 11 }, (_, i) => ev(null, `2026-08-${String(i + 2).padStart(2, "0")}T00:00:00Z`, `r${i}`));
   const out = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });

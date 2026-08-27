@@ -490,19 +490,42 @@ export function reviewDepthCohortTable(summaries) {
   });
 }
 
-// One aggregate statement of where the corpus is headed, oldest known version to newest,
-// reusing versionCohorts' own grouping and compareVersions' own sort rather than
-// re-implementing either (per-version/per-skill deltas already exist in emitCandidates below;
-// this is the roll-up neither of those provides).
-export function corpusDirectionOfTravel(settled) {
-  const cohorts = versionCohorts(settled);
-  const known = [...cohorts.keys()].filter((v) => v !== "unknown").sort(compareVersions);
-  if (known.length < 2) return { direction: "insufficient-data", deltaPct: null };
-  const first = median(cohorts.get(known[0]).dollars);
-  const last = median(cohorts.get(known[known.length - 1]).dollars);
-  if (first === 0) return { direction: "insufficient-data", deltaPct: null };
-  const deltaPct = ((last - first) / first) * 100;
-  return { direction: deltaPct > 1 ? "up" : deltaPct < -1 ? "down" : "flat", deltaPct };
+const DIRECTION_MIN_COHORT = 3; // below this the confidence column flags a version unreliable (#127)
+
+// Normalized like every other cross-version figure (issue #127): hold profile|requestKind|
+// workloadBand constant by scoring within one matched cohort, and never anchor an endpoint on a
+// version the confidence column flags unreliable (n<3) — widen inward to the nearest reliable
+// version, or report no reliable trend. Reuses matchKeyOf/median/pctDelta/compareVersions (QC2).
+export function corpusDirectionOfTravel(runs) {
+  const scored = (runs ?? []).filter((r) => r.requestKind != null && r.workloadBand != null);
+  const byKey = new Map();
+  for (const r of scored) {
+    const perVersion = byKey.get(matchKeyOf(r)) ?? new Map();
+    const arr = perVersion.get(r.version) ?? [];
+    arr.push(r.costUSD);
+    perVersion.set(r.version, arr);
+    byKey.set(matchKeyOf(r), perVersion);
+  }
+  let best = null;
+  for (const [key, perVersion] of byKey) {
+    const reliable = [...perVersion.entries()]
+      .filter(([v, arr]) => v !== "unknown" && arr.length >= DIRECTION_MIN_COHORT)
+      .map(([v]) => v)
+      .sort(compareVersions);
+    if (reliable.length < 2) continue;
+    if (!best || reliable.length > best.reliable.length) best = { key, perVersion, reliable };
+  }
+  if (!best)
+    return { direction: "insufficient-data", deltaPct: null,
+      reason: "no matched cohort spans two versions with n>=3" };
+  const first = median(best.perVersion.get(best.reliable[0]));
+  const last = median(best.perVersion.get(best.reliable[best.reliable.length - 1]));
+  const deltaPct = pctDelta(first, last);
+  if (deltaPct == null)
+    return { direction: "insufficient-data", deltaPct: null,
+      reason: "the oldest reliable cohort has a zero median" };
+  return { direction: deltaPct > 1 ? "up" : deltaPct < -1 ? "down" : "flat", deltaPct,
+    matchKey: best.key, from: best.reliable[0], to: best.reliable[best.reliable.length - 1] };
 }
 
 // A cohort of one is a sample, not a trend. Marked at every render site rather than left for
@@ -626,17 +649,18 @@ export function emitComplianceCandidates(turns, record) {
       calls: browser,
       onDevicePath: record.stages?.find((s) => s.stage === "on-device")?.path ?? null,
       note: "no path permits the coordinator to drive a browser — dispatch on-device-driver",
+      sessions_sampled: 1,
     });
 
   // C2: the rule exists at references/delegation.md:59; this makes the gap measurable.
   const dispatches = record.dispatches ?? [];
   const inherited = dispatches.filter((d) => d.modelSource === "inherited").length;
   if (inherited > 0)
-    out.push({ type: "inherited-model", inherited, total: dispatches.length });
+    out.push({ type: "inherited-model", inherited, total: dispatches.length, sessions_sampled: 1 });
 
   // C3: Explore's startup floor is 13955 against a 32711 median, ~2.3x per dispatch.
   const gp = dispatches.filter((d) => d.agentType === "general-purpose").length;
-  if (gp > 0) out.push({ type: "general-purpose-search", count: gp, total: dispatches.length });
+  if (gp > 0) out.push({ type: "general-purpose-search", count: gp, total: dispatches.length, sessions_sampled: 1 });
 
   return out;
 }
@@ -1150,17 +1174,19 @@ function complianceCandidatesOf(summaries) {
   }));
 }
 
-// Distinct from formatCandidate: these three carry their own fields (calls/inherited/count,
-// no sessions_sampled or dollars), so reusing formatCandidate's field set would print a
-// meaningless "sessions=undefined" line rather than nothing. The version range, when the source
-// session carried one, renders in formatCandidate's own `versions=[min..max]` form (spec C5).
+// Distinct from formatCandidate: these three carry their own occurrence field
+// (calls/inherited/count) and no dollars, so reusing formatCandidate's field set would print
+// unrelated columns. Each carries a per-session sessions_sampled=1 like the unpriced-model
+// convention (#128), rendered here as `sessions=N` so a reader can weigh how many sessions the
+// flag rests on. The version range, when the source session carried one, renders as
+// `versions=[min..max]` (spec C5).
 function formatComplianceCandidate(c) {
   const span = c.versions ? ` versions=[${c.versions[0]}..${c.versions[1]}]` : "";
   if (c.type === "main-thread-browser")
-    return `CANDIDATE: main-thread-browser calls=${c.calls} onDevicePath=${c.onDevicePath}${span} — ${c.note}`;
+    return `CANDIDATE: main-thread-browser calls=${c.calls} sessions=${c.sessions_sampled} onDevicePath=${c.onDevicePath}${span} — ${c.note}`;
   if (c.type === "inherited-model")
-    return `CANDIDATE: inherited-model inherited=${c.inherited}/${c.total}${span}`;
-  return `CANDIDATE: general-purpose-search count=${c.count}/${c.total}${span}`;
+    return `CANDIDATE: inherited-model inherited=${c.inherited}/${c.total} sessions=${c.sessions_sampled}${span}`;
+  return `CANDIDATE: general-purpose-search count=${c.count}/${c.total} sessions=${c.sessions_sampled}${span}`;
 }
 
 // Combines every session's cacheBand into one corpus-wide figure. Dollar edges (point/low/high)
@@ -1260,11 +1286,12 @@ export function formatReport(summaries) {
         IN_FLIGHT_NOTE,
     );
   lines.push("", "Per-version cohorts:");
-  const direction = corpusDirectionOfTravel(summaries.filter((s) => !s.inFlight));
+  const direction = corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight)));
   lines.push(
     direction.direction === "insufficient-data"
-      ? "direction of travel: insufficient data (need at least two known versions)"
-      : `direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median cost, oldest to newest known version)`
+      ? `direction of travel: insufficient data (${direction.reason})`
+      : `direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
+        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})`
   );
   for (const r of cohortTable(summaries))
     lines.push(
@@ -1385,7 +1412,7 @@ export function buildJsonReport(summaries, ctx = {}) {
     candidates: [...emitCandidates(summaries), ...complianceCandidatesOf(summaries)],
     version_cohorts: cohortTable(summaries),
     review_depth_cohorts: reviewDepthCohortTable(summaries),
-    direction_of_travel: corpusDirectionOfTravel(summaries.filter((s) => !s.inFlight)),
+    direction_of_travel: corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight))),
     inFlight: {
       excluded: summaries.filter((s) => s.inFlight).length,
       thresholdMs: IN_FLIGHT_MS,
@@ -2081,6 +2108,21 @@ export function winTable(summaries, vocab, candidates = []) {
   return rows.sort(byImpactDesc);
 }
 
+// The positive mirror of revertCandidates (issue D2): attach the promotion a version shipped to
+// each version-improvement candidate, so a detected cost drop points at what likely caused it.
+// Correlational — a matching promotion of any kind is a legitimate correlation, a win-kind one the
+// richest; no match is left unattributed for manual investigation.
+export function winCandidates(candidates, promotions) {
+  return (candidates ?? [])
+    .filter((c) => c.type === "version-improvement")
+    .map((c) => {
+      const shipped = (promotions ?? [])
+        .filter((p) => p.pluginVersion === c.version_to && p.culpritId)
+        .map((p) => p.culpritId);
+      return { ...c, cause: shipped.length ? shipped : null };
+    });
+}
+
 // The marker playbooks/profiling-sessions.md writes when the Actionability step drafts an
 // issue. That playbook is the contract's one written source; this parses what it states, and a
 // round-trip test (tests/unit/doctor-report.test.mjs) feeds this parser the literal extracted
@@ -2588,6 +2630,15 @@ export function renderReport(summaries, ctx) {
     ]),
     "no win events recorded in this corpus",
   ));
+  // A detected win is no longer merely tabulated then dropped (issue D2): the positive mirror of the
+  // escalation entry-point below. Each version-improvement gets a non-corrective Actionability line
+  // pointing at `/devcycle:learn` to deliberately mine WHY it improved, naming the promotion that
+  // shipped with the improved version as the correlational cause — visibly lower confidence than a
+  // revertCandidates hit (QC4), unattributed when no promotion matches.
+  for (const w of winCandidates(candidates, promotions))
+    L.push(`- Actionability — \`/devcycle:learn\` investigate & generalize the ${w.skill} ` +
+      `${w.version_from}→${w.version_to} improvement ` +
+      (w.cause ? `(shipped: ${w.cause.join(", ")})` : "(unattributed — investigate manually)"));
 
   section("## Cost anomalies", "anomalies");
   // version-improvement belongs to Your wins above; everything else emitCandidates found is a
@@ -2605,7 +2656,20 @@ export function renderReport(summaries, ctx) {
       ? `- EXCESS-COST: ${r.matchKey} version=${r.version} unmatched — no expectation (cohort n=${r.cohortN})`
       : `- EXCESS-COST: ${r.matchKey} version=${r.version} actual=${usd(r.actual)} ` +
         `expected=${usd(r.expected)} excess=${usd(r.excess)} (${r.confidence}, n=${r.cohortN})`);
-  const anomalyLines = [...anomalies.map((c) => `- ${formatCandidate(c)}`), ...excessLines];
+  // A version-regression no promotion explains gets a correlational citation of the version's own
+  // changelog entry (issue D1) — visibly lower confidence than a revertCandidates hit (QC4). The
+  // changelog is read once; an unreadable file degrades to no citation rather than aborting the
+  // report (QC1).
+  let anomalyChangelog = "";
+  try { anomalyChangelog = readFileSync(RELEASE_CHANGELOG_PATH, "utf8"); } catch { anomalyChangelog = ""; }
+  const anomalyCandidateLines = anomalies.flatMap((c) => {
+    const line = `- ${formatCandidate(c)}`;
+    if (c.type !== "version-regression") return [line];
+    const attr = regressionAttribution(c, promotions, anomalyChangelog);
+    if (!attr) return [line];
+    return [line, `  ↳ correlated change (unverified): ${attr.entry ? attr.entry[0] : "no changelog entry for " + attr.version}`];
+  });
+  const anomalyLines = [...anomalyCandidateLines, ...excessLines];
   L.push(...(anomalyLines.length
     ? anomalyLines
     : ["_No rows: no cost anomalies in this corpus._"]));
@@ -2704,13 +2768,13 @@ export function renderReport(summaries, ctx) {
     ]),
     "no settled sessions in this corpus",
   ));
-  const direction = corpusDirectionOfTravel(summaries.filter((s) => !s.inFlight));
+  const direction = corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight)));
   L.push(
     "",
     direction.direction === "insufficient-data"
-      ? "Direction of travel: insufficient data (need at least two known versions)"
+      ? `Direction of travel: insufficient data (${direction.reason})`
       : `Direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        "cost, oldest to newest known version)",
+        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})`,
   );
 
   section("### Per-session detail", "appendix-per-session-detail");
@@ -2770,6 +2834,28 @@ function promotionVerification(promotions, runChecks = false) {
   } catch {
     return { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] };
   }
+}
+
+// The prose body under a version's ## heading, for citing what a non-promotion regression
+// coincided with (issue D1). Correlational only — labelled as such at the render site (QC4).
+export function changelogEntry(changelogText, version) {
+  const lines = String(changelogText).split("\n");
+  const head = new RegExp(`^## ${version.replace(/\./g, "\\.")} — \\d{4}-\\d{2}-\\d{2}`);
+  let i = lines.findIndex((l) => head.test(l));
+  if (i < 0) return null;
+  const body = [];
+  for (i++; i < lines.length && !/^## /.test(lines[i]); i++)
+    if (lines[i].trim()) body.push(lines[i].trim());
+  return body.length ? body : null;
+}
+
+// D1: revertCandidates already explains a promotion-sourced regression; for every other
+// version-regression, cite the version's own changelog entry as a *correlational* candidate cause,
+// never with a revertCandidates hit's confidence.
+export function regressionAttribution(candidate, promotions, changelogText) {
+  const shipped = (promotions ?? []).some((p) => p.pluginVersion === candidate.version_to && p.culpritId);
+  if (shipped) return null;
+  return { correlational: true, version: candidate.version_to, entry: changelogEntry(changelogText, candidate.version_to) };
 }
 
 // Revert detection is cost-driven and lives here, not in the engine (QC1 / spec §5.3): the engine

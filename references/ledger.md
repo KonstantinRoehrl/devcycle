@@ -25,6 +25,9 @@ appended line per event, all four fields REQUIRED, exactly this shape:
 - [<ISO-8601 UTC>] task=<id> event=<dispatched|report-received|review-round|review-verdict|committed|user-decision> outcome=<short> ref=<commit-sha|file|none>
 ```
 
+The leading `[<ISO-8601 UTC>]` bracket is the output of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`,
+taken when the entry is appended — never a narrated or estimated time.
+
 After any compaction or resume, trust the ledger and `git log` over conversation memory.
 
 ## The run record

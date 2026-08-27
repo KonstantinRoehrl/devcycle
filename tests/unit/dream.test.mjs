@@ -812,6 +812,14 @@ test("readObservations rejects a record whose kind is outside the five-value enu
   assert.throws(() => readObservations(root, "bad"), /invalid kind/);
 });
 
+test("readObservations accepts a win-kind record (L2)", () => {
+  const root = realpathSync(repo());
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), "w.json"),
+    JSON.stringify([{ ...OBSERVATION, kind: "win" }]));
+  assert.doesNotThrow(() => readObservations(root, "w"));
+});
+
 test("readObservations rejects a record missing subject", () => {
   const root = realpathSync(repo());
   mkdirSync(observationsDir(root), { recursive: true });
@@ -1993,4 +2001,63 @@ test("--plan-landing is guarded against being combined with another subcommand",
   const res = run(["--plan-landing", "--stage", "execution", "--line", "- x [friction:new]", "--novel-slugs"], repo());
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /cannot be combined/);
+});
+
+// Seeds an unmined-session corpus under root's own escaped-cwd project dir (matching
+// escapeProjectPath, so --staleness's planCorpus actually counts them) and returns the dir to
+// hand back via CLAUDE_DREAM_PROJECTS. Sessions timestamped after last-run count as unmined.
+const seedStaleCorpus = (root, sessions) => {
+  const dir = mkdtempSync(join(tmpdir(), "dream-stale-proj-"));
+  const slug = join(dir, escapedSlug(root));
+  mkdirSync(slug, { recursive: true });
+  for (const [id, ts] of sessions)
+    writeFileSync(join(slug, `${id}.jsonl`),
+      JSON.stringify({ timestamp: ts, type: "assistant", message: { content: [] } }) + "\n");
+  return dir;
+};
+
+const writeLastRun = (root, iso) => {
+  mkdirSync(join(root, ".devcycle"), { recursive: true });
+  writeFileSync(join(root, ".devcycle", "distilling-state.md"),
+    `# distilling-learnings checkpoint\n- last-run: ${iso}\n- last-reviewed-devcycle-version: 0.1.0\n`);
+};
+
+test("--staleness reports stale via the days threshold when last-run is long past (L1)", () => {
+  const root = realpathSync(repo());
+  writeLastRun(root, "2020-01-01T00:00:00Z");
+  // Empty corpus isolates the days trigger from the session-count trigger.
+  const r = run(["--staleness", "--max-sessions", "5", "--max-days", "14"], root);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.ok("unminedSessions" in out && "daysSince" in out && "lastRun" in out);
+  assert.equal(out.unminedSessions, 0, "empty corpus → days is the only trigger");
+  assert.ok(out.daysSince >= 14);
+  assert.equal(out.stale, true);
+});
+
+test("--staleness reports stale via the session-count threshold with a recent last-run (L1)", () => {
+  const root = realpathSync(repo());
+  const recent = new Date(Date.now() - 2 * 86400000).toISOString(); // 2 days ago → days NOT crossed
+  const after = new Date(Date.now() - 86400000).toISOString(); // 1 day ago → unmined
+  writeLastRun(root, recent);
+  const projects = seedStaleCorpus(root, Array.from({ length: 5 }, (_, i) => [`s${i}`, after]));
+  const r = run(["--staleness", "--max-sessions", "5", "--max-days", "14"], root, { CLAUDE_DREAM_PROJECTS: projects });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.unminedSessions, 5);
+  assert.ok(out.daysSince < 14, "the days trigger must not fire, so the session count is what makes it stale");
+  assert.equal(out.stale, true);
+});
+
+test("--staleness reports not-stale when neither threshold is crossed (L1)", () => {
+  const root = realpathSync(repo());
+  const recent = new Date(Date.now() - 2 * 86400000).toISOString(); // 2 days ago → under 14
+  writeLastRun(root, recent);
+  // Empty corpus → 0 unmined sessions, under the 5 floor: the negative side of the gate.
+  const r = run(["--staleness", "--max-sessions", "5", "--max-days", "14"], root);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.unminedSessions, 0);
+  assert.ok(out.daysSince < 14);
+  assert.equal(out.stale, false);
 });

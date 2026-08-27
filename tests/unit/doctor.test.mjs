@@ -997,6 +997,7 @@ test("a main-thread browser call is flagged unconditionally", () => {
   const flag = c.find((x) => x.type === "main-thread-browser");
   assert.ok(flag, "no main-thread browser candidate produced");
   assert.strictEqual(flag.calls, 2, "sidechain browser calls must not be counted");
+  assert.strictEqual(flag.sessions_sampled, 1, "each candidate is one session's evidence (#128)");
 });
 
 test("no main-thread browser calls produces no candidate", () => {
@@ -1017,6 +1018,7 @@ test("dispatches that inherited their model are counted and reported", () => {
   const flag = c.find((x) => x.type === "inherited-model");
   assert.strictEqual(flag.inherited, 2);
   assert.strictEqual(flag.total, 3);
+  assert.strictEqual(flag.sessions_sampled, 1, "each candidate is one session's evidence (#128)");
 });
 
 test("read-only search routed to general-purpose is flagged", () => {
@@ -1029,6 +1031,7 @@ test("read-only search routed to general-purpose is flagged", () => {
   });
   const flag = c.find((x) => x.type === "general-purpose-search");
   assert.strictEqual(flag.count, 1);
+  assert.strictEqual(flag.sessions_sampled, 1, "each candidate is one session's evidence (#128)");
 });
 
 test("compliance candidates are absent, not zero, for a record-less session", () => {
@@ -1105,10 +1108,10 @@ function installDoctor(changelog) {
   // version shipped, so a copy without it cannot be loaded at all. This list is doctor.mjs's whole
   // load-time import closure — a copy missing any of it cannot be loaded, so --drift would report a
   // module-not-found stack rather than the doctor: diagnostic these tests pin. doctor → verification
-  // → {journal → run-record, semver}, plus pricing, promotions and cli-flags.
+  // → {journal → run-record → stamp, semver}, plus pricing, promotions and cli-flags.
   for (const name of [
     "doctor.mjs", "atomic-write.mjs", "pricing.mjs", "promotions.mjs", "cli-flags.mjs",
-    "verification.mjs", "journal.mjs", "semver.mjs", "run-record.mjs",
+    "verification.mjs", "journal.mjs", "semver.mjs", "run-record.mjs", "stamp.mjs",
   ])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
   if (changelog !== null) {
@@ -1758,37 +1761,61 @@ test("emitComplianceCandidates catches MCP-prefixed on-device-driver tool calls,
 // --- corpus-level direction of travel: one aggregate statement across all versions ---
 
 test("a corpus-level direction-of-travel statistic is computed across all versions, not just per-version deltas", () => {
-  // versionCohorts' dollars-per-session figure is summed from costByStage (not a bare costUSD
-  // field) — confirmed live at scripts/doctor.mjs:250-269 before writing this test.
-  const settled = [
-    { pluginVersion: "0.1.0", costByStage: { "devcycle:cycle": 10 }, inFlight: false },
-    { pluginVersion: "0.2.0", costByStage: { "devcycle:cycle": 6 }, inFlight: false },
+  // Normalized (#127): corpusDirectionOfTravel now scores the run projection, not raw session
+  // summaries — matched cohort (profile|requestKind|workloadBand) held constant, each endpoint
+  // reliable (n>=3) — confirmed live at scripts/doctor.mjs's corpusDirectionOfTravel before
+  // updating this test.
+  const run = (version, cost) =>
+    ({ version, profile: "thorough", requestKind: "feature", workloadBand: "M", costUSD: cost });
+  const runs = [
+    run("0.1.0", 10), run("0.1.0", 10), run("0.1.0", 10),
+    run("0.2.0", 6), run("0.2.0", 6), run("0.2.0", 6),
   ];
-  const direction = corpusDirectionOfTravel(settled);
+  const direction = corpusDirectionOfTravel(runs);
   assert.strictEqual(direction.direction, "down"); // median cost fell version-over-version
-  assert.ok(typeof direction.deltaPct === "number");
+  assert.strictEqual(direction.deltaPct, -40); // (6-10)/10 median → -40%, pinned per the evidence-discipline recompute
+
 });
 
 test("corpusDirectionOfTravel reports insufficient-data for a corpus with only one known version", () => {
-  const settled = [{ pluginVersion: "0.1.0", costByStage: { "devcycle:cycle": 10 }, inFlight: false }];
-  const direction = corpusDirectionOfTravel(settled);
+  // #127: feed the run-projection shape corpusDirectionOfTravel actually scores. Even a reliable
+  // (n>=3) single-version cohort cannot show a trend — a trend needs two versions, so this
+  // exercises the reliable.length<2 branch. (Old-shape summaries would be filtered out before that
+  // branch, passing for the wrong reason.)
+  const run = (cost) => ({ version: "0.1.0", profile: "thorough", requestKind: "feature", workloadBand: "M", costUSD: cost });
+  const direction = corpusDirectionOfTravel([run(10), run(10), run(10)]);
   assert.strictEqual(direction.direction, "insufficient-data");
   assert.strictEqual(direction.deltaPct, null);
 });
 
 test("the text report renders the corpus direction of travel beside the cohort table", () => {
-  const rendered = { costUSD: 1.0, models: {}, tools: {} };
+  // Normalized (#127): the render sites now feed corpusDirectionOfTravel the run projection
+  // (runAggregates' output), which only exists for sessions carrying a runId + workload — and
+  // only scores a version with a reliable (n>=3) cohort.
+  const wl = { requestKind: "feature", insertions: 50, deletions: 50, plannedTaskCount: 1 };
+  const run = (id, version, cost) => ({
+    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough", costUSD: cost,
+    costByStage: { "devcycle:cycle": cost }, medianDepth: 10, inFlight: false, models: {}, tools: {},
+    workload: wl,
+  });
   const text = formatReport([
-    { ...rendered, pluginVersion: "0.1.0", costByStage: { "devcycle:cycle": 10 }, medianDepth: 10, inFlight: false },
-    { ...rendered, pluginVersion: "0.2.0", costByStage: { "devcycle:cycle": 6 }, medianDepth: 10, inFlight: false },
+    run("a", "0.1.0", 10), run("b", "0.1.0", 10), run("c", "0.1.0", 10),
+    run("d", "0.2.0", 6), run("e", "0.2.0", 6), run("f", "0.2.0", 6),
   ]);
   assert.match(text, /direction of travel: down/i);
 });
 
 test("--json carries direction_of_travel as a top-level field", () => {
+  // Normalized (#127): same run-projection contract as the text-report test above.
+  const wl = { requestKind: "feature", insertions: 50, deletions: 50, plannedTaskCount: 1 };
+  const run = (id, version, cost) => ({
+    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough", costUSD: cost,
+    costByStage: { "devcycle:cycle": cost }, medianDepth: 10, inFlight: false, models: {}, tools: {},
+    workload: wl,
+  });
   const json = buildJsonReport([
-    { pluginVersion: "0.1.0", costByStage: { "devcycle:cycle": 10 }, medianDepth: 10, inFlight: false, models: {}, tools: {} },
-    { pluginVersion: "0.2.0", costByStage: { "devcycle:cycle": 6 }, medianDepth: 10, inFlight: false, models: {}, tools: {} },
+    run("a", "0.1.0", 10), run("b", "0.1.0", 10), run("c", "0.1.0", 10),
+    run("d", "0.2.0", 6), run("e", "0.2.0", 6), run("f", "0.2.0", 6),
   ]);
   assert.strictEqual(json.direction_of_travel.direction, "down");
   assert.ok(typeof json.direction_of_travel.deltaPct === "number");

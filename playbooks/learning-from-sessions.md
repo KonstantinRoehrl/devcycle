@@ -56,12 +56,21 @@ One dispatch per unmined slice the profile admits, per
 itself, never inheriting the caller's model**. A session-sourced slice reads its text through the
 engine (`--extract <session-id>`). Each dispatch writes its slice's records to
 `.devcycle/dreaming/observations/<slice-id>.json` as an array of objects carrying
-`session`, `ts` (the message timestamp of the quoted utterance, when known, so the reduce stage can dedup one utterance mined from sibling transcripts), `kind` (`friction | correction | rule-violation | decision | contradiction-side`),
+`session`, `ts` (the message timestamp of the quoted utterance, when known, so the reduce stage can dedup one utterance mined from sibling transcripts), `kind` (`friction | correction | rule-violation | decision | contradiction-side | win`),
 `subject`, `target` (a repo-relative path or `null`), `quote` and `confidence`. `subject` is the
 normalized phrase the next stage clusters on across sessions; `quote` is a short verbatim excerpt
 and the grounding anchor — **an observation may state only what its quote shows**. A dispatch
 **returns a count, not content**, and a slice that already has an observation file is never re-mined —
 which is what makes an interrupted run resumable.
+
+Also mine `win` observations — the positive mirror of friction — under the *same* grounding
+discipline: a verbatim `quote` is mandatory and a **stated reason** is required. A clean
+first-round review accept *with a transcript-stated cause*, an explicitly praised technique, or a
+pattern that measurably shortened a stage each qualifies; "went well" with no stated cause is **not
+minable**. A win clusters into a culprit-id and lands through the r0–r3 ladder exactly as a friction
+observation does, and is verified with `verify: journal-reinforcement` rather than
+`journal-recurrence` — a win that recurs after landing reads as `held` (the good practice is being
+followed), not `recurred`.
 
 Each dispatch then verifies its own write with `--check-observations <slice-id>` rather than by
 re-reading the file. A nonzero exit means the write is missing, truncated, or malformed; redo the
@@ -254,7 +263,8 @@ Then, per adopted candidate:
 
 Finally re-render the report in outcome mode —
 `--render-report <candidates.json> --outcome` — so the proposal and the outcome are diffable, and
-rewrite the checkpoint's two lines: `last-run:` to now, the version to the installed one.
+rewrite the checkpoint's two lines: `last-run:` to `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`,
+the version to the installed one.
 
 ## Entry points
 
