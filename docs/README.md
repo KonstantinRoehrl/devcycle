@@ -31,7 +31,7 @@ machinery a command loads by path.
 | [`/devcycle:doctor`](../commands/doctor.md) | Profiles token cost, context depth, model routing, and agent startup cost across devcycle sessions. Standalone. |
 | [`/devcycle:onboard`](../commands/onboard.md) | Bootstraps tier-2 setup: detects real build/test/lint commands, scaffolds `CLAUDE.md`, and proposes a permission allowlist. Standalone. |
 | [`/devcycle:maintain`](../commands/maintain.md) | Assesses a repository's longitudinal health — how its abstractions and history trend over time — and writes a ranked findings document. Read-only, standalone. |
-| [`/devcycle:reconcile`](../commands/reconcile.md) | Triage, fix, and reply to a PR's review comments. |
+| [`/devcycle:reconcile`](../commands/reconcile.md) | Triages a PR's review comments into fixes and consent-gated replies that disclose Claude Code authorship, then resolves the threads it closed from its side. |
 
 ## Playbooks
 
@@ -53,7 +53,7 @@ directly.
 | [`profiling-sessions`](playbooks/profiling-sessions/README.md) | Runs and interprets the token, context, routing, and startup-cost analyzer. |
 | [`onboarding-a-repo`](playbooks/onboarding-a-repo/README.md) | Detects a repo's real build/test/lint commands and scaffolds its setup. |
 | [`maintaining-the-repo`](playbooks/maintaining-the-repo/README.md) | The longitudinal-health engine behind `/devcycle:maintain`. |
-| [`receiving-review`](playbooks/receiving-review/README.md) | The standalone reconcile stage that triages a PR's review comments into fixes and consented replies. |
+| [`receiving-review`](playbooks/receiving-review/README.md) | The standalone reconcile stage that triages a PR's review comments into fixes and consent-gated replies that disclose Claude Code authorship, then resolves the threads it closed from its side. |
 
 ## Machinery
 
