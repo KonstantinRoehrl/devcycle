@@ -111,6 +111,61 @@ test("user_config check: an unreadable knob list fails loudly rather than skippi
   }
 });
 
+test("manifest check: a userConfig entry whose type is outside Claude Code's allowed set fails, naming the knob and the type", () => {
+  // Regression guard for 0.17.0: learnStalenessSessions/Days shipped with type "integer",
+  // which the plugin loader rejects (allowed: string|number|boolean|directory|file), so the
+  // whole plugin failed to load on update. validate.mjs must catch an invalid manifest type
+  // before it ships, not the user's loader after release.
+  const dir = makePluginFixture();
+  writeInto(
+    dir,
+    ".claude-plugin/plugin.json",
+    JSON.stringify(
+      {
+        name: "devcycle",
+        version: "0.0.1",
+        description: "Fixture plugin.",
+        license: "MIT",
+        dependencies: [],
+        userConfig: {
+          profile: { type: "string", title: "Pipeline profile", default: "standard", description: "Fixture knob." },
+          staleness: { type: "integer", title: "Staleness", default: 5, description: "Bad-type knob." },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  failsWith(runValidate(dir), /plugin\.json/, /staleness/, /integer/);
+});
+
+test("manifest check: every allowed userConfig type passes", () => {
+  const dir = makePluginFixture();
+  writeInto(
+    dir,
+    ".claude-plugin/plugin.json",
+    JSON.stringify(
+      {
+        name: "devcycle",
+        version: "0.0.1",
+        description: "Fixture plugin.",
+        license: "MIT",
+        dependencies: [],
+        userConfig: {
+          s: { type: "string", title: "s", default: "x", description: "d" },
+          n: { type: "number", title: "n", default: 1, description: "d" },
+          b: { type: "boolean", title: "b", default: false, description: "d" },
+          d: { type: "directory", title: "d", default: ".", description: "d" },
+          f: { type: "file", title: "f", default: "x", description: "d" },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  ok(runValidate(dir));
+});
+
 // --- check 3: devcycle:<name> against agents and commands ---
 
 test("devcycle: reference check: names resolving to an agent or a command all pass", () => {

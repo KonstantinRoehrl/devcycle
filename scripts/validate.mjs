@@ -38,6 +38,15 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       if (!(f in plugin)) fail(`plugin.json: missing "${f}"`);
     if (plugin.name !== "devcycle") fail("plugin.json: name must be devcycle");
     if (!/^\d+\.\d+\.\d+$/.test(plugin.version ?? "")) fail("plugin.json: version not semver");
+    // Every userConfig entry's type must be one the plugin loader accepts, or the whole
+    // manifest is rejected on install (0.17.0 shipped type "integer" and failed to load).
+    const CONFIG_TYPES = new Set(["string", "number", "boolean", "directory", "file"]);
+    if (plugin.userConfig && typeof plugin.userConfig === "object" && !Array.isArray(plugin.userConfig))
+      for (const [knob, spec] of Object.entries(plugin.userConfig)) {
+        const t = spec?.type;
+        if (!CONFIG_TYPES.has(t))
+          fail(`plugin.json: userConfig.${knob}.type "${t}" invalid — must be one of ${[...CONFIG_TYPES].join(", ")}`);
+      }
   } catch (e) { fail(`plugin.json: ${e.message}`); }
   try {
     const m = JSON.parse(readFileSync(join(root, ".claude-plugin/marketplace.json"), "utf8"));
