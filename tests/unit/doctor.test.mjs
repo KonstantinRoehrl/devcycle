@@ -1773,12 +1773,17 @@ test("a corpus-level direction-of-travel statistic is computed across all versio
   ];
   const direction = corpusDirectionOfTravel(runs);
   assert.strictEqual(direction.direction, "down"); // median cost fell version-over-version
-  assert.ok(typeof direction.deltaPct === "number");
+  assert.strictEqual(direction.deltaPct, -40); // (6-10)/10 median → -40%, pinned per the evidence-discipline recompute
+
 });
 
 test("corpusDirectionOfTravel reports insufficient-data for a corpus with only one known version", () => {
-  const settled = [{ pluginVersion: "0.1.0", costByStage: { "devcycle:cycle": 10 }, inFlight: false }];
-  const direction = corpusDirectionOfTravel(settled);
+  // #127: feed the run-projection shape corpusDirectionOfTravel actually scores. Even a reliable
+  // (n>=3) single-version cohort cannot show a trend — a trend needs two versions, so this
+  // exercises the reliable.length<2 branch. (Old-shape summaries would be filtered out before that
+  // branch, passing for the wrong reason.)
+  const run = (cost) => ({ version: "0.1.0", profile: "thorough", requestKind: "feature", workloadBand: "M", costUSD: cost });
+  const direction = corpusDirectionOfTravel([run(10), run(10), run(10)]);
   assert.strictEqual(direction.direction, "insufficient-data");
   assert.strictEqual(direction.deltaPct, null);
 });
