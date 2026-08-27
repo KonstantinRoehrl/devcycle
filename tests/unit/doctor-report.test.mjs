@@ -890,12 +890,12 @@ test("every rendered metric column in the pre-existing tables is tagged observed
   );
 });
 
-test("compliance candidates carry the source session's version range (spec C5)", () => {
+test("compliance candidates carry a session count like version-regression (#128)", () => {
   const out = renderReport([
     sum({ id: "z", pluginVersion: "0.12.0",
-      complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5 }] }),
+      complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5, sessions_sampled: 1 }] }),
   ], ctx());
-  assert.match(out, /CANDIDATE: inherited-model inherited=2\/5 versions=\[0\.12\.0\.\.0\.12\.0\]/);
+  assert.match(out, /CANDIDATE: inherited-model inherited=2\/5 sessions=1 versions=\[0\.12\.0\.\.0\.12\.0\]/);
 });
 
 test("every section carries a one-line gloss", () => {
@@ -954,7 +954,7 @@ const COVERAGE_CORPUS = [
     cacheBand: { point: 4, low: 3, high: 6, fallbackShare: 0.5, collapsed: false },
     impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
     culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
-    complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5 }],
+    complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5, sessions_sampled: 1 }],
   }),
   coverageSession({
     id: "22222222", costUSD: 15, costByStage: { execution: 5, planning: 10 },
@@ -997,7 +997,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     // needle that stopped at the Δ column still matched after the Trend column was deleted.
     "| partial-evidence-capture | friction | $6.00 | 2 | first seen | insufficient data | 0.12.0..0.12.0 | legacy |",
     // Compliance — now version-scoped from the source session (spec C5)
-    "- CANDIDATE: inherited-model inherited=2/5 versions=[0.12.0..0.12.0]",
+    "- CANDIDATE: inherited-model inherited=2/5 sessions=1 versions=[0.12.0..0.12.0]",
     // Your wins: a win event, and a version-over-version improvement
     "| first-round-clean-accept | $9.00 | 3 |",
     "| execution 0.11.0→0.12.0 | $5.00 | 4 | down |",

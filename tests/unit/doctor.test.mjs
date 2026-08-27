@@ -997,6 +997,7 @@ test("a main-thread browser call is flagged unconditionally", () => {
   const flag = c.find((x) => x.type === "main-thread-browser");
   assert.ok(flag, "no main-thread browser candidate produced");
   assert.strictEqual(flag.calls, 2, "sidechain browser calls must not be counted");
+  assert.strictEqual(flag.sessions_sampled, 1, "each candidate is one session's evidence (#128)");
 });
 
 test("no main-thread browser calls produces no candidate", () => {
@@ -1017,6 +1018,7 @@ test("dispatches that inherited their model are counted and reported", () => {
   const flag = c.find((x) => x.type === "inherited-model");
   assert.strictEqual(flag.inherited, 2);
   assert.strictEqual(flag.total, 3);
+  assert.strictEqual(flag.sessions_sampled, 1, "each candidate is one session's evidence (#128)");
 });
 
 test("read-only search routed to general-purpose is flagged", () => {
@@ -1029,6 +1031,7 @@ test("read-only search routed to general-purpose is flagged", () => {
   });
   const flag = c.find((x) => x.type === "general-purpose-search");
   assert.strictEqual(flag.count, 1);
+  assert.strictEqual(flag.sessions_sampled, 1, "each candidate is one session's evidence (#128)");
 });
 
 test("compliance candidates are absent, not zero, for a record-less session", () => {
@@ -1105,10 +1108,10 @@ function installDoctor(changelog) {
   // version shipped, so a copy without it cannot be loaded at all. This list is doctor.mjs's whole
   // load-time import closure — a copy missing any of it cannot be loaded, so --drift would report a
   // module-not-found stack rather than the doctor: diagnostic these tests pin. doctor → verification
-  // → {journal → run-record, semver}, plus pricing, promotions and cli-flags.
+  // → {journal → run-record → stamp, semver}, plus pricing, promotions and cli-flags.
   for (const name of [
     "doctor.mjs", "atomic-write.mjs", "pricing.mjs", "promotions.mjs", "cli-flags.mjs",
-    "verification.mjs", "journal.mjs", "semver.mjs", "run-record.mjs",
+    "verification.mjs", "journal.mjs", "semver.mjs", "run-record.mjs", "stamp.mjs",
   ])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
   if (changelog !== null) {

@@ -649,17 +649,18 @@ export function emitComplianceCandidates(turns, record) {
       calls: browser,
       onDevicePath: record.stages?.find((s) => s.stage === "on-device")?.path ?? null,
       note: "no path permits the coordinator to drive a browser — dispatch on-device-driver",
+      sessions_sampled: 1,
     });
 
   // C2: the rule exists at references/delegation.md:59; this makes the gap measurable.
   const dispatches = record.dispatches ?? [];
   const inherited = dispatches.filter((d) => d.modelSource === "inherited").length;
   if (inherited > 0)
-    out.push({ type: "inherited-model", inherited, total: dispatches.length });
+    out.push({ type: "inherited-model", inherited, total: dispatches.length, sessions_sampled: 1 });
 
   // C3: Explore's startup floor is 13955 against a 32711 median, ~2.3x per dispatch.
   const gp = dispatches.filter((d) => d.agentType === "general-purpose").length;
-  if (gp > 0) out.push({ type: "general-purpose-search", count: gp, total: dispatches.length });
+  if (gp > 0) out.push({ type: "general-purpose-search", count: gp, total: dispatches.length, sessions_sampled: 1 });
 
   return out;
 }
@@ -1173,17 +1174,19 @@ function complianceCandidatesOf(summaries) {
   }));
 }
 
-// Distinct from formatCandidate: these three carry their own fields (calls/inherited/count,
-// no sessions_sampled or dollars), so reusing formatCandidate's field set would print a
-// meaningless "sessions=undefined" line rather than nothing. The version range, when the source
-// session carried one, renders in formatCandidate's own `versions=[min..max]` form (spec C5).
+// Distinct from formatCandidate: these three carry their own occurrence field
+// (calls/inherited/count) and no dollars, so reusing formatCandidate's field set would print
+// unrelated columns. Each carries a per-session sessions_sampled=1 like the unpriced-model
+// convention (#128), rendered here as `sessions=N` so a reader can weigh how many sessions the
+// flag rests on. The version range, when the source session carried one, renders as
+// `versions=[min..max]` (spec C5).
 function formatComplianceCandidate(c) {
   const span = c.versions ? ` versions=[${c.versions[0]}..${c.versions[1]}]` : "";
   if (c.type === "main-thread-browser")
-    return `CANDIDATE: main-thread-browser calls=${c.calls} onDevicePath=${c.onDevicePath}${span} — ${c.note}`;
+    return `CANDIDATE: main-thread-browser calls=${c.calls} sessions=${c.sessions_sampled} onDevicePath=${c.onDevicePath}${span} — ${c.note}`;
   if (c.type === "inherited-model")
-    return `CANDIDATE: inherited-model inherited=${c.inherited}/${c.total}${span}`;
-  return `CANDIDATE: general-purpose-search count=${c.count}/${c.total}${span}`;
+    return `CANDIDATE: inherited-model inherited=${c.inherited}/${c.total} sessions=${c.sessions_sampled}${span}`;
+  return `CANDIDATE: general-purpose-search count=${c.count}/${c.total} sessions=${c.sessions_sampled}${span}`;
 }
 
 // Combines every session's cacheBand into one corpus-wide figure. Dollar edges (point/low/high)
