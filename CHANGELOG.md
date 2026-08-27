@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.1 — 2026-08-27
+
+- fix(config): use manifest type "number" so the plugin loads on update
+
 ## 0.17.0 — 2026-08-27
 
 - feat(devcycle): add the reconcile command and harden the learn/doctor loop
