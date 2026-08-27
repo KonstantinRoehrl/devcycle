@@ -538,6 +538,24 @@ test("the workload subcommand computes real git diff stats and writes a schema-v
   assert.ok(line.insertions >= 1);
 });
 
+test("reconcile-reply and reconcile-resolve marker kinds validate", () => {
+  const schema = JSON.parse(
+    readFileSync(join(REPO_ROOT, "tests/fixtures/run-record.schema.json"), "utf8")
+  );
+  const reply = subSchemaFor(schema, "reconcile-reply");
+  assert.ok(reply, "reconcile-reply kind is declared");
+  assert.deepEqual(
+    validate({ kind: "reconcile-reply", runId: "0123456789abcdef", pr: "134", commentId: "555", replyHash: "9xk2" }, reply),
+    []);
+  const resolve = subSchemaFor(schema, "reconcile-resolve");
+  assert.ok(resolve, "reconcile-resolve kind is declared");
+  assert.deepEqual(
+    validate({ kind: "reconcile-resolve", runId: "0123456789abcdef", pr: "134", threadId: "PRRT_kwDOabc" }, resolve),
+    []);
+  // rejects non-numeric pr
+  assert.ok(validate({ kind: "reconcile-reply", runId: "0123456789abcdef", pr: "x", commentId: "5", replyHash: "a" }, reply).length > 0);
+});
+
 test("gitToplevel canonicalizes a linked worktree to the main checkout (#104)", () => {
   const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-")));
   spawnSync("git", ["init", "-q"], { cwd: tempRepo });

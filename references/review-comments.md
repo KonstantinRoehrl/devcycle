@@ -24,7 +24,7 @@ labeled-assumption form.
 
 | Bucket | What it is | Resolution | Reply shape | Evidence |
 | --- | --- | --- | --- | --- |
-| `actionable-valid` | a real defect confirmed against spec/convention/code | enters the fix loop (§6.5a) | none while open; on residue, the item's own carried reply | `Confidence: verified` — the cross-reference in §6.3 established the defect |
+| `actionable-valid` | a real defect confirmed against spec/convention/code | enters the fix loop (§6.5a) | on fix-landed, a `Fixed in <sha>: <summary>` reply; on residue, the item's own carried reply | `Confidence: verified` — the cross-reference in §6.3 established the defect |
 | `already-addressed` | the comment names something the current branch already does | reply, no fix | "already handled at `file:line`" — cite the line that satisfies it | `Confidence: verified`; **fails closed** — if the referenced line is gone, it is not already-addressed |
 | `conflicts-with-spec` | the change asked for contradicts the approved spec/plan | never auto-resolves; surfaced at the gate, carries the §6.4 reopen offer | "declined — contradicts spec `file:line`", or a reopen-request if the user contests | `Confidence: verified` — names the governing spec passage |
 | `unsupported-preference` | a stylistic/opinion ask with no named convention or spec behind it | never auto-resolves; **surfaced at the gate for the user to decide** | "no supporting convention — your call" | `Confidence: suspected` unless a convention is found, in which case it is not this bucket |
@@ -76,24 +76,47 @@ gh api graphql -f query='query($owner:String!,$name:String!,$pr:Int!){
   -F owner=<owner> -F name=<name> -F pr=<pr>
 ```
 
-Read `isResolved` only. **Never** call `resolveReviewThread` or any other mutation — this
-flow never changes PR thread state.
+Read `isResolved` only here — this GraphQL call at intake never mutates. `resolveReviewThread`
+is called later, deliberately, by the resolution contract below.
 
-**Posting a threaded reply** (an `actionable-valid` residue reply or an `already-addressed` /
-`ambiguous` / `out-of-scope` reply that answers a specific inline comment):
+**Resolution contract.** `reconcile` is the flow with authority to resolve a PR review thread —
+via `node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs" resolve --repo <owner/name>
+--thread-id <PRRT_…>`, keyed by the classified item's own `thread_id` field (the `reviewThreads`
+node id captured at intake, a disjoint id space from the REST comment ids used to reply). This
+subsection is the **canonical owner** of the resolution contract; other files point at it instead
+of restating it.
+
+**Closed-from-our-side scope.** Resolve exactly the threads this run itself closed: `actionable-valid`
+once its fix has landed, `already-addressed`, declined `conflicts-with-spec`, and `out-of-scope`.
+Leave every other thread open, including: a contested `conflicts-with-spec` (pending the §6.4
+reopen offer), `ambiguous`, an `actionable-valid` item exhausted with residue still outstanding,
+and any thread-less item (a `pr-level` / `review-summary` reply, or a `--from-paste` item with no
+live thread) — there is nothing on GitHub's side to mark resolved.
+
+**The third gate.** Resolving is a separate, third gate: content (Gate 1) → post (Gate 2) →
+(batched) resolve (Gate 3). It runs after the post gate, batched across the run's
+closed-from-our-side items, and — like Gates 1 and 2 — is confirm-first and never
+`gitPolicy`-gated; it is never folded into the post gate.
+
+**Posting a threaded reply** (an `actionable-valid` fix-landed or residue reply, or an
+`already-addressed` / `ambiguous` / `out-of-scope` reply that answers a specific inline comment):
 
 ```
-# primary
-gh api repos/<owner>/<repo>/pulls/<pr>/comments/<comment_id>/replies -F body=@<file>
-# fallback if the replies endpoint is unavailable
-gh api repos/<owner>/<repo>/pulls/<pr>/comments -F in_reply_to=<comment_id> -F body=@<file>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs" reply --repo <owner/name> --pr <pr> \
+  --comment-id <comment_id> --body-file <file> --login <login>
 ```
 
 **Posting a top-level PR comment** (a reply with no single inline anchor):
 
 ```
-gh pr comment <pr> --repo <owner>/<repo> --body-file <draft>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs" reply --repo <owner/name> --pr <pr> \
+  --body-file <draft> --login <login> --pr-level
 ```
+
+Both invocations apply the attribution footer structurally (see "Attribution footer" under
+"Pinned constants" below) and skip a reply already posted under that footer's marker — never a
+hand-built `gh api …/replies` or `gh pr comment` call. The same `--repo <owner/name>` resolution
+rule above carries from the intake call's own `--repo` argument.
 
 **The `.devcycle/reopen-request.md` shape** (written for a contested `conflicts-with-spec`
 item, consumed at §6.4 / §6.6 to recommend a rewind to `stage: brainstorm`):
@@ -107,6 +130,12 @@ item, consumed at §6.4 / §6.6 to recommend a rewind to `stage: brainstorm`):
 
 ## Pinned constants
 
+- **Attribution footer.** Every posted reply/comment ends with the exact literal
+  `\n\n---\n🤖 Posted by Claude Code on behalf of @<login>`; the stable, login-independent
+  marker `🤖 Posted by Claude Code on behalf of` is what `pr-review-post.mjs` matches on to skip
+  a reply already posted. `<login>` comes from `gh api user --jq .login`, resolved once per run,
+  never hardcoded. This file **declares** the literal and marker as the contract; the exported
+  constant's body lives in and is owned by `pr-review-post.mjs` — never hand-typed into a draft.
 - **Frontier = 25.** At most 25 classified items are shown at the confirmation gate; beyond
   that, remaining items are **named and deferred**, never silently truncated. This is this
   file's own literal — `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` carries no numeric

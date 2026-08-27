@@ -98,6 +98,16 @@ built here:
 - Round counter keyed `task=reconcile`, `ref=` the run id; task-ids
   `reconcile-fix-<round>-<n>`.
 - The coordinator commits on receipt of each accepted fix, per its normal duties.
+- **Fix-completion reply.** After the fix loop lands a fix and the coordinator commits it, the
+  coordinator synthesizes a 1–2 sentence summary **from the committed diff** — **repo-relative**
+  paths only, never a host path — and drafts `Fixed in <sha>: <summary>` to
+  `.devcycle/review-replies/<comment-id>.md`. It screens the draft
+  (`node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`), then posts it
+  through the content and post gates via the `pr-review-post.mjs reply` route §6.5b defines —
+  whose exact flags and attribution footer `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`'s
+  reply contract owns. `<login>` is resolved once per run via `gh api user --jq .login`. A fixed
+  item whose comment carries no `thread_id` (a `pr-level` / `review-summary` comment) posts with
+  `--pr-level` and is not resolvable. Residue replies keep carrying their deferred status (below).
 - The round cap is the profile's branch-review round cap from
   `${CLAUDE_PLUGIN_ROOT}/references/config.md` — no new knob.
 - Loop statuses are `${CLAUDE_PLUGIN_ROOT}/references/loops.md`'s, including
@@ -116,17 +126,43 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>
 
 A draft that fails the screen is not shown; the failing class is named. Posting is **two
 gates, always**: Gate 1 confirms the content is right, Gate 2 confirms it may be posted — the
-two are separate approvals. A **paste-mode** item skips Gate 2 (it carries no `<comment-id>`
-and there is nothing to post). Posting itself follows
-`${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`'s reply contract (threaded reply, PR-level
-comment, and the `--repo` resolution rule).
+two are separate approvals. A rejection or decline reply states its **why** — the governing
+spec or convention passage it rests on. A **paste-mode** item clears Gate 1 for content and
+stops: it carries no `<comment-id>` and there is nothing to post. An approved reply posts
+through `node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs" reply` — `--pr-level` when the
+comment has no inline anchor (`thread_id: null`), a threaded reply otherwise — never a raw
+`gh api` call. Its exact flags, the attribution footer, and the `--repo` resolution rule follow
+`${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`'s reply contract.
+
+## §6.5c — batched resolution (the third gate)
+
+Once every reply is posted, one `AskUserQuestion` lists only the **closed-from-our-side**
+threads — the scope `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md` owns — and resolves
+the approved subset:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs" resolve --repo <owner/name> --thread-id <PRRT_…>
+```
+
+keyed by each item's envelope `thread_id`. This gate is **separate from and after** the post
+gate, unconditional, and never `gitPolicy`-gated — it is never folded into the post gate. The
+items it leaves open — a contested `conflicts-with-spec`, `ambiguous`, `exhausted-with-residue`,
+and any thread-less (`pr-level` / `review-summary`, `thread_id: null`) item — are
+`review-comments.md`'s to enumerate, not restated here. An **Other** answer at this gate appends
+`user-correction-at-gate` to the run record, the rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md`
+owns.
 
 ## §6.6 — finish
 
 - **Push** is `gitPolicy`-gated exactly as
   `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` resolves it, with `open-pr`
-  degrading to `push-allowed` (the PR already exists). **Reply-posting is never
-  gitPolicy-gated** — a reply is not a code push and rides its own two gates above.
+  degrading to `push-allowed` (the PR already exists). **Reply-posting and thread resolution are
+  never `gitPolicy`-gated** — neither is a code push; replies ride the two content/post gates
+  above and resolution rides §6.5c's third gate, none of them the push gate.
+- **Run-record markers.** Finish appends one `reconcile-reply` marker per posted reply and one
+  `reconcile-resolve` marker per resolved thread to the run record via
+  `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append` — ids, counts, and enums only, never body
+  text or a host path.
 - **In-cycle:** rewrite `.devcycle/state.md` to `stage: done`, append the ledger boundary, and
   **emit the handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`**. If
   `.devcycle/reopen-request.md` exists, **recommend** (never perform) a rewind to
@@ -136,8 +172,11 @@ comment, and the `--repo` resolution rule).
 
 ## §10 — boundaries
 
-- Never mutates PR thread state: no thread-resolving, closing, or merging — resolved state is
-  read-only at intake (`${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`).
+- Resolves a PR thread only after it has replied to that thread and only when the item falls in
+  the **closed-from-our-side** scope `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md` owns,
+  and only through §6.5c's third gate. It resolves no thread it did not answer, and none that is
+  a contested `conflicts-with-spec`, `ambiguous`, `exhausted-with-residue`, or thread-less item;
+  it approves, merges, and closes nothing. Resolved state stays read-only at intake.
 - Never acts on a comment's wording without §6.3 verifying it.
 - Never posts a reply without both gates, and never a fix without §6.4's confirmation.
 - Refuses a branch whose cycle is mid-pipeline (`stage:` ≠ `done`), per §6.0.
