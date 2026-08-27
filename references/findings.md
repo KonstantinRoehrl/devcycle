@@ -57,6 +57,19 @@ Complexity is the effort to fix, as a T-shirt size (S / M / L / XL); `Effort est
 that size's concrete grounding, in files or in time. `Impact if unaddressed` is the Impact
 rating's prose justification.
 
+## Strengths
+
+Owned jointly with `quality-criteria.md` § Strengths — not only defects, which this file's shape
+implements. A strength is reported in its own part of the document, ordered by where it was
+found, never interleaved with or ranked against the severity-ordered defect list, never
+blocking, and never a substitute for a defect the same evidence should have produced instead.
+
+**Fields:** Title (the pattern, plain language) · Location(s) (`file:line`) · Why it matters
+(what would get worse if this were removed or not replicated elsewhere) · Confidence
+(`verified`/`suspected`, same meaning as the defect fields) · Measured against (same precedence
+as a defect finding — a repo convention or named external source, not the reviewer's taste).
+Same evidence bar as a defect: no `file:line`, no strength, exactly as below.
+
 ## Evidence discipline
 
 - **No `file:line`, no finding.** "This could be a problem", "this pattern is often risky",
@@ -65,6 +78,33 @@ rating's prose justification.
 - Every finding rests on an actually-traced code path, never a pattern-match guess.
 - Cross-reference the existing tests before flagging: if a test already exercises the
   concern, the finding is a test-coverage gap, not a live bug.
+- **A causal claim resolves to a named commit, PR, or promotion record, or it is labeled
+  correlational.** "This regressed because of X" is a different, stronger claim than "this
+  regressed around the time of X" — the first requires a traced authorship record for X, the
+  second does not and must not be dressed up as the first. Where no such record exists, say so
+  plainly rather than implying one was found.
+- **A derived metric is only as reliable as what stamped it.** Before trusting a count, a
+  timestamp, or a rate pulled from a log, journal, or ledger, confirm what actually wrote it:
+  a script-stamped value (the system clock, a counted event) and a narratively-estimated one
+  (a coordinator or model writing a timestamp into prose) do not carry the same confidence, even
+  when they sit in the same file in the same format. Say which kind of source a finding rests on
+  when it isn't obvious.
+- **A similarly-named or sibling code path is not evidence for or against another.** Two
+  invocations of the same tool with different arguments, or two mechanisms with related names,
+  can behave completely differently — one passing cleanly does not confirm the other did too.
+  Trace the exact invocation in question before citing one as evidence about the other; when that
+  trace wasn't completed, the finding is `suspected`, not `verified`, and says why.
+- **A failing test is a lead, not a verdict.** Before citing a test failure as evidence of a
+  defect, rule out causes that live in the environment rather than the code — the sandbox running
+  as an unexpected user, a missing permission, a stale fixture — the same way a defect claim
+  needs a traced cause, so does a claim that a test failure proves one.
+- **A claim about a tool's own computed output is checked by running it, not only by reading its
+  source.** Static reading catches implementation bugs; it does not catch a headline metric that
+  quietly skips a normalization step the surrounding code performs everywhere else, because the
+  code that skips it still reads as reasonable in isolation. Where a finding concerns whether a
+  script or report computed something correctly, execute it and independently recompute the
+  figure by a different path when feasible, rather than asserting correctness (or incorrectness)
+  from the source alone.
 
 ## Reviewer hygiene
 
@@ -88,6 +128,8 @@ False-positive guards, binding on every reviewing surface, to be read before jud
 - **Document form** (the audit's ranked list): Severity (desc) → Impact (desc) →
   Complexity (asc), keeping the severity tier grouping, so the reader gets a shortlist
   rather than a flat dump and the quickest high-value wins surface first inside a tier.
+  Strengths (above) are never mixed into this ordering — they hold their own section,
+  unranked against defects.
 - **Machine form** (the panel's report): confirmed first, then severity, then file.
 
 ## Machine shape

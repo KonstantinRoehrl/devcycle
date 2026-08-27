@@ -125,6 +125,31 @@ the same reason `culprits.json` keeps a stable vocabulary for friction patterns.
 Measured against: this catalog (the repo's convention owner for what a review measures against). No
 dedicated agent — this is judgment over evidence a generic read-only reviewer already gathers.
 
+## Strengths — not only defects
+
+`playbooks/reviewing-code.md`'s own charter asks *what is wrong with this code* — every criterion
+above, and the whole findings vocabulary in `references/findings.md`, is built to answer that one
+question. **Abstraction**, above, already proves this is incomplete on its own: a `KEEP` verdict,
+reached by the same deletion test as a `REMOVE`, is named there as "a successful analysis, not a
+null result" precisely because an audit that only ever reports what to change trains its reader to
+distrust everything it doesn't mention. That precedent generalizes to every criterion in this
+catalog, not only Abstraction — a review is asked to find what to change, but a repo's durable
+knowledge is not just its defect list.
+
+Concretely: any lens, on any criterion above, may surface a **strength** — a pattern that
+concretely and measurably does the right thing, to the same evidentiary bar a defect finding
+would need (a traced `file:line`, not an impression) — alongside its defects. This is not a
+consolation prize for a lens that found nothing wrong, and it is not softening: a lens still
+reports every defect it finds at full severity. A strength is additive, reported through
+`findings.md`'s own `## Strengths` shape, which is deliberately lighter than the severity-ordered
+defect list and never dilutes, delays, or substitutes for it.
+
+Reported this way, a strength earns its place the same way a promoted lesson does in
+`docs/devcycle/lessons.md` — it doesn't just note something wasn't wrong, it names a pattern
+future work should replicate. An audit that finds a stack's error-handling convention unusually
+disciplined, or a caching layer that legitimately earns its complexity, has found something a
+team should keep doing on purpose — not just the absence of a problem.
+
 ## Multi-file feature chains
 
 For any non-trivial feature, map the full chain — entry point → state → API/service layer →
