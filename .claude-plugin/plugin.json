@@ -77,13 +77,13 @@
       "description": "Whether the on-device checklist closes only via a human walkthrough. Unset → the profile's on-device row (auto-ok at lean, human-required at standard and thorough); set → this value, verbatim, and the profile never moves it. One of: human-required, auto-ok, auto (identical to unset)."
     },
     "learnStalenessSessions": {
-      "type": "integer",
+      "type": "number",
       "title": "Learn staleness — sessions",
       "default": 5,
       "description": "How many sessions may accrue since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessDays crosses first triggers the nudge."
     },
     "learnStalenessDays": {
-      "type": "integer",
+      "type": "number",
       "title": "Learn staleness — days",
       "default": 14,
       "description": "How many days may pass since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessSessions crosses first triggers the nudge."
