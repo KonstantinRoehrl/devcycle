@@ -60,6 +60,11 @@ renders under the per-version cohort table. A report that lists regressions with
 way the whole corpus moved is the failure issue #44 recorded: the split was 21 worse / 18 better /
 5 flat, direction down, and the report stated the opposite.
 
+When a `version-regression` carries a `↳ correlated change (unverified)` line, render it as exactly
+that — the version "regressed around the time of" that changelog entry, never "because of" it. It is
+a correlation the reader confirms or discards, distinct from a `revertCandidates` promotion hit,
+which names the landed lesson whose own cost regressed and so is a verified causal link.
+
 Carry forward the script's `prices as of` line into the announce. If it emitted any
 `UNPRICED MODEL` lines, report them by name in the Highlights prose: an unpriced model means
 `scripts/pricing.mjs` needs an entry, and until it has one, that model's requests sit outside

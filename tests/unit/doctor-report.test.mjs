@@ -15,6 +15,7 @@ import {
   renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates,
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
+  changelogEntry, regressionAttribution,
 } from "../../scripts/doctor.mjs";
 import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
 
@@ -818,6 +819,50 @@ test("the At a glance percentage column carries no $ glyph over a percent (issue
   const glance = out.slice(out.indexOf("## At a glance"), out.indexOf("## Highlights"));
   assert.ok(!/workload-adj \$ Δ/.test(glance), "a $ glyph still sits over the percentage cell");
   assert.match(glance, /workload-adj cost Δ% \(derived\)/, "the honest percentage header is missing");
+});
+
+test("changelogEntry returns a version's body bullets, or null when absent", () => {
+  const cl = "# Changelog\n\n## 0.12.0 — 2026-08-07\n\n- feat(x): a thing\n- fix(y): another\n\n## 0.11.0 — 2026-08-05\n\n- fix\n";
+  assert.deepEqual(changelogEntry(cl, "0.12.0"), ["- feat(x): a thing", "- fix(y): another"]);
+  assert.equal(changelogEntry(cl, "0.9.9"), null);
+});
+
+test("regressionAttribution cites the changelog only when no promotion explains the regression (QC4)", () => {
+  const cl = "# Changelog\n\n## 0.12.0 — 2026-08-07\n\n- feat(x): a thing\n";
+  const candidate = { type: "version-regression", skill: "planning", version_from: "0.11.0", version_to: "0.12.0" };
+  // No matching promotion → a correlational citation of the version's own entry.
+  const attr = regressionAttribution(candidate, [], cl);
+  assert.equal(attr.correlational, true);
+  assert.equal(attr.version, "0.12.0");
+  assert.deepEqual(attr.entry, ["- feat(x): a thing"]);
+  // A promotion that shipped a culprit fix for the regressed-to version → revertCandidates owns it.
+  assert.equal(regressionAttribution(candidate, [{ pluginVersion: "0.12.0", culpritId: "a-culprit" }], cl), null);
+});
+
+// A version-regression the plugin's own promotions do not explain regresses "around the time of" a
+// release; the render cites that release's changelog entry, labelled correlational and lower
+// confidence than a revertCandidates hit (issue D1, QC4).
+const REGRESSION_CORPUS = [
+  sum({ id: "o1", pluginVersion: "0.11.0", costByStage: { planning: 1 }, costUSD: 1 }),
+  sum({ id: "o2", pluginVersion: "0.11.0", costByStage: { planning: 1 }, costUSD: 1 }),
+  sum({ id: "o3", pluginVersion: "0.11.0", costByStage: { planning: 1 }, costUSD: 1 }),
+  sum({ id: "n1", pluginVersion: "0.12.0", costByStage: { planning: 10 }, costUSD: 10 }),
+  sum({ id: "n2", pluginVersion: "0.12.0", costByStage: { planning: 10 }, costUSD: 10 }),
+  sum({ id: "n3", pluginVersion: "0.12.0", costByStage: { planning: 10 }, costUSD: 10 }),
+];
+
+test("a version-regression with no explaining promotion carries a correlational changelog citation", () => {
+  const out = renderReport(REGRESSION_CORPUS, ctx());
+  const anomalies = out.slice(out.indexOf("## Cost anomalies"), out.indexOf("## Previously promoted"));
+  assert.match(anomalies, /- CANDIDATE: version-regression skill=planning 0\.11\.0->0\.12\.0/);
+  assert.match(anomalies, /↳ correlated change \(unverified\):/);
+});
+
+test("a version-regression a promotion already explains carries no correlational citation", () => {
+  const out = renderReport(REGRESSION_CORPUS, ctx({ promotions: [{ pluginVersion: "0.12.0", culpritId: "a-culprit" }] }));
+  const anomalies = out.slice(out.indexOf("## Cost anomalies"), out.indexOf("## Previously promoted"));
+  assert.match(anomalies, /- CANDIDATE: version-regression skill=planning 0\.11\.0->0\.12\.0/);
+  assert.ok(!/↳ correlated change \(unverified\):/.test(anomalies), "revertCandidates owns a promotion-sourced regression; no correlational line");
 });
 
 test("the report renders observed workload and outcome families, each metric tagged observed", () => {

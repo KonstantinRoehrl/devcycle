@@ -2632,7 +2632,20 @@ export function renderReport(summaries, ctx) {
       ? `- EXCESS-COST: ${r.matchKey} version=${r.version} unmatched — no expectation (cohort n=${r.cohortN})`
       : `- EXCESS-COST: ${r.matchKey} version=${r.version} actual=${usd(r.actual)} ` +
         `expected=${usd(r.expected)} excess=${usd(r.excess)} (${r.confidence}, n=${r.cohortN})`);
-  const anomalyLines = [...anomalies.map((c) => `- ${formatCandidate(c)}`), ...excessLines];
+  // A version-regression no promotion explains gets a correlational citation of the version's own
+  // changelog entry (issue D1) — visibly lower confidence than a revertCandidates hit (QC4). The
+  // changelog is read once; an unreadable file degrades to no citation rather than aborting the
+  // report (QC1).
+  let anomalyChangelog = "";
+  try { anomalyChangelog = readFileSync(RELEASE_CHANGELOG_PATH, "utf8"); } catch { anomalyChangelog = ""; }
+  const anomalyCandidateLines = anomalies.flatMap((c) => {
+    const line = `- ${formatCandidate(c)}`;
+    if (c.type !== "version-regression") return [line];
+    const attr = regressionAttribution(c, promotions, anomalyChangelog);
+    if (!attr) return [line];
+    return [line, `  ↳ correlated change (unverified): ${attr.entry ? attr.entry[0] : "no changelog entry for " + attr.version}`];
+  });
+  const anomalyLines = [...anomalyCandidateLines, ...excessLines];
   L.push(...(anomalyLines.length
     ? anomalyLines
     : ["_No rows: no cost anomalies in this corpus._"]));
@@ -2797,6 +2810,28 @@ function promotionVerification(promotions, runChecks = false) {
   } catch {
     return { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] };
   }
+}
+
+// The prose body under a version's ## heading, for citing what a non-promotion regression
+// coincided with (issue D1). Correlational only — labelled as such at the render site (QC4).
+export function changelogEntry(changelogText, version) {
+  const lines = String(changelogText).split("\n");
+  const head = new RegExp(`^## ${version.replace(/\./g, "\\.")} — \\d{4}-\\d{2}-\\d{2}`);
+  let i = lines.findIndex((l) => head.test(l));
+  if (i < 0) return null;
+  const body = [];
+  for (i++; i < lines.length && !/^## /.test(lines[i]); i++)
+    if (lines[i].trim()) body.push(lines[i].trim());
+  return body.length ? body : null;
+}
+
+// D1: revertCandidates already explains a promotion-sourced regression; for every other
+// version-regression, cite the version's own changelog entry as a *correlational* candidate cause,
+// never with a revertCandidates hit's confidence.
+export function regressionAttribution(candidate, promotions, changelogText) {
+  const shipped = (promotions ?? []).some((p) => p.pluginVersion === candidate.version_to && p.culpritId);
+  if (shipped) return null;
+  return { correlational: true, version: candidate.version_to, entry: changelogEntry(changelogText, candidate.version_to) };
 }
 
 // Revert detection is cost-driven and lives here, not in the engine (QC1 / spec §5.3): the engine
