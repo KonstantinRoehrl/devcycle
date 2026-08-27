@@ -254,7 +254,8 @@ Then, per adopted candidate:
 
 Finally re-render the report in outcome mode —
 `--render-report <candidates.json> --outcome` — so the proposal and the outcome are diffable, and
-rewrite the checkpoint's two lines: `last-run:` to now, the version to the installed one.
+rewrite the checkpoint's two lines: `last-run:` to `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`,
+the version to the installed one.
 
 ## Entry points
 

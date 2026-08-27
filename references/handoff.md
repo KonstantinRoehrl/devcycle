@@ -31,8 +31,9 @@ against the count consulted — and, for the execution stage specifically, from 
 
 Every boundary also appends one `stage` line to the run record — `run-record.mjs append --kind
 stage` with the stage name, its outcome, `endedAt` as the boundary time, and `startedAt` as the
-`updated:` timestamp `state.md` carried when this stage was **entered** (the value written when
-the state file was last rewritten to enter this stage), never the boundary time. Sourcing
+`updated:` timestamp `state.md` carried when this stage was **entered** (the value written from
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now` when the state file was last rewritten to enter
+this stage), never the boundary time. Sourcing
 `startedAt` from stage entry is what makes the `[startedAt, endedAt)` window `scripts/doctor.mjs`
 joins cost to actually span the stage's work — including a stage entered in one session and
 completed in a later `/devcycle:continue` session, whose cost would otherwise land in

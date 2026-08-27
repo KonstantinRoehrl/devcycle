@@ -128,7 +128,7 @@ Sweep runs write `.devcycle/state.md` in the standard shape (`commands/cycle.md`
 - `ledger:` stays the standard `.devcycle/ledger.md` line but is unused.
 - `sweepCommit:` is a sweep-only extra line, absent until step 5 commits and then carrying that commit's sha
   (rewritten by step 6's amend).
-- An abort — at gate 2 or at a hard stop — closes the cycle: `stage: done`, fresh `updated:`, the abort
+- An abort — at gate 2 or at a hard stop — closes the cycle: `stage: done`, fresh `updated:` from `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`, the abort
   noted in `request:`, and every sweep artifact already written deleted. Left at `stage: sweep` with its
   artifacts on disk, a later `/devcycle:continue` walks straight back into the aborted sweep.
 

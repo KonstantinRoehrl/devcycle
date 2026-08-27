@@ -86,8 +86,7 @@ with no branch or no diff — an audit-only cycle, or a fast path that reached n
 nothing; doctor treats a missing workload record as *workload-unknown*, never as zero work. This
 append is counts-and-enums only: it never carries paths, prose, or diff content.
 
-As this stage's final state-file write, set `stage: done` and a fresh `updated:` timestamp —
-nothing remains to resume.
+As this stage's final state-file write, set `stage: done` and a fresh `updated:` timestamp from `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now` — nothing remains to resume.
 
 ## Archive this cycle's audit trail
 
