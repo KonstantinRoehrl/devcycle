@@ -43,8 +43,9 @@ export function listObservations(repoRoot) {
     .sort();
 }
 
-// Spec §5.4's five-value enum. A typo here must fail loud rather than silently seeding a
-// garbage grouping key the reduce stage would then cluster on.
+// Spec §5.4's observation-kind enum, extended with "win" (L2) so the miner can file a
+// grounded success, not only a corrective. A typo here must fail loud rather than silently
+// seeding a garbage grouping key the reduce stage would then cluster on.
 const OBSERVATION_KINDS = new Set(["friction", "correction", "rule-violation", "decision", "contradiction-side", "win"]);
 
 // Mirrors validatePromotion's style and error-message shape (`scripts/promotions.mjs`, the
