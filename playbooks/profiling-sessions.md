@@ -133,11 +133,21 @@ acting on, offer one batched `AskUserQuestion` (multi-select), letting the user 
 - **get a `/devcycle:cycle` entry point** — a one-line request string handed back for the user
   to run themselves. This run never invokes `/devcycle:cycle` itself: an entry point that
   chains onward takes the selection decision away from the user.
+- **investigate & generalize a detected win** — the positive mirror of the entry point above. A
+  detected win (a `version-improvement`: a cost drop between two version cohorts) is a finding too,
+  handed back as a `/devcycle:learn`-scoped request string focused on the sessions around that
+  version boundary, so the user can deliberately mine WHY it improved and generalize it. The verb is
+  non-corrective — nothing is broken — and this run never invokes `/devcycle:learn` itself.
 
 A `recurred` r2 escalation candidate from the scoreboard is itself one of these findings: its
 `/devcycle:cycle` entry point re-addresses the culprit the promotion failed to fix, the same
 escalation the scoreboard already rendered inline as an `Actionability — /devcycle:cycle re-address`
 line.
+
+A detected win is the same, mirrored: the report already renders it inline after the wins table as
+an `Actionability — /devcycle:learn investigate & generalize` line, naming the promotion that
+shipped with the improved version as the correlational cause (or `unattributed` when no promotion
+matches — a lead to chase manually, never a verified attribution).
 
 Always include an explicit "just the overview, no action" choice in the same batch — the
 follow-up is itself skippable, never a forced gate on finishing the command.

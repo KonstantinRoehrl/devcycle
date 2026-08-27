@@ -12,7 +12,7 @@ import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
   parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
-  renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates,
+  renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates, winCandidates,
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
   changelogEntry, regressionAttribution,
@@ -454,6 +454,15 @@ test("a version-improvement candidate is a win, not a neutral candidate", () => 
   assert.equal(wins[0].impact, 12);
 });
 
+test("winCandidates attaches the promotion a version shipped as the cause (D2)", () => {
+  const cands = [{ type: "version-improvement", skill: "execution", version_from: "0.11.0",
+    version_to: "0.12.0", delta_pct: -40, delta_dollars: -12, sessions_sampled: 4 }];
+  const [w] = winCandidates(cands, [{ pluginVersion: "0.12.0", culpritId: "win:cheap-exec" }]);
+  assert.deepEqual(w.cause, ["win:cheap-exec"]);
+  const [u] = winCandidates(cands, []);
+  assert.equal(u.cause, null);
+});
+
 const GH_RESPONSE = JSON.stringify([
   { number: 7, title: "[culprit:partial-evidence-capture] evidence capture", labels: [{ name: "from-doctor" }, { name: "culprit:partial-evidence-capture" }], createdAt: "2026-08-01T00:00:00Z", closedAt: "2026-08-07T00:00:00Z", state: "CLOSED" },
   { number: 8, title: "[culprit:reviewer-role-confusion] roles", labels: [{ name: "from-doctor" }, { name: "culprit:reviewer-role-confusion" }], createdAt: "2026-08-03T00:00:00Z", closedAt: null, state: "OPEN" },
@@ -863,6 +872,34 @@ test("a version-regression a promotion already explains carries no correlational
   const anomalies = out.slice(out.indexOf("## Cost anomalies"), out.indexOf("## Previously promoted"));
   assert.match(anomalies, /- CANDIDATE: version-regression skill=planning 0\.11\.0->0\.12\.0/);
   assert.ok(!/↳ correlated change \(unverified\):/.test(anomalies), "revertCandidates owns a promotion-sourced regression; no correlational line");
+});
+
+// A detected win (a version-improvement) is no longer dropped: after the wins table the report
+// renders a positive Actionability line pointing at /devcycle:learn to mine WHY it improved, and
+// names the promotion that shipped with the improved version as the (correlational) cause (D2, QC4).
+const IMPROVEMENT_CORPUS = [
+  sum({ id: "o1", pluginVersion: "0.11.0", costByStage: { execution: 10 }, costUSD: 10 }),
+  sum({ id: "o2", pluginVersion: "0.11.0", costByStage: { execution: 10 }, costUSD: 10 }),
+  sum({ id: "o3", pluginVersion: "0.11.0", costByStage: { execution: 10 }, costUSD: 10 }),
+  sum({ id: "n1", pluginVersion: "0.12.0", costByStage: { execution: 5 }, costUSD: 5 }),
+  sum({ id: "n2", pluginVersion: "0.12.0", costByStage: { execution: 5 }, costUSD: 5 }),
+  sum({ id: "n3", pluginVersion: "0.12.0", costByStage: { execution: 5 }, costUSD: 5 }),
+];
+
+test("a detected win renders an investigate & generalize Actionability line citing its promotion (D2)", () => {
+  const out = renderReport(IMPROVEMENT_CORPUS, ctx({ promotions: [{ pluginVersion: "0.12.0", culpritId: "win:cheap-exec" }] }));
+  const wins = out.slice(out.indexOf("## Your wins"), out.indexOf("## Cost anomalies"));
+  assert.match(wins, /Actionability — .*investigate & generalize/);
+  assert.match(wins, /\/devcycle:learn/);
+  assert.match(wins, /execution 0\.11\.0→0\.12\.0/);
+  assert.match(wins, /shipped: win:cheap-exec/);
+});
+
+test("a detected win with no explaining promotion still surfaces, marked unattributed (D2)", () => {
+  const out = renderReport(IMPROVEMENT_CORPUS, ctx());
+  const wins = out.slice(out.indexOf("## Your wins"), out.indexOf("## Cost anomalies"));
+  assert.match(wins, /Actionability — .*investigate & generalize/);
+  assert.match(wins, /unattributed — investigate manually/);
 });
 
 test("the report renders observed workload and outcome families, each metric tagged observed", () => {

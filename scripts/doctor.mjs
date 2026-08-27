@@ -2108,6 +2108,21 @@ export function winTable(summaries, vocab, candidates = []) {
   return rows.sort(byImpactDesc);
 }
 
+// The positive mirror of revertCandidates (issue D2): attach the promotion a version shipped to
+// each version-improvement candidate, so a detected cost drop points at what likely caused it.
+// Correlational — a matching promotion of any kind is a legitimate correlation, a win-kind one the
+// richest; no match is left unattributed for manual investigation.
+export function winCandidates(candidates, promotions) {
+  return (candidates ?? [])
+    .filter((c) => c.type === "version-improvement")
+    .map((c) => {
+      const shipped = (promotions ?? [])
+        .filter((p) => p.pluginVersion === c.version_to && p.culpritId)
+        .map((p) => p.culpritId);
+      return { ...c, cause: shipped.length ? shipped : null };
+    });
+}
+
 // The marker playbooks/profiling-sessions.md writes when the Actionability step drafts an
 // issue. That playbook is the contract's one written source; this parses what it states, and a
 // round-trip test (tests/unit/doctor-report.test.mjs) feeds this parser the literal extracted
@@ -2615,6 +2630,15 @@ export function renderReport(summaries, ctx) {
     ]),
     "no win events recorded in this corpus",
   ));
+  // A detected win is no longer merely tabulated then dropped (issue D2): the positive mirror of the
+  // escalation entry-point below. Each version-improvement gets a non-corrective Actionability line
+  // pointing at `/devcycle:learn` to deliberately mine WHY it improved, naming the promotion that
+  // shipped with the improved version as the correlational cause — visibly lower confidence than a
+  // revertCandidates hit (QC4), unattributed when no promotion matches.
+  for (const w of winCandidates(candidates, promotions))
+    L.push(`- Actionability — \`/devcycle:learn\` investigate & generalize the ${w.skill} ` +
+      `${w.version_from}→${w.version_to} improvement ` +
+      (w.cause ? `(shipped: ${w.cause.join(", ")})` : "(unattributed — investigate manually)"));
 
   section("## Cost anomalies", "anomalies");
   // version-improvement belongs to Your wins above; everything else emitCandidates found is a
