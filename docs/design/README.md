@@ -227,7 +227,9 @@ gated by `userConfig.crossModelReview`.
   "implementerModel": "auto | <model id>",
   "taskReviewerModel": "auto | <model id>",
   "branchReviewModel": "auto | <model id>",
-  "walkthroughModel": "auto | <model id>"
+  "walkthroughModel": "auto | <model id>",
+  "learnStalenessSessions": 5,
+  "learnStalenessDays": 14
 }
 ```
 
@@ -256,6 +258,11 @@ gated by `userConfig.crossModelReview`.
   `local-commits-only` for that run if either fires. `local-commits-only` needs no check;
   it is already the floor.
 - Model names are config values, not skill prose — they rot otherwise.
+- `learnStalenessSessions` (5) and `learnStalenessDays` (14) are non-profile integer knobs
+  gating the finish stage's staleness nudge: the finish stage runs `dream.mjs --staleness`
+  against the distilling checkpoint's `last-run:` and, when either threshold is crossed,
+  surfaces one advisory line suggesting another `/devcycle:learn` pass (resolution and
+  ownership in `references/config.md` § Learn staleness).
 - Once encoded, corresponding personal memories (e.g. never-local-merge-to-dev) are deleted.
 
 ---

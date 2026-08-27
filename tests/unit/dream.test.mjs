@@ -2002,3 +2002,16 @@ test("--plan-landing is guarded against being combined with another subcommand",
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /cannot be combined/);
 });
+
+test("--staleness reports stale once the unmined-session threshold is crossed (L1)", () => {
+  const root = realpathSync(repo());
+  mkdirSync(join(root, ".devcycle"), { recursive: true });
+  writeFileSync(join(root, ".devcycle", "distilling-state.md"),
+    "# distilling-learnings checkpoint\n- last-run: 2020-01-01T00:00:00Z\n- last-reviewed-devcycle-version: 0.1.0\n");
+  const r = run(["--staleness", "--max-sessions", "5", "--max-days", "14"], root);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(typeof out.stale, "boolean");
+  assert.ok("unminedSessions" in out && "daysSince" in out && "lastRun" in out);
+  assert.equal(out.stale, true); // last-run is years ago → days threshold crossed
+});

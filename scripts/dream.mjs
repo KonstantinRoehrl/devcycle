@@ -526,7 +526,7 @@ function main() {
     "--plan", "--commit-checkpoint", "--check-suppressed", "--extract", "--check-observations",
     "--record-promotion", "--record-lifecycle", "--check-recurrence", "--journal-events", "--legacy-similar",
     "--novel-slugs", "--lessons", "--render-report", "--match", "--lesson",
-    "--observations-deduped", "--plan-landing",
+    "--observations-deduped", "--plan-landing", "--staleness",
   ];
   const present = SUBCOMMANDS.filter((f) => argv.includes(f));
   if (present.length > 1) {
@@ -858,6 +858,37 @@ function main() {
     return;
   }
 
+  // The staleness probe finishing-the-cycle.md runs at cycle end: reads the distilling
+  // checkpoint's own `last-run:` (learning-from-sessions.md owns that file) and reports whether
+  // enough unmined sessions or days have accrued to warrant another /devcycle:learn pass. It is a
+  // read-only nudge — it advances no checkpoint and mines nothing. Reuses planCorpus (QC2) for the
+  // unmined-session count rather than re-walking transcripts.
+  if (argv.includes("--staleness")) {
+    try {
+      const { flags } = parseFlags(argv, {
+        "--staleness": "none", "--max-sessions": "value", "--max-days": "value",
+      });
+      const maxSessions = flags["--max-sessions"] != null ? Number(flags["--max-sessions"]) : 5;
+      const maxDays = flags["--max-days"] != null ? Number(flags["--max-days"]) : 14;
+      const dsPath = join(root, ".devcycle", "distilling-state.md");
+      const lastRun = existsSync(dsPath) ? (field(readFileSync(dsPath, "utf8"), "last-run") || null) : null;
+      // `never` (or an empty/missing line) means the corpus was never mined — the strongest stale
+      // signal, and never a real `since:` to filter the corpus against.
+      const literal = lastRun && lastRun !== "never" ? lastRun : null;
+      const plan = planCorpus({ repoRoot: root, projectsDir: resolveProjectsRoot(), since: literal });
+      const unminedSessions = plan.sessions.length;
+      // QC1: an unminable age is `null`, never `0` — a never-mined corpus has no elapsed days, and
+      // reading that as zero days would falsely read as "just mined".
+      const daysSince = literal ? Math.floor((Date.now() - Date.parse(literal)) / 86400000) : null;
+      const stale = literal == null || unminedSessions >= maxSessions
+        || (daysSince != null && daysSince >= maxDays);
+      console.log(JSON.stringify(
+        { stale, unminedSessions, daysSince, lastRun: literal, threshold: { maxSessions, maxDays } },
+        null, 2));
+    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
+    return;
+  }
+
   console.error(
     "usage: dream.mjs --plan | --extract <session-id> | --commit-checkpoint <iso> | --record-promotion <json> | " +
       "--record-lifecycle <json> | " +
@@ -865,7 +896,8 @@ function main() {
       "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --observations-deduped | --lessons <stage> | " +
       "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
       "--render-report <candidates.json> [--outcome] | " +
-      "--plan-landing --stage <stage> --line \"<lesson line>\" [--store repo|user-repo|user-global]",
+      "--plan-landing --stage <stage> --line \"<lesson line>\" [--store repo|user-repo|user-global] | " +
+      "--staleness [--max-sessions N] [--max-days M]",
   );
   process.exit(1);
 }

@@ -7,6 +7,20 @@ the policy logic lives here and only here. It reports per
 
 Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons finish`. No store, no output.
 
+## Learn staleness nudge
+
+Resolve `${user_config.learnStalenessSessions}` (default `5`) and
+`${user_config.learnStalenessDays}` (default `14`) per
+`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Learn staleness, then run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --staleness --max-sessions <sessions> --max-days <days>`.
+It reads the distilling checkpoint's `last-run:` and prints
+`{ stale, unminedSessions, daysSince, lastRun, threshold }`. When `stale` is `true`, surface
+**exactly one** line in this stage's report:
+`<unminedSessions> sessions unmined since <lastRun> — consider running /devcycle:learn`
+(when `lastRun` is `null`, phrase it as `never mined` in place of `since <lastRun>`). This is a
+nudge, never a forced run — it starts no mining pass and advances no checkpoint. When `stale`
+is `false`, say nothing.
+
 ## Configured policy
 
 Resolve `${user_config.gitPolicy}` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`: allowed
