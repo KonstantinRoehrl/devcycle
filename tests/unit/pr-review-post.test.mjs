@@ -1,8 +1,31 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import {
   FOOTER_MARKER, footer, withFooter, alreadyPosted, runReply, runResolve,
 } from "../../scripts/pr-review-post.mjs";
+
+const SCRIPT = fileURLToPath(new URL("../../scripts/pr-review-post.mjs", import.meta.url));
+
+// Spawn the real CLI dispatch path with a fake `gh` on PATH so no network is touched — the fake
+// exits 0 and prints `[]` (a valid empty listReplies payload). This exercises the argument gate
+// exactly as an operator would, which is the surface the unit tests calling runReply directly miss.
+function runCli(args) {
+  const ghDir = mkdtempSync(join(tmpdir(), "fakegh-"));
+  const ghPath = join(ghDir, "gh");
+  writeFileSync(ghPath, "#!/bin/sh\necho '[]'\nexit 0\n");
+  chmodSync(ghPath, 0o755);
+  const bodyFile = join(mkdtempSync(join(tmpdir(), "prbody-")), "body.md");
+  writeFileSync(bodyFile, "Fixed in abc123: intake now carries thread_id.");
+  return spawnSync(process.execPath, [SCRIPT, ...args.map((a) => (a === "@body" ? bodyFile : a))], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${ghDir}:${process.env.PATH}` },
+  });
+}
 
 test("footer/withFooter carry the marker and login", () => {
   assert.ok(footer("octocat").includes(FOOTER_MARKER));
@@ -53,6 +76,23 @@ test("runResolve issues the resolveReviewThread mutation for the node id", () =>
   const r = runResolve({ repo: "o/n", threadId: "PRRT_z", runner });
   assert.equal(r.status, "resolved");
   assert.deepEqual(calls, ["PRRT_z"]);
+});
+
+test("CLI reply --pr-level posts without a --comment-id", () => {
+  const res = runCli([
+    "reply", "--repo", "o/n", "--pr", "7", "--body-file", "@body", "--login", "octocat", "--pr-level",
+  ]);
+  assert.doesNotMatch(res.stderr ?? "", /--comment-id is required/, res.stderr);
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /^posted /);
+});
+
+test("CLI reply without --pr-level still requires --comment-id", () => {
+  const res = runCli([
+    "reply", "--repo", "o/n", "--pr", "7", "--body-file", "@body", "--login", "octocat",
+  ]);
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /--comment-id is required/);
 });
 
 test("defaultPostRunner builds the documented argv shapes", async () => {

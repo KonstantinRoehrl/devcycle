@@ -101,12 +101,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     };
     const repo = must("--repo", "an owner/name");
     if (sub === "reply") {
+      const prLevel = "--pr-level" in flags;
       const body = readFileSync(must("--body-file", "a draft path"), "utf8");
+      // --comment-id anchors an inline reply, so it is required only off the pr-level path; a
+      // pr-level reply has no anchor and runReply ignores commentId there.
       const r = runReply({
         repo, pr: Number(must("--pr", "a number")),
-        commentId: must("--comment-id", "a comment id"), body,
+        commentId: prLevel ? undefined : must("--comment-id", "a comment id"), body,
         login: must("--login", "a github login"),
-        prLevel: "--pr-level" in flags,
+        prLevel,
       });
       console.log(r.status === "posted" ? `posted ${r.replyHash}` : `skipped: ${r.reason}`);
     } else if (sub === "resolve") {
