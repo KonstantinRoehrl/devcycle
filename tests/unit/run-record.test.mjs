@@ -410,6 +410,7 @@ test("culprit lookup fails cleanly, not with a stack trace, when culprits.json i
     mkdirSync(join(treeDir, "tests/fixtures"), { recursive: true });
     mkdirSync(join(treeDir, "references"), { recursive: true });
     copyFileSync(join(REPO_ROOT, "scripts/run-record.mjs"), join(treeDir, "scripts/run-record.mjs"));
+    copyFileSync(join(REPO_ROOT, "scripts/stamp.mjs"), join(treeDir, "scripts/stamp.mjs"));
     copyFileSync(
       join(REPO_ROOT, "tests/fixtures/run-record.schema.json"),
       join(treeDir, "tests/fixtures/run-record.schema.json")
@@ -535,4 +536,22 @@ test("the workload subcommand computes real git diff stats and writes a schema-v
   assert.deepEqual(validate(line, sub), []);
   assert.strictEqual(line.filesCreated, 1);
   assert.ok(line.insertions >= 1);
+});
+
+test("gitToplevel canonicalizes a linked worktree to the main checkout (#104)", () => {
+  const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-")));
+  spawnSync("git", ["init", "-q"], { cwd: tempRepo });
+  spawnSync("git", ["-C", tempRepo, "config", "user.email", "t@e.st"]);
+  spawnSync("git", ["-C", tempRepo, "config", "user.name", "t"]);
+  writeFileSync(join(tempRepo, "f"), "x");
+  spawnSync("git", ["-C", tempRepo, "add", "-A"]);
+  spawnSync("git", ["-C", tempRepo, "commit", "-qm", "init"]);
+  const wt = realpathSync(mkdtempSync(join(tmpdir(), "wt-"))) + "/w";
+  spawnSync("git", ["-C", tempRepo, "worktree", "add", "-q", "--detach", wt, "HEAD"]);
+  try {
+    assert.strictEqual(gitToplevel(wt), tempRepo, "worktree did not resolve to the main root");
+    assert.strictEqual(repoSlug(gitToplevel(wt)), repoSlug(tempRepo), "slug split across worktree");
+  } finally {
+    spawnSync("git", ["-C", tempRepo, "worktree", "remove", "--force", wt]);
+  }
 });
