@@ -1,6 +1,10 @@
 # Reviewing Code
 
-The single review engine: *given this scope and these criteria, what is wrong with this code?*
+The single review engine: *given this scope and these criteria, what is wrong with this code —
+and what does it already do right, concretely enough to name and keep doing?* The second half
+is additive per `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md` § Strengths — not only
+defects and never softens, delays, or substitutes for a defect finding the same evidence would
+otherwise produce.
 **Which caller invoked it decides more than the scope does.** An **audit run** — `/devcycle:review`
 standalone, or `/devcycle:cycle`'s audit stage, at any scope below — runs the criteria interview
 (step 1) and ends in the ranked findings document (step 5). **The branch-review stage**
@@ -149,11 +153,26 @@ caller carrying authoring context dispatches fresh reviewers rather than reviewi
 rule and its rationale live here; callers name it and do not restate it.
 
 Every finding is adversarially verified before it is reported: a second reader tries to REFUTE it,
-and confidence follows what that reader found. Unverified findings are marked, never dropped;
-findings are then deduplicated across lenses and ranked. The severity vocabulary, core fields,
+and confidence follows what that reader found. For a finding about whether a script or tool
+*computed something correctly* — a report, a metric, a benchmark — refutation by re-reading the
+source is not enough on its own: run it and independently recompute the figure by a different
+path where feasible, per `findings.md`'s evidence discipline. A headline number that quietly skips
+a normalization step every other code path performs can read as correct from the source alone and
+still be wrong in practice. Unverified findings are marked, never dropped; findings are then
+deduplicated across lenses and ranked. The severity vocabulary, core fields,
 evidence discipline and machine ordering are owned by
 `${CLAUDE_PLUGIN_ROOT}/references/findings.md`. Depth never weakens step 1 or this pass, which is
 real machinery at every profile rather than a paragraph performed by hand.
+
+**Cross-reference open work before finalizing.** Check `docs/known-issues.md` and the repo's
+live issue tracker for anything already tracking a candidate finding — they are not guaranteed to
+agree with each other, so check both rather than trusting either as complete. A match is not
+reason to drop the finding; it is reason to say so (cite the existing entry instead of re-deriving
+it from scratch) and to check whether the two are independent or one is a **precondition** for the
+other — a finding whose evidence rests on data another open defect is already known to corrupt
+(a log a known bug under- or over-populates, a timestamp a known bug estimates rather than
+measures) inherits that unreliability silently unless the document says so. Note any such
+dependency in the finding itself; step 5 carries it into the document's ordering.
 
 **The branch-review stage returns exactly this and stops**, taking no step 5: findings in
 `references/findings.md`'s shape plus an **engine line** naming what ran — `single`, `single +
@@ -172,6 +191,12 @@ header** whose every line is **omitted rather than guessed** when it cannot be d
 **branch**, the **sha of the audited content** (that branch's tip at `branch` scope, the sweep's
 checkout HEAD otherwise — never this document's own topic branch, which need not contain the audited
 code), and a **PR link** when one exists. Locations inside findings stay plain `file:line`.
+
+Where step 4 noted a precondition between findings — one finding's reliability resting on
+another's fix landing first, in this document or in the tracker — the document states the
+dependency explicitly and closes with a **suggested sequencing** line ordering the affected
+findings; this supplements the severity/impact/complexity ranking in `findings.md`'s Ordering, it
+does not replace it.
 
 Write `docs/audits/YYYY-MM-DD-<topic>.md` and commit it scoped per
 `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit":

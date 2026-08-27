@@ -61,7 +61,7 @@ from its path and enforceable per-directory rather than by convention:
 
 | layer | directory | holds | rules |
 | --- | --- | --- | --- |
-| L0 | `commands/` | the eight entry points | the only surface listed to a user; names are verbs; per-file line budget owned by tests/fixtures/surface-budget.json |
+| L0 | `commands/` | the nine entry points | the only surface listed to a user; names are verbs; per-file line budget owned by tests/fixtures/surface-budget.json |
 | L1 | `playbooks/` | orchestration prose | loaded by path, in no roster, no frontmatter; names are gerunds; per-file line budget owned by tests/fixtures/surface-budget.json |
 | L2 | `agents/` | typed workers | separately dispatched contexts; names are role nouns; no `model:` in frontmatter |
 | L3 | `references/` | shared concepts | exactly one owner, at least one consumer; loaded on demand (§15.1) |
@@ -85,7 +85,8 @@ devcycle/                (public GitHub repo)
 │   ├── learn.md                  # sessions + memory → landed doc edits; --preview lands nothing
 │   ├── doctor.md                 # standalone token/context/routing profile and config drift; starts no cycle
 │   ├── maintain.md               # read-only longitudinal repo-health assessment; starts no cycle
-│   └── onboard.md                # bootstrap tier-2 in a repo; starts no cycle (see §8)
+│   ├── onboard.md                # bootstrap tier-2 in a repo; starts no cycle (see §8)
+│   └── reconcile.md              # triage/fix/reply to a PR's review comments; re-enters the branch's cycle when one exists
 ├── playbooks/                    # L1 — loaded only as ${CLAUDE_PLUGIN_ROOT}/playbooks/<name>.md
 │   ├── scoping-the-request.md    # rough idea → bounded scope; batched AskUserQuestion; nothing assumed;
 │   │                             # hands off to superpowers:brainstorming
@@ -226,7 +227,9 @@ gated by `userConfig.crossModelReview`.
   "implementerModel": "auto | <model id>",
   "taskReviewerModel": "auto | <model id>",
   "branchReviewModel": "auto | <model id>",
-  "walkthroughModel": "auto | <model id>"
+  "walkthroughModel": "auto | <model id>",
+  "learnStalenessSessions": 5,
+  "learnStalenessDays": 14
 }
 ```
 
@@ -255,6 +258,11 @@ gated by `userConfig.crossModelReview`.
   `local-commits-only` for that run if either fires. `local-commits-only` needs no check;
   it is already the floor.
 - Model names are config values, not skill prose — they rot otherwise.
+- `learnStalenessSessions` (5) and `learnStalenessDays` (14) are non-profile integer knobs
+  gating the finish stage's staleness nudge: the finish stage runs `dream.mjs --staleness`
+  against the distilling checkpoint's `last-run:` and, when either threshold is crossed,
+  surfaces one advisory line suggesting another `/devcycle:learn` pass (resolution and
+  ownership in `references/config.md` § Learn staleness).
 - Once encoded, corresponding personal memories (e.g. never-local-merge-to-dev) are deleted.
 
 ---
@@ -277,10 +285,13 @@ gated by `userConfig.crossModelReview`.
 - **Commands are verbs, playbooks are gerunds, agents are role nouns.** `doctor` is the single
   recorded exception, justified by `brew doctor` / `flutter doctor` / `npm doctor` — a noun
   every developer already reads as "diagnose this".
-- Commands (the whole user-facing surface, seven from 2026-08-06, eight since 2026-08-22):
+- Commands (the whole user-facing surface, seven from 2026-08-06, eight since 2026-08-22,
+  nine since 2026-08-26):
   `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:review`, `/devcycle:verify`,
   `/devcycle:learn`, `/devcycle:doctor`, `/devcycle:maintain` (read-only longitudinal
-  repo-health assessment; starts no cycle), `/devcycle:onboard`. `docs/routing.md` maps each
+  repo-health assessment; starts no cycle), `/devcycle:onboard`, `/devcycle:reconcile`
+  (triage a PR's review comments into fixes and consented replies; re-enters the branch's
+  cycle when one exists). `docs/routing.md` maps each
   to the intent it serves and what it may do before its first confirmation.
 - Playbooks: verb-first gerunds, listed in §3. They are addressed by path, never as
   `devcycle:<name>`, so a playbook name is never a user-typed string.

@@ -73,10 +73,12 @@ question once more the first time you run a cycle in a different repo.
 | `taskReviewerModel` | Model for per-task reviewers | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
 | `branchReviewModel` | Model for the whole-branch review | `auto` / model id / comma-separated pool | `auto` (inherits your session's model; set a model id to pin) |
 | `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id / comma-separated pool | `auto` (a fast model; set a model id to pin) |
+| `learnStalenessSessions` | Unmined sessions since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer | `5` |
+| `learnStalenessDays` | Days since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer | `14` |
 
 ## Other options
 
-The remaining nine knobs above are secondary to `profile` — most runs never touch them.
+The remaining eleven knobs above are secondary to `profile` — most runs never touch them.
 
 **`gitPolicy`** is the pipeline's blast radius: `local-commits-only` means it only ever
 commits on a local branch and hands it to you (never pushes); `push-allowed` lets it push

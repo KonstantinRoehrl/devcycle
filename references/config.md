@@ -55,6 +55,8 @@ three carry the same keys; without it the copies drift one release at a time.
 | `taskReviewerModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` | `auto` — § Model tiers derives it per task |
 | `branchReviewModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` | `auto` — the session's own model |
 | `walkthroughModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` | `auto` — a fast model |
+| `learnStalenessSessions` | § Learn staleness | `5` |
+| `learnStalenessDays` | § Learn staleness | `14` |
 
 An unset knob is a literal `${user_config...}` placeholder or `auto`; the resolution order above
 owns what "unset" then resolves to, and this column only names the endpoint.
@@ -158,6 +160,22 @@ A site that commits an artifact resolves the policy, checks this table permits t
 `git check-ignore` vetoes nothing, names the side effect, asks the user, then commits with an
 explicit pathspec. `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`'s step 3 is the
 reference implementation of that order.
+
+## Learn staleness
+
+`learnStalenessSessions` (default `5`) and `learnStalenessDays` (default `14`) are two
+non-profile integer knobs. They sit outside the profile matrix — no profile column moves
+them — and gate the single staleness nudge
+`${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` surfaces at cycle end.
+
+That playbook runs `scripts/dream.mjs --staleness`, which reads the distilling checkpoint's
+`last-run:` (`.devcycle/distilling-state.md`, owned by
+`${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`) and reports whether enough
+unmined sessions or elapsed days have accrued to warrant another `/devcycle:learn` pass.
+**Whichever threshold crosses first triggers the nudge** — `learnStalenessSessions` unmined
+sessions since `last-run:`, or `learnStalenessDays` days since it — and a corpus that was
+never mined (`last-run:` unset or `never`) is always stale. The nudge is advisory: it never
+forces a mining run and advances no checkpoint.
 
 ## Model tiers
 

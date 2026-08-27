@@ -12,9 +12,10 @@ import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
   parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
-  renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates,
+  renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates, winCandidates,
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
+  changelogEntry, regressionAttribution,
 } from "../../scripts/doctor.mjs";
 import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
 
@@ -453,6 +454,15 @@ test("a version-improvement candidate is a win, not a neutral candidate", () => 
   assert.equal(wins[0].impact, 12);
 });
 
+test("winCandidates attaches the promotion a version shipped as the cause (D2)", () => {
+  const cands = [{ type: "version-improvement", skill: "execution", version_from: "0.11.0",
+    version_to: "0.12.0", delta_pct: -40, delta_dollars: -12, sessions_sampled: 4 }];
+  const [w] = winCandidates(cands, [{ pluginVersion: "0.12.0", culpritId: "win:cheap-exec" }]);
+  assert.deepEqual(w.cause, ["win:cheap-exec"]);
+  const [u] = winCandidates(cands, []);
+  assert.equal(u.cause, null);
+});
+
 const GH_RESPONSE = JSON.stringify([
   { number: 7, title: "[culprit:partial-evidence-capture] evidence capture", labels: [{ name: "from-doctor" }, { name: "culprit:partial-evidence-capture" }], createdAt: "2026-08-01T00:00:00Z", closedAt: "2026-08-07T00:00:00Z", state: "CLOSED" },
   { number: 8, title: "[culprit:reviewer-role-confusion] roles", labels: [{ name: "from-doctor" }, { name: "culprit:reviewer-role-confusion" }], createdAt: "2026-08-03T00:00:00Z", closedAt: null, state: "OPEN" },
@@ -820,6 +830,78 @@ test("the At a glance percentage column carries no $ glyph over a percent (issue
   assert.match(glance, /workload-adj cost Δ% \(derived\)/, "the honest percentage header is missing");
 });
 
+test("changelogEntry returns a version's body bullets, or null when absent", () => {
+  const cl = "# Changelog\n\n## 0.12.0 — 2026-08-07\n\n- feat(x): a thing\n- fix(y): another\n\n## 0.11.0 — 2026-08-05\n\n- fix\n";
+  assert.deepEqual(changelogEntry(cl, "0.12.0"), ["- feat(x): a thing", "- fix(y): another"]);
+  assert.equal(changelogEntry(cl, "0.9.9"), null);
+});
+
+test("regressionAttribution cites the changelog only when no promotion explains the regression (QC4)", () => {
+  const cl = "# Changelog\n\n## 0.12.0 — 2026-08-07\n\n- feat(x): a thing\n";
+  const candidate = { type: "version-regression", skill: "planning", version_from: "0.11.0", version_to: "0.12.0" };
+  // No matching promotion → a correlational citation of the version's own entry.
+  const attr = regressionAttribution(candidate, [], cl);
+  assert.equal(attr.correlational, true);
+  assert.equal(attr.version, "0.12.0");
+  assert.deepEqual(attr.entry, ["- feat(x): a thing"]);
+  // A promotion that shipped a culprit fix for the regressed-to version → revertCandidates owns it.
+  assert.equal(regressionAttribution(candidate, [{ pluginVersion: "0.12.0", culpritId: "a-culprit" }], cl), null);
+});
+
+// A version-regression the plugin's own promotions do not explain regresses "around the time of" a
+// release; the render cites that release's changelog entry, labelled correlational and lower
+// confidence than a revertCandidates hit (issue D1, QC4).
+const REGRESSION_CORPUS = [
+  sum({ id: "o1", pluginVersion: "0.11.0", costByStage: { planning: 1 }, costUSD: 1 }),
+  sum({ id: "o2", pluginVersion: "0.11.0", costByStage: { planning: 1 }, costUSD: 1 }),
+  sum({ id: "o3", pluginVersion: "0.11.0", costByStage: { planning: 1 }, costUSD: 1 }),
+  sum({ id: "n1", pluginVersion: "0.12.0", costByStage: { planning: 10 }, costUSD: 10 }),
+  sum({ id: "n2", pluginVersion: "0.12.0", costByStage: { planning: 10 }, costUSD: 10 }),
+  sum({ id: "n3", pluginVersion: "0.12.0", costByStage: { planning: 10 }, costUSD: 10 }),
+];
+
+test("a version-regression with no explaining promotion carries a correlational changelog citation", () => {
+  const out = renderReport(REGRESSION_CORPUS, ctx());
+  const anomalies = out.slice(out.indexOf("## Cost anomalies"), out.indexOf("## Previously promoted"));
+  assert.match(anomalies, /- CANDIDATE: version-regression skill=planning 0\.11\.0->0\.12\.0/);
+  assert.match(anomalies, /↳ correlated change \(unverified\):/);
+});
+
+test("a version-regression a promotion already explains carries no correlational citation", () => {
+  const out = renderReport(REGRESSION_CORPUS, ctx({ promotions: [{ pluginVersion: "0.12.0", culpritId: "a-culprit" }] }));
+  const anomalies = out.slice(out.indexOf("## Cost anomalies"), out.indexOf("## Previously promoted"));
+  assert.match(anomalies, /- CANDIDATE: version-regression skill=planning 0\.11\.0->0\.12\.0/);
+  assert.ok(!/↳ correlated change \(unverified\):/.test(anomalies), "revertCandidates owns a promotion-sourced regression; no correlational line");
+});
+
+// A detected win (a version-improvement) is no longer dropped: after the wins table the report
+// renders a positive Actionability line pointing at /devcycle:learn to mine WHY it improved, and
+// names the promotion that shipped with the improved version as the (correlational) cause (D2, QC4).
+const IMPROVEMENT_CORPUS = [
+  sum({ id: "o1", pluginVersion: "0.11.0", costByStage: { execution: 10 }, costUSD: 10 }),
+  sum({ id: "o2", pluginVersion: "0.11.0", costByStage: { execution: 10 }, costUSD: 10 }),
+  sum({ id: "o3", pluginVersion: "0.11.0", costByStage: { execution: 10 }, costUSD: 10 }),
+  sum({ id: "n1", pluginVersion: "0.12.0", costByStage: { execution: 5 }, costUSD: 5 }),
+  sum({ id: "n2", pluginVersion: "0.12.0", costByStage: { execution: 5 }, costUSD: 5 }),
+  sum({ id: "n3", pluginVersion: "0.12.0", costByStage: { execution: 5 }, costUSD: 5 }),
+];
+
+test("a detected win renders an investigate & generalize Actionability line citing its promotion (D2)", () => {
+  const out = renderReport(IMPROVEMENT_CORPUS, ctx({ promotions: [{ pluginVersion: "0.12.0", culpritId: "win:cheap-exec" }] }));
+  const wins = out.slice(out.indexOf("## Your wins"), out.indexOf("## Cost anomalies"));
+  assert.match(wins, /Actionability — .*investigate & generalize/);
+  assert.match(wins, /\/devcycle:learn/);
+  assert.match(wins, /execution 0\.11\.0→0\.12\.0/);
+  assert.match(wins, /shipped: win:cheap-exec/);
+});
+
+test("a detected win with no explaining promotion still surfaces, marked unattributed (D2)", () => {
+  const out = renderReport(IMPROVEMENT_CORPUS, ctx());
+  const wins = out.slice(out.indexOf("## Your wins"), out.indexOf("## Cost anomalies"));
+  assert.match(wins, /Actionability — .*investigate & generalize/);
+  assert.match(wins, /unattributed — investigate manually/);
+});
+
 test("the report renders observed workload and outcome families, each metric tagged observed", () => {
   const workload = {
     requestKind: "feature", filesChanged: 4, insertions: 80, deletions: 20,
@@ -890,12 +972,12 @@ test("every rendered metric column in the pre-existing tables is tagged observed
   );
 });
 
-test("compliance candidates carry the source session's version range (spec C5)", () => {
+test("compliance candidates carry a session count like version-regression (#128)", () => {
   const out = renderReport([
     sum({ id: "z", pluginVersion: "0.12.0",
-      complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5 }] }),
+      complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5, sessions_sampled: 1 }] }),
   ], ctx());
-  assert.match(out, /CANDIDATE: inherited-model inherited=2\/5 versions=\[0\.12\.0\.\.0\.12\.0\]/);
+  assert.match(out, /CANDIDATE: inherited-model inherited=2\/5 sessions=1 versions=\[0\.12\.0\.\.0\.12\.0\]/);
 });
 
 test("every section carries a one-line gloss", () => {
@@ -954,7 +1036,7 @@ const COVERAGE_CORPUS = [
     cacheBand: { point: 4, low: 3, high: 6, fallbackShare: 0.5, collapsed: false },
     impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
     culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
-    complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5 }],
+    complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5, sessions_sampled: 1 }],
   }),
   coverageSession({
     id: "22222222", costUSD: 15, costByStage: { execution: 5, planning: 10 },
@@ -997,7 +1079,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     // needle that stopped at the Δ column still matched after the Trend column was deleted.
     "| partial-evidence-capture | friction | $6.00 | 2 | first seen | insufficient data | 0.12.0..0.12.0 | legacy |",
     // Compliance — now version-scoped from the source session (spec C5)
-    "- CANDIDATE: inherited-model inherited=2/5 versions=[0.12.0..0.12.0]",
+    "- CANDIDATE: inherited-model inherited=2/5 sessions=1 versions=[0.12.0..0.12.0]",
     // Your wins: a win event, and a version-over-version improvement
     "| first-round-clean-accept | $9.00 | 3 |",
     "| execution 0.11.0→0.12.0 | $5.00 | 4 | down |",
@@ -1017,7 +1099,8 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "5 dispatched, 2 without an explicit model",
     `| panel | 7 | $178.00 | $15.00 | ${COVERAGE_QUALITY_TEXT} |`,
     `| 0.12.0 | 4 | $145.00 | $15.00 | 40000 | ${COVERAGE_QUALITY_TEXT} |`,
-    "Direction of travel: up (36.4% median cost, oldest to newest known version)",
+    // No session in this fixture carries a runId, so no run projection exists to score (#127).
+    "Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)",
     "session 22222221 — turns 20 (main 15, subagent 5), depth median 40000 max 60000, cost $15.00, " +
       "models [claude-opus-5], tools [Read:2], quality: unavailable (no run record) " +
       "[stage costs inferred — forward-filled, no run record]",
@@ -1081,30 +1164,67 @@ test("compiled knowledge and the shipped column render empty rather than throwin
 // formatReport, which main() no longer prints — so the line a reader actually sees could have
 // been dropped without failing anything.
 test("the rendered report states the corpus direction of travel, under the cohort table it summarises", () => {
+  // Normalized (#127): the trend only fires within one matched (profile|requestKind|
+  // workloadBand) cohort, reliable (n>=3) on both ends — so every run below shares one workload.
+  const wl = { requestKind: "feature", insertions: 100, deletions: 100, plannedTaskCount: 3 };
+  const run = (id, version, cost) => sum({
+    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough",
+    costUSD: cost, workload: wl,
+  });
   const out = renderReport([
-    sum({ id: "aaaaaaa1", pluginVersion: "0.11.0", costUSD: 10, costByStage: { execution: 10 } }),
-    sum({ id: "aaaaaaa2", costUSD: 5, costByStage: { execution: 5 } }),
+    run("a", "0.11.0", 10), run("b", "0.11.0", 10), run("c", "0.11.0", 10),
+    run("d", "0.12.0", 5), run("e", "0.12.0", 5), run("f", "0.12.0", 5),
   ], ctx());
-  const line = "Direction of travel: down (-50.0% median cost, oldest to newest known version)";
-  assert.ok(out.includes(line), "the shipped report states no direction of travel");
-  assert.ok(out.indexOf("### Total cost by version") < out.indexOf(line), "the direction precedes the table it summarises");
-  assert.ok(out.indexOf(line) < out.indexOf("### Per-session detail"));
+  const directionAt = out.indexOf("Direction of travel:");
+  assert.ok(directionAt !== -1, "the shipped report states no direction of travel");
+  const line = out.slice(directionAt, out.indexOf("\n", directionAt));
+  assert.match(line, /Direction of travel: down \(-50\.0% median cost, .+, 0\.11\.0→0\.12\.0\)/);
+  assert.ok(out.indexOf("### Total cost by version") < directionAt, "the direction precedes the table it summarises");
+  assert.ok(directionAt < out.indexOf("### Per-session detail"));
 });
 
 test("one known version is insufficient data, never a flat trend", () => {
-  const out = renderReport([sum()], ctx());
-  assert.ok(out.includes("Direction of travel: insufficient data (need at least two known versions)"));
+  // Even a reliable (n>=3) cohort on a single version cannot show a trend — a trend needs two.
+  const wl = { requestKind: "feature", insertions: 10, deletions: 5, plannedTaskCount: 1 };
+  const run = (id) => sum({
+    id, runId: id.padEnd(16, "0"), pluginVersion: "0.12.0", profile: "thorough",
+    costUSD: 1, workload: wl,
+  });
+  const out = renderReport([run("a"), run("b"), run("c")], ctx());
+  assert.ok(out.includes("Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)"));
 });
 
 test("an in-flight session cannot set the direction of travel", () => {
-  // A part-recorded session carries part of its cost, so letting it open a newest cohort would
-  // report an improvement the corpus never made.
+  // A part-recorded session carries part of its cost, so letting it count toward a version's
+  // reliable-cohort size (n>=3) would report a trend the corpus never reliably made.
+  const wl = { requestKind: "feature", insertions: 100, deletions: 100, plannedTaskCount: 3 };
+  const run = (id, version, cost, over = {}) => sum({
+    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough",
+    costUSD: cost, workload: wl, ...over,
+  });
   const out = renderReport([
-    sum({ id: "aaaaaaa1", pluginVersion: "0.11.0", costUSD: 10, costByStage: { execution: 10 } }),
-    sum({ id: "aaaaaaa2", costUSD: 5, costByStage: { execution: 5 } }),
-    sum({ id: "aaaaaaa3", pluginVersion: "0.13.0", costUSD: 90, costByStage: { execution: 90 }, inFlight: true }),
+    run("a", "0.11.0", 10), run("b", "0.11.0", 10), run("c", "0.11.0", 10),
+    run("d", "0.12.0", 5), run("e", "0.12.0", 5),
+    run("f", "0.12.0", 90, { inFlight: true }),
   ], ctx());
-  assert.ok(out.includes("Direction of travel: down (-50.0% median cost, oldest to newest known version)"));
+  assert.ok(out.includes("Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)"));
+});
+
+test("direction of travel normalizes and never anchors on an n<3 endpoint (#127)", () => {
+  // Same workload on every run (mirrors the At-a-glance test :793-814) so runAggregates derives
+  // one matched cohort; requestKind/workloadBand come from `workload`, never set directly.
+  const wl = { requestKind: "feature", insertions: 100, deletions: 100, plannedTaskCount: 3 };
+  const run = (id, version, cost) => sum({
+    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough",
+    costUSD: cost, workload: wl,
+  });
+  const out = renderReport([
+    run("a", "0.10.0", 1), run("b", "0.10.0", 1),                            // n=2 outlier — ignored
+    run("c", "0.11.0", 10), run("d", "0.11.0", 10), run("e", "0.11.0", 10),  // n=3 reliable
+    run("f", "0.12.0", 13), run("g", "0.12.0", 13), run("h", "0.12.0", 13),  // n=3 reliable, +30%
+  ], ctx());
+  assert.match(out, /Direction of travel: up \(\+?30\.0% median/);
+  assert.doesNotMatch(out, /900\.0%|1200\.0%/);
 });
 
 test("an unavailable outer loop renders unavailable, not zeros", () => {

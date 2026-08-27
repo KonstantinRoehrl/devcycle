@@ -5,6 +5,23 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-08-26 — Command ceiling raised 8→9 for /devcycle:reconcile
+
+**Decision:** `COMMAND_CEILING` in `scripts/validate.mjs` is raised from **8** to **9** to admit
+`commands/reconcile.md`, the deliberate ninth command. `reconcile` triages a pull request's
+review comments into fixes and consented replies, following
+`playbooks/receiving-review.md`. It is `confirm-first` and model-invocable (like `cycle`), and
+carries no `disable-model-invocation` frontmatter. The raise, the command file, and this entry
+land in the same change.
+
+**Why:** the ceiling is a regression guard so an added verb is a deliberate surface decision, not
+an incidental file addition. `reconcile` earns its own verb rather than folding into `review` for
+the same reason `continue` stayed separate from `cycle`: the call site names the intent —
+reconciling an existing PR's review, not producing new findings — where an argument-shape rule on
+`review` would only state that difference after the fact.
+
+**Supersedes:** the ceiling of **8** recorded when `maintain` landed as the eighth command.
+
 ## 2026-08-25 — surfaceTotal corrected and raised for the references index
 
 **Decision:** `surfaceTotal` in `tests/fixtures/surface-budget.json` is raised to **4,504** to

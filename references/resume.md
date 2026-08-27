@@ -37,6 +37,8 @@ cycle appends to the same record rather than starting a second one.
 `configured:` records what configuration was written for this repo and is carried
 forward unchanged when a new cycle reuses the file; `references/config.md` owns what
 its values mean.
+`updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`
+taken when the field is written — never a narrated or estimated time.
 
 **The ownership check, run before trusting anything else in the file.** `root:` and
 `request:` pin it to one project and one goal, so every reader asks whether the file
@@ -105,13 +107,15 @@ so neither command carries a second copy.
 | `on-device` | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` |
 | `fast-path` | `${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md` (its Resume section) |
 | `sweep` | `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md` (its Resume section) |
+| `receiving-review` | `${CLAUDE_PLUGIN_ROOT}/playbooks/receiving-review.md` — a standalone `reconcile` stage, re-entered per §6.6 of its own flow; not part of the pipeline walk |
 | `finish` | `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
 
 `done` has no row: a closed cycle resumes at nothing, and `/devcycle:cycle` reuses its state file
 rather than resuming it.
 
 On resume the stage keeps the `startedAt` it was entered with (the `updated:` timestamp recorded
-at entry), so a resumed session's cost attributes to the resumed stage per
+at entry from `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`, never a narrated estimate), so
+a resumed session's cost attributes to the resumed stage per
 `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, not to `devcycle:continue`.
 
 ## Resuming a wave's per-task position

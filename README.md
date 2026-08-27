@@ -19,7 +19,7 @@ counterparts only at the `thorough` profile.
 ```mermaid
 ---
 title: devcycle — where to start
-accDescr: Command-level map of devcycle's eight slash commands. /devcycle:onboard scaffolds a new repo before the first cycle; /devcycle:cycle runs the guided pipeline through Scope/Design, Plan, Build, Review, and Ship; /devcycle:continue resumes a stopped cycle; and /devcycle:review, /devcycle:doctor, /devcycle:verify, /devcycle:learn, and /devcycle:maintain each run standalone at any time.
+accDescr: Command-level map of devcycle's nine slash commands. /devcycle:onboard scaffolds a new repo before the first cycle; /devcycle:cycle runs the guided pipeline through Scope/Design, Plan, Build, Review, and Ship; /devcycle:continue resumes a stopped cycle; and /devcycle:review, /devcycle:doctor, /devcycle:verify, /devcycle:learn, /devcycle:maintain, and /devcycle:reconcile each run standalone at any time.
 ---
 flowchart LR
     CYCLE(["/devcycle:cycle"]):::tool
@@ -30,6 +30,7 @@ flowchart LR
     VERIFY(["/devcycle:verify"]):::tool
     LEARN(["/devcycle:learn"]):::tool
     MAINTAIN(["/devcycle:maintain"]):::tool
+    RECONCILE(["/devcycle:reconcile"]):::tool
 
     ONBOARD -. "first, in a new repo" .-> CYCLE
     CYCLE --> SCOPE["Scope / Design"]:::stage
@@ -45,6 +46,7 @@ flowchart LR
     VERIFY -. "standalone, anytime" .-> SHIP
     LEARN -. "standalone, anytime" .-> SHIP
     MAINTAIN -. "standalone, anytime" .-> SHIP
+    RECONCILE -. "standalone, anytime" .-> SHIP
 
     classDef stage fill:#EEEDFE,stroke:#534AB7,color:#3C3489;
     classDef tool fill:#E1F5EE,stroke:#0F6E56,color:#085041,stroke-dasharray:5 5;
@@ -52,7 +54,7 @@ flowchart LR
 ```
 Command-level only — for stage internals, see `docs/pipeline/`.
 
-Those eight commands are devcycle's entire surface — everything else it ships is machinery they
+Those nine commands are devcycle's entire surface — everything else it ships is machinery they
 load. The full stage-level pipeline is in [`docs/pipeline/`](docs/pipeline/README.md).
 
 - [Install](#install)

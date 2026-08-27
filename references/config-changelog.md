@@ -81,6 +81,16 @@ marker with the version the change lands in, since only the release computes tha
   values: [standard, all-local, all-tracked]
   default: standard
   note: "settles which devcycle artifacts a host repo commits — lessons and promotions tracked, single-run specs and plans kept local; the repo's own .gitignore always wins"
+- version: "0.17.0"
+  change: added
+  key: learnStalenessSessions
+  default: 5
+  note: "one of two non-profile integer knobs gating the finish stage's /devcycle:learn staleness nudge (learnStalenessDays alongside it); whichever threshold crosses first triggers the one-line nudge"
+- version: "0.17.0"
+  change: added
+  key: learnStalenessDays
+  default: 14
+  note: "days since the last /devcycle:learn before the finish stage nudges; paired with learnStalenessSessions, whichever crosses first"
 ```
 
 ## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)
