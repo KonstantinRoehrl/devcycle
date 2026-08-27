@@ -162,6 +162,31 @@
       },
       "required": ["kind", "runId", "stage", "lens", "cost"],
       "additionalProperties": false
+    },
+    {
+      "title": "reconcile-reply",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "reconcile-reply" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "pr": { "type": "string", "pattern": "^[0-9]+$" },
+        "commentId": { "type": "string", "pattern": "^[0-9]+$" },
+        "replyHash": { "type": "string", "pattern": "^[0-9a-z]+$" }
+      },
+      "required": ["kind", "runId", "pr", "commentId", "replyHash"],
+      "additionalProperties": false
+    },
+    {
+      "title": "reconcile-resolve",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "reconcile-resolve" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "pr": { "type": "string", "pattern": "^[0-9]+$" },
+        "threadId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["kind", "runId", "pr", "threadId"],
+      "additionalProperties": false
     }
   ]
 }

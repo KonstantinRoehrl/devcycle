@@ -10,3 +10,5 @@
 {"kind":"event","runId":"0f1e2d3c4b5a6978","event":"user-correction-at-gate","stage":"planning","task":"3","culprit":null,"ts":"2026-08-07T10:05:00Z"}
 {"kind":"workload","runId":"0f1e2d3c4b5a6978","requestKind":"feature","filesChanged":3,"filesCreated":1,"filesDeleted":0,"insertions":42,"deletions":7,"plannedTaskCount":2,"waveCount":1}
 {"kind":"lens-cost","runId":"0f1e2d3c4b5a6978","stage":"maintain","lens":"abstraction","cost":0.42}
+{"kind":"reconcile-reply","runId":"0f1e2d3c4b5a6978","pr":"134","commentId":"555","replyHash":"9xk2"}
+{"kind":"reconcile-resolve","runId":"0f1e2d3c4b5a6978","pr":"134","threadId":"PRRT_kwDOabc123"}
