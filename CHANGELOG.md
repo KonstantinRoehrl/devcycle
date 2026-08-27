@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.0 — 2026-08-27
+
+- feat(devcycle): add the reconcile command and harden the learn/doctor loop
+
 ## 0.16.1 — 2026-08-26
 
 - fix(resume): find a gitignored .devcycle/state.md on first resume
