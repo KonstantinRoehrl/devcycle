@@ -4,6 +4,13 @@
 
 - fix(config): use manifest type "number" so the plugin loads on update
 
+**Patch — 0.17.0 could not load on update.** The 0.17.0 manifest declared
+`userConfig.learnStalenessSessions` and `learnStalenessDays` with type `"integer"`, which
+Claude Code's manifest validator rejects (it allows only `string` | `number` | `boolean` |
+`directory` | `file`), so the plugin failed to load for anyone who updated. Both knobs are now
+typed `"number"`. `scripts/validate.mjs` is hardened to reject any `userConfig` type outside the
+allowed set, so an out-of-range type is caught in CI rather than at plugin-load time.
+
 ## 0.17.0 — 2026-08-27
 
 - feat(devcycle): add the reconcile command and harden the learn/doctor loop
