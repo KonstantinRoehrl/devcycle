@@ -490,19 +490,42 @@ export function reviewDepthCohortTable(summaries) {
   });
 }
 
-// One aggregate statement of where the corpus is headed, oldest known version to newest,
-// reusing versionCohorts' own grouping and compareVersions' own sort rather than
-// re-implementing either (per-version/per-skill deltas already exist in emitCandidates below;
-// this is the roll-up neither of those provides).
-export function corpusDirectionOfTravel(settled) {
-  const cohorts = versionCohorts(settled);
-  const known = [...cohorts.keys()].filter((v) => v !== "unknown").sort(compareVersions);
-  if (known.length < 2) return { direction: "insufficient-data", deltaPct: null };
-  const first = median(cohorts.get(known[0]).dollars);
-  const last = median(cohorts.get(known[known.length - 1]).dollars);
-  if (first === 0) return { direction: "insufficient-data", deltaPct: null };
-  const deltaPct = ((last - first) / first) * 100;
-  return { direction: deltaPct > 1 ? "up" : deltaPct < -1 ? "down" : "flat", deltaPct };
+const DIRECTION_MIN_COHORT = 3; // below this the confidence column flags a version unreliable (#127)
+
+// Normalized like every other cross-version figure (issue #127): hold profile|requestKind|
+// workloadBand constant by scoring within one matched cohort, and never anchor an endpoint on a
+// version the confidence column flags unreliable (n<3) — widen inward to the nearest reliable
+// version, or report no reliable trend. Reuses matchKeyOf/median/pctDelta/compareVersions (QC2).
+export function corpusDirectionOfTravel(runs) {
+  const scored = (runs ?? []).filter((r) => r.requestKind != null && r.workloadBand != null);
+  const byKey = new Map();
+  for (const r of scored) {
+    const perVersion = byKey.get(matchKeyOf(r)) ?? new Map();
+    const arr = perVersion.get(r.version) ?? [];
+    arr.push(r.costUSD);
+    perVersion.set(r.version, arr);
+    byKey.set(matchKeyOf(r), perVersion);
+  }
+  let best = null;
+  for (const [key, perVersion] of byKey) {
+    const reliable = [...perVersion.entries()]
+      .filter(([v, arr]) => v !== "unknown" && arr.length >= DIRECTION_MIN_COHORT)
+      .map(([v]) => v)
+      .sort(compareVersions);
+    if (reliable.length < 2) continue;
+    if (!best || reliable.length > best.reliable.length) best = { key, perVersion, reliable };
+  }
+  if (!best)
+    return { direction: "insufficient-data", deltaPct: null,
+      reason: "no matched cohort spans two versions with n>=3" };
+  const first = median(best.perVersion.get(best.reliable[0]));
+  const last = median(best.perVersion.get(best.reliable[best.reliable.length - 1]));
+  const deltaPct = pctDelta(first, last);
+  if (deltaPct == null)
+    return { direction: "insufficient-data", deltaPct: null,
+      reason: "the oldest reliable cohort has a zero median" };
+  return { direction: deltaPct > 1 ? "up" : deltaPct < -1 ? "down" : "flat", deltaPct,
+    matchKey: best.key, from: best.reliable[0], to: best.reliable[best.reliable.length - 1] };
 }
 
 // A cohort of one is a sample, not a trend. Marked at every render site rather than left for
@@ -1260,11 +1283,12 @@ export function formatReport(summaries) {
         IN_FLIGHT_NOTE,
     );
   lines.push("", "Per-version cohorts:");
-  const direction = corpusDirectionOfTravel(summaries.filter((s) => !s.inFlight));
+  const direction = corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight)));
   lines.push(
     direction.direction === "insufficient-data"
-      ? "direction of travel: insufficient data (need at least two known versions)"
-      : `direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median cost, oldest to newest known version)`
+      ? `direction of travel: insufficient data (${direction.reason})`
+      : `direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
+        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})`
   );
   for (const r of cohortTable(summaries))
     lines.push(
@@ -1385,7 +1409,7 @@ export function buildJsonReport(summaries, ctx = {}) {
     candidates: [...emitCandidates(summaries), ...complianceCandidatesOf(summaries)],
     version_cohorts: cohortTable(summaries),
     review_depth_cohorts: reviewDepthCohortTable(summaries),
-    direction_of_travel: corpusDirectionOfTravel(summaries.filter((s) => !s.inFlight)),
+    direction_of_travel: corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight))),
     inFlight: {
       excluded: summaries.filter((s) => s.inFlight).length,
       thresholdMs: IN_FLIGHT_MS,
@@ -2704,13 +2728,13 @@ export function renderReport(summaries, ctx) {
     ]),
     "no settled sessions in this corpus",
   ));
-  const direction = corpusDirectionOfTravel(summaries.filter((s) => !s.inFlight));
+  const direction = corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight)));
   L.push(
     "",
     direction.direction === "insufficient-data"
-      ? "Direction of travel: insufficient data (need at least two known versions)"
+      ? `Direction of travel: insufficient data (${direction.reason})`
       : `Direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        "cost, oldest to newest known version)",
+        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})`,
   );
 
   section("### Per-session detail", "appendix-per-session-detail");

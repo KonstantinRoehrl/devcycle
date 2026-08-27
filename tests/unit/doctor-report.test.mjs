@@ -1017,7 +1017,8 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "5 dispatched, 2 without an explicit model",
     `| panel | 7 | $178.00 | $15.00 | ${COVERAGE_QUALITY_TEXT} |`,
     `| 0.12.0 | 4 | $145.00 | $15.00 | 40000 | ${COVERAGE_QUALITY_TEXT} |`,
-    "Direction of travel: up (36.4% median cost, oldest to newest known version)",
+    // No session in this fixture carries a runId, so no run projection exists to score (#127).
+    "Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)",
     "session 22222221 — turns 20 (main 15, subagent 5), depth median 40000 max 60000, cost $15.00, " +
       "models [claude-opus-5], tools [Read:2], quality: unavailable (no run record) " +
       "[stage costs inferred — forward-filled, no run record]",
@@ -1081,30 +1082,67 @@ test("compiled knowledge and the shipped column render empty rather than throwin
 // formatReport, which main() no longer prints — so the line a reader actually sees could have
 // been dropped without failing anything.
 test("the rendered report states the corpus direction of travel, under the cohort table it summarises", () => {
+  // Normalized (#127): the trend only fires within one matched (profile|requestKind|
+  // workloadBand) cohort, reliable (n>=3) on both ends — so every run below shares one workload.
+  const wl = { requestKind: "feature", insertions: 100, deletions: 100, plannedTaskCount: 3 };
+  const run = (id, version, cost) => sum({
+    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough",
+    costUSD: cost, workload: wl,
+  });
   const out = renderReport([
-    sum({ id: "aaaaaaa1", pluginVersion: "0.11.0", costUSD: 10, costByStage: { execution: 10 } }),
-    sum({ id: "aaaaaaa2", costUSD: 5, costByStage: { execution: 5 } }),
+    run("a", "0.11.0", 10), run("b", "0.11.0", 10), run("c", "0.11.0", 10),
+    run("d", "0.12.0", 5), run("e", "0.12.0", 5), run("f", "0.12.0", 5),
   ], ctx());
-  const line = "Direction of travel: down (-50.0% median cost, oldest to newest known version)";
-  assert.ok(out.includes(line), "the shipped report states no direction of travel");
-  assert.ok(out.indexOf("### Total cost by version") < out.indexOf(line), "the direction precedes the table it summarises");
-  assert.ok(out.indexOf(line) < out.indexOf("### Per-session detail"));
+  const directionAt = out.indexOf("Direction of travel:");
+  assert.ok(directionAt !== -1, "the shipped report states no direction of travel");
+  const line = out.slice(directionAt, out.indexOf("\n", directionAt));
+  assert.match(line, /Direction of travel: down \(-50\.0% median cost, .+, 0\.11\.0→0\.12\.0\)/);
+  assert.ok(out.indexOf("### Total cost by version") < directionAt, "the direction precedes the table it summarises");
+  assert.ok(directionAt < out.indexOf("### Per-session detail"));
 });
 
 test("one known version is insufficient data, never a flat trend", () => {
-  const out = renderReport([sum()], ctx());
-  assert.ok(out.includes("Direction of travel: insufficient data (need at least two known versions)"));
+  // Even a reliable (n>=3) cohort on a single version cannot show a trend — a trend needs two.
+  const wl = { requestKind: "feature", insertions: 10, deletions: 5, plannedTaskCount: 1 };
+  const run = (id) => sum({
+    id, runId: id.padEnd(16, "0"), pluginVersion: "0.12.0", profile: "thorough",
+    costUSD: 1, workload: wl,
+  });
+  const out = renderReport([run("a"), run("b"), run("c")], ctx());
+  assert.ok(out.includes("Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)"));
 });
 
 test("an in-flight session cannot set the direction of travel", () => {
-  // A part-recorded session carries part of its cost, so letting it open a newest cohort would
-  // report an improvement the corpus never made.
+  // A part-recorded session carries part of its cost, so letting it count toward a version's
+  // reliable-cohort size (n>=3) would report a trend the corpus never reliably made.
+  const wl = { requestKind: "feature", insertions: 100, deletions: 100, plannedTaskCount: 3 };
+  const run = (id, version, cost, over = {}) => sum({
+    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough",
+    costUSD: cost, workload: wl, ...over,
+  });
   const out = renderReport([
-    sum({ id: "aaaaaaa1", pluginVersion: "0.11.0", costUSD: 10, costByStage: { execution: 10 } }),
-    sum({ id: "aaaaaaa2", costUSD: 5, costByStage: { execution: 5 } }),
-    sum({ id: "aaaaaaa3", pluginVersion: "0.13.0", costUSD: 90, costByStage: { execution: 90 }, inFlight: true }),
+    run("a", "0.11.0", 10), run("b", "0.11.0", 10), run("c", "0.11.0", 10),
+    run("d", "0.12.0", 5), run("e", "0.12.0", 5),
+    run("f", "0.12.0", 90, { inFlight: true }),
   ], ctx());
-  assert.ok(out.includes("Direction of travel: down (-50.0% median cost, oldest to newest known version)"));
+  assert.ok(out.includes("Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)"));
+});
+
+test("direction of travel normalizes and never anchors on an n<3 endpoint (#127)", () => {
+  // Same workload on every run (mirrors the At-a-glance test :793-814) so runAggregates derives
+  // one matched cohort; requestKind/workloadBand come from `workload`, never set directly.
+  const wl = { requestKind: "feature", insertions: 100, deletions: 100, plannedTaskCount: 3 };
+  const run = (id, version, cost) => sum({
+    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough",
+    costUSD: cost, workload: wl,
+  });
+  const out = renderReport([
+    run("a", "0.10.0", 1), run("b", "0.10.0", 1),                            // n=2 outlier — ignored
+    run("c", "0.11.0", 10), run("d", "0.11.0", 10), run("e", "0.11.0", 10),  // n=3 reliable
+    run("f", "0.12.0", 13), run("g", "0.12.0", 13), run("h", "0.12.0", 13),  // n=3 reliable, +30%
+  ], ctx());
+  assert.match(out, /Direction of travel: up \(\+?30\.0% median/);
+  assert.doesNotMatch(out, /900\.0%|1200\.0%/);
 });
 
 test("an unavailable outer loop renders unavailable, not zeros", () => {
