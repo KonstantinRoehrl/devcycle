@@ -44,7 +44,7 @@ export function commentKey({ path, line, body } = {}) {
 // the pinned param name, `resolvedThreadIds` holds the REST inline-comment ids (== databaseId) of
 // comments in resolved threads — an inline comment is dropped when its own id is in that set. (The
 // old pull_request_review_id heuristic was wrong: a review can span both resolved and open threads.)
-export function normalizeComments({ inline = [], reviews = [], prLevel = [], resolvedThreadIds = [] } = {}) {
+export function normalizeComments({ inline = [], reviews = [], prLevel = [], resolvedThreadIds = [], threadByComment = {} } = {}) {
   const resolved = new Set(resolvedThreadIds);
   const isResolved = (...ids) => ids.some((x) => x != null && resolved.has(x));
   const out = [];
@@ -61,6 +61,7 @@ export function normalizeComments({ inline = [], reviews = [], prLevel = [], res
       diff_hunk: c.diff_hunk ?? null,
       in_reply_to: c.in_reply_to_id ?? null,
       resolved: false,
+      thread_id: threadByComment[c.id] ?? null,
     });
   }
 
@@ -76,6 +77,7 @@ export function normalizeComments({ inline = [], reviews = [], prLevel = [], res
       diff_hunk: null,
       in_reply_to: null,
       resolved: false,
+      thread_id: null,
     });
   }
 
@@ -91,6 +93,7 @@ export function normalizeComments({ inline = [], reviews = [], prLevel = [], res
       diff_hunk: null,
       in_reply_to: null,
       resolved: false,
+      thread_id: null,
     });
   }
 
@@ -113,6 +116,7 @@ export function wrapPaste(text) {
       diff_hunk: null,
       in_reply_to: null,
       resolved: false,
+      thread_id: null,
     }));
 }
 
@@ -159,7 +163,7 @@ export const defaultGhRunner = (repo, pr, exec = execFileSync) => {
   // it surfaces resolved noise rather than dropping live feedback, so the failure direction is safe.
   const threadQuery =
     "query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){" +
-    "pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved comments(first:100){nodes{databaseId}}}}}}}";
+    "pullRequest(number:$pr){reviewThreads(first:100){nodes{id isResolved comments(first:100){nodes{databaseId}}}}}}}";
   const threads = api([
     "api", "graphql",
     "-f", `query=${threadQuery}`,
@@ -177,7 +181,20 @@ export const defaultGhRunner = (repo, pr, exec = execFileSync) => {
   } catch {
     resolvedThreadIds = [];
   }
-  return { inline, reviews, prLevel, resolvedThreadIds };
+  let threadByComment = {};
+  try {
+    const root = threads?.data?.repository ?? threads?.repository;
+    const nodes = root?.pullRequest?.reviewThreads?.nodes ?? [];
+    for (const n of nodes) {
+      if (!n?.id) continue;
+      for (const c of n?.comments?.nodes ?? []) {
+        if (c?.databaseId != null) threadByComment[c.databaseId] = n.id;
+      }
+    }
+  } catch {
+    threadByComment = {};
+  }
+  return { inline, reviews, prLevel, resolvedThreadIds, threadByComment };
 };
 
 export const defaultRedactRunner = (dir) =>
@@ -257,9 +274,10 @@ export function intake({
   const reviews = raw.reviews ?? [];
   const prLevel = raw.prLevel ?? [];
   const resolvedThreadIds = raw.resolvedThreadIds ?? [];
+  const threadByComment = raw.threadByComment ?? {};
   const fetched = inline.length + reviews.length + prLevel.length;
 
-  let comments = normalizeComments({ inline, reviews, prLevel, resolvedThreadIds });
+  let comments = normalizeComments({ inline, reviews, prLevel, resolvedThreadIds, threadByComment });
   const resolvedDropped = fetched - comments.length;
 
   comments = redactComments(comments, scratchDir, redactRunner);
