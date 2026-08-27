@@ -812,6 +812,14 @@ test("readObservations rejects a record whose kind is outside the five-value enu
   assert.throws(() => readObservations(root, "bad"), /invalid kind/);
 });
 
+test("readObservations accepts a win-kind record (L2)", () => {
+  const root = realpathSync(repo());
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), "w.json"),
+    JSON.stringify([{ ...OBSERVATION, kind: "win" }]));
+  assert.doesNotThrow(() => readObservations(root, "w"));
+});
+
 test("readObservations rejects a record missing subject", () => {
   const root = realpathSync(repo());
   mkdirSync(observationsDir(root), { recursive: true });

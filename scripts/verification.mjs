@@ -107,7 +107,7 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
       ids.add(slug);
       ids.add(`novel:${slug}`);
     }
-    if (p.rung === "r3" && p.verify && p.verify !== "journal-recurrence") {
+    if (p.rung === "r3" && p.verify && p.verify !== "journal-recurrence" && p.verify !== "journal-reinforcement") {
       const { status, detail: reason } = runCheck(p.verify, { root, timeoutMs, maxBuffer });
       const verdict = VERDICT_BY_STATUS[status] ?? "unmeasurable";
       // Annotate why, so a skipped check, an unrunnable one and an errored one are distinguishable
@@ -119,7 +119,10 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
     const after = eventsAfter(journalEvents, p.landed);
     const runs = runsObserved(after);
     const recurrences = after.filter((e) => e.culprit && ids.has(e.culprit)).length;
-    const verdict = runs === 0 ? "unmeasurable" : recurrences > 0 ? "recurred" : "held";
+    const reinforcement = p.verify === "journal-reinforcement";
+    const verdict = runs === 0 ? "unmeasurable"
+      : reinforcement ? (recurrences > 0 ? "held" : "not-adopted")
+      : (recurrences > 0 ? "recurred" : "held");
     scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: runs, recurrences, detail: null });
     if (verdict === "recurred" && p.rung === "r2") escalation.push({ culpritId: p.culpritId, rung: p.rung, reason: `recurred ${recurrences}×` });
     if (verdict === "held" && (p.rung === "r1" || p.rung === "r2")

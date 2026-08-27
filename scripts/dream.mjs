@@ -45,7 +45,7 @@ export function listObservations(repoRoot) {
 
 // Spec §5.4's five-value enum. A typo here must fail loud rather than silently seeding a
 // garbage grouping key the reduce stage would then cluster on.
-const OBSERVATION_KINDS = new Set(["friction", "correction", "rule-violation", "decision", "contradiction-side"]);
+const OBSERVATION_KINDS = new Set(["friction", "correction", "rule-violation", "decision", "contradiction-side", "win"]);
 
 // Mirrors validatePromotion's style and error-message shape (`scripts/promotions.mjs`, the
 // one validator of the other record shape this engine writes). `subject` and `quote`
