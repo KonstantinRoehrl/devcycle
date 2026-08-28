@@ -96,3 +96,37 @@ test("does not flag a trailing plan-level section absorbed into the last task's 
   const r = runPlan(plan);
   assert.equal(r.status, 0, "a trailing plan-level section must not be scanned as the last task's prose");
 });
+
+test("a genuine reference at the end of a sentence (trailing period) still flags (M1)", () => {
+  // The right-boundary lookahead must accept a TERMINAL period (one that ends a clause) as a
+  // valid boundary, not just reject every "." outright -- over-rejecting a trailing period
+  // reintroduces the unseen-sibling-edit class this check exists to catch.
+  const B_period = "### Task 2: B\n**Files:**\n- Modify: `scripts/rule.mjs`\n\n- [ ] the rule reads scripts/table.mjs.\n\n";
+  const r = runPlan(HEADER + A + B_period + MAP_SAME);
+  assert.equal(r.status, 1, "a path token immediately followed by a terminal sentence period must still flag");
+  assert.match(r.stderr, /Task 2 references scripts\/table\.mjs, which Task 1 edits/);
+});
+
+test("a coincidental path-suffix collision does not flag even when it ends the sentence (table.mjs.bak.)", () => {
+  // A terminal period must be accepted as a boundary only when nothing but whitespace/punctuation
+  // follows it -- ".bak" continues the token into a longer filename, so it must still reject.
+  const B_bak_period = "### Task 2: B\n**Files:**\n- Modify: `scripts/rule.mjs`\n\n- [ ] first back up to scripts/table.mjs.bak.\n\n";
+  const r = runPlan(HEADER + A + B_bak_period + MAP_SAME);
+  assert.equal(r.status, 0, "scripts/table.mjs.bak is a different file than scripts/table.mjs and must not collide, even at end of sentence");
+});
+
+test("the last task's block does not absorb a trailing section's file into its OWN Files declaration (M2)", () => {
+  // aFiles (the editor side) must get the same two bounds the referencer side already has: the
+  // block is bounded at the first "## " heading AND the Files value is split at the first blank
+  // line. Without both bounds, taskFileMap()'s unbounded read for the LAST task absorbs path
+  // tokens from a trailing "## Blast-radius overrides" section into that task's aFiles set, so a
+  // same-wave sibling's prose mention of that trailing-section token gets falsely flagged as
+  // "editing" a file the last task never declared in its own **Files:** field.
+  const T1 = "### Task 1: EDITED\n**Files:**\n- Modify: `scripts/rule.mjs`\n\n- [ ] reads `scripts/shared.mjs`\n\n";
+  const T2_last = "### Task 2: LAST\n**Files:**\n- Modify: `scripts/b.mjs`\n\n- [ ] independent step\n\n";
+  const plan = HEADER + T1 + T2_last + MAP_SAME +
+    "## Blast-radius overrides\n" +
+    "- scripts/shared.mjs — pre-authorized referencer\n";
+  const r = runPlan(plan);
+  assert.equal(r.status, 0, "a trailing plan-level section's file must not be absorbed into the last task's own aFiles set");
+});
