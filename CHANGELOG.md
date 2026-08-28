@@ -4,10 +4,6 @@
 
 - fix(workload): make doctor missing-workload collection progressive and audit-safe (#139)
 
-## Unreleased
-
-- fix(doctor): collect workload progressively via a commit-sensor hook (#139)
-
 **Progressive workload collection (#139).** A new `PostToolUse(Bash)` hook,
 `hooks/workload-sensor.mjs`, re-derives each run's `workload` record from `.devcycle/state.md` and
 git on every commit in an active cycle, replacing the single finish-stage write that only fired when
