@@ -142,6 +142,7 @@ plugin ships. Start there.
 - Contributing, including the golden-path fixture that holds the pipeline's wiring together:
   [`CONTRIBUTING.md`](CONTRIBUTING.md). `scripts/doctor.mjs` re-measures devcycle's own token
   profile from a local Claude Code session corpus, which is how the cost claims are kept honest
-  rather than assumed.
+  rather than assumed; it reads each run's workload from records the `hooks/workload-sensor.mjs`
+  commit-sensor writes on every commit, not from a single finish-stage step.
 
 [superpowers]: https://github.com/obra/superpowers

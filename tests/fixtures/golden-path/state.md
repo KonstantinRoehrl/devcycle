@@ -3,11 +3,13 @@
 - root: /repo
 - branch: topic/example
 - request: an example request, for the structural fixture only
+- kind: feature
 - scope: .devcycle/scope.md
 - audit: none
 - diagnosis: none
 - spec: none
 - plan: none
+- plan-counts: planned=0 waves=0
 - ledger: .devcycle/ledger.md
 - checklist: none
 - run: none

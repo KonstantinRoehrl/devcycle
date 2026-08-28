@@ -106,6 +106,18 @@
       "additionalProperties": false
     },
     {
+      "title": "triage",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "triage" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "requestKind": { "enum": ["feature", "bug", "refactor", "audit", "docs", "chore"] },
+        "entryStage": { "enum": ["scoping", "audit", "diagnosis", "brainstorm", "planning", "fast-path", "sweep"] }
+      },
+      "required": ["kind", "runId", "requestKind", "entryStage"],
+      "additionalProperties": false
+    },
+    {
       "title": "event",
       "type": "object",
       "properties": {

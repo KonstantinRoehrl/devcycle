@@ -526,8 +526,8 @@ test("harvested: commands/state-file-resume — the state file's shape and owner
   const t = read("references/resume.md");
   const template = t.match(/```markdown\n# devcycle state\n([\s\S]*?)```/)?.[1] ?? "";
   const lines = template.trim().split("\n");
-  assert.equal(lines.length, 14, "the state template is no longer 14 lines");
-  for (const field of ["stage", "root", "branch", "request", "scope", "audit", "diagnosis", "spec", "plan", "ledger", "checklist", "run", "configured", "updated"])
+  assert.equal(lines.length, 16, "the state template is no longer 16 lines");
+  for (const field of ["stage", "root", "branch", "request", "kind", "scope", "audit", "diagnosis", "spec", "plan", "plan-counts", "ledger", "checklist", "run", "configured", "updated"])
     assert.ok(lines.some((l) => l.startsWith(`- ${field}:`)), `state field missing: ${field}`);
   assert.ok(template.includes("- ledger: .devcycle/ledger.md"), "the ledger path is not pinned");
   assert.match(t, /The ownership check, run before trusting anything else in the file/);
@@ -1990,4 +1990,31 @@ test("C6: plugin.json, the configuration hub, references/config.md and DESIGN §
     "docs/design/README.md §7's userConfig schema must enumerate exactly the manifest's keys — " +
       "#10 config parity; a schema section that lags the manifest is how docTrackingPolicy drifted"
   );
+});
+
+test("cycle.md writes the kind line and appends a triage record after triage", () => {
+  const t = read("commands/cycle.md");
+  assert.match(t, /- kind: <feature\|bug\|refactor\|audit\|docs\|chore>/,
+    "cycle.md does not add the state-file `kind:` line at triage");
+  assert.match(t, /run-record\.mjs append[^\n]*--kind triage[^\n]*--requestKind[^\n]*--entryStage/,
+    "cycle.md does not append the triage run-record line after triage");
+});
+
+test("planning-waves writes plan-counts into the state file at handoff", () => {
+  assert.match(read("playbooks/planning-waves.md"), /- plan-counts: planned=<[^>]+> waves=<[^>]+>/,
+    "planning-waves.md does not write the `plan-counts:` state line");
+});
+
+test("resume.md documents the kind and plan-counts state lines", () => {
+  const t = read("references/resume.md");
+  assert.match(t, /- kind: <feature\|bug\|refactor\|audit\|docs\|chore>/);
+  assert.match(t, /- plan-counts:/);
+});
+
+test("finishing-the-cycle frames the workload write as a refresh, not the sole collector", () => {
+  const t = read("playbooks/finishing-the-cycle.md");
+  assert.match(t, /commit-sensor|workload-sensor|progressively/,
+    "finish playbook does not mention the progressive/hook collector");
+  assert.match(t, /final refresh|belt-and-suspenders|already written progressively/,
+    "finish playbook does not reframe its own workload write as a refresh");
 });
