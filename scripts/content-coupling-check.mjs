@@ -74,7 +74,15 @@ for (const [waveNum, taskNums] of waves) {
       if (b === a) continue;
       // Exclude B's own **Files:** field from the searched text -- B naming its own files is not
       // coupling. Search only B's brief prose.
-      const bText = blocks.get(b) ?? "";
+      // taskBlocks() runs the LAST task's block from its "### Task N:" heading to end-of-file, so
+      // trailing plan-level "## " sections (Dispatch Map, Blast-radius overrides, ...) after the
+      // last task get absorbed into that task's block text. Bound the block at the first level-2
+      // "## " heading (a "### " task heading has a "#" at column 2, not a space, so it never
+      // matches this anchor) before deriving bFilesRaw/bFilesValue/bProse from it, so a plan-level
+      // section is never scanned as the last task's own brief prose.
+      let bText = blocks.get(b) ?? "";
+      const bPlanLevelBoundary = bText.match(/^## /m);
+      if (bPlanLevelBoundary) bText = bText.slice(0, bPlanLevelBoundary.index);
       const bFilesRaw = filesFieldValue(bText) ?? "";
       // filesFieldValue's terminator stops only at the next **field**, a ### heading, or end of
       // input -- when Files is a task's last field (nothing else declared after it, the shape a

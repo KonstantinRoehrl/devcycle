@@ -83,3 +83,16 @@ test("a genuine full-path reference still flags even alongside coincidental coll
   assert.equal(r.status, 1, "an exact path-token reference must still flag");
   assert.match(r.stderr, /Task 2 references scripts\/table\.mjs, which Task 1 edits/);
 });
+
+test("does not flag a trailing plan-level section absorbed into the last task's block (F4)", () => {
+  // taskBlocks() runs the LAST task's block from its heading to end-of-file, so any trailing
+  // plan-level "## " section (Dispatch Map, Blast-radius overrides, ...) is absorbed into that
+  // last task's text. Task 2 here is clean in its own brief prose, but the trailing
+  // "## Blast-radius overrides" section names Task 1's file `scripts/table.mjs` -- a mention
+  // that belongs to the plan, not to Task 2's brief, and must not be scanned as Task 2's prose.
+  const plan = HEADER + A + B_clean + MAP_SAME +
+    "## Blast-radius overrides\n" +
+    "- scripts/table.mjs — pre-authorized referencer <mentions scripts/table.mjs>\n";
+  const r = runPlan(plan);
+  assert.equal(r.status, 0, "a trailing plan-level section must not be scanned as the last task's prose");
+});
