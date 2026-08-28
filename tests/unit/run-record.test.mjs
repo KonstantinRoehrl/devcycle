@@ -556,6 +556,31 @@ test("reconcile-reply and reconcile-resolve marker kinds validate", () => {
   assert.ok(validate({ kind: "reconcile-reply", runId: "0123456789abcdef", pr: "x", commentId: "5", replyHash: "a" }, reply).length > 0);
 });
 
+test("append --kind triage writes a schema-valid triage line", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-triage-"));
+  const mk = run(["new", "--plugin-version", "0.0.0", "--plugin-sha", "abcdef1",
+    "--profile", "standard"], runs);
+  const runId = mk.stdout.trim();
+  const r = run(["append", "--run", runId, "--kind", "triage",
+    "--requestKind", "bug", "--entryStage", "brainstorm"], runs);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const lines = readFileSync(recordPath(realpathSync(process.cwd()), runId), "utf8")
+    .split("\n").filter(Boolean).map(JSON.parse);
+  const triage = lines.find((o) => o.kind === "triage");
+  assert.deepStrictEqual(triage,
+    { kind: "triage", runId, requestKind: "bug", entryStage: "brainstorm" });
+});
+
+test("append --kind triage rejects a requestKind outside the enum", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-triage-bad-"));
+  const runId = run(["new", "--plugin-version", "0.0.0", "--plugin-sha", "abcdef1",
+    "--profile", "standard"], runs).stdout.trim();
+  const r = run(["append", "--run", runId, "--kind", "triage",
+    "--requestKind", "epic", "--entryStage", "brainstorm"], runs);
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /requestKind/);
+});
+
 test("gitToplevel canonicalizes a linked worktree to the main checkout (#104)", () => {
   const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-")));
   spawnSync("git", ["init", "-q"], { cwd: tempRepo });
