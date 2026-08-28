@@ -51,12 +51,18 @@ for (const line of text.split("\n")) {
 const isOverridden = (b, file, a) =>
   overrides.some((o) => o.b === b && o.a === a && o.file === file);
 
-// A path token is matched with a boundary so a bare word never collides with a filename: the
-// path must be preceded by a delimiter or start-of-token and followed by a non-path char. This
-// is the same precision blast-radius-check uses for basenames.
+// A path token is matched with a boundary so it never collides with a coincidentally similar
+// path: the match must be a COMPLETE path token, bounded on both ends by a non-path-continuation
+// character. Path-continuation characters are [\w.\-/] (word chars, dot, dash, slash) -- so a
+// leading "/" is excluded from the left-boundary class (it would let a longer path like
+// "vendor/scripts/table.mjs" match the shorter "scripts/table.mjs"), and the right boundary is a
+// negative lookahead that rejects any of [\w.\-/] rather than a bare \b -- \b matches before ".",
+// "-", "/", which let "scripts/table.mjs.bak" or "scripts/table.mjs-old" false-collide with
+// "scripts/table.mjs". A bare word (e.g. "tabulate") still never matches a filename it merely
+// contains, matching the same precision blast-radius-check uses for basenames.
 const mentions = (haystack, path) => {
   const esc = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[\\s/'"\`(])${esc}(\\b|$)`, "m").test(haystack);
+  return new RegExp(`(^|[\\s'"\`(])${esc}(?![\\w.\\-/])`, "m").test(haystack);
 };
 
 const violations = [];
