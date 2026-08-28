@@ -636,6 +636,21 @@ test("inline `redaction-allow` exempts a single line from machine-identity class
   }
 });
 
+test("inline `redaction-allow` never exempts a deny-listed term", () => {
+  const term = "quarantineword";
+  const hdir = mkdtempSync(join(tmpdir(), "rh-"));
+  const hashesFile = join(hdir, "h.txt");
+  writeFileSync(hashesFile, createHash("sha256").update(term).digest("hex") + "\n");
+  const dir = makeFixture({ "a.md": `contains ${term} here <!-- redaction-allow -->\n` });
+  try {
+    const out = spawnSync("node", [SCRIPT, "--dir", dir, "--hashes", hashesFile], { encoding: "utf8" });
+    assert.equal(out.status, 1, "a deny-listed term must still fail even on a redaction-allow-marked line");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(hdir, { recursive: true, force: true });
+  }
+});
+
 test("still flags a deny-listed term, read from the hashes file", () => {
   const term = "forbiddenword";
   const dir = makeFixture({
