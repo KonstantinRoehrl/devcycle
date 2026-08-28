@@ -152,6 +152,8 @@ findings: .devcycle/findings/<task-id>-round-<n>.md | none
 lessons: <N matched / M read>
 ```
 
+The reviewer writes its findings file to the named path itself, as the implementer writes its
+report — `references/evidence.md` owns both file-write contracts.
 The coordinator opens a report or findings file only when a decision needs content the
 envelope cannot carry.
 
