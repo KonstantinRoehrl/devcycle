@@ -62,6 +62,12 @@ input being less settled than it reads · **take the offered short path**, only 
 the table · **run the full pipeline**. Declined → the verdict is discarded, the normal
 maturity/kind walk applies, and nothing extra is recorded.
 
+Once confirmed, write `- kind: <the confirmed requestKind>` onto `.devcycle/state.md` — the exact
+form `- kind: <feature|bug|refactor|audit|docs|chore>` — and append the triage run-record line:
+`run-record.mjs append --run <runId> --kind triage --requestKind <feature|bug|refactor|audit|docs|chore> --entryStage <the confirmed entry stage>`.
+This is what makes `requestKind` available to doctor independently of the workload record — the
+non-circular signal the `missing-workload` compliance check needs — written once per cycle.
+
 On a confirmed short path, rewrite the state file with `stage: fast-path`, `stage: sweep`, or
 `stage: audit` and enter that playbook from the walk below. For the sweep this is gate 1 of a
 two-step confirm; the second gate is the concrete file list and verify command, which the sweep
