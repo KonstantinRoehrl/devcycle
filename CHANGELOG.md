@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.2 — 2026-08-28
+
+- fix(workload): make doctor missing-workload collection progressive and audit-safe (#139)
+
 ## Unreleased
 
 - fix(doctor): collect workload progressively via a commit-sensor hook (#139)
