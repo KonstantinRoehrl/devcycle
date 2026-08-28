@@ -1169,6 +1169,17 @@ test("read-only mandate check: an agent naming both commit and push passes", () 
   ok(runValidate(dir));
 });
 
+test("read-only mandate check: a reviewer granting Write for its own findings still passes when it names commit and push", () => {
+  const dir = makePluginFixture();
+  writeInto(
+    dir,
+    "agents/example-reviewer.md",
+    "---\nname: example-reviewer\ntools: Read, Grep, Glob, Bash, Write\n---\n\n" +
+      "Your access is read-only with respect to the working tree and source, apart from its own findings file: never a route to commit, and never a route to push.\n"
+  );
+  ok(runValidate(dir));
+});
+
 test("read-only mandate check: an agent naming commit but not push fails, naming file and word", () => {
   const dir = makePluginFixture();
   readOnlyAgent(dir, "example-reviewer", "Your access is read-only: never a route to committing.\n");

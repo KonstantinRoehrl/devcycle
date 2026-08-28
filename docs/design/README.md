@@ -104,7 +104,7 @@ devcycle/                (public GitHub repo)
 │   └── onboarding-a-repo.md      # bootstrap tier-2 in any repo (see §8)
 ├── agents/                       # L2
 │   ├── implementer.md            # brief-driven implementer template
-│   ├── task-reviewer.md          # per-task reviewer; read-only tools allowlist
+│   ├── task-reviewer.md          # per-task reviewer; read-only apart from its own findings file
 │   ├── red-team-reviewer.md      # adversarial charter; read-only allowlist; spliced into
 │   │                             # review-panel's per-finding verification pass
 │   ├── history-inspector.md      # read-only git-history lens for /devcycle:maintain; bounded traversal
@@ -136,8 +136,11 @@ finish per `gitPolicy`.
 1. **Deterministic green gate.** The implementer's red→green claim is verified by re-running the task's test
    command (coordinator re-run, or Stop hook on the implementer subagent) before "done" is accepted. Evidence,
    not self-report.
-2. **Reviewers structurally read-only.** `task-reviewer` and `red-team-reviewer` declare a `tools:` allowlist
-   (Read/Grep/Glob/Bash) — Edit/Write are structurally absent, not merely forbidden by prose.
+2. **Reviewers structurally read-only.** `task-reviewer` and `red-team-reviewer` declare a `tools:` allowlist;
+   `Edit` is structurally absent from both, not merely forbidden by prose. `red-team-reviewer` stays fully
+   Write-less (Read/Grep/Glob/Bash). `task-reviewer` was given one scoped `Write` (2026-08-28, issue #107) for
+   its own gitignored `.devcycle/findings/<task-id>-round-<n>.md` file only — it remains read-only with
+   respect to the working tree and source, and never gets `Edit` or a write path into source.
 3. **Skill preloading in briefs.** Implementer dispatches inject TDD + relevant repo-convention skill content at
    dispatch time instead of instructing the subagent to invoke skills itself.
 4. **Entry points cannot auto-fire — except `/cycle`, intentionally.** Side-effectful commands and
