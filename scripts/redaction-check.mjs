@@ -21,11 +21,13 @@ import { fileURLToPath } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 
 const args = process.argv.slice(2);
-// --auto-redact is the only valueless flag here; --hashes names a deny-list file and takes one.
-// Declaring that arity is what stops `--dir <clean> --auto-redact <leaky>` from scanning only the
-// clean corpus and printing `redaction: ok` over a leaky one it never opened.
+// --auto-redact and --advisory-identity are the valueless flags here; --hashes names a deny-list
+// file and takes one. Declaring that arity is what stops `--dir <clean> --auto-redact <leaky>`
+// from scanning only the clean corpus and printing `redaction: ok` over a leaky one it never
+// opened.
 const KNOWN_FLAGS = {
   "--file": "value", "--dir": "value", "--hashes": "value", "--auto-redact": "none",
+  "--advisory-identity": "none",
 };
 // Flag parsing lives in cli-flags.mjs, which owns it for every script here. This script keeps its
 // own message prefix and exit code by catching what that module throws: an unknown flag (a typo
@@ -65,6 +67,10 @@ const hashesPath = read("--hashes") ?? join(SCRIPT_DIR, "redaction-hashes.txt");
 // Declared valueless above, so presence in argv is the whole meaning: "rewrite in place before
 // scanning". A token following it is not its value and is refused as an unexpected argument.
 const autoRedact = "--auto-redact" in flags;
+// Downgrades the three machine-identity classes to advisory (reported, exit 0) — for a
+// gitignored local-only corpus (`.devcycle/`) where those forms are the expected shape, not a
+// leak. Deny-listed terms are NEVER downgraded: a real secret is a leak in any corpus.
+const advisoryIdentity = "--advisory-identity" in flags;
 
 // --auto-redact rewrites files in place, and a scan pattern has known false positives (a public
 // UUID, a URL containing "/Users/"). Without an explicit corpus, listFiles() falls back to
@@ -182,6 +188,7 @@ if (files.length === 0) {
 }
 
 const errors = [];
+const advisories = [];
 const rewritten = []; // {f, count} per file --auto-redact actually changed, for the visible summary
 for (const f of files) {
   if (SELF_EXEMPT.includes(f)) continue;
@@ -207,8 +214,18 @@ for (const f of files) {
       rewritten.push({ f, count });
     }
   }
-  for (const cls of new Set(PATTERNS.filter((p) => p.re.test(text)).map((p) => p.class)))
-    errors.push(`${f}: contains ${cls} (redact it)`);
+  // Line-anchored so an inline `redaction-allow` marker can exempt one line from the
+  // machine-identity classes (never from a deny-listed term). Every PATTERNS class is a
+  // machine-identity form, so under --advisory-identity every class match is advisory.
+  const firedClasses = new Set();
+  for (const line of text.split("\n")) {
+    if (line.includes("redaction-allow")) continue;
+    for (const p of PATTERNS) if (p.re.test(line)) firedClasses.add(p.class);
+  }
+  for (const cls of firedClasses) {
+    const msg = `${f}: contains ${cls} (redact it)`;
+    (advisoryIdentity ? advisories : errors).push(msg);
+  }
   for (const token of new Set(text.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? []))
     if (hashes.has(sha(token))) errors.push(`${f}: contains a deny-listed term ("${token[0]}…", redact it)`);
 }
@@ -225,6 +242,15 @@ if (autoRedact) {
       : "redaction-check: auto-redact made no changes\n"
   );
 }
+
+// Advisory machine-identity findings never set the exit code — they are reported so the
+// operator can still choose to --auto-redact a local-only corpus, not blocked. Never the
+// matched text (a log is as public as the repo), only the class and file.
+if (advisories.length)
+  process.stderr.write(
+    "redaction-check: advisory (machine identity in local-only corpus, not blocking):\n" +
+      advisories.map((a) => " - " + a).join("\n") + "\n"
+  );
 
 if (errors.length) {
   console.error("REDACTION CHECK FAILED:\n" + errors.map((e) => " - " + e).join("\n"));
