@@ -11,7 +11,7 @@ records at the top, each written once, in this order:
 
 ```
 Plan: `<the plan path this stage was handed>`
-Branch: `<topic branch>` (cut from `<integration or default branch>`)
+Branch: `<topic branch>` (cut from `<integration or default branch>` at `<sha>`)
 Profile: `<resolved profile>` (evidence tail <N> lines)
 ```
 

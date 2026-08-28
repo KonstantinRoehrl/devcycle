@@ -77,7 +77,13 @@ function main() {
   const head = spawnSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8" });
   if (head.status !== 0) return;
   const sha = head.stdout.trim();
-  if (sha === st.base) return;
+  // Forbid a phantom zero-diff record when HEAD is still at the base commit (stage entered, no
+  // commit yet — GC3). The pipeline records `base` ABBREVIATED (a 7-char sha in state.md), so a
+  // raw `sha === st.base` never matches; normalize `base` to its full sha first. Fail-safe: an
+  // unresolvable/garbage base (rev-parse non-zero) no-ops like every other unrecognized input.
+  const baseFull = spawnSync("git", ["-C", repoRoot, "rev-parse", `${st.base}^{commit}`], { encoding: "utf8" });
+  if (baseFull.status !== 0) return;
+  if (sha === baseFull.stdout.trim()) return;
 
   const cursorPath = join(repoRoot, ".devcycle", "workload-cursor.json");
   let cursor = {};

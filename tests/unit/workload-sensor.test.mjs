@@ -83,6 +83,32 @@ test("writes no phantom zero-diff record before any commit (HEAD == base)", () =
   assert.strictEqual(workloads(runsDir, repo).length, 0);
 });
 
+test("writes no phantom zero-diff record before any commit when the recorded base is abbreviated", () => {
+  // The real pipeline records an ABBREVIATED base sha (this repo's state.md carries a 7-char
+  // sha). A full-string `sha === st.base` compare can never match it, so the phantom-zero guard
+  // must normalize the recorded base to a full sha before comparing.
+  const repo = makeRepo();
+  const full = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  const base = full.slice(0, 7);
+  const runsDir = makeRepo();
+  writeInto(repo, ".devcycle/state.md", stateMd({ base }));
+  const r = callHook(repo, runsDir);
+  assert.strictEqual(r.status, 0);
+  assert.strictEqual(workloads(runsDir, repo).length, 0);
+});
+
+test("writes a workload after a commit when the recorded base is abbreviated", () => {
+  const repo = makeRepo();
+  const base = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim().slice(0, 7);
+  const runsDir = makeRepo();
+  writeInto(repo, ".devcycle/state.md", stateMd({ base }));
+  writeInto(repo, "f.txt", "hello\nworld\n");
+  commitAll(repo, "task 1");
+  const r = callHook(repo, runsDir);
+  assert.strictEqual(r.status, 0);
+  assert.strictEqual(workloads(runsDir, repo).length, 1);
+});
+
 test("does not re-write when HEAD and stage are unchanged since the cursor", () => {
   const { repo, runsDir } = setup();
   callHook(repo, runsDir);
