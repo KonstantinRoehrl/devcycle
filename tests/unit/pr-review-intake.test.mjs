@@ -135,3 +135,34 @@ test("the intake script never calls a mutating gh subcommand", () => {
   // only passes `-F owner=/name=/pr=`, never `body=`) and the three REST reads.
   assert.doesNotMatch(src, /-(?:f|F|-field|-raw-field)\s+["']?body=/);
 });
+
+test("normalizeComments stamps thread_id from threadByComment; null off-thread", () => {
+  const out = normalizeComments({
+    inline: [{ id: 101, path: "a.js", line: 3, body: "x" }, { id: 102, path: "b.js", line: 4, body: "y" }],
+    reviews: [{ id: 201, body: "summary" }],
+    prLevel: [{ id: 301, body: "pr-level" }],
+    resolvedThreadIds: [],
+    threadByComment: { 101: "PRRT_ka" },
+  });
+  const byId = Object.fromEntries(out.map((c) => [c.id, c]));
+  assert.equal(byId[101].thread_id, "PRRT_ka");
+  assert.equal(byId[102].thread_id, null);   // in no thread map entry
+  assert.equal(byId[201].thread_id, null);   // review-summary never has a thread
+  assert.equal(byId[301].thread_id, null);   // pr-level never has a thread
+});
+
+test("defaultGhRunner builds threadByComment from reviewThreads node ids", () => {
+  const calls = [];
+  const exec = (_bin, args) => {
+    calls.push(args);
+    if (args.includes("graphql")) {
+      return JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [
+        { id: "PRRT_z", isResolved: false, comments: { nodes: [{ databaseId: 101 }, { databaseId: 105 }] } },
+      ] } } } } });
+    }
+    return "[]";
+  };
+  const raw = defaultGhRunner("o/n", 7, exec);
+  assert.deepEqual(raw.threadByComment, { 101: "PRRT_z", 105: "PRRT_z" });
+  assert.ok(calls.some((a) => a.join(" ").includes("reviewThreads(first:100){nodes{id ")));
+});

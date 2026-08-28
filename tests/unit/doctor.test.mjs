@@ -16,6 +16,7 @@ import {
   emitComplianceCandidates, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
   reviewDepthCohortTable, deriveEvents, attributedCost, impactScores,
   bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
+  renderReport,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -2158,4 +2159,39 @@ test("formatCandidate keeps versions=[..] for a candidate with no from->to span"
     versions: ["0.12.0", "0.12.0"], dollars: 15, sessions_sampled: 1,
   });
   assert.match(out, /versions=\[0\.12\.0\.\.0\.12\.0\]/);
+});
+
+test("readRunRecords carries file-scoped triage and window-scoped commits onto the record", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runs-triage-commit-"));
+  const slug = mkdtempSync(join(dir, "repo-"));
+  const h = createHash("sha256").update("s1").digest("hex");
+  writeFileSync(join(slug, "r.jsonl"),
+    JSON.stringify({ kind: "run", runId: "00000000000000a1", schemaVersion: 1, pluginVersion: "0.1.0", pluginSha: "abcdef1", repoSlug: "x-00000000", profile: "standard", knobs: {}, startedAt: "2026-08-28T00:00:00Z" }) + "\n" +
+    JSON.stringify({ kind: "triage", runId: "00000000000000a1", requestKind: "bug", entryStage: "brainstorm" }) + "\n" +
+    JSON.stringify({ kind: "session", runId: "00000000000000a1", sessionHash: h }) + "\n" +
+    JSON.stringify({ kind: "commit", runId: "00000000000000a1", taskId: "1", sha: "a".repeat(40) }) + "\n");
+  const rec = readRunRecords(dir).get(h);
+  assert.deepStrictEqual(rec.triage, { requestKind: "bug", entryStage: "brainstorm" });
+  assert.strictEqual(rec.commits.length, 1);
+  assert.strictEqual(rec.commits[0].sha, "a".repeat(40));
+});
+
+test("emitComplianceCandidates: missing-workload fires and stays GC3-silent", () => {
+  const base = { runId: "00000000000000a1", dispatches: [], stages: [] };
+  const commit = { taskId: "1", sha: "a".repeat(40) };
+  const triage = (k) => ({ requestKind: k, entryStage: "brainstorm" });
+  const fire = (rec) => emitComplianceCandidates([], rec).some((c) => c.type === "missing-workload");
+  assert.ok(fire({ ...base, commits: [commit], workload: null, triage: triage("bug") }));
+  assert.ok(!fire({ ...base, commits: [], workload: null, triage: triage("bug") }));
+  assert.ok(!fire({ ...base, commits: [commit], workload: null, triage: triage("audit") }));
+  assert.ok(!fire({ ...base, commits: [commit], workload: { kind: "workload" }, triage: triage("bug") }));
+  assert.ok(!fire({ ...base, commits: [commit], workload: null, triage: null }));
+});
+
+test("renderReport: a missing-workload compliance candidate surfaces a pointer under Workload (observed)", () => {
+  const text = renderReport([
+    { pluginVersion: "0.10.1", costByStage: {}, medianDepth: 10,
+      complianceCandidates: [{ type: "missing-workload", commits: 1, requestKind: "bug", sessions_sampled: 1 }] },
+  ], { repo: "x", today: "2026-08-28", scope: "all" });
+  assert.match(text, /committed work but recorded no workload/);
 });

@@ -1,0 +1,14 @@
+# Composing a gate command through a shell pipe loses the real exit status
+- promotion-type: doc-edit
+- cluster-signature: novel:exit-status-lost-through-shell-pipe|2 occurrences|session 2026-08-14-1
+- files-touched: ~/.claude/devcycle/learnings/devcycle-cc59abf5/lessons.md, ~/.claude/devcycle/learnings/global/lessons.md
+- affected-files: ~/.claude/devcycle/learnings/devcycle-cc59abf5/lessons.md, ~/.claude/devcycle/learnings/global/lessons.md
+- landed: 2026-08-27
+- commit: 
+- plugin-version: 0.17.1
+- sourced-from-memory: false
+- culprit-id: novel:exit-status-lost-through-shell-pipe
+- rung: r2
+- audience: just-me
+- verify: journal-recurrence
+- aliases: 

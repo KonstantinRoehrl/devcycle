@@ -284,3 +284,35 @@ The bare spelling is kept because it is what the frontmatter declares and what a
 change could plausibly pass — a by-hand run confirms the guard admits it today, so the fix does not
 depend on the harness continuing to namespace. Stripping a `<plugin>:` prefix instead was rejected
 because it would also admit another plugin's agent that happens to share the name.
+
+## (f) The `PostToolUse` contract the workload commit-sensor relies on
+
+**What was tried.** `hooks/workload-sensor.mjs` (issue #139) reads its origin and target the same
+way `hooks/block-main-thread-browser.mjs` does — total stdin read, JSON-parsed, non-object shapes
+treated as empty — rather than probing a new mechanism, so this entry corroborates rather than
+re-derives. Verified against the platform docs (code.claude.com/docs/en/hooks.md, `PostToolUse`
+and "Hook input" sections) and against § (e) above, which already established the `agent_type`
+field's presence/absence contract from a live harness reading.
+
+**Exact result.**
+
+- `PostToolUse` fires **after** the matched tool has already run — a hook here observes a
+  completed action, it cannot approve or veto it. The docs state plainly that `PostToolUse` hooks
+  "cannot block the tool call since it has already run"; exit 0 with no stdout is therefore the
+  hook's only correct response to anything it cannot act on (absent state file, non-active stage,
+  no real diff, subagent origin, malformed input) — there is no deny channel to fall back to.
+- The stdin JSON for a `PostToolUse(Bash)` call carries `cwd` (the invoking shell's working
+  directory) and `tool_name`/`tool_input.command` (here always `"Bash"` / the executed command
+  string) alongside the fields already documented in § (e): `agent_type`/`agent_id` are present
+  only when the call originated inside a subagent and absent on the main thread — the sensor reuses
+  that same absent/present read to skip subagent-origin calls without spawning `git`.
+- A plugin's `hooks/hooks.json` `PostToolUse` block is auto-discovered on install/enable exactly
+  like its `PreToolUse` block (no separate registration step), and `${CLAUDE_PLUGIN_ROOT}` resolves
+  in its `command` string the same way § (c) already established for skill/command content.
+
+**Consequence for the plan.** The sensor's fail-safe posture (QC1) is not a defensive choice on top
+of the contract — it is the only posture the contract allows: since `PostToolUse` cannot block or
+retry a tool call, every unrecognized or partial shape it sees must resolve to "no output, exit 0,"
+matching the canonical no-op `hooks/block-main-thread-browser.mjs`'s deny path already models for
+`PreToolUse`. No new probe was required; the existing `agent_type` reading and the `${CLAUDE_PLUGIN_ROOT}`
+substitution both transfer unchanged to this hook.

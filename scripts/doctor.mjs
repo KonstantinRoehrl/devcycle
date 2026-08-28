@@ -662,6 +662,16 @@ export function emitComplianceCandidates(turns, record) {
   const gp = dispatches.filter((d) => d.agentType === "general-purpose").length;
   if (gp > 0) out.push({ type: "general-purpose-search", count: gp, total: dispatches.length, sessions_sampled: 1 });
 
+  // C4 (issue #139): reached execution and committed but recorded no workload — the collection the
+  // commit-sensor hook (and finish's final refresh) should have written. GC3-safe by construction:
+  // no commits => silent; audit => silent (requestKind from the independent triage line, never the
+  // absent workload — the non-circular signal); workload present => silent; and a run predating the
+  // triage capture (no triage line) => silent, excluding every historical orphan by construction.
+  const missingCommits = record.commits ?? [];
+  if (missingCommits.length > 0 && !record.workload && record.triage && record.triage.requestKind !== "audit")
+    out.push({ type: "missing-workload", commits: missingCommits.length,
+      requestKind: record.triage.requestKind, sessions_sampled: 1 });
+
   return out;
 }
 
@@ -800,7 +810,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
       // firstSeen/lastSeen as dead fields). The run line's runId/pluginVersion/profile/knobs/
       // schemaMismatch are file-scoped, not window-scoped: they apply to every window in the
       // file and do not reset on a `session` line.
-      let runId = null, pluginVersion = null, profile = null, knobs = null, schemaMismatch;
+      let runId = null, pluginVersion = null, profile = null, knobs = null, schemaMismatch, triage = null;
       let current = null;
       const windows = new Map(); // sessionHash -> { stages, dispatches, verdicts, events, workloads }, file order
       for (const line of readFileSync(join(dir, repo.name, f), "utf8").split("\n").filter(Boolean)) {
@@ -815,18 +825,20 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         } else if (o.kind === "session") {
           current = o.sessionHash;
           if (!windows.has(current))
-            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [] });
+            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [] });
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
         else if (o.kind === "event") { if (current) windows.get(current).events.push(o); }
         else if (o.kind === "workload") { if (current) windows.get(current).workloads.push(o); }
         else if (o.kind === "lens-cost") { if (current) windows.get(current).lensCosts.push(o); }
+        else if (o.kind === "commit") { if (current) windows.get(current).commits.push(o); }
+        else if (o.kind === "triage") { triage = { requestKind: o.requestKind, entryStage: o.entryStage }; }
       }
       for (const [h, w] of windows) {
         // The run's workload is the last workload line written for the session (a rerun overwrites
         // an earlier estimate); null when the run wrote none (GC3 — workload-unknown, not zero).
-        const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, ...w,
+        const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, triage, ...w,
           workload: w.workloads.at(-1) ?? null };
         const prior = bySession.get(h);
         bySession.set(h, prior
@@ -837,6 +849,8 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
               events: [...prior.events, ...rec.events],
               workloads: [...prior.workloads, ...rec.workloads],
               lensCosts: [...prior.lensCosts, ...rec.lensCosts],
+              commits: [...prior.commits, ...rec.commits],
+              triage: rec.triage ?? prior.triage ?? null,
               workload: rec.workload ?? prior.workload ?? null }
           : rec);
       }
@@ -1186,6 +1200,8 @@ function formatComplianceCandidate(c) {
     return `CANDIDATE: main-thread-browser calls=${c.calls} sessions=${c.sessions_sampled} onDevicePath=${c.onDevicePath}${span} — ${c.note}`;
   if (c.type === "inherited-model")
     return `CANDIDATE: inherited-model inherited=${c.inherited}/${c.total} sessions=${c.sessions_sampled}${span}`;
+  if (c.type === "missing-workload")
+    return `CANDIDATE: missing-workload commits=${c.commits} requestKind=${c.requestKind} sessions=${c.sessions_sampled}${span} — reached execution and committed but recorded no workload (collection gap — the commit-sensor hook should have written it)`;
   return `CANDIDATE: general-purpose-search count=${c.count}/${c.total} sessions=${c.sessions_sampled}${span}`;
 }
 
@@ -2509,6 +2525,7 @@ export function renderReport(summaries, ctx) {
   // The raw observed workload family (spec C3): one row per run that wrote a workload record,
   // its raw counts straight off that record. Runs with no workload record have nothing to
   // observe and drop out (changedLines is null exactly when no record was joined — GC3).
+  const compliance = complianceCandidatesOf(summaries);
   section("## Workload (observed)", "workload-observed");
   L.push(...markdownTable(
     ["Run", "Version", "Profile", "Request kind (observed)", "Band (derived)",
@@ -2522,6 +2539,9 @@ export function renderReport(summaries, ctx) {
       ]),
     "no run carries a workload record yet",
   ));
+  const missingWorkload = compliance.filter((c) => c.type === "missing-workload");
+  if (missingWorkload.length)
+    L.push("", `> ${missingWorkload.length} cycle(s) committed work but recorded no workload — see ### Compliance (missing-workload). A thin or empty table above may reflect that collection gap, not absence of work.`);
 
   section("## Cost by version", "cost-by-version");
   L.push(...markdownTable(
@@ -2617,7 +2637,6 @@ export function renderReport(summaries, ctx) {
   ));
 
   section("### Compliance", "compliance");
-  const compliance = complianceCandidatesOf(summaries);
   L.push(...(compliance.length
     ? compliance.map((c) => `- ${formatComplianceCandidate(c)}`)
     : ["_No rows: no compliance signals in this corpus._"]));

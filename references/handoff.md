@@ -41,6 +41,9 @@ completed in a later `/devcycle:continue` session, whose cost would otherwise la
 window `scripts/doctor.mjs` joins cost to, so a boundary that emits a handoff block without the
 record line leaves that stage's cost unattributable.
 
+The run's `workload` record is not a boundary instruction: the `hooks/workload-sensor.mjs`
+commit-sensor refreshes it on each commit, so no `stage` boundary carries a step to write it.
+
 `Context depth:` is measured, not estimated: at every boundary this file names, run the depth
 probe `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` (`## The stage budget`) owns and copy
 its numbers into the field. A failed probe is written

@@ -17,13 +17,15 @@ transition, in this shape:
 # devcycle state
 - stage: <the stage to RESUME at; the enum lives in commands/cycle.md>
 - root: <absolute repo toplevel this cycle belongs to>
-- branch: <git branch>
+- branch: <git branch> (cut from <base> at <sha>)
 - request: <one line: what this cycle is building/fixing>
+- kind: <feature|bug|refactor|audit|docs|chore>
 - scope: <path or none>
 - audit: <path or none>
 - diagnosis: <path or none>
 - spec: <path or none>
 - plan: <path or none>
+- plan-counts: planned=<n> waves=<n>
 - ledger: .devcycle/ledger.md
 - checklist: <path or none>
 - run: <run id from scripts/run-record.mjs, or none>
@@ -39,6 +41,12 @@ forward unchanged when a new cycle reuses the file; `references/config.md` owns 
 its values mean.
 `updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`
 taken when the field is written — never a narrated or estimated time.
+`kind:` records the confirmed triage request kind and `plan-counts:` the plan's Dispatch-Map
+totals, both read by the `hooks/workload-sensor.mjs` commit-sensor so a cycle's workload is
+captured progressively; both are carried forward on rewrite like the other lines.
+`branch:` carries a `(cut from <base> at <sha>)` annotation whose `<sha>` (the point the topic
+branch was cut) `hooks/workload-sensor.mjs` parses to bound the cycle's diff — so the annotation
+is load-bearing, not decorative: reducing it to a bare branch line would blind the sensor.
 
 **The ownership check, run before trusting anything else in the file.** `root:` and
 `request:` pin it to one project and one goal, so every reader asks whether the file

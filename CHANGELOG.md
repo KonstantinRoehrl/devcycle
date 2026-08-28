@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.17.2 — 2026-08-28
+
+- fix(workload): make doctor missing-workload collection progressive and audit-safe (#139)
+
+**Progressive workload collection (#139).** A new `PostToolUse(Bash)` hook,
+`hooks/workload-sensor.mjs`, re-derives each run's `workload` record from `.devcycle/state.md` and
+git on every commit in an active cycle, replacing the single finish-stage write that only fired when
+the finish stage was reached. The finish-stage append is kept as a belt-and-suspenders final
+refresh, harmless because the last-wins join collapses it onto what the sensor already wrote.
+`scripts/doctor.mjs` now parses the commit and triage run-record lines and flags a committed cycle
+that recorded no workload — never an audit-only or no-commit cycle, where a missing record stays
+*workload-unknown*.
+
 ## 0.17.1 — 2026-08-27
 
 - fix(config): use manifest type "number" so the plugin loads on update
