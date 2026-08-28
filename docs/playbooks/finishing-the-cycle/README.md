@@ -23,7 +23,10 @@ gitignored `.devcycle/` directory and the run-record store — CI's own screen n
 either, so this is their only check, and a non-zero exit stops the stage rather than continuing
 past an unscreened finding — and a workload-signature append (`run-record.mjs workload`) that
 records only counts and enums (request kind, base sha, planned task/wave counts) and never
-paths or prose. The stage's final write to `.devcycle/state.md` sets `stage: done`.
+paths or prose. That append is a final refresh, not the primary collection: the
+`hooks/workload-sensor.mjs` commit-sensor already writes the same record progressively on every
+commit during the run, and the last-wins join makes this closing write harmless. The stage's
+final write to `.devcycle/state.md` sets `stage: done`.
 
 Before offering any cleanup, the stage unconditionally copies this cycle's audit trail —
 `ledger.md` plus the `briefs/`, `evidence/`, `findings/`, and `reports/` directories — into

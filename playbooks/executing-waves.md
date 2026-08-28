@@ -114,6 +114,8 @@ file conflicts these invariants already preserve.)
    committing to the wrong branch. Then, on acceptance: a local commit with a Conventional Commit subject,
    scoped per `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit". Ledger
    `event=committed` with the sha, then `run-record.mjs append --kind commit` with the task id and sha.
+   The `PostToolUse` commit-sensor (`hooks/workload-sensor.mjs`) fires on this commit and writes or
+   refreshes the run's `workload` record from the state file and git — no coordinator action required.
 
 **Trigger: this commit closes the wave.** When no task in the current wave remains undispatched, in
 review, or uncommitted, stop here — before forming the next wave — and follow ## Wave boundaries and

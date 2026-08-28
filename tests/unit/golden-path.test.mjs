@@ -2010,3 +2010,11 @@ test("resume.md documents the kind and plan-counts state lines", () => {
   assert.match(t, /- kind: <feature\|bug\|refactor\|audit\|docs\|chore>/);
   assert.match(t, /- plan-counts:/);
 });
+
+test("finishing-the-cycle frames the workload write as a refresh, not the sole collector", () => {
+  const t = read("playbooks/finishing-the-cycle.md");
+  assert.match(t, /commit-sensor|workload-sensor|progressively/,
+    "finish playbook does not mention the progressive/hook collector");
+  assert.match(t, /final refresh|belt-and-suspenders|already written progressively/,
+    "finish playbook does not reframe its own workload write as a refresh");
+});
