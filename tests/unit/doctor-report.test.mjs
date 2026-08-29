@@ -992,11 +992,14 @@ test("compliance candidates render one aggregated line per type across sessions 
   assert.match(lines[0], /inherited-model inherited=5\/9 sessions=2/);
 });
 
-test("the Workload (observed) warning counts sessions, not candidate lines (#128)", () => {
-  const mk = (id) => sum({ id, pluginVersion: "0.12.0",
-    complianceCandidates: [{ type: "missing-workload", commits: 1, requestKind: "feature", sessions_sampled: 1 }] });
-  const out = renderReport([mk("m1"), mk("m2")], ctx());
+test("the Workload (observed) warning counts sessions, and missing-workload candidates of the same requestKind collapse to one line (#128)", () => {
+  const mk = (id, commits) => sum({ id, pluginVersion: "0.12.0",
+    complianceCandidates: [{ type: "missing-workload", commits, requestKind: "feature", sessions_sampled: 1 }] });
+  const out = renderReport([mk("m1", 1), mk("m2", 2)], ctx());
   assert.match(out, /> 2 cycle\(s\) committed work but recorded no workload/);
+  const lines = out.split("\n").filter((l) => l.includes("CANDIDATE: missing-workload"));
+  assert.equal(lines.length, 1, "two sessions of the same requestKind must render ONE aggregated candidate line, not two n=1 lines");
+  assert.match(lines[0], /missing-workload commits=3 requestKind=feature sessions=2/);
 });
 
 test("every section carries a one-line gloss", () => {

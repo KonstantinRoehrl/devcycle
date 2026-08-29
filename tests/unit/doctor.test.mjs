@@ -2245,3 +2245,30 @@ test("an all-unknown-version cohort carries no version range (#128)", () => {
   assert.equal(c.total, 5);
   assert.ok(!("versions" in c), "an all-unknown cohort must not fabricate a version range");
 });
+
+test("main-thread-browser candidates across sessions aggregate calls and merge onDevicePath (#128)", () => {
+  const summaries = [
+    { id: "d1", pluginVersion: "0.11.0",
+      complianceCandidates: [{ type: "main-thread-browser", calls: 3, onDevicePath: "b/x", note: "some note", sessions_sampled: 1 }] },
+    { id: "d2", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "main-thread-browser", calls: 5, onDevicePath: "a/y", note: "some note", sessions_sampled: 1 }] },
+  ];
+  const out = complianceCandidatesOf(summaries);
+  assert.equal(out.length, 1, "two sessions of one type must fold into one cohort, not two n=1 lines");
+  const [c] = out;
+  assert.equal(c.sessions_sampled, 2, "sessions_sampled is the real cohort count");
+  assert.equal(c.calls, 8, "calls is the sum across sessions, not one member's count");
+  assert.equal(c.onDevicePath, "a/y,b/x", "onDevicePath is the sorted-distinct join of the recorded paths");
+  assert.equal(c.low_confidence, false);
+});
+
+test("main-thread-browser onDevicePath collapses to 'unrecorded' when every session recorded none (#128)", () => {
+  const summaries = [
+    { id: "e1", pluginVersion: "0.11.0",
+      complianceCandidates: [{ type: "main-thread-browser", calls: 1, onDevicePath: null, note: "some note", sessions_sampled: 1 }] },
+    { id: "e2", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "main-thread-browser", calls: 2, onDevicePath: null, note: "some note", sessions_sampled: 1 }] },
+  ];
+  const [c] = complianceCandidatesOf(summaries);
+  assert.equal(c.onDevicePath, "unrecorded", "an all-null onDevicePath cohort must render the literal 'unrecorded'");
+});
