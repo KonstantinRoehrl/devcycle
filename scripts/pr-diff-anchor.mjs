@@ -6,6 +6,7 @@
 // resolved (`gh pr diff …` output and the run's ranked findings), and stays just as offline.
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { parseFlags, requireValue } from "./cli-flags.mjs";
 
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
@@ -86,46 +87,48 @@ export function anchorFinding({ path, line }, index, map) {
   return { anchorable: true, path, line, side: "RIGHT", index };
 }
 
-function parseFlags(argv) {
-  const flags = {};
-  for (let i = 0; i < argv.length; i++) {
-    if (!argv[i].startsWith("--")) continue;
-    flags[argv[i].slice(2)] = argv[i + 1];
-    i++;
-  }
-  return flags;
-}
-
 function die(msg) {
   process.stderr.write(`pr-diff-anchor: ${msg}\n`);
   process.exit(1);
 }
 
+// Flag parsing is owned by cli-flags.mjs (unknown-flag rejection, value-lookahead guard); this CLI
+// declares its arities and reuses it rather than hand-rolling a weaker parser.
+const KNOWN_FLAGS = { "--diff-file": "value", "--findings-file": "value" };
+
 // CLI entry: partition the run's findings against the PR-head diff. `anchored` findings pin to a
 // RIGHT-side line the reviewer can post inline; `degraded` ones (file-only, or a line off every
-// hunk) fall through to the review summary body — printed, never dropped.
+// hunk) fall through to the review summary body — printed, never dropped. Every operator-facing
+// failure (bad flags, an unreadable path, malformed findings JSON) surfaces through die()'s own
+// `pr-diff-anchor:` prefix rather than a raw stack trace.
 function main() {
-  const flags = parseFlags(process.argv.slice(2));
-  if (!flags["diff-file"]) die("--diff-file <path> is required");
-  if (!flags["findings-file"]) die("--findings-file <path> is required");
+  try {
+    const { flags } = parseFlags(process.argv.slice(2), KNOWN_FLAGS);
+    const diffFile = requireValue(flags, "--diff-file");
+    const findingsFile = requireValue(flags, "--findings-file");
+    if (!diffFile) die("--diff-file <path> is required");
+    if (!findingsFile) die("--findings-file <path> is required");
 
-  const diffText = readFileSync(flags["diff-file"], "utf8");
-  const findings = JSON.parse(readFileSync(flags["findings-file"], "utf8"));
-  if (!Array.isArray(findings)) die("--findings-file must contain a JSON array of findings");
+    const diffText = readFileSync(diffFile, "utf8");
+    const findings = JSON.parse(readFileSync(findingsFile, "utf8"));
+    if (!Array.isArray(findings)) die("--findings-file must contain a JSON array of findings");
 
-  const map = parsePatch(diffText);
-  const anchored = [];
-  const degraded = [];
-  findings.forEach((finding, index) => {
-    const result = anchorFinding({ path: finding.path, line: finding.line ?? null }, index, map);
-    if (result.anchorable) {
-      anchored.push({ index, path: result.path, line: result.line, side: result.side });
-    } else {
-      degraded.push({ index, path: finding.path, line: finding.line ?? null, reason: result.reason });
-    }
-  });
+    const map = parsePatch(diffText);
+    const anchored = [];
+    const degraded = [];
+    findings.forEach((finding, index) => {
+      const result = anchorFinding({ path: finding.path, line: finding.line ?? null }, index, map);
+      if (result.anchorable) {
+        anchored.push({ index, path: result.path, line: result.line, side: result.side });
+      } else {
+        degraded.push({ index, path: finding.path, line: finding.line ?? null, reason: result.reason });
+      }
+    });
 
-  process.stdout.write(JSON.stringify({ anchored, degraded }) + "\n");
+    process.stdout.write(JSON.stringify({ anchored, degraded }) + "\n");
+  } catch (err) {
+    die(err.message);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

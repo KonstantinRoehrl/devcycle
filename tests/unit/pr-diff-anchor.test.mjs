@@ -141,3 +141,33 @@ test("CLI partitions an in-hunk finding into anchored (RIGHT) and out-of-hunk / 
   );
   for (const d of out.degraded) assert.ok(d.reason, "a degraded finding must carry a reason");
 });
+
+test("CLI reports malformed findings JSON through its own pr-diff-anchor: error, not a raw stack trace", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pr-diff-anchor-cli-"));
+  const diffFile = join(dir, "diff.patch");
+  const findingsFile = join(dir, "findings.json");
+  writeFileSync(diffFile, TWO_FILE_DIFF);
+  writeFileSync(findingsFile, "{ not valid json");
+
+  const res = spawnSync("node", [SCRIPT, "--diff-file", diffFile, "--findings-file", findingsFile], {
+    encoding: "utf8",
+  });
+  assert.notEqual(res.status, 0, "malformed findings JSON must fail");
+  assert.match(res.stderr, /^pr-diff-anchor: /m, "the error must use the script's own message prefix");
+});
+
+test("CLI rejects an unrecognised flag rather than silently ignoring it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pr-diff-anchor-cli-"));
+  const diffFile = join(dir, "diff.patch");
+  const findingsFile = join(dir, "findings.json");
+  writeFileSync(diffFile, TWO_FILE_DIFF);
+  writeFileSync(findingsFile, JSON.stringify([{ path: "src/a.js", line: 3 }]));
+
+  const res = spawnSync(
+    "node",
+    [SCRIPT, "--diff-file", diffFile, "--findings-file", findingsFile, "--bogus", "x"],
+    { encoding: "utf8" }
+  );
+  assert.notEqual(res.status, 0, "an unrecognised flag must fail rather than be ignored");
+  assert.match(res.stderr, /unrecognised flag --bogus/);
+});
