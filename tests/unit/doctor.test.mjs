@@ -13,7 +13,7 @@ import {
   extractPluginVersion, emitCandidates, configDrift, findTranscriptFiles,
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
-  emitComplianceCandidates, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
+  emitComplianceCandidates, complianceCandidatesOf, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
   reviewDepthCohortTable, deriveEvents, attributedCost, impactScores,
   bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
   renderReport,
@@ -2194,4 +2194,81 @@ test("renderReport: a missing-workload compliance candidate surfaces a pointer u
       complianceCandidates: [{ type: "missing-workload", commits: 1, requestKind: "bug", sessions_sampled: 1 }] },
   ], { repo: "x", today: "2026-08-28", scope: "all" });
   assert.match(text, /committed work but recorded no workload/);
+});
+
+test("compliance candidates of one type across sessions aggregate to one cohort (#128)", () => {
+  const summaries = [
+    { id: "a1", pluginVersion: "0.11.0",
+      complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5, sessions_sampled: 1 }] },
+    { id: "a2", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "inherited-model", inherited: 1, total: 3, sessions_sampled: 1 }] },
+  ];
+  const out = complianceCandidatesOf(summaries);
+  assert.equal(out.length, 1, "two sessions of one type must fold into one cohort, not two n=1 lines");
+  const [c] = out;
+  assert.equal(c.sessions_sampled, 2, "sessions_sampled is the real cohort count");
+  assert.equal(c.inherited, 3);
+  assert.equal(c.total, 8);
+  assert.deepEqual(c.versions, ["0.11.0", "0.12.0"]);
+  assert.equal(c.low_confidence, false);
+});
+
+test("missing-workload cohorts are keyed by requestKind (#128)", () => {
+  const summaries = [
+    { id: "b1", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "missing-workload", commits: 2, requestKind: "feature", sessions_sampled: 1 }] },
+    { id: "b2", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "missing-workload", commits: 3, requestKind: "feature", sessions_sampled: 1 }] },
+    { id: "b3", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "missing-workload", commits: 1, requestKind: "refactor", sessions_sampled: 1 }] },
+  ];
+  const mw = complianceCandidatesOf(summaries).filter((c) => c.type === "missing-workload");
+  assert.equal(mw.length, 2, "two requestKinds stay two cohorts");
+  const feat = mw.find((c) => c.requestKind === "feature");
+  assert.equal(feat.sessions_sampled, 2);
+  assert.equal(feat.commits, 5);
+  const refac = mw.find((c) => c.requestKind === "refactor");
+  assert.equal(refac.sessions_sampled, 1);
+  assert.equal(refac.commits, 1);
+});
+
+test("an all-unknown-version cohort carries no version range (#128)", () => {
+  const summaries = [
+    { id: "c1", pluginVersion: "unknown",
+      complianceCandidates: [{ type: "general-purpose-search", count: 1, total: 2, sessions_sampled: 1 }] },
+    { id: "c2", pluginVersion: "unknown",
+      complianceCandidates: [{ type: "general-purpose-search", count: 2, total: 3, sessions_sampled: 1 }] },
+  ];
+  const [c] = complianceCandidatesOf(summaries);
+  assert.equal(c.sessions_sampled, 2);
+  assert.equal(c.count, 3);
+  assert.equal(c.total, 5);
+  assert.ok(!("versions" in c), "an all-unknown cohort must not fabricate a version range");
+});
+
+test("main-thread-browser candidates across sessions aggregate calls and merge onDevicePath (#128)", () => {
+  const summaries = [
+    { id: "d1", pluginVersion: "0.11.0",
+      complianceCandidates: [{ type: "main-thread-browser", calls: 3, onDevicePath: "b/x", note: "some note", sessions_sampled: 1 }] },
+    { id: "d2", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "main-thread-browser", calls: 5, onDevicePath: "a/y", note: "some note", sessions_sampled: 1 }] },
+  ];
+  const out = complianceCandidatesOf(summaries);
+  assert.equal(out.length, 1, "two sessions of one type must fold into one cohort, not two n=1 lines");
+  const [c] = out;
+  assert.equal(c.sessions_sampled, 2, "sessions_sampled is the real cohort count");
+  assert.equal(c.calls, 8, "calls is the sum across sessions, not one member's count");
+  assert.equal(c.onDevicePath, "a/y,b/x", "onDevicePath is the sorted-distinct join of the recorded paths");
+  assert.equal(c.low_confidence, false);
+});
+
+test("main-thread-browser onDevicePath collapses to 'unrecorded' when every session recorded none (#128)", () => {
+  const summaries = [
+    { id: "e1", pluginVersion: "0.11.0",
+      complianceCandidates: [{ type: "main-thread-browser", calls: 1, onDevicePath: null, note: "some note", sessions_sampled: 1 }] },
+    { id: "e2", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "main-thread-browser", calls: 2, onDevicePath: null, note: "some note", sessions_sampled: 1 }] },
+  ];
+  const [c] = complianceCandidatesOf(summaries);
+  assert.equal(c.onDevicePath, "unrecorded", "an all-null onDevicePath cohort must render the literal 'unrecorded'");
 });

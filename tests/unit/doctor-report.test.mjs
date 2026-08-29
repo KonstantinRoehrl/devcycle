@@ -980,6 +980,28 @@ test("compliance candidates carry a session count like version-regression (#128)
   assert.match(out, /CANDIDATE: inherited-model inherited=2\/5 sessions=1 versions=\[0\.12\.0\.\.0\.12\.0\]/);
 });
 
+test("compliance candidates render one aggregated line per type across sessions (#128)", () => {
+  const out = renderReport([
+    sum({ id: "s1", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5, sessions_sampled: 1 }] }),
+    sum({ id: "s2", pluginVersion: "0.12.0",
+      complianceCandidates: [{ type: "inherited-model", inherited: 3, total: 4, sessions_sampled: 1 }] }),
+  ], ctx());
+  const lines = out.split("\n").filter((l) => l.includes("CANDIDATE: inherited-model"));
+  assert.equal(lines.length, 1, "two sessions of one type must render ONE aggregated candidate line");
+  assert.match(lines[0], /inherited-model inherited=5\/9 sessions=2/);
+});
+
+test("the Workload (observed) warning counts sessions, and missing-workload candidates of the same requestKind collapse to one line (#128)", () => {
+  const mk = (id, commits) => sum({ id, pluginVersion: "0.12.0",
+    complianceCandidates: [{ type: "missing-workload", commits, requestKind: "feature", sessions_sampled: 1 }] });
+  const out = renderReport([mk("m1", 1), mk("m2", 2)], ctx());
+  assert.match(out, /> 2 cycle\(s\) committed work but recorded no workload/);
+  const lines = out.split("\n").filter((l) => l.includes("CANDIDATE: missing-workload"));
+  assert.equal(lines.length, 1, "two sessions of the same requestKind must render ONE aggregated candidate line, not two n=1 lines");
+  assert.match(lines[0], /missing-workload commits=3 requestKind=feature sessions=2/);
+});
+
 test("every section carries a one-line gloss", () => {
   const out = renderReport([sum()], ctx());
   // Each `## ` or `### ` heading (except the two anchored ones, whose gloss precedes the
