@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Validates a devcycle state file against on-disk reality before /devcycle:continue trusts it (#79):
-// every named artifact path (spec/plan/checklist) exists, and stage: is a real enum value.
+// every named artifact path (spec/plan/checklist) exists, stage: is a real enum value, and the
+// recorded branch still exists as a ref (#138).
 import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { isAbsolute, join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -90,6 +91,35 @@ for (const name of ["spec", "plan", "checklist"]) {
   if (NONE.has(value) || value.startsWith("none")) continue;
   if (!existsSync(resolve(value)))
     errors.push(`${name}: recorded artifact does not exist on disk: ${value}`);
+}
+
+// references/resume.md § Settle the branch: the recorded branch is where any committed work
+// lives, so a recorded topic branch that no longer exists as a ref is a leftover from a
+// completed or abandoned cycle — continue.md step 4 would otherwise try to switch onto a
+// branch that is gone. This is stale-class, exactly like a missing artifact. The other case,
+// the branch still exists but the checkout drifted to another branch, is NOT stale: that is
+// the normal resume-switch continue.md step 4 owns, so this stays silent on it and never
+// compares against HEAD.
+const branchRaw = field(text, "branch");
+if (branchRaw !== null) {
+  const branch = branchRaw.split(/\s+/)[0]; // strip the "(cut from <base> at <sha>)" annotation
+  if (!NONE.has(branch)) {
+    const at = dirname(statePath);
+    // Confirm a repo first, then existence — same fail-open posture as the root check and
+    // VALID_STAGES: a precondition the guard cannot confirm never blocks a resume.
+    const inRepo = spawnSync("git", ["-C", at, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" });
+    if (inRepo.status === 0) {
+      const ref = spawnSync(
+        "git",
+        ["-C", at, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
+        { encoding: "utf8" }
+      );
+      if (ref.status !== 0)
+        errors.push(
+          `branch: recorded branch "${branch}" no longer exists — this state file is a leftover from a completed or abandoned cycle`
+        );
+    }
+  }
 }
 
 if (errors.length) {
