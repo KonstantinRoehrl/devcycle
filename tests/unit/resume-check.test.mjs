@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeRepo } from "./helpers.mjs";
+import { makeRepo, sh } from "./helpers.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/resume-check.mjs");
 const run = (statePath) => spawnSync("node", [SCRIPT, "--state", statePath], { encoding: "utf8" });
@@ -288,4 +288,123 @@ test("a bare path is an error, not a silent fallback to the default state file",
   const r = spawnSync("node", [SCRIPT, "somewhere.md"], { encoding: "utf8" });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /resume-check: unexpected argument "somewhere\.md"/);
+});
+
+// --- #138: the branch-existence check ---
+
+test("fails when the recorded branch no longer exists (leftover from a different cycle)", () => {
+  const repo = makeRepo(); // on main
+  try {
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        [
+          "- stage: execution",
+          `- root: ${repo}`,
+          "- branch: feat/long-gone (cut from main at abc1234)",
+          "- spec: none",
+          "- plan: none",
+          "- checklist: none",
+        ].join("\n") + "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stdout + r.stderr, /feat\/long-gone/);
+    assert.match(r.stdout + r.stderr, /no longer exists|leftover/i);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("passes when the recorded branch still exists, even with HEAD on another branch", () => {
+  const repo = makeRepo(); // on main
+  try {
+    sh("git", ["branch", "feat/topic"], { cwd: repo }); // exists; HEAD stays on main
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        [
+          "- stage: execution",
+          `- root: ${repo}`,
+          "- branch: feat/topic (cut from main at abc1234)",
+          "- spec: none",
+          "- plan: none",
+          "- checklist: none",
+        ].join("\n") + "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.equal(r.status, 0, r.stdout + r.stderr); // silent on the resume-drift case
+    assert.doesNotMatch(r.stdout + r.stderr, /branch/i);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("branch: none skips the branch-existence check", () => {
+  const repo = makeRepo();
+  try {
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        ["- stage: planning", `- root: ${repo}`, "- branch: none", "- spec: none", "- plan: none", "- checklist: none"].join("\n") +
+        "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a recorded branch in a non-git directory skips the branch check rather than failing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "resume-check-"));
+  try {
+    const state = makeState(dir, [
+      "- stage: planning",
+      "- branch: feat/whatever (cut from main at abc1234)",
+      "- spec: none",
+      "- plan: none",
+      "- checklist: none",
+    ]);
+    const r = run(state);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a stale branch and a missing artifact are both reported in one exit-1 run", () => {
+  const repo = makeRepo();
+  try {
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        [
+          "- stage: execution",
+          `- root: ${repo}`,
+          "- branch: feat/long-gone (cut from main at abc1234)",
+          "- spec: docs/missing-spec.md",
+          "- plan: none",
+          "- checklist: none",
+        ].join("\n") + "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stdout + r.stderr, /feat\/long-gone/);
+    assert.match(r.stdout + r.stderr, /missing-spec\.md/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
