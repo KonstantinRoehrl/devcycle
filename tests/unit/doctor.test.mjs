@@ -1109,10 +1109,13 @@ function installDoctor(changelog) {
   // version shipped, so a copy without it cannot be loaded at all. This list is doctor.mjs's whole
   // load-time import closure — a copy missing any of it cannot be loaded, so --drift would report a
   // module-not-found stack rather than the doctor: diagnostic these tests pin. doctor → verification
-  // → {journal → run-record → stamp, semver}, plus pricing, promotions and cli-flags.
+  // → {journal → run-record → {stamp, git-identity}, semver}, plus pricing, promotions and
+  // cli-flags. run-record.mjs re-exports gitToplevel from git-identity.mjs, so that module is now
+  // part of the closure too.
   for (const name of [
     "doctor.mjs", "atomic-write.mjs", "pricing.mjs", "promotions.mjs", "cli-flags.mjs",
     "verification.mjs", "journal.mjs", "semver.mjs", "run-record.mjs", "stamp.mjs",
+    "git-identity.mjs",
   ])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
   if (changelog !== null) {

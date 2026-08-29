@@ -401,9 +401,9 @@ test("the stage subschema enumerates outcome as complete|blocked|skipped|partial
 test("culprit lookup fails cleanly, not with a stack trace, when culprits.json is valid JSON but not an array", () => {
   // validateCulprit() resolves both tests/fixtures/run-record.schema.json and
   // references/culprits.json relative to the script's own location, so the script needs to run
-  // from a tree shaped like the repo's — but only those two files plus the script itself, not a
-  // full copy of the working tree (which would drag gitignored local files into /tmp and leave
-  // them there).
+  // from a tree shaped like the repo's — but only those fixtures plus the script's own imports
+  // (stamp.mjs, git-identity.mjs), not a full copy of the working tree (which would drag
+  // gitignored local files into /tmp and leave them there).
   const treeDir = realpathSync(mkdtempSync(join(tmpdir(), "rr-vocab-tree-")));
   try {
     mkdirSync(join(treeDir, "scripts"), { recursive: true });
@@ -411,6 +411,7 @@ test("culprit lookup fails cleanly, not with a stack trace, when culprits.json i
     mkdirSync(join(treeDir, "references"), { recursive: true });
     copyFileSync(join(REPO_ROOT, "scripts/run-record.mjs"), join(treeDir, "scripts/run-record.mjs"));
     copyFileSync(join(REPO_ROOT, "scripts/stamp.mjs"), join(treeDir, "scripts/stamp.mjs"));
+    copyFileSync(join(REPO_ROOT, "scripts/git-identity.mjs"), join(treeDir, "scripts/git-identity.mjs"));
     copyFileSync(
       join(REPO_ROOT, "tests/fixtures/run-record.schema.json"),
       join(treeDir, "tests/fixtures/run-record.schema.json")
