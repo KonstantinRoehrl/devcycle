@@ -2066,6 +2066,12 @@ test("--staleness reports not-stale when neither threshold is crossed (L1)", () 
 
 const wtSlug = (p) => p.replace(/[^A-Za-z0-9]/g, "-");
 
+// Match a slug as a full path SEGMENT, never a substring: wtSlug("/x/repo")="-x-repo" is a
+// substring of wtSlug("/x/repo-wt")="-x-repo-wt", so a bare `f.includes(wtSlug(main))` is
+// satisfied by the worktree file alone and could not catch repoRoot's own slug being dropped.
+const ownsSlug = (files, absCwd) =>
+  [...files].some((f) => String(f).split("/").includes(wtSlug(absCwd)));
+
 function seedProject(projectsDir, absCwd) {
   const dir = join(projectsDir, wtSlug(absCwd));
   mkdirSync(dir, { recursive: true });
@@ -2110,9 +2116,9 @@ test("corpus unions worktree sessions and excludes a sibling project (primary pa
   const { sessions } = planCorpus({
     repoRoot: main, projectsDir, since: null, gitRunner: gitFake(main, wt) });
   const cwds = new Set(sessions.flatMap((s) => s.files ?? []).map(String));
-  assert.ok([...cwds].some((f) => f.includes(wtSlug(main))), "main missing");
-  assert.ok([...cwds].some((f) => f.includes(wtSlug(wt))), "worktree missing");
-  assert.ok(![...cwds].some((f) => f.includes(wtSlug(other))), "sibling project leaked");
+  assert.ok(ownsSlug(cwds, main), "main missing");
+  assert.ok(ownsSlug(cwds, wt), "worktree missing");
+  assert.ok(!ownsSlug(cwds, other), "sibling project leaked");
 });
 
 test("corpus fallback scan unions worktrees and excludes a sibling project (fallback path)", () => {
@@ -2124,7 +2130,34 @@ test("corpus fallback scan unions worktrees and excludes a sibling project (fall
   const { sessions } = planCorpus({
     repoRoot: main, projectsDir, since: null, gitRunner: gitFakeFallback(main, wt) });
   const cwds = new Set(sessions.flatMap((s) => s.files ?? []).map(String));
-  assert.ok([...cwds].some((f) => f.includes(wtSlug(main))), "main missing");
-  assert.ok([...cwds].some((f) => f.includes(wtSlug(wt))), "worktree missing");
-  assert.ok(![...cwds].some((f) => f.includes(wtSlug(other))), "sibling project leaked");
+  assert.ok(ownsSlug(cwds, main), "main missing");
+  assert.ok(ownsSlug(cwds, wt), "worktree missing");
+  assert.ok(!ownsSlug(cwds, other), "sibling project leaked");
+});
+
+test("the fallback scan memoizes gitToplevel per cwd (spec Component 3: one git call per distinct cwd)", () => {
+  const projectsDir = mkdtempSync(join(tmpdir(), "proj-"));
+  const main = "/x/repo", other = "/x/other";
+  seedProject(projectsDir, main);
+  // A sibling project whose single transcript holds TWO records sharing one cwd: without per-cwd
+  // memoization the fallback filter resolves gitToplevel(other) once per record, not once per cwd.
+  const otherDir = join(projectsDir, wtSlug(other));
+  mkdirSync(otherDir, { recursive: true });
+  const rec = (i) => JSON.stringify({ cwd: other, timestamp: "2026-08-29T00:00:00Z",
+    message: { role: "user", content: `m${i}` }, sessionId: "o" });
+  writeFileSync(join(otherDir, "s.jsonl"), rec(1) + "\n" + rec(2) + "\n");
+
+  let otherCalls = 0;
+  const counting = (cmd, args) => {
+    const k = args.join(" ");
+    if (k.includes("worktree list --porcelain")) return { status: 0, stdout: "worktree /x/nope\n" };
+    if (k.includes("--git-common-dir")) {
+      const cwd = args[args.indexOf("-C") + 1];
+      if (cwd === other) otherCalls++;
+      return { status: 0, stdout: `${cwd}/.git\n` }; // each cwd resolves to its own toplevel
+    }
+    return { status: 1, stdout: "" };
+  };
+  planCorpus({ repoRoot: main, projectsDir, since: null, gitRunner: counting });
+  assert.equal(otherCalls, 1, `expected one git call for ${other}, got ${otherCalls}`);
 });

@@ -356,8 +356,8 @@ function readTranscriptsOrFail(dir, label) {
 // fallback filters on git-repo identity. Documented gaps: a deleted worktree (gone from
 // `git worktree list`) and a session launched from a subdir of a worktree (its slug is the
 // subdir, not the worktree root — a pre-existing gap for the main checkout too).
-function sessionRepoMatches(file, mineTop, gitRunner) {
-  return readRecords(file).some((r) => r.cwd && gitToplevel(r.cwd, gitRunner) === mineTop);
+function sessionRepoMatches(file, mineTop, topOf) {
+  return readRecords(file).some((r) => r.cwd && topOf(r.cwd) === mineTop);
 }
 
 function resolveProjectFiles(repoRoot, projectsDir, gitRunner) {
@@ -368,8 +368,18 @@ function resolveProjectFiles(repoRoot, projectsDir, gitRunner) {
 
   const all = readTranscriptsOrFail(projectsDir, "projects root");
   if (all === null) throw new Error(`projects root does not exist: ${projectsDir}`);
-  const mineTop = gitToplevel(repoRoot, gitRunner);
-  return all.filter((f) => sessionRepoMatches(f, mineTop, gitRunner));
+  // Memoize per distinct cwd so the whole-root fallback issues at most one `git` call per cwd
+  // (spec Component 3): the scan reads every session under the projects root, and a sibling
+  // project repeats one cwd across all its transcripts. gitToplevel never returns undefined, so
+  // it is a safe cache-miss sentinel. repoRoot is resolved through the same cache.
+  const topCache = new Map();
+  const topOf = (cwd) => {
+    let top = topCache.get(cwd);
+    if (top === undefined) topCache.set(cwd, (top = gitToplevel(cwd, gitRunner)));
+    return top;
+  };
+  const mineTop = topOf(repoRoot);
+  return all.filter((f) => sessionRepoMatches(f, mineTop, topOf));
 }
 
 // F5: a slice id that is only the session id can never reopen when the session grows, so every

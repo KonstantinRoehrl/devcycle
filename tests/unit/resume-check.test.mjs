@@ -169,6 +169,41 @@ test("the ownership check reports nothing else — a foreign root short-circuits
   }
 });
 
+test("a foreign-root state file with a blank request prints empty, not '(none recorded)'", () => {
+  // Component-2 delta (design doc migration table): resume-check now reads `- request:` through
+  // the shared parser's `field`, which returns "" (not null) for a present-but-blank field. So the
+  // `?? "(none recorded)"` fallback on the ownership-mismatch print line no longer fires for a
+  // blank request — it prints empty. This locks the delta at the resume-check level; the parser
+  // level is covered in md-field.test.mjs.
+  const repo = makeRepo();
+  const foreign = mkdtempSync(join(tmpdir(), "resume-check-foreign-"));
+  try {
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        [
+          "- stage: planning",
+          `- root: ${foreign}`, // foreign → reaches the ownership-mismatch print path
+          "- request:", // present but blank → must print "" not "(none recorded)"
+          "- spec: none",
+          "- plan: none",
+          "- checklist: none",
+        ].join("\n") +
+        "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.notEqual(r.status, 0); // foreign root still stops the resume
+    assert.match(r.stderr, /its request:/); // the print path was reached
+    assert.doesNotMatch(r.stderr, /\(none recorded\)/); // blank read as "" → fallback did not fire
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(foreign, { recursive: true, force: true });
+  }
+});
+
 test("a state file in a non-git directory skips the ownership check rather than failing", () => {
   const dir = mkdtempSync(join(tmpdir(), "resume-check-"));
   try {
