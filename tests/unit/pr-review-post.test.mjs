@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
-  FOOTER_MARKER, footer, withFooter, alreadyPosted, runReply, runResolve,
+  FOOTER_MARKER, footer, withFooter, alreadyPosted, runReply, runResolve, runReview,
 } from "../../scripts/pr-review-post.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/pr-review-post.mjs", import.meta.url));
@@ -21,7 +21,13 @@ function runCli(args) {
   chmodSync(ghPath, 0o755);
   const bodyFile = join(mkdtempSync(join(tmpdir(), "prbody-")), "body.md");
   writeFileSync(bodyFile, "Fixed in abc123: intake now carries thread_id.");
-  return spawnSync(process.execPath, [SCRIPT, ...args.map((a) => (a === "@body" ? bodyFile : a))], {
+  const commentsFile = join(mkdtempSync(join(tmpdir(), "prcomments-")), "comments.json");
+  writeFileSync(commentsFile, "[]");
+  return spawnSync(process.execPath, [SCRIPT, ...args.map((a) => {
+    if (a === "@body") return bodyFile;
+    if (a === "@comments") return commentsFile;
+    return a;
+  })], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${ghDir}:${process.env.PATH}` },
   });
@@ -106,4 +112,112 @@ test("defaultPostRunner builds the documented argv shapes", async () => {
   assert.ok(seen[0].join(" ").includes("-f"));
   assert.ok(seen[1].join(" ").includes("resolveReviewThread"));
   assert.ok(seen[1].join(" ").includes("PRRT_z"));
+});
+
+test("runReview refuses an empty login", () => {
+  assert.throws(() => runReview({
+    repo: "o/n", pr: 7, commitId: "abc", event: "COMMENT", body: "x", comments: [], login: "", runner: {},
+  }), /refusing to post/);
+});
+
+test("runReview posts a fresh batched review when no pending review exists", () => {
+  const calls = [];
+  const runner = {
+    findPendingReview: () => null,
+    createReview: (repo, pr, payload) => calls.push(["createReview", repo, pr, payload]),
+  };
+  const comments = [
+    { path: "a.js", line: 3, side: "RIGHT", body: "fix this" },
+    { path: "b.js", line: 9, side: "RIGHT", body: "and this" },
+  ];
+  const r = runReview({
+    repo: "o/n", pr: 7, commitId: "abc123", event: "COMMENT", body: "Summary.",
+    comments, login: "octocat", runner,
+  });
+  assert.equal(r.status, "submitted");
+  assert.equal(r.commentCount, 2);
+  assert.equal(calls.length, 1);
+  const [, repo, pr, payload] = calls[0];
+  assert.equal(repo, "o/n");
+  assert.equal(pr, 7);
+  assert.equal(payload.commit_id, "abc123");
+  assert.equal(payload.event, "COMMENT");
+  assert.ok(payload.body.includes(FOOTER_MARKER));
+  assert.equal(payload.comments.length, 2);
+  for (const c of payload.comments) assert.ok(c.body.includes(FOOTER_MARKER));
+});
+
+test("runReview reports a pending review without --merge-into and writes nothing", () => {
+  const runner = {
+    findPendingReview: () => "PRR_z",
+    createReview: () => { throw new Error("must not create"); },
+    addReviewThread: () => { throw new Error("must not add"); },
+  };
+  const r = runReview({
+    repo: "o/n", pr: 7, commitId: "abc123", event: "COMMENT", body: "Summary.",
+    comments: [], login: "octocat", runner,
+  });
+  assert.deepEqual(r, { status: "pending-review-exists", pendingReviewId: "PRR_z" });
+});
+
+test("runReview merges into a pending review when --merge-into is given", () => {
+  const addCalls = [];
+  const submitCalls = [];
+  const runner = {
+    findPendingReview: () => "PRR_z",
+    addReviewThread: (reviewId, c) => addCalls.push([reviewId, c]),
+    submitReview: (reviewId, event, body) => submitCalls.push([reviewId, event, body]),
+  };
+  const comments = [
+    { path: "a.js", line: 3, side: "RIGHT", body: "fix this" },
+    { path: "b.js", line: 9, side: "RIGHT", body: "and this" },
+  ];
+  const r = runReview({
+    repo: "o/n", pr: 7, commitId: "abc123", event: "COMMENT", body: "Summary.",
+    comments, login: "octocat", mergeInto: "PRR_z", runner,
+  });
+  assert.deepEqual(r, { status: "submitted", merged: true, commentCount: 2 });
+  assert.equal(addCalls.length, 2);
+  for (const [reviewId, c] of addCalls) {
+    assert.equal(reviewId, "PRR_z");
+    assert.ok(c.body.includes(FOOTER_MARKER));
+  }
+  assert.equal(submitCalls.length, 1);
+  assert.deepEqual(submitCalls[0].slice(0, 2), ["PRR_z", "COMMENT"]);
+  assert.ok(submitCalls[0][2].includes(FOOTER_MARKER));
+});
+
+test("runReview refuses a self-PR verdict for a non-COMMENT event", () => {
+  const runner = {
+    getPrAuthor: () => "octocat",
+    findPendingReview: () => { throw new Error("must not be consulted"); },
+  };
+  assert.throws(() => runReview({
+    repo: "o/n", pr: 7, commitId: "abc123", event: "REQUEST_CHANGES", body: "Summary.",
+    comments: [], login: "octocat", runner,
+  }), /refusing to REQUEST_CHANGES your own PR \(author @octocat\)/);
+});
+
+test("runReview allows a self-PR COMMENT and reaches the fresh path", () => {
+  const calls = [];
+  const runner = {
+    getPrAuthor: () => "octocat",
+    findPendingReview: () => null,
+    createReview: (repo, pr, payload) => calls.push(["createReview", repo, pr, payload]),
+  };
+  const r = runReview({
+    repo: "o/n", pr: 7, commitId: "abc123", event: "COMMENT", body: "Summary.",
+    comments: [], login: "octocat", runner,
+  });
+  assert.equal(r.status, "submitted");
+  assert.equal(calls.length, 1);
+});
+
+test("CLI review posts a batched review and reports the comment count", () => {
+  const res = runCli([
+    "review", "--repo", "o/n", "--pr", "7", "--commit-id", "abc", "--event", "COMMENT",
+    "--body-file", "@body", "--comments-file", "@comments", "--login", "octocat",
+  ]);
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /^reviewed /);
 });
