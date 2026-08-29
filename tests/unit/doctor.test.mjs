@@ -1111,11 +1111,12 @@ function installDoctor(changelog) {
   // module-not-found stack rather than the doctor: diagnostic these tests pin. doctor → verification
   // → {journal → run-record → {stamp, git-identity}, semver}, plus pricing, promotions and
   // cli-flags. run-record.mjs re-exports gitToplevel from git-identity.mjs, so that module is now
-  // part of the closure too.
+  // part of the closure too. promotions.mjs imports fieldText from md-field.mjs, so md-field.mjs is
+  // in the closure too.
   for (const name of [
     "doctor.mjs", "atomic-write.mjs", "pricing.mjs", "promotions.mjs", "cli-flags.mjs",
     "verification.mjs", "journal.mjs", "semver.mjs", "run-record.mjs", "stamp.mjs",
-    "git-identity.mjs",
+    "git-identity.mjs", "md-field.mjs",
   ])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
   if (changelog !== null) {
