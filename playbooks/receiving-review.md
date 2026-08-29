@@ -55,6 +55,13 @@ comments, drops threads GitHub already marks resolved, **redacts** each untruste
 intake, dedupes against prior runs on the `(path, line, normalized-body-hash)` key, and writes
 one envelope JSON, printing only its path. Hand that path to §6.2.
 
+**Respond-gating.** When intake yields **no genuine review comments** — the envelope holds
+nothing once resolved threads and prior-run dedupes are dropped — reconcile does **not** surface
+the respond path: it reports "nothing to reconcile" per §6.6's output and stops, rather than
+offering an empty respond flow through §6.2–§6.5. This is symmetric to the filing step's open-PR
+gate: each write action is surfaced only where the thing it acts on — an open PR to file into, a
+genuine review to respond to — actually exists.
+
 ## §6.2 — decompose and classify
 
 One **fast-tier** read-only judgment dispatch (per
@@ -77,9 +84,11 @@ item via that reference's comment→finding mapping, with `Origin: pr-review #<c
 
 ## §6.4 — batched confirmation
 
-One `AskUserQuestion`, a hard STOP before any fix or reply. It presents the classified items —
-at most the **frontier of 25** owned by `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`;
-beyond that, items are named and deferred, never silently truncated.
+One `AskUserQuestion`, a hard STOP before any fix or reply. Reached only when §6.1's
+respond-gating passed — with no genuine review comment there is nothing to confirm and this gate
+is never surfaced. It presents the classified items — at most the **frontier of 25** owned by
+`${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`; beyond that, items are named and deferred,
+never silently truncated.
 
 - `conflicts-with-spec` and `unsupported-preference` items **never auto-resolve** — they are
   surfaced here for the user to decide.
@@ -101,7 +110,10 @@ built here:
 - **Fix-completion reply.** After the fix loop lands a fix and the coordinator commits it, the
   coordinator synthesizes a 1–2 sentence summary **from the committed diff** — **repo-relative**
   paths only, never a host path — and drafts `Fixed in <sha>: <summary>` to
-  `.devcycle/review-replies/<comment-id>.md`. It screens the draft
+  `.devcycle/review-replies/<comment-id>.md`, its body rendered through the **comment-body
+  contract** (the `## The comment-body contract` subsection of
+  `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`) so this reply and a filed finding share
+  one body shape. It screens the draft
   (`node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`), then posts it
   through the content and post gates via the `pr-review-post.mjs reply` route §6.5b defines —
   whose exact flags and attribution footer `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`'s
@@ -117,8 +129,10 @@ built here:
 
 ## §6.5b — the non-actionable path
 
-Every reply is drafted to `.devcycle/review-replies/<comment-id>.md`, then screened before any
-display or post:
+Every reply is drafted to `.devcycle/review-replies/<comment-id>.md`, its body rendered through
+the **comment-body contract** (the `## The comment-body contract` subsection of
+`${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`) so a reconcile reply and a filed finding
+share one body shape, then screened before any display or post:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>
