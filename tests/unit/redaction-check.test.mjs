@@ -592,6 +592,65 @@ test("redaction-check: --dir naming a file (not a directory) prints the named di
   }
 });
 
+test("--advisory-identity: machine identity is reported to stderr but does not fail", () => {
+  const dir = makeFixture({ "ev.txt": `ran in ${MAC_HOME}/proj\n` });
+  try {
+    const out = spawnSync("node", [SCRIPT, "--dir", dir, "--advisory-identity"], { encoding: "utf8" });
+    assert.equal(out.status, 0, "advisory machine identity must not fail the gate");
+    assert.match(out.stderr, /advisory/i);
+    assert.match(out.stderr, /absolute home-directory path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--advisory-identity does NOT downgrade a deny-listed term", () => {
+  const token = "denyword";
+  const hdir = mkdtempSync(join(tmpdir(), "rh-"));
+  const hashesFile = join(hdir, "h.txt");
+  writeFileSync(hashesFile, createHash("sha256").update(token).digest("hex") + "\n");
+  const dir = makeFixture({ "a.md": `contains ${token} here\n` });
+  try {
+    const out = spawnSync("node", [SCRIPT, "--dir", dir, "--hashes", hashesFile, "--advisory-identity"], { encoding: "utf8" });
+    assert.equal(out.status, 1, "a deny-listed term must hard-fail even under --advisory-identity");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(hdir, { recursive: true, force: true });
+  }
+});
+
+test("inline `redaction-allow` exempts a single line from machine-identity classes", () => {
+  const dir = makeFixture({ "doc.md": `example ${MAC_HOME}/x <!-- redaction-allow -->\nreal ${MAC_HOME}/y\n` });
+  try {
+    const out = spawnSync("node", [SCRIPT, "--dir", dir], { encoding: "utf8" });
+    assert.equal(out.status, 1, "the un-marked second line must still flag");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const clean = makeFixture({ "doc.md": `example ${MAC_HOME}/x <!-- redaction-allow -->\n` });
+  try {
+    const out2 = spawnSync("node", [SCRIPT, "--dir", clean], { encoding: "utf8" });
+    assert.equal(out2.status, 0, "a lone allow-marked line must pass");
+  } finally {
+    rmSync(clean, { recursive: true, force: true });
+  }
+});
+
+test("inline `redaction-allow` never exempts a deny-listed term", () => {
+  const term = "quarantineword";
+  const hdir = mkdtempSync(join(tmpdir(), "rh-"));
+  const hashesFile = join(hdir, "h.txt");
+  writeFileSync(hashesFile, createHash("sha256").update(term).digest("hex") + "\n");
+  const dir = makeFixture({ "a.md": `contains ${term} here <!-- redaction-allow -->\n` });
+  try {
+    const out = spawnSync("node", [SCRIPT, "--dir", dir, "--hashes", hashesFile], { encoding: "utf8" });
+    assert.equal(out.status, 1, "a deny-listed term must still fail even on a redaction-allow-marked line");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(hdir, { recursive: true, force: true });
+  }
+});
+
 test("still flags a deny-listed term, read from the hashes file", () => {
   const term = "forbiddenword";
   const dir = makeFixture({

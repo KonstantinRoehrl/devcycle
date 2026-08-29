@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.17.3 — 2026-08-29
+
+- fix(devcycle): harden pipeline-safety gates and doctor compliance cohorts (#105, #106, #107, #128, #141, #145)
+
+**Pipeline-safety gate hardening (#157).** Four gates that could be silently routed around are now
+enforced:
+
+- **#105, #145** — `redaction-check.mjs` structurally could not pass when scanning the gitignored,
+  local-only `.devcycle/` corpus, where machine-identity forms (absolute home paths, session ids,
+  project dirs) are the expected shape, not a leak — so the hard failure made the finish gate
+  route-around-able. A new valueless `--advisory-identity` flag downgrades the three
+  machine-identity classes to a stderr advisory (exit 0) while deny-listed secret terms stay an
+  unconditional hard fail, and an inline `redaction-allow` line marker exempts a single line. The
+  finish stage passes `--advisory-identity` only on the `.devcycle` scan; the run-record-store scan
+  stays a full hard gate.
+- **#106** — a dispatch brief whose prose names a file another same-wave task edits is a hidden
+  content coupling that neither the file-set wave-disjointness check nor blast-radius catches, so
+  two concurrent implementers could race on the same content. A new `content-coupling-check.mjs`
+  flags such a brief — cleared by a dependency or a `Content-coupling override` line — and is wired
+  into planning's self-review.
+- **#141** — a non-test referencer of a changed file that sat in no task's Files block was only a
+  warning, so a co-change dependency in ordinary source could be silently omitted from a plan. The
+  non-test branch now takes the same override-or-hard-fail path as the test-file case, labelled
+  `(test)`/`(non-test)`, and the Blast-radius override clears any referencer pair.
+- **#107** — the task-reviewer was documented as read-only yet required to persist a findings file
+  it had no tool to write, so the requirement was enforced-then-skipped depending on which sentence
+  a reader trusted. The reviewer now holds a `Write` grant scoped to its single gitignored
+  `.devcycle/findings/<task-id>-round-<n>.md` file, and a step-5 gate confirms that file exists
+  before a review verdict is logged.
+
+**Doctor compliance cohorts (#128, #160).** `complianceCandidatesOf` now groups each session's
+per-type compliance candidates into one corpus-wide cohort — keyed by type (and `requestKind` for
+missing-workload) — carrying `sessions_sampled` = the distinct source-session count with the
+occurrence field summed, instead of emitting N separate `sessions=1` lines. `versions` merges to the
+known `[min..max]` (omitted when every contributing session lacked a version), and `onDevicePath`
+collapses to the sorted distinct recorded paths. The Workload (observed) warning now sums
+`sessions_sampled` across missing-workload cohorts rather than counting candidate lines.
+
+**Config defaults in field descriptions (#158).** Claude Code's plugin config UI renders each
+`userConfig` input empty rather than prefilling the declared `default`, so every field's description
+now states its effective default. Values match the configuration reference; no behavior change.
+
 ## 0.17.2 — 2026-08-28
 
 - fix(workload): make doctor missing-workload collection progressive and audit-safe (#139)

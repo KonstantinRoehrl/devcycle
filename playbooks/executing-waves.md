@@ -84,17 +84,21 @@ file conflicts these invariants already preserve.)
    dispatch` — using step 3's own `startedAt`, this step's time as `endedAt`, the envelope's
    outcome, and the current round/retry index: every field this line needs is only known from
    here on. The coordinator neither produces nor reads the task diff; step 5 does both.
-5. **Dispatch devcycle:task-reviewer** (read-only) with the brief, the report path, the task's file
-   list, the two evidence-file paths the report names, and the task's constraints block, instructing
-   it to produce the diff itself: `git add -N <new files>` first, or they are invisible to diff, then
-   `git diff -U10 HEAD -- <files>`. It returns the task-reviewer envelope `references/delegation.md`
-   defines; it has no write tool, so the coordinator writes what that envelope returns to
-   `.devcycle/findings/<task-id>-round-<n>.md`. Ledger `event=review-round` per reviewer dispatch
-   (round n), `event=review-verdict` for its outcome, then the `verdict` line — `run-record.mjs
-   append --kind verdict` — this round's number, blocking count, the task's declared evidence
-   class, `conformance` = `pass` on acceptance else `fail`. Non-zero blocking sends the findings
-   path back to the implementer; re-review after fixes logs the next `review-round` (and, once the
-   fix pass's envelope returns, another step-4 `dispatch` line).
+5. **Dispatch devcycle:task-reviewer** (read-only apart from its own findings file) with the brief,
+   the report path, the task's file list, the two evidence-file paths the report names, and the
+   task's constraints block, instructing it to produce the diff itself: `git add -N <new files>`
+   first, or they are invisible to diff, then `git diff -U10 HEAD -- <files>`. It returns the
+   task-reviewer envelope `references/delegation.md` defines; the reviewer writes its verdict block to
+   `.devcycle/findings/<task-id>-round-<n>.md` itself (the dispatch supplies the path and round n).
+   The coordinator **confirms the findings file exists at the named path before logging `event=review-verdict`** —
+   mirroring step 4. Missing or empty: ledger `event=review-verdict
+   outcome=rejected (missing findings file)`, re-dispatch the reviewer, no verdict acted on and no
+   `verdict` run-record line. Otherwise ledger `event=review-round` per reviewer dispatch (round n),
+   `event=review-verdict` for its outcome, then the `verdict` line — `run-record.mjs append --kind
+   verdict` — this round's number, blocking count, the task's declared evidence class, `conformance`
+   = `pass` on acceptance else `fail`. Non-zero blocking sends the findings path back to the
+   implementer; re-review after fixes logs the next `review-round` (and, once the fix pass's envelope
+   returns, another step-4 `dispatch` line).
 
    Cap: 3 rounds per task; one round is one reviewer dispatch plus the implementer's fix pass.
    Statuses and their reporting are owned by `${CLAUDE_PLUGIN_ROOT}/references/loops.md` — a task

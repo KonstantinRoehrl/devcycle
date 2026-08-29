@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Pre-flight check for a devcycle plan: for each non-test file a task modifies, find repo code
-// files that reference it (by module basename) but appear in no task's Files block. A referencing
-// TEST file is a hard failure (it almost certainly needs updating); a non-test referencer is a
-// warning. Language-agnostic; conservative. See playbooks/planning-waves.md.
+// files that reference it (by module basename) but appear in no task's Files block. Any such
+// referencer -- test or non-test -- is a hard failure (it almost certainly needs updating), cleared
+// only by adding it to a Files block or recording an override. Language-agnostic; conservative.
+// See playbooks/planning-waves.md.
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, basename, extname, relative, sep } from "node:path";
 import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES, normalizeFileToken } from "./task-files.mjs";
@@ -64,11 +65,13 @@ const codeFiles = walk(repoRoot)
   .map((p) => relative(repoRoot, p).split(sep).join("/"))
   .filter((p) => CODE_EXT.has(extname(p)));
 
-// The resolution planning-waves.md documents: a planner acknowledges a referencing test that does
-// not need updating, with a reason, and the gate clears rather than being walked around in prose.
-//   - Blast-radius override: <changed-file> [→ <test-file>] — <reason>
-// File-only clears every test-referencer of that file; "→ test" clears just that pair. A missing
-// reason is an error — an unexplained override is exactly the silent walk-around this gate prevents.
+// The resolution planning-waves.md documents: a planner acknowledges a referencer (test or
+// non-test) that does not need updating, with a reason, and the gate clears rather than being
+// walked around in prose.
+//   - Blast-radius override: <changed-file> [→ <referencer>] — <reason>
+// File-only clears every referencer of that file; "→ <referencer>" clears just that pair. A
+// missing reason is an error — an unexplained override is exactly the silent walk-around this
+// gate prevents.
 const OVERRIDE_START = /^\s*-\s*Blast-radius override:/;
 const OVERRIDE_RE = /^\s*-\s*Blast-radius override:\s*(\S+?)(?:\s*→\s*(\S+))?\s*—\s*(.*\S)\s*$/;
 const overrides = [];
@@ -81,11 +84,11 @@ for (const { text } of blocks) {
     // punctuation -- exactly how planners write paths elsewhere -- still matches `chg` below.
     const file = m ? normalizeFileToken(m[1]) : null;
     const test = m && m[2] !== undefined ? normalizeFileToken(m[2]) : null;
-    // A present "→ <test>" whose token does not normalize to a path is malformed just as a bad
-    // changed-file token is; otherwise it would silently widen the override from the single pair
-    // to every test-referencer of the changed file.
+    // A present "→ <referencer>" whose token does not normalize to a path is malformed just as a
+    // bad changed-file token is; otherwise it would silently widen the override from the single
+    // pair to every referencer of the changed file.
     if (!m || file === null || (m[2] !== undefined && test === null)) {
-      console.error(`blast-radius-check: malformed override (needs "<changed-file> [→ <test>] — <reason>"): ${line.trim()}`);
+      console.error(`blast-radius-check: malformed override (needs "<changed-file> [→ <referencer>] — <reason>"): ${line.trim()}`);
       process.exit(1);
     }
     overrides.push({ file, test, reason: m[3] });
@@ -93,7 +96,6 @@ for (const { text } of blocks) {
 }
 
 const hardFails = [];
-const warnings = [];
 const acknowledged = [];
 for (const chg of changed) {
   const base = basename(chg); // keep the extension: `config.md`, not `config`
@@ -107,27 +109,21 @@ for (const chg of changed) {
       continue;
     }
     if (!tokenRe.test(content)) continue;
-    if (isTestFile(cand)) {
-      const ov = overrides.find((o) => o.file === chg && (o.test === null || o.test === cand));
-      if (ov) acknowledged.push({ cand, chg, reason: ov.reason });
-      else hardFails.push({ cand, chg });
-    } else {
-      warnings.push({ cand, chg });
-    }
+    const ov = overrides.find((o) => o.file === chg && (o.test === null || o.test === cand));
+    if (ov) acknowledged.push({ cand, chg, reason: ov.reason });
+    else hardFails.push({ cand, chg, isTest: isTestFile(cand) });
   }
 }
 
-for (const w of warnings) {
-  console.error(`blast-radius-check: warning -- ${w.cand} references ${w.chg} but is in no task's Files block`);
-}
 for (const a of acknowledged) {
   console.error(`blast-radius-check: override -- ${a.cand} references ${a.chg}, cleared: ${a.reason}`);
 }
 if (hardFails.length > 0) {
   for (const h of hardFails) {
-    console.error(`blast-radius-check: ${h.cand} (test) references ${h.chg} but is in no task's Files block -- add it or record an override`);
+    const kind = h.isTest ? "test" : "non-test";
+    console.error(`blast-radius-check: ${h.cand} (${kind}) references ${h.chg} but is in no task's Files block -- add it or record an override`);
   }
   process.exit(1);
 }
-console.log(`blast-radius-check: ok -- no unlisted test-file consumers (${warnings.length} non-test warning(s))`);
+console.log("blast-radius-check: ok -- every referencer of a changed file is in a Files block or overridden");
 process.exit(0);

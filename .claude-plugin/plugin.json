@@ -1,6 +1,6 @@
 {
   "name": "devcycle",
-  "version": "0.17.2",
+  "version": "0.17.3",
   "description": "Opinionated pipeline from a feature, bug, or refactor description to a verified, publish-ready implementation: scoped interview, spec, wave-based plan, TDD subagent execution, branch review, on-device verification.",
   "author": {
     "name": "Konstantin Röhrl",
@@ -20,73 +20,73 @@
       "type": "string",
       "title": "Pipeline profile",
       "default": "standard",
-      "description": "Cost/rigor preset. One of: lean, standard, thorough. Individual knobs override it when explicitly configured."
+      "description": "Cost/rigor preset. One of: lean, standard, thorough. Individual knobs override it when explicitly configured. Default: standard."
     },
     "gitPolicy": {
       "type": "string",
       "title": "Git policy",
       "default": "local-commits-only",
-      "description": "What the finish stage may do with the branch. One of: local-commits-only, push-allowed, open-pr."
+      "description": "What the finish stage may do with the branch. One of: local-commits-only, push-allowed, open-pr. Default: local-commits-only."
     },
     "docTrackingPolicy": {
       "type": "string",
       "title": "Doc-tracking policy",
       "default": "standard",
-      "description": "What devcycle attempts to commit of the specs, plans, lessons, promotion records and audit reports it writes (the repo's own .gitignore always wins, and a few artifacts sit outside the policy). One of: all-local (commit none of them), standard (commit lessons, promotion records and audit reports; keep specs + plans local), all-tracked (also commit specs + plans)."
+      "description": "What devcycle attempts to commit of the specs, plans, lessons, promotion records and audit reports it writes (the repo's own .gitignore always wins, and a few artifacts sit outside the policy). One of: all-local (commit none of them), standard (commit lessons, promotion records and audit reports; keep specs + plans local), all-tracked (also commit specs + plans). Default: standard."
     },
     "implementerModel": {
       "type": "string",
       "title": "Implementer model",
       "default": "auto",
-      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier. Default: auto."
     },
     "taskReviewerModel": {
       "type": "string",
       "title": "Task reviewer model",
       "default": "auto",
-      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier. Default: auto."
     },
     "walkthroughModel": {
       "type": "string",
       "title": "Walkthrough model",
       "default": "auto",
-      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier. Default: auto."
     },
     "branchReviewModel": {
       "type": "string",
       "title": "Branch review model",
       "default": "auto",
-      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier. Default: auto."
     },
     "reviewDepth": {
       "type": "string",
       "title": "Review depth",
       "default": "single",
-      "description": "Branch review engine. Unset → the profile's branch-review row (single at lean and standard, panel at thorough); set → this value, verbatim, and the profile never moves it. One of: single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass), panel (multi-lens review panel workflow), auto (identical to unset)."
+      "description": "Branch review engine. Unset → the profile's branch-review row (single at lean and standard, panel at thorough); set → this value, verbatim, and the profile never moves it. One of: single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass), panel (multi-lens review panel workflow), auto (identical to unset). Default: single."
     },
     "crossModelReview": {
       "type": "boolean",
       "title": "Cross-model review",
       "default": false,
-      "description": "Add a cross-model lens to the review panel when available."
+      "description": "Add a cross-model lens to the review panel when available. Default: false."
     },
     "onDeviceGate": {
       "type": "string",
       "title": "On-device gate",
       "default": "human-required",
-      "description": "Whether the on-device checklist closes only via a human walkthrough. Unset → the profile's on-device row (auto-ok at lean, human-required at standard and thorough); set → this value, verbatim, and the profile never moves it. One of: human-required, auto-ok, auto (identical to unset)."
+      "description": "Whether the on-device checklist closes only via a human walkthrough. Unset → the profile's on-device row (auto-ok at lean, human-required at standard and thorough); set → this value, verbatim, and the profile never moves it. One of: human-required, auto-ok, auto (identical to unset). Default: human-required."
     },
     "learnStalenessSessions": {
       "type": "number",
       "title": "Learn staleness — sessions",
       "default": 5,
-      "description": "How many sessions may accrue since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessDays crosses first triggers the nudge."
+      "description": "How many sessions may accrue since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessDays crosses first triggers the nudge. Default: 5."
     },
     "learnStalenessDays": {
       "type": "number",
       "title": "Learn staleness — days",
       "default": 14,
-      "description": "How many days may pass since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessSessions crosses first triggers the nudge."
+      "description": "How many days may pass since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessSessions crosses first triggers the nudge. Default: 14."
     }
   }
 }

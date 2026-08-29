@@ -64,8 +64,8 @@ regardless of the configured value; otherwise effective equals configured. The c
 **Screen this cycle's real artifacts for privacy.** Constraint 4 (`.devcycle/scope.md`) is a
 hard gate: `redaction-check.mjs` defaults to `git ls-files`, so gitignored `.devcycle/` has
 never been screened by CI. Run it directly against what actually exists on this machine —
-`node ${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir .devcycle` and `node
-${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir
+`node ${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --advisory-identity --dir .devcycle` and
+`node ${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir
 $(node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs').then(m
 => console.log(m.runsDirForRepo(m.gitToplevel(process.cwd()))))")`. The second call screens only this
 repo's own slice of the run-record store: `run-record.mjs` exports `gitToplevel(cwd)` and
@@ -73,7 +73,13 @@ repo's own slice of the run-record store: `run-record.mjs` exports `gitToplevel(
 `~/.claude/devcycle/runs`), the same base the mint step writes into, so a user with that variable
 set is screened at the directory their records actually live in. The mint step
 (`commands/cycle.md`, "Before the first confirmation") guarantees this directory exists by the
-time finish runs. A non-zero exit stops
+time finish runs. Severity differs: `.devcycle` is gitignored and local-only, so its
+machine-identity forms (home paths, session ids, escaped project-directory) are *expected*
+there, not a leak — `--advisory-identity` downgrades those three classes to a stderr report at
+exit 0, hard-stopping only on a deny-listed term. The run-record-store call carries no such flag
+and stays the hard gate on all four classes, since that content is durable and potentially
+shared. An inline `redaction-allow` marker exempts one line from the machine-identity classes
+only, never a deny-listed term. A non-zero exit stops
 the finish stage — surface the specific finding to the user rather than silently continuing;
 this screen exists because the CI screen (which covers only the committed schema and golden
 fixture) structurally cannot see either directory. When the finding is redactable machine

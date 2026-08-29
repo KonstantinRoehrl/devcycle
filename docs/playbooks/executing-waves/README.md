@@ -22,8 +22,10 @@ cycle: the brief is sliced down to exactly what that implementer needs — its i
 Interfaces, Dependencies, evidence class and tail length, quality constraints resolved to
 verbatim lines, and matched lessons — and dispatched to a fresh `devcycle:implementer`, never
 carrying prior tasks' history. Once its report file is confirmed to exist and carry the fields
-its evidence class requires, a read-only `devcycle:task-reviewer` is dispatched to produce the
-task's diff itself and return a verdict; a non-zero verdict sends findings back to the
+its evidence class requires, a `devcycle:task-reviewer` (read-only apart from its own findings
+file) is dispatched to produce the task's diff itself and return a verdict; it writes that verdict
+to `.devcycle/findings/<task-id>-round-<n>.md` itself, and the coordinator confirms that file
+exists before acting on the verdict. A non-zero verdict sends findings back to the
 implementer for a fix pass, bounded at three rounds per task, past which the task exits
 `exhausted-unresolved` and is surfaced to the user rather than committed as if it had passed.
 

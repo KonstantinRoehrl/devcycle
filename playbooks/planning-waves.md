@@ -114,8 +114,9 @@ fixing what it finds inline as you go; no re-review pass.
    forward. Passing the path is what makes this gate non-vacuous: invoked bare it sweeps two
    directories the plan need not be in.
 8. **Brief completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/brief-completeness-check.mjs" <plan-path>` — every task carries Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, and the Dispatch Map lists every task. Fix any gap it reports.
-9. **Blast-radius completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/blast-radius-check.mjs" <plan-path>` — it hard-fails on a test file that references a task's changed file but is in no Files block, and warns on a non-test referencer. Add each flagged file to the right task's Files block, or record an explicit override — a `- Blast-radius override: <changed-file> [→ <test-file>] — <reason>` line (em-dash before the reason; a reasonless override is a hard error), e.g. referenced only in a comment.
-10. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch.
+9. **Blast-radius completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/blast-radius-check.mjs" <plan-path>` — it hard-fails on any referencer (test or non-test) of a task's changed file that is in no Files block. Add each flagged file to the right task's Files block, or record an explicit override — a `- Blast-radius override: <changed-file> [→ <referencer>] — <reason>` line (em-dash before the reason; a reasonless override is a hard error), e.g. referenced only in a comment.
+10. **Content-coupling completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/content-coupling-check.mjs" <plan-path>` — it flags a same-wave task whose brief names a file another same-wave task edits (a coupling the wave-disjointness check cannot see), cleared by a dependency or a `- Content-coupling override: Task B → <file> (Task A) — <reason>` line.
+11. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch.
 
 ## The three per-task declaration lines
 
@@ -143,11 +144,12 @@ only dependency-ready, file-disjoint tasks: never place two tasks touching the s
 wave, even if both declare `none`. Execution dispatches by readiness from this map, never by written
 order. That map, the plan header, and the per-task blocks are the whole contract
 `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` consumes. Before handing the plan off, run
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/wave-disjointness-check.mjs" <plan-path>` -- it only catches a
-literal Files-block overlap within one wave, not the harder case of two tasks coupled only by
-editing the same shared resource's prose or assertions.
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/wave-disjointness-check.mjs" <plan-path>` and
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/content-coupling-check.mjs" <plan-path>` -- the first only
+catches a literal Files-block overlap within one wave; the second catches the harder case of two
+same-wave tasks coupled only because one's brief names a file the other edits.
 
-A non-zero exit from self-review items 8 or 9 is a stop, resolved by fixing the plan (or, for
+A non-zero exit from self-review items 8, 9, or 10 is a stop, resolved by fixing the plan (or, for
 blast-radius, recording an override) — never by handing off around it.
 
 ## Reuse before rebuild

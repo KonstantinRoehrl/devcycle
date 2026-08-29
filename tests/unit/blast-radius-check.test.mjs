@@ -42,14 +42,14 @@ test("hard-fails when an unlisted TEST file references the changed file", () => 
   assert.match(r.out, /widget\.test\.mjs.*references/s);
 });
 
-test("warns (exit 0) when only a non-test file references the changed file", () => {
+test("hard-fails when only a non-test file references the changed file", () => {
   const repo = makeRepo({
     "src/widget.mjs": "export function widget() {}",
     "src/consumer.mjs": "import { widget } from './widget.mjs';",
   });
   const r = run(PLAN, repo);
-  assert.equal(r.code, 0);
-  assert.match(r.out, /consumer\.mjs.*references.*widget/s);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /consumer\.mjs \(non-test\) references.*widget/s);
 });
 
 test("does not hard-fail when a test file only mentions the basename in prose (no import)", () => {
@@ -254,6 +254,28 @@ test("a pair-form override whose test token is not a path is malformed, not a si
   const { code, out } = run(plan, repo);
   assert.equal(code, 1);
   assert.match(out, /malformed override/i);
+});
+
+test("a non-test referencer not in any Files block now hard-fails", () => {
+  const repo = makeRepo({
+    "scripts/foo.mjs": "export const x = 1;\n",
+    "scripts/bar.mjs": 'import "./foo.mjs";\n', // non-test referencer, in no Files block
+  });
+  const { code, out } = run(planChanging("scripts/foo.mjs"), repo);
+  assert.equal(code, 1, out);
+  assert.match(out, /scripts\/bar\.mjs \(non-test\) references scripts\/foo\.mjs/);
+});
+
+test("a non-test referencer is cleared by an override targeting it", () => {
+  const plan = planChanging("scripts/foo.mjs", {
+    override: "- Blast-radius override: scripts/foo.mjs → scripts/bar.mjs — bar names foo only in a comment",
+  });
+  const repo = makeRepo({
+    "scripts/foo.mjs": "export const x = 1;\n",
+    "scripts/bar.mjs": 'import "./foo.mjs";\n',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
 });
 
 test(".worktrees is not walked", () => {

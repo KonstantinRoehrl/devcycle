@@ -12,3 +12,4 @@
 - verify: 
 - lifecycle: 
 - dismissed-reason: 
+- resolution: reviewer given a scoped Write tool for its own `.devcycle/findings/<task-id>-round-<n>.md`; the coordinator confirms that file exists before logging `event=review-verdict` (cycle 9d661cd3e5a9bfe3, 2026-08-28). Supersedes the 2026-08-05 coordinator-persists promotion, which did not hold.

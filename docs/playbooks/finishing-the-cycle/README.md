@@ -20,10 +20,19 @@ never merges; `open-pr` pushes and opens a PR whose title parses as a Convention
 matches this run's derived commit convention, and is likewise never merged. Before the state
 file closes, two more gates run: a redaction screen (`redaction-check.mjs`) over the real,
 gitignored `.devcycle/` directory and the run-record store — CI's own screen never reaches
-either, so this is their only check, and a non-zero exit stops the stage rather than continuing
-past an unscreened finding — and a workload-signature append (`run-record.mjs workload`) that
-records only counts and enums (request kind, base sha, planned task/wave counts) and never
-paths or prose. That append is a final refresh, not the primary collection: the
+either, so this is their only check — and a workload-signature append (`run-record.mjs
+workload`) that records only counts and enums (request kind, base sha, planned task/wave
+counts) and never paths or prose. The two redaction calls carry different severity because
+their content has different fates: `.devcycle/` is gitignored and local-only, so its three
+machine-identity classes (absolute home paths, session ids, the escaped project-directory form)
+are the expected shape there, not a leak — that call passes `--advisory-identity`, which
+downgrades those three classes to a stderr report and exit 0, leaving only a deny-listed term as
+a hard stop; the run-record-store call carries no such flag and stays the hard gate on all four
+classes, because that content is durable and potentially shared. A single line can be exempted
+from the machine-identity classes only (never from a deny-listed term) with an inline
+`redaction-allow` marker on that line. Either call's non-zero exit stops the stage rather than
+continuing past an unscreened finding. That workload-signature append is a final refresh, not
+the primary collection: the
 `hooks/workload-sensor.mjs` commit-sensor already writes the same record progressively on every
 commit during the run, and the last-wins join makes this closing write harmless. The stage's
 final write to `.devcycle/state.md` sets `stage: done`.
@@ -63,7 +72,7 @@ flowchart TD
     HANDBACK --> REDACT
     PUSH --> REDACT
     PR --> REDACT
-    REDACT{"redaction-check.mjs over .devcycle/ and the run-record dir — exit 0?"}:::stage
+    REDACT{"redaction-check.mjs: --advisory-identity over .devcycle/, hard gate over the run-record dir — exit 0?"}:::stage
     REDACT -->|"no"| STOP[("stage stops — surface the finding")]:::structural
     REDACT -->|"yes"| RECORD("Append the workload signature via run-record.mjs"):::stage
     RECORD --> ARCHIVE[("Archive ledger, briefs, evidence, findings, reports into .devcycle/archive-&lt;date&gt;-&lt;branch-slug&gt;/")]:::structural

@@ -748,6 +748,14 @@ test("harvested: executing-waves/return-envelopes — a dispatch returns counts 
   assert.match(t, /opens a report or findings file only when a decision needs content the\s+envelope cannot carry/);
 });
 
+test("harvested: task-reviewer/owns-its-findings-file — the reviewer has Write and persists its own findings", () => {
+  const a = read("agents/task-reviewer.md");
+  assert.match(a, /^tools:.*\bWrite\b/m, "task-reviewer must grant Write to persist its findings file");
+  assert.match(a, /\.devcycle\/findings\/<task-id>-round-<n>\.md/);
+  const e = read("playbooks/executing-waves.md");
+  assert.match(e, /confirms the findings file exists .* before logging `event=review-verdict`/i);
+});
+
 test("harvested: fast-path/mini-cycle — the fast path keeps its evidence files and its one-reviewer floor", () => {
   const t = read("playbooks/taking-the-fast-path.md");
   assert.ok(t.includes(".devcycle/evidence/fast-before.txt"), "fast-path before-evidence path missing");
