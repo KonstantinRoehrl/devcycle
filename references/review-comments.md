@@ -128,6 +128,27 @@ item, consumed at §6.4 / §6.6 to recommend a rewind to `stage: brainstorm`):
 - Reviewer's reasoning: <why the reviewer believes the spec is wrong>
 ```
 
+## The comment-body contract
+
+This subsection is the single owner of the Claude-authored PR-comment **body** shape — both the
+write-back filing step and reconcile replies render bodies through it, never a hand-built string,
+so a filed finding and a reconcile reply are visually indistinguishable in shape and origin.
+
+A body is structured as:
+
+- a symptom-first title line — what's wrong before the mechanism, per this file's own
+  `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`-aligned convention;
+- the plain-language body explaining the finding;
+- the repo-relative `file:line` location the finding is anchored to.
+
+Markdown conventions follow the rest of this repo's authored prose: plain sentences over nested
+bullets, code spans for identifiers and paths, no emoji beyond the footer's own.
+
+Every body ends with the attribution footer declared under "Pinned constants" below — its literal
+and marker are not restated here; this subsection only names that the footer applies to every
+comment-body rendered through this contract. The footer marks **only** Claude-authored comments; a
+human reviewer's own comments are never stamped with it.
+
 ## Pinned constants
 
 - **Attribution footer.** Every posted reply/comment ends with the exact literal
