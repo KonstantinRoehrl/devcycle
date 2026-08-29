@@ -152,7 +152,7 @@ function main() {
   const toplevel = flags.repo ?? gitToplevel(process.cwd());
   const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex",
     "filesChanged", "filesCreated", "filesDeleted", "insertions", "deletions",
-    "plannedTaskCount", "waveCount"]);
+    "plannedTaskCount", "waveCount", "filed", "degraded"]);
   const floatFields = new Set(["cost"]);
 
   if (sub === "new") {

@@ -582,6 +582,36 @@ test("append --kind triage rejects a requestKind outside the enum", () => {
   assert.match(r.stderr, /requestKind/);
 });
 
+test("append --kind review-writeback writes a schema-valid marker line (documented filing step)", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-review-writeback-"));
+  const runId = run(
+    ["new", "--repo", "/tmp/demo-writeback", "--plugin-version", "0.13.0",
+     "--plugin-sha", "ded29c6", "--profile", "standard"],
+    runs
+  ).stdout.trim();
+  const r = run(
+    ["append", "--run", runId, "--repo", "/tmp/demo-writeback", "--kind", "review-writeback",
+     "--pr", "159", "--event", "COMMENT", "--filed", "3", "--degraded", "1"],
+    runs
+  );
+  assert.strictEqual(r.status, 0, r.stderr);
+  const lines = readFileSync(recordPath("/tmp/demo-writeback", runId), "utf8")
+    .split("\n").filter(Boolean).map(JSON.parse);
+  const marker = lines.find((o) => o.kind === "review-writeback");
+  assert.ok(marker, "a review-writeback line was appended");
+  assert.strictEqual(marker.pr, "159");
+  assert.strictEqual(marker.event, "COMMENT");
+  assert.strictEqual(marker.filed, 3);
+  assert.strictEqual(marker.degraded, 1);
+
+  const schema = JSON.parse(
+    readFileSync(join(REPO_ROOT, "tests/fixtures/run-record.schema.json"), "utf8")
+  );
+  const sub = subSchemaFor(schema, "review-writeback");
+  assert.ok(sub, "review-writeback kind is declared in the schema");
+  assert.deepEqual(validate(marker, sub), []);
+});
+
 test("gitToplevel canonicalizes a linked worktree to the main checkout (#104)", () => {
   const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-")));
   spawnSync("git", ["init", "-q"], { cwd: tempRepo });

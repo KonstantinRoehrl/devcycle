@@ -1168,6 +1168,19 @@ const DESCRIBES_NOT_GATES = [
   "references/quality-criteria.md § ## Abstraction — does an existing abstraction still earn its complexity",
 ];
 
+// Sections that gate the user but run ONLY on an entry that carries no run record, so their
+// gate can never append — the runless twin of PRE_MINT_SURFACES, one level down at the section
+// rather than the file. `reviewing-code.md` is reachable both in-cycle (run-bearing) and
+// standalone, so the FILE is not exempt; but its `### Filing …` section runs exclusively on the
+// standalone `/devcycle:review` entry, which mints no run record. Such a section must still cite
+// the write site — honestly, in the negative — so it is held to verdict "negative" below rather
+// than the affirmative every run-bearing gate owes. Listed, not derived: "runs only on the
+// standalone entry" is a fact about which entry reaches this section, carried nowhere in the file
+// structure. Guarded below: an entry that stops gating, or flips to affirmative, fails.
+const RUNLESS_SECTIONS = [
+  "playbooks/reviewing-code.md § ### Filing the findings to the PR — standalone `/devcycle:review`, `branch` scope, open PR only",
+];
+
 // A gate that runs before any run record exists must say so, rather than claim an append that
 // cannot happen there. Listed, not derived: "before the mint" is a fact about when the text runs,
 // and nothing in the file structure carries it — `references/first-run-config.md`'s walkthrough is reached
@@ -1510,7 +1523,11 @@ test("every gating section of every in-cycle surface cites the write site, or is
     for (const section of gatingSections(read(path))) {
       const entry = `${path} § ${section.heading}`;
       if (DESCRIBES_NOT_GATES.includes(entry)) continue;
-      if (section.verdict !== "affirmative") offenders.push(`${entry} (${section.verdict})`);
+      // A runless section runs only where no run record exists, so it owes an honest negative
+      // citation, never the affirmative every run-bearing gate owes. This EXTENDS the invariant —
+      // the section must still cite the write site — rather than exempting the section outright.
+      const required = RUNLESS_SECTIONS.includes(entry) ? "negative" : "affirmative";
+      if (section.verdict !== required) offenders.push(`${entry} (${section.verdict}, want ${required})`);
     }
   }
   assert.deepEqual(offenders, [], `these sections gate inside a cycle run but cite no write site: ${offenders.join(", ")}`);
@@ -1524,6 +1541,27 @@ test("the descriptive-mention allowlist cannot go stale", () => {
       sections.some((s) => s.heading === heading),
       `${entry} is allowlisted as a descriptive mention, but that section no longer exists or no longer ` +
         `matches the gate vocabulary — drop the entry rather than leaving it to excuse nothing`
+    );
+  }
+});
+
+test("the runless-section list cannot go stale or silently flip to affirmative", () => {
+  for (const entry of RUNLESS_SECTIONS) {
+    const [path, heading] = entry.split(" § ");
+    const sections = gatingSections(read(path));
+    const section = sections.find((s) => s.heading === heading);
+    assert.ok(
+      section,
+      `${entry} is listed as a runless gate, but that section no longer exists or no longer matches the ` +
+        `gate vocabulary — drop the entry rather than leaving it to hold a citation to nothing`
+    );
+    // The reason it is listed at all: its gate can never append, so it must declare that in the
+    // negative. An entry that flips to affirmative would claim a journal that cannot happen here.
+    assert.equal(
+      section.verdict,
+      "negative",
+      `${entry} runs only on an entry that mints no run record, so it must cite the write site in the ` +
+        `negative; its citation reads "${section.verdict}"`
     );
   }
 });

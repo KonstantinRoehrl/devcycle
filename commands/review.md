@@ -1,5 +1,5 @@
 ---
-description: "Review a branch, a repository, or a file set against criteria you confirm, and write a ranked findings document. Standalone: no cycle is started."
+description: "Review a branch, a repository, or a file set against criteria you confirm, and produce a ranked findings document — the produce arm of the review write-back path, with an opt-in file step on an open PR. Standalone: no cycle is started."
 ---
 
 # /devcycle:review
@@ -12,9 +12,11 @@ file-referenced evidence and a concrete fix. Three scopes:
 - `/devcycle:review` — this repository.
 - `/devcycle:review <path> [<path>…]` — a file set.
 
-Invoked standalone, every scope confirms its criteria at an interview first and ends at a ranked
-findings document. Only the in-cycle branch-review stage skips the interview and returns its
-findings inline.
+Invoked standalone, every scope confirms its criteria at an interview first and produces a ranked
+findings document; `branch` scope against an open PR can then opt in to filing those findings back
+as PR review comments, the file arm of the review write-back path
+(`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` §5). Only the in-cycle branch-review stage
+skips the interview and returns its findings inline.
 
 **`$ARGUMENTS` grammar — explicit tokens, never inference. This command owns it; the playbook
 consumes the branch it is handed and does not re-derive the syntax.** A `branch:<name>` token

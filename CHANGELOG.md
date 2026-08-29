@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- feat(review): add the PR review write-back path — produce, file, respond (#159)
+
+**Review write-back path (#159).** `/devcycle:review` and `/devcycle:reconcile` now close a loop
+around a pull request. A standalone audit run (**produce**) can **file** its ranked findings back
+onto an open PR as a single batched, diff-anchored review — opt-in, confirm-first, and read-only
+toward code — via a new `scripts/pr-diff-anchor.mjs` anchoring module and a `review` route on
+`scripts/pr-review-post.mjs`. `/devcycle:reconcile` (**respond**) triages a PR's own review
+comments into fixes and consent-gated replies, and no longer surfaces the respond path when intake
+yields no genuine review to answer. Both arms render every Claude-authored comment through one
+shared comment-body contract, now owned by `references/review-comments.md`, so a filed finding and
+a reconcile reply are indistinguishable in shape and origin.
+
 ## 0.17.3 — 2026-08-29
 
 - fix(devcycle): harden pipeline-safety gates and doctor compliance cohorts (#105, #106, #107, #128, #141, #145)
