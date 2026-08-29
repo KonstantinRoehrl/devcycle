@@ -1173,27 +1173,62 @@ export function formatCandidate(c) {
   return `CANDIDATE: ${parts.join(" ")}`;
 }
 
-// Every session's own emitComplianceCandidates() output, gathered corpus-wide — same one-entry-
-// per-source-session convention emitCandidates already uses for unpriced-model, above. QC5: a
-// null onDevicePath (always null until Task 11 lands in cycle 3) is labelled "unrecorded" here
-// so both render sites below show a labelled value, never a bare null.
-function complianceCandidatesOf(summaries) {
-  return summaries.flatMap((s) => (s.complianceCandidates ?? []).map((c) => {
-    const withPath =
-      c.type === "main-thread-browser" ? { ...c, onDevicePath: c.onDevicePath ?? "unrecorded" } : c;
-    // Version scope from the source session (spec C5): a single-session candidate spans [v, v].
-    // A version-less session (unknown) carries no range rather than a fabricated "unknown..unknown".
-    const v = s.pluginVersion;
-    return v && v !== "unknown" ? { ...withPath, versions: [v, v] } : withPath;
-  }));
+// Every session's own emitComplianceCandidates() output, gathered corpus-wide and aggregated per
+// compliance type (per (type, requestKind) for missing-workload) so a habit spread over N sessions
+// renders as ONE candidate carrying sessions_sampled=N and its occurrence field summed — the real
+// cohort count version-regression already carries (#128), not the per-session sessions_sampled=1 the
+// emitter seeds. versions merges to the known [min..max]; onDevicePath collapses to the sorted
+// distinct recorded paths, "unrecorded" when every source session was null.
+export function complianceCandidatesOf(summaries) {
+  // Group each session's per-type candidate into one corpus-wide cohort. type alone keys the first
+  // three; missing-workload also keys on requestKind so a systemic feature-cycle gap stays distinct
+  // from a one-off refactor. requestKind is a fixed triage enum with no spaces, so a space joins the
+  // composite key unambiguously.
+  const groups = new Map(); // key -> { type, members, sessions:Set, versions:[] }
+  for (const s of summaries) {
+    const v = s.pluginVersion && s.pluginVersion !== "unknown" ? s.pluginVersion : null;
+    for (const c of s.complianceCandidates ?? []) {
+      const key = c.type === "missing-workload" ? `${c.type} ${c.requestKind}` : c.type;
+      let g = groups.get(key);
+      if (!g) groups.set(key, (g = { type: c.type, members: [], sessions: new Set(), versions: [] }));
+      g.members.push(c);
+      g.sessions.add(s.id);
+      if (v) g.versions.push(v);
+    }
+  }
+  const out = [];
+  for (const g of groups.values()) {
+    const sessions_sampled = g.sessions.size;
+    const sum = (field) => g.members.reduce((n, c) => n + (c[field] ?? 0), 0);
+    const cand = { type: g.type, sessions_sampled, low_confidence: sessions_sampled === 1 };
+    // Version scope merged across contributing sessions (spec C5): known min..max, ignoring unknown;
+    // a cohort whose sessions all lacked a version carries no range rather than a fabricated one.
+    if (g.versions.length) {
+      const sorted = [...g.versions].sort(compareVersions);
+      cand.versions = [sorted[0], sorted[sorted.length - 1]];
+    }
+    if (g.type === "main-thread-browser") {
+      // Sessions may disagree on the path; collapse to the sorted distinct set (display field only),
+      // "unrecorded" when every source session was null.
+      const paths = [...new Set(g.members.map((c) => c.onDevicePath).filter(Boolean))].sort();
+      out.push({ ...cand, calls: sum("calls"),
+        onDevicePath: paths.length ? paths.join(",") : "unrecorded", note: g.members[0].note });
+    } else if (g.type === "inherited-model") {
+      out.push({ ...cand, inherited: sum("inherited"), total: sum("total") });
+    } else if (g.type === "general-purpose-search") {
+      out.push({ ...cand, count: sum("count"), total: sum("total") });
+    } else if (g.type === "missing-workload") {
+      out.push({ ...cand, commits: sum("commits"), requestKind: g.members[0].requestKind });
+    }
+  }
+  return out;
 }
 
-// Distinct from formatCandidate: these three carry their own occurrence field
-// (calls/inherited/count) and no dollars, so reusing formatCandidate's field set would print
-// unrelated columns. Each carries a per-session sessions_sampled=1 like the unpriced-model
-// convention (#128), rendered here as `sessions=N` so a reader can weigh how many sessions the
-// flag rests on. The version range, when the source session carried one, renders as
-// `versions=[min..max]` (spec C5).
+// Distinct from formatCandidate: these carry their own occurrence field (calls/inherited/count) and
+// no dollars, so reusing formatCandidate's field set would print unrelated columns. sessions_sampled
+// is the aggregated cohort size from complianceCandidatesOf (#128), rendered as `sessions=N` so a
+// reader can weigh how many sessions the flag rests on; versions renders as `versions=[min..max]`
+// when the cohort carried any known version (spec C5).
 function formatComplianceCandidate(c) {
   const span = c.versions ? ` versions=[${c.versions[0]}..${c.versions[1]}]` : "";
   if (c.type === "main-thread-browser")
@@ -2540,8 +2575,9 @@ export function renderReport(summaries, ctx) {
     "no run carries a workload record yet",
   ));
   const missingWorkload = compliance.filter((c) => c.type === "missing-workload");
-  if (missingWorkload.length)
-    L.push("", `> ${missingWorkload.length} cycle(s) committed work but recorded no workload — see ### Compliance (missing-workload). A thin or empty table above may reflect that collection gap, not absence of work.`);
+  const missingWorkloadSessions = missingWorkload.reduce((n, c) => n + c.sessions_sampled, 0);
+  if (missingWorkloadSessions)
+    L.push("", `> ${missingWorkloadSessions} cycle(s) committed work but recorded no workload — see ### Compliance (missing-workload). A thin or empty table above may reflect that collection gap, not absence of work.`);
 
   section("## Cost by version", "cost-by-version");
   L.push(...markdownTable(
