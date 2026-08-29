@@ -33,6 +33,17 @@ then committing it scoped to that one path. A branch-review run returns findings
 line and stops there — the rounds-and-cap loop, the ledger cross-check, and the handoff belong
 to that stage, not this one.
 
+A standalone `/devcycle:review` audit run over a `branch` scope with an open PR can take one
+further, opt-in step: **filing** its own ranked findings back onto that PR as a single batched,
+diff-anchored review — the **file** arm of the review write-back path. It stays read-only toward
+code (only PR state changes; the audit document is still the only working-tree file written), is
+confirm-first behind a content gate and a post gate, anchors each finding against the PR-head diff,
+and renders every comment body through the comment-body contract
+[`references/review-comments.md`](../../../references/review-comments.md) owns — the same body shape
+a `/devcycle:reconcile` reply uses. The step lives in
+[`playbooks/reviewing-code.md`](../../../playbooks/reviewing-code.md) §5; this page names it and
+does not restate its gates.
+
 ## How it fits
 - Up: [the pipeline](../../pipeline/README.md) — where the Audit stage sits.
 - Source: [`playbooks/reviewing-code.md`](../../../playbooks/reviewing-code.md) — the behavior
@@ -40,6 +51,8 @@ to that stage, not this one.
 - Other callers: [`playbooks/maintaining-the-repo.md`](../../../playbooks/maintaining-the-repo.md)
   wraps this engine for `/devcycle:maintain`; standalone
   [`commands/review.md`](../../../commands/review.md) runs it directly, outside any cycle.
+- Respond side: [`receiving-review`](../receiving-review/README.md) — the **respond** arm of the
+  write-back path, where `/devcycle:reconcile` answers a PR's own review comments.
 
 ```mermaid
 ---
