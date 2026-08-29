@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.3 — 2026-08-29
+
+- fix(devcycle): harden pipeline-safety gates and doctor compliance cohorts (#105, #106, #107, #128, #141, #145)
+
 ## 0.17.2 — 2026-08-28
 
 - fix(workload): make doctor missing-workload collection progressive and audit-safe (#139)
