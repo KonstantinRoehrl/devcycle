@@ -1,6 +1,11 @@
+#!/usr/bin/env node
 // Parses a unified PR-head diff and anchors findings against its new-side (RIGHT) lines.
-// Pure Node -- no `gh`, no child_process, no filesystem. Line numbers come only from the
-// PR-head diff text passed in by the caller, never the local checkout.
+// The library core (parsePatch/anchorFinding) is pure Node -- no `gh`, no child_process, no
+// filesystem; line numbers come only from the PR-head diff text passed in by the caller, never
+// the local checkout. The CLI wrapper reads the diff and the findings from files the caller
+// resolved (`gh pr diff …` output and the run's ranked findings), and stays just as offline.
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
@@ -80,3 +85,47 @@ export function anchorFinding({ path, line }, index, map) {
 
   return { anchorable: true, path, line, side: "RIGHT", index };
 }
+
+function parseFlags(argv) {
+  const flags = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (!argv[i].startsWith("--")) continue;
+    flags[argv[i].slice(2)] = argv[i + 1];
+    i++;
+  }
+  return flags;
+}
+
+function die(msg) {
+  process.stderr.write(`pr-diff-anchor: ${msg}\n`);
+  process.exit(1);
+}
+
+// CLI entry: partition the run's findings against the PR-head diff. `anchored` findings pin to a
+// RIGHT-side line the reviewer can post inline; `degraded` ones (file-only, or a line off every
+// hunk) fall through to the review summary body — printed, never dropped.
+function main() {
+  const flags = parseFlags(process.argv.slice(2));
+  if (!flags["diff-file"]) die("--diff-file <path> is required");
+  if (!flags["findings-file"]) die("--findings-file <path> is required");
+
+  const diffText = readFileSync(flags["diff-file"], "utf8");
+  const findings = JSON.parse(readFileSync(flags["findings-file"], "utf8"));
+  if (!Array.isArray(findings)) die("--findings-file must contain a JSON array of findings");
+
+  const map = parsePatch(diffText);
+  const anchored = [];
+  const degraded = [];
+  findings.forEach((finding, index) => {
+    const result = anchorFinding({ path: finding.path, line: finding.line ?? null }, index, map);
+    if (result.anchorable) {
+      anchored.push({ index, path: result.path, line: result.line, side: result.side });
+    } else {
+      degraded.push({ index, path: finding.path, line: finding.line ?? null, reason: result.reason });
+    }
+  });
+
+  process.stdout.write(JSON.stringify({ anchored, degraded }) + "\n");
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

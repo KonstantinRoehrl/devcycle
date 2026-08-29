@@ -232,6 +232,11 @@ step 5), the scope is `branch`, and an open PR exists for that branch. Absent an
 Filing consumes the run's **own in-memory ranked findings** — never re-parsing the findings
 document just written, never a machine-readable sidecar.
 
+The scope/severity gate below runs only on the standalone `/devcycle:review` entry, which carries
+no run record, so an Other answer here **never appends** `user-correction-at-gate` —
+`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that condition (a gate appends exactly when a run
+record exists, and here none does).
+
 Orchestration, once the three conditions hold:
 
 1. **Resolve once.** The open PR, its head sha as the `commit_id` every anchor pins against, and
@@ -243,10 +248,13 @@ Orchestration, once the three conditions hold:
    refuses with a named error and files nothing. At most the Frontier-25 cap
    `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md` owns is shown at the gate; beyond it,
    remaining findings are named and deferred, never silently truncated.
-3. **Anchor against the PR-head diff, never the checkout.** Each selected finding is anchored via
-   `${CLAUDE_PLUGIN_ROOT}/scripts/pr-diff-anchor.mjs` against the PR-head diff
-   (`gh pr diff <pr> --repo <owner/name>`) — anchoring line numbers come only from that diff. A
-   finding that will not anchor **degrades into the review summary body**, never dropped.
+3. **Anchor against the PR-head diff, never the checkout.** Write the PR-head diff
+   (`gh pr diff <pr> --repo <owner/name>`) and the selected findings (a JSON array of
+   `{path, line}`) to temp files, then partition them with
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-diff-anchor.mjs" --diff-file <diff> --findings-file
+   <findings>` — anchoring line numbers come only from that diff, never the checkout. It prints
+   `{"anchored":[…RIGHT-side lines…],"degraded":[…]}`; a finding that will not anchor lands in
+   `degraded` and **degrades into the review summary body**, never dropped.
 4. **Draft each body through the comment-body contract** — the `## The comment-body contract`
    subsection of `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md` owns the body shape and its
    attribution footer; this step names it and never restates it.

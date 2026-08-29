@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parsePatch, anchorFinding } from "../../scripts/pr-diff-anchor.mjs";
+
+const SCRIPT = fileURLToPath(new URL("../../scripts/pr-diff-anchor.mjs", import.meta.url));
 
 // Two-file diff fixture from the task brief. For src/a.js the new-side numbers are:
 // line 1 (context "const x = 1;"), line 2 (added "const y = 3;"), line 3 (added "const z = 4;"),
@@ -104,4 +111,33 @@ test("anchorFinding anchors a finding in the second file of a multi-file diff", 
     side: "RIGHT",
     index: 5,
   });
+});
+
+test("CLI partitions an in-hunk finding into anchored (RIGHT) and out-of-hunk / file-only findings into degraded", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pr-diff-anchor-cli-"));
+  const diffFile = join(dir, "diff.patch");
+  const findingsFile = join(dir, "findings.json");
+  writeFileSync(diffFile, TWO_FILE_DIFF);
+  writeFileSync(
+    findingsFile,
+    JSON.stringify([
+      { path: "src/a.js", line: 3 }, // on an added line -> anchored, side RIGHT
+      { path: "src/a.js", line: 99 }, // outside every hunk -> degraded
+      { path: "src/a.js" }, // file-only finding (no line) -> degraded
+    ])
+  );
+
+  const res = spawnSync("node", [SCRIPT, "--diff-file", diffFile, "--findings-file", findingsFile], {
+    encoding: "utf8",
+  });
+  assert.equal(res.status, 0, res.stderr);
+
+  const out = JSON.parse(res.stdout);
+  assert.deepEqual(out.anchored, [{ index: 0, path: "src/a.js", line: 3, side: "RIGHT" }]);
+  assert.equal(out.degraded.length, 2);
+  assert.deepEqual(
+    out.degraded.map((d) => d.index).sort((a, b) => a - b),
+    [1, 2]
+  );
+  for (const d of out.degraded) assert.ok(d.reason, "a degraded finding must carry a reason");
 });
