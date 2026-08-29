@@ -2061,3 +2061,70 @@ test("--staleness reports not-stale when neither threshold is crossed (L1)", () 
   assert.ok(out.daysSince < 14);
   assert.equal(out.stale, false);
 });
+
+// --- Wave 2 Task 5: worktree-aware corpus + sibling-project exclusion ---
+
+const wtSlug = (p) => p.replace(/[^A-Za-z0-9]/g, "-");
+
+function seedProject(projectsDir, absCwd) {
+  const dir = join(projectsDir, wtSlug(absCwd));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "s.jsonl"),
+    JSON.stringify({ cwd: absCwd, timestamp: "2026-08-29T00:00:00Z",
+      message: { role: "user", content: "hi" }, sessionId: "s" }) + "\n");
+}
+
+// One fake git runner: worktree list returns main + wt; --git-common-dir maps both to main.
+const gitFake = (main, wt) => (cmd, args) => {
+  const k = args.join(" ");
+  if (k.includes("worktree list --porcelain"))
+    return { status: 0, stdout: `worktree ${main}\nworktree ${wt}\n` };
+  if (k.includes("--git-common-dir")) {
+    const cwd = args[args.indexOf("-C") + 1];
+    return (cwd === main || cwd === wt)
+      ? { status: 0, stdout: `${main}/.git\n` }
+      : { status: 0, stdout: `${cwd}/.git\n` };
+  }
+  return { status: 1, stdout: "" };
+};
+
+// Same identity mapping, but `worktree list` names a single non-existent root so no
+// enumerated slug dir exists → the whole-root fallback path is exercised.
+const gitFakeFallback = (main, wt) => (cmd, args) => {
+  const k = args.join(" ");
+  if (k.includes("worktree list --porcelain"))
+    return { status: 0, stdout: `worktree /x/nope\n` };
+  if (k.includes("--git-common-dir")) {
+    const cwd = args[args.indexOf("-C") + 1];
+    return (cwd === main || cwd === wt)
+      ? { status: 0, stdout: `${main}/.git\n` }
+      : { status: 0, stdout: `${cwd}/.git\n` };
+  }
+  return { status: 1, stdout: "" };
+};
+
+test("corpus unions worktree sessions and excludes a sibling project (primary path)", () => {
+  const projectsDir = mkdtempSync(join(tmpdir(), "proj-"));
+  const main = "/x/repo", wt = "/x/repo-wt", other = "/x/other";
+  seedProject(projectsDir, main); seedProject(projectsDir, wt); seedProject(projectsDir, other);
+  const { sessions } = planCorpus({
+    repoRoot: main, projectsDir, since: null, gitRunner: gitFake(main, wt) });
+  const cwds = new Set(sessions.flatMap((s) => s.files ?? []).map(String));
+  assert.ok([...cwds].some((f) => f.includes(wtSlug(main))), "main missing");
+  assert.ok([...cwds].some((f) => f.includes(wtSlug(wt))), "worktree missing");
+  assert.ok(![...cwds].some((f) => f.includes(wtSlug(other))), "sibling project leaked");
+});
+
+test("corpus fallback scan unions worktrees and excludes a sibling project (fallback path)", () => {
+  const projectsDir = mkdtempSync(join(tmpdir(), "proj-"));
+  const main = "/x/repo", wt = "/x/repo-wt", other = "/x/other";
+  seedProject(projectsDir, main); seedProject(projectsDir, wt); seedProject(projectsDir, other);
+  // `worktree list` names /x/nope (no slug dir) → primary is empty → whole-root scan runs,
+  // filtering each session's own cwd through the git-identity mapping.
+  const { sessions } = planCorpus({
+    repoRoot: main, projectsDir, since: null, gitRunner: gitFakeFallback(main, wt) });
+  const cwds = new Set(sessions.flatMap((s) => s.files ?? []).map(String));
+  assert.ok([...cwds].some((f) => f.includes(wtSlug(main))), "main missing");
+  assert.ok([...cwds].some((f) => f.includes(wtSlug(wt))), "worktree missing");
+  assert.ok(![...cwds].some((f) => f.includes(wtSlug(other))), "sibling project leaked");
+});

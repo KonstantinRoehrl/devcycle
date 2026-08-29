@@ -20,6 +20,8 @@ import { parseFlags } from "./cli-flags.mjs";
 import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
 import { renderLearnReport } from "./learn-report.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
+import { fieldText } from "./md-field.mjs";
+import { gitToplevel, worktreeRoots } from "./git-identity.mjs";
 
 const CAP = 100;
 const dreamDir = (root) => join(root, ".devcycle", "dreaming");
@@ -132,23 +134,14 @@ export function readAllObservations(repoRoot) {
   return { total: all.length, unique: observations.length, observations };
 }
 
-// `\s*` matches a newline too, so a field left blank on its own line would otherwise let
-// the capture cross into the next "- key: value" line and read that line back as the
-// value. `[ \t]*` stops at the newline: it only ever captures the rest of the field's own
-// line, blank or not.
-function field(text, key) {
-  const m = text.match(new RegExp(`^- ${key}:[ \\t]*(.*)$`, "m"));
-  return m ? m[1].trim() : "";
-}
-
 export function readCheckpoint(repoRoot) {
   const p = statePath(repoRoot);
   if (!existsSync(p)) return { lastDreamedThrough: null, lastArtifact: null };
   const text = readFileSync(p, "utf8");
   const literal = (v) => (!v || v === "never" || v === "none" ? null : v);
   return {
-    lastDreamedThrough: literal(field(text, "last-dreamed-through")),
-    lastArtifact: literal(field(text, "last-artifact")),
+    lastDreamedThrough: literal(fieldText(text, "last-dreamed-through")),
+    lastArtifact: literal(fieldText(text, "last-artifact")),
   };
 }
 
@@ -328,8 +321,8 @@ function defaultReadText(session) {
 // keeps the manifest's redaction property intact. Deliberately not routed through planCorpus:
 // the 100-session cap and the checkpoint window bound *mining*, and a caller holding a session
 // id must be able to read that session's text regardless of either.
-export function extractSession({ repoRoot, projectsDir, sessionId }) {
-  const files = resolveProjectFiles(repoRoot, projectsDir).filter(
+export function extractSession({ repoRoot, projectsDir, sessionId, gitRunner }) {
+  const files = resolveProjectFiles(repoRoot, projectsDir, gitRunner).filter(
     (f) => owningSession(f) === sessionId,
   );
   if (!files.length) throw new Error(`no transcript for session: ${sessionId}`);
@@ -355,27 +348,28 @@ function readTranscriptsOrFail(dir, label) {
   throw new Error(`${label} exists but could not be read: ${dir}`);
 }
 
-function sessionCwdMatches(file, repoRoot) {
-  return readRecords(file).some((r) => r.cwd === repoRoot);
+// The learn corpus spans every live worktree of the invoking repo, not only the exact-cwd
+// checkout: each worktree is a distinct project slug, so the common path enumerates them
+// (`git worktree list`, one call — never a per-session git call, keeping the machine-wide scan
+// spec §10 rejected out of the hot path) and unions their slug dirs. Sessions from a *sibling
+// project* never enter: an enumerated slug is this repo's own worktree, and the whole-root
+// fallback filters on git-repo identity. Documented gaps: a deleted worktree (gone from
+// `git worktree list`) and a session launched from a subdir of a worktree (its slug is the
+// subdir, not the worktree root — a pre-existing gap for the main checkout too).
+function sessionRepoMatches(file, mineTop, gitRunner) {
+  return readRecords(file).some((r) => r.cwd && gitToplevel(r.cwd, gitRunner) === mineTop);
 }
 
-// Safety net scripts/doctor.mjs's resolveDepth already has and this engine lacked: when
-// the (correctly escaped) slug directory doesn't exist at all, fall back to a search of
-// the whole projects root rather than reporting an empty corpus — the same fallback
-// doctor.mjs:135-138 uses when its own slug misses. Kept repo-scoped by filtering on each
-// session's own recorded `cwd`, so a sibling project's sessions still never leak in; this
-// is the fallback path only, not the common case, so it does not reintroduce the
-// machine-wide scan spec §10's amendment rejected on cost and leakage grounds.
-function resolveProjectFiles(repoRoot, projectsDir) {
-  const repoProjectDir = join(projectsDir, escapeProjectPath(repoRoot));
-  const direct = readTranscriptsOrFail(repoProjectDir, "project directory");
-  if (direct !== null) return direct;
+function resolveProjectFiles(repoRoot, projectsDir, gitRunner) {
+  const roots = worktreeRoots(repoRoot, gitRunner);
+  const primary = roots.flatMap((r) =>
+    readTranscriptsOrFail(join(projectsDir, escapeProjectPath(r)), "project directory") ?? []);
+  if (primary.length) return primary;
+
   const all = readTranscriptsOrFail(projectsDir, "projects root");
-  // A repo with no project directory yet is normal (handled by the fallback above). A
-  // projects root that does not exist at all is not: the transcript source is absent, and
-  // reporting an empty corpus at exit 0 is the silent swallow §9 forbids.
   if (all === null) throw new Error(`projects root does not exist: ${projectsDir}`);
-  return all.filter((f) => sessionCwdMatches(f, repoRoot));
+  const mineTop = gitToplevel(repoRoot, gitRunner);
+  return all.filter((f) => sessionRepoMatches(f, mineTop, gitRunner));
 }
 
 // F5: a slice id that is only the session id can never reopen when the session grows, so every
@@ -385,9 +379,9 @@ function resolveProjectFiles(repoRoot, projectsDir) {
 export const sliceId = (sessionId, bytes, digest) => `${sessionId}@${bytes}-${digest}`;
 export const sliceSessionId = (id) => String(id).split("@")[0];
 
-export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false }) {
+export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false, gitRunner }) {
   const groups = new Map();
-  for (const file of resolveProjectFiles(repoRoot, projectsDir)) {
+  for (const file of resolveProjectFiles(repoRoot, projectsDir, gitRunner)) {
     const id = owningSession(file);
     if (!groups.has(id)) groups.set(id, []);
     groups.get(id).push(file);
@@ -872,7 +866,7 @@ function main() {
       const maxSessions = flags["--max-sessions"] != null ? Number(flags["--max-sessions"]) : 5;
       const maxDays = flags["--max-days"] != null ? Number(flags["--max-days"]) : 14;
       const dsPath = join(root, ".devcycle", "distilling-state.md");
-      const lastRun = existsSync(dsPath) ? (field(readFileSync(dsPath, "utf8"), "last-run") || null) : null;
+      const lastRun = existsSync(dsPath) ? (fieldText(readFileSync(dsPath, "utf8"), "last-run") || null) : null;
       // `never` (or an empty/missing line) means the corpus was never mined — the strongest stale
       // signal, and never a real `since:` to filter the corpus against.
       const literal = lastRun && lastRun !== "never" ? lastRun : null;
