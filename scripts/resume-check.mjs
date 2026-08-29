@@ -5,6 +5,7 @@ import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { isAbsolute, join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
+import { field } from "./md-field.mjs";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -43,17 +44,12 @@ let text;
 try { text = readFileSync(statePath, "utf8"); }
 catch { console.error(`resume-check: cannot read state file: ${statePath}`); process.exit(1); }
 
-const field = (name) => {
-  const m = text.match(new RegExp(`^- ${name}:\\s*(.+?)\\s*$`, "m"));
-  return m ? m[1] : null;
-};
-
 // references/resume.md § The ownership check: root: pins the file to one checkout, and a
 // differing root: means the file was copied or leaked from another project — never resume it.
 // This runs FIRST and exits on mismatch: every artifact path below is resolved against root:,
 // so once root: is wrong those verdicts are noise, not findings. The script reports; the
 // adopt-or-leave decision is the user's, per that same section.
-const recordedRoot = field("root");
+const recordedRoot = field(text, "root");
 if (recordedRoot && !NONE.has(recordedRoot)) {
   // Derived from the state file's OWN directory, not the cwd: the question is whether this file
   // belongs to the checkout it sits in, which is what makes it correct for nested checkouts and
@@ -70,7 +66,7 @@ if (recordedRoot && !NONE.has(recordedRoot)) {
       console.error("resume-check: this state file belongs to another checkout — do not resume it:");
       console.error(`  - its root:  ${real(recordedRoot)}`);
       console.error(`  - you are in: ${actualRoot}`);
-      console.error(`  - its request: ${field("request") ?? "(none recorded)"}`);
+      console.error(`  - its request: ${field(text, "request") ?? "(none recorded)"}`);
       console.error("  Adopt it (rewrite root:, keep everything else) or leave it alone — the user decides.");
       process.exit(1);
     }
@@ -78,16 +74,16 @@ if (recordedRoot && !NONE.has(recordedRoot)) {
 }
 
 const errors = [];
-const stage = field("stage");
+const stage = field(text, "stage");
 if (!stage || (VALID_STAGES.size > 0 && !VALID_STAGES.has(stage)))
   errors.push(`stage: "${stage}" is not a valid devcycle stage`);
 
-const root = field("root");
+const root = field(text, "root");
 const baseForRel = root && !NONE.has(root) ? root : dirname(statePath);
 const resolve = (p) => (isAbsolute(p) ? p : join(baseForRel, p));
 
 for (const name of ["spec", "plan", "checklist"]) {
-  const raw = field(name);
+  const raw = field(text, name);
   if (raw === null) continue;
   // A field may carry a path plus a trailing "— note"; take the first whitespace-delimited token.
   const value = raw.split(/\s+/)[0];

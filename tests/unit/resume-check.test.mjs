@@ -186,6 +186,37 @@ test("a state file in a non-git directory skips the ownership check rather than 
   }
 });
 
+test("a blank field on its own line does not swallow the next field", () => {
+  // Drift regression: the old local `field` used `\s*`, so a blank `- root:` on its own line
+  // read the following `- request:` line back as its value — making resume-check reject an
+  // ownerless state file as belonging to a foreign checkout. The shared md-field parser's
+  // `[ \t]*` stops at the newline, so a blank root reads "" and the ownership check is skipped.
+  const repo = makeRepo();
+  try {
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        [
+          "- stage: planning",
+          "- root:", // blank on its own line
+          "- request: build the thing", // must NOT be read back as root:'s value
+          "- spec: none",
+          "- plan: none",
+          "- checklist: none",
+        ].join("\n") +
+        "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.equal(r.status, 0, `blank root: was misparsed as foreign:\n${r.stdout}${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /another checkout|its root:/i);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("a state file with no root: line is not treated as foreign", () => {
   const repo = makeRepo();
   try {
