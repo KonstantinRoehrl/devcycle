@@ -25,7 +25,9 @@ advanced by `--commit-checkpoint` below; the other is this playbook's own
 
 ## Plan the corpus
 
-Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --plan`; never walk transcripts directly. It
+Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --plan`; never walk transcripts directly. The
+engine's corpus spans every live git worktree of the invoking repo — a worktree run mines the main
+checkout and its siblings too — landing all results in the invoking checkout. It
 prints the manifest as JSON. Every stage's work list is its own slice ids minus the manifest's
 `observations`, and `capped: true` is reported as a bounded run, never a failure.
 

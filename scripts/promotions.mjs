@@ -3,14 +3,11 @@
 // records too, and importing them from dream.mjs made the two scripts a cycle.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
+import { fieldText } from "./md-field.mjs";
 
 export const promoDir = (root) => join(root, "docs", "devcycle", "promotions");
 
-// (verbatim from scripts/dream.mjs:80-83 — one regex, not two)
-export function field(text, key) {
-  const m = text.match(new RegExp(`^- ${key}:[ \\t]*(.*)$`, "m"));
-  return m ? m[1].trim() : "";
-}
+export const field = fieldText;
 
 export const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
 // The two Unicode escapes are line terminators for `^`/`$` in JavaScript regexes; written as

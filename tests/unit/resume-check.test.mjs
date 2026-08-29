@@ -169,6 +169,41 @@ test("the ownership check reports nothing else — a foreign root short-circuits
   }
 });
 
+test("a foreign-root state file with a blank request prints empty, not '(none recorded)'", () => {
+  // Component-2 delta (design doc migration table): resume-check now reads `- request:` through
+  // the shared parser's `field`, which returns "" (not null) for a present-but-blank field. So the
+  // `?? "(none recorded)"` fallback on the ownership-mismatch print line no longer fires for a
+  // blank request — it prints empty. This locks the delta at the resume-check level; the parser
+  // level is covered in md-field.test.mjs.
+  const repo = makeRepo();
+  const foreign = mkdtempSync(join(tmpdir(), "resume-check-foreign-"));
+  try {
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        [
+          "- stage: planning",
+          `- root: ${foreign}`, // foreign → reaches the ownership-mismatch print path
+          "- request:", // present but blank → must print "" not "(none recorded)"
+          "- spec: none",
+          "- plan: none",
+          "- checklist: none",
+        ].join("\n") +
+        "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.notEqual(r.status, 0); // foreign root still stops the resume
+    assert.match(r.stderr, /its request:/); // the print path was reached
+    assert.doesNotMatch(r.stderr, /\(none recorded\)/); // blank read as "" → fallback did not fire
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(foreign, { recursive: true, force: true });
+  }
+});
+
 test("a state file in a non-git directory skips the ownership check rather than failing", () => {
   const dir = mkdtempSync(join(tmpdir(), "resume-check-"));
   try {
@@ -183,6 +218,37 @@ test("a state file in a non-git directory skips the ownership check rather than 
     assert.equal(r.status, 0, r.stdout + r.stderr);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a blank field on its own line does not swallow the next field", () => {
+  // Drift regression: the old local `field` used `\s*`, so a blank `- root:` on its own line
+  // read the following `- request:` line back as its value — making resume-check reject an
+  // ownerless state file as belonging to a foreign checkout. The shared md-field parser's
+  // `[ \t]*` stops at the newline, so a blank root reads "" and the ownership check is skipped.
+  const repo = makeRepo();
+  try {
+    mkdirSync(join(repo, ".devcycle"), { recursive: true });
+    const state = join(repo, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        [
+          "- stage: planning",
+          "- root:", // blank on its own line
+          "- request: build the thing", // must NOT be read back as root:'s value
+          "- spec: none",
+          "- plan: none",
+          "- checklist: none",
+        ].join("\n") +
+        "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.equal(r.status, 0, `blank root: was misparsed as foreign:\n${r.stdout}${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /another checkout|its root:/i);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
   }
 });
 
