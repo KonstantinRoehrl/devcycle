@@ -1,0 +1,14 @@
+# runReview guards comments when stamping but dereferences it unguarded two lines later, after the review is already posted
+- finding-kind: maintenance-finding
+- finding-id: runtime-defect:7f121321
+- culprit-kind: runtime-defect
+- severity: low
+- confidence: verified
+- affected-files: scripts/pr-review-post.mjs
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

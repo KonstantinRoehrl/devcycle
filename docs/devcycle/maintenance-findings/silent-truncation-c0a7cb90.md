@@ -1,0 +1,14 @@
+# A missing --paginate silently drops every PR review comment past GitHub's first page, and reconcile never knows they existed
+- finding-kind: maintenance-finding
+- finding-id: silent-truncation:c0a7cb90
+- culprit-kind: silent-truncation
+- severity: high
+- confidence: verified
+- affected-files: scripts/pr-review-intake.mjs
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

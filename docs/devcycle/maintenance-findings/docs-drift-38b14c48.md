@@ -2,12 +2,12 @@
 - finding-kind: maintenance-finding
 - finding-id: docs-drift:38b14c48
 - culprit-kind: docs-drift
-- severity: high
+- severity: medium
 - confidence: verified
 - affected-files: docs/routing.md
 - first-seen: 2026-08-25
-- last-seen: 2026-08-25
-- passes: 1
+- last-seen: 2026-08-30
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

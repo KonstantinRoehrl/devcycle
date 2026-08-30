@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: playbooks/maintaining-the-repo.md, references/config.md, references/delegation.md
 - first-seen: 2026-08-25
-- last-seen: 2026-08-25
-- passes: 1
+- last-seen: 2026-08-30
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

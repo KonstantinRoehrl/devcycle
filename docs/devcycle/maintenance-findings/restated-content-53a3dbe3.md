@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: commands/maintain.md
 - first-seen: 2026-08-23
-- last-seen: 2026-08-25
-- passes: 2
+- last-seen: 2026-08-30
+- passes: 3
 - origin: lens
 - verify: 
 - lifecycle: 

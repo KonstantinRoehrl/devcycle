@@ -1,0 +1,14 @@
+# The spec text is re-sent to every lens on every diff chunk, regardless of whether that lens's charter needs it
+- finding-kind: maintenance-finding
+- finding-id: wholesale-context-load:821c6f9c
+- culprit-kind: wholesale-context-load
+- severity: medium
+- confidence: verified
+- affected-files: workflows/review-panel.js
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

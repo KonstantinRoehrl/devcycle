@@ -1,0 +1,14 @@
+# The thorough/feature/M cohort's excess-cost baseline recomputes and drifts day to day, so the anomaly figures it reports are already stale by the time they're read
+- finding-kind: github-issue
+- finding-id: github-issue:172
+- issue: 172
+- severity: medium
+- confidence: verified
+- affected-files: scripts/doctor.mjs
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: github-issue #172
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

@@ -20,10 +20,11 @@
 //   submit:  gh api graphql -f query='mutation($id:ID!,$event:PullRequestReviewEvent!,$body:String){submitPullRequestReview(input:{pullRequestReviewId:$id,event:$event,body:$body}){pullRequestReview{state}}}' -F id=<PRR_> -F event=<EVENT> -F body=<b>
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
+import { djb2, normalizeBody } from "./pr-review-intake.mjs";
 
 export const FOOTER_MARKER = "🤖 Posted by Claude Code on behalf of";
 
@@ -41,13 +42,11 @@ export function alreadyPosted(existingReplies, commentId) {
   );
 }
 
-// Audit-only hash (djb2, base36). Correctness of idempotency rests on alreadyPosted() against
-// GitHub, never on this hash — a reworded re-draft hashes differently by design.
-function hash(str) {
-  let h = 5381;
-  const s = String(str ?? "").replace(/\s+/g, " ").trim();
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
-  return h.toString(36);
+// Audit-only correctness note carries to this sibling too: a pr-level reply has no comment_id to
+// key an in_reply_to_id match against, so idempotency here is an exact stamped-body match instead
+// -- withFooter is deterministic for the same (body, login) pair, so this is sufficient.
+export function alreadyPostedPrLevel(existingComments, stampedBody) {
+  return (existingComments ?? []).some((c) => c?.body === stampedBody);
 }
 
 export const defaultPostRunner = (exec = execFileSync) => {
@@ -55,6 +54,8 @@ export const defaultPostRunner = (exec = execFileSync) => {
   return {
     listReplies: (repo, pr) =>
       JSON.parse(api(["api", `repos/${repo}/pulls/${pr}/comments`, "--paginate"]) || "[]"),
+    listPrLevelComments: (repo, pr) =>
+      JSON.parse(api(["api", `repos/${repo}/issues/${pr}/comments`, "--paginate"]) || "[]"),
     postReply: (repo, pr, commentId, body) => {
       try {
         api(["api", `repos/${repo}/pulls/${pr}/comments/${commentId}/replies`, "-f", `body=${body}`]);
@@ -64,9 +65,13 @@ export const defaultPostRunner = (exec = execFileSync) => {
     },
     postPrLevel: (repo, pr, body) => {
       const dir = mkdtempSync(join(tmpdir(), "prpost-"));
-      const f = join(dir, "body.md");
-      writeFileSync(f, body);
-      api(["pr", "comment", String(pr), "--repo", repo, "--body-file", f]);
+      try {
+        const f = join(dir, "body.md");
+        writeFileSync(f, body);
+        api(["pr", "comment", String(pr), "--repo", repo, "--body-file", f]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     },
     resolveThread: (threadId) =>
       api(["api", "graphql", "-f",
@@ -85,9 +90,13 @@ export const defaultPostRunner = (exec = execFileSync) => {
     },
     createReview: (repo, pr, payload) => {
       const dir = mkdtempSync(join(tmpdir(), "prreview-"));
-      const f = join(dir, "review.json");
-      writeFileSync(f, JSON.stringify(payload));
-      api(["api", `repos/${repo}/pulls/${pr}/reviews`, "--method", "POST", "--input", f]);
+      try {
+        const f = join(dir, "review.json");
+        writeFileSync(f, JSON.stringify(payload));
+        api(["api", `repos/${repo}/pulls/${pr}/reviews`, "--method", "POST", "--input", f]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     },
     addReviewThread: (reviewId, { path, line, side, body }) =>
       api(["api", "graphql", "-f",
@@ -104,14 +113,17 @@ export const defaultPostRunner = (exec = execFileSync) => {
 export function runReply({ repo, pr, commentId, body, login, prLevel = false, runner = defaultPostRunner() }) {
   if (!login) throw new Error("refusing to post: no --login (gh api user returned no login)");
   const id = Number(commentId);
-  if (!prLevel) {
+  const stamped = withFooter(body, login);
+  if (prLevel) {
+    const existing = runner.listPrLevelComments(repo, pr);
+    if (alreadyPostedPrLevel(existing, stamped)) return { status: "skipped", reason: "already-posted" };
+    runner.postPrLevel(repo, pr, stamped);
+  } else {
     const existing = runner.listReplies(repo, pr);
     if (alreadyPosted(existing, id)) return { status: "skipped", reason: "already-posted" };
+    runner.postReply(repo, pr, id, stamped);
   }
-  const stamped = withFooter(body, login);
-  if (prLevel) runner.postPrLevel(repo, pr, stamped);
-  else runner.postReply(repo, pr, id, stamped);
-  return { status: "posted", replyHash: hash(stamped) };
+  return { status: "posted", replyHash: djb2(normalizeBody(stamped)) };
 }
 
 export function runResolve({ repo, threadId, runner = defaultPostRunner() }) {
@@ -134,12 +146,12 @@ export function runReview({
   if (mergeInto) {
     for (const c of stampedComments) runner.addReviewThread(mergeInto, c);
     runner.submitReview(mergeInto, event, stampedSummary);
-    return { status: "submitted", merged: true, commentCount: comments.length };
+    return { status: "submitted", merged: true, commentCount: stampedComments.length };
   }
   runner.createReview(repo, pr, {
     commit_id: commitId, event, body: stampedSummary, comments: stampedComments,
   });
-  return { status: "submitted", commentCount: comments.length };
+  return { status: "submitted", commentCount: stampedComments.length };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

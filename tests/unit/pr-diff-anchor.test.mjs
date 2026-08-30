@@ -142,6 +142,49 @@ test("CLI partitions an in-hunk finding into anchored (RIGHT) and out-of-hunk / 
   for (const d of out.degraded) assert.ok(d.reason, "a degraded finding must carry a reason");
 });
 
+test("CLI accepts a review-panel-shaped finding (file, no path) and anchors it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pr-diff-anchor-cli-"));
+  const diffFile = join(dir, "diff.patch");
+  const findingsFile = join(dir, "findings.json");
+  writeFileSync(diffFile, TWO_FILE_DIFF);
+  writeFileSync(
+    findingsFile,
+    // Mirrors workflows/review-panel.js's FINDINGS_SCHEMA output shape (file, not path) --
+    // not imported, since that file is a CommonJS workflow script with real side effects at
+    // load (require("./lib/agent-cli.js"), logger setup, process.env reads).
+    JSON.stringify([
+      { file: "src/b.js", line: 11, claim: "off-by-one", severity: "medium", measuredAgainst: "unstated", lens: "correctness" },
+    ])
+  );
+
+  const res = spawnSync("node", [SCRIPT, "--diff-file", diffFile, "--findings-file", findingsFile], {
+    encoding: "utf8",
+  });
+  assert.equal(res.status, 0, res.stderr);
+
+  const out = JSON.parse(res.stdout);
+  assert.deepEqual(out.anchored, [{ index: 0, path: "src/b.js", line: 11, side: "RIGHT" }]);
+  assert.equal(out.degraded.length, 0);
+});
+
+test("CLI degrades a finding with neither path nor file, with a named reason", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pr-diff-anchor-cli-"));
+  const diffFile = join(dir, "diff.patch");
+  const findingsFile = join(dir, "findings.json");
+  writeFileSync(diffFile, TWO_FILE_DIFF);
+  writeFileSync(findingsFile, JSON.stringify([{ line: 3, claim: "no path or file field" }]));
+
+  const res = spawnSync("node", [SCRIPT, "--diff-file", diffFile, "--findings-file", findingsFile], {
+    encoding: "utf8",
+  });
+  assert.equal(res.status, 0, res.stderr);
+
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.anchored.length, 0);
+  assert.equal(out.degraded.length, 1);
+  assert.equal(out.degraded[0].reason, "finding missing path/file");
+});
+
 test("CLI reports malformed findings JSON through its own pr-diff-anchor: error, not a raw stack trace", () => {
   const dir = mkdtempSync(join(tmpdir(), "pr-diff-anchor-cli-"));
   const diffFile = join(dir, "diff.patch");

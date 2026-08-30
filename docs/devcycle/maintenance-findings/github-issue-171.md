@@ -1,0 +1,14 @@
+# 40% of dispatches carry no explicit model, and doctor's compliance metric cannot distinguish sanctioned session-tier dispatches from careless omissions
+- finding-kind: github-issue
+- finding-id: github-issue:171
+- issue: 171
+- severity: medium
+- confidence: verified
+- affected-files: scripts/doctor.mjs, references/config.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: github-issue #171
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

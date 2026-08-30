@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: playbooks/reviewing-code.md, playbooks/maintaining-the-repo.md, references/resume.md
 - first-seen: 2026-08-25
-- last-seen: 2026-08-25
-- passes: 1
+- last-seen: 2026-08-30
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

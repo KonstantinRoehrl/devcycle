@@ -1,0 +1,14 @@
+# res.value.findings/.verified are dereferenced unguarded; a malformed agent envelope kills the whole panel instead of one lens
+- finding-kind: maintenance-finding
+- finding-id: runtime-defect:47a6e8dd
+- culprit-kind: runtime-defect
+- severity: medium
+- confidence: verified
+- affected-files: workflows/review-panel.js, workflows/lib/agent-cli.js
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

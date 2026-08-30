@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, writeFileSync, chmodSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -220,4 +220,96 @@ test("CLI review posts a batched review and reports the comment count", () => {
   ]);
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stdout, /^reviewed /);
+});
+
+test("runReply (pr-level) skips when an identical-marker top-level comment already exists", () => {
+  const runner = {
+    listPrLevelComments: () => [{ body: withFooter("Fixed in abc.", "octocat") }],
+    postPrLevel: () => { throw new Error("must not post"); },
+  };
+  const r = runReply({ repo: "o/n", pr: 7, body: "Fixed in abc.", login: "octocat", prLevel: true, runner });
+  assert.deepEqual(r, { status: "skipped", reason: "already-posted" });
+});
+
+test("runReply (pr-level) posts when no matching top-level comment exists", () => {
+  const calls = [];
+  const runner = {
+    listPrLevelComments: () => [],
+    postPrLevel: (repo, pr, body) => calls.push(["postPrLevel", repo, pr, body]),
+  };
+  const r = runReply({ repo: "o/n", pr: 7, body: "Fixed in abc.", login: "octocat", prLevel: true, runner });
+  assert.equal(r.status, "posted");
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0][3].includes(FOOTER_MARKER));
+});
+
+test("runReply's replyHash is the shared djb2(normalizeBody(...)) hash from pr-review-intake.mjs", async () => {
+  const { djb2, normalizeBody } = await import("../../scripts/pr-review-intake.mjs");
+  const runner = { listReplies: () => [], postReply: () => {} };
+  const r = runReply({ repo: "o/n", pr: 7, commentId: 5, body: "Fixed in abc.", login: "octocat", runner });
+  assert.equal(r.replyHash, djb2(normalizeBody(withFooter("Fixed in abc.", "octocat"))));
+});
+
+test("defaultPostRunner.listPrLevelComments hits the issue-comments endpoint with --paginate", async () => {
+  const { defaultPostRunner } = await import("../../scripts/pr-review-post.mjs");
+  const seen = [];
+  const exec = (_bin, args) => { seen.push(args); return "[]"; };
+  const runner = defaultPostRunner(exec);
+  runner.listPrLevelComments("o/n", 7);
+  assert.ok(seen[0].join(" ").includes("repos/o/n/issues/7/comments"));
+  assert.ok(seen[0].includes("--paginate"));
+});
+
+test("defaultPostRunner.postPrLevel removes its mkdtempSync temp dir after posting", async () => {
+  const { defaultPostRunner } = await import("../../scripts/pr-review-post.mjs");
+  let capturedDir;
+  const exec = (_bin, args) => {
+    const i = args.indexOf("--body-file");
+    if (i !== -1) capturedDir = dirname(args[i + 1]);
+    return "";
+  };
+  const runner = defaultPostRunner(exec);
+  runner.postPrLevel("o/n", 7, "hello");
+  assert.ok(capturedDir, "expected --body-file to be captured");
+  assert.equal(existsSync(capturedDir), false);
+});
+
+test("defaultPostRunner.createReview removes its mkdtempSync temp dir after posting", async () => {
+  const { defaultPostRunner } = await import("../../scripts/pr-review-post.mjs");
+  let capturedDir;
+  const exec = (_bin, args) => {
+    const i = args.indexOf("--input");
+    if (i !== -1) capturedDir = dirname(args[i + 1]);
+    return "";
+  };
+  const runner = defaultPostRunner(exec);
+  runner.createReview("o/n", 7, { commit_id: "abc", event: "COMMENT", body: "hi", comments: [] });
+  assert.ok(capturedDir, "expected --input to be captured");
+  assert.equal(existsSync(capturedDir), false);
+});
+
+test("runReview's returned commentCount does not throw when comments is nullish (createReview path)", () => {
+  const runner = {
+    findPendingReview: () => null,
+    createReview: () => {},
+  };
+  const r = runReview({
+    repo: "o/n", pr: 7, commitId: "abc", event: "COMMENT", body: "Summary.",
+    login: "octocat", runner,
+  });
+  assert.equal(r.status, "submitted");
+  assert.equal(r.commentCount, 0);
+});
+
+test("runReview's returned commentCount does not throw when comments is nullish (merge-into path)", () => {
+  const runner = {
+    findPendingReview: () => "PRR_z",
+    addReviewThread: () => {},
+    submitReview: () => {},
+  };
+  const r = runReview({
+    repo: "o/n", pr: 7, commitId: "abc", event: "COMMENT", body: "Summary.",
+    login: "octocat", mergeInto: "PRR_z", runner,
+  });
+  assert.deepEqual(r, { status: "submitted", merged: true, commentCount: 0 });
 });
