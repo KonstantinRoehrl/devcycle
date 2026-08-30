@@ -2,11 +2,9 @@
 
 ## 0.18.0 — 2026-08-30
 
-- feat(review): add the PR review write-back path (#159, #174, #175, #187, #188, #198, #199, #200)
-
-## Unreleased
-
 - feat(review): add the PR review write-back path — produce, file, respond (#159)
+- fix(review): resolve pr-review write-back defects (#159, #174, #175, #187, #188, #198, #199, #200)
+- fix(maintain): delete resolved maintenance findings instead of retaining them
 
 **Review write-back path (#159).** `/devcycle:review` and `/devcycle:reconcile` now close a loop
 around a pull request. A standalone audit run (**produce**) can **file** its ranked findings back
@@ -17,6 +15,21 @@ comments into fixes and consent-gated replies, and no longer surfaces the respon
 yields no genuine review to answer. Both arms render every Claude-authored comment through one
 shared comment-body contract, now owned by `references/review-comments.md`, so a filed finding and
 a reconcile reply are indistinguishable in shape and origin.
+
+**Write-back defect hardening (#174, #175, #187, #188, #198, #199, #200).** Seven defects found in
+the write-back path above, fixed in one follow-up pass: `pr-diff-anchor` now accepts either a
+`path` or `file` finding shape (#187, #188); `pr-review-intake` paginates all three PR-comment
+reads instead of silently dropping anything past the first page (#174, #200), and exports its
+`djb2` hash so `pr-review-post` shares it instead of carrying a duplicate; `pr-review-post`'s
+dedup, cleanup, and count logic is hardened against re-posting and miscounting (#175, #198, #199,
+#200).
+
+**Maintenance findings no longer accumulate.** A maintenance finding that `/devcycle:maintain`
+confirms resolved is now deleted from `docs/devcycle/maintenance-findings/` instead of kept
+forever with `lifecycle: resolved` — the store only ever tracks what still needs work. Dismissed
+findings are unaffected: they must persist so they are never re-flagged. Trade-off, accepted: a
+resolved finding that later recurs re-enters as brand-new rather than flagged `regressed`, since
+its prior record no longer exists to compare against.
 
 ## 0.17.3 — 2026-08-29
 
