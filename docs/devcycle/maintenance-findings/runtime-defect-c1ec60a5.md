@@ -1,0 +1,14 @@
+# matchMaintenanceFindings can drop a critical finding in favor of low ones when more than 5 match
+- finding-kind: maintenance-finding
+- finding-id: runtime-defect:c1ec60a5
+- culprit-kind: runtime-defect
+- severity: medium
+- confidence: verified
+- affected-files: scripts/maintenance-findings.mjs
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

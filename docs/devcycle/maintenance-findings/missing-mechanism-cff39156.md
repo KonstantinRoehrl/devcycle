@@ -1,0 +1,14 @@
+# The panel engine has no channel for a Strength finding, though the criteria catalog mandates one
+- finding-kind: maintenance-finding
+- finding-id: missing-mechanism:cff39156
+- culprit-kind: missing-mechanism
+- severity: medium
+- confidence: verified
+- affected-files: workflows/review-panel.js, references/quality-criteria.md, references/findings.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

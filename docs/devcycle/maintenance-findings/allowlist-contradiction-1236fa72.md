@@ -1,0 +1,14 @@
+# docs/audits/ .gitignore blocks every commit except one grandfathered file, defeating docTrackingPolicy=standard's audit-report row
+- finding-kind: maintenance-finding
+- finding-id: allowlist-contradiction:1236fa72
+- culprit-kind: allowlist-contradiction
+- severity: medium
+- confidence: verified
+- affected-files: .gitignore, references/config.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

@@ -1,0 +1,14 @@
+# pr-review-post.mjs leaks a temp directory on every PR-level comment and every batched review
+- finding-kind: maintenance-finding
+- finding-id: resource-leak:343264d9
+- culprit-kind: resource-leak
+- severity: low
+- confidence: verified
+- affected-files: scripts/pr-review-post.mjs
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

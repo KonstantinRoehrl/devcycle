@@ -6,9 +6,9 @@
 - confidence: verified
 - affected-files: scripts/dream.mjs, scripts/promotions.mjs, scripts/resume-check.mjs
 - first-seen: 2026-08-23
-- last-seen: 2026-08-23
+- last-seen: 2026-08-30
 - passes: 1
 - origin: lens
 - verify: 
-- lifecycle: 
+- lifecycle: resolved
 - dismissed-reason: 

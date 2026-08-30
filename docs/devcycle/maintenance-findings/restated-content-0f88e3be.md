@@ -1,0 +1,14 @@
+# playbooks/receiving-review.md restates the leave-open list and two-gates/paste-mode rules its own header says it never restates
+- finding-kind: maintenance-finding
+- finding-id: restated-content:0f88e3be
+- culprit-kind: restated-content
+- severity: medium
+- confidence: verified
+- affected-files: playbooks/receiving-review.md, references/review-comments.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

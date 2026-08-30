@@ -2,12 +2,12 @@
 - finding-kind: maintenance-finding
 - finding-id: unguarded-duplication:28247907
 - culprit-kind: unguarded-duplication
-- severity: high
+- severity: medium
 - confidence: verified
 - affected-files: references/findings.md, workflows/review-panel.js, tests/unit/review-panel.test.mjs
 - first-seen: 2026-08-25
-- last-seen: 2026-08-25
-- passes: 1
+- last-seen: 2026-08-30
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

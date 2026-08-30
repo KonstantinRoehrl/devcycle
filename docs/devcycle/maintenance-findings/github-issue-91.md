@@ -6,9 +6,9 @@
 - confidence: verified
 - affected-files: workflows/lib/agent-cli.js, DESIGN.md
 - first-seen: 2026-08-23
-- last-seen: 2026-08-25
+- last-seen: 2026-08-30
 - passes: 2
 - origin: github-issue #91
 - verify: 
-- lifecycle: 
+- lifecycle: resolved
 - dismissed-reason: 

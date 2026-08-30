@@ -1,0 +1,14 @@
+# The adversarial verifier has no Bash, so it structurally cannot recompute a tool's own output as reviewing-code.md mandates
+- finding-kind: maintenance-finding
+- finding-id: gate-blind-spot:e995771b
+- culprit-kind: gate-blind-spot
+- severity: medium
+- confidence: verified
+- affected-files: workflows/review-panel.js, playbooks/reviewing-code.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 
