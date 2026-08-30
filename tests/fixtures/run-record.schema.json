@@ -176,6 +176,20 @@
       "additionalProperties": false
     },
     {
+      "title": "review-writeback",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "review-writeback" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "pr": { "type": "string", "pattern": "^[0-9]+$" },
+        "event": { "enum": ["COMMENT", "REQUEST_CHANGES", "APPROVE"] },
+        "filed": { "type": "integer", "minimum": 0 },
+        "degraded": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["kind", "runId", "pr", "event", "filed", "degraded"],
+      "additionalProperties": false
+    },
+    {
       "title": "reconcile-reply",
       "type": "object",
       "properties": {

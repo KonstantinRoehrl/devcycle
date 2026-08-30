@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: workflows/review-panel.js
 - first-seen: 2026-08-23
-- last-seen: 2026-08-23
-- passes: 1
+- last-seen: 2026-08-30
+- passes: 2
 - origin: github-issue #90
 - verify: 
 - lifecycle: 

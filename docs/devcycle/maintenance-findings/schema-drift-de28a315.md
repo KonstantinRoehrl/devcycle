@@ -1,0 +1,14 @@
+# pr-diff-anchor.mjs never validates a finding's path field, so review-panel-shaped findings silently degrade to zero inline comments
+- finding-kind: maintenance-finding
+- finding-id: schema-drift:de28a315
+- culprit-kind: schema-drift
+- severity: medium
+- confidence: verified
+- affected-files: scripts/pr-diff-anchor.mjs, workflows/review-panel.js
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

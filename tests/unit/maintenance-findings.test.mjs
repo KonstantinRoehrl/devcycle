@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { existsSync } from "node:fs";
 import {
   maintDir, findingId, validateMaintenanceFinding, recordMaintenanceFinding,
   readMaintenanceFindings, findMaintenanceFindingById, rankByTrending,
+  removeMaintenanceFinding,
 } from "../../scripts/maintenance-findings.mjs";
 
 const root = () => mkdtempSync(join(tmpdir(), "maint-"));
@@ -40,6 +42,21 @@ test("record is idempotent by id — a re-record overwrites, one file", () => {
   const recs = readMaintenanceFindings(r);
   assert.equal(recs.length, 1);
   assert.equal(recs[0].passes, 2);
+});
+
+test("removeMaintenanceFinding deletes a resolved finding's file", () => {
+  const r = root();
+  const path = recordMaintenanceFinding(r, base);
+  assert.ok(existsSync(path));
+  const removed = removeMaintenanceFinding(r, base.findingId);
+  assert.equal(removed, path);
+  assert.equal(existsSync(path), false);
+  assert.equal(readMaintenanceFindings(r).length, 0);
+});
+
+test("removeMaintenanceFinding is idempotent — a missing file is a no-op, not an error", () => {
+  const r = root();
+  assert.equal(removeMaintenanceFinding(r, "dead-code:doesnotexist"), null);
 });
 
 test("round-trips a github-issue record keyed by issue number", () => {

@@ -401,9 +401,9 @@ test("the stage subschema enumerates outcome as complete|blocked|skipped|partial
 test("culprit lookup fails cleanly, not with a stack trace, when culprits.json is valid JSON but not an array", () => {
   // validateCulprit() resolves both tests/fixtures/run-record.schema.json and
   // references/culprits.json relative to the script's own location, so the script needs to run
-  // from a tree shaped like the repo's — but only those two files plus the script itself, not a
-  // full copy of the working tree (which would drag gitignored local files into /tmp and leave
-  // them there).
+  // from a tree shaped like the repo's — but only those fixtures plus the script's own imports
+  // (stamp.mjs, git-identity.mjs), not a full copy of the working tree (which would drag
+  // gitignored local files into /tmp and leave them there).
   const treeDir = realpathSync(mkdtempSync(join(tmpdir(), "rr-vocab-tree-")));
   try {
     mkdirSync(join(treeDir, "scripts"), { recursive: true });
@@ -411,6 +411,7 @@ test("culprit lookup fails cleanly, not with a stack trace, when culprits.json i
     mkdirSync(join(treeDir, "references"), { recursive: true });
     copyFileSync(join(REPO_ROOT, "scripts/run-record.mjs"), join(treeDir, "scripts/run-record.mjs"));
     copyFileSync(join(REPO_ROOT, "scripts/stamp.mjs"), join(treeDir, "scripts/stamp.mjs"));
+    copyFileSync(join(REPO_ROOT, "scripts/git-identity.mjs"), join(treeDir, "scripts/git-identity.mjs"));
     copyFileSync(
       join(REPO_ROOT, "tests/fixtures/run-record.schema.json"),
       join(treeDir, "tests/fixtures/run-record.schema.json")
@@ -579,6 +580,36 @@ test("append --kind triage rejects a requestKind outside the enum", () => {
     "--requestKind", "epic", "--entryStage", "brainstorm"], runs);
   assert.notStrictEqual(r.status, 0);
   assert.match(r.stderr, /requestKind/);
+});
+
+test("append --kind review-writeback writes a schema-valid marker line (documented filing step)", () => {
+  const runs = mkdtempSync(join(tmpdir(), "runs-review-writeback-"));
+  const runId = run(
+    ["new", "--repo", "/tmp/demo-writeback", "--plugin-version", "0.13.0",
+     "--plugin-sha", "ded29c6", "--profile", "standard"],
+    runs
+  ).stdout.trim();
+  const r = run(
+    ["append", "--run", runId, "--repo", "/tmp/demo-writeback", "--kind", "review-writeback",
+     "--pr", "159", "--event", "COMMENT", "--filed", "3", "--degraded", "1"],
+    runs
+  );
+  assert.strictEqual(r.status, 0, r.stderr);
+  const lines = readFileSync(recordPath("/tmp/demo-writeback", runId), "utf8")
+    .split("\n").filter(Boolean).map(JSON.parse);
+  const marker = lines.find((o) => o.kind === "review-writeback");
+  assert.ok(marker, "a review-writeback line was appended");
+  assert.strictEqual(marker.pr, "159");
+  assert.strictEqual(marker.event, "COMMENT");
+  assert.strictEqual(marker.filed, 3);
+  assert.strictEqual(marker.degraded, 1);
+
+  const schema = JSON.parse(
+    readFileSync(join(REPO_ROOT, "tests/fixtures/run-record.schema.json"), "utf8")
+  );
+  const sub = subSchemaFor(schema, "review-writeback");
+  assert.ok(sub, "review-writeback kind is declared in the schema");
+  assert.deepEqual(validate(marker, sub), []);
 });
 
 test("gitToplevel canonicalizes a linked worktree to the main checkout (#104)", () => {

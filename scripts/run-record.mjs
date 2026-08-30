@@ -10,6 +10,9 @@ import { pathToFileURL } from "node:url";
 import { createHash, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { now } from "./stamp.mjs";
+import { gitToplevel } from "./git-identity.mjs";
+
+export { gitToplevel };
 
 const SCHEMA_PATH = new URL("../tests/fixtures/run-record.schema.json", import.meta.url).pathname;
 const CULPRITS_PATH = new URL("../references/culprits.json", import.meta.url).pathname;
@@ -122,19 +125,6 @@ function parseArgs(argv) {
   return { flags, knobs, objects };
 }
 
-export function gitToplevel(cwd) {
-  // Canonicalize a linked worktree to the main checkout that owns the shared .git, so every
-  // worktree of one repo resolves to one toplevel and one runs/<slug>/ dir (issue #104).
-  // --show-toplevel returns the *worktree* root; the common git dir's parent is the main root and
-  // is byte-identical to --show-toplevel on a normal checkout (QC3 — the main slug never moves).
-  const common = spawnSync(
-    "git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-    { encoding: "utf8" });
-  if (common.status === 0 && common.stdout.trim()) return dirname(common.stdout.trim());
-  const top = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
-  return top.status === 0 ? top.stdout.trim() : cwd;
-}
-
 // Derives workload counts from git itself rather than the caller, so a workload line always
 // reflects what actually landed between base and HEAD — never a self-reported count.
 export function diffStats(base, cwd = process.cwd()) {
@@ -162,7 +152,7 @@ function main() {
   const toplevel = flags.repo ?? gitToplevel(process.cwd());
   const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex",
     "filesChanged", "filesCreated", "filesDeleted", "insertions", "deletions",
-    "plannedTaskCount", "waveCount"]);
+    "plannedTaskCount", "waveCount", "filed", "degraded"]);
   const floatFields = new Set(["cost"]);
 
   if (sub === "new") {

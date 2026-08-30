@@ -1,0 +1,14 @@
+# Nothing pins that pr-diff-anchor.mjs's output shape actually composes with pr-review-post.mjs's input shape
+- finding-kind: maintenance-finding
+- finding-id: gate-blind-spot:57a950de
+- culprit-kind: gate-blind-spot
+- severity: medium
+- confidence: verified
+- affected-files: scripts/pr-diff-anchor.mjs, scripts/pr-review-post.mjs
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

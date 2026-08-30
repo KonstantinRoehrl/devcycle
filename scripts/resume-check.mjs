@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Validates a devcycle state file against on-disk reality before /devcycle:continue trusts it (#79):
-// every named artifact path (spec/plan/checklist) exists, and stage: is a real enum value.
+// every named artifact path (spec/plan/checklist) exists, stage: is a real enum value, and the
+// recorded branch still exists as a ref (#138).
 import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { isAbsolute, join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
+import { field } from "./md-field.mjs";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -43,17 +45,12 @@ let text;
 try { text = readFileSync(statePath, "utf8"); }
 catch { console.error(`resume-check: cannot read state file: ${statePath}`); process.exit(1); }
 
-const field = (name) => {
-  const m = text.match(new RegExp(`^- ${name}:\\s*(.+?)\\s*$`, "m"));
-  return m ? m[1] : null;
-};
-
 // references/resume.md § The ownership check: root: pins the file to one checkout, and a
 // differing root: means the file was copied or leaked from another project — never resume it.
 // This runs FIRST and exits on mismatch: every artifact path below is resolved against root:,
 // so once root: is wrong those verdicts are noise, not findings. The script reports; the
 // adopt-or-leave decision is the user's, per that same section.
-const recordedRoot = field("root");
+const recordedRoot = field(text, "root");
 if (recordedRoot && !NONE.has(recordedRoot)) {
   // Derived from the state file's OWN directory, not the cwd: the question is whether this file
   // belongs to the checkout it sits in, which is what makes it correct for nested checkouts and
@@ -70,7 +67,7 @@ if (recordedRoot && !NONE.has(recordedRoot)) {
       console.error("resume-check: this state file belongs to another checkout — do not resume it:");
       console.error(`  - its root:  ${real(recordedRoot)}`);
       console.error(`  - you are in: ${actualRoot}`);
-      console.error(`  - its request: ${field("request") ?? "(none recorded)"}`);
+      console.error(`  - its request: ${field(text, "request") ?? "(none recorded)"}`);
       console.error("  Adopt it (rewrite root:, keep everything else) or leave it alone — the user decides.");
       process.exit(1);
     }
@@ -78,22 +75,51 @@ if (recordedRoot && !NONE.has(recordedRoot)) {
 }
 
 const errors = [];
-const stage = field("stage");
+const stage = field(text, "stage");
 if (!stage || (VALID_STAGES.size > 0 && !VALID_STAGES.has(stage)))
   errors.push(`stage: "${stage}" is not a valid devcycle stage`);
 
-const root = field("root");
+const root = field(text, "root");
 const baseForRel = root && !NONE.has(root) ? root : dirname(statePath);
 const resolve = (p) => (isAbsolute(p) ? p : join(baseForRel, p));
 
 for (const name of ["spec", "plan", "checklist"]) {
-  const raw = field(name);
+  const raw = field(text, name);
   if (raw === null) continue;
   // A field may carry a path plus a trailing "— note"; take the first whitespace-delimited token.
   const value = raw.split(/\s+/)[0];
   if (NONE.has(value) || value.startsWith("none")) continue;
   if (!existsSync(resolve(value)))
     errors.push(`${name}: recorded artifact does not exist on disk: ${value}`);
+}
+
+// references/resume.md § Settle the branch: the recorded branch is where any committed work
+// lives, so a recorded topic branch that no longer exists as a ref is a leftover from a
+// completed or abandoned cycle — continue.md step 4 would otherwise try to switch onto a
+// branch that is gone. This is stale-class, exactly like a missing artifact. The other case,
+// the branch still exists but the checkout drifted to another branch, is NOT stale: that is
+// the normal resume-switch continue.md step 4 owns, so this stays silent on it and never
+// compares against HEAD.
+const branchRaw = field(text, "branch");
+if (branchRaw !== null) {
+  const branch = branchRaw.split(/\s+/)[0]; // strip the "(cut from <base> at <sha>)" annotation
+  if (!NONE.has(branch)) {
+    const at = dirname(statePath);
+    // Confirm a repo first, then existence — same fail-open posture as the root check and
+    // VALID_STAGES: a precondition the guard cannot confirm never blocks a resume.
+    const inRepo = spawnSync("git", ["-C", at, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" });
+    if (inRepo.status === 0) {
+      const ref = spawnSync(
+        "git",
+        ["-C", at, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
+        { encoding: "utf8" }
+      );
+      if (ref.status !== 0)
+        errors.push(
+          `branch: recorded branch "${branch}" no longer exists — this state file is a leftover from a completed or abandoned cycle`
+        );
+    }
+  }
 }
 
 if (errors.length) {

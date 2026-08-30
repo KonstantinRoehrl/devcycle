@@ -218,3 +218,58 @@ named in the report, and must NOT create, read-modify, or write `.devcycle/state
 **Then stop.** Present the ranked list; the user picks, and each pick starts its own
 `/devcycle:cycle` naming that finding — never auto-chain. This playbook is **read-only**: it fixes
 nothing it notices in passing, even a trivial one, and that document is the only file it writes.
+
+### Filing the findings to the PR — standalone `/devcycle:review`, `branch` scope, open PR only
+
+An opt-in, confirm-first step that files this run's findings as PR review comments. It stays
+**read-only toward code exactly as the rest of this playbook is**: it touches only PR state, never
+the working tree, and the audit document above remains the only working-tree file the run writes.
+It runs only when **all** three hold — this is a standalone `/devcycle:review` audit run (never the
+in-cycle branch-review stage, which returned its findings inline back at step 4 and never reaches
+step 5), the scope is `branch`, and an open PR exists for that branch. Absent any one, §5 ends at
+**Then stop.** exactly as above.
+
+Filing consumes the run's **own in-memory ranked findings** — never re-parsing the findings
+document just written, never a machine-readable sidecar.
+
+The scope/severity gate below runs only on the standalone `/devcycle:review` entry, which carries
+no run record, so an Other answer here **never appends** `user-correction-at-gate` —
+`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that condition (a gate appends exactly when a run
+record exists, and here none does).
+
+Orchestration, once the three conditions hold:
+
+1. **Resolve once.** The open PR, its head sha as the `commit_id` every anchor pins against, and
+   `<login>` from `gh api user --jq .login` — resolved once for the whole step.
+2. **One scope/severity gate** via AskUserQuestion: which findings to file (default: the blocking
+   set — `critical` + `high` in `${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s four-value severity
+   vocabulary), and the review verdict — `COMMENT`, `REQUEST_CHANGES`, or `APPROVE`. On the user's
+   **own** PR, `REQUEST_CHANGES` and `APPROVE` are **not offered**: a self-PR non-`COMMENT` verdict
+   refuses with a named error and files nothing. At most the Frontier-25 cap
+   `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md` owns is shown at the gate; beyond it,
+   remaining findings are named and deferred, never silently truncated.
+3. **Anchor against the PR-head diff, never the checkout.** Write the PR-head diff
+   (`gh pr diff <pr> --repo <owner/name>`) and the selected findings (a JSON array where each
+   entry carries `line` and either `path` or `file` — `pr-diff-anchor.mjs` accepts both, so the
+   review panel's own `finding.file` shape composes directly, no hand-translation needed) to
+   temp files, then partition them with
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-diff-anchor.mjs" --diff-file <diff> --findings-file
+   <findings>` — anchoring line numbers come only from that diff, never the checkout. It prints
+   `{"anchored":[…RIGHT-side lines…],"degraded":[…]}`; a finding that will not anchor lands in
+   `degraded` and **degrades into the review summary body**, never dropped.
+4. **Draft each body through the comment-body contract** — the `## The comment-body contract`
+   subsection of `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md` owns the body shape and its
+   attribution footer; this step names it and never restates it.
+5. **Screen every draft** — inline bodies and the summary body alike — by writing each body to a temp
+   file and screening it with `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file
+   <draft>`; a body that would leak a host path or secret is fixed or dropped before any gate.
+6. **Two gates, then one post.** Gate 1 (content: is what will be filed right?) → Gate 2 (post: may
+   I file it?), then post through the `review` route of
+   `${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs` — one batched review carrying every inline
+   comment plus the summary body, one notification.
+7. **Never clobber a pending review.** When the `review` route reports an existing pending review,
+   surface its `PRR_…` node id and ask: merge into it (`--merge-into <PRR_…>`) or abort. Without an
+   explicit `--merge-into` the route exits non-zero naming that node id and files nothing.
+8. **Record the write.** Append one `review-writeback` marker via
+   `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append` — finding counts, the verdict event enum,
+   and the PR number only; never body text, never a host path.

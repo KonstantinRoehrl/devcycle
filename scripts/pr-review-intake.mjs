@@ -18,7 +18,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 // A tiny deterministic string hash (Bernstein djb2), base-36, so the dedup key is stable across
 // runs without pulling in a crypto dependency. Unsigned via >>>0 so the result never carries a sign.
-function djb2(str) {
+export function djb2(str) {
   let h = 5381;
   for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
   return h.toString(36);
@@ -153,9 +153,9 @@ export const defaultGhRunner = (repo, pr, exec = execFileSync) => {
   const api = (args) =>
     JSON.parse(exec("gh", args, { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }) || "null");
   const asArray = (v) => (Array.isArray(v) ? v : []);
-  const inline = asArray(api(["api", `repos/${repo}/pulls/${pr}/comments`]));
-  const reviews = asArray(api(["api", `repos/${repo}/pulls/${pr}/reviews`]));
-  const prLevel = asArray(api(["api", `repos/${repo}/issues/${pr}/comments`]));
+  const inline = asArray(api(["api", `repos/${repo}/pulls/${pr}/comments`, "--paginate"]));
+  const reviews = asArray(api(["api", `repos/${repo}/pulls/${pr}/reviews`, "--paginate"]));
+  const prLevel = asArray(api(["api", `repos/${repo}/issues/${pr}/comments`, "--paginate"]));
   // The thread's own GraphQL node id (PRRT_…) is a disjoint id space from the REST comment ids, so
   // fetch each thread's comments' databaseId — those numeric ids DO match the REST inline comment
   // `id`, and are what normalizeComments drops on. Both first:100 caps are unpaginated: a PR with

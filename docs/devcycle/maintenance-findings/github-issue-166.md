@@ -1,0 +1,14 @@
+# "Pre-existing/flaky/unrelated" test-failure verdicts are accepted with no requirement to reproduce them in isolation
+- finding-kind: github-issue
+- finding-id: github-issue:166
+- issue: 166
+- severity: medium
+- confidence: verified
+- affected-files: playbooks/reviewing-the-branch.md, playbooks/receiving-review.md, references/evidence.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: github-issue #166
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

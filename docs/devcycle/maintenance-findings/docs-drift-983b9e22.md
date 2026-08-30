@@ -1,0 +1,14 @@
+# dead-export-check.mjs claims coverage of workflows/ that it structurally cannot produce
+- finding-kind: maintenance-finding
+- finding-id: docs-drift:983b9e22
+- culprit-kind: docs-drift
+- severity: medium
+- confidence: verified
+- affected-files: scripts/dead-export-check.mjs
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

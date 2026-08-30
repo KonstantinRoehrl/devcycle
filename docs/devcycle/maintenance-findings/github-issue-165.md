@@ -1,0 +1,14 @@
+# Reviewer-role dispatches have unrestricted destructive git access, and the one detective backstop only catches a dirtier tree, not a cleaner one
+- finding-kind: github-issue
+- finding-id: github-issue:165
+- issue: 165
+- severity: medium
+- confidence: verified
+- affected-files: agents/task-reviewer.md, agents/red-team-reviewer.md, playbooks/reviewing-code.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: github-issue #165
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: scripts/run-record.mjs
 - first-seen: 2026-08-23
-- last-seen: 2026-08-23
-- passes: 1
+- last-seen: 2026-08-30
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

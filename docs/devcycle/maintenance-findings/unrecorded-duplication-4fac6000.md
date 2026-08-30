@@ -1,0 +1,14 @@
+# pr-review-post.mjs's local hash() reimplements pr-review-intake.mjs's exported djb2(normalizeBody(...))
+- finding-kind: maintenance-finding
+- finding-id: unrecorded-duplication:4fac6000
+- culprit-kind: unrecorded-duplication
+- severity: low
+- confidence: verified
+- affected-files: scripts/pr-review-post.mjs, scripts/pr-review-intake.mjs
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

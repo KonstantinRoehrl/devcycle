@@ -1,0 +1,14 @@
+# playbooks/maintaining-the-repo.md states its read-only boundary four times, and the copies have already drifted from each other
+- finding-kind: maintenance-finding
+- finding-id: restated-content:be9cdad8
+- culprit-kind: restated-content
+- severity: low
+- confidence: verified
+- affected-files: playbooks/maintaining-the-repo.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

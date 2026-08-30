@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  normalizeComments, wrapPaste, normalizeBody, commentKey,
+  normalizeComments, wrapPaste, normalizeBody, commentKey, djb2,
   dedupeAgainst, priorKeysFrom, intake, defaultGhRunner,
 } from "../../scripts/pr-review-intake.mjs";
 
@@ -165,4 +165,23 @@ test("defaultGhRunner builds threadByComment from reviewThreads node ids", () =>
   const raw = defaultGhRunner("o/n", 7, exec);
   assert.deepEqual(raw.threadByComment, { 101: "PRRT_z", 105: "PRRT_z" });
   assert.ok(calls.some((a) => a.join(" ").includes("reviewThreads(first:100){nodes{id ")));
+});
+
+test("djb2 is exported for pr-review-post.mjs's shared hash", () => {
+  assert.equal(typeof djb2, "function");
+  assert.equal(djb2("same"), djb2("same"));
+  assert.notEqual(djb2("same"), djb2("different"));
+});
+
+test("defaultGhRunner paginates all three REST comment reads", () => {
+  const calls = [];
+  const exec = (_bin, args) => {
+    calls.push(args);
+    if (args.includes("graphql")) return "{}";
+    return "[]";
+  };
+  defaultGhRunner("o/n", 7, exec);
+  const restCalls = calls.filter((a) => !a.includes("graphql"));
+  assert.equal(restCalls.length, 3);
+  for (const args of restCalls) assert.ok(args.includes("--paginate"), args.join(" "));
 });

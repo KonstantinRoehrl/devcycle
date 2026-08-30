@@ -1,0 +1,14 @@
+# references/resume.md restates handoff.md's startedAt rule in full before citing it
+- finding-kind: maintenance-finding
+- finding-id: restated-content:f96bcd12
+- culprit-kind: restated-content
+- severity: low
+- confidence: verified
+- affected-files: references/resume.md, references/handoff.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

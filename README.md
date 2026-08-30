@@ -57,6 +57,12 @@ Command-level only — for stage internals, see `docs/pipeline/`.
 Those nine commands are devcycle's entire surface — everything else it ships is machinery they
 load. The full stage-level pipeline is in [`docs/pipeline/`](docs/pipeline/README.md).
 
+Two of the standalone commands form a review write-back path around a pull request:
+`/devcycle:review` **produces** a ranked findings document and can **file** those findings back
+onto an open PR, and `/devcycle:reconcile` **responds** to a PR's own review comments — triaging
+them into fixes and consent-gated replies. Both post through one shared comment-body shape, so
+what Claude files and what it replies look the same on the PR.
+
 - [Install](#install)
 - [Use](#use)
 - [Troubleshooting](#troubleshooting)

@@ -1,0 +1,14 @@
+# Wave execution attributes full-suite failures to the task under review without checking for a sibling's uncommitted edits or a narrowed evidence-capture command
+- finding-kind: github-issue
+- finding-id: github-issue:167
+- issue: 167
+- severity: medium
+- confidence: verified
+- affected-files: playbooks/executing-waves.md, scripts/evidence-completeness-check.mjs, references/evidence.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: github-issue #167
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

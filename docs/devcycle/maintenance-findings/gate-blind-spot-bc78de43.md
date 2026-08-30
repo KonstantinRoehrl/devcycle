@@ -1,0 +1,14 @@
+# references/handoff.md's boundary table has no row for the receiving-review stage it's required to cover
+- finding-kind: maintenance-finding
+- finding-id: gate-blind-spot:bc78de43
+- culprit-kind: gate-blind-spot
+- severity: medium
+- confidence: verified
+- affected-files: references/handoff.md, playbooks/receiving-review.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

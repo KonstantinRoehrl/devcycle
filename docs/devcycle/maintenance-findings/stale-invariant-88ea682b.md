@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: docs/known-issues.md, CONTRIBUTING.md, docs/devcycle/maintenance-findings
 - first-seen: 2026-08-25
-- last-seen: 2026-08-25
-- passes: 1
+- last-seen: 2026-08-30
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

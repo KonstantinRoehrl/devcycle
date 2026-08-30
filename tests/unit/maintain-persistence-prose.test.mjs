@@ -28,3 +28,9 @@ test("the playbook keeps dismissal load-bearing and the read-only store boundary
   assert.match(playbook, /load-bearing/);
   assert.match(playbook, /never auto-re-evaluated|not automatically re-evaluated|stays dismissed/);
 });
+
+test("the playbook deletes resolved findings rather than persisting them", () => {
+  assert.match(playbook, /removeMaintenanceFinding/);
+  assert.match(playbook, /deleted, not written/);
+  assert.match(playbook, /never accumulates settled history/);
+});

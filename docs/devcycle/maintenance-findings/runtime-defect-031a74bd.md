@@ -1,0 +1,14 @@
+# A --pr-level reply skips the already-posted guard entirely, so re-running it duplicates a top-level PR comment while reporting success
+- finding-kind: maintenance-finding
+- finding-id: runtime-defect:031a74bd
+- culprit-kind: runtime-defect
+- severity: high
+- confidence: verified
+- affected-files: scripts/pr-review-post.mjs, references/review-comments.md
+- first-seen: 2026-08-30
+- last-seen: 2026-08-30
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

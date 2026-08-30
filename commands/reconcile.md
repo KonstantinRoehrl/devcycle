@@ -1,5 +1,5 @@
 ---
-description: "Triage a PR's review comments into fixes and consented replies. Confirm-first: makes no commit and posts nothing before your first confirmation."
+description: "Respond to a PR's review comments — the respond arm of the review write-back path, triaging them into fixes and consented replies. Confirm-first: makes no commit and posts nothing before your first confirmation."
 ---
 
 # /devcycle:reconcile

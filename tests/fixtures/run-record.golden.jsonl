@@ -13,3 +13,4 @@
 {"kind":"lens-cost","runId":"0f1e2d3c4b5a6978","stage":"maintain","lens":"abstraction","cost":0.42}
 {"kind":"reconcile-reply","runId":"0f1e2d3c4b5a6978","pr":"134","commentId":"555","replyHash":"9xk2"}
 {"kind":"reconcile-resolve","runId":"0f1e2d3c4b5a6978","pr":"134","threadId":"PRRT_kwDOabc123"}
+{"kind":"review-writeback","runId":"0f1e2d3c4b5a6978","pr":"159","event":"COMMENT","filed":3,"degraded":1}
