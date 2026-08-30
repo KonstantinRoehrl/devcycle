@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.0 — 2026-08-30
+
+- feat(review): add the PR review write-back path (#159, #174, #175, #187, #188, #198, #199, #200)
+
 ## Unreleased
 
 - feat(review): add the PR review write-back path — produce, file, respond (#159)
