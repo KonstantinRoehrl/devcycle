@@ -88,7 +88,8 @@ and no GitHub issue.
      used as verification tools against a pre-existing claim, in one session-tier reviewer dispatch
      over the in-scope fragments. Outcomes: `verified` → ranked; doesn't-reproduce → dropped (not
      ranked, not flagged for closing); verified-as-already-fixed → resolved/low, only with a landed
-     commit/PR cited; undetermined → stays `suspected` at low confidence.
+     commit/PR cited, reported in this pass's ranked list but — per step 8's persistence rule — never
+     written to the store; undetermined → stays `suspected` at low confidence.
    - **Rank alongside lens findings.** Verified/suspected issue fragments merge into the same ranked
      list the engine produces — same severity-first ordering, same tie-break, same sections —
      distinguished only by `Origin: github-issue #<n>` (provenance only; origin never affects rank).
@@ -120,11 +121,18 @@ and no GitHub issue.
      **Resolved since last pass**, **Trending**. Every lifecycle transition rendered is backed by
      this pass's live re-detection (verify-before-stating, `planning-waves.md` item 4), never a
      prior pass's wording.
-   - **Write the store.** Persist each finding with `recordMaintenanceFinding(<targetRoot>, rec)`
-     (idempotent by id; issue-sourced findings write a `github-issue` record the same way). Commit the
-     store by resolving `${user_config.docTrackingPolicy}` against
-     `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, then `git check-ignore`, then an
-     explicit pathspec — the order `learning-from-sessions.md` step 3 uses. Per-file, never one log.
+   - **Write the store.** Persist a `persisting`, `regressed`, or new finding with
+     `recordMaintenanceFinding(<targetRoot>, rec)` (idempotent by id; issue-sourced findings write a
+     `github-issue` record the same way). A finding `verifyMaintenance` classifies `resolved` this
+     pass is **deleted, not written** — `removeMaintenanceFinding(<targetRoot>, id)` — a closed loop
+     is not a longitudinal artifact worth keeping tracked forever, unlike a `dismissed` record (which
+     must persist so it is never re-flagged). This trades away regression detection for that one
+     finding: a later recurrence re-enters as brand-new (`passes: 1`), not `regressed` — accepted so
+     the store never accumulates settled history. Commit the store by resolving
+     `${user_config.docTrackingPolicy}` against `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc
+     tracking, then `git check-ignore`, then an explicit pathspec — the order
+     `learning-from-sessions.md` step 3 uses. Per-file, never one log — a deletion is its own `git rm`
+     commit, distinct from a written finding's `git add`.
    - **Per-lens cost rollup (§M7).** Sum each lens's inspector `cost:` envelope and append one
      `lens-cost` run record per lens: `run-record.mjs append --kind lens-cost --stage maintain --lens
      <slug> --cost <dollars> --run <runId>`. Maintenance emits **no** `workload` record, so its cost

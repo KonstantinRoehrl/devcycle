@@ -3,7 +3,7 @@
 // kinds (maintenance-finding, github-issue) distinguished by a finding-kind field, so verifyMaintenance
 // and the --match extension read one store, not two. Reuses promotions.mjs's helpers rather than
 // re-declaring them (QC1).
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
 import { field, slugify, oneLine, isValidCalendarDate, CULPRIT_ID_RE } from "./promotions.mjs";
@@ -17,7 +17,13 @@ const FINDING_KINDS = new Set(["maintenance-finding", "github-issue"]);
 const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 const SEVERITIES = new Set(["critical", "high", "medium", "low"]);
 const CONFIDENCES = new Set(["verified", "suspected"]);
-const LIFECYCLE = ["resolved", "dismissed"]; // terminal/locked fates; an active finding carries none
+// "resolved" stays a valid enum value for a record already on disk (backward compat with anything
+// written before removeMaintenanceFinding existed, or a manual edit) but nothing writes it anymore:
+// a newly-resolved finding is deleted outright (see removeMaintenanceFinding) rather than persisted,
+// so the store never accumulates settled history. "dismissed" is the one true locked fate — it must
+// persist, since deleting it would let the finding resurface as "new" and defeat the point of a
+// dismissal (never auto-re-evaluated).
+const LIFECYCLE = ["resolved", "dismissed"];
 
 // Repo-local finding identity (M4): <culprit-kind>:<location-hash>, mirroring run-record.mjs's repoSlug
 // canonicalization (sha256 sliced to 8 hex). The caller (the playbook) builds canonicalLocation WITHOUT
@@ -84,6 +90,18 @@ export function recordMaintenanceFinding(root, rec) {
     `- dismissed-reason: ${oneLine(rec.dismissedReason)}`,
   ];
   writeFileSync(path, lines.join("\n") + "\n");
+  return path;
+}
+
+// A resolved finding's file is deleted outright rather than persisted with lifecycle: resolved
+// (see the LIFECYCLE comment above) — the closed loop is not a longitudinal artifact worth keeping
+// tracked forever, unlike a dismissed one. Idempotent: a missing file (already removed, or never
+// written) is a no-op, not an error, so a caller can call this unconditionally from the persistence
+// step without first checking existence.
+export function removeMaintenanceFinding(root, findingId) {
+  const path = join(maintDir(root), `${slugify(String(findingId ?? ""))}.md`);
+  if (!existsSync(path)) return null;
+  unlinkSync(path);
   return path;
 }
 
