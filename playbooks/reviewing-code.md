@@ -249,8 +249,10 @@ Orchestration, once the three conditions hold:
    `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md` owns is shown at the gate; beyond it,
    remaining findings are named and deferred, never silently truncated.
 3. **Anchor against the PR-head diff, never the checkout.** Write the PR-head diff
-   (`gh pr diff <pr> --repo <owner/name>`) and the selected findings (a JSON array of
-   `{path, line}`) to temp files, then partition them with
+   (`gh pr diff <pr> --repo <owner/name>`) and the selected findings (a JSON array where each
+   entry carries `line` and either `path` or `file` — `pr-diff-anchor.mjs` accepts both, so the
+   review panel's own `finding.file` shape composes directly, no hand-translation needed) to
+   temp files, then partition them with
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-diff-anchor.mjs" --diff-file <diff> --findings-file
    <findings>` — anchoring line numbers come only from that diff, never the checkout. It prints
    `{"anchored":[…RIGHT-side lines…],"degraded":[…]}`; a finding that will not anchor lands in

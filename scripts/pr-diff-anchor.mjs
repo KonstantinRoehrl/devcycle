@@ -117,11 +117,16 @@ function main() {
     const anchored = [];
     const degraded = [];
     findings.forEach((finding, index) => {
-      const result = anchorFinding({ path: finding.path, line: finding.line ?? null }, index, map);
+      const path = finding.path ?? finding.file;
+      if (typeof path !== "string" || !path) {
+        degraded.push({ index, path: path ?? null, line: finding.line ?? null, reason: "finding missing path/file" });
+        return;
+      }
+      const result = anchorFinding({ path, line: finding.line ?? null }, index, map);
       if (result.anchorable) {
         anchored.push({ index, path: result.path, line: result.line, side: result.side });
       } else {
-        degraded.push({ index, path: finding.path, line: finding.line ?? null, reason: result.reason });
+        degraded.push({ index, path, line: finding.line ?? null, reason: result.reason });
       }
     });
 
