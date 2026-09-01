@@ -65,8 +65,17 @@ test("fallbackSummary counts confirmed vs unverified and appends notes", () => {
   assert.match(s, /Notes: diff truncated/);
 });
 
-test("the severity vocabulary is the four values findings.md defines, in rank order", () => {
-  assert.deepEqual(panel.SEVERITIES, ["critical", "high", "medium", "low"]);
+// #209 — replaces the hardcoded-array assertion: the vocabulary must equal findings.md's table.
+test("the severity vocabulary matches references/findings.md's table, in rank order (#209)", () => {
+  const doc = readFileSync(join(here, "..", "..", "references", "findings.md"), "utf8");
+  const start = doc.indexOf("## Severity");
+  assert.ok(start >= 0, "findings.md must have a ## Severity section");
+  const rest = doc.slice(start + "## Severity".length);
+  const end = rest.indexOf("\n## ");
+  const section = end >= 0 ? rest.slice(0, end) : rest;
+  const severities = [...section.matchAll(/^\|\s*`([a-z]+)`\s*\|/gm)].map((m) => m[1]);
+  assert.equal(severities.length, 4, `expected four severity rows, got ${JSON.stringify(severities)}`);
+  assert.deepEqual(panel.SEVERITIES, severities);
 });
 
 test("rankFindings orders all four severities", () => {
@@ -553,4 +562,121 @@ if (prompt.includes("You are one lens")) {
   }
   assert.ok(peak <= 4, `stage 1 peaked at ${peak} concurrent lens processes; the cap is 4`);
   assert.equal(panel.LENS_CONCURRENCY, 4, "the cap is the VERIFY_CONCURRENCY value it follows");
+});
+
+// ---------- §4 engine fixes ----------
+
+// #189 — a null payload and a non-array `findings` each degrade to a note; the panel survives.
+test("malformed lens envelopes (null and non-array) degrade to notes; the panel survives (#189)", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  writeFileSync(join(repo, "spec.md"), "# Spec\nThe module must export 2.\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 3;\n");
+  const bin = makeFakeBin("claude", `
+const prompt = process.argv[process.argv.length - 1];
+let out;
+if (prompt.includes("You are one lens")) {
+  if (prompt.includes("Correctness and security")) out = null;              // malformed: null payload
+  else if (prompt.includes("Simplification")) out = { findings: "nope" };   // malformed: non-array findings
+  else out = { findings: [{ file: "src/a.js", line: 1, claim: "exports 3 not 2", severity: "high", measuredAgainst: "the spec" }] };
+} else if (prompt.includes("adversarial verifier")) out = { verified: true, verification: "stands" };
+else out = { summary: "one finding" };
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+`);
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `panel must survive malformed envelopes; stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.equal(report.findings.length, 1, "the one healthy lens's finding survives");
+  assert.ok(report.notes.filter((n) => /malformed/.test(n)).length >= 2, `expected two malformed notes, got ${JSON.stringify(report.notes)}`);
+});
+
+// #190 — a lens strength surfaces in its own channel, unranked and unverified.
+test("a lens strength surfaces in its own channel, unranked and unverified (#190)", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 2;\n");
+  const bin = makeFakeBin("claude", `
+const prompt = process.argv[process.argv.length - 1];
+let out;
+if (prompt.includes("You are one lens")) {
+  if (prompt.includes("Correctness and security")) {
+    out = {
+      findings: [{ file: "src/a.js", line: 1, claim: "a defect", severity: "low", measuredAgainst: "repo convention" }],
+      strengths: [{ file: "src/a.js", line: 1, claim: "clean single-export module", measuredAgainst: "repo convention" }],
+    };
+  } else out = { findings: [] };
+} else if (prompt.includes("adversarial verifier")) out = { verified: true, verification: "stands" };
+else out = { summary: "ok" };
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+`);
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, res.stderr);
+  const report = JSON.parse(res.stdout);
+  assert.equal(report.strengths.length, 1, "strength surfaces in its own array");
+  assert.equal(report.strengths[0].claim, "clean single-export module");
+  assert.ok(!("verified" in report.strengths[0]), "strengths are not verified");
+  assert.ok(!("severity" in report.strengths[0]), "strengths carry no severity");
+  assert.ok(report.findings.every((f) => f.claim !== "clean single-export module"), "strength is not in findings");
+});
+
+// #191 — the adversarial verifier is dispatched with Bash in its --tools.
+test("the adversarial verifier is dispatched with Bash (#191)", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 2;\n");
+  const bin = makeFakeBin("claude", `
+const prompt = process.argv[process.argv.length - 1];
+const toolsArg = process.argv.find((a) => a.startsWith("--tools=")) || "";
+let out;
+if (prompt.includes("You are one lens")) {
+  out = prompt.includes("Correctness and security")
+    ? { findings: [{ file: "src/a.js", line: 1, claim: "a defect", severity: "medium", measuredAgainst: "repo convention" }] }
+    : { findings: [] };
+} else if (prompt.includes("adversarial verifier")) {
+  out = { verified: toolsArg.includes("Bash"), verification: "tools=" + toolsArg };
+} else out = { summary: "ok" };
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+`);
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, res.stderr);
+  const report = JSON.parse(res.stdout);
+  assert.equal(report.findings.length, 1);
+  assert.equal(report.findings[0].verified, true, `verifier must be dispatched with Bash; got ${report.findings[0].verification}`);
+});
+
+// #192 — the spec reaches only the spec lens.
+test("the spec reaches only the spec lens, not correctness or simplify (#192)", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  writeFileSync(join(repo, "spec.md"), "# Spec\nSPECMARKER_UNIQUE must hold.\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 2;\n");
+  const bin = makeFakeBin("claude", `
+const prompt = process.argv[process.argv.length - 1];
+let out;
+if (prompt.includes("You are one lens")) {
+  const sawSpec = prompt.includes("SPECMARKER_UNIQUE");
+  let key = "other";
+  if (prompt.includes("Spec compliance")) key = "spec";
+  else if (prompt.includes("Correctness and security")) key = "correctness";
+  else if (prompt.includes("Simplification")) key = "simplify";
+  out = { findings: [{ file: "src/a.js", line: 1, claim: key + ":sawSpec=" + sawSpec, severity: "low", measuredAgainst: "the spec" }] };
+} else if (prompt.includes("adversarial verifier")) out = { verified: false, verification: "n/a" };
+else out = { summary: "ok" };
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+`);
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, res.stderr);
+  const report = JSON.parse(res.stdout);
+  const claims = report.findings.map((f) => f.claim);
+  assert.ok(claims.includes("spec:sawSpec=true"), `spec lens should see the spec; claims=${JSON.stringify(claims)}`);
+  assert.ok(claims.includes("correctness:sawSpec=false"), `correctness must NOT see the spec; claims=${JSON.stringify(claims)}`);
+  assert.ok(claims.includes("simplify:sawSpec=false"), `simplify must NOT see the spec; claims=${JSON.stringify(claims)}`);
 });
