@@ -680,3 +680,38 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: out })
   assert.ok(claims.includes("correctness:sawSpec=false"), `correctness must NOT see the spec; claims=${JSON.stringify(claims)}`);
   assert.ok(claims.includes("simplify:sawSpec=false"), `simplify must NOT see the spec; claims=${JSON.stringify(claims)}`);
 });
+
+// #192 follow-up — the spec reaches the BUILT-IN spec lens only. A caller-supplied
+// { key, charter } lens defaults wantsSpec=false regardless of its key, so a custom
+// lens keyed "spec" does not receive the spec (opting in is out of scope, per the design).
+test("a caller-supplied lens keyed \"spec\" does not receive the spec; only the built-in spec lens does (#192)", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  writeFileSync(join(repo, "spec.md"), "# Spec\nSPECMARKER_UNIQUE must hold.\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 2;\n");
+  const bin = makeFakeBin("claude", `
+const prompt = process.argv[process.argv.length - 1];
+let out;
+if (prompt.includes("You are one lens")) {
+  const sawSpec = prompt.includes("SPECMARKER_UNIQUE");
+  const key = prompt.includes("CUSTOMSPECLENS_MARKER") ? "custom-spec" : "other";
+  out = { findings: [{ file: "src/a.js", line: 1, claim: key + ":sawSpec=" + sawSpec, severity: "low", measuredAgainst: "the spec" }] };
+} else if (prompt.includes("adversarial verifier")) out = { verified: false, verification: "n/a" };
+else out = { summary: "ok" };
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+`);
+  const res = runScript(
+    SCRIPT,
+    { scope: { ref: "HEAD" }, specPath: "spec.md", lenses: [{ key: "spec", charter: "CUSTOMSPECLENS_MARKER: audit against the spec" }] },
+    { cwd: repo, binDirs: [bin] },
+  );
+  assert.equal(res.status, 0, res.stderr);
+  const report = JSON.parse(res.stdout);
+  const claims = report.findings.map((f) => f.claim);
+  assert.ok(
+    claims.includes("custom-spec:sawSpec=false"),
+    `a caller-supplied lens keyed "spec" must NOT receive the spec; claims=${JSON.stringify(claims)}`,
+  );
+});
