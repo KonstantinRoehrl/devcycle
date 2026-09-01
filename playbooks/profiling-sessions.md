@@ -112,13 +112,13 @@ act rather than a side effect of asking for a report.
   `Actionability — /devcycle:cycle re-address <culprit-id> (recurred N×; escalate from r2)` — and,
   being its own finding, its `/devcycle:cycle` entry point is also offered through the Actionability
   menu below.
-- The report run also writes the cost-driven revert sidecar `.devcycle/doctor/revert-candidates.json`
+- The report run also writes the cost-driven revert sidecar to the fixed doctor directory (below) as "revert-candidates.json"
   (same-profile, stage-scoped; the undo is an edit, never `git revert`) that the learning loop's
   Confirm step reads — a promotion whose own profile-and-stage cost regressed after it landed.
 
 ## Persisted artifact
 
-Every run with at least one finding writes `.devcycle/doctor/YYYY-MM-DD-report.md` — never
+Every run with at least one finding writes "YYYY-MM-DD-report.md" to the fixed doctor directory — resolved via "node -e \"import('${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs').then(m=>console.log(m.doctorDir()))\"" (DEVCYCLE_DOCTOR_DIR if set, else "~/.claude/devcycle/doctor") — never
 `docs/doctor/`, where a repo-scoped audit goes: a doctor report holds the user's own session
 cost data and must not default to being committed into whatever repo it ran in. A run with
 zero findings need not write the file.
@@ -170,7 +170,7 @@ to draft. For each finding it chose:
    ```
 
    That marker is the only record of a draft: the Outer loop section counts the issues out of
-   `.devcycle/doctor/`, and `scripts/doctor.mjs` parses exactly this form, which this file owns.
+   the fixed doctor directory (doctorDir(), above), and `scripts/doctor.mjs` parses exactly this form, which this file owns.
 4. Show the screened draft and ask whether it is right. That is the first gate, and it asks about
    the draft's content only.
 5. Ask separately whether to post it — the second gate, never inferred from the first. Nothing is
