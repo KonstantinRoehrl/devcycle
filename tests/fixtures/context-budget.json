@@ -1,16 +1,16 @@
 {
-  "playbooks/executing-waves.md": 102302,
-  "playbooks/finishing-the-cycle.md": 93616,
+  "playbooks/executing-waves.md": 105600,
+  "playbooks/finishing-the-cycle.md": 95100,
   "playbooks/learning-from-sessions.md": 104878,
   "playbooks/maintaining-the-repo.md": 87976,
   "playbooks/onboarding-a-repo.md": 85174,
-  "playbooks/planning-waves.md": 89391,
-  "playbooks/profiling-sessions.md": 44483,
-  "playbooks/receiving-review.md": 115052,
-  "playbooks/reviewing-code.md": 121096,
-  "playbooks/reviewing-the-branch.md": 96567,
-  "playbooks/scoping-the-request.md": 82588,
-  "playbooks/sweeping-mechanical-changes.md": 95426,
-  "playbooks/taking-the-fast-path.md": 88594,
-  "playbooks/verifying-on-device.md": 91081
+  "playbooks/planning-waves.md": 91500,
+  "playbooks/profiling-sessions.md": 46000,
+  "playbooks/receiving-review.md": 117600,
+  "playbooks/reviewing-code.md": 123300,
+  "playbooks/reviewing-the-branch.md": 98300,
+  "playbooks/scoping-the-request.md": 84100,
+  "playbooks/sweeping-mechanical-changes.md": 97700,
+  "playbooks/taking-the-fast-path.md": 90900,
+  "playbooks/verifying-on-device.md": 92600
 }
