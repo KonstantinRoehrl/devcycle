@@ -608,6 +608,29 @@ async function reconcile(findings, notes, model) {
   return res.ok && res.value.summary ? res.value.summary : fallbackSummary(findings, notes);
 }
 
+// Build the stage-1 job descriptors: the spec lens (wantsSpec) runs once over the whole diff
+// (scope "full-diff", no chunk), every other lens runs once per reviewed chunk (scope "chunk",
+// carrying its chunk + chunkIndex), and — when crossModel — a cross-model job per reviewed chunk.
+// Pure and deterministic; main() maps each descriptor to its runGuarded(...) job.
+function buildLensJobs({ lenses, reviewedChunks, crossModel }) {
+  const descriptors = [];
+  for (const lens of lenses) {
+    if (lens.wantsSpec) {
+      descriptors.push({ lensKey: lens.key, kind: "claude-lens", scope: "full-diff", lens });
+    } else {
+      reviewedChunks.forEach((chunk, chunkIndex) => {
+        descriptors.push({ lensKey: lens.key, kind: "claude-lens", scope: "chunk", chunk, chunkIndex, lens });
+      });
+    }
+  }
+  if (crossModel) {
+    reviewedChunks.forEach((chunk, chunkIndex) => {
+      descriptors.push({ lensKey: "cross-model", kind: "cross-model", scope: "chunk", chunk, chunkIndex });
+    });
+  }
+  return descriptors;
+}
+
 // ---------- main ----------
 
 // Wrap an async job so an unexpected throw degrades to a fallback value instead of
@@ -649,10 +672,12 @@ async function main() {
 
   let scopeLabel;
   let fileList;
+  let fullDiff = null; // whole-diff source for the single-pass spec lens; null in the file-set branch
   let diffChunks = [null]; // file-set branch reviews once, with no diff text
   if (args.scope.ref) {
     scopeLabel = `diff for ref ${args.scope.ref}`;
-    const { chunks, notes: chunkNotes } = chunkDiff(gitReadOnly(["diff", args.scope.ref]), DIFF_CHAR_CAP);
+    fullDiff = gitReadOnly(["diff", args.scope.ref]);
+    const { chunks, notes: chunkNotes } = chunkDiff(fullDiff, DIFF_CHAR_CAP);
     for (const n of chunkNotes) {
       notes.push(n);
       dropped.push(n);
@@ -675,29 +700,36 @@ async function main() {
   // Verification re-reads the working tree, so it needs the scope label, not the diff text.
   const verifyCtx = { scopeLabel, specPath: args.specPath, spec: spec.text, diff: null, fileList };
 
-  // Stage 1: every lens reviews every diff chunk (jobs = lenses × chunks, + optional cross-model per chunk).
-  const lensJobs = [];
-  for (const chunk of diffChunks) {
-    const chunkCtx = { scopeLabel, specPath: args.specPath, diff: chunk, fileList };
-    for (const lens of args.lenses) {
-      const lensCtx = { ...chunkCtx, spec: lens.wantsSpec ? spec.text : null };
-      lensJobs.push({ kind: "claude-lens", run: () =>
-        runGuarded(
-          () => runClaudeLens(lens, lensCtx, model),
-          (msg) => ({ lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" crashed: ${msg}` }),
-        ),
-      });
-    }
-    if (args.crossModel) {
-      const cmCtx = { ...chunkCtx, spec: null };
-      lensJobs.push({ kind: "cross-model", run: () =>
+  // Stage 1: the spec lens reviews the whole diff once; every other lens reviews each reviewed
+  // chunk; cross-model runs per reviewed chunk. buildLensJobs is the pure descriptor builder;
+  // here each descriptor becomes its runGuarded(...) job, with the spec lens carrying the whole
+  // (truncated) diff + spec text, and per-chunk lenses carrying their chunk with no spec.
+  const lensJobs = buildLensJobs({ lenses: args.lenses, reviewedChunks: diffChunks, crossModel: args.crossModel }).map((desc) => {
+    if (desc.kind === "cross-model") {
+      const cmCtx = { scopeLabel, specPath: args.specPath, diff: desc.chunk, fileList, spec: null };
+      return { kind: "cross-model", run: () =>
         runGuarded(
           () => runCrossModelLens(cmCtx),
           (msg) => ({ lens: "cross-model", findings: [], strengths: [], note: `cross-model lens crashed: ${msg}` }),
         ),
-      });
+      };
     }
-  }
+    const lens = desc.lens;
+    let ctx;
+    if (desc.scope === "full-diff") {
+      // One spec-lens pass over the whole diff; its truncation (if any) is disclosed once.
+      const diff = fullDiff === null ? null : record(truncate(fullDiff, DIFF_CHAR_CAP, "diff (spec lens)")).text;
+      ctx = { scopeLabel, specPath: args.specPath, diff, fileList, spec: spec.text };
+    } else {
+      ctx = { scopeLabel, specPath: args.specPath, diff: desc.chunk, fileList, spec: null };
+    }
+    return { kind: "claude-lens", run: () =>
+      runGuarded(
+        () => runClaudeLens(lens, ctx, model),
+        (msg) => ({ lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" crashed: ${msg}` }),
+      ),
+    };
+  });
   const lensResults = await mapLimit(lensJobs, LENS_CONCURRENCY, (job) => job.run());
 
   const rawFindings = lensResults.flatMap((r) => r.findings);
@@ -751,6 +783,6 @@ if (require.main === module) {
 
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
-  dedupRaw, dedupStrengths, rankFindings, truncate, chunkDiff, selectChunksByChurn, fallbackSummary, mapLimit, loadRedTeamCharter,
+  dedupRaw, dedupStrengths, rankFindings, truncate, chunkDiff, selectChunksByChurn, buildLensJobs, fallbackSummary, mapLimit, loadRedTeamCharter,
   SEVERITIES, LENS_CONCURRENCY,
 };

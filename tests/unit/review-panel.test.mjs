@@ -219,6 +219,21 @@ test("selectChunksByChurn does not count +++/--- headers as churn", () => {
   assert.deepEqual(deferredFiles, ["b"]);
 });
 
+// ---------- buildLensJobs (F5) ----------
+
+test("buildLensJobs runs the spec lens once over the whole diff, others per chunk", () => {
+  const jobs = panel.buildLensJobs({
+    lenses: [{ key: "spec", wantsSpec: true }, { key: "correctness", wantsSpec: false }],
+    reviewedChunks: ["chunkA", "chunkB"],
+    crossModel: false,
+  });
+  const spec = jobs.filter((j) => j.lensKey === "spec");
+  const corr = jobs.filter((j) => j.lensKey === "correctness");
+  assert.equal(spec.length, 1);
+  assert.equal(spec[0].scope, "full-diff");
+  assert.equal(corr.length, 2); // one per reviewed chunk
+});
+
 // ---------- end-to-end against a stubbed claude CLI ----------
 
 test("panel end-to-end: lenses find, verifier confirms, dedup collapses, report on stdout", () => {
