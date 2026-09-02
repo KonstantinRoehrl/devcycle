@@ -319,6 +319,26 @@ test("panel fans out over a multi-chunk diff: all findings merge, correctly attr
   for (const f of report.findings) assert.ok(f.claim.includes(f.file), `finding misattributed: ${JSON.stringify(f)}`);
 });
 
+test("panel caps stage-1 fan-out at maxChunks and discloses the deferred chunks (F1)", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  const names = ["f1.js", "f2.js", "f3.js", "f4.js"];
+  for (const n of names) writeFileSync(join(repo, "src", n), "// base\n");
+  commitAll(repo, "base");
+  for (const n of names) writeFileSync(join(repo, "src", n), "// x\n".repeat(3_800));
+
+  const bin = makeFakeBin("claude", multiChunkClaude);
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["correctness"], maxChunks: 1 }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+
+  // A Frontier coverage warning is disclosed in both the summary and the notes.
+  assert.match(report.summary, /COVERAGE WARNING[\s\S]*Frontier: reviewed the 1 highest-churn chunks of/);
+  const frontier = report.notes.find((n) => n.startsWith("Frontier: reviewed"));
+  assert.ok(frontier, `expected a Frontier note, got ${JSON.stringify(report.notes)}`);
+  assert.match(frontier, /deferred chunks touching: .*src\//);
+});
+
 test("panel exits 1 when every lens reviewer fails (unusable CLI output)", () => {
   const repo = makeRepo();
   writeFileSync(join(repo, "spec.md"), "# Spec\n");

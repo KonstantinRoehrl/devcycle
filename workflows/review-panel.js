@@ -124,6 +124,9 @@ function parseArgs() {
   if (args.specPath !== undefined && (typeof args.specPath !== "string" || !args.specPath)) {
     fatal("args.specPath, when given, must be a non-empty string");
   }
+  if (args.maxChunks !== undefined && (!Number.isInteger(args.maxChunks) || args.maxChunks < 1)) {
+    fatal("args.maxChunks, when given, must be a positive integer");
+  }
   const defaulted = args.lenses === undefined;
   const requested = defaulted ? Object.keys(LENS_CHARTERS) : args.lenses;
   if (!Array.isArray(requested) || requested.length === 0) {
@@ -160,6 +163,7 @@ function parseArgs() {
     lenses: selected,
     specLensDropped,
     crossModel: args.crossModel === true,
+    maxChunks: Number.isInteger(args.maxChunks) ? args.maxChunks : null,
   };
 }
 
@@ -649,12 +653,19 @@ async function main() {
   if (args.scope.ref) {
     scopeLabel = `diff for ref ${args.scope.ref}`;
     const { chunks, notes: chunkNotes } = chunkDiff(gitReadOnly(["diff", args.scope.ref]), DIFF_CHAR_CAP);
-    diffChunks = chunks.length ? chunks : [""];
     for (const n of chunkNotes) {
       notes.push(n);
       dropped.push(n);
       log(n);
     }
+    const { reviewed, deferredFiles } = selectChunksByChurn(chunks, args.maxChunks);
+    if (deferredFiles.length) {
+      const note = `Frontier: reviewed the ${reviewed.length} highest-churn chunks of ${chunks.length}; deferred chunks touching: ${deferredFiles.join(", ")}`;
+      notes.push(note);
+      dropped.push(note);
+      log(note);
+    }
+    diffChunks = reviewed.length ? reviewed : [""];
     fileList = gitReadOnly(["diff", "--name-only", args.scope.ref]).trim();
   } else {
     scopeLabel = `file set below (${args.scope.paths.length} file(s))`;
@@ -670,31 +681,33 @@ async function main() {
     const chunkCtx = { scopeLabel, specPath: args.specPath, diff: chunk, fileList };
     for (const lens of args.lenses) {
       const lensCtx = { ...chunkCtx, spec: lens.wantsSpec ? spec.text : null };
-      lensJobs.push(() =>
+      lensJobs.push({ kind: "claude-lens", run: () =>
         runGuarded(
           () => runClaudeLens(lens, lensCtx, model),
           (msg) => ({ lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" crashed: ${msg}` }),
         ),
-      );
+      });
     }
     if (args.crossModel) {
       const cmCtx = { ...chunkCtx, spec: null };
-      lensJobs.push(() =>
+      lensJobs.push({ kind: "cross-model", run: () =>
         runGuarded(
           () => runCrossModelLens(cmCtx),
           (msg) => ({ lens: "cross-model", findings: [], strengths: [], note: `cross-model lens crashed: ${msg}` }),
         ),
-      );
+      });
     }
   }
-  const lensResults = await mapLimit(lensJobs, LENS_CONCURRENCY, (job) => job());
+  const lensResults = await mapLimit(lensJobs, LENS_CONCURRENCY, (job) => job.run());
 
   const rawFindings = lensResults.flatMap((r) => r.findings);
   const rawStrengths = lensResults.flatMap((r) => r.strengths ?? []);
   for (const r of lensResults) if (r.note) notes.push(r.note);
-  const failedClaudeLenses = lensResults.filter((r) => r.note && r.lens !== "cross-model").length;
-  const totalClaudeLensJobs = args.lenses.length * diffChunks.length;
-  if (failedClaudeLenses === totalClaudeLensJobs) fatal(`all lens reviewers failed: ${notes.join("; ")}`);
+  const claudeLensJobCount = lensJobs.filter((j) => j.kind === "claude-lens").length;
+  const failedClaudeLenses = lensResults.filter((r, i) => r.note && lensJobs[i].kind === "claude-lens").length;
+  if (claudeLensJobCount > 0 && failedClaudeLenses === claudeLensJobCount) {
+    fatal(`all lens reviewers failed: ${notes.join("; ")}`);
+  }
 
   // Stage 3 (moved up): dedup raw findings by file+claim BEFORE verifying, so duplicates are
   // verified once. Stage 2: verify survivors. Stage 4: rank.
