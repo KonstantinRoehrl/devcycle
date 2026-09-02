@@ -193,7 +193,7 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
 6. **Surface any retirement or revert candidates** raised since the last run, proposed exactly like
    fresh candidates — this runs live. A **retirement** candidate is a `held` r1/r2 lesson past 10
    runs or 90 days; it proposes deleting the line and writing a **retirement** lifecycle record. A
-   **revert** candidate, read from `.devcycle/doctor/revert-candidates.json`, proposes the undo
+   **revert** candidate, read from "revert-candidates.json" in the fixed doctor directory (playbooks/profiling-sessions.md owns its resolution), proposes the undo
    *edit* and a **revert** lifecycle record — never `git revert`, since recorded `commit:` shas
    predate squash-merging and often do not resolve on the integration branch. Both carry the
    prior-lifecycle hint: a lifecycle record surfaces here as advice, never a hard suppression (the

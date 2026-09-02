@@ -6,12 +6,12 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
-  parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
+  parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM, doctorDir,
   renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates, winCandidates,
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
@@ -1544,6 +1544,58 @@ test("--issue-body prints the whole draft and nothing else, naming the upstream 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// One transcript carrying a devcycle attribution, and a run record whose dispatch inherited its
+// model — the smallest corpus in which the inherited-model compliance candidate is draftable.
+function complianceFixture() {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-compliance-body-"));
+  const proj = join(dir, "projects", "-some-project");
+  mkdirSync(proj, { recursive: true });
+  writeFileSync(join(proj, "sess-abcdef123456.jsonl"),
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) + "\n");
+  const runs = join(dir, "runs", "some-repo");
+  mkdirSync(runs, { recursive: true });
+  writeFileSync(join(runs, "run.jsonl"), [
+    { kind: "run", schemaVersion: 1, runId: "0123456789abcdef", pluginVersion: DRAFT_VERSION, profile: "thorough", knobs: {} },
+    { kind: "session", sessionHash: sha256("sess-abcdef123456") },
+    { kind: "stage", stage: "execution", startedAt: "2026-07-20T09:00:00.000Z", endedAt: "2026-07-20T11:00:00.000Z", outcome: "complete" },
+    { kind: "dispatch", taskId: "1", agentType: "devcycle:implementer", model: "claude-opus-5", modelSource: "inherited", startedAt: "2026-07-20T09:10:00.000Z", endedAt: "2026-07-20T09:40:00.000Z", outcome: "ok", reviewRound: 0, retryIndex: 0 },
+  ].map((l) => JSON.stringify(l)).join("\n") + "\n");
+  return dir;
+}
+
+test("--issue-body inherited-model drafts a [compliance:…] issue", () => {
+  const dir = complianceFixture();
+  const res = spawnSync(process.execPath,
+    [SCRIPT, "--dir", join(dir, "projects"), "--issue-body", "inherited-model"],
+    { encoding: "utf8", env: { ...process.env, PATH: "", CLAUDE_CODE_SESSION_ID: "", DEVCYCLE_RUNS_DIR: join(dir, "runs") } });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /title: \[compliance:inherited-model\]/);
+  assert.match(res.stdout, /CANDIDATE: inherited-model/);
+});
+
+test("--issue-body rejects an unknown slug as neither culprit nor compliance", () => {
+  const dir = complianceFixture();
+  const res = spawnSync(process.execPath,
+    [SCRIPT, "--dir", join(dir, "projects"), "--issue-body", "not-a-real-slug"],
+    { encoding: "utf8", env: { ...process.env, PATH: "", CLAUDE_CODE_SESSION_ID: "", DEVCYCLE_RUNS_DIR: join(dir, "runs") } });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /no culprit or compliance candidate "not-a-real-slug"/);
+});
+
+// FIX E (spec Testing #216): regression guard over already-correct behavior — a KNOWN compliance
+// type with zero occurrences in the corpus errors DISTINCTLY from an unknown slug. The fixture
+// carries only an inherited-model candidate, so main-thread-browser is a real type with no cohort.
+test("--issue-body errors distinctly for a known compliance type absent from the corpus", () => {
+  const dir = complianceFixture();
+  const res = spawnSync(process.execPath,
+    [SCRIPT, "--dir", join(dir, "projects"), "--issue-body", "main-thread-browser"],
+    { encoding: "utf8", env: { ...process.env, PATH: "", CLAUDE_CODE_SESSION_ID: "", DEVCYCLE_RUNS_DIR: join(dir, "runs") } });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /no compliance candidate "main-thread-browser" in this corpus/);
+  // Distinct from the unknown-slug message: a real-but-empty type must not read as "not a slug".
+  assert.doesNotMatch(res.stderr, /no culprit or compliance candidate/);
+});
+
 test("parseArgs reads --issue-body", () => {
   assert.equal(parseArgs(["--issue-body", "partial-evidence-capture"]).issueBody, "partial-evidence-capture");
   // The report path is unaffected when the flag is absent.
@@ -1720,7 +1772,7 @@ test("revertCandidates emits a same-profile stage-scoped regression with the sid
     const promotions = [
       { culpritId: "friction:regressor", rung: "r2", pluginVersion: "0.12.0", commit: "abc1234", lifecycle: null },
     ];
-    const result = revertCandidates(summaries, promotions, { root });
+    const result = revertCandidates(summaries, promotions, { dir: root });
     const c = result.candidates[0];
     assert.equal(c.culpritId, "friction:regressor");
     assert.equal(c.rung, "r2");
@@ -1728,7 +1780,7 @@ test("revertCandidates emits a same-profile stage-scoped regression with the sid
     assert.equal(c.stage, "execution");
     assert.ok(c.deltaPct < 0, "a regression is a negative deltaPct");
     // The sidecar is written to the pinned path under the given root, in the same shape.
-    const written = JSON.parse(readFileSync(join(root, ".devcycle", "doctor", "revert-candidates.json"), "utf8"));
+    const written = JSON.parse(readFileSync(join(root, "revert-candidates.json"), "utf8"));
     assert.equal(written.candidates[0].culpritId, "friction:regressor");
     assert.ok("generatedAt" in written && "installedVersion" in written);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -1745,6 +1797,27 @@ test("revertCandidates never fires on a profile-mix shift — the regression is 
     const promotions = [
       { culpritId: "friction:regressor", rung: "r2", pluginVersion: "0.12.0", commit: "abc1234", lifecycle: null },
     ];
-    assert.deepEqual(revertCandidates(summaries, promotions, { root }).candidates, []);
+    assert.deepEqual(revertCandidates(summaries, promotions, { dir: root }).candidates, []);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("doctorDir resolves DEVCYCLE_DOCTOR_DIR when set", () => {
+  const prior = process.env.DEVCYCLE_DOCTOR_DIR;
+  process.env.DEVCYCLE_DOCTOR_DIR = "/tmp/custom-doctor-dir";
+  try {
+    assert.equal(doctorDir(), "/tmp/custom-doctor-dir");
+  } finally {
+    if (prior === undefined) delete process.env.DEVCYCLE_DOCTOR_DIR;
+    else process.env.DEVCYCLE_DOCTOR_DIR = prior;
+  }
+});
+
+test("doctorDir falls back to ~/.claude/devcycle/doctor when unset", () => {
+  const prior = process.env.DEVCYCLE_DOCTOR_DIR;
+  delete process.env.DEVCYCLE_DOCTOR_DIR;
+  try {
+    assert.equal(doctorDir(), join(homedir(), ".claude", "devcycle", "doctor"));
+  } finally {
+    if (prior !== undefined) process.env.DEVCYCLE_DOCTOR_DIR = prior;
+  }
 });

@@ -69,8 +69,9 @@ and no GitHub issue.
      `node "${CLAUDE_PLUGIN_ROOT}/scripts/issue-intake.mjs" --repo <owner/name> --scratch .devcycle/issue-intake/<pass>`.
      It is **read-only** (`gh issue list` only) and redacts third-party body text on a `.devcycle/`
      working copy. On `available:false` (gh missing/unauth/timeout), skip the rest of issue-folding
-     and name it in the coverage statement. It excludes devcycle's own `[culprit:]`/`[doctor:]`-titled
-     issues before anything downstream; record `counts.excludedCulprit` as a report line ("M
+     and name it in the coverage statement. It excludes devcycle's own
+     `[culprit:]`/`[doctor:]`/`[compliance:]`-titled issues before anything downstream; record
+     `counts.excludedCulprit` as a report line ("M
      devcycle-tracked culprit issues, handled by the promotions engine — not re-triaged here").
    - **Decompose before classify.** For each screened issue, split its body into independently
      true-or-false, independently fixable claims — one fast-tier read-only dispatch over the screened

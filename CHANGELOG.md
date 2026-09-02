@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.18.1 — 2026-09-02
+
+- fix(review-panel): guard malformed lens envelopes, add a strengths channel, arm the verifier, and gate spec-splicing (#189, #190, #191, #192, #209)
+- fix(doctor): store the report at a fixed absolute path instead of a cwd-relative one (#220)
+- fix(doctor): draftable compliance candidates, workload-band coverage, and a commit-sensor collection gap (#215, #216, #218, #219)
+
+**Review panel robustness (#189, #190, #191, #192, #209).** One malformed agent envelope no
+longer takes down the whole review panel — `review-panel.js`'s `res.value` dereferences are
+guarded so a single bad lens result is skipped rather than fatal (#189). The engine gains a
+first-class channel for **Strength** findings the criteria catalog already mandated (#190), and
+the adversarial verifier is given `Bash` so it can actually recompute a tool's own output as
+`reviewing-code.md` requires (#191). Spec text is no longer spliced into every lens on every diff
+chunk regardless of relevance (#192), and the severity-vocabulary coupling test now reads the file
+it claims to guard (#209).
+
+**Doctor telemetry (#215, #216, #218, #219, #220).** The doctor report is written to a fixed
+absolute path rather than a `process.cwd()`-relative `.devcycle/doctor/`, so it lands in the same
+place regardless of where doctor is invoked (#220). The PostToolUse commit-sensor now fires on
+every post-planning, commit-bearing stage — not just execution — so a HEAD-advancing fix made in a
+later committing stage no longer records zero workload (#219). Compliance candidates are now
+draftable as issues (`--issue-body` accepts a compliance slug via a shared `COMPLIANCE_TYPES`
+source of truth) (#216), inherited-model candidates expose which models the inherited dispatches
+ran on and those models' corpus spend (#218), and `renderReport` surfaces an up-front COLLECTION
+GAP warning — plus an honesty note for versions predating the commit-sensor hook — so an
+under-collected corpus never reads as "no work" (#215, #219).
+
 ## 0.18.0 — 2026-08-30
 
 - feat(review): add the PR review write-back path — produce, file, respond (#159)

@@ -20,7 +20,7 @@ script's unranked candidate lines using the shared findings vocabulary. It also 
 `## Previously promoted — did it hold` section's verdicts (`held`/`recurred`/`errored`/
 `unmeasurable`/`broken`) straight from the run-record journal via the verification engine, never
 by re-running the mining loop, and every run with at least one finding persists to
-`.devcycle/doctor/YYYY-MM-DD-report.md`. An optional, fully skippable actionability step can draft
+"YYYY-MM-DD-report.md" in the fixed doctor directory — resolved via "node -e \"import('${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs').then(m=>console.log(m.doctorDir()))\"" (DEVCYCLE_DOCTOR_DIR if set, else "~/.claude/devcycle/doctor"). An optional, fully skippable actionability step can draft
 a GitHub issue (screened, then gated by two separate confirmations before anything is filed) or
 hand back a `/devcycle:cycle` entry-point string — the playbook itself never starts one.
 
@@ -41,7 +41,7 @@ flowchart TD
     DRIFT --> DRIFTOUT(["findings printed — no report file"]):::tool
     MODE -->|no| RUN("Run doctor.mjs over the scoped transcript corpus"):::stage
     RUN --> SPLICE("Splice Highlights + ranked findings into the two marked sections only"):::stage
-    SPLICE --> PERSIST[(".devcycle/doctor/YYYY-MM-DD-report.md — only when findings exist")]:::structural
+    SPLICE --> PERSIST[("<doctor dir>/YYYY-MM-DD-report.md — only when findings exist")]:::structural
     PERSIST --> ACT{"findings worth acting on?"}:::stage
     ACT -->|"yes, optional"| OFFER("Offer per finding: skip / draft issue (two gates) / /devcycle:cycle entry point"):::stage
     ACT -->|no| DONE(["report delivered"]):::tool

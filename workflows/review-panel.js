@@ -16,8 +16,11 @@
 //   { findings: [{ file, line: integer|null, claim,
 //                  severity: "critical"|"high"|"medium"|"low",
 //                  measuredAgainst, lens, verified: boolean, verification: string }],
+//     strengths: [{ file, line: integer|null, claim, measuredAgainst, lens }],
+//                           // unranked, unverified — never mixed into findings
 //     notes: string[],      // coverage reductions and lens failures, verbatim
-//     summary: string }     // opens with a COVERAGE WARNING when an input was truncated
+//     summary: string }     // opens with a COVERAGE WARNING when an input was truncated;
+//                           // strengths, when any, are appended as their own section
 // The finding shape is owned by references/findings.md; keep the two in step.
 //
 // Stages: 1) read-only lens reviewers in parallel — the caller's lenses when
@@ -30,7 +33,9 @@
 // findings by severity.
 //
 // STRICTLY READ-ONLY: the script itself only runs `git diff`/`git rev-parse`;
-// every claude subagent is restricted to --tools "Read,Grep,Glob" and the
+// the lens reviewers get --tools "Read,Grep,Glob"; the adversarial verifier
+// additionally gets Bash so it can re-run and recompute a claim (still read-only
+// in intent — no --permission-mode is passed, so nothing grants writes); the
 // codex lens runs with --sandbox read-only. Nothing here mutates files or git.
 //
 // Optional env: DEVCYCLE_PANEL_MODEL sets --model for the claude subagents
@@ -129,10 +134,13 @@ function parseArgs() {
       if (!(l in LENS_CHARTERS)) {
         fatal(`unknown built-in lens "${l}" (built-ins: ${Object.keys(LENS_CHARTERS).join("|")})`);
       }
-      return { key: l, charter: LENS_CHARTERS[l] };
+      return { key: l, charter: LENS_CHARTERS[l], wantsSpec: l === "spec" };
     }
     if (l && typeof l.key === "string" && l.key && typeof l.charter === "string" && l.charter) {
-      return { key: l.key, charter: l.charter };
+      // A caller-supplied lens defaults wantsSpec=false regardless of its key: the built-in
+      // "spec" lens is the only one the spec text is spliced into, and opting a custom lens in
+      // is deliberately out of scope (a spec copied into every lens is what #192 removed).
+      return { key: l.key, charter: l.charter, wantsSpec: false };
     }
     return fatal("each lens must be a built-in key or { key, charter } with non-empty strings");
   });
@@ -269,6 +277,19 @@ const FINDINGS_SCHEMA = {
         required: ["file", "claim", "severity", "measuredAgainst"],
       },
     },
+    strengths: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          file: { type: "string" },
+          line: { type: ["integer", "null"] },
+          claim: { type: "string" },
+          measuredAgainst: { type: "string" },
+        },
+        required: ["file", "claim", "measuredAgainst"],
+      },
+    },
   },
   required: ["findings"],
 };
@@ -292,12 +313,40 @@ function lensPrompt(charter, ctx) {
     `"measuredAgainst" names the repo convention (by file path) or the external source the`,
     `finding is measured against. A finding measured against neither is an unsupported`,
     `opinion: do not report it. Return an empty findings array if your lens finds nothing.`,
+    ``,
+    `You MAY additionally report strengths — patterns that concretely and measurably do the`,
+    `right thing — in a "strengths" array, to the SAME evidence bar (file, the line when known,`,
+    `a one-to-two-sentence claim, and what it is measured against). A strength is additive and`,
+    `never a substitute for a defect. Omit the array or leave it empty when you have none.`,
     ...(ctx.spec ? [``, `## Spec (${ctx.specPath})`, ctx.spec] : []),
     ``,
     ctx.diff === null ? `## Files under review` : `## Changed files`,
     ctx.fileList || "(none)",
     ...(ctx.diff === null ? [] : [``, `## Diff`, ctx.diff || "(empty diff)"]),
   ].join("\n");
+}
+
+// Shared normalization for the items a lens reports. A raw item is kept only when it
+// carries both a file and a claim; line, measuredAgainst and lens are normalized the same
+// way for findings and strengths (findings additionally clamp severity to the vocabulary).
+const hasFileAndClaim = (x) => x && typeof x.file === "string" && typeof x.claim === "string";
+const lineOrNull = (x) => (Number.isInteger(x.line) ? x.line : null);
+const measuredAgainstOr = (x) =>
+  typeof x.measuredAgainst === "string" && x.measuredAgainst.trim() ? x.measuredAgainst : "unstated";
+
+function normalizeFinding(f, lens) {
+  return {
+    file: f.file,
+    line: lineOrNull(f),
+    claim: f.claim,
+    severity: SEVERITIES.includes(f.severity) ? f.severity : "medium",
+    measuredAgainst: measuredAgainstOr(f),
+    lens,
+  };
+}
+
+function normalizeStrength(s, lens) {
+  return { file: s.file, line: lineOrNull(s), claim: s.claim, measuredAgainst: measuredAgainstOr(s), lens };
 }
 
 async function runClaudeLens(lens, ctx, model) {
@@ -308,20 +357,17 @@ async function runClaudeLens(lens, ctx, model) {
     schema: FINDINGS_SCHEMA,
     model,
   });
-  if (!res.ok) return { lens: lens.key, findings: [], note: `lens "${lens.key}" failed: ${res.error}` };
-  const findings = (res.value.findings ?? [])
-    .filter((f) => f && typeof f.file === "string" && typeof f.claim === "string")
-    .map((f) => ({
-      file: f.file,
-      line: Number.isInteger(f.line) ? f.line : null,
-      claim: f.claim,
-      severity: SEVERITIES.includes(f.severity) ? f.severity : "medium",
-      measuredAgainst:
-        typeof f.measuredAgainst === "string" && f.measuredAgainst.trim() ? f.measuredAgainst : "unstated",
-      lens: lens.key,
-    }));
-  log(`lens "${lens.key}": ${findings.length} finding(s)`);
-  return { lens: lens.key, findings, note: null };
+  if (!res.ok) return { lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" failed: ${res.error}` };
+  const value = res.value;
+  if (!value || typeof value !== "object" || !Array.isArray(value.findings)) {
+    return { lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" returned a malformed envelope; treated as no findings` };
+  }
+  const findings = value.findings.filter(hasFileAndClaim).map((f) => normalizeFinding(f, lens.key));
+  const strengths = (Array.isArray(value.strengths) ? value.strengths : [])
+    .filter(hasFileAndClaim)
+    .map((s) => normalizeStrength(s, lens.key));
+  log(`lens "${lens.key}": ${findings.length} finding(s), ${strengths.length} strength(s)`);
+  return { lens: lens.key, findings, strengths, note: null };
 }
 
 // Cross-model lens via the codex CLI (read-only sandbox). Degrades gracefully:
@@ -356,17 +402,7 @@ async function runCrossModelLens(ctx) {
     const jsonMatch = message.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: no JSON in codex output" };
     const parsed = JSON.parse(jsonMatch[0]);
-    const findings = (parsed.findings ?? [])
-      .filter((f) => f && typeof f.file === "string" && typeof f.claim === "string")
-      .map((f) => ({
-        file: f.file,
-        line: Number.isInteger(f.line) ? f.line : null,
-        claim: f.claim,
-        severity: SEVERITIES.includes(f.severity) ? f.severity : "medium",
-        measuredAgainst:
-          typeof f.measuredAgainst === "string" && f.measuredAgainst.trim() ? f.measuredAgainst : "unstated",
-        lens: "cross-model",
-      }));
+    const findings = (parsed.findings ?? []).filter(hasFileAndClaim).map((f) => normalizeFinding(f, "cross-model"));
     log(`lens "cross-model": ${findings.length} finding(s)`);
     return { lens: "cross-model", findings, note: null };
   } catch (e) {
@@ -439,15 +475,16 @@ async function verifyFinding(finding, ctx, model, charter) {
         ]
       : []),
   ].join("\n");
-  const res = await claudeStructured({ prompt, tools: "Read,Grep,Glob", schema: VERIFY_SCHEMA, model });
+  const res = await claudeStructured({ prompt, tools: "Read,Grep,Glob,Bash", schema: VERIFY_SCHEMA, model });
   if (!res.ok) {
     // Contract: unverified findings are marked, never dropped.
     return { ...finding, verified: false, verification: `verifier unavailable (${res.error}); finding retained unverified` };
   }
+  const v = res.value ?? {};
   return {
     ...finding,
-    verified: res.value.verified === true,
-    verification: String(res.value.verification ?? "").slice(0, 600) || "no verification detail returned",
+    verified: v.verified === true,
+    verification: String(v.verification ?? "").slice(0, 600) || "no verification detail returned",
   };
 }
 
@@ -472,6 +509,15 @@ function dedupFindings(findings) {
       kept.verification += ` (also reported by the ${dropped.lens} lens)`;
     }
     byKey.set(key, kept);
+  }
+  return [...byKey.values()];
+}
+
+function dedupStrengths(strengths) {
+  const byKey = new Map();
+  for (const s of strengths) {
+    const key = `${s.file}::${s.claim.toLowerCase().replace(/\s+/g, " ").trim()}`;
+    if (!byKey.has(key)) byKey.set(key, s);
   }
   return [...byKey.values()];
 }
@@ -530,6 +576,17 @@ async function reconcile(findings, notes, model) {
 
 // ---------- main ----------
 
+// Wrap an async job so an unexpected throw degrades to a fallback value instead of
+// rejecting the whole batch (mapLimit's Promise.all) — only an all-lens failure is fatal.
+// Each caller supplies the degraded shape its stage expects, given the error message.
+async function runGuarded(work, degrade) {
+  try {
+    return await work();
+  } catch (e) {
+    return degrade(String(e?.message ?? e));
+  }
+}
+
 async function main() {
   const args = parseArgs();
   const model = process.env.DEVCYCLE_PANEL_MODEL || undefined;
@@ -580,13 +637,30 @@ async function main() {
   // Stage 1: every lens reviews every diff chunk (jobs = lenses × chunks, + optional cross-model per chunk).
   const lensJobs = [];
   for (const chunk of diffChunks) {
-    const ctx = { scopeLabel, specPath: args.specPath, spec: spec.text, diff: chunk, fileList };
-    for (const lens of args.lenses) lensJobs.push(() => runClaudeLens(lens, ctx, model));
-    if (args.crossModel) lensJobs.push(() => runCrossModelLens(ctx));
+    const chunkCtx = { scopeLabel, specPath: args.specPath, diff: chunk, fileList };
+    for (const lens of args.lenses) {
+      const lensCtx = { ...chunkCtx, spec: lens.wantsSpec ? spec.text : null };
+      lensJobs.push(() =>
+        runGuarded(
+          () => runClaudeLens(lens, lensCtx, model),
+          (msg) => ({ lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" crashed: ${msg}` }),
+        ),
+      );
+    }
+    if (args.crossModel) {
+      const cmCtx = { ...chunkCtx, spec: null };
+      lensJobs.push(() =>
+        runGuarded(
+          () => runCrossModelLens(cmCtx),
+          (msg) => ({ lens: "cross-model", findings: [], strengths: [], note: `cross-model lens crashed: ${msg}` }),
+        ),
+      );
+    }
   }
   const lensResults = await mapLimit(lensJobs, LENS_CONCURRENCY, (job) => job());
 
   const rawFindings = lensResults.flatMap((r) => r.findings);
+  const rawStrengths = lensResults.flatMap((r) => r.strengths ?? []);
   for (const r of lensResults) if (r.note) notes.push(r.note);
   const failedClaudeLenses = lensResults.filter((r) => r.note && r.lens !== "cross-model").length;
   const totalClaudeLensJobs = args.lenses.length * diffChunks.length;
@@ -595,20 +669,33 @@ async function main() {
   // Stage 2: adversarial verification per finding (marked, never dropped).
   log(`verifying ${rawFindings.length} finding(s)...`);
   const charter = rawFindings.length ? loadRedTeamCharter() : null;
-  const verified = await mapLimit(rawFindings, VERIFY_CONCURRENCY, (f) => verifyFinding(f, verifyCtx, model, charter));
+  const verified = await mapLimit(rawFindings, VERIFY_CONCURRENCY, (f) =>
+    runGuarded(
+      () => verifyFinding(f, verifyCtx, model, charter),
+      (msg) => ({ ...f, verified: false, verification: `verifier crashed (${msg}); retained unverified` }),
+    ),
+  );
 
   // Stage 3: dedup by file+claim.  Stage 4: rank + reconcile.
   const deduped = dedupFindings(verified);
   const ranked = rankFindings(deduped);
+  const strengths = dedupStrengths(rawStrengths);
   const summary = await reconcile(ranked, notes, model);
 
   // The reconciler is a model and may drop a note it was handed, so the coverage line is
   // prepended here instead: a panel that reviewed a sample must never read as a full pass.
-  const disclosed = dropped.length
-    ? `COVERAGE WARNING: ${dropped.join("; ")}. This panel reviewed a sample, not the whole input.\n\n${summary}`
-    : summary;
+  const strengthsSection = strengths.length
+    ? `\n\nStrengths (${strengths.length}, unranked — not defects):\n` +
+      strengths
+        .map((s) => `- ${s.file}${s.line != null ? ":" + s.line : ""} — ${s.claim} (measured against: ${s.measuredAgainst})`)
+        .join("\n")
+    : "";
+  const disclosed =
+    (dropped.length
+      ? `COVERAGE WARNING: ${dropped.join("; ")}. This panel reviewed a sample, not the whole input.\n\n${summary}`
+      : summary) + strengthsSection;
 
-  process.stdout.write(JSON.stringify({ findings: ranked, notes, summary: disclosed }, null, 2) + "\n");
+  process.stdout.write(JSON.stringify({ findings: ranked, strengths, notes, summary: disclosed }, null, 2) + "\n");
 }
 
 if (require.main === module) {
@@ -617,6 +704,6 @@ if (require.main === module) {
 
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
-  dedupFindings, rankFindings, truncate, chunkDiff, fallbackSummary, mapLimit, loadRedTeamCharter,
+  dedupFindings, dedupStrengths, rankFindings, truncate, chunkDiff, fallbackSummary, mapLimit, loadRedTeamCharter,
   SEVERITIES, LENS_CONCURRENCY,
 };

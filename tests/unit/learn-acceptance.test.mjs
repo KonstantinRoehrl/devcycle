@@ -22,7 +22,7 @@ function world({ journal = true } = {}) {
     mkdirSync(dir, { recursive: true });
     cpSync(join(FIXTURES, "journal.jsonl"), join(dir, "1111111111111111.jsonl"));
   }
-  return { root, env: { DEVCYCLE_RUNS_DIR: runsDir, DEVCYCLE_LEARNINGS_DIR: learnings } };
+  return { root, env: { DEVCYCLE_RUNS_DIR: runsDir, DEVCYCLE_LEARNINGS_DIR: learnings, DEVCYCLE_DOCTOR_DIR: join(root, ".devcycle", "doctor") } };
 }
 
 const cli = (root, env, args) =>

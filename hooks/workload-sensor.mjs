@@ -11,7 +11,15 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const RUN_RECORD = fileURLToPath(new URL("../scripts/run-record.mjs", import.meta.url));
-const ACTIVE_STAGES = new Set(["execution", "fast-path", "sweep"]);
+// Every post-planning, commit-bearing stage. A HEAD-advancing coordinator commit can land in any
+// of these — branch-review (carry-over fixes), on-device (a verification fix), or finish — not only
+// during execution. Pre-implementation stages (scoping/audit/diagnosis/brainstorm/planning) stay
+// excluded so no workload is recorded before there is implementation work. Safe to fire in more
+// stages: the diff is always base...HEAD, doctor's workload join is last-wins, and the cursor
+// (lastHead+lastStage) still suppresses a redundant write at the same HEAD within a stage.
+const COMMIT_STAGES = new Set([
+  "execution", "fast-path", "sweep", "branch-review", "on-device", "finish",
+]);
 
 // Returns the parsed stdin object, or `null` as a distinct sentinel for "unreadable" — a JSON
 // parse failure or a parse result that isn't a plain object (array, string, number, null). `null`
@@ -72,7 +80,7 @@ function main() {
   if (!stateFile) return;
   const repoRoot = dirname(dirname(stateFile));
   const st = parseState(readFileSync(stateFile, "utf8"));
-  if (!st.run || !st.base || !st.kind || st.kind === "audit" || !ACTIVE_STAGES.has(st.stage)) return;
+  if (!st.run || !st.base || !st.kind || st.kind === "audit" || !COMMIT_STAGES.has(st.stage)) return;
 
   const head = spawnSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8" });
   if (head.status !== 0) return;
