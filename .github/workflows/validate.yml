@@ -6,7 +6,16 @@ on:
     # `dev` is listed so human and merge-API commits landing there get a check suite at push
     # time. It does NOT cover commits pushed with the implicit token — GitHub does not trigger
     # workflows from it — so the release workflows call this one directly via workflow_call.
-    branches: [main, dev]
+    #
+    # `main` is deliberately ABSENT. Every push to `main` is a release-PR squash-merge, and
+    # `Release` (bump-version.yml, on: push: branches: [main]) already validates that exact
+    # commit in-line via workflow_call. A standalone push-on-`main` run would only duplicate
+    # that — and, because a called `validate.yml` inherits the caller's `github.ref`
+    # (`refs/heads/main`), both would land in the same concurrency group `validate-refs/heads/main`
+    # and `cancel-in-progress` below would cancel the standalone one, painting `main` with a red
+    # ✗ for a run that never added coverage. Leaving `main` out removes that false failure; the
+    # `Release` run keeps `main` fully validated.
+    branches: [dev]
   # Manual re-run, for requesting a suite without inventing a commit.
   workflow_dispatch:
   # Called in-line by the release workflows: the release commit is pushed with the implicit token,
