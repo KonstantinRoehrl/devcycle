@@ -112,6 +112,19 @@ file conflicts these invariants already preserve.)
    this round — a reviewer-rejected round never wrote `conformance=pass`. Journal the outcome either way:
    `run-record.mjs append --run <id> --kind event --event gate-fail --stage execution --task <task-id>` on
    a failure, `--event gate-pass-clean` on a clean pass. Enums and ids only — never the failure text.
+   On a whole-suite failure, before attributing the red to this task, run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/foreign-change-check.mjs" <this task's **Files:** list>` (the
+   concurrent-sibling guard `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § File-backed evidence
+   names). **Clean** (exit 0) → attribute the red as today: block, `event=review-verdict
+   outcome=rejected (green gate: <symptom>)`, back to the implementer. **Foreign paths reported**
+   (non-zero) → the whole-suite red is indeterminate: re-run the task's file-scoped subset (the
+   evidence discipline's own `git diff -- <files>` / scoped command). Subset **green** → the red is
+   sibling-caused: do **not** attribute it, do not write a `conformance=fail` verdict line, log
+   `event=review-verdict outcome=deferred (concurrent sibling edits)`, journal
+   `run-record.mjs append --run <id> --kind event --event gate-deferred-foreign-change --stage
+   execution --task <task-id>` (ids only, never the foreign paths or failure text), and re-evaluate
+   after the wave quiesces. Subset **red** → it is the task's own failure: attribute and block
+   normally.
 7. **Branch re-check, then commit.** Immediately before the commit, re-run
    `git rev-parse --abbrev-ref HEAD` against the recorded `branch:` line, per
    `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s per-commit re-check; a mismatch stops the run rather than

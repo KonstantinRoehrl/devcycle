@@ -24,7 +24,9 @@ the reason they are banned are owned by
 **Never revert the author's or a sibling's uncommitted work.** `git stash`,
 `git checkout -- <path>` / `git restore <path>`, and `git reset` all discard or unstage
 in-progress edits across the shared checkout — never run them. (The one allowed write is the
-`git add -N` above, which only makes untracked files diff-visible and reverts nothing.)
+`git add -N` above, which only makes untracked files diff-visible and reverts nothing.) `hooks/block-reviewer-git-write.mjs` structurally enforces this. Before recording a red test as
+"pre-existing/flaky/unrelated", satisfy the reproduction-or-reject rule in
+`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Reviewer verdicts.
 
 ## What you receive
 

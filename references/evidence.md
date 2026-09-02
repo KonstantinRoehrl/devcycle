@@ -72,8 +72,11 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   declared deviation.
   `node "${CLAUDE_PLUGIN_ROOT}/scripts/evidence-completeness-check.mjs" <report>` mechanizes
   the narrow-selector subset of this rule — a `cmd:` naming one test file or carrying a
-  test-name filter flag — but it cannot catch every partial-gate case, so the
-  concurrent-wave whole-tree-capture case stays a human judgment call. It also requires an
+  test-name filter flag. The concurrent-wave case — a whole-suite red caused by a sibling's
+  uncommitted edit rather than the task under review — is mechanized by **the concurrent-sibling
+  guard** `node "${CLAUDE_PLUGIN_ROOT}/scripts/foreign-change-check.mjs" <task files>`, which
+  `playbooks/executing-waves.md` step 6 runs on a green-gate failure to defer a sibling-caused
+  red instead of attributing it. `evidence-completeness-check.mjs` also requires an
   `(exit <n>)` status — read from the report line, not file contents — on any present
   `- Before:`/`- After:` line of any class; a `red-green`/`green-green` report additionally
   needs its `- After:` file to carry a test-runner summary line. The normal
@@ -131,6 +134,14 @@ report. Reject when:
 - a `red-green` before/red whose failure is a bare missing-symbol, import, or collection error
   rather than a discriminating assertion failure — the test never proved the behavior was absent;
 - the class mismatches the diff.
+- a red test is explained as **pre-existing / flaky / unrelated / environmental** without a logged
+  reproduction. Such an explanation is an unverified authored claim (§ Authored claims); accept it
+  only when the verdict cites an evidence artifact
+  (`.devcycle/evidence/<task-id>-flaky.txt`, on the file-backed principle) carrying the failing test
+  run against **clean HEAD** and against **the change** at the **same iteration count** with their
+  actual pass/fail counts (the "clean 20/20; change 6/20" shape), and the #167 foreign-change check
+  ruled out concurrent-sibling pollution. The reviewer reads that file rather than trusting the
+  claim.
 
 A reviewer returns its verdict in this shape:
 

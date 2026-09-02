@@ -612,6 +612,16 @@ test("append --kind review-writeback writes a schema-valid marker line (document
   assert.deepEqual(validate(marker, sub), []);
 });
 
+test("gate-deferred-foreign-change is a valid run-record event (#167)", () => {
+  const schema = JSON.parse(readFileSync(new URL("../fixtures/run-record.schema.json", import.meta.url), "utf8"));
+  const eventSub = (schema.oneOf ?? []).find((s) => s.properties?.kind?.const === "event");
+  assert.ok(eventSub, "run-record schema has no `event` sub-schema");
+  assert.ok(
+    eventSub.properties.event.enum.includes("gate-deferred-foreign-change"),
+    "the event enum must accept gate-deferred-foreign-change so step 6 can journal a sibling-caused deferral"
+  );
+});
+
 test("gitToplevel canonicalizes a linked worktree to the main checkout (#104)", () => {
   const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-")));
   spawnSync("git", ["init", "-q"], { cwd: tempRepo });
