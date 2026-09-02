@@ -53,16 +53,23 @@ const READ_ONLY = new Set([
   "describe", "grep", "shortlog", "merge-base", "rev-list", "name-rev", "for-each-ref",
   "diff-tree", "diff-index", "symbolic-ref", "whatchanged",
 ]);
-// Shell/exec wrappers that could execute a git we cannot see into → deny-on-ambiguity when git
-// appears. This is a bounded denylist (per the design's § Parser robustness): it need not be
-// exhaustive because deny-on-ambiguity backstops it — a wrapper not listed here still cannot make a
-// destructive git read-only, it only fails to short-circuit. Covered: shell interpreters and
-// exec/eval helpers, plus the common process/privilege/scheduling launchers (setsid/sudo/doas/
-// taskset/chrt/ionice/stdbuf/unshare/unbuffer) that otherwise pass a destructive git straight through.
+// Command-LAUNCHERS that run their trailing arguments as a command, so a git after one is EXECUTED
+// → deny-on-ambiguity when git appears. This is a bounded denylist (per the design's § Parser
+// robustness): a head-position launcher NOT in this set is allowed — that is the accepted bound, not
+// a backstopped case. There is no fallback that catches an unlisted launcher: the git-behind-wrapper
+// check below only runs for a head in this set, so completeness of the set is what keeps a launched
+// git from slipping through. A recognized wrapper hiding git, by contrast, is denied. The set is
+// deliberately launchers only: commands that take `git` as a DATA argument (grep/echo/cat/rg/find/
+// awk/sed) never execute it and MUST stay allowed, so a blanket "any segment containing a git token"
+// is wrong. Covered: shell interpreters and exec/eval helpers (including the `exec` builtin), plus
+// the common process/privilege/scheduling/sandbox launchers (setsid/sudo/doas/taskset/chrt/ionice/
+// stdbuf/unshare/unbuffer/caffeinate/flock/strace/ltrace/proxychains/firejail/arch/chroot/runcon/
+// catchsegv) that otherwise pass a destructive git straight through.
 const WRAPPERS = new Set([
-  "sh", "bash", "zsh", "dash", "eval", "xargs", "env", "command", "nice", "nohup", "time",
+  "sh", "bash", "zsh", "dash", "eval", "exec", "xargs", "env", "command", "nice", "nohup", "time",
   "timeout", "watch", "setsid", "sudo", "doas", "taskset", "chrt", "ionice", "stdbuf", "unshare",
-  "unbuffer",
+  "unbuffer", "caffeinate", "flock", "strace", "ltrace", "proxychains", "proxychains4", "firejail",
+  "arch", "chroot", "runcon", "catchsegv",
 ]);
 
 // Normalize a command head to the bare command name so alternate spellings of the same binary all

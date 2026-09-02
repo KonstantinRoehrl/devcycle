@@ -135,6 +135,37 @@ test("reviewer + destructive git behind an exec/privilege/scheduling wrapper is 
     assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for wrapped git: ${cmd}`);
 });
 
+// Round-2 blocking fix: command-LAUNCHERS not in WRAPPERS let a destructive git through — the
+// git-behind-wrapper check only fires inside `if (WRAPPERS.has(head))`, so a head-position launcher
+// missing from the set falls to `if (head !== "git") continue;` and the git is executed unguarded.
+// `exec` is the priority case: an always-available shell builtin that replaces the shell with the
+// git it launches.
+test("reviewer + destructive git behind a command-launcher (exec/caffeinate/flock/…) is denied", () => {
+  for (const cmd of [
+    "exec git reset --hard",
+    "caffeinate git reset --hard",
+    "flock /tmp/l git reset --hard",
+    "strace git reset --hard",
+    "firejail git checkout -- x",
+    "chroot /jail git clean -fd",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for launcher-wrapped git: ${cmd}`);
+});
+
+// Regression: a launcher (or any command) taking the literal string "git" as a DATA argument stays
+// allowed — reviewers grep for "git" constantly, so a blanket "deny any segment containing a git
+// token" is wrong. grep/echo/cat/rg/find take git as data, never execute it.
+test("reviewer + a command taking \"git\" as a data argument is allowed", () => {
+  for (const cmd of [
+    "grep -rn git playbooks/",
+    "rg git references/",
+    "echo git",
+    "cat somefile",
+    "git add -N f",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for git-as-data: ${cmd}`);
+});
+
 // (3) A read-only subcommand carrying git's write-capable `--output` flag overwrites a file.
 test("reviewer + a read-only git carrying --output is denied", () => {
   for (const cmd of [
