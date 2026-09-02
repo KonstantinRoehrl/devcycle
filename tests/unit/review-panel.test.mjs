@@ -12,20 +12,19 @@ const SCRIPT = join(here, "..", "..", "workflows", "review-panel.js");
 
 // ---------- pure helpers ----------
 
-test("dedupFindings merges same file+claim, keeps the stronger one, annotates the other lens", () => {
-  const weak = { file: "f.js", claim: "Broken  loop", severity: "medium", lens: "spec", verified: false, verification: "v1" };
-  const strong = { file: "f.js", claim: "broken loop", severity: "high", lens: "correctness", verified: true, verification: "v2" };
-  const out = panel.dedupFindings([weak, strong]);
+test("dedupRaw merges same file+claim, keeps higher severity, records both lenses", () => {
+  const a = { file: "x.js", line: 1, claim: "boom", severity: "low", measuredAgainst: "conv.md", lens: "correctness" };
+  const b = { file: "x.js", line: 1, claim: "boom", severity: "high", measuredAgainst: "conv.md", lens: "simplify" };
+  const out = panel.dedupRaw([a, b]);
   assert.equal(out.length, 1);
-  assert.equal(out[0].lens, "correctness");
-  assert.equal(out[0].verified, true);
-  assert.match(out[0].verification, /also reported by the spec lens/);
+  assert.equal(out[0].severity, "high");
+  assert.deepEqual(out[0].mergedLenses, ["correctness", "simplify"]);
 });
 
-test("dedupFindings keeps distinct claims apart", () => {
-  const a = { file: "f.js", claim: "claim one", severity: "low", lens: "spec", verified: false, verification: "" };
-  const b = { file: "f.js", claim: "claim two", severity: "low", lens: "spec", verified: false, verification: "" };
-  assert.equal(panel.dedupFindings([a, b]).length, 2);
+test("dedupRaw keeps distinct claims apart", () => {
+  const a = { file: "x.js", claim: "one", severity: "low", measuredAgainst: "m", lens: "correctness" };
+  const b = { file: "x.js", claim: "two", severity: "low", measuredAgainst: "m", lens: "correctness" };
+  assert.equal(panel.dedupRaw([a, b]).length, 2);
 });
 
 test("rankFindings orders verified first, then by severity, then by file", () => {
@@ -84,13 +83,11 @@ test("rankFindings orders all four severities", () => {
   assert.deepEqual(ranked.map((x) => x.file), ["a.js", "b.js", "c.js", "d.js"]);
 });
 
-test("dedupFindings carries measuredAgainst through the merge", () => {
-  const weak = { file: "f.js", claim: "same claim", severity: "medium", lens: "spec", verified: false, verification: "v1", measuredAgainst: "CONTRIBUTING.md" };
-  const strong = { file: "f.js", claim: "Same  Claim", severity: "critical", lens: "correctness", verified: true, verification: "v2", measuredAgainst: "OWASP Top Ten" };
-  const out = panel.dedupFindings([weak, strong]);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].severity, "critical");
-  assert.equal(out[0].measuredAgainst, "OWASP Top Ten");
+test("dedupRaw carries measuredAgainst through and always sets mergedLenses", () => {
+  const a = { file: "x.js", claim: "boom", severity: "low", measuredAgainst: "conv.md", lens: "correctness" };
+  const out = panel.dedupRaw([a]);
+  assert.equal(out[0].measuredAgainst, "conv.md");
+  assert.deepEqual(out[0].mergedLenses, ["correctness"]);
 });
 
 test("fallbackSummary counts critical findings", () => {

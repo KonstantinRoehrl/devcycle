@@ -490,6 +490,26 @@ async function verifyFinding(finding, ctx, model, charter) {
 
 // ---------- stage 3: dedup ----------
 
+// Pre-verification dedup: collapse identical file+claim, keep the higher severity, and record
+// every lens that reported it. Runs before stage 2 so duplicates are verified once, not N times.
+function dedupRaw(findings) {
+  const byKey = new Map();
+  for (const f of findings) {
+    const key = `${f.file}::${f.claim.toLowerCase().replace(/\s+/g, " ").trim()}`;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, { ...f, mergedLenses: [f.lens] });
+      continue;
+    }
+    const keepNew = SEVERITIES.indexOf(f.severity) < SEVERITIES.indexOf(prev.severity);
+    const kept = keepNew ? { ...f } : prev;
+    const lenses = new Set([...(prev.mergedLenses ?? [prev.lens]), f.lens]);
+    kept.mergedLenses = [...lenses].sort();
+    byKey.set(key, kept);
+  }
+  return [...byKey.values()];
+}
+
 function dedupFindings(findings) {
   const byKey = new Map();
   for (const f of findings) {
@@ -704,6 +724,6 @@ if (require.main === module) {
 
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
-  dedupFindings, dedupStrengths, rankFindings, truncate, chunkDiff, fallbackSummary, mapLimit, loadRedTeamCharter,
+  dedupRaw, dedupFindings, dedupStrengths, rankFindings, truncate, chunkDiff, fallbackSummary, mapLimit, loadRedTeamCharter,
   SEVERITIES, LENS_CONCURRENCY,
 };
