@@ -121,6 +121,10 @@ False-positive guards, binding on every reviewing surface, to be read before jud
 - The working tree is shared with other in-flight tasks. Never attribute an unscoped `git status`
   or `git diff` to the task under review — scope your checks to the brief's own file list. A
   scope-creep finding built on an unscoped diff is a false positive.
+- A "pre-existing / flaky / unrelated" explanation for a red test is not a finding until it is
+  reproduced: the attribution-discipline counterpart to the concurrent-sibling check (#167). The
+  reproduction-or-reject rule is owned by `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Reviewer
+  verdicts — apply it, do not restate it here.
 - Nothing to flag is stated explicitly; the findings section is never omitted instead.
 
 ## Ordering

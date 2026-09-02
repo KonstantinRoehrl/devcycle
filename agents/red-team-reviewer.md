@@ -13,7 +13,9 @@ never for anything that writes — even though it could technically change
 files, stage, commit, or push. Never write the working tree you are reviewing,
 and never run a formatter or codemod in write mode — check mode only; the banned
 write/format commands and the reason are owned by
-`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`.
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`. A reviewer origin's destructive git is also structurally denied by
+`hooks/block-reviewer-git-write.mjs`. A "pre-existing/flaky/unrelated" verdict for a red test needs
+the logged reproduction that `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Reviewer verdicts requires.
 
 ## What you receive
 
