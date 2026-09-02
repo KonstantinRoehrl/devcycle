@@ -95,6 +95,12 @@ test("fallbackSummary counts critical findings", () => {
   assert.match(s, /1 critical/);
 });
 
+test("verifierTools grants Bash only when needsExecution is true", () => {
+  assert.equal(panel.verifierTools({ needsExecution: true }), "Read,Grep,Glob,Bash");
+  assert.equal(panel.verifierTools({ needsExecution: false }), "Read,Grep,Glob");
+  assert.equal(panel.verifierTools({}), "Read,Grep,Glob"); // default
+});
+
 // ---------- chunkDiff (#65) ----------
 
 // Build a diff segment for one file with `hunks` hunks of roughly `hunkLen` chars each.
@@ -697,7 +703,7 @@ const toolsArg = process.argv.find((a) => a.startsWith("--tools=")) || "";
 let out;
 if (prompt.includes("You are one lens")) {
   out = prompt.includes("Correctness and security")
-    ? { findings: [{ file: "src/a.js", line: 1, claim: "a defect", severity: "medium", measuredAgainst: "repo convention" }] }
+    ? { findings: [{ file: "src/a.js", line: 1, claim: "a defect", severity: "medium", measuredAgainst: "repo convention", needsExecution: true }] }
     : { findings: [] };
 } else if (prompt.includes("adversarial verifier")) {
   out = { verified: toolsArg.includes("Bash"), verification: "tools=" + toolsArg };

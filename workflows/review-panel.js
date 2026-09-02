@@ -310,6 +310,7 @@ const FINDINGS_SCHEMA = {
           claim: { type: "string" },
           severity: { enum: SEVERITIES },
           measuredAgainst: { type: "string" },
+          needsExecution: { type: "boolean" },
         },
         required: ["file", "claim", "severity", "measuredAgainst"],
       },
@@ -341,7 +342,9 @@ function lensPrompt(charter, ctx) {
     `only concrete, evidenced findings for YOUR lens — no restated diff hunks, no style nits`,
     `outside your charter. For each finding give the file path (repo-relative), the line in`,
     `the reviewed version when known, a one-to-two sentence claim in plain language (symptom`,
-    `first), a severity, and what the finding is measured against.`,
+    `first), a severity, and what the finding is measured against. Set "needsExecution" true`,
+    `ONLY when refuting the claim requires running code or commands (a benchmark, a metric, a`,
+    `computed figure); false for a claim refutable by reading the code.`,
     ``,
     `Severity: critical (data loss, a security hole, or a broken release path), high (broken`,
     `behavior or a violation of what the spec requires), medium (a likely defect or`,
@@ -378,6 +381,7 @@ function normalizeFinding(f, lens) {
     claim: f.claim,
     severity: SEVERITIES.includes(f.severity) ? f.severity : "medium",
     measuredAgainst: measuredAgainstOr(f),
+    needsExecution: f.needsExecution === true,
     lens,
   };
 }
@@ -484,6 +488,8 @@ const VERIFY_SCHEMA = {
   required: ["verified", "verification"],
 };
 
+function verifierTools(f) { return f.needsExecution === true ? "Read,Grep,Glob,Bash" : "Read,Grep,Glob"; }
+
 async function verifyFinding(finding, ctx, model, charter) {
   const prompt = [
     `You are an adversarial verifier on a review panel. A reviewer claims:`,
@@ -512,7 +518,7 @@ async function verifyFinding(finding, ctx, model, charter) {
         ]
       : []),
   ].join("\n");
-  const res = await claudeStructured({ prompt, tools: "Read,Grep,Glob,Bash", schema: VERIFY_SCHEMA, model });
+  const res = await claudeStructured({ prompt, tools: verifierTools(finding), schema: VERIFY_SCHEMA, model });
   if (!res.ok) {
     // Contract: unverified findings are marked, never dropped.
     return { ...finding, verified: false, verification: `verifier unavailable (${res.error}); finding retained unverified` };
@@ -784,5 +790,5 @@ if (require.main === module) {
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
   dedupRaw, dedupStrengths, rankFindings, truncate, chunkDiff, selectChunksByChurn, buildLensJobs, fallbackSummary, mapLimit, loadRedTeamCharter,
-  SEVERITIES, LENS_CONCURRENCY,
+  SEVERITIES, LENS_CONCURRENCY, verifierTools,
 };
