@@ -1544,6 +1544,44 @@ test("--issue-body prints the whole draft and nothing else, naming the upstream 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// One transcript carrying a devcycle attribution, and a run record whose dispatch inherited its
+// model — the smallest corpus in which the inherited-model compliance candidate is draftable.
+function complianceFixture() {
+  const dir = mkdtempSync(join(tmpdir(), "doctor-compliance-body-"));
+  const proj = join(dir, "projects", "-some-project");
+  mkdirSync(proj, { recursive: true });
+  writeFileSync(join(proj, "sess-abcdef123456.jsonl"),
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) + "\n");
+  const runs = join(dir, "runs", "some-repo");
+  mkdirSync(runs, { recursive: true });
+  writeFileSync(join(runs, "run.jsonl"), [
+    { kind: "run", schemaVersion: 1, runId: "0123456789abcdef", pluginVersion: DRAFT_VERSION, profile: "thorough", knobs: {} },
+    { kind: "session", sessionHash: sha256("sess-abcdef123456") },
+    { kind: "stage", stage: "execution", startedAt: "2026-07-20T09:00:00.000Z", endedAt: "2026-07-20T11:00:00.000Z", outcome: "complete" },
+    { kind: "dispatch", taskId: "1", agentType: "devcycle:implementer", model: "claude-opus-5", modelSource: "inherited", startedAt: "2026-07-20T09:10:00.000Z", endedAt: "2026-07-20T09:40:00.000Z", outcome: "ok", reviewRound: 0, retryIndex: 0 },
+  ].map((l) => JSON.stringify(l)).join("\n") + "\n");
+  return dir;
+}
+
+test("--issue-body inherited-model drafts a [compliance:…] issue", () => {
+  const dir = complianceFixture();
+  const res = spawnSync(process.execPath,
+    [SCRIPT, "--dir", join(dir, "projects"), "--issue-body", "inherited-model"],
+    { encoding: "utf8", env: { ...process.env, PATH: "", CLAUDE_CODE_SESSION_ID: "", DEVCYCLE_RUNS_DIR: join(dir, "runs") } });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /title: \[compliance:inherited-model\]/);
+  assert.match(res.stdout, /CANDIDATE: inherited-model/);
+});
+
+test("--issue-body rejects an unknown slug as neither culprit nor compliance", () => {
+  const dir = complianceFixture();
+  const res = spawnSync(process.execPath,
+    [SCRIPT, "--dir", join(dir, "projects"), "--issue-body", "not-a-real-slug"],
+    { encoding: "utf8", env: { ...process.env, PATH: "", CLAUDE_CODE_SESSION_ID: "", DEVCYCLE_RUNS_DIR: join(dir, "runs") } });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /no culprit or compliance candidate "not-a-real-slug"/);
+});
+
 test("parseArgs reads --issue-body", () => {
   assert.equal(parseArgs(["--issue-body", "partial-evidence-capture"]).issueBody, "partial-evidence-capture");
   // The report path is unaffected when the flag is absent.

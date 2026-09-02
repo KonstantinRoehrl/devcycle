@@ -16,7 +16,8 @@ import {
   emitComplianceCandidates, complianceCandidatesOf, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
   reviewDepthCohortTable, deriveEvents, attributedCost, impactScores,
   bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
-  renderReport,
+  renderReport, complianceIssueBody, COMPLIANCE_TYPES, NoComplianceCandidateError,
+  formatComplianceCandidate, parseDraftedMarkers,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -2275,4 +2276,78 @@ test("main-thread-browser onDevicePath collapses to 'unrecorded' when every sess
   ];
   const [c] = complianceCandidatesOf(summaries);
   assert.equal(c.onDevicePath, "unrecorded", "an all-null onDevicePath cohort must render the literal 'unrecorded'");
+});
+
+test("complianceIssueBody: drafts an inherited-model candidate as a [compliance:…] envelope", () => {
+  const summaries = [{
+    id: "s1", pluginVersion: "0.17.3", costByModel: { "claude-opus-5": 12 },
+    complianceCandidates: [{ type: "inherited-model", inherited: 3, total: 5,
+      inheritedByModel: { "claude-opus-5": 3 }, sessions_sampled: 1 }],
+  }];
+  const d = complianceIssueBody("inherited-model", summaries, { language: "js" });
+  assert.equal(d.repo, "KonstantinRoehrl/devcycle");
+  assert.ok(d.title.startsWith("[compliance:inherited-model] "));
+  assert.deepEqual(d.labels, ["compliance:inherited-model", "from-doctor"]);
+  assert.match(d.body, /CANDIDATE: inherited-model inherited=3\/5/);
+});
+
+test("complianceIssueBody: throws NoComplianceCandidateError for a type absent from the corpus", () => {
+  assert.throws(() => complianceIssueBody("main-thread-browser", [{ id: "s1", complianceCandidates: [] }]),
+    NoComplianceCandidateError);
+});
+
+test("COMPLIANCE_TYPES names exactly the four emitComplianceCandidates types", () => {
+  assert.deepEqual([...COMPLIANCE_TYPES].sort(),
+    ["general-purpose-search", "inherited-model", "main-thread-browser", "missing-workload"]);
+});
+
+test("parseDraftedMarkers recognizes a [compliance:…] title as well as [culprit:…]", () => {
+  const rows = parseDraftedMarkers("Drafted: [compliance:inherited-model] some title\nDrafted: [culprit:x] y");
+  assert.deepEqual(rows.map((r) => r.slug), ["inherited-model", "x"]);
+});
+
+test("emitComplianceCandidates: inherited-model carries an inheritedByModel breakdown", () => {
+  const record = { runId: "00000000000000a1", stages: [], dispatches: [
+    { modelSource: "inherited", model: "claude-opus-5" },
+    { modelSource: "inherited", model: "claude-opus-5" },
+    { modelSource: "explicit", model: "claude-sonnet-5" },
+  ] };
+  const c = emitComplianceCandidates([], record).find((c) => c.type === "inherited-model");
+  assert.deepEqual(c.inheritedByModel, { "claude-opus-5": 2 });
+  assert.equal(c.inherited, 2);
+  assert.equal(c.total, 3);
+});
+
+test("complianceCandidatesOf: inherited-model aggregates model counts and corpus spend", () => {
+  const summaries = [
+    { id: "s1", pluginVersion: "0.17.3", costByModel: { "claude-opus-5": 10, "claude-sonnet-5": 4 },
+      complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 3, inheritedByModel: { "claude-opus-5": 2 }, sessions_sampled: 1 }] },
+    { id: "s2", pluginVersion: "0.17.3", costByModel: { "claude-opus-5": 6 },
+      complianceCandidates: [{ type: "inherited-model", inherited: 1, total: 1, inheritedByModel: { "claude-opus-5": 1 }, sessions_sampled: 1 }] },
+  ];
+  const c = complianceCandidatesOf(summaries).find((c) => c.type === "inherited-model");
+  assert.deepEqual(c.inheritedByModel, { "claude-opus-5": 3 });
+  assert.equal(c.inheritedModelSpend["claude-opus-5"], 16); // 10 + 6; sonnet excluded (never inherited)
+  assert.ok(!("claude-sonnet-5" in c.inheritedModelSpend));
+});
+
+test("formatComplianceCandidate: inherited-model shows the model exposure as labelled context", () => {
+  const line = formatComplianceCandidate({ type: "inherited-model", inherited: 3, total: 5,
+    sessions_sampled: 2, inheritedByModel: { "claude-opus-5": 3 }, inheritedModelSpend: { "claude-opus-5": 16 } });
+  assert.match(line, /inherited=3\/5 sessions=2/);
+  assert.match(line, /ran on: claude-opus-5 ×3 \(\$16\.00\)/);
+  assert.match(line, /not attributed to inheritance/);
+});
+
+test("renderReport: a committing-cycle-with-no-workload surfaces an up-front COLLECTION GAP", () => {
+  const text = renderReport([
+    { pluginVersion: "0.17.3", costByStage: {}, medianDepth: 10,
+      complianceCandidates: [{ type: "missing-workload", commits: 1, requestKind: "bug", sessions_sampled: 1 }] },
+  ], { repo: "x", today: "2026-09-02", scope: "all" });
+  // The warning appears before the "## At a glance" section (i.e. up front, not only under Compliance).
+  const gapAt = text.indexOf("COLLECTION GAP");
+  const glanceAt = text.indexOf("## At a glance");
+  assert.ok(gapAt !== -1, "expected an up-front COLLECTION GAP warning");
+  assert.ok(gapAt < glanceAt, "the gap warning must render before the cost tables");
+  assert.match(text, /predating the commit-sensor hook/); // honesty note: historical nulls are expected
 });
