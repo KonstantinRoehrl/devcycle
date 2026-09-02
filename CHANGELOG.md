@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.1 — 2026-09-02
+
+- fix(doctor): commit-sensor coverage, fixed report path, and review-panel robustness
+
 ## 0.18.0 — 2026-08-30
 
 - feat(review): add the PR review write-back path — produce, file, respond (#159)
