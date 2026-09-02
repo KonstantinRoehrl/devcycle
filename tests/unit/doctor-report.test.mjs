@@ -6,12 +6,12 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
-  parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM,
+  parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM, doctorDir,
   renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates, winCandidates,
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
@@ -1720,7 +1720,7 @@ test("revertCandidates emits a same-profile stage-scoped regression with the sid
     const promotions = [
       { culpritId: "friction:regressor", rung: "r2", pluginVersion: "0.12.0", commit: "abc1234", lifecycle: null },
     ];
-    const result = revertCandidates(summaries, promotions, { root });
+    const result = revertCandidates(summaries, promotions, { dir: root });
     const c = result.candidates[0];
     assert.equal(c.culpritId, "friction:regressor");
     assert.equal(c.rung, "r2");
@@ -1728,7 +1728,7 @@ test("revertCandidates emits a same-profile stage-scoped regression with the sid
     assert.equal(c.stage, "execution");
     assert.ok(c.deltaPct < 0, "a regression is a negative deltaPct");
     // The sidecar is written to the pinned path under the given root, in the same shape.
-    const written = JSON.parse(readFileSync(join(root, ".devcycle", "doctor", "revert-candidates.json"), "utf8"));
+    const written = JSON.parse(readFileSync(join(root, "revert-candidates.json"), "utf8"));
     assert.equal(written.candidates[0].culpritId, "friction:regressor");
     assert.ok("generatedAt" in written && "installedVersion" in written);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -1745,6 +1745,27 @@ test("revertCandidates never fires on a profile-mix shift — the regression is 
     const promotions = [
       { culpritId: "friction:regressor", rung: "r2", pluginVersion: "0.12.0", commit: "abc1234", lifecycle: null },
     ];
-    assert.deepEqual(revertCandidates(summaries, promotions, { root }).candidates, []);
+    assert.deepEqual(revertCandidates(summaries, promotions, { dir: root }).candidates, []);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("doctorDir resolves DEVCYCLE_DOCTOR_DIR when set", () => {
+  const prior = process.env.DEVCYCLE_DOCTOR_DIR;
+  process.env.DEVCYCLE_DOCTOR_DIR = "/tmp/custom-doctor-dir";
+  try {
+    assert.equal(doctorDir(), "/tmp/custom-doctor-dir");
+  } finally {
+    if (prior === undefined) delete process.env.DEVCYCLE_DOCTOR_DIR;
+    else process.env.DEVCYCLE_DOCTOR_DIR = prior;
+  }
+});
+
+test("doctorDir falls back to ~/.claude/devcycle/doctor when unset", () => {
+  const prior = process.env.DEVCYCLE_DOCTOR_DIR;
+  delete process.env.DEVCYCLE_DOCTOR_DIR;
+  try {
+    assert.equal(doctorDir(), join(homedir(), ".claude", "devcycle", "doctor"));
+  } finally {
+    if (prior !== undefined) process.env.DEVCYCLE_DOCTOR_DIR = prior;
+  }
 });

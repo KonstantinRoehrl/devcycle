@@ -624,7 +624,7 @@ test("harvested: doctor/severity-ranking-and-actionability — severity ranks, d
   for (const option of ["**skip**", "**draft a GitHub issue**", "get a `/devcycle:cycle` entry point", "just the overview, no action"])
     assert.ok(t.includes(option), `actionability option missing: ${option}`);
   assert.match(t, /This run never invokes `\/devcycle:cycle` itself/);
-  assert.match(t, /writes `\.devcycle\/doctor\/YYYY-MM-DD-report\.md`/);
+  assert.match(t, /writes "YYYY-MM-DD-report\.md" to the fixed doctor directory/);
 });
 
 test("harvested: dreaming-across-sessions/contradiction-not-auto-resolved — recency never settles a contradiction", () => {

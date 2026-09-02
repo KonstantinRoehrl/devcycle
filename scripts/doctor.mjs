@@ -2868,7 +2868,7 @@ function reportContext(args, result) {
     previousSummaries: result.previousSessions,
     vocab,
     promotions,
-    outerLoop: outerLoop(join(process.cwd(), ".devcycle", "doctor")),
+    outerLoop: outerLoop(doctorDir()),
     compiledKnowledge: compiledKnowledge(promotions),
     verification: promotionVerification(promotions, args.runChecks),
   };
@@ -2921,7 +2921,14 @@ export function regressionAttribution(candidate, promotions, changelogText) {
 // building a second (profile, stage) grouper (QC2). The sidecar write degrades, never aborts (QC7).
 const REVERT_REGRESSION_PCT = 15;
 
-export function revertCandidates(summaries, promotions, { root = process.cwd() } = {}) {
+// Doctor's report is deliberately global — it profiles the whole session corpus, not one
+// repo (references/profiling-sessions.md) — so unlike run-record.mjs's runsDirForRepo(),
+// this carries no per-repo slug. Mirrors DEVCYCLE_RUNS_DIR's env-var-plus-homedir shape.
+export function doctorDir() {
+  return process.env.DEVCYCLE_DOCTOR_DIR ?? join(homedir(), ".claude", "devcycle", "doctor");
+}
+
+export function revertCandidates(summaries, promotions, { dir = doctorDir() } = {}) {
   const settled = (summaries ?? []).filter((s) => !s.inFlight);
   const profiles = [...new Set(settled.map((s) => s.profile ?? "unknown"))];
   const candidates = [];
@@ -2951,7 +2958,6 @@ export function revertCandidates(summaries, promotions, { root = process.cwd() }
   }
   const out = { generatedAt: new Date().toISOString(), installedVersion: installedVersion(), candidates };
   try {
-    const dir = join(root, ".devcycle", "doctor");
     mkdirSync(dir, { recursive: true });
     atomicWrite(join(dir, "revert-candidates.json"), JSON.stringify(out, null, 2) + "\n");
   } catch { /* QC7: the sidecar write must never abort the report */ }
