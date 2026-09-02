@@ -165,7 +165,9 @@ still be wrong in practice. Unverified findings are marked, never dropped; findi
 deduplicated across lenses and ranked. The severity vocabulary, core fields,
 evidence discipline and machine ordering are owned by
 `${CLAUDE_PLUGIN_ROOT}/references/findings.md`. Depth never weakens step 1 or this pass, which is
-real machinery at every profile rather than a paragraph performed by hand.
+real machinery at every profile rather than a paragraph performed by hand. A red test explained
+as pre-existing/flaky/unrelated/environmental without a logged clean-HEAD-vs-change reproduction
+is rejected, per `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Reviewer verdicts.
 
 **Cross-reference open work before finalizing.** Check `docs/known-issues.md` and the repo's
 live issue tracker for anything already tracking a candidate finding — they are not guaranteed to
