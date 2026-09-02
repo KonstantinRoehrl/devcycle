@@ -190,6 +190,35 @@ test("chunkDiff consolidates multiple truncations into one note (#6)", () => {
   assert.match(joined, /--- a\/f2\.js/);
 });
 
+// ---------- selectChunksByChurn (F1) ----------
+const mkChunk = (path, plus, minus) =>
+  [`diff --git a/${path} b/${path}`, "@@ -1 +1 @@",
+   ...Array(plus).fill("+add"), ...Array(minus).fill("-del")].join("\n");
+
+test("selectChunksByChurn returns all chunks when maxChunks is unset or >= count", () => {
+  const cs = [mkChunk("a", 1, 0), mkChunk("b", 2, 0)];
+  assert.deepEqual(panel.selectChunksByChurn(cs, undefined), { reviewed: cs, deferredFiles: [] });
+  assert.deepEqual(panel.selectChunksByChurn(cs, 5), { reviewed: cs, deferredFiles: [] });
+});
+
+test("selectChunksByChurn keeps the highest-churn chunks and names the deferred files", () => {
+  const a = mkChunk("a.js", 1, 0);   // churn 1
+  const b = mkChunk("b.js", 5, 3);   // churn 8
+  const c = mkChunk("c.js", 2, 0);   // churn 2
+  const { reviewed, deferredFiles } = panel.selectChunksByChurn([a, b, c], 2);
+  assert.deepEqual(reviewed, [b, c]);         // top-2 by churn, original order preserved
+  assert.deepEqual(deferredFiles, ["a.js"]);
+});
+
+test("selectChunksByChurn does not count +++/--- headers as churn", () => {
+  // a has a real +/- pair (churn 2); b is header-only (churn 0) → a wins.
+  const a = ["diff --git a/a b/a", "+++ b/a", "--- a/a", "@@", "+x", "-y"].join("\n");
+  const b = ["diff --git a/b b/b", "+++ b/b", "--- a/b", "@@"].join("\n");
+  const { reviewed, deferredFiles } = panel.selectChunksByChurn([a, b], 1);
+  assert.deepEqual(reviewed, [a]);
+  assert.deepEqual(deferredFiles, ["b"]);
+});
+
 // ---------- end-to-end against a stubbed claude CLI ----------
 
 test("panel end-to-end: lenses find, verifier confirms, dedup collapses, report on stdout", () => {

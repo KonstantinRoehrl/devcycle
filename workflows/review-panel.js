@@ -230,6 +230,39 @@ function chunkDiff(diff, cap) {
   return { chunks, notes };
 }
 
+// Churn of one chunk: added/removed content lines, excluding the +++/--- file headers.
+function chunkChurn(chunk) {
+  let n = 0;
+  for (const line of chunk.split("\n")) {
+    if ((line[0] === "+" && !line.startsWith("+++")) || (line[0] === "-" && !line.startsWith("---"))) n++;
+  }
+  return n;
+}
+
+// Files a chunk touches, from its `diff --git a/… b/<path>` header lines.
+function chunkFiles(chunk) {
+  const files = [];
+  for (const line of chunk.split("\n")) {
+    const m = line.match(/^diff --git a\/.+ b\/(.+)$/);
+    if (m) files.push(m[1]);
+  }
+  return files;
+}
+
+// Keep the maxChunks highest-churn chunks (original order preserved); name the rest's files.
+function selectChunksByChurn(chunks, maxChunks) {
+  if (!maxChunks || chunks.length <= maxChunks) return { reviewed: chunks, deferredFiles: [] };
+  const ranked = chunks
+    .map((chunk, index) => ({ chunk, index, churn: chunkChurn(chunk) }))
+    .sort((a, b) => b.churn - a.churn || a.index - b.index);
+  const keep = new Set(ranked.slice(0, maxChunks).map((r) => r.index));
+  const reviewed = chunks.filter((_, i) => keep.has(i));
+  const deferredFiles = [
+    ...new Set(chunks.filter((_, i) => !keep.has(i)).flatMap(chunkFiles)),
+  ].sort();
+  return { reviewed, deferredFiles };
+}
+
 // Split text into segments each beginning at a line that starts with prefix. Any text before
 // the first such line stays attached to the first segment.
 function splitByPrefix(text, prefix) {
@@ -724,6 +757,6 @@ if (require.main === module) {
 
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
-  dedupRaw, dedupFindings, dedupStrengths, rankFindings, truncate, chunkDiff, fallbackSummary, mapLimit, loadRedTeamCharter,
+  dedupRaw, dedupFindings, dedupStrengths, rankFindings, truncate, chunkDiff, selectChunksByChurn, fallbackSummary, mapLimit, loadRedTeamCharter,
   SEVERITIES, LENS_CONCURRENCY,
 };
