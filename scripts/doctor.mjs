@@ -40,6 +40,27 @@ const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
 // in every repo except this one — the failure this constant exists to prevent.
 export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
 
+// The four compliance-candidate slugs emitComplianceCandidates can produce — the single source of
+// truth for all three consumers, made structurally load-bearing so adding a fifth type here (and
+// nowhere else) either derives automatically or fails loudly, instead of needing four parallel edits:
+//   - the emitter routes every candidate's `type` through complianceType() below, so a literal that
+//     drifts from this array throws at emit time rather than producing an unroutable candidate;
+//   - the --issue-body router reads it directly (`COMPLIANCE_TYPES.includes`);
+//   - COMPLIANCE_TITLES's key set is asserted equal to this array by a module-load invariant (below),
+//     so a new type can't be routable/emittable without also getting a title.
+export const COMPLIANCE_TYPES = [
+  "inherited-model", "missing-workload", "main-thread-browser", "general-purpose-search",
+];
+const COMPLIANCE_TYPE_SET = new Set(COMPLIANCE_TYPES);
+
+// Guard every emitted compliance `type` through the shared constant: an unregistered slug throws
+// here instead of flowing downstream as a candidate no router or title map knows about.
+export function complianceType(slug) {
+  if (!COMPLIANCE_TYPE_SET.has(slug))
+    throw new Error(`unregistered compliance type "${slug}" — add it to COMPLIANCE_TYPES`);
+  return slug;
+}
+
 // Drafted markers began being recorded in this release; reports written before it carry none,
 // so the count is qualified rather than mixing "none drafted" with "not recorded".
 const DRAFTED_SINCE = "0.13.0";
@@ -645,7 +666,7 @@ export function emitComplianceCandidates(turns, record) {
   const browser = turns.filter((t) => !t.isSidechain && BROWSER_TOOLS.has(t.toolName)).length;
   if (browser > 0)
     out.push({
-      type: "main-thread-browser",
+      type: complianceType("main-thread-browser"),
       calls: browser,
       onDevicePath: record.stages?.find((s) => s.stage === "on-device")?.path ?? null,
       note: "no path permits the coordinator to drive a browser — dispatch on-device-driver",
@@ -654,13 +675,20 @@ export function emitComplianceCandidates(turns, record) {
 
   // C2: the rule exists at references/delegation.md:59; this makes the gap measurable.
   const dispatches = record.dispatches ?? [];
-  const inherited = dispatches.filter((d) => d.modelSource === "inherited").length;
-  if (inherited > 0)
-    out.push({ type: "inherited-model", inherited, total: dispatches.length, sessions_sampled: 1 });
+  const inheritedDispatches = dispatches.filter((d) => d.modelSource === "inherited");
+  if (inheritedDispatches.length > 0) {
+    const inheritedByModel = {};
+    for (const d of inheritedDispatches) {
+      const m = d.model ?? "(none)";
+      inheritedByModel[m] = (inheritedByModel[m] ?? 0) + 1;
+    }
+    out.push({ type: complianceType("inherited-model"), inherited: inheritedDispatches.length,
+      total: dispatches.length, inheritedByModel, sessions_sampled: 1 });
+  }
 
   // C3: Explore's startup floor is 13955 against a 32711 median, ~2.3x per dispatch.
   const gp = dispatches.filter((d) => d.agentType === "general-purpose").length;
-  if (gp > 0) out.push({ type: "general-purpose-search", count: gp, total: dispatches.length, sessions_sampled: 1 });
+  if (gp > 0) out.push({ type: complianceType("general-purpose-search"), count: gp, total: dispatches.length, sessions_sampled: 1 });
 
   // C4 (issue #139): reached execution and committed but recorded no workload — the collection the
   // commit-sensor hook (and finish's final refresh) should have written. GC3-safe by construction:
@@ -669,7 +697,7 @@ export function emitComplianceCandidates(turns, record) {
   // triage capture (no triage line) => silent, excluding every historical orphan by construction.
   const missingCommits = record.commits ?? [];
   if (missingCommits.length > 0 && !record.workload && record.triage && record.triage.requestKind !== "audit")
-    out.push({ type: "missing-workload", commits: missingCommits.length,
+    out.push({ type: complianceType("missing-workload"), commits: missingCommits.length,
       requestKind: record.triage.requestKind, sessions_sampled: 1 });
 
   return out;
@@ -1221,6 +1249,21 @@ export function complianceCandidatesOf(summaries) {
       out.push({ ...cand, commits: sum("commits"), requestKind: g.members[0].requestKind });
     }
   }
+  const inh = out.find((c) => c.type === "inherited-model");
+  if (inh) {
+    const byModel = {};
+    for (const s of summaries)
+      for (const c of s.complianceCandidates ?? [])
+        if (c.type === "inherited-model")
+          for (const [m, n] of Object.entries(c.inheritedByModel ?? {}))
+            byModel[m] = (byModel[m] ?? 0) + n;
+    inh.inheritedByModel = byModel;
+    const spend = {};
+    for (const s of summaries)
+      for (const [m, d] of Object.entries(s.costByModel ?? {}))
+        if (m in byModel) spend[m] = (spend[m] ?? 0) + d;
+    inh.inheritedModelSpend = spend;
+  }
   return out;
 }
 
@@ -1229,12 +1272,20 @@ export function complianceCandidatesOf(summaries) {
 // is the aggregated cohort size from complianceCandidatesOf (#128), rendered as `sessions=N` so a
 // reader can weigh how many sessions the flag rests on; versions renders as `versions=[min..max]`
 // when the cohort carried any known version (spec C5).
-function formatComplianceCandidate(c) {
+export function formatComplianceCandidate(c) {
   const span = c.versions ? ` versions=[${c.versions[0]}..${c.versions[1]}]` : "";
   if (c.type === "main-thread-browser")
     return `CANDIDATE: main-thread-browser calls=${c.calls} sessions=${c.sessions_sampled} onDevicePath=${c.onDevicePath}${span} — ${c.note}`;
-  if (c.type === "inherited-model")
-    return `CANDIDATE: inherited-model inherited=${c.inherited}/${c.total} sessions=${c.sessions_sampled}${span}`;
+  if (c.type === "inherited-model") {
+    const models = Object.entries(c.inheritedByModel ?? {})
+      .sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))
+      .map(([m, n]) => `${m} ×${n}${c.inheritedModelSpend?.[m] != null ? ` (${usd(c.inheritedModelSpend[m])})` : ""}`)
+      .join(", ");
+    const ran = models
+      ? ` — ran on: ${models} (corpus spend on these models; not attributed to inheritance)`
+      : "";
+    return `CANDIDATE: inherited-model inherited=${c.inherited}/${c.total} sessions=${c.sessions_sampled}${span}${ran}`;
+  }
   if (c.type === "missing-workload")
     return `CANDIDATE: missing-workload commits=${c.commits} requestKind=${c.requestKind} sessions=${c.sessions_sampled}${span} — reached execution and committed but recorded no workload (collection gap — the commit-sensor hook should have written it)`;
   return `CANDIDATE: general-purpose-search count=${c.count}/${c.total} sessions=${c.sessions_sampled}${span}`;
@@ -1620,21 +1671,27 @@ function main() {
   // posts, and it builds its own two tables rather than taking reportContext's, so drafting an
   // issue never runs the `gh` probe the report's Outer loop section needs.
   if (args.issueBody) {
+    const slug = args.issueBody;
     const tables = {
       versionProfile: versionProfileTable(result.sessions, safePromotions()),
       culprits: culpritTable(result.sessions, readVocab()),
     };
-    if (!tables.culprits.some((r) => r.culprit === args.issueBody)) {
-      console.error(`doctor: no culprit "${args.issueBody}" in this corpus`);
-      process.exit(1);
-    }
+    const isCulprit = tables.culprits.some((r) => r.culprit === slug);
     let draft;
     try {
-      draft = issueBody(args.issueBody, result.sessions, tables, repoShape(process.cwd()));
+      if (isCulprit) {
+        draft = issueBody(slug, result.sessions, tables, repoShape(process.cwd()));
+      } else if (COMPLIANCE_TYPES.includes(slug)) {
+        draft = complianceIssueBody(slug, result.sessions, repoShape(process.cwd()));
+      } else {
+        console.error(`doctor: no culprit or compliance candidate "${slug}" in this corpus`);
+        process.exit(1);
+      }
     } catch (e) {
-      // A culprit last seen outside the recency band drafts stale noise; refuse it, print why,
-      // and exit non-zero without emitting a body.
-      if (e instanceof StaleCulpritError) {
+      // A culprit last seen outside the recency band (StaleCulpritError), or a compliance type
+      // with no cohort in this corpus (NoComplianceCandidateError): print why and exit non-zero
+      // without emitting a body.
+      if (e instanceof StaleCulpritError || e instanceof NoComplianceCandidateError) {
         console.error(`doctor: ${e.message}`);
         process.exitCode = 1;
         return;
@@ -2184,7 +2241,7 @@ export function winCandidates(candidates, promotions) {
 // closing bracket or run into the title. Leading whitespace is tolerated because the playbook
 // states the marker inside an indented block, and a marker copied from there carries its indent.
 const DRAFTED_MARKER_RE =
-  /^[ \t]*Drafted: \[culprit:([a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)*)\] (.+)$/gm;
+  /^[ \t]*Drafted: \[(?:culprit|compliance):([a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)*)\] (.+)$/gm;
 
 export function parseDraftedMarkers(text) {
   const out = [];
@@ -2526,6 +2583,12 @@ export function renderReport(summaries, ctx) {
   const glanceBand = recencyBand(installedVersion(), releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8")));
   const glanceSteps = workloadAdjustedSteps(settledRuns, glanceBand);
   const excess = excessCost(settledRuns);
+  // Computed up front (not only inside ## Workload) so a collection gap can be warned before the
+  // cost tables — an under-collected corpus must not read as "no work" in the headline view.
+  const compliance = complianceCandidatesOf(summaries);
+  const missingWorkloadCycles = compliance
+    .filter((c) => c.type === "missing-workload")
+    .reduce((n, c) => n + c.sessions_sampled, 0);
 
   L.push(
     `# Doctor Report — ${repo} — ${today}`,
@@ -2536,6 +2599,12 @@ export function renderReport(summaries, ctx) {
 
   section("## Read this first", "read-this-first");
   L.push(...caveatLines(summaries, agg));
+  if (missingWorkloadCycles)
+    L.push("",
+      `> ⚠ COLLECTION GAP — ${missingWorkloadCycles} committing cycle(s) recorded no workload, so ` +
+      `they are absent from ## Workload (observed) and every matched-cohort comparison below. This is ` +
+      `under-collection, not absence of work (see ### Compliance → missing-workload). Cycles on plugin ` +
+      `versions predating the commit-sensor hook legitimately carry no band and are not counted here.`);
 
   section("## At a glance", "ataglance");
   const pctText = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
@@ -2560,7 +2629,7 @@ export function renderReport(summaries, ctx) {
   // The raw observed workload family (spec C3): one row per run that wrote a workload record,
   // its raw counts straight off that record. Runs with no workload record have nothing to
   // observe and drop out (changedLines is null exactly when no record was joined — GC3).
-  const compliance = complianceCandidatesOf(summaries);
+  // (compliance is computed up front, above — see the collection-gap warning under Read this first.)
   section("## Workload (observed)", "workload-observed");
   L.push(...markdownTable(
     ["Run", "Version", "Profile", "Request kind (observed)", "Band (derived)",
@@ -3172,6 +3241,57 @@ export function issueBody(slug, summaries, tables, shape) {
     title: `[culprit:${slug}] ${culpritTitle(slug, entry)}`,
     labels: [`culprit:${slug}`, "from-doctor"],
     body: L.join("\n"),
+  };
+}
+
+// Thrown by complianceIssueBody when a slug names a real compliance type that has no cohort in this
+// corpus — a distinct failure from an unknown slug, so main() can print the right message.
+export class NoComplianceCandidateError extends Error {
+  constructor(slug) { super(`no compliance candidate "${slug}" in this corpus`); }
+}
+
+export const COMPLIANCE_TITLES = {
+  "inherited-model": "subagent dispatches inherit the caller's model instead of naming one",
+  "missing-workload": "a committing cycle recorded no workload (collection gap)",
+  "main-thread-browser": "the coordinator drove a browser on the main thread",
+  "general-purpose-search": "a general-purpose agent used where a scoped search would do",
+};
+const complianceTitle = (slug) => COMPLIANCE_TITLES[slug] ?? slug;
+
+// Module-load invariant: COMPLIANCE_TITLES must carry exactly the COMPLIANCE_TYPES slugs — no more,
+// no fewer — so a fifth type can never be added to the constant without also getting a title (or vice
+// versa). Throws at load on drift, making the "single source of truth" comment above enforceable.
+{
+  const titleKeys = Object.keys(COMPLIANCE_TITLES).sort();
+  const types = [...COMPLIANCE_TYPES].sort();
+  if (titleKeys.length !== types.length || titleKeys.some((k, i) => k !== types[i]))
+    throw new Error(
+      `COMPLIANCE_TITLES keys [${titleKeys.join(", ")}] must equal COMPLIANCE_TYPES [${types.join(", ")}]`,
+    );
+}
+
+// A ready-to-paste GitHub issue for one COMPLIANCE candidate, the sibling of issueBody for the
+// culprit table. It reuses complianceCandidatesOf's aggregation and formatComplianceCandidate's
+// line, so the body carries exactly the counts/sessions/version-span (and, for inherited-model, the
+// model-exposure line) the report already renders — enums and integers only, no per-dispatch figure
+// and no prose the corpus did not already carry. Compliance candidates are not lifecycle-classified
+// against the recency band, so no StaleCulpritError guard applies here.
+export function complianceIssueBody(slug, summaries, shape) {
+  const cohorts = complianceCandidatesOf(summaries ?? []).filter((c) => c.type === slug);
+  if (!cohorts.length) throw new NoComplianceCandidateError(slug);
+  const body = [
+    `Repo shape: monorepo=${shape?.monorepo ?? "unknown"} · language=${shape?.language ?? "unknown"} ` +
+      `· test-runner=${shape?.testRunner ?? "unknown"}`,
+    "",
+    ...cohorts.map((c) => `- ${formatComplianceCandidate(c)}`),
+    "",
+    "<!-- add anything you want to say here -->",
+  ];
+  return {
+    repo: DEVCYCLE_UPSTREAM,
+    title: `[compliance:${slug}] ${complianceTitle(slug)}`,
+    labels: [`compliance:${slug}`, "from-doctor"],
+    body: body.join("\n"),
   };
 }
 

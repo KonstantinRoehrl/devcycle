@@ -54,6 +54,19 @@ test("writes a workload after a commit in an active execution cycle", () => {
   assert.ok(wl[0].insertions >= 2);
 });
 
+test("writes a workload after a commit made in branch-review (carry-over fix)", () => {
+  const { repo, runsDir } = setup();
+  // setup() made exactly one commit on top of base, so base is HEAD~1. Rewrite the
+  // state file to branch-review — the stage a carry-over fix commits in — keeping that base.
+  const base = spawnSync("git", ["-C", repo, "rev-parse", "HEAD~1"], { encoding: "utf8" }).stdout.trim();
+  writeInto(repo, ".devcycle/state.md", stateMd({ stage: "branch-review", base }));
+  const r = callHook(repo, runsDir);
+  assert.strictEqual(r.status, 0);
+  const wl = workloads(runsDir, repo);
+  assert.strictEqual(wl.length, 1);
+  assert.strictEqual(wl[0].requestKind, "feature");
+});
+
 test("writes nothing for an audit cycle (GC3)", () => {
   const { repo, runsDir } = setup("audit");
   callHook(repo, runsDir);

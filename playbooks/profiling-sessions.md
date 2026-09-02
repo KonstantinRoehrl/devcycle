@@ -156,8 +156,11 @@ follow-up is itself skippable, never a forced gate on finishing the command.
 to draft. For each finding it chose:
 
 1. Take the draft from the script, never hand-composed:
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --issue-body <culprit-slug>`. Its `repo:` line
-   names the repo every command below targets — read the slug from there, never from this file.
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --issue-body <slug>`. The slug may name a culprit
+   (drafting a `[culprit:<slug>]` issue) OR a Compliance candidate — `inherited-model`,
+   `missing-workload`, `main-thread-browser`, `general-purpose-search` — drafting a
+   `[compliance:<slug>]` issue from the same section the report renders. Its `repo:` line names the
+   repo every command below targets — read the slug from there, never from this file.
 2. Screen it before anyone sees it: write it to a file, then run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`. A draft that fails
    the screen is not shown at all — name the class that failed and stop there.
@@ -167,6 +170,12 @@ to draft. For each finding it chose:
 
    ```
    Drafted: [culprit:<slug>] <title>
+   ```
+
+   — or, for a Compliance candidate, a `[compliance:<slug>]` title:
+
+   ```
+   Drafted: [compliance:<slug>] <title>
    ```
 
    That marker is the only record of a draft: the Outer loop section counts the issues out of
@@ -187,8 +196,8 @@ to draft. For each finding it chose:
    Pass no `--label`, and create none. Labelling that repo needs push access, so a filer who is
    not a collaborator gets a 403 — after both gates, with the draft already recorded — and GitHub
    drops labels such a filer supplies anyway. The draft's `labels:` line says what the maintainer
-   applies at triage; the Outer loop section counts by the `[culprit:<slug>]` title prefix, which
-   every filer can set.
+   applies at triage; the Outer loop section counts by the `[culprit:<slug>]` or `[compliance:<slug>]`
+   title prefix, which every filer can set.
 
 ## Config-drift mode
 

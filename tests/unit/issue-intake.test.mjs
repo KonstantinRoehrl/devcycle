@@ -33,6 +33,25 @@ test("isCulpritBracketTitle recognizes both prefixes and rejects ordinary titles
   assert.equal(isCulpritBracketTitle("[wip] not a culprit issue"), false);
 });
 
+// FIX B: doctor now files [compliance:<slug>] issues into devcycle's own tracker, so intake must
+// exclude those too — otherwise a /devcycle:maintain pass re-triages doctor's own drafts as
+// external bugs (the self-triage loop the exclusion exists to prevent).
+test("isCulpritBracketTitle also excludes doctor's own [compliance:…] issues", () => {
+  assert.equal(isCulpritBracketTitle("[compliance:inherited-model] subagent dispatches inherit the model"), true);
+  assert.equal(isCulpritBracketTitle("[compliance:missing-workload] a committing cycle recorded no workload"), true);
+});
+
+test("a [compliance:…] issue is placed in the excluded set, not kept", () => {
+  const issues = [
+    { number: 501, title: "[compliance:inherited-model] subagent dispatches inherit the model", body: "", url: "u" },
+    { number: 502, title: "fix(pipeline): a real external defect", body: "", url: "u" },
+  ];
+  const r = intake({ repo: "o/r", ghRunner: fakeGh(issues), redactRunner: noRedact });
+  assert.deepEqual(r.excludedCulprit.map((x) => x.number), [501]);
+  assert.deepEqual(r.issues.map((x) => x.number), [502]);
+  assert.equal(r.counts.excludedCulprit, 1);
+});
+
 test("a throwing gh runner degrades to available:false with a reason, never throwing", () => {
   const throwing = () => { throw new Error("gh: command not found"); };
   const r = intake({ repo: "o/r", ghRunner: throwing, redactRunner: noRedact });

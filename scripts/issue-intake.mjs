@@ -16,7 +16,11 @@ import { parseFlags, requireValue } from "./cli-flags.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
-const CULPRIT_BRACKET = /^\s*\[(?:culprit|doctor):[^\]]*\]/i;
+// Excludes devcycle's own self-filed issues so a /devcycle:maintain pass never re-triages them as
+// external bugs. `compliance` was added once doctor began filing [compliance:<slug>] drafts; the
+// CULPRIT_BRACKET / isCulpritBracketTitle / counts.excludedCulprit names predate that and stay as
+// a documented report-line interface (widening the pattern, not renaming, avoids the ripple).
+const CULPRIT_BRACKET = /^\s*\[(?:culprit|doctor|compliance):[^\]]*\]/i;
 export const isCulpritBracketTitle = (title) => CULPRIT_BRACKET.test(String(title ?? ""));
 
 export const defaultGhRunner = (args) =>
