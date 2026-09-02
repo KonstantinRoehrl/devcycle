@@ -543,29 +543,6 @@ function dedupRaw(findings) {
   return [...byKey.values()];
 }
 
-function dedupFindings(findings) {
-  const byKey = new Map();
-  for (const f of findings) {
-    const key = `${f.file}::${f.claim.toLowerCase().replace(/\s+/g, " ").trim()}`;
-    const prev = byKey.get(key);
-    if (!prev) {
-      byKey.set(key, f);
-      continue;
-    }
-    // Keep the stronger duplicate: verified beats unverified, then higher severity.
-    const better =
-      (f.verified && !prev.verified) ||
-      (f.verified === prev.verified && SEVERITIES.indexOf(f.severity) < SEVERITIES.indexOf(prev.severity));
-    const kept = better ? f : prev;
-    const dropped = better ? prev : f;
-    if (dropped.lens !== kept.lens && !kept.verification.includes("also reported by")) {
-      kept.verification += ` (also reported by the ${dropped.lens} lens)`;
-    }
-    byKey.set(key, kept);
-  }
-  return [...byKey.values()];
-}
-
 function dedupStrengths(strengths) {
   const byKey = new Map();
   for (const s of strengths) {
@@ -719,19 +696,23 @@ async function main() {
   const totalClaudeLensJobs = args.lenses.length * diffChunks.length;
   if (failedClaudeLenses === totalClaudeLensJobs) fatal(`all lens reviewers failed: ${notes.join("; ")}`);
 
-  // Stage 2: adversarial verification per finding (marked, never dropped).
-  log(`verifying ${rawFindings.length} finding(s)...`);
-  const charter = rawFindings.length ? loadRedTeamCharter() : null;
-  const verified = await mapLimit(rawFindings, VERIFY_CONCURRENCY, (f) =>
+  // Stage 3 (moved up): dedup raw findings by file+claim BEFORE verifying, so duplicates are
+  // verified once. Stage 2: verify survivors. Stage 4: rank.
+  const distinct = dedupRaw(rawFindings);
+  log(`stage 1→2: ${rawFindings.length} raw finding(s) → ${distinct.length} distinct to verify`);
+  const charter = distinct.length ? loadRedTeamCharter() : null;
+  const verified = await mapLimit(distinct, VERIFY_CONCURRENCY, (f) =>
     runGuarded(
       () => verifyFinding(f, verifyCtx, model, charter),
       (msg) => ({ ...f, verified: false, verification: `verifier crashed (${msg}); retained unverified` }),
     ),
   );
-
-  // Stage 3: dedup by file+claim.  Stage 4: rank + reconcile.
-  const deduped = dedupFindings(verified);
-  const ranked = rankFindings(deduped);
+  // Render the merged-lens disclosure onto verification text (was mutated inside dedup before).
+  for (const f of verified) {
+    const others = (f.mergedLenses ?? []).filter((l) => l !== f.lens);
+    if (others.length) f.verification += ` (also reported by the ${others.join(", ")} lens${others.length > 1 ? "es" : ""})`;
+  }
+  const ranked = rankFindings(verified);
   const strengths = dedupStrengths(rawStrengths);
   const summary = await reconcile(ranked, notes, model);
 
@@ -757,6 +738,6 @@ if (require.main === module) {
 
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
-  dedupRaw, dedupFindings, dedupStrengths, rankFindings, truncate, chunkDiff, selectChunksByChurn, fallbackSummary, mapLimit, loadRedTeamCharter,
+  dedupRaw, dedupStrengths, rankFindings, truncate, chunkDiff, selectChunksByChurn, fallbackSummary, mapLimit, loadRedTeamCharter,
   SEVERITIES, LENS_CONCURRENCY,
 };
