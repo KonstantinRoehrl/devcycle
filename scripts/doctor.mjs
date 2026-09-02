@@ -41,10 +41,25 @@ const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
 export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
 
 // The four compliance-candidate slugs emitComplianceCandidates can produce — the single source of
-// truth shared by the emitter's type strings and the --issue-body router, so the two cannot drift.
+// truth for all three consumers, made structurally load-bearing so adding a fifth type here (and
+// nowhere else) either derives automatically or fails loudly, instead of needing four parallel edits:
+//   - the emitter routes every candidate's `type` through complianceType() below, so a literal that
+//     drifts from this array throws at emit time rather than producing an unroutable candidate;
+//   - the --issue-body router reads it directly (`COMPLIANCE_TYPES.includes`);
+//   - COMPLIANCE_TITLES's key set is asserted equal to this array by a module-load invariant (below),
+//     so a new type can't be routable/emittable without also getting a title.
 export const COMPLIANCE_TYPES = [
   "inherited-model", "missing-workload", "main-thread-browser", "general-purpose-search",
 ];
+const COMPLIANCE_TYPE_SET = new Set(COMPLIANCE_TYPES);
+
+// Guard every emitted compliance `type` through the shared constant: an unregistered slug throws
+// here instead of flowing downstream as a candidate no router or title map knows about.
+export function complianceType(slug) {
+  if (!COMPLIANCE_TYPE_SET.has(slug))
+    throw new Error(`unregistered compliance type "${slug}" — add it to COMPLIANCE_TYPES`);
+  return slug;
+}
 
 // Drafted markers began being recorded in this release; reports written before it carry none,
 // so the count is qualified rather than mixing "none drafted" with "not recorded".
@@ -651,7 +666,7 @@ export function emitComplianceCandidates(turns, record) {
   const browser = turns.filter((t) => !t.isSidechain && BROWSER_TOOLS.has(t.toolName)).length;
   if (browser > 0)
     out.push({
-      type: "main-thread-browser",
+      type: complianceType("main-thread-browser"),
       calls: browser,
       onDevicePath: record.stages?.find((s) => s.stage === "on-device")?.path ?? null,
       note: "no path permits the coordinator to drive a browser — dispatch on-device-driver",
@@ -667,13 +682,13 @@ export function emitComplianceCandidates(turns, record) {
       const m = d.model ?? "(none)";
       inheritedByModel[m] = (inheritedByModel[m] ?? 0) + 1;
     }
-    out.push({ type: "inherited-model", inherited: inheritedDispatches.length,
+    out.push({ type: complianceType("inherited-model"), inherited: inheritedDispatches.length,
       total: dispatches.length, inheritedByModel, sessions_sampled: 1 });
   }
 
   // C3: Explore's startup floor is 13955 against a 32711 median, ~2.3x per dispatch.
   const gp = dispatches.filter((d) => d.agentType === "general-purpose").length;
-  if (gp > 0) out.push({ type: "general-purpose-search", count: gp, total: dispatches.length, sessions_sampled: 1 });
+  if (gp > 0) out.push({ type: complianceType("general-purpose-search"), count: gp, total: dispatches.length, sessions_sampled: 1 });
 
   // C4 (issue #139): reached execution and committed but recorded no workload — the collection the
   // commit-sensor hook (and finish's final refresh) should have written. GC3-safe by construction:
@@ -682,7 +697,7 @@ export function emitComplianceCandidates(turns, record) {
   // triage capture (no triage line) => silent, excluding every historical orphan by construction.
   const missingCommits = record.commits ?? [];
   if (missingCommits.length > 0 && !record.workload && record.triage && record.triage.requestKind !== "audit")
-    out.push({ type: "missing-workload", commits: missingCommits.length,
+    out.push({ type: complianceType("missing-workload"), commits: missingCommits.length,
       requestKind: record.triage.requestKind, sessions_sampled: 1 });
 
   return out;
@@ -3235,13 +3250,25 @@ export class NoComplianceCandidateError extends Error {
   constructor(slug) { super(`no compliance candidate "${slug}" in this corpus`); }
 }
 
-const COMPLIANCE_TITLES = {
+export const COMPLIANCE_TITLES = {
   "inherited-model": "subagent dispatches inherit the caller's model instead of naming one",
   "missing-workload": "a committing cycle recorded no workload (collection gap)",
   "main-thread-browser": "the coordinator drove a browser on the main thread",
   "general-purpose-search": "a general-purpose agent used where a scoped search would do",
 };
 const complianceTitle = (slug) => COMPLIANCE_TITLES[slug] ?? slug;
+
+// Module-load invariant: COMPLIANCE_TITLES must carry exactly the COMPLIANCE_TYPES slugs — no more,
+// no fewer — so a fifth type can never be added to the constant without also getting a title (or vice
+// versa). Throws at load on drift, making the "single source of truth" comment above enforceable.
+{
+  const titleKeys = Object.keys(COMPLIANCE_TITLES).sort();
+  const types = [...COMPLIANCE_TYPES].sort();
+  if (titleKeys.length !== types.length || titleKeys.some((k, i) => k !== types[i]))
+    throw new Error(
+      `COMPLIANCE_TITLES keys [${titleKeys.join(", ")}] must equal COMPLIANCE_TYPES [${types.join(", ")}]`,
+    );
+}
 
 // A ready-to-paste GitHub issue for one COMPLIANCE candidate, the sibling of issueBody for the
 // culprit table. It reuses complianceCandidatesOf's aggregation and formatComplianceCandidate's

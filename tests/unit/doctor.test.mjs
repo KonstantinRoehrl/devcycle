@@ -17,7 +17,7 @@ import {
   reviewDepthCohortTable, deriveEvents, attributedCost, impactScores,
   bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
   renderReport, complianceIssueBody, COMPLIANCE_TYPES, NoComplianceCandidateError,
-  formatComplianceCandidate, parseDraftedMarkers,
+  formatComplianceCandidate, parseDraftedMarkers, complianceType, COMPLIANCE_TITLES,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -2296,9 +2296,56 @@ test("complianceIssueBody: throws NoComplianceCandidateError for a type absent f
     NoComplianceCandidateError);
 });
 
+// FIX C (spec Testing→Redaction): regression guard over already-correct behavior — the inherited-model
+// compliance draft (which carries the model-exposure line) passes the L3 redaction screener cleanly.
+test("complianceIssueBody: an inherited-model draft body screens clean through redaction-check", () => {
+  const summaries = [{
+    id: "s1", pluginVersion: "0.17.3", costByModel: { "claude-opus-5": 12 },
+    complianceCandidates: [{ type: "inherited-model", inherited: 3, total: 5,
+      inheritedByModel: { "claude-opus-5": 3 }, sessions_sampled: 1 }],
+  }];
+  const d = complianceIssueBody("inherited-model", summaries, { monorepo: false, language: "js", testRunner: "node" });
+  const tmp = mkdtempSync(join(tmpdir(), "compliance-draft-redact-"));
+  try {
+    const bodyFile = join(tmp, "draft-body.md");
+    writeFileSync(bodyFile, d.body);
+    const res = spawnSync(process.execPath,
+      [new URL("../../scripts/redaction-check.mjs", import.meta.url).pathname, "--file", bodyFile],
+      { encoding: "utf8" });
+    assert.equal(res.status, 0, `redaction screen flagged the compliance draft body:\n${res.stdout}${res.stderr}`);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
 test("COMPLIANCE_TYPES names exactly the four emitComplianceCandidates types", () => {
   assert.deepEqual([...COMPLIANCE_TYPES].sort(),
     ["general-purpose-search", "inherited-model", "main-thread-browser", "missing-workload"]);
+});
+
+// FIX A: the compliance-type constant is now load-bearing, not just documentation. Three
+// invariants make drift a loud failure instead of four silent parallel edits.
+test("complianceType guards against an unregistered compliance slug", () => {
+  for (const t of COMPLIANCE_TYPES) assert.equal(complianceType(t), t, `${t} is registered and passes through`);
+  assert.throws(() => complianceType("not-a-real-type"),
+    /unregistered compliance type/, "an unregistered type must throw, not silently pass");
+});
+
+test("COMPLIANCE_TITLES keys are exactly COMPLIANCE_TYPES (no drift between title map and constant)", () => {
+  assert.deepEqual(Object.keys(COMPLIANCE_TITLES).sort(), [...COMPLIANCE_TYPES].sort());
+});
+
+test("every type emitComplianceCandidates can emit is a registered COMPLIANCE_TYPE", () => {
+  // A corpus that triggers all four C-rules at once: browser calls, an inherited dispatch, a
+  // general-purpose dispatch, and a committing cycle with no workload.
+  const record = { runId: "00000000000000a2", stages: [],
+    dispatches: [
+      { modelSource: "inherited", model: "claude-opus-5" },
+      { agentType: "general-purpose", model: "claude-opus-5", modelSource: "explicit" },
+    ],
+    commits: [{ sha: "abc" }], triage: { requestKind: "bug" } };
+  const turns = [{ isSidechain: false, toolName: "computer" }];
+  const types = emitComplianceCandidates(turns, record).map((c) => c.type);
+  assert.ok(types.length > 0, "expected the fixture to trigger at least one compliance candidate");
+  for (const t of types) assert.ok(COMPLIANCE_TYPES.includes(t), `emitted type "${t}" is outside COMPLIANCE_TYPES`);
 });
 
 test("parseDraftedMarkers recognizes a [compliance:…] title as well as [culprit:…]", () => {
@@ -2350,4 +2397,14 @@ test("renderReport: a committing-cycle-with-no-workload surfaces an up-front COL
   assert.ok(gapAt !== -1, "expected an up-front COLLECTION GAP warning");
   assert.ok(gapAt < glanceAt, "the gap warning must render before the cost tables");
   assert.match(text, /predating the commit-sensor hook/); // honesty note: historical nulls are expected
+});
+
+// FIX D (spec §219 read-side): regression guard over already-correct behavior — the up-front warning
+// is ABSENT when no committing-no-workload gap exists (here: only a pre-hook null-band-style cycle
+// with no missing-workload candidate). It must appear only for a real gap, never on a clean corpus.
+test("renderReport: no COLLECTION GAP warning when the corpus carries no missing-workload candidate", () => {
+  const text = renderReport([
+    { pluginVersion: "0.11.0", costByStage: {}, medianDepth: 10, complianceCandidates: [] },
+  ], { repo: "x", today: "2026-09-02", scope: "all" });
+  assert.doesNotMatch(text, /COLLECTION GAP/, "a corpus with no committing-no-workload gap must not raise the warning");
 });

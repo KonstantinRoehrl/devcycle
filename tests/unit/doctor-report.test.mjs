@@ -1582,6 +1582,20 @@ test("--issue-body rejects an unknown slug as neither culprit nor compliance", (
   assert.match(res.stderr, /no culprit or compliance candidate "not-a-real-slug"/);
 });
 
+// FIX E (spec Testing #216): regression guard over already-correct behavior — a KNOWN compliance
+// type with zero occurrences in the corpus errors DISTINCTLY from an unknown slug. The fixture
+// carries only an inherited-model candidate, so main-thread-browser is a real type with no cohort.
+test("--issue-body errors distinctly for a known compliance type absent from the corpus", () => {
+  const dir = complianceFixture();
+  const res = spawnSync(process.execPath,
+    [SCRIPT, "--dir", join(dir, "projects"), "--issue-body", "main-thread-browser"],
+    { encoding: "utf8", env: { ...process.env, PATH: "", CLAUDE_CODE_SESSION_ID: "", DEVCYCLE_RUNS_DIR: join(dir, "runs") } });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /no compliance candidate "main-thread-browser" in this corpus/);
+  // Distinct from the unknown-slug message: a real-but-empty type must not read as "not a slug".
+  assert.doesNotMatch(res.stderr, /no culprit or compliance candidate/);
+});
+
 test("parseArgs reads --issue-body", () => {
   assert.equal(parseArgs(["--issue-body", "partial-evidence-capture"]).issueBody, "partial-evidence-capture");
   // The report path is unaffected when the flag is absent.
