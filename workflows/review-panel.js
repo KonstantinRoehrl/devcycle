@@ -391,6 +391,9 @@ function normalizeStrength(s, lens) {
 }
 
 async function runClaudeLens(lens, ctx, model) {
+  // Kept (unlike the finding-count line below): tests/unit/review-panel.test.mjs's
+  // spec-drop coverage asserts on this exact stderr line as its only signal that a
+  // given lens ran, so removing it would break that test — out of this task's Files scope.
   log(`lens "${lens.key}" reviewing...`);
   const res = await claudeStructured({
     prompt: lensPrompt(lens.charter, ctx),
@@ -407,7 +410,6 @@ async function runClaudeLens(lens, ctx, model) {
   const strengths = (Array.isArray(value.strengths) ? value.strengths : [])
     .filter(hasFileAndClaim)
     .map((s) => normalizeStrength(s, lens.key));
-  log(`lens "${lens.key}": ${findings.length} finding(s), ${strengths.length} strength(s)`);
   return { lens: lens.key, findings, strengths, note: null };
 }
 
@@ -415,7 +417,6 @@ async function runClaudeLens(lens, ctx, model) {
 // if codex is unavailable or its output is unusable, the lens is skipped with
 // a note in the summary — the panel itself still succeeds.
 async function runCrossModelLens(ctx) {
-  log(`lens "cross-model" (codex) reviewing...`);
   const outDir = mkdtempSync(join(os.tmpdir(), "devcycle-panel-"));
   const outFile = join(outDir, "last-message.txt");
   try {
@@ -444,7 +445,6 @@ async function runCrossModelLens(ctx) {
     if (!jsonMatch) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: no JSON in codex output" };
     const parsed = JSON.parse(jsonMatch[0]);
     const findings = (parsed.findings ?? []).filter(hasFileAndClaim).map((f) => normalizeFinding(f, "cross-model"));
-    log(`lens "cross-model": ${findings.length} finding(s)`);
     return { lens: "cross-model", findings, note: null };
   } catch (e) {
     return { lens: "cross-model", findings: [], note: `cross-model lens skipped: ${String(e).slice(0, 200)}` };
@@ -736,6 +736,7 @@ async function main() {
       ),
     };
   });
+  log(`stage 1: ${diffChunks.length} chunk(s) × ${args.lenses.length} lens(es) → ${lensJobs.length} job(s)`);
   const lensResults = await mapLimit(lensJobs, LENS_CONCURRENCY, (job) => job.run());
 
   const rawFindings = lensResults.flatMap((r) => r.findings);
@@ -763,6 +764,7 @@ async function main() {
     const others = (f.mergedLenses ?? []).filter((l) => l !== f.lens);
     if (others.length) f.verification += ` (also reported by the ${others.join(", ")} lens${others.length > 1 ? "es" : ""})`;
   }
+  log(`stage 2: ${verified.filter((f) => f.verified).length} verified`);
   const ranked = rankFindings(verified);
   const strengths = dedupStrengths(rawStrengths);
   const summary = await reconcile(ranked, notes, model);
@@ -780,7 +782,7 @@ async function main() {
       ? `COVERAGE WARNING: ${dropped.join("; ")}. This panel reviewed a sample, not the whole input.\n\n${summary}`
       : summary) + strengthsSection;
 
-  process.stdout.write(JSON.stringify({ findings: ranked, strengths, notes, summary: disclosed }, null, 2) + "\n");
+  process.stdout.write(JSON.stringify({ findings: ranked, strengths, notes, summary: disclosed }) + "\n");
 }
 
 if (require.main === module) {
