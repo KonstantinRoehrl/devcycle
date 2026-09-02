@@ -5,12 +5,14 @@
 // intercepts the call — prose is exactly what failed in the incident that destroyed an uncommitted
 // round-2 diff. This is the structural backstop, mirroring hooks/block-main-thread-browser.mjs:
 // origin is read from the hook input's agent_type (namespaced for a plugin agent, per
-// docs/platform-notes.md § (e)); for a GUARDED reviewer origin every git invocation must reduce to an
-// allowlisted read-only subcommand or the call is denied. Deny-on-ambiguity carries the safety: any
-// git form the parser cannot confidently classify as read-only — including git behind sh -c, xargs,
-// eval, a process/privilege/scheduling wrapper (setsid/sudo/taskset/…), a `{ … }` group or `( … )`
-// subshell, backticks, a write-capable option (git diff --output=<file>), or an unrecognized option
-// shape — is denied. Scope is git-only; non-git commands
+// docs/platform-notes.md § (e)); for a GUARDED reviewer origin a git invocation must reduce to an
+// allowlisted read-only subcommand or the call is denied. Deny-on-ambiguity carries the safety within
+// what the parser sees: a git it cannot confidently classify as read-only — a destructive subcommand,
+// git behind a RECOGNIZED shell/exec wrapper (sh -c, xargs, eval, or a process/privilege/scheduling
+// launcher in the bounded WRAPPERS set: setsid/sudo/exec/taskset/…), a `{ … }` group or `( … )`
+// subshell, backticks, or a write-capable option (git diff --output=<file>) — is denied. The WRAPPERS
+// set is a bounded launcher denylist: a git behind an UNLISTED head-position launcher is allowed, the
+// accepted bound per the design spec's § Parser robustness. Scope is git-only; non-git commands
 // (tests, greps) are allowed, and a non-reviewer origin (implementer, on-device-driver, main thread)
 // is never guarded.
 import { readFileSync } from "node:fs";
