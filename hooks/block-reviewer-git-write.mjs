@@ -8,7 +8,9 @@
 // docs/platform-notes.md § (e)); for a GUARDED reviewer origin every git invocation must reduce to an
 // allowlisted read-only subcommand or the call is denied. Deny-on-ambiguity carries the safety: any
 // git form the parser cannot confidently classify as read-only — including git behind sh -c, xargs,
-// eval, backticks, or an unrecognized option shape — is denied. Scope is git-only; non-git commands
+// eval, a process/privilege/scheduling wrapper (setsid/sudo/taskset/…), a `{ … }` group or `( … )`
+// subshell, backticks, a write-capable option (git diff --output=<file>), or an unrecognized option
+// shape — is denied. Scope is git-only; non-git commands
 // (tests, greps) are allowed, and a non-reviewer origin (implementer, on-device-driver, main thread)
 // is never guarded.
 import { readFileSync } from "node:fs";
@@ -51,15 +53,25 @@ const READ_ONLY = new Set([
   "describe", "grep", "shortlog", "merge-base", "rev-list", "name-rev", "for-each-ref",
   "diff-tree", "diff-index", "symbolic-ref", "whatchanged",
 ]);
-// Shell wrappers that could execute a git we cannot see into → deny-on-ambiguity when git appears.
-const WRAPPERS = new Set(["sh", "bash", "zsh", "dash", "eval", "xargs", "env", "command", "nice", "nohup", "time", "timeout", "watch"]);
+// Shell/exec wrappers that could execute a git we cannot see into → deny-on-ambiguity when git
+// appears. This is a bounded denylist (per the design's § Parser robustness): it need not be
+// exhaustive because deny-on-ambiguity backstops it — a wrapper not listed here still cannot make a
+// destructive git read-only, it only fails to short-circuit. Covered: shell interpreters and
+// exec/eval helpers, plus the common process/privilege/scheduling launchers (setsid/sudo/doas/
+// taskset/chrt/ionice/stdbuf/unshare/unbuffer) that otherwise pass a destructive git straight through.
+const WRAPPERS = new Set([
+  "sh", "bash", "zsh", "dash", "eval", "xargs", "env", "command", "nice", "nohup", "time",
+  "timeout", "watch", "setsid", "sudo", "doas", "taskset", "chrt", "ionice", "stdbuf", "unshare",
+  "unbuffer",
+]);
 
 // Normalize a command head to the bare command name so alternate spellings of the same binary all
-// reduce to one token before classification (deny-on-ambiguity depends on this being total): strip
-// surrounding quotes (`"git"`), then a single leading backslash (`\git`, the alias-bypass spelling),
-// then the path basename (`/usr/bin/git`, `./git`). Whatever reduces to `git` is treated as git.
+// reduce to one token before classification (deny-on-ambiguity depends on this being total): strip a
+// leading grouping token (`(`/`{`, the subshell/brace-group spelling `(git`/`{git`), then surrounding
+// quotes (`"git"`), then a single leading backslash (`\git`, the alias-bypass spelling), then the path
+// basename (`/usr/bin/git`, `./git`). Whatever reduces to `git` is treated as git.
 function normalizeHead(token) {
-  let t = token.replace(/^['"]+|['"]+$/g, "").replace(/^\\/, "");
+  let t = token.replace(/^[({]+/, "").replace(/^['"]+|['"]+$/g, "").replace(/^\\/, "");
   const slash = t.lastIndexOf("/");
   return slash === -1 ? t : t.slice(slash + 1);
 }
@@ -68,8 +80,12 @@ function normalizeHead(token) {
 function gitSegmentIsReadOnly(tokens, i) {
   const sub = tokens[i];
   if (sub === undefined) return false;          // bare `git` → not classifiable → deny
-  if (READ_ONLY.has(sub)) return true;
   const rest = tokens.slice(i + 1);
+  // git's `--output=<file>` / `--output <file>` writes/overwrites that file, so a read-only
+  // subcommand (the diff-generating family accepts it) carrying it is not inspection-only → deny.
+  // Judge only this one write flag; deny-on-ambiguity backstops any other write option.
+  if (rest.some((a) => a === "--output" || a.startsWith("--output="))) return false;
+  if (READ_ONLY.has(sub)) return true;
   if (sub === "add") return rest.some((a) => a === "-N" || a === "--intent-to-add"); // the one carve-out
   if (sub === "config") return rest.some((a) => a === "--get" || a === "--get-all" || a === "--list" || a === "-l");
   if (sub === "remote") return rest.length === 0 || rest[0] === "-v" || rest[0] === "show";
@@ -86,7 +102,10 @@ if (/`|\$\(/.test(command) && /\bgit\b/.test(command))
 // into two segments — `&&` is matched first so a logical-AND is never mis-split on its first `&`.
 for (const seg of command.split(/(?:&&|\|\||;|\||&|\n)/)) {
   let tokens = seg.trim().split(/\s+/).filter(Boolean);
-  while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) tokens.shift(); // drop env-assignments
+  // Drop leading env-assignments and bare grouping tokens (`{`/`(`, a brace group or subshell) so the
+  // head re-derives to the real command — `{ git reset; }` and `( git reset )` must not hide the git.
+  // (normalizeHead additionally strips a grouping char glued to the head, e.g. `(git`.)
+  while (tokens.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0]) || tokens[0] === "{" || tokens[0] === "(")) tokens.shift();
   if (!tokens.length) continue;
   const head = normalizeHead(tokens[0]);
   if (WRAPPERS.has(head)) {

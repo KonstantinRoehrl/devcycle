@@ -105,6 +105,59 @@ test("reviewer + non-git commands are allowed (tests, greps)", () => {
     assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for non-git: ${cmd}`);
 });
 
+// Round-1 blocking fix: three confirmed bypasses where a destructive git slipped classification.
+
+// (1) Shell grouping constructs — a `{ … }` group or a `( … )` subshell must not hide the git.
+test("reviewer + destructive git inside a grouping construct is denied", () => {
+  for (const cmd of [
+    "{ git reset --hard; }",
+    "{ git checkout -- x; }",
+    "(git reset --hard)",
+    "( git reset --hard )",
+    "(git clean -fd)",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for grouped git: ${cmd}`);
+});
+
+// (2) Exec/privilege/scheduling wrappers — a wrapper that runs a destructive git must be denied.
+test("reviewer + destructive git behind an exec/privilege/scheduling wrapper is denied", () => {
+  for (const cmd of [
+    "setsid git reset --hard",
+    "taskset 1 git checkout -- x",
+    "sudo git reset --hard",
+    "doas git reset --hard",
+    "ionice git reset --hard",
+    "chrt 1 git reset --hard",
+    "stdbuf -o0 git clean -fd",
+    "unshare git reset --hard",
+    "unbuffer git reset --hard",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for wrapped git: ${cmd}`);
+});
+
+// (3) A read-only subcommand carrying git's write-capable `--output` flag overwrites a file.
+test("reviewer + a read-only git carrying --output is denied", () => {
+  for (const cmd of [
+    "git diff --output=src/main.js HEAD",
+    "git diff --output out.txt HEAD",
+    "git show --output=x HEAD",
+    "git log --output=x -p",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for --output git: ${cmd}`);
+});
+
+// Regression: a wrapper with NO git token stays allowed (reviewers genuinely need these).
+test("reviewer + a wrapper running a non-git command is allowed", () => {
+  for (const cmd of ["timeout 30 npm test", "xargs grep foo", "nice node --test", "setsid npm test"])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for non-git wrapper: ${cmd}`);
+});
+
+// Regression: `--` pathspec is not the `--output` write flag.
+test("reviewer + git diff with a double-dash pathspec stays allowed", () => {
+  assert.equal(decide(REVIEWER, "git diff -- path"), "allow");
+  assert.equal(decide(REVIEWER, "git diff -- src/main.js"), "allow");
+});
+
 test("both guarded reviewer spellings are guarded", () => {
   for (const origin of ["task-reviewer", "devcycle:task-reviewer", "red-team-reviewer", "devcycle:red-team-reviewer"])
     assert.equal(decide(origin, "git checkout -- x"), "deny", `expected deny for origin: ${origin}`);
