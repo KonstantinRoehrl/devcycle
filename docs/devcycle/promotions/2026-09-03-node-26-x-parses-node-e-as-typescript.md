@@ -1,0 +1,14 @@
+# Node 26.x parses node -e as TypeScript
+- promotion-type: doc-edit
+- cluster-signature: novel:node26-dash-e-parsed-as-typescript|2 occurrences|session <redacted-session>
+- files-touched: ~/.claude/devcycle/learnings/devcycle-cc59abf5/lessons.md, ~/.claude/devcycle/learnings/global/lessons.md
+- affected-files: CLAUDE.md
+- landed: 2026-09-03
+- commit: 
+- plugin-version: 0.18.2
+- sourced-from-memory: false
+- culprit-id: novel:node26-dash-e-parsed-as-typescript
+- rung: r2
+- audience: just-me
+- verify: 
+- aliases: 
