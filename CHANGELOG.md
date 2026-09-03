@@ -2,7 +2,33 @@
 
 ## 0.18.2 — 2026-09-03
 
-- perf(review-panel): token-economy fan-out ceiling and dedup-before-verify
+- perf(review-panel): cap stage-1 fan-out at a churn-ranked chunk ceiling, dedup before verify, tier verifier tools, and trim per-run token cost (F1–F7)
+- fix(pipeline-safety): harden the §3 batch — reviewer-git write hook, foreign-change gate, reproduction rule (#164, #165, #166, #167, #168)
+- ci(validate): gate on the real Claude Code plugin-loader validator (#225)
+- ci(validate): drop main from the push trigger so release CI stops going red (#226)
+
+**Review-panel token economy (F1–F7).** The review panel no longer lets its stage-1 fan-out grow
+without bound. `lenses × chunks` was multiplying full `claude` subprocesses on large diffs with no
+ceiling on the chunk count (F1) — the "sudden spike" behind the thorough-cohort cost overruns. It
+now selects the highest-churn chunks up to a profile-derived `maxChunks` ceiling, reviews those,
+and names every deferred file in the coverage warning — the concrete implementation of the
+playbook's Frontier contract, wiring engine and playbook back into step (F3). Verification, the
+most expensive stage, now runs **after** dedup instead of before, so a defect reported by several
+lenses (or recurring across chunks) is verified once rather than once per copy (F2). Verifiers are
+tiered to `Read,Grep,Glob` and only armed with `Bash` when a finding genuinely needs code
+execution (F4); the spec lens runs once over the whole diff rather than re-sending the spec on every
+chunk (F5); stdout is compact and per-stage stderr is a bounded summary so orchestrator ingestion
+no longer scales with fan-out (F6); and `run()` bounds its subprocess output buffer (F7).
+
+**§3 batch safety (#164–#168).** The execution batch gains three guardrails: a `PostToolUse` hook
+that blocks a reviewer subagent from mutating the tree through git, a foreign-change gate that
+refuses to proceed when the working tree carries edits the task did not make, and a reproduction
+rule so a claimed failure must be demonstrated before it is acted on.
+
+**Release CI (#225, #226).** `validate` now gates on the real Claude Code plugin-loader validator
+rather than the repo's own `validate.mjs` — catching manifest shapes the loader rejects but the
+local check accepted. The push trigger no longer fires on `main`, so the release squash-merge stops
+tripping a redundant, red CI run.
 
 ## 0.18.1 — 2026-09-02
 
