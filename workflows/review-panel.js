@@ -124,6 +124,9 @@ function parseArgs() {
   if (args.specPath !== undefined && (typeof args.specPath !== "string" || !args.specPath)) {
     fatal("args.specPath, when given, must be a non-empty string");
   }
+  if (args.maxChunks !== undefined && (!Number.isInteger(args.maxChunks) || args.maxChunks < 1)) {
+    fatal("args.maxChunks, when given, must be a positive integer");
+  }
   const defaulted = args.lenses === undefined;
   const requested = defaulted ? Object.keys(LENS_CHARTERS) : args.lenses;
   if (!Array.isArray(requested) || requested.length === 0) {
@@ -160,6 +163,7 @@ function parseArgs() {
     lenses: selected,
     specLensDropped,
     crossModel: args.crossModel === true,
+    maxChunks: Number.isInteger(args.maxChunks) ? args.maxChunks : null,
   };
 }
 
@@ -230,6 +234,39 @@ function chunkDiff(diff, cap) {
   return { chunks, notes };
 }
 
+// Churn of one chunk: added/removed content lines, excluding the +++/--- file headers.
+function chunkChurn(chunk) {
+  let n = 0;
+  for (const line of chunk.split("\n")) {
+    if ((line[0] === "+" && !line.startsWith("+++")) || (line[0] === "-" && !line.startsWith("---"))) n++;
+  }
+  return n;
+}
+
+// Files a chunk touches, from its `diff --git a/… b/<path>` header lines.
+function chunkFiles(chunk) {
+  const files = [];
+  for (const line of chunk.split("\n")) {
+    const m = line.match(/^diff --git a\/.+ b\/(.+)$/);
+    if (m) files.push(m[1]);
+  }
+  return files;
+}
+
+// Keep the maxChunks highest-churn chunks (original order preserved); name the rest's files.
+function selectChunksByChurn(chunks, maxChunks) {
+  if (!maxChunks || chunks.length <= maxChunks) return { reviewed: chunks, deferredFiles: [] };
+  const ranked = chunks
+    .map((chunk, index) => ({ chunk, index, churn: chunkChurn(chunk) }))
+    .sort((a, b) => b.churn - a.churn || a.index - b.index);
+  const keep = new Set(ranked.slice(0, maxChunks).map((r) => r.index));
+  const reviewed = chunks.filter((_, i) => keep.has(i));
+  const deferredFiles = [
+    ...new Set(chunks.filter((_, i) => !keep.has(i)).flatMap(chunkFiles)),
+  ].sort();
+  return { reviewed, deferredFiles };
+}
+
 // Split text into segments each beginning at a line that starts with prefix. Any text before
 // the first such line stays attached to the first segment.
 function splitByPrefix(text, prefix) {
@@ -273,6 +310,7 @@ const FINDINGS_SCHEMA = {
           claim: { type: "string" },
           severity: { enum: SEVERITIES },
           measuredAgainst: { type: "string" },
+          needsExecution: { type: "boolean" },
         },
         required: ["file", "claim", "severity", "measuredAgainst"],
       },
@@ -304,7 +342,9 @@ function lensPrompt(charter, ctx) {
     `only concrete, evidenced findings for YOUR lens — no restated diff hunks, no style nits`,
     `outside your charter. For each finding give the file path (repo-relative), the line in`,
     `the reviewed version when known, a one-to-two sentence claim in plain language (symptom`,
-    `first), a severity, and what the finding is measured against.`,
+    `first), a severity, and what the finding is measured against. Set "needsExecution" true`,
+    `ONLY when refuting the claim requires running code or commands (a benchmark, a metric, a`,
+    `computed figure); false for a claim refutable by reading the code.`,
     ``,
     `Severity: critical (data loss, a security hole, or a broken release path), high (broken`,
     `behavior or a violation of what the spec requires), medium (a likely defect or`,
@@ -341,6 +381,7 @@ function normalizeFinding(f, lens) {
     claim: f.claim,
     severity: SEVERITIES.includes(f.severity) ? f.severity : "medium",
     measuredAgainst: measuredAgainstOr(f),
+    needsExecution: f.needsExecution === true,
     lens,
   };
 }
@@ -350,7 +391,9 @@ function normalizeStrength(s, lens) {
 }
 
 async function runClaudeLens(lens, ctx, model) {
-  log(`lens "${lens.key}" reviewing...`);
+  // No per-lens progress line: stage-1 stderr must not scale with fan-out (F6). The stage-1
+  // summary log in main() reports the lens/chunk/job counts once; the spec-drop coverage is
+  // asserted off the report's own `notes`, not a per-lens stderr line.
   const res = await claudeStructured({
     prompt: lensPrompt(lens.charter, ctx),
     tools: "Read,Grep,Glob",
@@ -366,7 +409,6 @@ async function runClaudeLens(lens, ctx, model) {
   const strengths = (Array.isArray(value.strengths) ? value.strengths : [])
     .filter(hasFileAndClaim)
     .map((s) => normalizeStrength(s, lens.key));
-  log(`lens "${lens.key}": ${findings.length} finding(s), ${strengths.length} strength(s)`);
   return { lens: lens.key, findings, strengths, note: null };
 }
 
@@ -374,7 +416,6 @@ async function runClaudeLens(lens, ctx, model) {
 // if codex is unavailable or its output is unusable, the lens is skipped with
 // a note in the summary — the panel itself still succeeds.
 async function runCrossModelLens(ctx) {
-  log(`lens "cross-model" (codex) reviewing...`);
   const outDir = mkdtempSync(join(os.tmpdir(), "devcycle-panel-"));
   const outFile = join(outDir, "last-message.txt");
   try {
@@ -393,6 +434,9 @@ async function runCrossModelLens(ctx) {
     ]);
     if (res.spawnError) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex CLI not available" };
     if (res.timedOut) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex timed out" };
+    // Overflow is a transport failure like timedOut/spawnError (agent-cli run() SIGKILLs the
+    // child and truncates the buffer): skip the lens rather than parse the truncated output.
+    if (res.overflow) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex output exceeded the buffer cap" };
     let message = "";
     try {
       message = readFileSync(outFile, "utf8");
@@ -403,7 +447,6 @@ async function runCrossModelLens(ctx) {
     if (!jsonMatch) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: no JSON in codex output" };
     const parsed = JSON.parse(jsonMatch[0]);
     const findings = (parsed.findings ?? []).filter(hasFileAndClaim).map((f) => normalizeFinding(f, "cross-model"));
-    log(`lens "cross-model": ${findings.length} finding(s)`);
     return { lens: "cross-model", findings, note: null };
   } catch (e) {
     return { lens: "cross-model", findings: [], note: `cross-model lens skipped: ${String(e).slice(0, 200)}` };
@@ -447,6 +490,8 @@ const VERIFY_SCHEMA = {
   required: ["verified", "verification"],
 };
 
+function verifierTools(f) { return f.needsExecution === true ? "Read,Grep,Glob,Bash" : "Read,Grep,Glob"; }
+
 async function verifyFinding(finding, ctx, model, charter) {
   const prompt = [
     `You are an adversarial verifier on a review panel. A reviewer claims:`,
@@ -475,7 +520,7 @@ async function verifyFinding(finding, ctx, model, charter) {
         ]
       : []),
   ].join("\n");
-  const res = await claudeStructured({ prompt, tools: "Read,Grep,Glob,Bash", schema: VERIFY_SCHEMA, model });
+  const res = await claudeStructured({ prompt, tools: verifierTools(finding), schema: VERIFY_SCHEMA, model });
   if (!res.ok) {
     // Contract: unverified findings are marked, never dropped.
     return { ...finding, verified: false, verification: `verifier unavailable (${res.error}); finding retained unverified` };
@@ -490,24 +535,25 @@ async function verifyFinding(finding, ctx, model, charter) {
 
 // ---------- stage 3: dedup ----------
 
-function dedupFindings(findings) {
+// Pre-verification dedup: collapse identical file+claim, keep the higher severity, and record
+// every lens that reported it. Runs before stage 2 so duplicates are verified once, not N times.
+function dedupRaw(findings) {
   const byKey = new Map();
   for (const f of findings) {
     const key = `${f.file}::${f.claim.toLowerCase().replace(/\s+/g, " ").trim()}`;
     const prev = byKey.get(key);
     if (!prev) {
-      byKey.set(key, f);
+      byKey.set(key, { ...f, mergedLenses: [f.lens] });
       continue;
     }
-    // Keep the stronger duplicate: verified beats unverified, then higher severity.
-    const better =
-      (f.verified && !prev.verified) ||
-      (f.verified === prev.verified && SEVERITIES.indexOf(f.severity) < SEVERITIES.indexOf(prev.severity));
-    const kept = better ? f : prev;
-    const dropped = better ? prev : f;
-    if (dropped.lens !== kept.lens && !kept.verification.includes("also reported by")) {
-      kept.verification += ` (also reported by the ${dropped.lens} lens)`;
-    }
+    const keepNew = SEVERITIES.indexOf(f.severity) < SEVERITIES.indexOf(prev.severity);
+    const kept = keepNew ? { ...f } : prev;
+    const lenses = new Set([...(prev.mergedLenses ?? [prev.lens]), f.lens]);
+    kept.mergedLenses = [...lenses].sort();
+    // Union the execution need across duplicates: if either the kept or the dropped finding
+    // needed Bash to refute, the survivor keeps that tier — otherwise a merged-away
+    // needsExecution:true would silently downgrade the survivor's verifier to read-only.
+    kept.needsExecution = Boolean(prev.needsExecution) || Boolean(f.needsExecution);
     byKey.set(key, kept);
   }
   return [...byKey.values()];
@@ -574,6 +620,29 @@ async function reconcile(findings, notes, model) {
   return res.ok && res.value.summary ? res.value.summary : fallbackSummary(findings, notes);
 }
 
+// Build the stage-1 job descriptors: the spec lens (wantsSpec) runs once over the whole diff
+// (scope "full-diff", no chunk), every other lens runs once per reviewed chunk (scope "chunk",
+// carrying its chunk), and — when crossModel — a cross-model job per reviewed chunk.
+// Pure and deterministic; main() maps each descriptor to its runGuarded(...) job.
+function buildLensJobs({ lenses, reviewedChunks, crossModel }) {
+  const descriptors = [];
+  for (const lens of lenses) {
+    if (lens.wantsSpec) {
+      descriptors.push({ lensKey: lens.key, kind: "claude-lens", scope: "full-diff", lens });
+    } else {
+      for (const chunk of reviewedChunks) {
+        descriptors.push({ lensKey: lens.key, kind: "claude-lens", scope: "chunk", chunk, lens });
+      }
+    }
+  }
+  if (crossModel) {
+    for (const chunk of reviewedChunks) {
+      descriptors.push({ lensKey: "cross-model", kind: "cross-model", scope: "chunk", chunk });
+    }
+  }
+  return descriptors;
+}
+
 // ---------- main ----------
 
 // Wrap an async job so an unexpected throw degrades to a fallback value instead of
@@ -615,16 +684,25 @@ async function main() {
 
   let scopeLabel;
   let fileList;
+  let fullDiff = null; // whole-diff source for the single-pass spec lens; null in the file-set branch
   let diffChunks = [null]; // file-set branch reviews once, with no diff text
   if (args.scope.ref) {
     scopeLabel = `diff for ref ${args.scope.ref}`;
-    const { chunks, notes: chunkNotes } = chunkDiff(gitReadOnly(["diff", args.scope.ref]), DIFF_CHAR_CAP);
-    diffChunks = chunks.length ? chunks : [""];
+    fullDiff = gitReadOnly(["diff", args.scope.ref]);
+    const { chunks, notes: chunkNotes } = chunkDiff(fullDiff, DIFF_CHAR_CAP);
     for (const n of chunkNotes) {
       notes.push(n);
       dropped.push(n);
       log(n);
     }
+    const { reviewed, deferredFiles } = selectChunksByChurn(chunks, args.maxChunks);
+    if (deferredFiles.length) {
+      const note = `Frontier: reviewed the ${reviewed.length} highest-churn chunks of ${chunks.length}; deferred chunks touching: ${deferredFiles.join(", ")}`;
+      notes.push(note);
+      dropped.push(note);
+      log(note);
+    }
+    diffChunks = reviewed.length ? reviewed : [""];
     fileList = gitReadOnly(["diff", "--name-only", args.scope.ref]).trim();
   } else {
     scopeLabel = `file set below (${args.scope.paths.length} file(s))`;
@@ -634,51 +712,66 @@ async function main() {
   // Verification re-reads the working tree, so it needs the scope label, not the diff text.
   const verifyCtx = { scopeLabel, specPath: args.specPath, spec: spec.text, diff: null, fileList };
 
-  // Stage 1: every lens reviews every diff chunk (jobs = lenses × chunks, + optional cross-model per chunk).
-  const lensJobs = [];
-  for (const chunk of diffChunks) {
-    const chunkCtx = { scopeLabel, specPath: args.specPath, diff: chunk, fileList };
-    for (const lens of args.lenses) {
-      const lensCtx = { ...chunkCtx, spec: lens.wantsSpec ? spec.text : null };
-      lensJobs.push(() =>
-        runGuarded(
-          () => runClaudeLens(lens, lensCtx, model),
-          (msg) => ({ lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" crashed: ${msg}` }),
-        ),
-      );
-    }
-    if (args.crossModel) {
-      const cmCtx = { ...chunkCtx, spec: null };
-      lensJobs.push(() =>
+  // Stage 1: the spec lens reviews the whole diff once; every other lens reviews each reviewed
+  // chunk; cross-model runs per reviewed chunk. buildLensJobs is the pure descriptor builder;
+  // here each descriptor becomes its runGuarded(...) job, with the spec lens carrying the whole
+  // (truncated) diff + spec text, and per-chunk lenses carrying their chunk with no spec.
+  const lensJobs = buildLensJobs({ lenses: args.lenses, reviewedChunks: diffChunks, crossModel: args.crossModel }).map((desc) => {
+    if (desc.kind === "cross-model") {
+      const cmCtx = { scopeLabel, specPath: args.specPath, diff: desc.chunk, fileList, spec: null };
+      return { kind: "cross-model", run: () =>
         runGuarded(
           () => runCrossModelLens(cmCtx),
           (msg) => ({ lens: "cross-model", findings: [], strengths: [], note: `cross-model lens crashed: ${msg}` }),
         ),
-      );
+      };
     }
-  }
-  const lensResults = await mapLimit(lensJobs, LENS_CONCURRENCY, (job) => job());
+    const lens = desc.lens;
+    let ctx;
+    if (desc.scope === "full-diff") {
+      // One spec-lens pass over the whole diff; its truncation (if any) is disclosed once.
+      const diff = fullDiff === null ? null : record(truncate(fullDiff, DIFF_CHAR_CAP, "diff (spec lens)")).text;
+      ctx = { scopeLabel, specPath: args.specPath, diff, fileList, spec: spec.text };
+    } else {
+      ctx = { scopeLabel, specPath: args.specPath, diff: desc.chunk, fileList, spec: null };
+    }
+    return { kind: "claude-lens", run: () =>
+      runGuarded(
+        () => runClaudeLens(lens, ctx, model),
+        (msg) => ({ lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" crashed: ${msg}` }),
+      ),
+    };
+  });
+  log(`stage 1: ${diffChunks.length} chunk(s) × ${args.lenses.length} lens(es) → ${lensJobs.length} job(s)`);
+  const lensResults = await mapLimit(lensJobs, LENS_CONCURRENCY, (job) => job.run());
 
   const rawFindings = lensResults.flatMap((r) => r.findings);
   const rawStrengths = lensResults.flatMap((r) => r.strengths ?? []);
   for (const r of lensResults) if (r.note) notes.push(r.note);
-  const failedClaudeLenses = lensResults.filter((r) => r.note && r.lens !== "cross-model").length;
-  const totalClaudeLensJobs = args.lenses.length * diffChunks.length;
-  if (failedClaudeLenses === totalClaudeLensJobs) fatal(`all lens reviewers failed: ${notes.join("; ")}`);
+  const claudeLensJobCount = lensJobs.filter((j) => j.kind === "claude-lens").length;
+  const failedClaudeLenses = lensResults.filter((r, i) => r.note && lensJobs[i].kind === "claude-lens").length;
+  if (claudeLensJobCount > 0 && failedClaudeLenses === claudeLensJobCount) {
+    fatal(`all lens reviewers failed: ${notes.join("; ")}`);
+  }
 
-  // Stage 2: adversarial verification per finding (marked, never dropped).
-  log(`verifying ${rawFindings.length} finding(s)...`);
-  const charter = rawFindings.length ? loadRedTeamCharter() : null;
-  const verified = await mapLimit(rawFindings, VERIFY_CONCURRENCY, (f) =>
+  // Stage 3 (moved up): dedup raw findings by file+claim BEFORE verifying, so duplicates are
+  // verified once. Stage 2: verify survivors. Stage 4: rank.
+  const distinct = dedupRaw(rawFindings);
+  log(`stage 1→2: ${rawFindings.length} raw finding(s) → ${distinct.length} distinct to verify`);
+  const charter = distinct.length ? loadRedTeamCharter() : null;
+  const verified = await mapLimit(distinct, VERIFY_CONCURRENCY, (f) =>
     runGuarded(
       () => verifyFinding(f, verifyCtx, model, charter),
       (msg) => ({ ...f, verified: false, verification: `verifier crashed (${msg}); retained unverified` }),
     ),
   );
-
-  // Stage 3: dedup by file+claim.  Stage 4: rank + reconcile.
-  const deduped = dedupFindings(verified);
-  const ranked = rankFindings(deduped);
+  // Render the merged-lens disclosure onto verification text (was mutated inside dedup before).
+  for (const f of verified) {
+    const others = (f.mergedLenses ?? []).filter((l) => l !== f.lens);
+    if (others.length) f.verification += ` (also reported by the ${others.join(", ")} lens${others.length > 1 ? "es" : ""})`;
+  }
+  log(`stage 2: ${verified.filter((f) => f.verified).length} verified`);
+  const ranked = rankFindings(verified);
   const strengths = dedupStrengths(rawStrengths);
   const summary = await reconcile(ranked, notes, model);
 
@@ -695,7 +788,7 @@ async function main() {
       ? `COVERAGE WARNING: ${dropped.join("; ")}. This panel reviewed a sample, not the whole input.\n\n${summary}`
       : summary) + strengthsSection;
 
-  process.stdout.write(JSON.stringify({ findings: ranked, strengths, notes, summary: disclosed }, null, 2) + "\n");
+  process.stdout.write(JSON.stringify({ findings: ranked, strengths, notes, summary: disclosed }) + "\n");
 }
 
 if (require.main === module) {
@@ -704,6 +797,6 @@ if (require.main === module) {
 
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
-  dedupFindings, dedupStrengths, rankFindings, truncate, chunkDiff, fallbackSummary, mapLimit, loadRedTeamCharter,
-  SEVERITIES, LENS_CONCURRENCY,
+  dedupRaw, dedupStrengths, rankFindings, truncate, chunkDiff, selectChunksByChurn, buildLensJobs, fallbackSummary, mapLimit, loadRedTeamCharter,
+  SEVERITIES, LENS_CONCURRENCY, verifierTools,
 };

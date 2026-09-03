@@ -40,6 +40,9 @@ where contents are read from per "Deriving a branch's file set" in
   nothing, and review that stabilized set — correctness routinely depends on untouched code.
 - **Frontier**: if that set exceeds what the profile can genuinely read, review the highest-risk
   subset and name **every** file left at the frontier, with its reason, in the coverage statement.
+  The panel engine realizes this as `maxChunks` (§ 3): it enforces the profile's ceiling on diff
+  chunks and discloses the deferred set in its `COVERAGE WARNING`, rather than leaving the cutoff
+  to the reviewer's judgment.
 
 ## 1. Discovery and the criteria interview — audit runs only
 
@@ -105,7 +108,7 @@ Keyed to `reviewDepth`, resolved per `${CLAUDE_PLUGIN_ROOT}/references/config.md
 the constructed lenses through the workflow:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js" '{"scope":{"ref":"<base>..<branch>"},"specPath":"<path>","lenses":[{"key":"<key>","charter":"<charter>"}],"crossModel":<crossModelReview>}'
+node "${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js" '{"scope":{"ref":"<base>..<branch>"},"specPath":"<path>","lenses":[{"key":"<key>","charter":"<charter>"}],"crossModel":<crossModelReview>,"maxChunks":<profile ceiling>}'
 ```
 
 One JSON argv: `scope` carries exactly one of `ref` or `paths`, `specPath` is omitted when no spec
@@ -113,6 +116,17 @@ governs the scope, `lenses` mixes built-in keys and `{key, charter}` objects, an
 mirrors `crossModelReview`. The JSON report is stdout ONLY — progress goes to stderr. When
 `branchReviewModel` resolves to an explicit id, export it (`DEVCYCLE_PANEL_MODEL=<id> node ...`) or
 the CLI's default silently replaces the user's binding choice; on the session tier omit it.
+
+`maxChunks` is the profile's Frontier ceiling on how many diff chunks the panel reviews; past it
+the panel reviews the highest-churn chunks and names the deferred files in its `COVERAGE WARNING`.
+The playbook resolves `profile` per `${CLAUDE_PLUGIN_ROOT}/references/config.md` and passes the
+matching ceiling:
+
+| `profile` | `maxChunks` |
+| --- | --- |
+| `lean` | 2 |
+| `standard` | 4 |
+| `thorough` | 8 |
 
 The panel splits an oversize diff at file — and, for a lone file past the cap, `@@` hunk —
 boundaries into chunks each within the cap and runs every lens over every chunk, so the whole diff

@@ -27,25 +27,36 @@ function makeLogger(tag) {
 // Spawn a child, buffer its output, SIGKILL it after timeoutMs. Never rejects:
 // transport failures come back on the resolved value as { spawnError } or
 // { timedOut } so callers branch on them instead of catching.
-function run(cmd, args, { cwd, timeoutMs } = {}) {
+function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = {}) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let overflow = false;
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
     }, timeoutMs ?? AGENT_TIMEOUT_MS);
-    child.stdout.on("data", (d) => (stdout += d));
-    child.stderr.on("data", (d) => (stderr += d));
+    const guard = () => {
+      if (!overflow && stdout.length + stderr.length > maxBufferBytes) {
+        overflow = true;
+        // A single "data" event can deliver a whole write in one chunk, so the
+        // accumulator can already sit well past the cap by the time this fires —
+        // truncate what's kept, not just what's kept from growing further.
+        if (stdout.length > maxBufferBytes) stdout = stdout.slice(0, maxBufferBytes);
+        child.kill("SIGKILL");
+      }
+    };
+    child.stdout.on("data", (d) => { stdout += d; guard(); });
+    child.stderr.on("data", (d) => { stderr += d; guard(); });
     child.on("error", (err) => {
       clearTimeout(timer);
       resolve({ code: null, stdout, stderr: String(err), timedOut, spawnError: err });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ code, stdout, stderr, timedOut });
+      resolve(overflow ? { code, stdout, stderr, timedOut: false, overflow: true } : { code, stdout, stderr, timedOut });
     });
     child.stdin.end();
   });
@@ -81,6 +92,10 @@ async function claudeStructured({ prompt, tools, schema, model, cwd, permissionM
     if (res.spawnError) return { ok: false, error: `claude CLI not runnable: ${res.stderr}` };
     if (res.timedOut) {
       if (attempt === attempts) return { ok: false, error: `${errors.agent} timed out` };
+      continue;
+    }
+    if (res.overflow) {
+      if (attempt === attempts) return { ok: false, error: `${errors.agent} output exceeded the buffer cap` };
       continue;
     }
     try {

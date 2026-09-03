@@ -68,6 +68,25 @@ test("run kills a child that outlives timeoutMs and reports timedOut", async () 
   assert.ok(!res.spawnError, "a timeout is not a spawn failure");
 });
 
+test("run() resolves overflow:true and kills a child that exceeds maxBufferBytes", async () => {
+  // Child writes 5000 bytes; cap is 1000 → overflow.
+  const res = await run(process.execPath, ["-e", "process.stdout.write('x'.repeat(5000))"], {
+    maxBufferBytes: 1000,
+  });
+  assert.equal(res.overflow, true);
+  assert.equal(res.timedOut, false);
+  assert.ok(res.stdout.length <= 1000 + 64, "buffered output is bounded near the cap");
+});
+
+test("run() completes normally under the cap with no overflow flag", async () => {
+  const res = await run(process.execPath, ["-e", "process.stdout.write('hello')"], {
+    maxBufferBytes: 1000,
+  });
+  assert.equal(res.overflow, undefined);
+  assert.equal(res.code, 0);
+  assert.equal(res.stdout, "hello");
+});
+
 test("claudeStructured pins --tools with the equals form and plumbs cwd, model and permission mode", async () => {
   const argvLog = join(mkdtempSync(join(tmpdir(), "devcycle-agent-cli-")), "argv.json");
   const bin = makeFakeBin(
