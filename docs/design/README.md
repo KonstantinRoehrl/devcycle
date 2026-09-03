@@ -110,9 +110,10 @@ devcycle/                (public GitHub repo)
 │   ├── history-inspector.md      # read-only git-history lens for /devcycle:maintain; bounded traversal
 │   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
 │                                 # origin the browser guard below permits
-├── hooks/                        # L4 — the one hook that ships (docs/decisions/README.md, 2026-08-20)
-│   ├── hooks.json                # registers the guard on PreToolUse over mcp__claude-in-chrome__.*
-│   └── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
+├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02)
+│   ├── hooks.json                # registers the guards on PreToolUse (browser + reviewer-git)
+│   ├── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
+│   └── block-reviewer-git-write.mjs   # denies destructive git from a reviewer origin (#165)
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
 ├── scripts/                      # L4 — validate.mjs, doctor.mjs, dream.mjs, the checkers, bump-version.mjs
 ├── workflows/                    # L4
@@ -302,8 +303,8 @@ gated by `userConfig.crossModelReview`.
   `devcycle:red-team-reviewer`, `devcycle:on-device-driver`, `devcycle:history-inspector`. The plugin id is not decoration:
   the harness passes `<plugin>:<name>` as a subagent's `agent_type`, which is the spelling the
   browser guard's allowlist must carry (`docs/platform-notes.md` § (e)).
-- Hooks: one, `block-main-thread-browser`, named for what it denies rather than what it guards —
-  the only surface component that is not loaded by a command.
+- Hooks: two — `block-main-thread-browser` and `block-reviewer-git-write` — named for what they
+  deny rather than what they guard; the only surface components not loaded by a command.
 
 ## 15. Compaction — the reference layer, profiles, and the audit stage (added 2026-07-26)
 

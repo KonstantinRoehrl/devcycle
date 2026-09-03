@@ -5,6 +5,22 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-09-02 — the reviewer git-write guard, a second hook (#165)
+
+**Decision:** The plugin ships a second hook, `hooks/block-reviewer-git-write.mjs`, registered
+in `hooks/hooks.json` on `PreToolUse` over `Bash`. It denies destructive or ambiguous git
+subcommands (`checkout -- <path>`, `restore`, `reset --hard`, `stash`, `clean`, and similar)
+whenever the calling origin is a reviewer (`task-reviewer` or `red-team-reviewer`), allowing
+only inspection commands and the one permitted `git add -N`. It is the structural backstop for
+the reviewers-never-write ban `playbooks/reviewing-code.md` states in prose.
+
+**Why:** a reviewer ran `git checkout -- <file>` and destroyed an uncommitted round-2 diff —
+prose alone had already failed to stop it, and could not, since the rule is only enforceable at
+the moment of the call. The hook denies on ambiguity rather than trying to enumerate every safe
+git invocation, the same posture `block-main-thread-browser.mjs` takes toward browser calls.
+
+**Supersedes:** the 2026-08-20 entry's "the plugin ships exactly one hook" clause, below.
+
 ## 2026-08-26 — Command ceiling raised 8→9 for /devcycle:reconcile
 
 **Decision:** `COMMAND_CEILING` in `scripts/validate.mjs` is raised from **8** to **9** to admit
@@ -109,6 +125,8 @@ instead of as a line in a documentation diff.
 unaffected and is what check 15 implements.
 
 ## 2026-08-20 — hooks ship in the public plugin, for one guard only
+
+*(Superseded 2026-09-02, above: a second hook, `hooks/block-reviewer-git-write.mjs`, now ships.)*
 
 **Decision:** The plugin ships exactly one hook. `hooks/block-main-thread-browser.mjs`, registered
 in `hooks/hooks.json` on `PreToolUse` over `mcp__claude-in-chrome__.*`, denies every browser tool

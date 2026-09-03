@@ -72,6 +72,7 @@ The hooks the plugin ships. No command loads them; each fires on a matched tool 
 | Hook | What it does |
 | --- | --- |
 | [`hooks/block-main-thread-browser.mjs`](../hooks/block-main-thread-browser.mjs) | Registered on `PreToolUse` over `mcp__claude-in-chrome__.*`, it denies any browser tool call whose origin is not the `on-device-driver` subagent — the main thread included — so the coordinator cannot drive the browser at its own context depth ([`decisions/`](decisions/README.md), 2026-08-20). |
+| [`hooks/block-reviewer-git-write.mjs`](../hooks/block-reviewer-git-write.mjs) | Registered on `PreToolUse` over `Bash`, it denies destructive or ambiguous git subcommands (`checkout`/`reset`/`restore`/`clean`/`stash`/…) from a reviewer origin (`task-reviewer`, `red-team-reviewer`), allowing only inspection commands and `git add -N` — the structural backstop for the reviewer-write ban (#165). |
 | [`hooks/workload-sensor.mjs`](../hooks/workload-sensor.mjs) | Registered on `PostToolUse` over `Bash`, it re-derives the run's `workload` record from `.devcycle/state.md` and git on each HEAD-advancing commit in an active cycle, so workload collection never depends on the finish stage running ([`playbooks/finishing-the-cycle/`](playbooks/finishing-the-cycle/README.md)). |
 
 ## Agents

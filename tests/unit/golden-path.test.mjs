@@ -1955,6 +1955,43 @@ test("the browser guard is named by DESIGN.md's blueprint and the hub's inventor
   );
 });
 
+// #165 reviewer-git guard: the same tie the browser guard has, so a reviewer-agent rename fails the
+// suite instead of silently leaving a guarded origin unmatched. The GUARDED list must be exactly the
+// two reviewer agents' frontmatter names and their <plugin>:-namespaced forms.
+const REVIEWER_HOOK_SRC = "hooks/block-reviewer-git-write.mjs";
+
+const guardedAgentTypes = () => {
+  const m = read(REVIEWER_HOOK_SRC).match(/const GUARDED_AGENT_TYPES = \[([^\]]*)\];/);
+  assert.ok(m, `${REVIEWER_HOOK_SRC} must declare GUARDED_AGENT_TYPES as a single-line array literal`);
+  return [...m[1].matchAll(/"([^"]+)"/g)].map(([, v]) => v);
+};
+
+test("the reviewer-git guard's guarded list is the reviewer agents' names and their namespaced forms", () => {
+  const plugin = JSON.parse(read(".claude-plugin/plugin.json")).name;
+  const expected = [];
+  for (const agent of ["agents/task-reviewer.md", "agents/red-team-reviewer.md"]) {
+    const name = read(agent).match(/^name:\s*(\S+)\s*$/m)?.[1];
+    assert.ok(name, `${agent} must carry a frontmatter name:`);
+    expected.push(name, `${plugin}:${name}`);
+  }
+  assert.deepEqual(
+    guardedAgentTypes(),
+    expected,
+    `${REVIEWER_HOOK_SRC}'s GUARDED_AGENT_TYPES must be exactly the two reviewer agents' frontmatter ` +
+      "names and their namespaced forms — the harness passes the namespaced spelling (docs/platform-notes.md § (e)), " +
+      "and drift from the agents' name: would leave a reviewer origin unguarded"
+  );
+});
+
+test("the reviewer-git guard is registered on PreToolUse over Bash", () => {
+  const doc = JSON.parse(read("hooks/hooks.json"));
+  const entry = (doc.hooks?.PreToolUse ?? []).find((e) =>
+    (e.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(REVIEWER_HOOK_SRC))
+  );
+  assert.ok(entry, `hooks/hooks.json must register ${REVIEWER_HOOK_SRC} on PreToolUse`);
+  assert.equal(entry.matcher, "Bash", `${REVIEWER_HOOK_SRC} must match Bash, got "${entry.matcher}"`);
+});
+
 test("DESIGN.md §10 no longer rejects the hooks that ship", () => {
   assert.doesNotMatch(
     read(DESIGN_DOC),

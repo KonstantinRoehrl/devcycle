@@ -12,20 +12,28 @@ const SCRIPT = join(here, "..", "..", "workflows", "review-panel.js");
 
 // ---------- pure helpers ----------
 
-test("dedupFindings merges same file+claim, keeps the stronger one, annotates the other lens", () => {
-  const weak = { file: "f.js", claim: "Broken  loop", severity: "medium", lens: "spec", verified: false, verification: "v1" };
-  const strong = { file: "f.js", claim: "broken loop", severity: "high", lens: "correctness", verified: true, verification: "v2" };
-  const out = panel.dedupFindings([weak, strong]);
+test("dedupRaw merges same file+claim, keeps higher severity, records both lenses", () => {
+  const a = { file: "x.js", line: 1, claim: "boom", severity: "low", measuredAgainst: "conv.md", lens: "correctness" };
+  const b = { file: "x.js", line: 1, claim: "boom", severity: "high", measuredAgainst: "conv.md", lens: "simplify" };
+  const out = panel.dedupRaw([a, b]);
   assert.equal(out.length, 1);
-  assert.equal(out[0].lens, "correctness");
-  assert.equal(out[0].verified, true);
-  assert.match(out[0].verification, /also reported by the spec lens/);
+  assert.equal(out[0].severity, "high");
+  assert.deepEqual(out[0].mergedLenses, ["correctness", "simplify"]);
 });
 
-test("dedupFindings keeps distinct claims apart", () => {
-  const a = { file: "f.js", claim: "claim one", severity: "low", lens: "spec", verified: false, verification: "" };
-  const b = { file: "f.js", claim: "claim two", severity: "low", lens: "spec", verified: false, verification: "" };
-  assert.equal(panel.dedupFindings([a, b]).length, 2);
+test("dedupRaw keeps distinct claims apart", () => {
+  const a = { file: "x.js", claim: "one", severity: "low", measuredAgainst: "m", lens: "correctness" };
+  const b = { file: "x.js", claim: "two", severity: "low", measuredAgainst: "m", lens: "correctness" };
+  assert.equal(panel.dedupRaw([a, b]).length, 2);
+});
+
+test("dedupRaw ORs needsExecution so the survivor keeps the stricter tool tier", () => {
+  const cheap = { file: "x.js", claim: "boom", severity: "high", measuredAgainst: "m", lens: "correctness", needsExecution: false };
+  const exec = { file: "x.js", claim: "boom", severity: "low", measuredAgainst: "m", lens: "simplify", needsExecution: true };
+  const out = panel.dedupRaw([cheap, exec]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].severity, "high"); // higher-severity survivor kept
+  assert.equal(out[0].needsExecution, true); // the dropped duplicate's execution need is preserved, so verification keeps Bash
 });
 
 test("rankFindings orders verified first, then by severity, then by file", () => {
@@ -84,18 +92,22 @@ test("rankFindings orders all four severities", () => {
   assert.deepEqual(ranked.map((x) => x.file), ["a.js", "b.js", "c.js", "d.js"]);
 });
 
-test("dedupFindings carries measuredAgainst through the merge", () => {
-  const weak = { file: "f.js", claim: "same claim", severity: "medium", lens: "spec", verified: false, verification: "v1", measuredAgainst: "CONTRIBUTING.md" };
-  const strong = { file: "f.js", claim: "Same  Claim", severity: "critical", lens: "correctness", verified: true, verification: "v2", measuredAgainst: "OWASP Top Ten" };
-  const out = panel.dedupFindings([weak, strong]);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].severity, "critical");
-  assert.equal(out[0].measuredAgainst, "OWASP Top Ten");
+test("dedupRaw carries measuredAgainst through and always sets mergedLenses", () => {
+  const a = { file: "x.js", claim: "boom", severity: "low", measuredAgainst: "conv.md", lens: "correctness" };
+  const out = panel.dedupRaw([a]);
+  assert.equal(out[0].measuredAgainst, "conv.md");
+  assert.deepEqual(out[0].mergedLenses, ["correctness"]);
 });
 
 test("fallbackSummary counts critical findings", () => {
   const s = panel.fallbackSummary([{ verified: true, severity: "critical" }], []);
   assert.match(s, /1 critical/);
+});
+
+test("verifierTools grants Bash only when needsExecution is true", () => {
+  assert.equal(panel.verifierTools({ needsExecution: true }), "Read,Grep,Glob,Bash");
+  assert.equal(panel.verifierTools({ needsExecution: false }), "Read,Grep,Glob");
+  assert.equal(panel.verifierTools({}), "Read,Grep,Glob"); // default
 });
 
 // ---------- chunkDiff (#65) ----------
@@ -191,6 +203,50 @@ test("chunkDiff consolidates multiple truncations into one note (#6)", () => {
   const joined = chunks.join("\n");
   assert.match(joined, /--- a\/f1\.js/);
   assert.match(joined, /--- a\/f2\.js/);
+});
+
+// ---------- selectChunksByChurn (F1) ----------
+const mkChunk = (path, plus, minus) =>
+  [`diff --git a/${path} b/${path}`, "@@ -1 +1 @@",
+   ...Array(plus).fill("+add"), ...Array(minus).fill("-del")].join("\n");
+
+test("selectChunksByChurn returns all chunks when maxChunks is unset or >= count", () => {
+  const cs = [mkChunk("a", 1, 0), mkChunk("b", 2, 0)];
+  assert.deepEqual(panel.selectChunksByChurn(cs, undefined), { reviewed: cs, deferredFiles: [] });
+  assert.deepEqual(panel.selectChunksByChurn(cs, 5), { reviewed: cs, deferredFiles: [] });
+});
+
+test("selectChunksByChurn keeps the highest-churn chunks and names the deferred files", () => {
+  const a = mkChunk("a.js", 1, 0);   // churn 1
+  const b = mkChunk("b.js", 5, 3);   // churn 8
+  const c = mkChunk("c.js", 2, 0);   // churn 2
+  const { reviewed, deferredFiles } = panel.selectChunksByChurn([a, b, c], 2);
+  assert.deepEqual(reviewed, [b, c]);         // top-2 by churn, original order preserved
+  assert.deepEqual(deferredFiles, ["a.js"]);
+});
+
+test("selectChunksByChurn does not count +++/--- headers as churn", () => {
+  // a has a real +/- pair (churn 2); b is header-only (churn 0) → a wins.
+  const a = ["diff --git a/a b/a", "+++ b/a", "--- a/a", "@@", "+x", "-y"].join("\n");
+  const b = ["diff --git a/b b/b", "+++ b/b", "--- a/b", "@@"].join("\n");
+  const { reviewed, deferredFiles } = panel.selectChunksByChurn([a, b], 1);
+  assert.deepEqual(reviewed, [a]);
+  assert.deepEqual(deferredFiles, ["b"]);
+});
+
+// ---------- buildLensJobs (F5) ----------
+
+test("buildLensJobs runs the spec lens once over the whole diff, others per chunk", () => {
+  const jobs = panel.buildLensJobs({
+    lenses: [{ key: "spec", wantsSpec: true }, { key: "correctness", wantsSpec: false }],
+    reviewedChunks: ["chunkA", "chunkB"],
+    crossModel: false,
+  });
+  const spec = jobs.filter((j) => j.lensKey === "spec");
+  const corr = jobs.filter((j) => j.lensKey === "correctness");
+  assert.equal(spec.length, 1);
+  assert.equal(spec[0].scope, "full-diff");
+  assert.equal(corr.length, 2); // one per reviewed chunk
 });
 
 // ---------- end-to-end against a stubbed claude CLI ----------
@@ -291,6 +347,26 @@ test("panel fans out over a multi-chunk diff: all findings merge, correctly attr
   assert.ok(!foundFiles.has("UNATTRIBUTED"), "every reviewed chunk must name its file");
   for (const n of names) assert.ok(foundFiles.has("src/" + n), `missing finding for src/${n}`);
   for (const f of report.findings) assert.ok(f.claim.includes(f.file), `finding misattributed: ${JSON.stringify(f)}`);
+});
+
+test("panel caps stage-1 fan-out at maxChunks and discloses the deferred chunks (F1)", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  const names = ["f1.js", "f2.js", "f3.js", "f4.js"];
+  for (const n of names) writeFileSync(join(repo, "src", n), "// base\n");
+  commitAll(repo, "base");
+  for (const n of names) writeFileSync(join(repo, "src", n), "// x\n".repeat(3_800));
+
+  const bin = makeFakeBin("claude", multiChunkClaude);
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["correctness"], maxChunks: 1 }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+
+  // A Frontier coverage warning is disclosed in both the summary and the notes.
+  assert.match(report.summary, /COVERAGE WARNING[\s\S]*Frontier: reviewed the 1 highest-churn chunks of/);
+  const frontier = report.notes.find((n) => n.startsWith("Frontier: reviewed"));
+  assert.ok(frontier, `expected a Frontier note, got ${JSON.stringify(report.notes)}`);
+  assert.match(frontier, /deferred chunks touching: .*src\//);
 });
 
 test("panel exits 1 when every lens reviewer fails (unusable CLI output)", () => {
@@ -394,9 +470,13 @@ test("with lenses omitted and no specPath, the spec lens is dropped and the othe
   const bin = makeFakeBin("claude", echoingClaude);
   const res = runScript(SCRIPT, { scope: { paths: ["src/a.js"] } }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
-  assert.doesNotMatch(res.stderr, /lens "spec" reviewing/);
-  assert.match(res.stderr, /lens "correctness" reviewing/);
   const report = JSON.parse(res.stdout);
+  // Signal the drop off the report's own coverage note (not a per-lens stderr line, which F6 removed):
+  // the spec lens is disclosed as dropped, and the surviving built-ins still produced the finding.
+  assert.ok(
+    report.notes.some((n) => /spec lens skipped: no specPath given/.test(n)),
+    `expected the spec-drop note in report.notes, got ${JSON.stringify(report.notes)}`,
+  );
   assert.equal(report.findings.length, 1);
 });
 
@@ -636,7 +716,7 @@ const toolsArg = process.argv.find((a) => a.startsWith("--tools=")) || "";
 let out;
 if (prompt.includes("You are one lens")) {
   out = prompt.includes("Correctness and security")
-    ? { findings: [{ file: "src/a.js", line: 1, claim: "a defect", severity: "medium", measuredAgainst: "repo convention" }] }
+    ? { findings: [{ file: "src/a.js", line: 1, claim: "a defect", severity: "medium", measuredAgainst: "repo convention", needsExecution: true }] }
     : { findings: [] };
 } else if (prompt.includes("adversarial verifier")) {
   out = { verified: toolsArg.includes("Bash"), verification: "tools=" + toolsArg };

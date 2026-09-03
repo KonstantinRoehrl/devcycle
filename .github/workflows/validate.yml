@@ -6,7 +6,16 @@ on:
     # `dev` is listed so human and merge-API commits landing there get a check suite at push
     # time. It does NOT cover commits pushed with the implicit token — GitHub does not trigger
     # workflows from it — so the release workflows call this one directly via workflow_call.
-    branches: [main, dev]
+    #
+    # `main` is deliberately ABSENT. Every push to `main` is a release-PR squash-merge, and
+    # `Release` (bump-version.yml, on: push: branches: [main]) already validates that exact
+    # commit in-line via workflow_call. A standalone push-on-`main` run would only duplicate
+    # that — and, because a called `validate.yml` inherits the caller's `github.ref`
+    # (`refs/heads/main`), both would land in the same concurrency group `validate-refs/heads/main`
+    # and `cancel-in-progress` below would cancel the standalone one, painting `main` with a red
+    # ✗ for a run that never added coverage. Leaving `main` out removes that false failure; the
+    # `Release` run keeps `main` fully validated.
+    branches: [dev]
   # Manual re-run, for requesting a suite without inventing a commit.
   workflow_dispatch:
   # Called in-line by the release workflows: the release commit is pushed with the implicit token,
@@ -71,6 +80,48 @@ jobs:
           echo "${GITLEAKS_SHA256}  ${asset}" | sha256sum -c -
           tar -xzf "$asset" gitleaks
           ./gitleaks git --no-banner --redact --exit-code 1 .
+  plugin-load:
+    name: Plugin loads under Claude Code's real validator
+    # scripts/validate.mjs is a HOMEGROWN approximation of the plugin loader — it only rejects
+    # the loader-failure classes we thought to encode. A userConfig `"type": "integer"` slipped
+    # past it in 0.17.0 and the plugin failed to load on update. This job runs Claude Code's
+    # ACTUAL validator against the manifest, so a manifest the real loader would reject fails CI
+    # here instead of after a release ships. It gates all three surfaces at once: every PR, the
+    # pre-merge check `Prepare release` calls (prepare-release.yml -> validate), and the
+    # pre-publish check `Release` calls (bump-version.yml -> validate) — both `uses:` this
+    # workflow, and a reusable-workflow call is green only if all its jobs are.
+    # The validator needs no ANTHROPIC_API_KEY, no network, and no model call.
+    # Pin maintenance: bump CLAUDE_CLI_VERSION by hand (there is no package.json for Dependabot
+    # to track a global CLI). A bump to a version that adds a new validator warning reddens this
+    # job first under --strict — which is the intended early-warning, not a regression.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLAUDE_CLI_VERSION: 2.1.258
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Same ref as the `validate` job: workflow_call callers (prepare-release.yml) pass the
+          # bumped sha in inputs.ref, so this validates THAT commit's manifest, not the run's
+          # pre-bump github.sha. Every other trigger leaves inputs.ref empty and falls back to
+          # github.ref. Shallow checkout (default depth) is enough — this reads the manifest, not
+          # git history.
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: ".nvmrc"
+      - name: Install the pinned Claude Code CLI
+        # Exact-version pin (never @latest) for reproducible CI; npm supplies the registry
+        # integrity for the pin. The package runs a postinstall that fetches platform binaries,
+        # so --ignore-scripts is not usable.
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}"
+      - name: Validate the plugin against the real loader
+        # --strict fails on warnings too. CI=true + stdin from /dev/null keep it non-interactive
+        # so a first-run prompt can never block the runner.
+        env:
+          CI: "true"
+        run: claude plugin validate . --strict < /dev/null
   pr-title:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
