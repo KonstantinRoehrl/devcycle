@@ -391,10 +391,9 @@ function normalizeStrength(s, lens) {
 }
 
 async function runClaudeLens(lens, ctx, model) {
-  // Kept (unlike the finding-count line below): tests/unit/review-panel.test.mjs's
-  // spec-drop coverage asserts on this exact stderr line as its only signal that a
-  // given lens ran, so removing it would break that test — out of this task's Files scope.
-  log(`lens "${lens.key}" reviewing...`);
+  // No per-lens progress line: stage-1 stderr must not scale with fan-out (F6). The stage-1
+  // summary log in main() reports the lens/chunk/job counts once; the spec-drop coverage is
+  // asserted off the report's own `notes`, not a per-lens stderr line.
   const res = await claudeStructured({
     prompt: lensPrompt(lens.charter, ctx),
     tools: "Read,Grep,Glob",
@@ -435,6 +434,9 @@ async function runCrossModelLens(ctx) {
     ]);
     if (res.spawnError) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex CLI not available" };
     if (res.timedOut) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex timed out" };
+    // Overflow is a transport failure like timedOut/spawnError (agent-cli run() SIGKILLs the
+    // child and truncates the buffer): skip the lens rather than parse the truncated output.
+    if (res.overflow) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex output exceeded the buffer cap" };
     let message = "";
     try {
       message = readFileSync(outFile, "utf8");
@@ -548,6 +550,10 @@ function dedupRaw(findings) {
     const kept = keepNew ? { ...f } : prev;
     const lenses = new Set([...(prev.mergedLenses ?? [prev.lens]), f.lens]);
     kept.mergedLenses = [...lenses].sort();
+    // Union the execution need across duplicates: if either the kept or the dropped finding
+    // needed Bash to refute, the survivor keeps that tier — otherwise a merged-away
+    // needsExecution:true would silently downgrade the survivor's verifier to read-only.
+    kept.needsExecution = Boolean(prev.needsExecution) || Boolean(f.needsExecution);
     byKey.set(key, kept);
   }
   return [...byKey.values()];
@@ -616,7 +622,7 @@ async function reconcile(findings, notes, model) {
 
 // Build the stage-1 job descriptors: the spec lens (wantsSpec) runs once over the whole diff
 // (scope "full-diff", no chunk), every other lens runs once per reviewed chunk (scope "chunk",
-// carrying its chunk + chunkIndex), and — when crossModel — a cross-model job per reviewed chunk.
+// carrying its chunk), and — when crossModel — a cross-model job per reviewed chunk.
 // Pure and deterministic; main() maps each descriptor to its runGuarded(...) job.
 function buildLensJobs({ lenses, reviewedChunks, crossModel }) {
   const descriptors = [];
@@ -624,15 +630,15 @@ function buildLensJobs({ lenses, reviewedChunks, crossModel }) {
     if (lens.wantsSpec) {
       descriptors.push({ lensKey: lens.key, kind: "claude-lens", scope: "full-diff", lens });
     } else {
-      reviewedChunks.forEach((chunk, chunkIndex) => {
-        descriptors.push({ lensKey: lens.key, kind: "claude-lens", scope: "chunk", chunk, chunkIndex, lens });
-      });
+      for (const chunk of reviewedChunks) {
+        descriptors.push({ lensKey: lens.key, kind: "claude-lens", scope: "chunk", chunk, lens });
+      }
     }
   }
   if (crossModel) {
-    reviewedChunks.forEach((chunk, chunkIndex) => {
-      descriptors.push({ lensKey: "cross-model", kind: "cross-model", scope: "chunk", chunk, chunkIndex });
-    });
+    for (const chunk of reviewedChunks) {
+      descriptors.push({ lensKey: "cross-model", kind: "cross-model", scope: "chunk", chunk });
+    }
   }
   return descriptors;
 }

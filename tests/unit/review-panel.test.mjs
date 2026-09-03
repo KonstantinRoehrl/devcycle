@@ -27,6 +27,15 @@ test("dedupRaw keeps distinct claims apart", () => {
   assert.equal(panel.dedupRaw([a, b]).length, 2);
 });
 
+test("dedupRaw ORs needsExecution so the survivor keeps the stricter tool tier", () => {
+  const cheap = { file: "x.js", claim: "boom", severity: "high", measuredAgainst: "m", lens: "correctness", needsExecution: false };
+  const exec = { file: "x.js", claim: "boom", severity: "low", measuredAgainst: "m", lens: "simplify", needsExecution: true };
+  const out = panel.dedupRaw([cheap, exec]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].severity, "high"); // higher-severity survivor kept
+  assert.equal(out[0].needsExecution, true); // the dropped duplicate's execution need is preserved, so verification keeps Bash
+});
+
 test("rankFindings orders verified first, then by severity, then by file", () => {
   const f = (file, severity, verified) => ({ file, severity, verified, claim: "", lens: "", verification: "" });
   const ranked = panel.rankFindings([
@@ -461,9 +470,13 @@ test("with lenses omitted and no specPath, the spec lens is dropped and the othe
   const bin = makeFakeBin("claude", echoingClaude);
   const res = runScript(SCRIPT, { scope: { paths: ["src/a.js"] } }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
-  assert.doesNotMatch(res.stderr, /lens "spec" reviewing/);
-  assert.match(res.stderr, /lens "correctness" reviewing/);
   const report = JSON.parse(res.stdout);
+  // Signal the drop off the report's own coverage note (not a per-lens stderr line, which F6 removed):
+  // the spec lens is disclosed as dropped, and the surviving built-ins still produced the finding.
+  assert.ok(
+    report.notes.some((n) => /spec lens skipped: no specPath given/.test(n)),
+    `expected the spec-drop note in report.notes, got ${JSON.stringify(report.notes)}`,
+  );
   assert.equal(report.findings.length, 1);
 });
 
