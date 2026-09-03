@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.2 — 2026-09-03
+
+- perf(review-panel): token-economy fan-out ceiling and dedup-before-verify
+
 ## 0.18.1 — 2026-09-02
 
 - fix(review-panel): guard malformed lens envelopes, add a strengths channel, arm the verifier, and gate spec-splicing (#189, #190, #191, #192, #209)
