@@ -24,9 +24,10 @@ const URL_RE = /https?:\/\/\S+/g;
 // The implementer-report template's evidence-tail field header — `- Tail (…, last <N> lines):`
 // (references/evidence.md § Implementer report shape). Its <N> is a structural descriptor of the
 // report's own tail field, not an authored claim about repo/source state (what this lint polices),
-// so it is blanked before matching like a code span. Deliberately narrowed to this field-label
-// shape — a bare count in report body prose still trips.
-const TAIL_FIELD_RE = /^\s*-\s*Tail\b.*?\blast\s+\d+\s+lines\b.*$/i;
+// so it is blanked before matching like a code span. Deliberately narrowed to the field-label
+// span itself (up through "last <N> lines") — a bare count in report body prose, or a real
+// claim written after the label on the same line, still trips.
+const TAIL_FIELD_RE = /^\s*-\s*Tail\b.*?\blast\s+\d+\s+lines\b/i;
 
 const rawLines = readFileSync(filePath, "utf8").split("\n");
 

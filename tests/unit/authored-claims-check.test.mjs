@@ -115,6 +115,12 @@ test("a genuine count claim in report body text is still flagged", () => {
   assert.match(out, /unverified count claim "5 files"/);
 });
 
+test("a real claim written after the Tail label on the same line is still flagged", () => {
+  const { code, out } = run("- Tail (after, last 50 lines): see src/foo.mjs:42 for detail\n");
+  assert.equal(code, 1, out);
+  assert.match(out, /unverified line-reference claim "src\/foo\.mjs:42"/);
+});
+
 // --- CLI shape ---
 
 test("a clean file exits 0 and prints ok", () => {
