@@ -28,8 +28,8 @@ deduplicated across lenses, and ranked before anything is reported.
 Reviewers work from fresh context — the scope, criteria, and spec path only, never the
 authoring conversation — and never write the tree they're reviewing (formatters and linters run
 check-mode only). Only an audit run takes the final step: writing
-`docs/audits/YYYY-MM-DD-<topic>.md`, complete with a coverage statement and a provenance header,
-then committing it scoped to that one path. A branch-review run returns findings and an engine
+`docs/audits/YYYY-MM-DD-<topic>.md`, complete with a coverage statement and a provenance header —
+a local per-run snapshot it does **not** commit (audit reports stay local at every policy depth). A branch-review run returns findings and an engine
 line and stops there — the rounds-and-cap loop, the ledger cross-check, and the handoff belong
 to that stage, not this one.
 
