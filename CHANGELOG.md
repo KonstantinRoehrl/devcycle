@@ -3,12 +3,38 @@
 ## 0.19.0 — 2026-09-04
 
 - feat(evidence-contract): harden the evidence-capture & verification contract (#143, #144, #150, #151, #230, #231, #232, #238)
+- fix(maintain): harden the maintain engine's finding-ranking, cost rollup, and doc reconciliation (#251)
+- docs(case-studies): record a dated matched-cohort payoff checkpoint (#250)
+- docs(readme): merge the fuller pipeline story — parallelized subagents, on-device UI verification via claude-in-chrome, GitHub reconcile, and the doctor/learn loop — into the README opening (#248)
+- docs(plugin): broaden the plugin.json description to match the README opening (#248)
+- docs(learn): land 3 repo lessons, retire 1 held lesson, and file 15 pipeline-fault findings as GitHub issues #230–#244 (#247)
 
-## Unreleased
+**Evidence-capture & verification contract (#143, #144, #150, #151, #230, #231, #232, #238).**
+`evidence-completeness-check.mjs` no longer rejects a correct capture or lets a required check
+get truncated out of a gate: it tolerates backtick-wrapped fields and prose inside `(exit N)`,
+treats a compound cmd that runs the whole suite as non-narrow, and enforces a host-declared
+required-checks manifest — clearable only through an explicit, reasoned `- Narrowing:` hatch.
+Plan Files blocks that touch a budgeted surface must now also list the matching budget fixture
+(`scripts/budget-fixture-check.mjs`), a new `contract-staleness-check.mjs` preflight warns when
+an installed plugin cache predates the repo's evidence-contract version, and
+`scripts/authored-claims-check.mjs` flags unverified line/count claims in specs, plans, and
+reports. All four are wired into planning, execution, and `/devcycle:cycle`'s pre-confirmation
+checks, with `references/evidence.md` as the one contract they cite.
 
-- docs(readme): merge the fuller pipeline story — parallelized subagents, on-device UI verification via claude-in-chrome, GitHub reconcile, and the doctor/learn loop — into the README opening
-- docs(plugin): broaden the plugin.json description to match the README opening
-- docs(case-studies): record a dated matched-cohort checkpoint — doctor's `At a glance` bar (n≥3 across two adjacent in-band versions) is not yet cleared, so no payoff number is published and the README makes no unearned value-prop claim
+**Maintain engine hardening (#251).** Finding selection now ranks by severity/confidence/passes
+before applying the report cap, so a critical finding can no longer be crowded out by low ones.
+The review panel threads a per-lens `costByLens` envelope through so a maintenance pass can
+produce its cost receipt, and three prose contracts (dispatch-ceiling scope, cost-rollup shape,
+audit-report doc-tracking) are reconciled against the code that implements them.
+
+**Case-study checkpoint (#250).** A live `/devcycle:doctor` run over the full devcycle-tagged
+corpus found the matched-cohort bar (n≥3 across two adjacent in-band versions) still uncleared,
+so this records a dated checkpoint — current cohort sizes and what's still missing — instead of
+publishing a payoff number the data doesn't support yet.
+
+**Self-description refresh (#248).** The README opening and `plugin.json` description now name
+parallelized subagent execution, on-device UI verification via claude-in-chrome, GitHub
+reconcile, and the doctor/learn loop consistently, wherever devcycle is first encountered.
 
 ## 0.18.2 — 2026-09-03
 
