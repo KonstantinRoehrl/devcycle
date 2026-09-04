@@ -101,7 +101,8 @@ async function claudeStructured({ prompt, tools, schema, model, cwd, permissionM
     try {
       const envelope = JSON.parse(res.stdout);
       if (!envelope.is_error && envelope.structured_output !== undefined) {
-        return { ok: true, value: envelope.structured_output };
+        const cost = typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd : null;
+        return { ok: true, value: envelope.structured_output, cost };
       }
       if (attempt === attempts) {
         return { ok: false, error: `${errors.agent} error: ${envelope.result ?? res.stderr}`.slice(0, errors.cap) };

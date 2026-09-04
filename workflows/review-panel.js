@@ -19,8 +19,10 @@
 //     strengths: [{ file, line: integer|null, claim, measuredAgainst, lens }],
 //                           // unranked, unverified — never mixed into findings
 //     notes: string[],      // coverage reductions and lens failures, verbatim
-//     summary: string }     // opens with a COVERAGE WARNING when an input was truncated;
+//     summary: string,      // opens with a COVERAGE WARNING when an input was truncated;
 //                           // strengths, when any, are appended as their own section
+//     costByLens: [{ lens, cost }] }  // per-lens $ rollup (§M7); one entry per distinct
+//                           // lens plus a trailing "panel-overhead" entry (verify + reconcile)
 // The finding shape is owned by references/findings.md; keep the two in step.
 //
 // Stages: 1) read-only lens reviewers in parallel — the caller's lenses when
@@ -400,16 +402,16 @@ async function runClaudeLens(lens, ctx, model) {
     schema: FINDINGS_SCHEMA,
     model,
   });
-  if (!res.ok) return { lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" failed: ${res.error}` };
+  if (!res.ok) return { lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" failed: ${res.error}`, cost: res.cost ?? null };
   const value = res.value;
   if (!value || typeof value !== "object" || !Array.isArray(value.findings)) {
-    return { lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" returned a malformed envelope; treated as no findings` };
+    return { lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" returned a malformed envelope; treated as no findings`, cost: res.cost ?? null };
   }
   const findings = value.findings.filter(hasFileAndClaim).map((f) => normalizeFinding(f, lens.key));
   const strengths = (Array.isArray(value.strengths) ? value.strengths : [])
     .filter(hasFileAndClaim)
     .map((s) => normalizeStrength(s, lens.key));
-  return { lens: lens.key, findings, strengths, note: null };
+  return { lens: lens.key, findings, strengths, note: null, cost: res.cost ?? null };
 }
 
 // Cross-model lens via the codex CLI (read-only sandbox). Degrades gracefully:
@@ -432,11 +434,11 @@ async function runCrossModelLens(ctx) {
       "exec", "--sandbox", "read-only", "--skip-git-repo-check",
       "-o", outFile, prompt,
     ]);
-    if (res.spawnError) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex CLI not available" };
-    if (res.timedOut) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex timed out" };
+    if (res.spawnError) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex CLI not available", cost: null };
+    if (res.timedOut) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex timed out", cost: null };
     // Overflow is a transport failure like timedOut/spawnError (agent-cli run() SIGKILLs the
     // child and truncates the buffer): skip the lens rather than parse the truncated output.
-    if (res.overflow) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex output exceeded the buffer cap" };
+    if (res.overflow) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: codex output exceeded the buffer cap", cost: null };
     let message = "";
     try {
       message = readFileSync(outFile, "utf8");
@@ -444,12 +446,12 @@ async function runCrossModelLens(ctx) {
       message = res.stdout;
     }
     const jsonMatch = message.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: no JSON in codex output" };
+    if (!jsonMatch) return { lens: "cross-model", findings: [], note: "cross-model lens skipped: no JSON in codex output", cost: null };
     const parsed = JSON.parse(jsonMatch[0]);
     const findings = (parsed.findings ?? []).filter(hasFileAndClaim).map((f) => normalizeFinding(f, "cross-model"));
-    return { lens: "cross-model", findings, note: null };
+    return { lens: "cross-model", findings, note: null, cost: null };
   } catch (e) {
-    return { lens: "cross-model", findings: [], note: `cross-model lens skipped: ${String(e).slice(0, 200)}` };
+    return { lens: "cross-model", findings: [], note: `cross-model lens skipped: ${String(e).slice(0, 200)}`, cost: null };
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }
@@ -523,13 +525,19 @@ async function verifyFinding(finding, ctx, model, charter) {
   const res = await claudeStructured({ prompt, tools: verifierTools(finding), schema: VERIFY_SCHEMA, model });
   if (!res.ok) {
     // Contract: unverified findings are marked, never dropped.
-    return { ...finding, verified: false, verification: `verifier unavailable (${res.error}); finding retained unverified` };
+    return {
+      finding: { ...finding, verified: false, verification: `verifier unavailable (${res.error}); finding retained unverified` },
+      cost: 0,
+    };
   }
   const v = res.value ?? {};
   return {
-    ...finding,
-    verified: v.verified === true,
-    verification: String(v.verification ?? "").slice(0, 600) || "no verification detail returned",
+    finding: {
+      ...finding,
+      verified: v.verified === true,
+      verification: String(v.verification ?? "").slice(0, 600) || "no verification detail returned",
+    },
+    cost: res.cost ?? null,
   };
 }
 
@@ -576,6 +584,22 @@ const SUMMARY_SCHEMA = {
   required: ["summary"],
 };
 
+// Per-lens cost rollup (§M7). Stage-1 lens jobs carry a per-call cost (res.cost from
+// claudeStructured; null when the CLI omitted total_cost_usd, and for the codex cross-model
+// lens which has no claude envelope). Sum by lens.key; verify + reconcile are not per-lens, so
+// they fold into one panel-overhead entry. A zero-cost lens is still emitted so the run record
+// shows the lens ran.
+function aggregateLensCosts({ lensResults, verifyCost = 0, reconcileCost = 0 }) {
+  const byLens = new Map();
+  for (const r of lensResults) {
+    const lens = r.lens ?? "unknown";
+    byLens.set(lens, (byLens.get(lens) ?? 0) + (Number(r.cost) || 0));
+  }
+  const out = [...byLens.entries()].map(([lens, cost]) => ({ lens, cost }));
+  out.push({ lens: "panel-overhead", cost: (Number(verifyCost) || 0) + (Number(reconcileCost) || 0) });
+  return out;
+}
+
 function rankFindings(findings) {
   return [...findings].sort(
     (a, b) =>
@@ -601,9 +625,12 @@ function fallbackSummary(findings, notes) {
 
 async function reconcile(findings, notes, model) {
   if (findings.length === 0) {
-    return notes.length
-      ? `Review panel found no findings. Notes: ${notes.join("; ")}.`
-      : "Review panel found no findings.";
+    return {
+      text: notes.length
+        ? `Review panel found no findings. Notes: ${notes.join("; ")}.`
+        : "Review panel found no findings.",
+      cost: 0,
+    };
   }
   const prompt = [
     `You are the reconciler of a read-only review panel. Findings are already`,
@@ -617,7 +644,10 @@ async function reconcile(findings, notes, model) {
     JSON.stringify(findings, null, 2),
   ].join("\n");
   const res = await claudeStructured({ prompt, tools: "", schema: SUMMARY_SCHEMA, model });
-  return res.ok && res.value.summary ? res.value.summary : fallbackSummary(findings, notes);
+  return {
+    text: res.ok && res.value.summary ? res.value.summary : fallbackSummary(findings, notes),
+    cost: res.cost ?? 0,
+  };
 }
 
 // Build the stage-1 job descriptors: the spec lens (wantsSpec) runs once over the whole diff
@@ -759,12 +789,14 @@ async function main() {
   const distinct = dedupRaw(rawFindings);
   log(`stage 1→2: ${rawFindings.length} raw finding(s) → ${distinct.length} distinct to verify`);
   const charter = distinct.length ? loadRedTeamCharter() : null;
-  const verified = await mapLimit(distinct, VERIFY_CONCURRENCY, (f) =>
+  const verifyRaw = await mapLimit(distinct, VERIFY_CONCURRENCY, (f) =>
     runGuarded(
       () => verifyFinding(f, verifyCtx, model, charter),
-      (msg) => ({ ...f, verified: false, verification: `verifier crashed (${msg}); retained unverified` }),
+      (msg) => ({ finding: { ...f, verified: false, verification: `verifier crashed (${msg}); retained unverified` }, cost: 0 }),
     ),
   );
+  const verified = verifyRaw.map((v) => v.finding);
+  const verifyCost = verifyRaw.reduce((s, v) => s + (Number(v.cost) || 0), 0);
   // Render the merged-lens disclosure onto verification text (was mutated inside dedup before).
   for (const f of verified) {
     const others = (f.mergedLenses ?? []).filter((l) => l !== f.lens);
@@ -773,7 +805,7 @@ async function main() {
   log(`stage 2: ${verified.filter((f) => f.verified).length} verified`);
   const ranked = rankFindings(verified);
   const strengths = dedupStrengths(rawStrengths);
-  const summary = await reconcile(ranked, notes, model);
+  const rec = await reconcile(ranked, notes, model);
 
   // The reconciler is a model and may drop a note it was handed, so the coverage line is
   // prepended here instead: a panel that reviewed a sample must never read as a full pass.
@@ -785,10 +817,11 @@ async function main() {
     : "";
   const disclosed =
     (dropped.length
-      ? `COVERAGE WARNING: ${dropped.join("; ")}. This panel reviewed a sample, not the whole input.\n\n${summary}`
-      : summary) + strengthsSection;
+      ? `COVERAGE WARNING: ${dropped.join("; ")}. This panel reviewed a sample, not the whole input.\n\n${rec.text}`
+      : rec.text) + strengthsSection;
 
-  process.stdout.write(JSON.stringify({ findings: ranked, strengths, notes, summary: disclosed }) + "\n");
+  const costByLens = aggregateLensCosts({ lensResults, verifyCost, reconcileCost: rec.cost });
+  process.stdout.write(JSON.stringify({ findings: ranked, strengths, notes, summary: disclosed, costByLens }) + "\n");
 }
 
 if (require.main === module) {
@@ -798,5 +831,5 @@ if (require.main === module) {
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
   dedupRaw, dedupStrengths, rankFindings, truncate, chunkDiff, selectChunksByChurn, buildLensJobs, fallbackSummary, mapLimit, loadRedTeamCharter,
-  SEVERITIES, LENS_CONCURRENCY, verifierTools,
+  SEVERITIES, LENS_CONCURRENCY, verifierTools, aggregateLensCosts,
 };
