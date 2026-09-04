@@ -1,0 +1,14 @@
+# 
+- finding-kind: maintenance-finding
+- finding-id: restated-content:6c65dc70
+- culprit-kind: restated-content
+- severity: medium
+- confidence: verified
+- affected-files: references/config.md, playbooks/reviewing-code.md, playbooks/planning-waves.md, playbooks/maintaining-the-repo.md, commands/cycle.md
+- first-seen: 2026-09-04
+- last-seen: 2026-09-04
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

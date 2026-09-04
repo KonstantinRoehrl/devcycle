@@ -1,0 +1,14 @@
+# 
+- finding-kind: maintenance-finding
+- finding-id: runtime-defect:b2c5a841
+- culprit-kind: runtime-defect
+- severity: low
+- confidence: verified
+- affected-files: scripts/pricing.mjs, scripts/doctor.mjs
+- first-seen: 2026-09-04
+- last-seen: 2026-09-04
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

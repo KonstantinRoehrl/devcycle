@@ -110,7 +110,7 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { ok: 
       errors: { agent: "test agent", output: "test", cap: 100 },
     })
   );
-  assert.deepEqual(res, { ok: true, value: { ok: true } });
+  assert.deepEqual(res, { ok: true, value: { ok: true }, cost: null });
 
   const seen = JSON.parse(readFileSync(argvLog, "utf8"));
   assert.ok(seen.argv.includes("--tools=Read,Edit"), `--tools must be the equals form; got: ${seen.argv.join(" ")}`);
@@ -201,6 +201,23 @@ test("claudeStructured retries a timed-out agent and reports the timeout after t
   assert.equal(res.ok, false);
   assert.equal(res.error, "claude subagent timed out");
   assert.equal(readFileSync(tries, "utf8").length, 2, "a timeout is retried, and only the last attempt returns the error");
+});
+
+test("claudeStructured surfaces total_cost_usd from the envelope as cost", async () => {
+  const bin = makeFakeBin(
+    "claude",
+    `process.stdout.write(JSON.stringify({ is_error: false, structured_output: { ok: true }, total_cost_usd: 0.0123 }));`
+  );
+  const res = await withPath(isolatedPath([bin]), () =>
+    claudeStructured({
+      prompt: "p",
+      tools: "Read",
+      schema: { type: "object" },
+      attempts: 1,
+      errors: { agent: "a", output: "a", cap: 100 },
+    })
+  );
+  assert.deepEqual(res, { ok: true, value: { ok: true }, cost: 0.0123 });
 });
 
 test("makeLogger tags every line with its engine's name", () => {

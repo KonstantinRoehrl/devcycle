@@ -1,0 +1,14 @@
+# 
+- finding-kind: maintenance-finding
+- finding-id: unrecorded-duplication:38cef452
+- culprit-kind: unrecorded-duplication
+- severity: low
+- confidence: verified
+- affected-files: scripts/run-record.mjs, scripts/git-identity.mjs
+- first-seen: 2026-09-04
+- last-seen: 2026-09-04
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

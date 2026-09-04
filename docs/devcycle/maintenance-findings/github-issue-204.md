@@ -1,0 +1,14 @@
+# 
+- finding-kind: github-issue
+- finding-id: github-issue:204
+- issue: 204
+- severity: low
+- confidence: verified
+- affected-files: CONTRIBUTING.md, docs/known-issues.md
+- first-seen: 2026-09-04
+- last-seen: 2026-09-04
+- passes: 1
+- origin: github-issue #204
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

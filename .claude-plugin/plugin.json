@@ -1,7 +1,7 @@
 {
   "name": "devcycle",
-  "version": "0.18.2",
-  "description": "Opinionated pipeline from a feature, bug, or refactor description to a verified, publish-ready implementation: scoped interview, spec, wave-based plan, TDD subagent execution, branch review, on-device verification.",
+  "version": "0.19.0",
+  "description": "Opinionated pipeline from a feature, bug, or refactor description to a verified, publish-ready implementation: scoped interview, wave-based plan, parallelized subagent execution, cross-model branch review, on-device UI verification via claude-in-chrome, and GitHub reconcile — layered on the superpowers skill set, with a doctor/learn loop that benchmarks and improves the pipeline from session to session.",
   "author": {
     "name": "Konstantin Röhrl",
     "url": "https://github.com/KonstantinRoehrl"
@@ -32,7 +32,7 @@
       "type": "string",
       "title": "Doc-tracking policy",
       "default": "standard",
-      "description": "What devcycle attempts to commit of the specs, plans, lessons, promotion records and audit reports it writes (the repo's own .gitignore always wins, and a few artifacts sit outside the policy). One of: all-local (commit none of them), standard (commit lessons, promotion records and audit reports; keep specs + plans local), all-tracked (also commit specs + plans). Default: standard."
+      "description": "What devcycle attempts to commit of the specs, plans, lessons, promotion records and audit reports it writes (the repo's own .gitignore always wins, and a few artifacts sit outside the policy). One of: all-local (commit none of them), standard (commit lessons and promotion records; keep specs, plans and audit reports local), all-tracked (also commit specs + plans). Default: standard."
     },
     "implementerModel": {
       "type": "string",

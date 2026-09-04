@@ -17,6 +17,7 @@ docs/*
 !docs/comparisons/
 !docs/devcycle/
 !docs/audits/
+!docs/case-studies/
 !docs/design/
 !docs/decisions/
 !docs/configuration/

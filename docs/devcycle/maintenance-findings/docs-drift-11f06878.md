@@ -1,0 +1,14 @@
+# 
+- finding-kind: maintenance-finding
+- finding-id: docs-drift:11f06878
+- culprit-kind: docs-drift
+- severity: medium
+- confidence: verified
+- affected-files: references/config.md, CONTRIBUTING.md, tests/unit/golden-path.test.mjs
+- first-seen: 2026-09-04
+- last-seen: 2026-09-04
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

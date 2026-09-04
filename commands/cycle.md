@@ -31,6 +31,11 @@ not a side effect of the first stage transition: a cycle interrupted mid-scoping
 file at `stage: done` is reused — carry `configured:`, mint a fresh `run:` and `session` line, reset the rest, ask nothing; not
 a collision. At any other stage, surface the collision and ask — never overwrite it.
 
+While reading the plugin version, also run the evidence-contract staleness preflight: `node
+"${CLAUDE_PLUGIN_ROOT}/scripts/contract-staleness-check.mjs" --plugin-root "${CLAUDE_PLUGIN_ROOT}"
+--repo-root <the target repo root>`. It is advisory and never blocks — on a `stale` line, surface
+its reinstall warning to the user before triage; any other line proceeds silently.
+
 ## Triage the input
 
 Judge `$ARGUMENTS` on three axes, then confirm every verdict with the user in ONE
@@ -97,12 +102,16 @@ stage enum's single source of truth — `scripts/validate.mjs` reads its literal
    enough for planning to turn the reproduction into the fix task's failing test. How to fix it
    belongs to brainstorm, which takes the report as its context; if diagnosis overturns the
    confirmed scope, return to scoping.
-4. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified) with two notes on top.
+4. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified) with three notes on top.
    Ask in AskUserQuestion batches of 1–4 with concrete options plus Other, where upstream asks
    one question at a time. And gate upstream's "commit the design document to git" step per
    `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking: resolve
    `${user_config.docTrackingPolicy}` first, then `git check-ignore` the spec's path — write the
-   file and skip the commit unless both permit it. An approved spec transitions to planning below,
+   file and skip the commit unless both permit it. Before that commit gate, run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <spec-path>` — a blocking lint
+   that flags an unguarded `path.ext:line` reference or a bare count claim, cleared by a
+   `(verified: <cmd>)` or `(assumption)` marker on the same or an adjacent line (the same backstop
+   `planning-waves.md` runs on the plan). An approved spec transitions to planning below,
    never directly to upstream's writing-plans.
 5. **planning** — wave-based plan.
 6. **execution**.

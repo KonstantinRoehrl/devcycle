@@ -1,4 +1,4 @@
-# The binding 8-dispatch fan-out ceiling is structurally exceeded by the very engine maintain routes to
+# 
 - finding-kind: maintenance-finding
 - finding-id: budget-fiction:ffe18753
 - culprit-kind: budget-fiction
@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: playbooks/maintaining-the-repo.md, workflows/review-panel.js
 - first-seen: 2026-08-30
-- last-seen: 2026-08-30
-- passes: 1
+- last-seen: 2026-09-04
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

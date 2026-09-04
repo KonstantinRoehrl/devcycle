@@ -1,0 +1,14 @@
+# Verify authored claims against the live repo before shipping
+- promotion-type: enforcement-gap
+- cluster-signature: unverified-authored-claim|18 occurrences|session <redacted-session>
+- files-touched: scripts/lint-plan-code-blocks.mjs, README.md, DESIGN.md, CHANGELOG.md, docs/design/README.md
+- affected-files: scripts/lint-plan-code-blocks.mjs, README.md, DESIGN.md, CHANGELOG.md, docs/design/README.md
+- landed: 2026-09-03
+- commit: 
+- plugin-version: 0.18.2
+- sourced-from-memory: false
+- culprit-id: unverified-authored-claim
+- rung: r3
+- audience: repo-devs
+- verify: scripts/lint-plan-code-blocks.mjs
+- aliases: 

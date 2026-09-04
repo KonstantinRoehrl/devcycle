@@ -15,6 +15,7 @@ and the full inventory of everything the plugin ships.
 - [`platform-notes.md`](platform-notes.md) — platform verification notes and the §10.D gate.
 - [`routing.md`](routing.md) — which command answers which intent, and what each may do before your first confirmation.
 - [`known-issues.md`](known-issues.md) — confirmed open defects in devcycle's own engines, each with a located cause.
+- [`case-studies/`](case-studies/) — devcycle's own before/after payoff, measured from its session corpus. Currently a dated checkpoint: doctor's matched-cohort bar is not yet cleared, so no payoff number is published.
 
 ## Commands
 
@@ -41,7 +42,7 @@ directly.
 | Playbook | What it does |
 | --- | --- |
 | [`scoping-the-request`](playbooks/scoping-the-request/README.md) | The batched scope interview, with a hard stop before design begins. |
-| [`planning-waves`](playbooks/planning-waves/README.md) | Feasibility gate plus wave-structured planning. |
+| [`planning-waves`](playbooks/planning-waves/README.md) | Feasibility gate plus wave-structured planning, with self-review gates including budget-fixture and authored-claims checks. |
 | [`executing-waves`](playbooks/executing-waves/README.md) | Parallel subagent execution with green gate, ledger, and commit discipline. |
 | [`reviewing-code`](playbooks/reviewing-code/README.md) | The shared review engine: lens construction, engine selection, adversarial verification, dedup, and ranking; plus the opt-in write-back that files an audit run's findings onto an open PR. |
 | [`reviewing-the-branch`](playbooks/reviewing-the-branch/README.md) | The whole-branch review gate — spec-compliance layer and bounded rounds, over the shared review engine. |

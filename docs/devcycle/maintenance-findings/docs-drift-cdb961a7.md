@@ -1,0 +1,14 @@
+# 
+- finding-kind: maintenance-finding
+- finding-id: docs-drift:cdb961a7
+- culprit-kind: docs-drift
+- severity: low
+- confidence: suspected
+- affected-files: docs/README.md
+- first-seen: 2026-09-04
+- last-seen: 2026-09-04
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

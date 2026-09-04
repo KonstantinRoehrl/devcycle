@@ -90,6 +90,9 @@ file conflicts these invariants already preserve.)
    first, or they are invisible to diff, then `git diff -U10 HEAD -- <files>`. It returns the
    task-reviewer envelope `references/delegation.md` defines; the reviewer writes its verdict block to
    `.devcycle/findings/<task-id>-round-<n>.md` itself (the dispatch supplies the path and round n).
+   As part of evidence verification the reviewer runs
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <report-path>` on the
+   implementer's report, per `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims.
    The coordinator **confirms the findings file exists at the named path before logging `event=review-verdict`** —
    mirroring step 4. Missing or empty: ledger `event=review-verdict
    outcome=rejected (missing findings file)`, re-dispatch the reviewer, no verdict acted on and no

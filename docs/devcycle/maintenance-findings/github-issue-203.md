@@ -1,0 +1,14 @@
+# 
+- finding-kind: github-issue
+- finding-id: github-issue:203
+- issue: 203
+- severity: medium
+- confidence: verified
+- affected-files: docs/routing.md, playbooks/maintaining-the-repo.md
+- first-seen: 2026-09-04
+- last-seen: 2026-09-04
+- passes: 1
+- origin: github-issue #203
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

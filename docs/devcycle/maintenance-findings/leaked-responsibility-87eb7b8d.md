@@ -1,0 +1,14 @@
+# 
+- finding-kind: maintenance-finding
+- finding-id: leaked-responsibility:87eb7b8d
+- culprit-kind: leaked-responsibility
+- severity: low
+- confidence: verified
+- affected-files: agents/task-reviewer.md, agents/red-team-reviewer.md, playbooks/reviewing-code.md, references/evidence.md
+- first-seen: 2026-09-04
+- last-seen: 2026-09-04
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

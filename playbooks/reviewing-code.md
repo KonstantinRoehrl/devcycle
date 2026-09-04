@@ -217,13 +217,10 @@ dependency explicitly and closes with a **suggested sequencing** line ordering t
 findings; this supplements the severity/impact/complexity ranking in `findings.md`'s Ordering, it
 does not replace it.
 
-Write `docs/audits/YYYY-MM-DD-<topic>.md` and commit it scoped per
-`${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit":
-`git add docs/audits/… && git commit -- docs/audits/…`. The `git add` is not optional — a pathspec
-naming a path git does not know yet aborts the commit. That commit is gated per
-`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking: resolve
-`${user_config.docTrackingPolicy}` first, then `git check-ignore` the path — write the file and
-skip the commit unless both permit it.
+Write `docs/audits/YYYY-MM-DD-<topic>.md` and **do not commit it**: the audit report is a local
+per-run snapshot at every policy depth (`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking,
+audit-report row = local across `all-local`/`standard`/`all-tracked`). Writing the file is the whole
+of this step; the committed durable artifact is the maintenance-findings store, not this snapshot.
 
 Branch discipline follows `${CLAUDE_PLUGIN_ROOT}/references/branch.md`. **In-cycle** (a
 `.devcycle/state.md` exists and this cycle owns it): follow it in full including the `branch:`-line
