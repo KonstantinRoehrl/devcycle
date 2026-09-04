@@ -4,6 +4,7 @@
 
 - docs(readme): merge the fuller pipeline story — parallelized subagents, on-device UI verification via claude-in-chrome, GitHub reconcile, and the doctor/learn loop — into the README opening
 - docs(plugin): broaden the plugin.json description to match the README opening
+- docs(case-studies): record a dated matched-cohort checkpoint — doctor's `At a glance` bar (n≥3 across two adjacent in-band versions) is not yet cleared, so no payoff number is published and the README makes no unearned value-prop claim
 
 ## 0.18.2 — 2026-09-03
 

@@ -15,6 +15,7 @@ and the full inventory of everything the plugin ships.
 - [`platform-notes.md`](platform-notes.md) — platform verification notes and the §10.D gate.
 - [`routing.md`](routing.md) — which command answers which intent, and what each may do before your first confirmation.
 - [`known-issues.md`](known-issues.md) — confirmed open defects in devcycle's own engines, each with a located cause.
+- [`case-studies/`](case-studies/) — devcycle's own before/after payoff, measured from its session corpus. Currently a dated checkpoint: doctor's matched-cohort bar is not yet cleared, so no payoff number is published.
 
 ## Commands
 
