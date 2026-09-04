@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- docs(readme): merge the fuller pipeline story — parallelized subagents, on-device UI verification via claude-in-chrome, GitHub reconcile, and the doctor/learn loop — into the README opening
+- docs(plugin): broaden the plugin.json description to match the README opening
+
 ## 0.18.2 — 2026-09-03
 
 - perf(review-panel): cap stage-1 fan-out at a churn-ranked chunk ceiling, dedup before verify, tier verifier tools, and trim per-run token cost (F1–F7)
