@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.19.0 — 2026-09-04
+
+- feat(evidence-contract): harden the evidence-capture & verification contract (#143, #144, #150, #151, #230, #231, #232, #238)
+
 ## Unreleased
 
 - docs(readme): merge the fuller pipeline story — parallelized subagents, on-device UI verification via claude-in-chrome, GitHub reconcile, and the doctor/learn loop — into the README opening
