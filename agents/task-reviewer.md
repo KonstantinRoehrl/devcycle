@@ -54,6 +54,8 @@ including its instruction to produce the diff yourself.
    is a report you cannot verify, and a report whose named path does not
    exist is a missing file, not a formatting slip.
    - Reject a report that states a load-bearing claim about source state as bare fact with no backing command and no assumption label (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims).
+   - Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <report>` and reject on a non-zero exit whose flagged claims carry no `(verified: <cmd>)` or `(assumption)` marker.
+   - Judge any `- Narrowing:` declaration's reason per `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Reviewer verdicts.
    - For a `red-green` task, apply `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Reviewer verdicts' discriminating-failure condition to the red/before output.
 
 ## Reviewer hygiene

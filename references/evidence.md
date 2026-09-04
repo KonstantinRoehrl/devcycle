@@ -1,5 +1,7 @@
 # Evidence — classes, the file-backed contract, report and verdict shapes
 
+<!-- evidence-contract-version: 1 -->
+
 The single owner of how devcycle proves a task did what it claims. A playbook, command,
 or agent that needs any of this names this file and does not restate it.
 
@@ -41,6 +43,12 @@ cause) in exactly one of two forms:
 It is never stated as bare fact. `findings.md`'s
 `Confidence: verified | suspected` field is this contract's instance on the review surface; a
 finding is the same discipline said in that file's own shape.
+
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <file>` mechanizes the
+line-reference and count-claim subset of this rule: it exits 0 when clean and 1 on an unverified
+line-reference or count claim, and a flagged claim clears by carrying a `(verified: <cmd>)` or
+`(assumption)` marker on its own or an immediately adjacent line. Superlative and uniqueness
+claims are the reviewer's judgment, not linted.
 
 ## Preloading a class into a brief
 
@@ -86,6 +94,19 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   green whole — the whole-gate `-before.txt` legitimately exits 0; capture the honest
   subset red as a third file, `.devcycle/evidence/<task-id>-red.txt`, running just the
   subset command, before any implementation code is written.
+- A capture legitimately narrowed away from the whole gate — e.g. a concurrent-wave whole-suite
+  red caused by a sibling's uncommitted edit rather than the task under review — declares that
+  narrowing with a `- Narrowing: <selector/scope> — <reason>` report line. A valid declaration
+  clears `evidence-completeness-check.mjs`'s narrow-selector guard (its reason is echoed on
+  stdout); the reviewer then judges whether the reason is legitimate (§ Reviewer verdicts). A
+  declaration with no `— <reason>` (the em-dash before the reason) is a hard error —
+  `malformed narrowing declaration (needs "<selector/scope> — <reason>")` — matching the
+  blast-radius-override grammar. Silently narrowing without the declaration is a defect.
+- A repo may own a required-checks manifest at `tests/fixtures/required-gate-checks.json`: a JSON
+  array of substrings that every whole-gate `cmd:` must contain, enforced by
+  `evidence-completeness-check.mjs` (overridable via `--required-checks <path>`). This is how a
+  required check (e.g. `redaction-check.mjs`) cannot be truncated out of the gate. The manifest is
+  absent by default and an absent manifest is a no-op, keeping the plugin repo-agnostic.
 - **Scope every capture to the task's own `**Files:**` list**, as a pathspec — `git diff -- <the
   task's files>`, never a bare `git diff`. Concurrent implementers share one checkout, and wave
   formation guarantees no two of them touch the same file, so a file-scoped capture sees exactly
@@ -111,6 +132,7 @@ an inlined evidence tail.
 - Tail (after, last <N> lines):
   <N lines>
 - Deviations: <list, or none>
+- Narrowing: <selector/scope> — <reason>, or omit
 - Claims: every prose claim about source state carries its backing command, or is labeled an assumption (per § Authored claims); none stated as bare fact
 - On-device items: <list, or none>
 ```
@@ -142,6 +164,12 @@ report. Reject when:
   actual pass/fail counts (the "clean 20/20; change 6/20" shape), and the #167 foreign-change check
   ruled out concurrent-sibling pollution. The reviewer reads that file rather than trusting the
   claim.
+- a `- Narrowing:` declaration's reason does not hold up: accept a legitimate concurrent-wave
+  narrowing (a sibling's uncommitted edit reddening the whole suite), reject a reason that is
+  lazy partial coverage dressed up as narrowing.
+- the report fails `node "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <report>`
+  (a non-zero exit) and any flagged claim carries neither a `(verified: <cmd>)` nor an
+  `(assumption)` marker.
 
 A reviewer returns its verdict in this shape:
 

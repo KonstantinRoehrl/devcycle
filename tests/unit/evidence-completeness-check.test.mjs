@@ -14,8 +14,8 @@ function makeReport(content) {
   return { dir, file };
 }
 
-function run(reportPath) {
-  return spawnSync(process.execPath, [SCRIPT, reportPath], { encoding: "utf8" });
+function run(reportPath, extraArgs = []) {
+  return spawnSync(process.execPath, [SCRIPT, reportPath, ...extraArgs], { encoding: "utf8" });
 }
 
 // Node --test green summary block, assembled from fragments (never a literal the redaction check flags).
@@ -53,7 +53,7 @@ test("a report with no Evidence line fails naming that", () => {
   try {
     const res = run(file);
     assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
-    assert.match(res.stderr, /no evidence line found/i);
+    assert.match(res.stderr, /no .*Evidence.* line found/i);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -99,8 +99,11 @@ test("a cmd naming a single .test.mjs file as a positional arg fails as a narrow
 });
 
 test("a cmd carrying a --grep flag fails as a narrow selector", () => {
+  // No glob token here: a cmd that also runs a broad glob is now exempted by the
+  // broad-run guard (hasBroadTestRun) even with a --grep flag present, so this fixture
+  // stays narrow on both signals to keep discriminating the --grep-flag check itself.
   const { dir, file } = makeReport(
-    "- Evidence: red-green | cmd: node --test --grep \"a session id\" tests/unit/*.test.mjs\n"
+    "- Evidence: red-green | cmd: node --test --grep \"a session id\" tests/unit/foo.test.mjs\n"
   );
   try {
     const res = run(file);
@@ -286,8 +289,11 @@ test("rejects captures whose header is identical but narrower than the declared 
 });
 
 test("a convention report with no runner summary still passes (class-gated check a)", () => {
+  // The cmd also runs the default required-gate-checks.json entries (validate.mjs,
+  // redaction-check.mjs) alongside the grep this test actually demonstrates, so it
+  // satisfies the required-checks manifest gate without changing what check (a) covers.
   const body =
-    `- Evidence: convention (grep -q banned agents/implementer.md) | cmd: grep -q banned agents/implementer.md\n` +
+    `- Evidence: convention (grep -q banned agents/implementer.md) | cmd: grep -q banned agents/implementer.md && node scripts/validate.mjs && node scripts/redaction-check.mjs\n` +
     `- Before: before.txt (exit 0)\n` +
     `- After: after.txt (exit 0)\n`;
   const { dir, file } = makeReportWithEvidence(body, "banned\n");
@@ -330,6 +336,478 @@ test("a red-green report whose Before evidence file is missing fails naming the 
     const res = run(file);
     assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
     assert.match(res.stderr, /before-evidence file not found: before\.txt/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Tolerant parsing: backticks around the class/cmd/paths and prose inside the exit
+// parens are cosmetic report-authoring variation, not a different command or a missing
+// status, so the checker resolves them the same as their plain forms. ---
+
+test("backtick-wrapped class, cmd, and Before path, plus prose inside the After exit parens, all resolve to a clean pass", () => {
+  const cmd = "node scripts/validate.mjs && node --test tests/unit/*.test.mjs";
+  const body =
+    "- Evidence: `red-green` | cmd: `" + cmd + "`\n" +
+    "- Before: `before.txt` (exit 1)\n" +
+    "- After: after.txt (exit 0, whole gate green)\n";
+  const { dir, file } = makeReport(body);
+  const header = `# devcycle-cmd: ${cmd}\n`;
+  writeFileSync(join(dir, "before.txt"), header + "before output\n", "utf8");
+  writeFileSync(join(dir, "after.txt"), header + NODE_SUMMARY + "\n", "utf8");
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stdout: ${res.stdout}\nstderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an (exit <n>, ...) status carrying trailing prose inside the parens is tolerated", () => {
+  // A class that is neither red-green/green-green nor convention isolates the
+  // unconditional exit-status check from the is-test-class and required-checks blocks.
+  const body =
+    "- Evidence: manual-check | cmd: true\n" +
+    "- Before: before.txt (exit 1, expected failure)\n" +
+    "- After: after.txt (exit 0, whole gate green)\n";
+  const { dir, file } = makeReport(body);
+  writeFileSync(join(dir, "before.txt"), "output\n", "utf8");
+  writeFileSync(join(dir, "after.txt"), "output\n", "utf8");
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stdout: ${res.stdout}\nstderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a compound cmd that also runs the whole suite via a bare test directory is not flagged narrow, even though a single test file also appears", () => {
+  const cmd = "node --test tests/unit/foo.test.mjs && node --test tests/unit/";
+  const body = `- Evidence: green-green (behavior-preserving) | cmd: ${cmd}\n- Before: before.txt (exit 0)\n- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, NODE_SUMMARY);
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stdout: ${res.stdout}\nstderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- The narrowing escape hatch: a declared "<selector/scope> — <reason>" is accepted
+// instead of blind-rejected; a reasonless declaration is a hard error. ---
+
+test("a narrow selector with a valid Narrowing declaration passes and echoes the reason", () => {
+  const cmd = "node --test tests/unit/foo.test.mjs";
+  const body =
+    `- Evidence: red-green | cmd: ${cmd}\n` +
+    `- Before: before.txt (exit 1)\n` +
+    `- After: after.txt (exit 0)\n` +
+    `- Narrowing: tests/unit/foo.test.mjs — concurrent wave; whole suite red from sibling edits\n`;
+  const { dir, file } = makeReportWithEvidence(body, NODE_SUMMARY);
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stdout: ${res.stdout}\nstderr: ${res.stderr}`);
+    assert.match(res.stdout, /narrowing declared.*concurrent wave; whole suite red from sibling edits/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a narrow selector with no Narrowing declaration still fails (unchanged behavior)", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: node --test tests/unit/foo.test.mjs\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a reasonless Narrowing declaration (no em-dash) is a hard error", () => {
+  const cmd = "node --test tests/unit/foo.test.mjs";
+  const body =
+    `- Evidence: red-green | cmd: ${cmd}\n` +
+    `- Before: before.txt (exit 1)\n` +
+    `- After: after.txt (exit 0)\n` +
+    `- Narrowing: tests/unit/foo.test.mjs\n`;
+  const { dir, file } = makeReportWithEvidence(body, NODE_SUMMARY);
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /malformed narrowing declaration/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Required-checks manifest + staleness-aware header error. ---
+
+test("a convention cmd missing a required gate check fails naming it (default manifest)", () => {
+  const body =
+    `- Evidence: convention (repo gate) | cmd: node scripts/validate.mjs\n` +
+    `- Before: before.txt (exit 0)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, "ok\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /omits required gate check "redaction-check\.mjs"/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a convention cmd carrying every required gate check passes the manifest gate (default manifest)", () => {
+  const body =
+    `- Evidence: convention (repo gate) | cmd: node scripts/validate.mjs && node scripts/redaction-check.mjs\n` +
+    `- Before: before.txt (exit 0)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, "ok\n");
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--required-checks pointing at a custom manifest with a missing entry fails naming it", () => {
+  const body =
+    `- Evidence: convention (repo gate) | cmd: node scripts/validate.mjs\n` +
+    `- Before: before.txt (exit 0)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, "ok\n");
+  const manifest = join(dir, "custom-required-checks.json");
+  writeFileSync(manifest, JSON.stringify(["duplication-check.mjs"]), "utf8");
+  try {
+    const res = run(file, ["--required-checks", manifest]);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /omits required gate check "duplication-check\.mjs"/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--required-checks pointing at a nonexistent manifest is a no-op", () => {
+  const body =
+    `- Evidence: convention (repo gate) | cmd: node scripts/validate.mjs\n` +
+    `- Before: before.txt (exit 0)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, "ok\n");
+  try {
+    const res = run(file, ["--required-checks", join(dir, "does-not-exist.json")]);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a missing '# devcycle-cmd:' header on a test-class report names the contract version and tells the author to reinstall", () => {
+  const body =
+    `- Evidence: green-green (behavior-preserving) | cmd: npm test\n` +
+    `- Before: before.txt (exit 0)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReport(body);
+  writeFileSync(join(dir, "before.txt"), "PASS\nTests: 1 passed\n", "utf8");
+  writeFileSync(join(dir, "after.txt"), "PASS\nTests: 1 passed\n", "utf8");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /contract version 1/);
+    assert.match(res.stderr, /reinstall/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Defect A: narrow-selector detection is invocation-aware. The heuristic is applied
+// only to the actual test-runner sub-command(s), not to every whitespace token in the line. ---
+
+test("a convention cmd whose non-test sub-command carries an -t flag (ripgrep file-type) is not flagged narrow", () => {
+  // `-t` is ripgrep's file-type flag, not a test-runner selector; `rg …` is not a
+  // test-runner invocation, so its flags must not read as test selectors.
+  const cmd = "rg -t md banned playbooks/ && node scripts/validate.mjs && node scripts/redaction-check.mjs";
+  const body =
+    `- Evidence: convention (rg -t md banned playbooks/) | cmd: ${cmd}\n` +
+    `- Before: before.txt (exit 0)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, "banned\n");
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a name-filter selector on the test-runner invocation is narrow even when a glob is also present", () => {
+  const { dir, file } = makeReport(
+    "- Evidence: red-green | cmd: node --test --grep \"foo\" tests/unit/*.test.mjs\n"
+  );
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a non-test sub-command's tests/ token does not mask a genuinely narrow single-file test run", () => {
+  const { dir, file } = makeReport(
+    "- Evidence: red-green | cmd: rm -rf tests/tmp && node --test tests/unit/one.test.mjs\n"
+  );
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a --require value that looks like a test dir does not reclassify a single-file run as broad", () => {
+  const { dir, file } = makeReport(
+    "- Evidence: red-green | cmd: node --test tests/unit/foo.test.mjs --require ./tests/setup.mjs\n"
+  );
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a genuine whole-suite node --test glob run is not flagged narrow", () => {
+  const cmd = "node --test tests/unit/*.test.mjs";
+  const body =
+    `- Evidence: red-green | cmd: ${cmd}\n- Before: before.txt (exit 1)\n- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, NODE_SUMMARY);
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- branch-fix-4-1 Defect 1: a test runner invoked behind a launcher/wrapper prefix
+// (python -m, poetry run, npx, time, an env assignment) is still a test-runner invocation,
+// so its narrow selector/single-file capture must be flagged. ---
+
+test("a python -m pytest -k selector is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: python -m pytest -k foo\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a poetry run pytest single-file positional is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: poetry run pytest tests/unit/foo_test.py\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an npx vitest -t selector is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: npx vitest -t foo\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an npx jest single-file positional is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: npx jest tests/unit/foo.test.js\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a time-prefixed pytest -k selector is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: time pytest -k foo\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an env-assignment-prefixed pytest -k selector is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: FOO=1 pytest -k foo\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- branch-fix-4-1 Defect 2: an equals-form selector flag is recognized like the
+// space-separated form. ---
+
+test("an equals-form --grep=foo selector is flagged narrow even alongside a glob", () => {
+  const { dir, file } = makeReport(
+    "- Evidence: red-green | cmd: node --test --grep=foo tests/unit/*.test.mjs\n"
+  );
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- branch-fix-4-1 Defect 3: a selector flag as the final token (its value elided in the
+// report) is still a selector signal. ---
+
+test("a trailing bare -k selector flag as the last token is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: pytest -k\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- branch-fix-4-1: the launcher/wrapper strip must NOT turn a non-test command into a
+// test runner — rg -t md stays a convention grep, never read as a test selector. ---
+
+test("branch-fix-4-1: rg -t md is still not read as a test selector after the launcher-strip fix", () => {
+  // A convention gate whose only test-runner-looking token is ripgrep's -t file-type flag.
+  // It satisfies the required-checks manifest, so the only way it can fail is a wrong
+  // narrow-selector flag — assert that specific error text never appears.
+  const cmd = "rg -t md banned playbooks/ && node scripts/validate.mjs && node scripts/redaction-check.mjs";
+  const body =
+    `- Evidence: convention (rg -t md banned playbooks/) | cmd: ${cmd}\n` +
+    `- Before: before.txt (exit 0)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, "banned\n");
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.doesNotMatch(res.stderr, /narrow selector|test-name filter/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("branch-fix-4-1: a whole jest suite via npx with no selector or positional is broad", () => {
+  const cmd = "npx jest";
+  const body =
+    `- Evidence: red-green | cmd: ${cmd}\n- Before: before.txt (exit 1)\n- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, ["ℹ pass 3", "ℹ fail 0"].join("\n"));
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Defect B: convention captures are verified against their # devcycle-cmd: header,
+// so a truncated capture cannot hide behind a full declared cmd:. ---
+
+test("a convention report whose capture headers omit a required check fails naming it, even though the declared cmd: carries it", () => {
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      "- Evidence: convention (repo gate) | cmd: node scripts/validate.mjs && node scripts/redaction-check.mjs",
+      "- Before: before.txt (exit 0)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  const truncated = "# devcycle-cmd: node scripts/validate.mjs\n";
+  writeFileSync(join(dir, "before.txt"), truncated + "ok\n");
+  writeFileSync(join(dir, "after.txt"), truncated + "ok\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /omits required gate check "redaction-check\.mjs"/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a convention report whose capture headers match the declared full gate passes", () => {
+  const cmd = "node scripts/validate.mjs && node scripts/redaction-check.mjs";
+  const body =
+    `- Evidence: convention (repo gate) | cmd: ${cmd}\n` +
+    `- Before: before.txt (exit 0)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, "ok\n");
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a convention report whose before/after capture headers differ from each other fails", () => {
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      "- Evidence: convention (repo gate) | cmd: node scripts/validate.mjs && node scripts/redaction-check.mjs",
+      "- Before: before.txt (exit 0)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  writeFileSync(join(dir, "before.txt"), "# devcycle-cmd: node scripts/validate.mjs && node scripts/redaction-check.mjs\nok\n");
+  writeFileSync(join(dir, "after.txt"), "# devcycle-cmd: node scripts/validate.mjs\nok\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr + res.stdout, /non-identical command|command.*mismatch/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Defect C: a present `- Evidence:` line missing its `| cmd:` suffix gets its own
+// message, distinct from a wholly absent Evidence line. ---
+
+test("an Evidence line present but missing the | cmd: suffix reports the missing suffix, not a missing line", () => {
+  const { dir, file } = makeReport("## Task report\n- Evidence: red-green\n- Files changed: a.mjs\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /present but missing the .*cmd.*suffix/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a report with no Evidence line at all reports the absent line, distinct from the missing-suffix case", () => {
+  const { dir, file } = makeReport("## Task report\n- Files changed: a.mjs\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /no .*Evidence.* line found/i);
+    assert.doesNotMatch(res.stderr, /missing the .*cmd.*suffix/i);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
