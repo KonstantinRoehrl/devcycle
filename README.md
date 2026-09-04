@@ -1,18 +1,27 @@
 # devcycle
 
 A Claude Code plugin that turns a one-line feature, bug, or refactor description into a
-verified, reviewed implementation on its own git branch. You type one command; devcycle
-interviews you about scope, designs a spec with you, plans the work as parallel tasks,
-implements them test-first with subagents, reviews the finished branch against the spec, and —
-when changes are visible on screen — walks you through checking them on the running app.
+verified, reviewed implementation on its own git branch. You type one command; devcycle asks
+clarifying questions to scope and brainstorm the work, designs a spec with you, plans it as
+parallel tasks, and implements them test-first with subagents running in parallel. It reviews
+the finished branch against the spec and — when the change is visible on screen — drives the
+running app through claude-in-chrome to auto-check every item a browser can confirm
+structurally, then walks you through the rest, since how it actually looks and feels is your
+verdict, not a script's.
+
+Beyond building the change, devcycle closes the loop around a pull request: it reads a PR's
+review comments and reconciles them into the right fixes and consented replies. And it
+benchmarks its own runs and learns from past sessions — so the pipeline gets better the more
+you use it.
 
 Policy — what it may do with git, which models it runs, how deep reviews go — is
 configuration, not something you re-explain each session, and a single `profile` preset sets
-the cost-versus-rigor level for all of it at once. It builds on the [superpowers]
-plugin (a required dependency) instead of replacing it: brainstorming and debugging are
-upstream's, unmodified, and devcycle adds the stages, gates, and mechanics around them.
-Planning and execution ship as compact devcycle-native engines that overlay their upstream
-counterparts only at the `thorough` profile.
+the cost-versus-rigor level for all of it at once. devcycle is built entirely on the
+[superpowers] plugin (a required dependency): superpowers is the toolkit, devcycle is the
+guide for using it as a repeatable pipeline. Brainstorming and debugging are upstream's,
+unmodified; devcycle adds the stages, gates, and mechanics around them, and ships compact
+native planning and execution engines that overlay their upstream counterparts only at the
+`thorough` profile.
 
 ## Where to start
 
