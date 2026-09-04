@@ -1,4 +1,4 @@
-# rankByTrending implements the ranking rule the playbook restates in prose, but nothing in production calls it
+# 
 - finding-kind: maintenance-finding
 - finding-id: unrecorded-duplication:c7c49da9
 - culprit-kind: unrecorded-duplication
@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: scripts/maintenance-findings.mjs, playbooks/maintaining-the-repo.md
 - first-seen: 2026-08-30
-- last-seen: 2026-08-30
-- passes: 1
+- last-seen: 2026-09-04
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

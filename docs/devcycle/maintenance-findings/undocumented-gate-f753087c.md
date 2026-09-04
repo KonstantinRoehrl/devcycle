@@ -1,4 +1,4 @@
-# CONTRIBUTING.md omits the line-budget gate and tests/fixtures/surface-budget.json appears in no contributor doc
+# 
 - finding-kind: maintenance-finding
 - finding-id: undocumented-gate:f753087c
 - culprit-kind: undocumented-gate
@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: CONTRIBUTING.md, scripts/validate.mjs, tests/fixtures/surface-budget.json
 - first-seen: 2026-08-25
-- last-seen: 2026-08-30
-- passes: 2
+- last-seen: 2026-09-04
+- passes: 3
 - origin: lens
 - verify: 
 - lifecycle: 

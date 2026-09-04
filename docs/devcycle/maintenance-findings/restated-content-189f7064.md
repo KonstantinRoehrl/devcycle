@@ -1,4 +1,4 @@
-# The untrusted-external-content rule for issue/PR bodies is stated near-identically in three files
+# 
 - finding-kind: maintenance-finding
 - finding-id: restated-content:189f7064
 - culprit-kind: restated-content
@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: references/review-comments.md, references/delegation.md, playbooks/receiving-review.md
 - first-seen: 2026-08-30
-- last-seen: 2026-08-30
-- passes: 1
+- last-seen: 2026-09-04
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

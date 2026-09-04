@@ -1,4 +1,4 @@
-# Two near-identical clauses in playbooks/receiving-review.md explain the comment-body contract twice
+# 
 - finding-kind: maintenance-finding
 - finding-id: restated-content:2bf2298c
 - culprit-kind: restated-content
@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: playbooks/receiving-review.md
 - first-seen: 2026-08-30
-- last-seen: 2026-08-30
-- passes: 1
+- last-seen: 2026-09-04
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

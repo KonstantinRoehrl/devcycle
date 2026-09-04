@@ -1,0 +1,14 @@
+# 
+- finding-kind: maintenance-finding
+- finding-id: measurement-rot:a953a25a
+- culprit-kind: measurement-rot
+- severity: medium
+- confidence: suspected
+- affected-files: scripts/pricing.mjs, scripts/doctor.mjs
+- first-seen: 2026-09-04
+- last-seen: 2026-09-04
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 
