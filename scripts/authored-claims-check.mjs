@@ -21,6 +21,12 @@ const MARKER_RE = /\((?:verified:[^)]*|assumption)\)/i;
 const FENCE_RE = /^\s*```/;
 const INLINE_CODE_RE = /`[^`]*`/g;
 const URL_RE = /https?:\/\/\S+/g;
+// The implementer-report template's evidence-tail field header — `- Tail (…, last <N> lines):`
+// (references/evidence.md § Implementer report shape). Its <N> is a structural descriptor of the
+// report's own tail field, not an authored claim about repo/source state (what this lint polices),
+// so it is blanked before matching like a code span. Deliberately narrowed to this field-label
+// shape — a bare count in report body prose still trips.
+const TAIL_FIELD_RE = /^\s*-\s*Tail\b.*?\blast\s+\d+\s+lines\b.*$/i;
 
 const rawLines = readFileSync(filePath, "utf8").split("\n");
 
@@ -35,7 +41,7 @@ const guardedLines = rawLines.map((line) => {
     return null; // the fence delimiter line itself carries no claims
   }
   if (inFence) return null;
-  return blank(blank(line, INLINE_CODE_RE), URL_RE);
+  return blank(blank(blank(line, INLINE_CODE_RE), URL_RE), TAIL_FIELD_RE);
 });
 
 function markerClears(lineIdx) {

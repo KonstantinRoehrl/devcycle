@@ -101,6 +101,20 @@ test("an ISO date is NOT flagged", () => {
   assert.equal(code, 0, out);
 });
 
+// --- Step 4: report-template structural field labels (not state claims) ---
+
+test("the canonical Tail field label with a bare N is NOT flagged", () => {
+  const { code, out } = run("- Tail (after, last 50 lines):\n");
+  assert.equal(code, 0, out);
+  assert.match(out, /ok/);
+});
+
+test("a genuine count claim in report body text is still flagged", () => {
+  const { code, out } = run("We touched 5 files during this refactor.\n");
+  assert.equal(code, 1, out);
+  assert.match(out, /unverified count claim "5 files"/);
+});
+
 // --- CLI shape ---
 
 test("a clean file exits 0 and prints ok", () => {
