@@ -593,6 +593,141 @@ test("a genuine whole-suite node --test glob run is not flagged narrow", () => {
   }
 });
 
+// --- branch-fix-4-1 Defect 1: a test runner invoked behind a launcher/wrapper prefix
+// (python -m, poetry run, npx, time, an env assignment) is still a test-runner invocation,
+// so its narrow selector/single-file capture must be flagged. ---
+
+test("a python -m pytest -k selector is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: python -m pytest -k foo\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a poetry run pytest single-file positional is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: poetry run pytest tests/unit/foo_test.py\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an npx vitest -t selector is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: npx vitest -t foo\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an npx jest single-file positional is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: npx jest tests/unit/foo.test.js\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a time-prefixed pytest -k selector is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: time pytest -k foo\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an env-assignment-prefixed pytest -k selector is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: FOO=1 pytest -k foo\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- branch-fix-4-1 Defect 2: an equals-form selector flag is recognized like the
+// space-separated form. ---
+
+test("an equals-form --grep=foo selector is flagged narrow even alongside a glob", () => {
+  const { dir, file } = makeReport(
+    "- Evidence: red-green | cmd: node --test --grep=foo tests/unit/*.test.mjs\n"
+  );
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- branch-fix-4-1 Defect 3: a selector flag as the final token (its value elided in the
+// report) is still a selector signal. ---
+
+test("a trailing bare -k selector flag as the last token is flagged narrow", () => {
+  const { dir, file } = makeReport("- Evidence: red-green | cmd: pytest -k\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- branch-fix-4-1: the launcher/wrapper strip must NOT turn a non-test command into a
+// test runner — rg -t md stays a convention grep, never read as a test selector. ---
+
+test("branch-fix-4-1: rg -t md is still not read as a test selector after the launcher-strip fix", () => {
+  // A convention gate whose only test-runner-looking token is ripgrep's -t file-type flag.
+  // It satisfies the required-checks manifest, so the only way it can fail is a wrong
+  // narrow-selector flag — assert that specific error text never appears.
+  const cmd = "rg -t md banned playbooks/ && node scripts/validate.mjs && node scripts/redaction-check.mjs";
+  const body =
+    `- Evidence: convention (rg -t md banned playbooks/) | cmd: ${cmd}\n` +
+    `- Before: before.txt (exit 0)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, "banned\n");
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.doesNotMatch(res.stderr, /narrow selector|test-name filter/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("branch-fix-4-1: a whole jest suite via npx with no selector or positional is broad", () => {
+  const cmd = "npx jest";
+  const body =
+    `- Evidence: red-green | cmd: ${cmd}\n- Before: before.txt (exit 1)\n- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, ["ℹ pass 3", "ℹ fail 0"].join("\n"));
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- Defect B: convention captures are verified against their # devcycle-cmd: header,
 // so a truncated capture cannot hide behind a full declared cmd:. ---
 

@@ -82,11 +82,61 @@ function splitSubcommands(cmdStr) {
 // its binary is a known test runner. Node without `--test` (e.g. `node scripts/validate.mjs`)
 // is a plain script, not a test runner.
 const TEST_RUNNER_BINS = new Set(["pytest", "py.test", "jest", "vitest", "mocha", "ava", "tap"]);
+
+// A runner is often invoked behind a launcher or wrapper prefix — `python -m pytest`,
+// `poetry run pytest`, `npx vitest`, `time pytest`, `FOO=1 pytest`. Strip that prefix from
+// the front so the command token underneath (whose basename decides) is identified. A prefix
+// that leaves a non-runner token with no `--test` is still not a test-runner invocation, so
+// `rg -t md …` (ripgrep) is never turned into one.
+const ENV_ASSIGN_RE = /^[A-Za-z_]\w*=/;
+const PKG_RUNNERS = new Set(["yarn", "pnpm", "bun"]);
+const PKG_RUN_SUBCMDS = new Set(["exec", "dlx", "run"]);
+const PY_RUN_MANAGERS = new Set(["poetry", "pdm", "pipenv", "rye"]);
+function stripLauncherPrefix(toks) {
+  let i = 0;
+  while (i < toks.length) {
+    const t = toks[i];
+    if (ENV_ASSIGN_RE.test(t)) { i++; continue; } // leading VAR=val assignments (repeatable)
+    if (t === "env") {
+      i++; // env + any following VAR=val assignments or `-u VAR`
+      while (i < toks.length) {
+        if (ENV_ASSIGN_RE.test(toks[i])) { i++; continue; }
+        if (toks[i] === "-u" && i + 1 < toks.length) { i += 2; continue; }
+        break;
+      }
+      continue;
+    }
+    if (t === "time") { i++; continue; }
+    if (t === "npx" || t === "bunx") {
+      i++; // skip the launcher and its own leading flags (e.g. `-y`)
+      while (i < toks.length && toks[i].startsWith("-")) i++;
+      continue;
+    }
+    if (PKG_RUNNERS.has(t)) {
+      i++;
+      if (i < toks.length && PKG_RUN_SUBCMDS.has(toks[i])) i++;
+      continue;
+    }
+    if (PY_RUN_MANAGERS.has(t)) {
+      if (i + 1 < toks.length && toks[i + 1] === "run") { i += 2; continue; }
+      break;
+    }
+    if (t === "python" || t === "python3") {
+      // `python -m pytest` — the module after `-m` is the command token.
+      if (i + 1 < toks.length && toks[i + 1] === "-m") i += 2;
+      break;
+    }
+    break;
+  }
+  return toks.slice(i);
+}
 function isTestRunnerInvocation(sub) {
   const toks = sub.split(/\s+/).filter(Boolean);
   if (toks.length === 0) return false;
   if (toks.includes("--test")) return true;
-  const bin = toks[0].split("/").pop();
+  const stripped = stripLauncherPrefix(toks);
+  if (stripped.length === 0) return false;
+  const bin = stripped[0].split("/").pop();
   return TEST_RUNNER_BINS.has(bin);
 }
 
@@ -136,10 +186,17 @@ function narrowTestFileToken(sub) {
 
 // A name-filter selector flag on a test-runner invocation makes it narrow regardless of a
 // glob — a `--grep`/`-t` etc. filters to name-matched tests, so it is a partial-gate capture.
+// A selector is recognized in every surface form: space-separated (`-k foo`), equals-form
+// (`--grep=foo`), and the attached short form (`-kfoo`). Every token is examined — a bare
+// selector flag as the final token, its value elided, is still a selector signal.
+const SHORT_SELECTOR_FLAGS = new Set(["-t", "-g", "-k"]);
 function narrowSelectorFlag(sub) {
-  const tokens = sub.split(/\s+/);
-  for (let i = 0; i < tokens.length - 1; i++) {
-    if (SELECTOR_FLAGS.has(tokens[i])) return tokens[i];
+  const tokens = sub.split(/\s+/).filter(Boolean);
+  for (const tok of tokens) {
+    if (SELECTOR_FLAGS.has(tok)) return tok; // space-separated or bare trailing form
+    const eq = tok.indexOf("=");
+    if (eq > 0 && SELECTOR_FLAGS.has(tok.slice(0, eq))) return tok.slice(0, eq); // equals-form
+    if (tok.length > 2 && SHORT_SELECTOR_FLAGS.has(tok.slice(0, 2))) return tok.slice(0, 2); // attached short form
   }
   return undefined;
 }
