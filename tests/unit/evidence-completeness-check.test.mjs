@@ -53,7 +53,7 @@ test("a report with no Evidence line fails naming that", () => {
   try {
     const res = run(file);
     assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
-    assert.match(res.stderr, /no evidence line found/i);
+    assert.match(res.stderr, /no .*Evidence.* line found/i);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -516,6 +516,163 @@ test("a missing '# devcycle-cmd:' header on a test-class report names the contra
     assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
     assert.match(res.stderr, /contract version 1/);
     assert.match(res.stderr, /reinstall/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Defect A: narrow-selector detection is invocation-aware. The heuristic is applied
+// only to the actual test-runner sub-command(s), not to every whitespace token in the line. ---
+
+test("a convention cmd whose non-test sub-command carries an -t flag (ripgrep file-type) is not flagged narrow", () => {
+  // `-t` is ripgrep's file-type flag, not a test-runner selector; `rg …` is not a
+  // test-runner invocation, so its flags must not read as test selectors.
+  const cmd = "rg -t md banned playbooks/ && node scripts/validate.mjs && node scripts/redaction-check.mjs";
+  const body =
+    `- Evidence: convention (rg -t md banned playbooks/) | cmd: ${cmd}\n` +
+    `- Before: before.txt (exit 0)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, "banned\n");
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a name-filter selector on the test-runner invocation is narrow even when a glob is also present", () => {
+  const { dir, file } = makeReport(
+    "- Evidence: red-green | cmd: node --test --grep \"foo\" tests/unit/*.test.mjs\n"
+  );
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a non-test sub-command's tests/ token does not mask a genuinely narrow single-file test run", () => {
+  const { dir, file } = makeReport(
+    "- Evidence: red-green | cmd: rm -rf tests/tmp && node --test tests/unit/one.test.mjs\n"
+  );
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a --require value that looks like a test dir does not reclassify a single-file run as broad", () => {
+  const { dir, file } = makeReport(
+    "- Evidence: red-green | cmd: node --test tests/unit/foo.test.mjs --require ./tests/setup.mjs\n"
+  );
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /narrow/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a genuine whole-suite node --test glob run is not flagged narrow", () => {
+  const cmd = "node --test tests/unit/*.test.mjs";
+  const body =
+    `- Evidence: red-green | cmd: ${cmd}\n- Before: before.txt (exit 1)\n- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, NODE_SUMMARY);
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Defect B: convention captures are verified against their # devcycle-cmd: header,
+// so a truncated capture cannot hide behind a full declared cmd:. ---
+
+test("a convention report whose capture headers omit a required check fails naming it, even though the declared cmd: carries it", () => {
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      "- Evidence: convention (repo gate) | cmd: node scripts/validate.mjs && node scripts/redaction-check.mjs",
+      "- Before: before.txt (exit 0)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  const truncated = "# devcycle-cmd: node scripts/validate.mjs\n";
+  writeFileSync(join(dir, "before.txt"), truncated + "ok\n");
+  writeFileSync(join(dir, "after.txt"), truncated + "ok\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /omits required gate check "redaction-check\.mjs"/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a convention report whose capture headers match the declared full gate passes", () => {
+  const cmd = "node scripts/validate.mjs && node scripts/redaction-check.mjs";
+  const body =
+    `- Evidence: convention (repo gate) | cmd: ${cmd}\n` +
+    `- Before: before.txt (exit 0)\n` +
+    `- After: after.txt (exit 0)\n`;
+  const { dir, file } = makeReportWithEvidence(body, "ok\n");
+  try {
+    const res = run(file);
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a convention report whose before/after capture headers differ from each other fails", () => {
+  const { dir, file } = makeReport(
+    [
+      "## Task report",
+      "- Evidence: convention (repo gate) | cmd: node scripts/validate.mjs && node scripts/redaction-check.mjs",
+      "- Before: before.txt (exit 0)",
+      "- After: after.txt (exit 0)",
+    ].join("\n"),
+  );
+  writeFileSync(join(dir, "before.txt"), "# devcycle-cmd: node scripts/validate.mjs && node scripts/redaction-check.mjs\nok\n");
+  writeFileSync(join(dir, "after.txt"), "# devcycle-cmd: node scripts/validate.mjs\nok\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr + res.stdout, /non-identical command|command.*mismatch/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Defect C: a present `- Evidence:` line missing its `| cmd:` suffix gets its own
+// message, distinct from a wholly absent Evidence line. ---
+
+test("an Evidence line present but missing the | cmd: suffix reports the missing suffix, not a missing line", () => {
+  const { dir, file } = makeReport("## Task report\n- Evidence: red-green\n- Files changed: a.mjs\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /present but missing the .*cmd.*suffix/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a report with no Evidence line at all reports the absent line, distinct from the missing-suffix case", () => {
+  const { dir, file } = makeReport("## Task report\n- Files changed: a.mjs\n");
+  try {
+    const res = run(file);
+    assert.notEqual(res.status, 0, `stdout: ${res.stdout}`);
+    assert.match(res.stderr, /no .*Evidence.* line found/i);
+    assert.doesNotMatch(res.stderr, /missing the .*cmd.*suffix/i);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
