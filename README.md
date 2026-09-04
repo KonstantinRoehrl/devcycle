@@ -153,7 +153,11 @@ plugin ships. Start there.
 - The evidence-and-verification contract's gates: planning runs `scripts/budget-fixture-check.mjs`
   and `scripts/authored-claims-check.mjs` in its self-review, and `/devcycle:cycle` runs
   `scripts/contract-staleness-check.mjs` as an advisory preflight that warns when a cached plugin's
-  contract predates the target repo's. The contract itself lives in
+  contract predates the target repo's. A host repo can declare its whole-gate checks in the
+  required-checks manifest `tests/fixtures/required-gate-checks.json` — a committed JSON array of
+  substrings every convention whole-gate command must contain, enforced by
+  `scripts/evidence-completeness-check.mjs` and a no-op when absent, keeping the plugin
+  repo-agnostic. The contract itself lives in
   [`references/evidence.md`](references/evidence.md).
 
 [superpowers]: https://github.com/obra/superpowers
