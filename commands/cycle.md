@@ -31,6 +31,11 @@ not a side effect of the first stage transition: a cycle interrupted mid-scoping
 file at `stage: done` is reused — carry `configured:`, mint a fresh `run:` and `session` line, reset the rest, ask nothing; not
 a collision. At any other stage, surface the collision and ask — never overwrite it.
 
+While reading the plugin version, also run the evidence-contract staleness preflight: `node
+"${CLAUDE_PLUGIN_ROOT}/scripts/contract-staleness-check.mjs" --plugin-root "${CLAUDE_PLUGIN_ROOT}"
+--repo-root <the target repo root>`. It is advisory and never blocks — on a `stale` line, surface
+its reinstall warning to the user before triage; any other line proceeds silently.
+
 ## Triage the input
 
 Judge `$ARGUMENTS` on three axes, then confirm every verdict with the user in ONE

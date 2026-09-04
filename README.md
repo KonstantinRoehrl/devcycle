@@ -150,5 +150,10 @@ plugin ships. Start there.
   profile from a local Claude Code session corpus, which is how the cost claims are kept honest
   rather than assumed; it reads each run's workload from records the `hooks/workload-sensor.mjs`
   commit-sensor writes on every commit, not from a single finish-stage step.
+- The evidence-and-verification contract's gates: planning runs `scripts/budget-fixture-check.mjs`
+  and `scripts/authored-claims-check.mjs` in its self-review, and `/devcycle:cycle` runs
+  `scripts/contract-staleness-check.mjs` as an advisory preflight that warns when a cached plugin's
+  contract predates the target repo's. The contract itself lives in
+  [`references/evidence.md`](references/evidence.md).
 
 [superpowers]: https://github.com/obra/superpowers

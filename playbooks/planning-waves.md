@@ -105,7 +105,10 @@ fixing what it finds inline as you go; no re-review pass.
 4. **Factual-claim accuracy:** every load-bearing plan-authored claim — file/section targets,
    locked "must show no changes" regions, verification greps, counts — was checked by running
    the proving command/grep and citing its result, or is marked an assumption; never stated as
-   bare fact (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims).
+   bare fact (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims). Its mechanized
+   backstop: run `node "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <plan-path>` —
+   a blocking lint that flags an unguarded `path.ext:line` reference or a bare count claim,
+   cleared by a `(verified: <cmd>)` or `(assumption)` marker on the same or an adjacent line.
 5. **No count-only enumeration:** never cite an enumeration by count alone ("all four guardrails");
    one that more than one task reproduces belongs in Global Constraints, verbatim in every brief.
 6. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
@@ -117,6 +120,7 @@ fixing what it finds inline as you go; no re-review pass.
 9. **Blast-radius completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/blast-radius-check.mjs" <plan-path>` — it hard-fails on any referencer (test or non-test) of a task's changed file that is in no Files block. Add each flagged file to the right task's Files block, or record an explicit override — a `- Blast-radius override: <changed-file> [→ <referencer>] — <reason>` line (em-dash before the reason; a reasonless override is a hard error), e.g. referenced only in a comment.
 10. **Content-coupling completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/content-coupling-check.mjs" <plan-path>` — it flags a same-wave task whose brief names a file another same-wave task edits (a coupling the wave-disjointness check cannot see), cleared by a dependency or a `- Content-coupling override: Task B → <file> (Task A) — <reason>` line.
 11. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch.
+12. **Budget-fixture completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/budget-fixture-check.mjs" <plan-path>` — it hard-fails when a task's Files touch a budgeted surface (`playbooks/`, `commands/`, `agents/`, `references/` markdown) without also touching the matching budget fixture(s). Add the fixture to that task's Files block, or record an explicit override — a `- Budget-fixture override: <surface-or-fixture> — <reason>` line (em-dash before the reason; a reasonless override is a hard error).
 
 ## The three per-task declaration lines
 
@@ -149,8 +153,9 @@ order. That map, the plan header, and the per-task blocks are the whole contract
 catches a literal Files-block overlap within one wave; the second catches the harder case of two
 same-wave tasks coupled only because one's brief names a file the other edits.
 
-A non-zero exit from self-review items 8, 9, or 10 is a stop, resolved by fixing the plan (or, for
-blast-radius, recording an override) — never by handing off around it.
+A non-zero exit from self-review items 8, 9, 10, or 12, or from the authored-claims backstop in
+item 4, is a stop, resolved by fixing the plan (or, for blast-radius and budget-fixture, recording
+an override) — never by handing off around it.
 
 ## Reuse before rebuild
 
