@@ -117,7 +117,9 @@ and no GitHub issue.
      from the next pass's ranked list and is **never auto-re-evaluated**; it stays dismissed until a
      human asks maintenance to reconsider it.
    - **Rank + report.** Keep the engine's severity-first order as primary (never lowered); within a
-     severity tier sort by the trending signal, tie-broken confidence → passes → first-seen. Add
+     severity tier sort by the trending signal, tie-broken confidence → passes → first-seen — the
+     rule `scripts/maintenance-findings.mjs`'s `rankByTrending` implements and singly owns, named
+     here rather than silently re-specified. Add
      three longitudinal sections to the findings document: **Previously known (persisting)**,
      **Resolved since last pass**, **Trending**. Every lifecycle transition rendered is backed by
      this pass's live re-detection (verify-before-stating, `planning-waves.md` item 4), never a
@@ -134,10 +136,12 @@ and no GitHub issue.
      tracking, then `git check-ignore`, then an explicit pathspec — the order
      `learning-from-sessions.md` step 3 uses. Per-file, never one log — a deletion is its own `git rm`
      commit, distinct from a written finding's `git add`.
-   - **Per-lens cost rollup (§M7).** Sum each lens's inspector `cost:` envelope and append one
-     `lens-cost` run record per lens: `run-record.mjs append --kind lens-cost --stage maintain --lens
-     <slug> --cost <dollars> --run <runId>`. Maintenance emits **no** `workload` record, so its cost
-     stays on doctor's workload-independent `## Cost by stage` / `### Cost by lens` tables only.
+   - **Per-lens cost rollup (§M7).** Read the panel's emitted `costByLens` array — one
+     `{ lens, cost }` entry per lens plus a trailing `panel-overhead` row (the codex cross-model lens
+     contributes an unpriced `0` row) — and append one `lens-cost` run record per entry:
+     `run-record.mjs append --kind lens-cost --stage maintain --lens <slug> --cost <dollars> --run
+     <runId>`. Maintenance emits **no** `workload` record, so its cost stays on doctor's
+     workload-independent `## Cost by stage` / `### Cost by lens` tables only.
 
 ## Fan-out ceiling (binding)
 
@@ -147,7 +151,11 @@ A repo-wide multi-lens pass is the unbounded fan-out shape that has historically
   ~30 tool calls / ~15 files) applies **per lens**;
 - a global pass ceiling of **at most 5 concurrent panel lenses** and **at most 8 total LLM dispatches
   per pass** (≤5 lenses + 1 history inspector + 1 issue decompose/classify + 1 issue verification;
-  the deterministic pre-pass and `issue-intake.mjs` fetch are bounded tool commands, not LLM lenses);
+  the deterministic pre-pass and `issue-intake.mjs` fetch are bounded tool commands, not LLM lenses).
+  This ceiling counts **orchestration** dispatches only: the review panel's own per-finding
+  adversarial verify + reconcile are a **separately-governed sub-fan-out**, bounded by the panel's
+  own concurrency limit (`VERIFY_CONCURRENCY` in `workflows/review-panel.js`), and are **not**
+  counted against this pass ceiling;
 - a **hard stop at the ≥20% context-depth band** `delegation.md` already defines
   (`node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth`); on a hard stop the coverage statement
   names the unswept remainder;
@@ -158,8 +166,9 @@ A repo-wide multi-lens pass is the unbounded fan-out shape that has historically
 - Starts no cycle; creates, reads, or writes no `.devcycle/state.md`; emits no handoff block.
 - Mutates no code and no GitHub issue, ever.
 - Issue-folding is read-only: `gh issue list`/`view` only, never `close`/`comment`/`edit`/`label`.
-- Ends at the ranked findings document, committed per `${user_config.docTrackingPolicy}` exactly as
-  `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` commits it.
+- Ends at the ranked findings document, a **local** per-run report (`references/config.md` § Doc
+  tracking, audit-report row = local at all depths) exactly as
+  `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` writes it.
 - Writes one new artifact — the per-finding `docs/devcycle/maintenance-findings/` store — committed per
   `${user_config.docTrackingPolicy}` (`references/config.md` § Doc tracking); still no code or issue mutation.
 

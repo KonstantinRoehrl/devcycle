@@ -1,13 +1,13 @@
 # 
 - finding-kind: maintenance-finding
-- finding-id: unrecorded-duplication:29a98a10
+- finding-id: unrecorded-duplication:38cef452
 - culprit-kind: unrecorded-duplication
 - severity: low
 - confidence: verified
-- affected-files: scripts/maintenance-findings.mjs, scripts/promotions.mjs, scripts/md-field.mjs
-- first-seen: 2026-08-30
+- affected-files: scripts/run-record.mjs, scripts/git-identity.mjs
+- first-seen: 2026-09-04
 - last-seen: 2026-09-04
-- passes: 2
+- passes: 1
 - origin: lens
 - verify: 
 - lifecycle: 

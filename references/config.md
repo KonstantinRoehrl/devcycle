@@ -139,7 +139,7 @@ of deciding for itself.
 | lessons — `docs/devcycle/lessons.md` | local | commit | commit |
 | promotion records — `docs/devcycle/promotions/` | local | commit | commit |
 | maintenance findings — `docs/devcycle/maintenance-findings/` | local | commit | commit |
-| audit report — `docs/audits/` | local | commit | commit |
+| audit report — `docs/audits/` | local | local | local |
 | on-device checklist, in-cycle — `docs/<feature>/` | never committed | never committed | never committed |
 | onboarding scaffold — `CLAUDE.md`, `.gitignore` lines | exempt | exempt | exempt |
 | run scratch — `.devcycle/` | never committed | never committed | never committed |

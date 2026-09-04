@@ -1,4 +1,4 @@
-# references/quality-criteria.md's Abstraction and Strengths sections load unconditionally though their execution is depth-gated
+# 
 - finding-kind: maintenance-finding
 - finding-id: wholesale-context-load:7eda0ee0
 - culprit-kind: wholesale-context-load
@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: references/quality-criteria.md, playbooks/planning-waves.md
 - first-seen: 2026-08-30
-- last-seen: 2026-08-30
-- passes: 1
+- last-seen: 2026-09-04
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

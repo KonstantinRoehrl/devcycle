@@ -1,13 +1,13 @@
 # 
 - finding-kind: maintenance-finding
-- finding-id: runtime-defect:54454d07
+- finding-id: runtime-defect:b2c5a841
 - culprit-kind: runtime-defect
-- severity: medium
+- severity: low
 - confidence: verified
-- affected-files: scripts/issue-intake.mjs
-- first-seen: 2026-08-30
+- affected-files: scripts/pricing.mjs, scripts/doctor.mjs
+- first-seen: 2026-09-04
 - last-seen: 2026-09-04
-- passes: 2
+- passes: 1
 - origin: lens
 - verify: 
 - lifecycle: 

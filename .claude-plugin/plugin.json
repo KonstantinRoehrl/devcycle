@@ -32,7 +32,7 @@
       "type": "string",
       "title": "Doc-tracking policy",
       "default": "standard",
-      "description": "What devcycle attempts to commit of the specs, plans, lessons, promotion records and audit reports it writes (the repo's own .gitignore always wins, and a few artifacts sit outside the policy). One of: all-local (commit none of them), standard (commit lessons, promotion records and audit reports; keep specs + plans local), all-tracked (also commit specs + plans). Default: standard."
+      "description": "What devcycle attempts to commit of the specs, plans, lessons, promotion records and audit reports it writes (the repo's own .gitignore always wins, and a few artifacts sit outside the policy). One of: all-local (commit none of them), standard (commit lessons and promotion records; keep specs, plans and audit reports local), all-tracked (also commit specs + plans). Default: standard."
     },
     "implementerModel": {
       "type": "string",

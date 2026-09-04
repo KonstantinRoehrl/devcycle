@@ -1,4 +1,4 @@
-# Two consecutive sentences in references/handoff.md state the same fact about the cost-attribution window
+# 
 - finding-kind: maintenance-finding
 - finding-id: restated-content:741f5587
 - culprit-kind: restated-content
@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: references/handoff.md
 - first-seen: 2026-08-30
-- last-seen: 2026-08-30
-- passes: 1
+- last-seen: 2026-09-04
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

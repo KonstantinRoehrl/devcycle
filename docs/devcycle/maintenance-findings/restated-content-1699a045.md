@@ -1,13 +1,13 @@
 # 
 - finding-kind: maintenance-finding
-- finding-id: restated-content:53a3dbe3
+- finding-id: restated-content:1699a045
 - culprit-kind: restated-content
 - severity: low
 - confidence: verified
-- affected-files: commands/maintain.md
-- first-seen: 2026-08-23
+- affected-files: playbooks/planning-waves.md, references/evidence.md
+- first-seen: 2026-09-04
 - last-seen: 2026-09-04
-- passes: 4
+- passes: 1
 - origin: lens
 - verify: 
 - lifecycle: 

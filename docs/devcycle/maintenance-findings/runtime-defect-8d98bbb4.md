@@ -1,13 +1,13 @@
 # 
 - finding-kind: maintenance-finding
-- finding-id: restated-content:53a3dbe3
-- culprit-kind: restated-content
+- finding-id: runtime-defect:8d98bbb4
+- culprit-kind: runtime-defect
 - severity: low
 - confidence: verified
-- affected-files: commands/maintain.md
-- first-seen: 2026-08-23
+- affected-files: scripts/run-record.mjs
+- first-seen: 2026-09-04
 - last-seen: 2026-09-04
-- passes: 4
+- passes: 1
 - origin: lens
 - verify: 
 - lifecycle: 

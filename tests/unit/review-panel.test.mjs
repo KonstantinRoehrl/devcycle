@@ -110,6 +110,21 @@ test("verifierTools grants Bash only when needsExecution is true", () => {
   assert.equal(panel.verifierTools({}), "Read,Grep,Glob"); // default
 });
 
+test("aggregateLensCosts sums per lens and folds verify+reconcile into panel-overhead", () => {
+  const lensResults = [
+    { lens: "spec", cost: 0.01 },
+    { lens: "correctness", cost: 0.02 },
+    { lens: "correctness", cost: 0.03 },
+    { lens: "simplify", cost: null },
+  ];
+  const out = panel.aggregateLensCosts({ lensResults, verifyCost: 0.05, reconcileCost: 0.01 });
+  const by = Object.fromEntries(out.map((e) => [e.lens, e.cost]));
+  assert.equal(by.spec, 0.01);
+  assert.ok(Math.abs(by.correctness - 0.05) < 1e-9, "same-lens chunks sum");
+  assert.equal(by.simplify, 0, "an absent cost counts as zero, and the lens is still emitted");
+  assert.ok(Math.abs(by["panel-overhead"] - 0.06) < 1e-9, "verify + reconcile fold into panel-overhead");
+});
+
 // ---------- chunkDiff (#65) ----------
 
 // Build a diff segment for one file with `hunks` hunks of roughly `hunkLen` chars each.
@@ -759,6 +774,30 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: out })
   assert.ok(claims.includes("spec:sawSpec=true"), `spec lens should see the spec; claims=${JSON.stringify(claims)}`);
   assert.ok(claims.includes("correctness:sawSpec=false"), `correctness must NOT see the spec; claims=${JSON.stringify(claims)}`);
   assert.ok(claims.includes("simplify:sawSpec=false"), `simplify must NOT see the spec; claims=${JSON.stringify(claims)}`);
+});
+
+test("panel emits costByLens with a per-lens sum and a panel-overhead entry", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 3;\n");
+  const bin = makeFakeBin(
+    "claude",
+    `
+const prompt = process.argv[process.argv.length - 1];
+let out;
+if (prompt.includes("adversarial verifier")) out = { verified: true, verification: "ok" };
+else if (prompt.includes("You are one lens")) out = { findings: [{ file: "src/a.js", line: 1, claim: "x", severity: "low", measuredAgainst: "conv" }], strengths: [] };
+else out = { summary: "done" };
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: out, total_cost_usd: 0.01 }));`
+  );
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.ok(Array.isArray(report.costByLens), "costByLens is present");
+  assert.ok(report.costByLens.some((e) => e.lens === "correctness"), "the correctness lens has a cost row");
+  assert.ok(report.costByLens.some((e) => e.lens === "panel-overhead"), "a panel-overhead row is present");
 });
 
 // #192 follow-up — the spec reaches the BUILT-IN spec lens only. A caller-supplied

@@ -1,4 +1,4 @@
-# references/findings.md declares joint ownership of the Strengths rule with quality-criteria.md, and both are restated a third time
+# 
 - finding-kind: maintenance-finding
 - finding-id: misattributed-owner:715f2c64
 - culprit-kind: misattributed-owner
@@ -6,8 +6,8 @@
 - confidence: verified
 - affected-files: references/findings.md, references/quality-criteria.md, playbooks/reviewing-code.md
 - first-seen: 2026-08-30
-- last-seen: 2026-08-30
-- passes: 1
+- last-seen: 2026-09-04
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 

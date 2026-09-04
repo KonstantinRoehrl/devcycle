@@ -175,7 +175,7 @@ export function matchMaintenanceFindings({ records, files, cap = 5 }) {
     const hit = (r.affectedFiles ?? []).some((g) => files.some((f) => g === f || fileMatchesGlob(f, g)));
     if (hit) out.push(r);
   }
-  return out.slice(0, cap);
+  return rankByTrending(out).slice(0, cap);
 }
 
 export function renderMaintenanceMatches(matches) {

@@ -1,13 +1,13 @@
 # 
 - finding-kind: maintenance-finding
-- finding-id: docs-drift:983b9e22
+- finding-id: docs-drift:11f06878
 - culprit-kind: docs-drift
 - severity: medium
 - confidence: verified
-- affected-files: scripts/dead-export-check.mjs
-- first-seen: 2026-08-30
+- affected-files: references/config.md, CONTRIBUTING.md, tests/unit/golden-path.test.mjs
+- first-seen: 2026-09-04
 - last-seen: 2026-09-04
-- passes: 2
+- passes: 1
 - origin: lens
 - verify: 
 - lifecycle: 
