@@ -9,7 +9,9 @@ its frontmatter.
 
 `consequence` is one of:
 
-- `read-only` — writes nothing outside a report. Must **not** carry `disable-model-invocation`.
+- `read-only` — writes nothing outside its own report and the append-only records that back it
+  (`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking owns which of those are committed).
+  Must **not** carry `disable-model-invocation`.
 - `confirm-first` — may write, but takes no irreversible action before its first user
   confirmation. The deliberate exception class; each member names its justification below.
 - `side-effectful` — writes before any confirmation gate. Must carry `disable-model-invocation`.
@@ -45,7 +47,9 @@ ranked findings document. Its abstraction and history lenses and its cross-pass 
 behavioural today, so it reads the code across passes rather than only as it stands now; that is
 what sets it apart from `review` (single-shot, the code as it stands now), from `doctor` (pipeline
 cost, depth and model routing — not the code), and from `learn` (distilling sessions into landed
-rules — not assessing the repo).
+rules — not assessing the repo). Its cross-pass memory is a committed artifact — the per-finding
+`docs/devcycle/maintenance-findings/` store — which the widened `read-only` definition above
+covers as records backing its report, not as a write outside one.
 
 **Naming.** Commands are verbs, playbooks are gerunds, agents are role nouns. `doctor` is the
 single recorded exception, justified by `brew doctor` / `flutter doctor` / `npm doctor`.
