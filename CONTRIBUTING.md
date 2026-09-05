@@ -102,11 +102,23 @@ runs from the installed plugin, not this repo.
 `scripts/doctor.mjs` prices what it measures against `scripts/pricing.mjs`, the data module
 that holds per-model dollar rates and context windows with no CLI of its own — update that
 file when prices change. What says the table is complete is
-`tests/fixtures/observed-model-ids.json`, the model ids a real corpus recorded;
-`node scripts/refresh-observed-models.mjs` regenerates it (`--dir` for a corpus elsewhere,
+`tests/fixtures/observed-model-ids.json`, the model ids real corpora recorded;
+`node scripts/refresh-observed-models.mjs` refreshes it (`--dir` for a corpus elsewhere,
 `--out` for another target) and names any id it found that has no price. Refresh it rather
 than editing it by hand: a hand-written copy of the table's own keys is what let
 `claude-fable-5-1` ship unpriced.
+
+A second committed file keeps that snapshot honest, and the invariant between the two is what
+the suite enforces. `tests/fixtures/observed-corpus/` is a corpus of transcript records in
+`~/.claude/projects` layout, and `tests/unit/pricing.test.mjs` requires the snapshot to hold
+every model id that corpus yields — so deleting an unpriced id from the snapshot to quiet the
+coverage test fails there instead. The refresh is therefore **additive**: it adds what the
+corpus it read records and keeps every id the snapshot already held, so running it the
+documented way over your own `~/.claude/projects` cannot drop the fixture corpus's ids and
+cannot red the tree by itself. It can still red the coverage test by adding a model nobody has
+priced — that is the signal, not a collision, and the script names the id as it writes. Dropping
+an id is the one deliberate hand edit here, and the corpus guard bounds it to ids that corpus
+does not record.
 
 Writing a new `scripts/*.mjs`? Reuse `doctor.mjs`'s exported helpers
 (`findTranscriptFiles`, `owningSession`, `readRecords`, `inWindow`) for corpus enumeration,

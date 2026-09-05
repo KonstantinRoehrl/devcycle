@@ -13,7 +13,7 @@ import { collectModelIds, formatFixture, readFixture, unpricedIds } from "../../
 const FIXTURE = fileURLToPath(new URL("../fixtures/observed-model-ids.json", import.meta.url));
 const REFRESH = fileURLToPath(new URL("../../scripts/refresh-observed-models.mjs", import.meta.url));
 // A committed corpus of transcript records in the same <slug>/<session>.jsonl layout as
-// ~/.claude/projects, holding the model ids the snapshot was generated from. It is the snapshot's
+// ~/.claude/projects, holding the model ids the snapshot may never drop. It is the snapshot's
 // independent counterpart: keeping the two in step takes an edit to both, which is what lets the
 // snapshot guard below fail on a lone hand edit to the snapshot.
 const CORPUS = fileURLToPath(new URL("../fixtures/observed-corpus", import.meta.url));
@@ -99,6 +99,51 @@ test("the committed snapshot holds every model id the refresh script derives fro
     assert.deepEqual(missing, [],
       `tests/fixtures/observed-model-ids.json is missing corpus id(s) ${missing.join(", ")} — `
       + "regenerate it with scripts/refresh-observed-models.mjs instead of editing it by hand");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// What keeps the guard above compatible with the documented refresh: the refresh is additive. It
+// adds whatever the corpus it read records and keeps every id the snapshot already held, so a
+// machine whose transcripts never mention the frozen corpus ids cannot drop them.
+test("refresh CLI: a refresh adds what the corpus records and keeps the ids the snapshot already held", () => {
+  const root = corpus({ "sess-one": [turn("claude-opus-5"), turn("claude-nimbus-9")] });
+  const out = join(root, "out.json");
+  writeFileSync(out, formatFixture(["claude-fable-5", "claude-sonnet-5"]));
+  const r = spawnSync(process.execPath, [REFRESH, "--dir", root, "--out", out], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: root },
+  });
+  try {
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(readFixture(out),
+      ["claude-fable-5", "claude-nimbus-9", "claude-opus-5", "claude-sonnet-5"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The collision stated end to end: run the documented refresh over a machine whose transcripts
+// record none of the fixture corpus's ids, and the guard above still holds afterwards. A refresh
+// that replaced the snapshot would red the tree here, with no way to tell that from a genuine
+// coverage regression.
+test("refresh CLI: the documented refresh over a foreign corpus keeps the snapshot a superset of the fixture corpus", () => {
+  const root = corpus({ "sess-one": [turn("claude-opus-5")] });
+  const refreshed = join(root, "snapshot.json");
+  const derived = join(root, "corpus-ids.json");
+  writeFileSync(refreshed, readFileSync(FIXTURE, "utf8"));
+  try {
+    for (const [dir, out] of [[root, refreshed], [CORPUS, derived]]) {
+      const r = spawnSync(process.execPath, [REFRESH, "--dir", dir, "--out", out], {
+        encoding: "utf8",
+        env: { ...process.env, HOME: root },
+      });
+      assert.equal(r.status, 0, r.stderr);
+    }
+    const snapshot = new Set(readFixture(refreshed));
+    const missing = readFixture(derived).filter((id) => !snapshot.has(id));
+    assert.deepEqual(missing, [], "the documented refresh dropped fixture-corpus id(s) the guard requires");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -198,6 +243,27 @@ test("refresh CLI: an unreadable corpus reports the script's prefixed error, not
     assert.equal(existsSync(out), false, "nothing is written");
   } finally {
     chmodSync(locked, 0o755);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The snapshot on disk is an input to an additive refresh, not just its destination, so a
+// malformed one has to be reported the way every other failure here is rather than overwritten —
+// silently replacing it would throw away exactly the ids the merge exists to keep.
+test("refresh CLI: a malformed existing snapshot reports the script's prefixed error, not a stack trace", () => {
+  const root = corpus({ "sess-one": [turn("claude-opus-5")] });
+  const out = join(root, "out.json");
+  writeFileSync(out, "{ not a json array }");
+  const r = spawnSync(process.execPath, [REFRESH, "--dir", root, "--out", out], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: root },
+  });
+  try {
+    assert.notEqual(r.status, 0, "an unreadable snapshot is an error, not an overwrite");
+    assert.match(r.stderr, /^refresh-observed-models: /m, "the script names itself, as its other failures do");
+    assert.doesNotMatch(r.stderr, /^\s+at /m, "a raw stack trace is not this script's error convention");
+    assert.equal(readFileSync(out, "utf8"), "{ not a json array }", "the malformed snapshot is left alone");
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

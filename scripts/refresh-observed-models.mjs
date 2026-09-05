@@ -8,9 +8,15 @@
 // whatever it reports as unpriced. Reading ~/.claude/projects happens here and only when someone
 // runs this without --dir. The tests always pass --dir — at a throwaway corpus, or at the
 // committed one, tests/fixtures/observed-corpus. That corpus keeps the snapshot honest: the guard in
-// tests/unit/pricing.test.mjs fails when an id the corpus records is missing from the snapshot, so
-// a refresh may add ids freely but a hand edit cannot quietly drop one.
-import { readFileSync } from "node:fs";
+// tests/unit/pricing.test.mjs fails when an id the corpus records is missing from the snapshot.
+//
+// The refresh is therefore additive, not a replacement: it adds what the corpus it read records
+// and keeps every id already in the snapshot. Two reasons. The snapshot is the price table's
+// coverage floor, and doctor prices historical transcripts, so an id one machine no longer records
+// still has to stay priced for the sessions that used it. And a replacing refresh run the
+// documented way — no --dir, over one operator's real corpus — would drop the fixture corpus's ids
+// and red that guard, leaving no way to tell the collision from a real coverage regression.
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
@@ -37,6 +43,13 @@ export function collectModelIds(dir) {
 // Which of these observed ids scripts/pricing.mjs cannot price. Empty is the healthy state.
 export function unpricedIds(ids) {
   return ids.filter((id) => !priceFor(id));
+}
+
+// The snapshot a refresh writes: everything it already held plus everything the corpus records,
+// sorted and deduped. Removing an id is deliberate and manual by design — nothing a refresh reads
+// can justify dropping a model doctor may still have to price.
+export function mergeIds(existing, observed) {
+  return [...new Set([...existing, ...observed])].sort();
 }
 
 export function readFixture(path) {
@@ -87,16 +100,31 @@ function main(argv) {
     console.error(`refresh-observed-models: no model ids found under ${dir} — leaving the snapshot alone`);
     process.exit(1);
   }
+  let existing = [];
+  if (existsSync(out)) {
+    try {
+      existing = readFixture(out);
+    } catch (err) {
+      // The snapshot is an input now, so a malformed one is an error rather than something to
+      // overwrite — overwriting would throw away the very ids the merge exists to keep.
+      console.error(`refresh-observed-models: cannot read the existing snapshot ${out}: ${err.message}`);
+      process.exit(1);
+    }
+  }
+  const merged = mergeIds(existing, ids);
   try {
-    atomicWrite(out, formatFixture(ids));
+    atomicWrite(out, formatFixture(merged));
   } catch (err) {
     // atomicWrite stages its temp file beside the target and creates no parent directory, so an
     // --out under a missing one fails here rather than at flag parsing.
     console.error(`refresh-observed-models: cannot write ${out}: ${err.message}`);
     process.exit(1);
   }
-  console.error(`refresh-observed-models: wrote ${ids.length} observed model id(s) to ${out}`);
-  const unpriced = unpricedIds(ids);
+  const added = merged.filter((id) => !existing.includes(id));
+  console.error(
+    `refresh-observed-models: wrote ${merged.length} observed model id(s) to ${out}`
+    + (added.length ? `, ${added.length} added by this refresh: ${added.join(", ")}` : ", none added by this refresh"));
+  const unpriced = unpricedIds(merged);
   if (unpriced.length)
     console.error(`refresh-observed-models: unpriced by scripts/pricing.mjs: ${unpriced.join(", ")} — price them there`);
 }
