@@ -304,8 +304,10 @@ gated by `userConfig.crossModelReview`.
   `devcycle:red-team-reviewer`, `devcycle:on-device-driver`, `devcycle:history-inspector`. The plugin id is not decoration:
   the harness passes `<plugin>:<name>` as a subagent's `agent_type`, which is the spelling the
   browser guard's allowlist must carry (`docs/platform-notes.md` § (e)).
-- Hooks: two — `block-main-thread-browser` and `block-reviewer-git-write` — named for what they
-  deny rather than what they guard; the only surface components not loaded by a command.
+- Hooks: three — two guards, `block-main-thread-browser` and `block-reviewer-git-write`, named for
+  what they deny rather than what they guard; and one sensor, `workload-sensor`, named for what it
+  watches rather than for the record it writes. They are the only surface components not loaded by
+  a command: each fires on a matched tool call instead (`docs/README.md` § Hooks).
 
 ## 15. Compaction — the reference layer, profiles, and the audit stage (added 2026-07-26)
 
