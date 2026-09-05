@@ -471,12 +471,15 @@ The contract used to cover skills. It covers commands because, since 2026-08-06,
 the only files with frontmatter: playbooks are loaded by path and carry no description at all
 (§3), so nothing but a command can be selected by description. `docs/routing.md` carries
 the same information in prose a human reads, and `scripts/validate.mjs` fails the build when a
-command is absent from it — which is the closest thing to a mechanized sufficiency check the
-repo has.
+command is absent from it — and, since 2026-09-05, when a description names one of the
+consequence classes `read-only`, `side-effectful` or `confirm-first` while the routing table
+assigns that command a different one. So CI mechanizes two properties of a description: that the
+command it describes is on the routing surface at all, and that any consequence it claims there is
+the one the table assigns.
 
-The rest is a review-time convention, deliberately not a CI gate: judging whether a description
-is complete enough needs a model, and no model credential is available to GitHub Actions. A new
-or materially-changed command's description is written against the intents in `routing.md` and
-checked by the reviewer of the change. The prose scenario harness that formerly held this as a
+Completeness is not among them, and the rest stays a review-time convention, deliberately not a CI
+gate: judging whether a description is complete enough needs a model, and no model credential is
+available to GitHub Actions. A new or materially-changed command's description is written against
+the intents in `routing.md` and checked by the reviewer of the change. The prose scenario harness that formerly held this as a
 `description-sufficiency` test type was retired 2026-08-06 — see `CONTRIBUTING.md` and the
 decision log.

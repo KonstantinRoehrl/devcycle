@@ -139,9 +139,10 @@ they date immediately, and nobody installing the plugin has a use for them. `.de
 gitignored and is where those belong.
 
 `docs/known-issues.md` is the hand-curated store of confirmed defects in devcycle's own engines;
-fixing one means deleting its entry in the same commit. Maintenance-detected defects are recorded
-separately, under `docs/devcycle/maintenance-findings/`, where a record carries a `lifecycle:` field
-a later pass resolves rather than an entry anyone deletes.
+fixing one means deleting its entry in the same commit. The same rule holds for the second store,
+`docs/devcycle/maintenance-findings/`: a resolved finding's record is deleted outright — here,
+where that store is tracked, in its own `git rm` commit — rather than kept with a resolved marker,
+so neither store accumulates settled history. `docs/known-issues.md` owns how the two stores split.
 
 ## Releasing
 
