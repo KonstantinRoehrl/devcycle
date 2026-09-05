@@ -119,7 +119,11 @@ test("resolved-in: a post-release run for a different culprit is held (the previ
 test("resolved-in: a culprit event dated before the release is not counted (date boundary)", () => {
   const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
   const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
-  const before = ev("friction:flaky-test-retry", "2026-01-01T00:00:00Z", "r0");
+  // The bare slug, which is the only shape run-record.mjs writes and the only one this matcher
+  // compares against. A <kind>:<slug> culprit here can never match, which left the held assertion
+  // below reading "held" whether or not eventsAfter excluded this pre-release event — the very
+  // thing it exists to pin. With the matching shape, admitting it makes the verdict "recurred".
+  const before = ev("flaky-test-retry", "2026-01-01T00:00:00Z", "r0");
   // The only in-window run journals nothing attributable, so the window cannot say the fix held.
   const unattributed = verify([], [before, ev(null, "2026-08-10T00:00:00Z", "r1")], "0.14.0",
     { now: Date.parse("2026-08-20"), vocab, releaseDates });

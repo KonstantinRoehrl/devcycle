@@ -2,7 +2,7 @@
 // and the coverage guard that says the table knows every model id a doctor corpus recorded.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -12,6 +12,11 @@ import { collectModelIds, formatFixture, readFixture, unpricedIds } from "../../
 
 const FIXTURE = fileURLToPath(new URL("../fixtures/observed-model-ids.json", import.meta.url));
 const REFRESH = fileURLToPath(new URL("../../scripts/refresh-observed-models.mjs", import.meta.url));
+// A committed corpus of transcript records in the same <slug>/<session>.jsonl layout as
+// ~/.claude/projects, holding the model ids the snapshot was generated from. It is the snapshot's
+// independent counterpart: keeping the two in step takes an edit to both, which is what lets the
+// snapshot guard below fail on a lone hand edit to the snapshot.
+const CORPUS = fileURLToPath(new URL("../fixtures/observed-corpus", import.meta.url));
 
 // A transcript record shaped like the ones doctor counts: assistant side, carrying usage.
 const turn = (model) =>
@@ -66,8 +71,37 @@ test("the coverage guard reports a snapshot id that is genuinely unpriced", () =
   }
 });
 
-test("the snapshot on disk is byte-for-byte what the refresh script writes", () => {
+// All this compares is the file against a re-render of its own contents, so it pins the writer's
+// shape and nothing about where the contents came from. It used to be named "byte-for-byte what
+// the refresh script writes", which claimed the guard below — and passed on any well-formed hand
+// edit, including deleting an observed id.
+test("the snapshot on disk is in the refresh script's canonical shape: sorted, deduped, two-space", () => {
   assert.equal(readFileSync(FIXTURE, "utf8"), formatFixture(readFixture(FIXTURE)));
+});
+
+// The guard that survives a hand edit: run the real refresh script over the committed corpus and
+// require the snapshot to hold every id it reports. Deleting an observed id from the snapshot —
+// the edit that would disarm the coverage guard above by removing whatever is unpriced — fails
+// here, because the corpus still records it.
+test("the committed snapshot holds every model id the refresh script derives from the fixture corpus", () => {
+  const root = mkdtempSync(join(tmpdir(), "observed-models-"));
+  const out = join(root, "out.json");
+  const r = spawnSync(process.execPath, [REFRESH, "--dir", CORPUS, "--out", out], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: root }, // never the operator's real ~/.claude/projects
+  });
+  try {
+    assert.equal(r.status, 0, r.stderr);
+    const derived = readFixture(out);
+    assert.ok(derived.length >= 6, "the fixture corpus records the observed ids");
+    const snapshot = new Set(readFixture(FIXTURE));
+    const missing = derived.filter((id) => !snapshot.has(id));
+    assert.deepEqual(missing, [],
+      `tests/fixtures/observed-model-ids.json is missing corpus id(s) ${missing.join(", ")} — `
+      + "regenerate it with scripts/refresh-observed-models.mjs instead of editing it by hand");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("refresh: collects the model ids a corpus recorded, sorted and deduped", () => {
@@ -136,6 +170,51 @@ test("refresh CLI: refuses to write an empty snapshot when the corpus yields no 
   });
   try {
     assert.notEqual(r.status, 0, "an empty corpus is an error, not an empty fixture");
+    assert.equal(existsSync(out), false, "nothing is written");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// findTranscriptFiles re-throws a permissions or I/O failure rather than reading it as an empty
+// corpus, so main has to report it in the script's own voice like every other failure path here.
+test("refresh CLI: an unreadable corpus reports the script's prefixed error, not a stack trace", {
+  skip: process.getuid?.() === 0 ? "root reads a directory whose permission bits forbid it" : false,
+}, () => {
+  const root = mkdtempSync(join(tmpdir(), "observed-models-"));
+  const locked = join(root, "corpus", "repo-slug");
+  mkdirSync(locked, { recursive: true });
+  writeFileSync(join(locked, "sess-one.jsonl"), turn("claude-opus-5") + "\n");
+  chmodSync(locked, 0o000);
+  const out = join(root, "out.json");
+  const r = spawnSync(process.execPath, [REFRESH, "--dir", join(root, "corpus"), "--out", out], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: root },
+  });
+  try {
+    assert.notEqual(r.status, 0, "an unreadable corpus is an error");
+    assert.match(r.stderr, /^refresh-observed-models: /m, "the script names itself, as its other failures do");
+    assert.doesNotMatch(r.stderr, /^\s+at /m, "a raw stack trace is not this script's error convention");
+    assert.equal(existsSync(out), false, "nothing is written");
+  } finally {
+    chmodSync(locked, 0o755);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// atomicWrite writes its temp file beside the target, so an --out under a directory that does not
+// exist fails inside the write rather than at flag parsing.
+test("refresh CLI: an --out under a missing directory reports the script's prefixed error, not a stack trace", () => {
+  const root = corpus({ "sess-one": [turn("claude-opus-5")] });
+  const out = join(root, "no-such-dir", "out.json");
+  const r = spawnSync(process.execPath, [REFRESH, "--dir", root, "--out", out], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: root },
+  });
+  try {
+    assert.notEqual(r.status, 0, "an unwritable destination is an error");
+    assert.match(r.stderr, /^refresh-observed-models: /m, "the script names itself, as its other failures do");
+    assert.doesNotMatch(r.stderr, /^\s+at /m, "a raw stack trace is not this script's error convention");
     assert.equal(existsSync(out), false, "nothing is written");
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -5,8 +5,11 @@
 // own keys, a comparison that could never fail and let `claude-fable-5-1` ship unpriced.
 //
 // Human-run and occasional: refresh the snapshot when a new model id shows up, then price
-// whatever it reports as unpriced. The tests only ever read the committed snapshot — this is the
-// one place that reads ~/.claude/projects, and only when someone runs it.
+// whatever it reports as unpriced. Reading ~/.claude/projects happens here and only when someone
+// runs this without --dir. The tests always pass --dir — at a throwaway corpus, or at the
+// committed one, tests/fixtures/observed-corpus. That corpus keeps the snapshot honest: the guard in
+// tests/unit/pricing.test.mjs fails when an id the corpus records is missing from the snapshot, so
+// a refresh may add ids freely but a hand edit cannot quietly drop one.
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
@@ -69,14 +72,29 @@ function main(argv) {
     process.exit(1);
   }
 
-  const ids = collectModelIds(dir);
+  let ids;
+  try {
+    ids = collectModelIds(dir);
+  } catch (err) {
+    // findTranscriptFiles re-throws a permissions or I/O failure rather than reading it as an
+    // absent corpus, so it surfaces here. Report it the way every other failure in main does.
+    console.error(`refresh-observed-models: cannot read the corpus under ${dir}: ${err.message}`);
+    process.exit(1);
+  }
   if (!ids?.length) {
     // An empty snapshot would make the coverage guard vacuous again — the exact defect this
     // script exists to remove — so a corpus that yields nothing is an error, not a write.
     console.error(`refresh-observed-models: no model ids found under ${dir} — leaving the snapshot alone`);
     process.exit(1);
   }
-  atomicWrite(out, formatFixture(ids));
+  try {
+    atomicWrite(out, formatFixture(ids));
+  } catch (err) {
+    // atomicWrite stages its temp file beside the target and creates no parent directory, so an
+    // --out under a missing one fails here rather than at flag parsing.
+    console.error(`refresh-observed-models: cannot write ${out}: ${err.message}`);
+    process.exit(1);
+  }
   console.error(`refresh-observed-models: wrote ${ids.length} observed model id(s) to ${out}`);
   const unpriced = unpricedIds(ids);
   if (unpriced.length)
