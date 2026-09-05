@@ -101,7 +101,12 @@ runs from the installed plugin, not this repo.
 
 `scripts/doctor.mjs` prices what it measures against `scripts/pricing.mjs`, the data module
 that holds per-model dollar rates and context windows with no CLI of its own — update that
-file when prices change.
+file when prices change. What says the table is complete is
+`tests/fixtures/observed-model-ids.json`, the model ids a real corpus recorded;
+`node scripts/refresh-observed-models.mjs` regenerates it (`--dir` for a corpus elsewhere,
+`--out` for another target) and names any id it found that has no price. Refresh it rather
+than editing it by hand: a hand-written copy of the table's own keys is what let
+`claude-fable-5-1` ship unpriced.
 
 Writing a new `scripts/*.mjs`? Reuse `doctor.mjs`'s exported helpers
 (`findTranscriptFiles`, `owningSession`, `readRecords`, `inWindow`) for corpus enumeration,
