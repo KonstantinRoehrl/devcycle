@@ -29,8 +29,10 @@ A matcher that cannot fire must never read as a clean bill of health.
 
 ## The grouping key
 
-The key is `(event, stage)` while the journal carries no attribution. From the release that
-turns on culprit attribution it becomes the culprit-id. The formula is unchanged either way.
+The key is the culprit-id when the event carries one, else `(event, stage)`. A run written by a
+version whose writers journal the culprit (`playbooks/executing-waves.md` steps 5–6,
+`references/ledger.md`'s `event` row) keys by culprit; an older run keys by `(event, stage)` and
+renders as unattributed. The formula is unchanged either way.
 
 ## Signals that are derived, not written
 
@@ -49,3 +51,7 @@ round is one event, not two (the same collapse `qualitySignals` documents and bo
 `"unattributed"` is a sentinel, not a member of the schema's stage enum or a `costByStage` key —
 no stage window ever matches it, so `attributedCost` finds no dispatches and the event scores as
 unmeasurable (`impact: null`), never `$0`.
+
+An explicit `review-reject` event beats the derived one: a run whose `events` carry any explicit
+`review-reject` derives none from its verdict lines, so a run written by a version that journals
+rejections at the writer is never double-counted, while an older run keeps its derived ones.

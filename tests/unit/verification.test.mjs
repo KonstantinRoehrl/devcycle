@@ -18,7 +18,7 @@ test("r0-r2: a run with no recurrence is held; a recurrence is recurred + escala
   // The promotion's culprit-id is the <kind>:<slug> form; run-record.mjs only ever writes the
   // bare slug into a journal event's culprit field (never "friction:a"), so the recurrence must
   // be found through that shape or this test is vacuous.
-  const runs = [ev(null, "2026-08-05T00:00:00Z", "r1")];
+  const runs = [ev("other-slug", "2026-08-05T00:00:00Z", "r1")];
   const held = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(held.scoreboard[0].verdict, "held");
   const recur = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })],
@@ -31,6 +31,32 @@ test("r0-r2: the novel:<slug> form still matches after normalization (do not bre
   const runs = [ev(null, "2026-08-05T00:00:00Z", "r1"), ev("novel:foo-bar", "2026-08-06T00:00:00Z", "r2")];
   const out = verify([promo({ culpritId: "novel:foo-bar", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(out.scoreboard[0].verdict, "recurred");
+});
+
+test("r0-r2: runs observed but none attributed is unmeasurable, never held, and never retires", () => {
+  const p = [promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })];
+  const runs = Array.from({ length: 11 }, (_, i) => ev(null, `2026-08-${String(i + 2).padStart(2, "0")}T00:00:00Z`, `r${i}`));
+  const out = verify(p, runs, "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(out.scoreboard[0].verdict, "unmeasurable");
+  assert.equal(out.scoreboard[0].detail, "11 runs, 0 attributed");
+  assert.deepEqual(out.candidates.retirement, []);
+});
+
+test("r0-r2: the detail says why — zero runs, or runs with nothing attributed — and is null on a real verdict", () => {
+  const p = [promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })];
+  assert.equal(verify(p, [], "0.14.0", { now: Date.parse("2026-08-20") }).scoreboard[0].detail, "0 runs");
+  const one = verify(p, [ev(null, "2026-08-05T00:00:00Z", "r1")], "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(one.scoreboard[0].detail, "1 run, 0 attributed");
+  const held = verify(p, [ev("other-slug", "2026-08-05T00:00:00Z", "r1")], "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(held.scoreboard[0].verdict, "held");
+  assert.equal(held.scoreboard[0].detail, null);
+});
+
+test("journal-reinforcement: runs with no attributed event are unmeasurable, never not-adopted", () => {
+  const p = [promo({ culpritId: "win:clean-round-one", rung: "r2", landed: "2026-08-01", verify: "journal-reinforcement" })];
+  const out = verify(p, [ev(null, "2026-08-10T00:00:00Z", "r1")], "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(out.scoreboard[0].verdict, "unmeasurable");
+  assert.equal(out.scoreboard[0].detail, "1 run, 0 attributed");
 });
 
 test("journal-reinforcement: recurrence after landing is held (the practice is followed)", () => {
@@ -55,7 +81,7 @@ test("journal-reinforcement: zero runs is unmeasurable, never not-adopted", () =
 });
 
 test("retirement fires on held past 10 runs OR 90 days", () => {
-  const runs = Array.from({ length: 11 }, (_, i) => ev(null, `2026-08-${String(i + 2).padStart(2, "0")}T00:00:00Z`, `r${i}`));
+  const runs = Array.from({ length: 11 }, (_, i) => ev("other-slug", `2026-08-${String(i + 2).padStart(2, "0")}T00:00:00Z`, `r${i}`));
   const out = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(out.candidates.retirement[0].culpritId, "friction:a");
 });
@@ -93,12 +119,43 @@ test("resolved-in: a post-release run for a different culprit is held (the previ
 test("resolved-in: a culprit event dated before the release is not counted (date boundary)", () => {
   const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
   const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
-  const runs = [
-    ev("friction:flaky-test-retry", "2026-01-01T00:00:00Z", "r0"),
-    ev(null, "2026-08-10T00:00:00Z", "r1"),
-  ];
+  // The bare slug, which is the only shape run-record.mjs writes and the only one this matcher
+  // compares against. A <kind>:<slug> culprit here can never match, which left the held assertion
+  // below reading "held" whether or not eventsAfter excluded this pre-release event — the very
+  // thing it exists to pin. With the matching shape, admitting it makes the verdict "recurred".
+  const before = ev("flaky-test-retry", "2026-01-01T00:00:00Z", "r0");
+  // The only in-window run journals nothing attributable, so the window cannot say the fix held.
+  const unattributed = verify([], [before, ev(null, "2026-08-10T00:00:00Z", "r1")], "0.14.0",
+    { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(unattributed.resolvedIn[0].verdict, "unmeasurable");
+  // Give the same window an attributed event and the boundary is what is under test again: the
+  // pre-release recurrence is still not counted, so the verdict is held rather than recurred.
+  const attributed = verify([], [before, ev("other-slug", "2026-08-10T00:00:00Z", "r1")], "0.14.0",
+    { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(attributed.resolvedIn[0].verdict, "held");
+});
+
+test("resolved-in: runs observed but none attributed is unmeasurable, never held", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const runs = [ev(null, "2026-08-10T00:00:00Z", "r1"), ev(null, "2026-08-11T00:00:00Z", "r2")];
   const out = verify([], runs, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
-  assert.equal(out.resolvedIn[0].verdict, "held");
+  assert.equal(out.resolvedIn[0].verdict, "unmeasurable");
+  assert.equal(out.resolvedIn[0].runsObserved, 2);
+  assert.equal(out.resolvedIn[0].detail, "2 runs, 0 attributed");
+});
+
+test("resolved-in: the detail says which unmeasurable this is, and is null on a real verdict", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const at = (installed, runs, dates = releaseDates) =>
+    verify([], runs, installed, { now: Date.parse("2026-08-20"), vocab, releaseDates: dates }).resolvedIn[0];
+  assert.equal(at("0.13.0", []).detail, "not reached");
+  assert.equal(at("0.14.0", [], new Map()).detail, "no release date");
+  assert.equal(at("0.14.0", []).detail, "0 runs");
+  assert.equal(at("0.14.0", [ev(null, "2026-08-10T00:00:00Z", "r1")]).detail, "1 run, 0 attributed");
+  assert.equal(at("0.14.0", [ev("other-slug", "2026-08-10T00:00:00Z", "r1")]).detail, null);
+  assert.equal(at("0.14.0", [ev("flaky-test-retry", "2026-08-10T00:00:00Z", "r1")]).detail, null);
 });
 
 test("resolved-in: reached but the resolving version has no CHANGELOG date is unmeasurable, never held", () => {

@@ -91,15 +91,11 @@ the mining cost. The engine scores each promotion and the section carries one li
 promotion — `<culprit-id> (<rung>): <verdict>` — with its verdict one of: `held` (runs observed,
 no recurrence), `recurred` (the pattern came back), `errored` (the check itself failed to run to
 completion — a timeout, an output overflow, or a spawn failure; a broken harness, never a verdict
-on the lesson), `unmeasurable` (zero runs observed, never read
-as `held`), or `broken` (an r3 check that now fails). Each `recurred` hit is its own finding,
+on the lesson), `unmeasurable` (zero runs observed, or runs observed but none attributed — never
+read as `held`), or `broken` (an r3 check that now fails). Each `recurred` hit is its own finding,
 ranked like everything above: a reappearance means the promotion did not fix the pattern, not a
 reason to re-promote it. With nothing scored yet, the section renders the single line
 `_No promoted lesson has been measured against a run yet._`.
-
-- Beneath the verdicts come the `resolved-in` lines — `<culprit-id>: resolved in <version> —
-  <verdict>` — one per culprit whose vocabulary entry claims a `resolved-in` version, verdict
-  `unmeasurable` until the installed version reaches that mark and a run is observed against it.
 
 An r3 lesson's `verify:` check is not executed by a report: both
 `node ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs` and
@@ -178,7 +174,7 @@ to draft. For each finding it chose:
    Drafted: [compliance:<slug>] <title>
    ```
 
-   That marker is the only record of a draft: the Outer loop section counts the issues out of
+   That marker is the only record of a draft: `doctor --json`'s `outer_loop` counts the issues out of
    the fixed doctor directory (doctorDir(), above), and `scripts/doctor.mjs` parses exactly this form, which this file owns.
 4. Show the screened draft and ask whether it is right. That is the first gate, and it asks about
    the draft's content only.
@@ -196,7 +192,7 @@ to draft. For each finding it chose:
    Pass no `--label`, and create none. Labelling that repo needs push access, so a filer who is
    not a collaborator gets a 403 — after both gates, with the draft already recorded — and GitHub
    drops labels such a filer supplies anyway. The draft's `labels:` line says what the maintainer
-   applies at triage; the Outer loop section counts by the `[culprit:<slug>]` or `[compliance:<slug>]`
+   applies at triage; `doctor --json`'s `outer_loop` counts by the `[culprit:<slug>]` or `[compliance:<slug>]`
    title prefix, which every filer can set.
 
 ## Config-drift mode
@@ -208,7 +204,7 @@ entirely and takes precedence over every other flag:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --drift <path>
 ```
 
-It resolves the changelog at `${CLAUDE_PLUGIN_ROOT}/references/config-changelog.md` — the same
+It resolves the changelog at `${CLAUDE_PLUGIN_ROOT}/docs/configuration/config-changelog.md` — the same
 engine `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md` calls into, one engine, two
 callers — and prints each finding as a `file:line` reference with the changelog's recorded
 replacement. Report them as printed; never re-parse the changelog or re-grep the target file yourself.

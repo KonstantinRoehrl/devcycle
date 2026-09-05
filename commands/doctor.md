@@ -12,7 +12,7 @@ invocations:
 - `/devcycle:doctor --all` — every transcript under `~/.claude/projects`, devcycle-tagged or not.
 - `/devcycle:doctor --since <date> --until <date>` — a window.
 - `/devcycle:doctor drift <path>` — config-drift mode: flags stale `userConfig`
-  references in `<path>` against `references/config-changelog.md`.
+  references in `<path>` against `docs/configuration/config-changelog.md`.
 - `--json` for machine output; `--depth` for the bare depth probe.
 
 The report opens with an `At a glance` TL;DR — workload-adjusted, matched-cohort cost movement

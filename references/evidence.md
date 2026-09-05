@@ -171,10 +171,14 @@ report. Reject when:
   (a non-zero exit) and any flagged claim carries neither a `(verified: <cmd>)` nor an
   `(assumption)` marker.
 
-A reviewer returns its verdict in this shape:
+A reviewer returns its verdict in this shape. A `needs-changes` verdict carries a mandatory
+`Culprit: <slug>` line directly under `Verdict:` — a `references/culprits.json` slug or
+`novel:<kebab-slug>`, the two shapes `scripts/run-record.mjs`'s `validateCulprit` admits — and an
+`accept` verdict carries none:
 
 ```markdown
 Verdict: accept | needs-changes
+Culprit: <slug>
 
 1. [severity] <finding, symptom first>
 2. [severity] <finding, symptom first>

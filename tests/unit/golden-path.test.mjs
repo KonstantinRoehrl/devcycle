@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DESIGN_DOC } from "../../scripts/doc-paths.mjs";
+import { PLAYBOOK_STAGE } from "../../scripts/doctor.mjs";
 
 const root = process.cwd();
 const read = (p) => readFileSync(join(root, p), "utf8");
@@ -941,6 +942,24 @@ test("the run-record write-site table declares the event kind", () => {
   assert.match(row, /user-correction-at-gate/);
 });
 
+test("every rejecting writer journals a culprit, and the boundary sentences name their enums", () => {
+  const waves = read("playbooks/executing-waves.md");
+  assert.match(waves, /--kind event --event review-reject --stage execution --task <task-id> --culprit <the reviewer envelope's culprit> --attributedBy coordinator/,
+    "step 5 must journal review-reject with the culprit the reviewer envelope carries");
+  assert.match(read("references/delegation.md"), /^culprit: <slug> \| none$/m,
+    "the reviewer envelope must carry the slug, or step 5 has no data path to it");
+  assert.match(waves, /--event gate-fail --stage execution --task <task-id> --culprit <slug> --attributedBy coordinator/,
+    "step 6's gate-fail must carry a culprit");
+  assert.match(waves, /gate-caught-regression/, "step 6 must name the fallback slug for a gate the reviewer did not reject");
+  assert.match(waves, /`complete\|blocked\|rejected`/, "step 4 must name the dispatch outcome enum");
+  assert.match(waves, /modelSource/, "step 4 must name modelSource");
+  assert.match(read("references/evidence.md"), /Culprit: <slug>/, "the needs-changes verdict block must carry a Culprit line");
+  assert.match(read("agents/task-reviewer.md"), /Culprit: <slug>/, "the reviewer's output contract must name the Culprit line");
+  const row = read("references/ledger.md").split("\n").find((l) => l.startsWith("| `event` |"));
+  assert.match(row, /user-correction-at-gate[^|]*--culprit/, "user-correction-at-gate must carry a culprit");
+  assert.match(read("references/handoff.md"), /`complete\|blocked\|skipped\|partial`/, "the stage boundary must name the outcome enum");
+});
+
 // The invariant, not today's file list: a surface that asks the user anything is a surface
 // where an "Other" answer can happen, so it must point at the rule that owns the append —
 // wherever that append is possible at all. It needs a run record, and a command that never
@@ -1592,6 +1611,11 @@ test("every stage playbook reads its own lessons section, and no other file clai
   }
 });
 
+test("every PLAYBOOK_STAGE key doctor re-attributes by names a playbook that exists", () => {
+  for (const name of Object.keys(PLAYBOOK_STAGE))
+    assert.ok(existsSync(join(root, "playbooks", `${name}.md`)), `playbooks/${name}.md is missing`);
+});
+
 test("the lessons line is short enough that duplication-check exempts it", () => {
   for (const file of readdirSync(join(root, "playbooks"))) {
     const text = readFileSync(join(root, "playbooks", file), "utf8");
@@ -2073,6 +2097,24 @@ test("C6: plugin.json, the configuration hub, references/config.md and DESIGN §
     "docs/design/README.md §7's userConfig schema must enumerate exactly the manifest's keys — " +
       "#10 config parity; a schema section that lags the manifest is how docTrackingPolicy drifted"
   );
+});
+
+test("C6: the workload sensor's integration-branch list matches the prose that owns it", () => {
+  // references/branch.md § Committing owns that list; hooks/workload-sensor.mjs carries its only
+  // runtime spelling, because prose cannot be handed to a hook. Parsed and compared the way C3
+  // leg 1 parses dream.mjs's SUBCOMMANDS, so a name added on one side and not the other fails
+  // here instead of silently narrowing which cut-points a cycle can be measured against.
+  const block = read("hooks/workload-sensor.mjs").match(/const INTEGRATION_BRANCHES = \[([\s\S]*?)\];/);
+  assert.ok(block, "INTEGRATION_BRANCHES array not found in hooks/workload-sensor.mjs");
+  const runtime = [...block[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
+  const sentence = read("references/branch.md")
+    .match(/on an integration branch — ([\s\S]*?)or one the user names/);
+  assert.ok(sentence, "references/branch.md § Committing no longer states the integration-branch list");
+  const owned = [...sentence[1].matchAll(/`([a-z-]+)`/g)].map((m) => m[1]);
+  assert.ok(owned.length >= 4, `expected the full prose list, got ${owned.length}`);
+  assert.deepEqual(runtime, owned,
+    "hooks/workload-sensor.mjs's INTEGRATION_BRANCHES must spell exactly the branches " +
+      "references/branch.md § Committing names — the hook is that prose's only runtime copy");
 });
 
 test("cycle.md writes the kind line and appends a triage record after triage", () => {

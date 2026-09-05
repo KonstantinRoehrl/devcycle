@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { makeRepo, commitAll, writeInto } from "./helpers.mjs";
+import { tmpdir } from "node:os";
+import { makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
 import { repoSlug, gitToplevel } from "../../scripts/run-record.mjs";
 
 const HOOK = new URL("../../hooks/workload-sensor.mjs", import.meta.url).pathname;
@@ -11,7 +12,7 @@ const HOOK = new URL("../../hooks/workload-sensor.mjs", import.meta.url).pathnam
 function stateMd({ stage = "execution", kind = "feature", run = "00000000000000a1", base }) {
   return [
     "# devcycle state", `- stage: ${stage}`, "- root: /x",
-    `- branch: topic (cut from main at ${base})`, "- request: x",
+    base ? `- branch: topic (cut from main at ${base})` : "- branch: topic", "- request: x",
     `- kind: ${kind}`, "- plan-counts: planned=3 waves=2", `- run: ${run}`,
     "- updated: 2026-08-28T00:00:00Z", "",
   ].join("\n");
@@ -138,5 +139,140 @@ test("malformed stdin is a silent no-op, exit 0, and writes nothing even in an a
     env: { ...process.env, DEVCYCLE_RUNS_DIR: runsDir } });
   assert.strictEqual(r.status, 0);
   assert.strictEqual(r.stdout, "");
+  assert.strictEqual(workloads(runsDir, repo).length, 0);
+});
+
+test("derives the base from the default branch's merge-base when the branch line carries no annotation", () => {
+  const repo = makeRepo(); const runsDir = makeRepo();
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  writeInto(repo, "f.txt", "hello\nworld\n");
+  commitAll(repo, "task 1");
+  const r = callHook(repo, runsDir);
+  assert.strictEqual(r.status, 0);
+  const wl = workloads(runsDir, repo);
+  assert.strictEqual(wl.length, 1);
+  assert.ok(wl[0].insertions >= 2);
+  assert.ok(wl[0].filesCreated >= 1, "f.txt (and the untracked state file, which git add -A also stages) count as created");
+});
+
+test("without an annotation, HEAD on the default branch itself is a no-op — nothing to measure", () => {
+  const repo = makeRepo(); const runsDir = makeRepo();
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  writeInto(repo, "f.txt", "hello\n");
+  commitAll(repo, "on main");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  assert.strictEqual(workloads(runsDir, repo).length, 0);
+});
+
+test("without an annotation, a topic branch at its merge-base is a no-op — no phantom zero-diff record", () => {
+  const repo = makeRepo(); const runsDir = makeRepo();
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  assert.strictEqual(workloads(runsDir, repo).length, 0);
+});
+
+test("derives the base from the integration branch a topic was cut from, not from the default", () => {
+  // `references/branch.md` § "Deriving a branch's file set" → Base takes the merge-base nearest
+  // to HEAD, which here is `dev`'s — the topic was cut from it, so no candidate's merge-base is
+  // nearer. An integration branch is permanently ahead of the default
+  // (squash-merge artifact), so measuring this topic against the default would bill every
+  // unreleased integration commit to this cycle instead of the two lines the topic added.
+  const repo = makeRepo(); const runsDir = makeRepo();
+  sh("git", ["checkout", "-q", "-b", "dev"], { cwd: repo });
+  writeInto(repo, "unreleased.txt", "a\nb\nc\n");
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  commitAll(repo, "unreleased dev work");
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  writeInto(repo, "f.txt", "hello\nworld\n");
+  commitAll(repo, "task 1");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  const wl = workloads(runsDir, repo);
+  assert.strictEqual(wl.length, 1);
+  // dev..topic is exactly f.txt, added, two lines.
+  assert.strictEqual(wl[0].filesChanged, 1);
+  assert.strictEqual(wl[0].filesCreated, 1);
+  assert.strictEqual(wl[0].insertions, 2);
+});
+
+test("derives the base in a clone whose default branch exists only as a remote-tracking ref", () => {
+  // A fresh clone with no local branch for the default: `refs/remotes/origin/HEAD` resolves but
+  // the bare name it points at does not, so the base must be spelled `origin/<name>`
+  // (`references/branch.md` § "Names first: validate, then quote"). Spelling it bare made
+  // `git merge-base` fail and the sensor silently record nothing.
+  const origin = makeRepo(); const runsDir = makeRepo();
+  const repo = join(mkdtempSync(join(tmpdir(), "devcycle-test-clone-")), "clone");
+  sh("git", ["clone", "-q", origin, repo]);
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  sh("git", ["branch", "-q", "-D", "main"], { cwd: repo });
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  writeInto(repo, "f.txt", "hello\nworld\n");
+  commitAll(repo, "task 1");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  const wl = workloads(runsDir, repo);
+  assert.strictEqual(wl.length, 1);
+  // origin/main..topic is the state file plus f.txt, both added.
+  assert.strictEqual(wl[0].filesChanged, 2);
+  assert.strictEqual(wl[0].filesCreated, 2);
+});
+
+test("falls back to main when origin/HEAD names a branch this clone cannot resolve", () => {
+  // The old `if (!def)` form made the main/master fallback dead code after any successful
+  // `symbolic-ref`, so an origin/HEAD pointing at a branch this clone does not carry left the
+  // sensor with an unusable base and nothing recorded.
+  const repo = makeRepo(); const runsDir = makeRepo();
+  sh("git", ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"], { cwd: repo });
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  writeInto(repo, "f.txt", "hello\nworld\n");
+  commitAll(repo, "task 1");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  const wl = workloads(runsDir, repo);
+  assert.strictEqual(wl.length, 1);
+  // main..topic is the state file plus f.txt, both added.
+  assert.strictEqual(wl[0].filesChanged, 2);
+  assert.strictEqual(wl[0].filesCreated, 2);
+});
+
+test("derives the base from the default branch when the topic was cut from it, even beside a diverged integration branch", () => {
+  // The mirror of the test above, and the case a fixed candidate order cannot get right: this
+  // topic descends from `main`, in a repo that also carries a `dev` that diverged earlier.
+  // Preferring `dev` by name measures from the divergence point and bills main's post-divergence
+  // release commit to this cycle. Which cut-point a branch descends from is a property of
+  // history, so the base is the merge-base NEAREST to HEAD, not the first name that resolves.
+  const repo = makeRepo(); const runsDir = makeRepo();
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  commitAll(repo, "state file on main");
+  sh("git", ["checkout", "-q", "-b", "dev"], { cwd: repo });
+  writeInto(repo, "unreleased.txt", "a\nb\nc\n");
+  commitAll(repo, "unreleased dev work");
+  sh("git", ["checkout", "-q", "main"], { cwd: repo });
+  writeInto(repo, "released.txt", "x\ny\n");
+  commitAll(repo, "release commit on main, after dev diverged");
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  writeInto(repo, "f.txt", "hello\nworld\n");
+  commitAll(repo, "task 1");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  const wl = workloads(runsDir, repo);
+  assert.strictEqual(wl.length, 1);
+  // main..topic is exactly f.txt, added, two lines. Measuring from merge-base(dev, topic) instead
+  // would add released.txt's file and its two lines.
+  assert.strictEqual(wl[0].filesChanged, 1);
+  assert.strictEqual(wl[0].filesCreated, 1);
+  assert.strictEqual(wl[0].insertions, 2);
+});
+
+test("without an annotation, HEAD on an integration branch is a no-op — nothing to measure", () => {
+  // The default-branch arm of this guard is covered above; this pins the arm the widening added.
+  // Nearest-merge-base selection reaches the same no-op independently (HEAD is its own branch's
+  // merge-base, so the phantom-zero-diff guard also fires), so what this test pins is the
+  // outcome: a commit made while sitting on `dev` records no workload.
+  const repo = makeRepo(); const runsDir = makeRepo();
+  sh("git", ["checkout", "-q", "-b", "dev"], { cwd: repo });
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  writeInto(repo, "f.txt", "hello\n");
+  commitAll(repo, "on dev");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
   assert.strictEqual(workloads(runsDir, repo).length, 0);
 });

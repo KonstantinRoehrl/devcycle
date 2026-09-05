@@ -45,8 +45,11 @@ taken when the field is written — never a narrated or estimated time.
 totals, both read by the `hooks/workload-sensor.mjs` commit-sensor so a cycle's workload is
 captured progressively; both are carried forward on rewrite like the other lines.
 `branch:` carries a `(cut from <base> at <sha>)` annotation whose `<sha>` (the point the topic
-branch was cut) `hooks/workload-sensor.mjs` parses to bound the cycle's diff — so the annotation
-is load-bearing, not decorative: reducing it to a bare branch line would blind the sensor.
+branch was cut) `hooks/workload-sensor.mjs` parses to bound the cycle's diff. A bare branch line no
+longer blinds the sensor — `references/branch.md` § Committing owns the base it derives instead —
+but keep writing the annotation: it records the exact cut point, where the derivation only infers
+one from the branch's ancestry, and an inference goes wrong where a record cannot (a branch cut
+from something outside the sanctioned cut-points, a history rewritten since).
 
 **The ownership check, run before trusting anything else in the file.** `root:` and
 `request:` pin it to one project and one goal, so every reader asks whether the file
