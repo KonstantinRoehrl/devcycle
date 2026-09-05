@@ -29,8 +29,10 @@ A matcher that cannot fire must never read as a clean bill of health.
 
 ## The grouping key
 
-The key is `(event, stage)` while the journal carries no attribution. From the release that
-turns on culprit attribution it becomes the culprit-id. The formula is unchanged either way.
+The key is the culprit-id when the event carries one, else `(event, stage)`. A run written by a
+version whose writers journal the culprit (`playbooks/executing-waves.md` steps 5–6,
+`references/ledger.md`'s `event` row) keys by culprit; an older run keys by `(event, stage)` and
+renders as unattributed. The formula is unchanged either way.
 
 ## Signals that are derived, not written
 

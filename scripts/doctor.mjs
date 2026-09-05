@@ -36,7 +36,7 @@ const CHANGELOG_PATH = join(PLUGIN_ROOT, "references", "config-changelog.md");
 const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
 
 // `from-doctor` issues are filed against devcycle itself, wherever doctor happens to run. A
-// bare `gh issue list` resolves to the host repo, so the Outer loop section would render zeros
+// bare `gh issue list` resolves to the host repo, so `doctor --json`'s `outer_loop` would count zero
 // in every repo except this one — the failure this constant exists to prevent.
 export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
 
@@ -982,15 +982,18 @@ export function isInFlight(newestRecordMs, nowMs = Date.now()) {
   return nowMs - newestRecordMs < IN_FLIGHT_MS;
 }
 
+// references/impact-scoring.md § The grouping key: the culprit-id when the event carries one,
+// else (event, stage). One definition, read by impactScores and culpritsByKey alike.
+export const impactKey = (e) => e.culprit ?? `${e.event}:${e.stage}`;
+
 // The culprit slugs each impact key's events carried, so a table can name the vocabulary entry
-// without impactScores having to key on it — the key stays (event, stage) until the release
-// references/impact-scoring.md § The grouping key names. A key whose events carry no slug is
+// without impactScores having to key on it. A key whose events carry no slug is
 // absent, never present with an empty list: absent is not "attributed to nothing".
 function culpritsByKey(record) {
   const out = {};
   for (const e of journalEvents(record)) {
     if (!e.culprit) continue;
-    const key = `${e.event}:${e.stage}`;
+    const key = impactKey(e);
     (out[key] ??= new Set()).add(e.culprit);
   }
   return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...v].sort()]));
@@ -1532,6 +1535,7 @@ export function buildJsonReport(summaries, ctx = {}) {
     // Absent, not zero: a probe that did not run renders null here for the same reason the
     // markdown renders "unavailable" — a 0 would read as "nothing filed".
     outer_loop: ctx.outerLoop ?? null,
+    verification: ctx.verification ?? null,
     compiled_knowledge: ctx.compiledKnowledge ?? null,
     cycles: cycleGroups(summaries),
   };
@@ -1669,7 +1673,7 @@ function main() {
   }
   // The draft path, before the report path: it prints one culprit's issue and returns. It never
   // posts, and it builds its own two tables rather than taking reportContext's, so drafting an
-  // issue never runs the `gh` probe the report's Outer loop section needs.
+  // issue never runs the `gh` probe `doctor --json`'s `outer_loop` needs.
   if (args.issueBody) {
     const slug = args.issueBody;
     const tables = {
@@ -1779,7 +1783,7 @@ export function impactScores(record, costByStage) {
   const all = journalEvents(record);
   const byKey = new Map();
   for (const e of all) {
-    const key = `${e.event}:${e.stage}`;
+    const key = impactKey(e);
     if (!byKey.has(key))
       byKey.set(key, { key, event: e.event, stage: e.stage, frequency: 0, impact: 0, measurable: true });
     const agg = byKey.get(key);
@@ -2195,6 +2199,8 @@ function impactRows(summaries, vocab = [], band = [], dates = new Map()) {
       // filed under a kind nobody assigned it.
       kind: entry?.kind ?? "unclassified",
       isWin: WIN_EVENTS.has(agg.event) || entry?.kind === "win",
+      // A culprit-keyed row always agrees on its one slug; an (event, stage) row has no slug list.
+      attributed: slug !== null,
       impact: agg.measurable ? agg.impact : null,
       occurrences: agg.occurrences,
       // Absent, not zero (QC1): a key seen only under an undetectable version has no range.
@@ -2217,8 +2223,8 @@ export function culpritTable(summaries, vocab) {
   const band = recencyBand(installedVersion(), dates);
   return impactRows(summaries, vocab, band, dates)
     .filter((r) => !r.isWin)
-    .map(({ name, kind, impact, occurrences, delta, trend, versions, lifecycle: life }) =>
-      ({ culprit: name, kind, impact, occurrences, delta, trend, versions, lifecycle: life }))
+    .map(({ name, kind, attributed, impact, occurrences, delta, trend, versions, lifecycle: life }) =>
+      ({ culprit: name, kind, attributed, impact, occurrences, delta, trend, versions, lifecycle: life }))
     // Live problems first, then by money at stake: a culprit still occurring in the recency band
     // is what the reader can act on, ahead of one a newer release has likely moved past.
     .sort((a, b) => (b.lifecycle === "active") - (a.lifecycle === "active") || byImpactDesc(a, b));
@@ -2448,7 +2454,6 @@ const GLOSSES = {
     "running far deeper than its own startup floor, a stage whose cost jumped between versions, and " +
     "each run's excess over its matched cohort (unmatched when the cohort has no peer).",
   promoted: "Whether lessons this repo already adopted actually stopped the problem recurring.",
-  "outer-loop": "Whether filing issues from this report is actually producing fixes.",
   "compiled-knowledge":
     "Whether lessons are getting cheaper to carry — a check costs nothing to read, prose costs " +
     "context on every run.",
@@ -2520,13 +2525,6 @@ const impactText = (v) => (v === null || v === undefined ? "unmeasurable" : usd(
 const cohortSessionsText = (r) =>
   r.lowConfidence ? `${r.sessions} (low confidence: n<${MIN_COHORT})` : String(r.sessions);
 
-// null means gh answered but no resolved culprit had a dated release — not a zero-day
-// turnaround; the string "unavailable" means gh itself could not be reached.
-const turnaroundText = (v) =>
-  v === null || v === undefined
-    ? "unavailable (no resolved culprit has a dated release)"
-    : v === "unavailable" ? "unavailable" : `${v} day(s)`;
-
 // Cost anomalies are ranked by the money at stake. A candidate carrying no dollar figure ranks
 // last rather than being sorted as if it had been measured at zero.
 const anomalyWeight = (c) => Math.abs(c.delta_dollars ?? c.dollars ?? 0);
@@ -2597,7 +2595,7 @@ export function renderReport(summaries, ctx) {
   const {
     repo, today, scope,
     previousSummaries = null, vocab = [], promotions = [],
-    outerLoop: loop = null, compiledKnowledge: compiled = null, verification = null,
+    compiledKnowledge: compiled = null, verification = null,
   } = ctx ?? {};
   const L = [];
   const section = (heading, glossKey) => {
@@ -2772,10 +2770,11 @@ export function renderReport(summaries, ctx) {
 
   section("## Your culprits", "culprits");
   L.push(...markdownTable(
-    ["Culprit", "Kind", "Cost (observed)", "Occurrences (observed)", "Δ vs previous (derived)",
+    ["Culprit", "Cost (observed)", "Occurrences (observed)", "Δ vs previous (derived)",
       "Trend (derived)", "Versions (observed)", "Lifecycle (derived)"],
     culpritTable(summaries, vocab).map((r) => [
-      r.culprit, r.kind, impactText(r.impact), r.occurrences, deltaText(r.delta), r.trend,
+      r.attributed ? r.culprit : `${r.culprit} (unattributed)`,
+      impactText(r.impact), r.occurrences, deltaText(r.delta), r.trend,
       r.versions ? `${r.versions[0]}..${r.versions[1]}` : null, r.lifecycle,
     ]),
     "no scored culprit events in this corpus",
@@ -2840,12 +2839,12 @@ export function renderReport(summaries, ctx) {
 
   section("## Previously promoted — did it hold", "promoted");
   // The verification engine computes every verdict; this only renders it. One line per scoreboard
-  // entry (held / recurred / unmeasurable / broken / errored), then the resolved-in lines, then the
+  // entry (held / recurred / unmeasurable / broken / errored), then the
   // Actionability menu — each recurred lesson the engine flagged for escalation becomes a
   // `/devcycle:cycle` entry point the reader can run (playbooks/profiling-sessions.md).
   const v = verification ?? { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] };
   const overRuns = (n) => (n ? ` over ${n} run${n === 1 ? "" : "s"}` : "");
-  if (!v.scoreboard.length && !v.resolvedIn.length) {
+  if (!v.scoreboard.length) {
     L.push("_No promoted lesson has been measured against a run yet._");
   } else {
     for (const s of v.scoreboard)
@@ -2853,29 +2852,9 @@ export function renderReport(summaries, ctx) {
       // took: a skipped check (no --run-checks), an unrunnable path and an errored harness all
       // land on "unmeasurable"/"errored" and are only told apart by this suffix.
       L.push(`- ${s.culpritId} (${s.rung}): ${s.verdict}${overRuns(s.runsObserved)}${s.detail ? ` — ${s.detail}` : ""}`);
-    for (const r of v.resolvedIn)
-      L.push(`- ${r.culpritId}: resolved in ${r.resolvedIn} — ${r.verdict}${overRuns(r.runsObserved)}`);
     for (const e of v.candidates.escalation)
       L.push(`- Actionability — \`/devcycle:cycle\` re-address ${e.culpritId} (${e.reason}; escalate from ${e.rung})`);
   }
-
-  section("## Outer loop", "outer-loop");
-  // A probe that could not run renders "unavailable" for every field it feeds — never 0, which
-  // would read as "nothing has ever been filed".
-  const l = loop ?? {
-    drafted: "unavailable", draftedSince: DRAFTED_SINCE,
-    filed: "unavailable", resolved: "unavailable", medianTurnaroundDays: "unavailable",
-    truncated: false,
-  };
-  L.push(
-    `- Drafted: ${l.drafted} (issues; markers recorded since ${l.draftedSince})`,
-    `- Filed: ${l.filed}`,
-    `- Resolved: ${l.resolved}`,
-    ...(l.truncated
-      ? [`- Note: the issue query returned results at the ${OUTER_LOOP_QUERY_LIMIT}-issue query limit — the counts below are a lower bound`]
-      : []),
-    `- Median turnaround: ${turnaroundText(l.medianTurnaroundDays)}`,
-  );
 
   section("## Compiled knowledge (cumulative, by version)", "compiled-knowledge");
   const ck = compiled ?? { rows: [], note: "Unavailable — the compiled-knowledge probe did not run." };
@@ -2977,7 +2956,7 @@ function reportContext(args, result) {
     previousSummaries: result.previousSessions,
     vocab,
     promotions,
-    outerLoop: outerLoop(doctorDir()),
+    outerLoop: args.json ? outerLoop(doctorDir()) : null, // the funnel is --json only: nothing in the markdown reads it, so a markdown run makes no gh call
     compiledKnowledge: compiledKnowledge(promotions),
     verification: promotionVerification(promotions, args.runChecks),
   };
@@ -3337,8 +3316,8 @@ export function complianceIssueBody(slug, summaries, shape) {
 
 // Exactly what `--issue-body` prints. The repo line leads because it is the one field the filing
 // step must act on rather than paste: a bare `gh issue create` resolves to the repo the run
-// happened in, so a draft filed without it lands in the user's own tracker while the Outer loop
-// section queries DEVCYCLE_UPSTREAM and counts zero. Held here, not inlined in main(), so the
+// happened in, so a draft filed without it lands in the user's own tracker while
+// `doctor --json`'s `outer_loop` queries DEVCYCLE_UPSTREAM and counts zero. Held here, not inlined in main(), so the
 // printed form is pinned by a test rather than by nothing.
 export function issueDraftLines(draft) {
   return [

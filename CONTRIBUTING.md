@@ -181,8 +181,9 @@ notes come from the PR title rather than from a commit range.
 
 ### Watching a fix past release: the maintainer-cohort check
 
-`doctor.mjs` tells one user whether a `resolved-in:` fix held for *their* own runs, but no local
-journal sees whether it held fleet-wide. After a `resolved-in:` release ships, watch
+`doctor --json`'s `verification.resolvedIn` tells one user whether a `resolved-in:` fix held for
+*their* own runs (the markdown report no longer renders the line), but no local journal sees
+whether it held fleet-wide. After a `resolved-in:` release ships, watch
 `gh issue list --label culprit:<slug> --label from-doctor` for that culprit-id: if new issues
 keep arriving post-release, the fix did not hold across the userbase even though it may show
 `held` in an individual doctor report.

@@ -21,6 +21,7 @@ one bullet per task, appended by the task that trips the baseline:
   needed (5320 still holds).
 - Task 3: context-budget learning-from-sessions 108827→109213, profiling-sessions
   110030→110359; surfaceTotal no raise needed.
+- Task 4: context-budget learning-from-sessions 109213→109370; surfaceTotal no raise needed.
 
 **Why:** every playbook cites `references/evidence.md`, `references/ledger.md`, and
 `references/handoff.md` transitively, so one sentence in any of them moves every playbook's

@@ -12,7 +12,7 @@ import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
   parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM, doctorDir,
-  renderReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates, winCandidates,
+  renderReport, buildJsonReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates, winCandidates,
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
   changelogEntry, regressionAttribution,
@@ -97,7 +97,8 @@ test("a summary carries the culprit slugs each impact key's events named", () =>
       { kind: "event", event: "gate-fail", stage: "execution", task: "2", culprit: "partial-evidence-capture", ts: "2026-07-20T10:05:00.000Z" },
     ],
   }));
-  assert.deepEqual(s.culpritsByKey["gate-fail:execution"], ["partial-evidence-capture"]);
+  assert.deepEqual(s.culpritsByKey["partial-evidence-capture"], ["partial-evidence-capture"]);
+  assert.equal(s.culpritsByKey["gate-fail:execution"], undefined);
 });
 
 test("an event with no culprit slug contributes no key rather than an empty-string slug", () => {
@@ -347,11 +348,12 @@ const VOCAB = [
 
 test("culpritTable prices a culprit from impactScores and names it from the vocabulary", () => {
   const rows = culpritTable([sum({
-    impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
-    culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
+    impact: [{ key: "partial-evidence-capture", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
+    culpritsByKey: { "partial-evidence-capture": ["partial-evidence-capture"] },
   })], VOCAB);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].culprit, "partial-evidence-capture");
+  assert.equal(rows[0].attributed, true);
   assert.equal(rows[0].kind, "friction");
   assert.equal(rows[0].impact, 6);
   assert.equal(rows[0].occurrences, 2);
@@ -363,6 +365,7 @@ test("a culprit with no vocabulary slug is still offered, keyed by event and sta
   })], VOCAB);
   assert.equal(rows[0].culprit, "review-reject:execution");
   assert.equal(rows[0].kind, "unclassified");
+  assert.equal(rows[0].attributed, false);
 });
 
 test("an unmeasurable impact stays null and sorts last, never zero", () => {
@@ -403,7 +406,7 @@ test("culprit impact figures come from impactScores and from no second formula",
     ],
   });
   const s = withRecord(rec);
-  const expected = impactScores(rec, s.costByStage).find((r) => r.key === "gate-fail:execution");
+  const expected = impactScores(rec, s.costByStage).find((r) => r.key === "partial-evidence-capture");
   const [row] = culpritTable([s], VOCAB);
   assert.equal(row.impact, expected.impact);
   assert.equal(row.occurrences, expected.frequency);
@@ -810,12 +813,41 @@ test("the section order is fixed", () => {
     "## Workload (observed)", "## Cost by version",
     "## Cost by stage", "### Cost by stage (this window)", "## Outcome (observed)",
     "## Your culprits", "### Compliance",
-    "## Your wins", "## Cost anomalies", "## Previously promoted — did it hold", "## Outer loop",
+    "## Your wins", "## Cost anomalies", "## Previously promoted — did it hold",
     "## Compiled knowledge", "## Findings", "## Appendix",
   ];
   const positions = order.map((h) => out.indexOf(h));
   assert.ok(positions.every((p) => p !== -1), `a section is missing: ${order.filter((h, i) => positions[i] === -1)}`);
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b), "sections are out of order");
+});
+
+test("the markdown report drops Outer loop and the resolved-in lines; --json keeps both", () => {
+  const verification = {
+    scoreboard: [], candidates: { escalation: [], retirement: [] },
+    resolvedIn: [{ culpritId: "partial-evidence-capture", resolvedIn: "0.12.0", verdict: "held", runsObserved: 2 }],
+  };
+  const out = renderReport([sum()], ctx({ verification }));
+  assert.ok(!out.includes("## Outer loop"), "the Outer loop section still renders");
+  assert.ok(!/resolved in 0\.12\.0/.test(out), "a resolved-in line still renders");
+  assert.match(out, /_No promoted lesson has been measured against a run yet\._/);
+  const json = buildJsonReport([sum()], ctx({ verification }));
+  assert.equal(json.outer_loop.drafted, 0);
+  assert.equal(json.verification.resolvedIn[0].verdict, "held");
+});
+
+test("the culprit table names the slug, marks an unattributed key, and carries no Kind column", () => {
+  const out = renderReport([sum({
+    impact: [
+      { key: "partial-evidence-capture", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 },
+      { key: "review-reject:execution", event: "review-reject", stage: "execution", frequency: 1, impact: 2 },
+    ],
+    culpritsByKey: { "partial-evidence-capture": ["partial-evidence-capture"] },
+  })], ctx());
+  const table = out.slice(out.indexOf("## Your culprits"), out.indexOf("### Compliance"));
+  assert.match(table, /^\| Culprit \| Cost \(observed\) \|/m, "the header must start with Culprit then Cost");
+  assert.ok(!/\| Kind \|/.test(table), "the Kind column still renders");
+  assert.match(table, /^\| partial-evidence-capture \| \$6\.00 \|/m);
+  assert.match(table, /^\| review-reject:execution \(unattributed\) \| \$2\.00 \|/m);
 });
 
 test("the report leads with an At a glance workload-adjusted step, carrying its confidence", () => {
@@ -1077,14 +1109,14 @@ const COVERAGE_CORPUS = [
     unpriced: { "some-unpriced-model": 3 },
     attributionSource: "forward-filled",
     cacheBand: { point: 4, low: 3, high: 6, fallbackShare: 0.5, collapsed: false },
-    impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
-    culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
+    impact: [{ key: "partial-evidence-capture", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
+    culpritsByKey: { "partial-evidence-capture": ["partial-evidence-capture"] },
     complianceCandidates: [{ type: "inherited-model", inherited: 2, total: 5, sessions_sampled: 1 }],
   }),
   coverageSession({
     id: "22222222", costUSD: 15, costByStage: { execution: 5, planning: 10 },
-    impact: [{ key: "first-round-accept:execution", event: "first-round-accept", stage: "execution", frequency: 3, impact: 9 }],
-    culpritsByKey: { "first-round-accept:execution": ["first-round-clean-accept"] },
+    impact: [{ key: "first-round-clean-accept", event: "first-round-accept", stage: "execution", frequency: 3, impact: 9 }],
+    culpritsByKey: { "first-round-clean-accept": ["first-round-clean-accept"] },
   }),
   coverageSession({
     id: "22222223", costUSD: 15, costByStage: { execution: 5, planning: 10 },
@@ -1120,7 +1152,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
     // Your culprits — out to the row's end, for the same reason as the cohort row above: a
     // needle that stopped at the Δ column still matched after the Trend column was deleted.
-    "| partial-evidence-capture | friction | $6.00 | 2 | first seen | insufficient data | 0.12.0..0.12.0 | legacy |",
+    "| partial-evidence-capture | $6.00 | 2 | first seen | insufficient data | 0.12.0..0.12.0 | legacy |",
     // Compliance — now version-scoped from the source session (spec C5)
     "- CANDIDATE: inherited-model inherited=2/5 sessions=1 versions=[0.12.0..0.12.0]",
     // Your wins: a win event, and a version-over-version improvement
@@ -1270,21 +1302,6 @@ test("direction of travel normalizes and never anchors on an n<3 endpoint (#127)
   assert.doesNotMatch(out, /900\.0%|1200\.0%/);
 });
 
-test("an unavailable outer loop renders unavailable, not zeros", () => {
-  const out = renderReport([sum()], ctx());
-  assert.match(out, /Filed: unavailable/);
-  assert.ok(!/Filed: 0/.test(out));
-});
-
-// D-4: the unit is issues, matching Filed and Resolved, so the outer-loop line reads as one
-// monotonic funnel rather than mixing units.
-test("the Drafted line names its unit as issues, matching Filed and Resolved", () => {
-  const out = renderReport([sum()], ctx({
-    outerLoop: { drafted: 2, draftedSince: "0.13.0", filed: 1, resolved: 0, medianTurnaroundDays: null, truncated: false },
-  }));
-  assert.match(out, /^- Drafted: 2 \(issues; markers recorded since 0\.13\.0\)$/m);
-});
-
 test("an outer-loop query that hits its limit says so rather than under-reporting silently", () => {
   const dir = reportsFixture({});
   const issues = Array.from({ length: 200 }, (_, i) => ({
@@ -1294,8 +1311,7 @@ test("an outer-loop query that hits its limit says so rather than under-reportin
   try {
     const l = outerLoop(dir, () => JSON.stringify(issues));
     assert.equal(l.truncated, true);
-    const out = renderReport([sum()], ctx({ outerLoop: l }));
-    assert.match(out, /at the 200-issue query limit — the counts below are a lower bound/);
+    assert.equal(buildJsonReport([sum()], ctx({ outerLoop: l })).outer_loop.truncated, true);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -1714,7 +1730,7 @@ test("the playbook's consent path keeps both gates and files a runnable command"
 // The section between its own heading and the next one — so a verdict word matched here cannot
 // have leaked in from a different section.
 const promotedSection = (out) =>
-  out.slice(out.indexOf("## Previously promoted — did it hold"), out.indexOf("## Outer loop"));
+  out.slice(out.indexOf("## Previously promoted — did it hold"), out.indexOf("## Compiled knowledge"));
 
 test("the previously-promoted section renders every verdict word from the engine scoreboard", () => {
   const section = promotedSection(renderReport([sum()], ctx()));
