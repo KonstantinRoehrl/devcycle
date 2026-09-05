@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-// PreToolUse Bash hook (#165): a reviewer-role dispatch must never run a destructive git command
-// against the shared checkout. agents/task-reviewer.md and agents/red-team-reviewer.md carry a prose
-// ban and references/evidence.md forbids `git stash`, but `tools:` still grants full Bash and nothing
-// intercepts the call — prose is exactly what failed in the incident that destroyed an uncommitted
-// round-2 diff. This is the structural backstop, mirroring hooks/block-main-thread-browser.mjs:
-// origin is read from the hook input's agent_type (namespaced for a plugin agent, per
-// docs/platform-notes.md § (e)); for a GUARDED reviewer origin a git invocation must reduce to an
-// allowlisted read-only subcommand or the call is denied. Deny-on-ambiguity carries the safety within
-// what the parser sees: a git it cannot confidently classify as read-only — a destructive subcommand,
+// PreToolUse Bash hook (#165): a guarded dispatch must never run a destructive git command
+// against the shared checkout. agents/task-reviewer.md, agents/red-team-reviewer.md and
+// agents/implementer.md carry a prose ban and references/evidence.md forbids `git stash`, but
+// `tools:` still grants full Bash and nothing intercepts the call — prose is exactly what failed in
+// the incident that destroyed an uncommitted round-2 diff. This is the structural backstop,
+// mirroring hooks/block-main-thread-browser.mjs: origin is read from the hook input's agent_type
+// (namespaced for a plugin agent, per docs/platform-notes.md § (e)); for a GUARDED dispatch origin
+// a git invocation must reduce to an allowlisted read-only subcommand or the call is denied.
+// Deny-on-ambiguity carries the safety within what the parser sees: a git it cannot confidently
+// classify as read-only — a destructive subcommand,
 // git behind a RECOGNIZED shell/exec wrapper (sh -c, xargs, eval, or a process/privilege/scheduling
 // launcher in the bounded WRAPPERS set: setsid/sudo/exec/taskset/…), a `{ … }` group or `( … )`
 // subshell, backticks, or a write-capable option (git diff --output=<file>) — is denied. The WRAPPERS
@@ -16,15 +17,18 @@
 // words and process substitution are NOT a bound: a head that is a reserved word (`if`, `!`,
 // `for … do`, `while … do`) is stripped until the real command is reached, and `<(`/`>(` are denied
 // like backticks and `$(` — that spec's rule is that a missed destructive command is not acceptable.
-// Scope is git-only; non-git commands (tests, greps) are allowed, and a non-reviewer origin
-// (implementer, on-device-driver, main thread) is never guarded.
+// Scope is git-only; non-git commands (tests, greps) are allowed. Three dispatch origins are guarded
+// by the allowlist — task-reviewer, red-team-reviewer and, since #235, implementer — and the main
+// thread (no agent_type) is guarded for `git stash` alone, only while a .devcycle/state.md above the
+// call's cwd reports a stage other than done. Every other origin is never guarded.
 import { readFileSync } from "node:fs";
+import { findStateFile } from "./lib/find-state-file.mjs";
 
 let input = {};
 try {
   const parsed = JSON.parse(readFileSync(0, "utf8") || "{}");
   if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) input = parsed;
-} catch { /* malformed stdin → no origin → not a guarded reviewer → allow */ }
+} catch { /* malformed stdin → no origin → not a guarded dispatch → allow */ }
 
 const rawAgentType = input.agent_type;
 const agentType = typeof rawAgentType === "string" ? rawAgentType.trim() : "";
@@ -32,9 +36,11 @@ const agentType = typeof rawAgentType === "string" ? rawAgentType.trim() : "";
 // The inverse of block-main-thread-browser.mjs's ALLOWED list: these origins are GUARDED. Both the
 // bare frontmatter name and the <plugin>:<name> spelling the harness passes are pinned (stripping a
 // prefix would admit another plugin's identically-named agent, widening a guard whose only job is to
-// narrow). tests/unit/golden-path.test.mjs ties this list to agents/task-reviewer.md and
-// agents/red-team-reviewer.md's name: frontmatter, so a rename fails the suite instead of disarming.
-const GUARDED_AGENT_TYPES = ["task-reviewer", "devcycle:task-reviewer", "red-team-reviewer", "devcycle:red-team-reviewer"];
+// narrow). tests/unit/golden-path.test.mjs ties this list to the three agents' name: frontmatter, so
+// a rename fails the suite instead of disarming. The implementer joined in #235: its contract was
+// already read-only apart from `git add -N`, so one allowlist serves all three.
+const GUARDED_AGENT_TYPES = ["task-reviewer", "devcycle:task-reviewer", "red-team-reviewer", "devcycle:red-team-reviewer", "implementer", "devcycle:implementer"];
+const guarded = GUARDED_AGENT_TYPES.includes(agentType);
 
 const allow = () => process.exit(0); // no output = defer to normal permission flow
 const deny = (reason) => {
@@ -48,9 +54,33 @@ const deny = (reason) => {
   process.exit(0);
 };
 
-if (!GUARDED_AGENT_TYPES.includes(agentType)) allow();
+// Main thread (agent_type absent): only `git stash` is guarded, and only while a cycle is active —
+// a stash discards every in-flight implementer's uncommitted edits across the shared checkout
+// (#235). The active cycle is read the way hooks/workload-sensor.mjs reads it: walk upward from the
+// hook input's cwd for .devcycle/state.md and take its stage: line. No state file, `stage: done`,
+// or a malformed file → not in a cycle → allow. Everything else on the main thread stays
+// unguarded: the coordinator legitimately commits, switches branches and merges.
+function activeCycleStage() {
+  const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd();
+  const stateFile = findStateFile(cwd);
+  if (!stateFile) return null;
+  let stage;
+  try { stage = readFileSync(stateFile, "utf8").match(/^- stage:\s*(\S+)/m)?.[1]; } catch { return null; }
+  return stage && stage !== "done" ? stage : null;
+}
+const cycleStage = agentType === "" ? activeCycleStage() : null;
+if (!guarded && cycleStage === null) allow();
 
 const command = typeof input.tool_input?.command === "string" ? input.tool_input.command : "";
+
+// Every deny names its origin class and the offending spelling, so the transcript explains itself: a
+// guarded dispatch is told what its allowlist forbids, the main thread which stash spelling tripped
+// the cycle-scoped ban.
+const denyReason = (guardedTail, mainThreadTail) =>
+  (guarded
+    ? `devcycle: reviewer/implementer dispatch (${agentType}) may not ${guardedTail}`
+    : `devcycle: main thread may not run git stash while a devcycle cycle is active (stage: ${cycleStage}) — ${mainThreadTail}`) +
+  ` command: ${command.slice(0, 200)}`;
 
 // Clearly read-only git subcommands (unconditional).
 const READ_ONLY = new Set([
@@ -79,11 +109,14 @@ const WRAPPERS = new Set([
 
 // Normalize a command head to the bare command name so alternate spellings of the same binary all
 // reduce to one token before classification (deny-on-ambiguity depends on this being total): strip a
-// leading grouping token (`(`/`{`, the subshell/brace-group spelling `(git`/`{git`), then surrounding
-// quotes (`"git"`), then a single leading backslash (`\git`, the alias-bypass spelling), then the path
-// basename (`/usr/bin/git`, `./git`). Whatever reduces to `git` is treated as git.
+// leading run of grouping tokens and quotes (`(`/`{`/`\'`/`"` — the subshell/brace-group spelling
+// `(git`/`{git`, the quoted spelling `"git"`), then the same run at the end (`stash)`, `git}`, the
+// closing char the whitespace split leaves glued to the last word of a group — round-1 fix), then a
+// single leading backslash (`\git`, the alias-bypass spelling), then the path basename
+// (`/usr/bin/git`, `./git`). Whatever reduces to `git` is treated as git. Stripping only ever adds
+// matches, so every extension here denies more, never less.
 function normalizeHead(token) {
-  let t = token.replace(/^[({]+/, "").replace(/^['"]+|['"]+$/g, "").replace(/^\\/, "");
+  let t = token.replace(/^[({'"]+/, "").replace(/[)}'"]+$/, "").replace(/^\\/, "");
   const slash = t.lastIndexOf("/");
   return slash === -1 ? t : t.slice(slash + 1);
 }
@@ -105,11 +138,33 @@ function gitSegmentIsReadOnly(tokens, i) {
   return false;                                  // everything else (checkout/reset/clean/stash/…) → deny
 }
 
+// Main-thread classification: only a stash subcommand other than `list`/`show` is denied. Both
+// tokens go through normalizeHead for the same reason heads do — the whitespace split leaves a
+// grouping char or a quote glued to them (`(git stash)` tokenizes as `stash)`, `git "stash"` as
+// `"stash"`), and a raw comparison read those as "not stash" and allowed the one command this ban
+// exists to stop (round-1 finding).
+function stashIsDestructive(tokens, i) {
+  if (normalizeHead(tokens[i] ?? "") !== "stash") return false;
+  const op = normalizeHead(tokens[i + 1] ?? "");
+  return !(op === "list" || op === "show");
+}
+// Behind a wrapper or substitution the main thread cannot see the subcommand either; a `stash`
+// token next to a git token is denied on ambiguity (`sh -c 'git stash list'` included — the
+// coordinator can run that directly). Same normalizer, so a quoted or grouped spelling counts.
+const mentionsStash = (tokens) => tokens.some((t) => normalizeHead(t) === "stash");
+
 // Command and process substitution can hide a git write we cannot classify: backticks, `$(`, and
 // the `<(`/`>(` process-substitution forms (audit 2026-09-05 H1) are all denied when a git token
-// is present anywhere in the command, whatever the subcommand.
-if (/`|\$\(|<\(|>\(/.test(command) && /\bgit\b/.test(command))
-  deny(`devcycle: reviewer dispatch (${agentType}) may not run git inside a command substitution (deny-on-ambiguity). command: ${command.slice(0, 200)}`);
+// is present anywhere in the command, whatever the subcommand. On the main thread the same denial
+// is scoped to commands that ALSO carry a `stash` token anywhere. Like the wrapper arm below, that
+// scoping over-reaches — an unrelated `stash` word (a `--grep=stash`, an echoed word) beside any
+// substituted git denies — which is the accepted cost of not parsing inside a substitution; the
+// reason therefore states what was seen instead of asserting a stash was run.
+if (/`|\$\(|<\(|>\(/.test(command) && /\bgit\b/.test(command) && (guarded || /\bstash\b/.test(command)))
+  deny(denyReason(
+    "run git inside a command substitution (deny-on-ambiguity).",
+    "this command names `stash` and runs git inside a command substitution, which can hide one (deny-on-ambiguity)."
+  ));
 
 // Shell reserved words that may precede a command inside one segment. They are neither a command
 // nor a wrapper, so a segment whose head is one of them was skipped and the git after it never
@@ -152,8 +207,11 @@ for (const seg of command.split(/(?:&&|\|\||;|\||&|\n)/)) {
     // A wrapper's argument is often a quoted script (`sh -c 'git checkout -- x'`), so the naive
     // whitespace split leaves a quote character glued to the word (`'git`, `"git`), and a wrapper may
     // also name git by path — normalizeHead reduces every such spelling to `git` before comparing.
-    if (tokens.slice(1).some((t) => normalizeHead(t) === "git")) // git behind a wrapper we cannot see into
-      deny(`devcycle: reviewer dispatch (${agentType}) may not run git behind a shell wrapper (deny-on-ambiguity). command: ${command.slice(0, 200)}`);
+    if (tokens.slice(1).some((t) => normalizeHead(t) === "git") && (guarded || mentionsStash(tokens))) // git behind a wrapper we cannot see into
+      deny(denyReason(
+        "run git behind a shell wrapper (deny-on-ambiguity).",
+        "a git behind a shell wrapper can hide one (deny-on-ambiguity)."
+      ));
     continue; // a wrapper with no git (e.g. `timeout 30 npm test`) is a non-git command → allow
   }
   if (head !== "git") continue; // non-git command (basename never `git`) → allowed
@@ -164,8 +222,12 @@ for (const seg of command.split(/(?:&&|\|\||;|\||&|\n)/)) {
     if (t.startsWith("-")) { i += 1; continue; }
     break;
   }
-  if (!gitSegmentIsReadOnly(tokens, i))
-    deny(`devcycle: reviewer dispatch (${agentType}) may not run destructive/ambiguous git — reviewers are read-only apart from \`git add -N\` (${(tokens[i] ?? "git")}). command: ${command.slice(0, 200)}`);
+  const denied = guarded ? !gitSegmentIsReadOnly(tokens, i) : stashIsDestructive(tokens, i);
+  if (denied)
+    deny(denyReason(
+      `run destructive/ambiguous git — guarded dispatches are read-only apart from \`git add -N\` (${tokens[i] ?? "git"}).`,
+      `\`git ${normalizeHead(tokens[i] ?? "") || "stash"}\` discards every in-flight implementer's uncommitted edits across the shared checkout.`
+    ));
 }
 
 allow();

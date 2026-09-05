@@ -1,27 +1,47 @@
-// #165: a reviewer-role dispatch must not run destructive git against the shared checkout.
-// Structural backstop mirroring block-main-thread-browser.test.mjs: spawn the hook with a crafted
+// #165/#235: a guarded dispatch must not run destructive git against the shared checkout, and the
+// main thread must not run `git stash` while a devcycle cycle is active. Structural backstop
+// mirroring block-main-thread-browser.test.mjs: spawn the hook with a crafted
 // PreToolUse stdin and assert the deny/allow decision. deny = a permissionDecision:"deny" object on
 // stdout; allow = empty stdout (defer to normal permission flow). Both exit 0 (a non-zero exit with
 // empty stdout is the fail-open a PreToolUse harness reads as "no decision").
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
 
-const HOOK = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "hooks", "block-reviewer-git-write.mjs");
+const HOOK = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "hooks", "block-destructive-git.mjs");
 
-// Returns "deny" or "allow" for a given agent_type + Bash command.
-function decide(agentType, command) {
-  const input = JSON.stringify({ agent_type: agentType, tool_input: { command } });
-  const r = spawnSync("node", [HOOK], { input, encoding: "utf8" });
+// Spawns the hook with a crafted PreToolUse stdin; returns the decision and the deny reason.
+function decideRaw(input) {
+  const r = spawnSync("node", [HOOK], { input: JSON.stringify(input), encoding: "utf8" });
   assert.equal(r.status, 0, `hook exited ${r.status}, stderr: ${r.stderr}`);
-  if (r.stdout.trim() === "") return "allow";
-  const out = JSON.parse(r.stdout);
-  return out.hookSpecificOutput?.permissionDecision === "deny" ? "deny" : "allow";
+  if (r.stdout.trim() === "") return { decision: "allow", reason: "" };
+  const out = JSON.parse(r.stdout).hookSpecificOutput ?? {};
+  return { decision: out.permissionDecision === "deny" ? "deny" : "allow", reason: out.permissionDecisionReason ?? "" };
 }
 
+// Returns "deny" or "allow" for a given agent_type + Bash command.
+const decide = (agentType, command) => decideRaw({ agent_type: agentType, tool_input: { command } }).decision;
+
+// Main-thread cases pass a cwd; the hook walks upward from it for .devcycle/state.md exactly as
+// hooks/workload-sensor.mjs does. tmpdir() must sit outside the repo (the suite runs under an
+// out-of-repo TMPDIR), or the walk would find the repo's own state file.
+function cycleDir(stateBody) {
+  const dir = mkdtempSync(join(tmpdir(), "devcycle-git-guard-"));
+  if (stateBody !== null) {
+    mkdirSync(join(dir, ".devcycle"));
+    writeFileSync(join(dir, ".devcycle", "state.md"), stateBody);
+  }
+  return dir;
+}
+const stateAt = (stage) => `# devcycle state\n- stage: ${stage}\n- root: /nowhere\n`;
+const decideMain = (cwd, command) => decideRaw({ cwd, tool_input: { command } }).decision;
+
 const REVIEWER = "devcycle:task-reviewer";
+const IMPLEMENTER = "devcycle:implementer";
 
 test("reviewer + destructive git is denied", () => {
   for (const cmd of [
@@ -221,20 +241,61 @@ test("reviewer + reserved words around non-git commands stay allowed", () => {
     assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for reserved-word non-git: ${cmd}`);
 });
 
-test("both guarded reviewer spellings are guarded", () => {
-  for (const origin of ["task-reviewer", "devcycle:task-reviewer", "red-team-reviewer", "devcycle:red-team-reviewer"])
+test("all six guarded spellings are guarded", () => {
+  for (const origin of ["task-reviewer", "devcycle:task-reviewer", "red-team-reviewer", "devcycle:red-team-reviewer", "implementer", "devcycle:implementer"])
     assert.equal(decide(origin, "git checkout -- x"), "deny", `expected deny for origin: ${origin}`);
 });
 
-test("a non-reviewer origin is never guarded", () => {
-  for (const origin of ["devcycle:implementer", "implementer", "devcycle:on-device-driver", "", "general-purpose"])
+// #235: an implementer shares the checkout with its siblings, and agents/implementer.md already
+// forbids every git write except `git add -N` — the same allowlist applies, one classifier.
+test("implementer + destructive git is denied, read-only git and git add -N are allowed", () => {
+  for (const cmd of ["git stash", "git checkout -- x", "git restore x", "git reset --hard", "git commit -m y", "git add newfile", "sh -c 'git stash'"])
+    assert.equal(decide(IMPLEMENTER, cmd), "deny", `expected deny for implementer: ${cmd}`);
+  for (const cmd of ["git diff", "git status", "git log -3", "git add -N newfile", "npm test"])
+    assert.equal(decide(IMPLEMENTER, cmd), "allow", `expected allow for implementer: ${cmd}`);
+});
+
+test("an unguarded dispatch origin is never guarded", () => {
+  for (const origin of ["devcycle:on-device-driver", "on-device-driver", "general-purpose", "Explore"])
     assert.equal(decide(origin, "git checkout -- x"), "allow", `expected allow for origin: ${origin}`);
 });
 
-test("main thread (absent agent_type) is never guarded", () => {
-  const r = spawnSync("node", [HOOK], { input: JSON.stringify({ tool_input: { command: "git checkout -- x" } }), encoding: "utf8" });
-  assert.equal(r.status, 0);
-  assert.equal(r.stdout.trim(), "");
+test("main thread (absent agent_type) is unguarded apart from git stash", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["git checkout -- x", "git commit -m x", "git checkout dev", "git merge --squash topic", "git reset --hard", "git add -A", "git push"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow on the main thread: ${cmd}`);
+});
+
+test("main thread + git stash is denied while a cycle is active, through every spelling the parser sees", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["git stash", "git stash push -m wip", "git stash pop", "git stash drop", "git -C . stash", "sh -c 'git stash'", "for i in 1; do git stash; done", "x=$(git stash)",
+    // Round-1 blocking fix: the whitespace split leaves a grouping char or a quote glued to the
+    // subcommand, so the raw-token comparison read `stash)` / `"stash"` as "not stash" and allowed
+    // the one command this ban exists to stop. `(cd sub && git stash)` is an ordinary spelling.
+    "(cd sub && git stash)", "(git stash)", "( git stash )", "{ git stash; }", 'git "stash"', "git 'stash'", "git stash)"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for main-thread stash: ${cmd}`);
+});
+
+test("main thread + git stash list/show are allowed in an active cycle", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  assert.equal(decideMain(cwd, "git stash list"), "allow");
+  assert.equal(decideMain(cwd, "git stash show -p"), "allow");
+  // Normalizing the subcommand must not turn the grouped spellings into a blanket stash deny.
+  assert.equal(decideMain(cwd, "(git stash list)"), "allow");
+  assert.equal(decideMain(cwd, "(cd sub && git stash show -p)"), "allow");
+});
+
+test("main thread + git stash is allowed when the cycle is done, absent, or the state file is malformed", () => {
+  assert.equal(decideMain(cycleDir(stateAt("done")), "git stash"), "allow");
+  assert.equal(decideMain(cycleDir(null), "git stash"), "allow");
+  assert.equal(decideMain(cycleDir("not a state file\n"), "git stash"), "allow");
+});
+
+test("the deny reason names the origin class and the active stage", () => {
+  const dispatch = decideRaw({ agent_type: IMPLEMENTER, tool_input: { command: "git reset --hard" } });
+  assert.match(dispatch.reason, /^devcycle: reviewer\/implementer dispatch \(devcycle:implementer\) may not /);
+  const main = decideRaw({ cwd: cycleDir(stateAt("execution")), tool_input: { command: "git stash" } });
+  assert.match(main.reason, /^devcycle: main thread may not run git stash while a devcycle cycle is active \(stage: execution\)/);
 });
 
 test("malformed / non-object stdin fails safe to allow, never throws", () => {
