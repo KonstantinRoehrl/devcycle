@@ -15,22 +15,30 @@ const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 // name its justification; helpers.mjs's base table predates that arm and is owned
 // elsewhere, so every fixture tree gets the table from here instead.
 const ROUTING_PATH = "docs/routing.md";
-const ROUTING_HEAD =
+// Check 6 reads the allowed consequence classes out of this bullet list rather than from a
+// hardcoded copy, so every fixture table has to carry one. Entries open "- `<class>` — ".
+const ROUTING_CLASS_BULLETS = [
+  "- `read-only` — writes nothing outside its own report. Must **not** carry `disable-model-invocation`.",
+  "- `confirm-first` — may write, but takes no irreversible action before its first confirmation.",
+  "- `side-effectful` — writes before any confirmation gate. Must carry `disable-model-invocation`.",
+  "- `resume` — acts on existing state. Must carry `disable-model-invocation`.",
+];
+const routingHead = (bullets) =>
   "# Routing\n\n" +
-  // Check 6 reads the allowed consequence classes out of this bullet list rather than from a
-  // hardcoded copy, so every fixture table has to carry one. Entries open "- `<class>` — ".
   "`consequence` is one of:\n\n" +
-  "- `read-only` — writes nothing outside its own report. Must **not** carry `disable-model-invocation`.\n" +
-  "- `confirm-first` — may write, but takes no irreversible action before its first confirmation.\n" +
-  "- `side-effectful` — writes before any confirmation gate. Must carry `disable-model-invocation`.\n" +
-  "- `resume` — acts on existing state. Must carry `disable-model-invocation`.\n\n" +
+  bullets.join("\n") +
+  "\n\n" +
   "| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n";
+const ROUTING_HEAD = routingHead(ROUTING_CLASS_BULLETS);
 const CYCLE_ROW = "| run the pipeline | `cycle` | confirm-first | yes |\n";
 const CYCLE_JUSTIFICATION =
   "\n**`cycle`'s justification.** Model-invocable by deliberate exception so a wrapper can drive the\n" +
   "pipeline programmatically: it creates no branch and makes no commit before its first user\n" +
   "confirmation, and it surfaces a state-file collision rather than overwriting one.\n";
 const routing = (...rows) => ROUTING_HEAD + CYCLE_ROW + rows.join("") + CYCLE_JUSTIFICATION;
+// The same fixture with a different class list: the vocabulary tests below vary the list, not the rows.
+const routingWithClasses = (bullets, ...rows) =>
+  routingHead(bullets) + CYCLE_ROW + rows.join("") + CYCLE_JUSTIFICATION;
 
 const makePluginFixture = () => {
   const dir = makeBaseFixture();
@@ -429,6 +437,46 @@ test("consequence classes: a routing.md whose class list is unreadable fails lou
       CYCLE_JUSTIFICATION
   );
   failsWith(runValidate(dir), /docs\/routing\.md.*class list/);
+});
+
+// --- check 6, sixth clause: routing.md's vocabulary and the classes the guards act on agree ---
+
+// A class routing.md defines that no clause acts on is exempt from every guard — the same silent
+// waiver the fifth clause closes, one level up. Renaming a class in the bullet list and the table
+// together is the cheapest way to reach it, and it has to be reported from both sides.
+test("consequence vocabulary: a class renamed in routing.md but not in the guards fails in both directions", () => {
+  const dir = makePluginFixture();
+  const renamed = ROUTING_CLASS_BULLETS.map((b) => b.replace("`side-effectful`", "`mutating`"));
+  writeInto(dir, ROUTING_PATH, routingWithClasses(renamed, "| turn sessions into rules | `learn` | mutating | no |\n"));
+  writeInto(dir, "commands/learn.md", '---\ndescription: "Distil sessions into landed rules."\n---\n');
+  failsWith(
+    runValidate(dir),
+    /docs\/routing\.md.*"mutating".*no clause/,
+    /docs\/routing\.md.*"side-effectful".*no longer defines/
+  );
+});
+
+test("consequence vocabulary: a fifth class no clause acts on fails, naming it", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, ROUTING_PATH, routingWithClasses([...ROUTING_CLASS_BULLETS, "- `advisory` — reports and nothing else."]));
+  failsWith(runValidate(dir), /docs\/routing\.md.*"advisory".*no clause/);
+});
+
+test("consequence vocabulary: a class the guards act on that routing.md stops defining fails", () => {
+  const dir = makePluginFixture();
+  const dropped = ROUTING_CLASS_BULLETS.filter((b) => !b.startsWith("- `resume`"));
+  writeInto(dir, ROUTING_PATH, routingWithClasses(dropped));
+  failsWith(runValidate(dir), /docs\/routing\.md.*"resume".*no longer defines/);
+});
+
+// The scan ends at the blank line after the list, so a later top-level bullet of the same shape is
+// not absorbed into the vocabulary. Only the table's position prevented that before; here the list
+// is followed by a stray bullet, and the run has to stay green.
+test("consequence vocabulary: a top-level bullet past the end of the list is not absorbed", () => {
+  const dir = makePluginFixture();
+  const stray = [...ROUTING_CLASS_BULLETS, "", "- `legacy` — a later top-level bullet, not part of the vocabulary."];
+  writeInto(dir, ROUTING_PATH, routingWithClasses(stray));
+  ok(runValidate(dir));
 });
 
 // --- check 7: skills/ is not part of the surface any more ---

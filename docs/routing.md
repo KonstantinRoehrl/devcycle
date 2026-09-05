@@ -6,16 +6,20 @@ stage is running, and neither maps a user's intent to an entry point or says wha
 do before its first confirmation. Every entry point appears exactly once. `scripts/validate.mjs`
 fails the build when a command is missing from this table, when a row names no command, when a
 command is listed twice, when a `consequence` cell is not one of the classes below (or that list
-is unreadable), when a `consequence` disagrees with the command's `disable-model-invocation`
+is unreadable), when the classes below and the classes the script's own clauses act on disagree in
+either direction, when a `consequence` disagrees with the command's `disable-model-invocation`
 frontmatter, when a `confirm-first` row names no justification in the prose below, or when a
-command's own description claims a different class than its row assigns.
+command's own description names `read-only`, `side-effectful` or `confirm-first` and its row
+assigns a different one. `resume` is not scanned in a description, because `continue.md`'s opens
+with the verb.
 
 `consequence` is one of:
 
 - `read-only` — never modifies the repo's source and starts no cycle; its writes are confined to
   its own report and the devcycle-owned records that same pass derives
   (`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking owns which of those are committed).
-  `review`'s PR write-back is an opt-in step it confirms before posting.
+  Anything it writes beyond those — `review`'s PR comments, `doctor`'s filed issues — is an opt-in
+  step it confirms before posting, never automatic.
   Must **not** carry `disable-model-invocation`.
 - `confirm-first` — may write, but takes no irreversible action before its first user
   confirmation. The deliberate exception class; each member names its justification below.

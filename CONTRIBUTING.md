@@ -141,8 +141,9 @@ gitignored and is where those belong.
 `docs/known-issues.md` is the hand-curated store of confirmed defects in devcycle's own engines;
 fixing one means deleting its entry in the same commit. The same rule holds for the second store,
 `docs/devcycle/maintenance-findings/`: a resolved finding's record is deleted outright — here,
-where that store is tracked, in its own `git rm` commit — rather than kept with a resolved marker,
-so neither store accumulates settled history. `docs/known-issues.md` owns how the two stores split.
+where that store is tracked, in its own `git rm` commit — rather than kept with a resolved marker.
+A *dismissed* finding is the one record that stays: deleting it would let the finding resurface as
+new on the next pass. `docs/known-issues.md` owns how the two stores split.
 
 ## Releasing
 

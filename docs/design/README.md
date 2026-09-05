@@ -473,9 +473,10 @@ the only files with frontmatter: playbooks are loaded by path and carry no descr
 the same information in prose a human reads, and `scripts/validate.mjs` fails the build when a
 command is absent from it — and, since 2026-09-05, when a description names one of the
 consequence classes `read-only`, `side-effectful` or `confirm-first` while the routing table
-assigns that command a different one. So CI mechanizes two properties of a description: that the
-command it describes is on the routing surface at all, and that any consequence it claims there is
-the one the table assigns.
+assigns that command a different one. So, on top of the presence check and §4.6's
+length budget, CI mechanizes two *routing* properties of a description: that the command it
+describes is on the routing surface at all, and that any consequence it claims there is the one
+the table assigns.
 
 Completeness is not among them, and the rest stays a review-time convention, deliberately not a CI
 gate: judging whether a description is complete enough needs a model, and no model credential is
