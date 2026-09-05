@@ -65,23 +65,45 @@ function parseState(text) {
   };
 }
 
+// The integration branches a topic branch may be cut from, in the order references/branch.md
+// § Committing lists them. That file owns the list; this is its runtime spelling, which prose
+// cannot hand a hook.
+const INTEGRATION_BRANCHES = ["dev", "develop", "development", "integration"];
+
 // The base to measure against when the branch line carries no `(cut from <base> at <sha>)`
-// annotation: the merge-base of the default branch and HEAD. Null — a no-op — when no default
-// branch resolves, when HEAD is that branch, or when the merge-base is HEAD itself (nothing
-// landed yet, the same phantom-zero-diff guard the annotated path applies).
+// annotation: the merge-base of HEAD and the first sanctioned cut-point that resolves.
+// references/branch.md § "Deriving a branch's file set" owns that preference order — the
+// integration branch when one exists, else the default branch — and this only follows it:
+// measuring a topic cut from an integration branch against the default instead bills every
+// unreleased integration commit to this cycle. Each candidate is spelled the way this clone can
+// resolve it, local branch else `origin/<name>`, per that file's § "Names first" — a fresh clone
+// carries the default only as a remote-tracking ref. Null — a no-op — when no candidate resolves,
+// when HEAD is on a candidate branch itself, or when the merge-base is HEAD (nothing landed yet,
+// the same phantom-zero-diff guard the annotated path applies).
 function deriveBase(repoRoot) {
   const git = (...args) => spawnSync("git", ["-C", repoRoot, ...args], { encoding: "utf8" });
   const remoteHead = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD");
-  let def = remoteHead.status === 0 ? remoteHead.stdout.trim().replace(/^origin\//, "") : null;
-  if (!def) def = ["main", "master"].find((b) => git("rev-parse", "--verify", "--quiet", `refs/heads/${b}`).status === 0) ?? null;
-  if (!def) return null;
+  const named = remoteHead.status === 0 ? remoteHead.stdout.trim().replace(/^origin\//, "") : "";
+  // main/master trails the reported default rather than replacing it, so the fallback stays
+  // reachable when `symbolic-ref` succeeds but names a branch this clone cannot resolve.
+  const candidates = [...new Set([...INTEGRATION_BRANCHES, ...(named ? [named] : []), "main", "master"])];
+
   const current = git("rev-parse", "--abbrev-ref", "HEAD");
-  if (current.status !== 0 || current.stdout.trim() === def) return null;
-  const mergeBase = git("merge-base", def, "HEAD");
-  if (mergeBase.status !== 0) return null;
-  const base = mergeBase.stdout.trim();
-  const head = git("rev-parse", "HEAD");
-  return head.status === 0 && head.stdout.trim() === base ? null : base;
+  if (current.status !== 0) return null;
+  const branch = current.stdout.trim();
+  if (candidates.includes(branch)) return null;
+
+  for (const name of candidates) {
+    const ref = [`refs/heads/${name}`, `refs/remotes/origin/${name}`]
+      .find((r) => git("rev-parse", "--verify", "--quiet", r).status === 0);
+    if (!ref) continue;
+    const mergeBase = git("merge-base", ref, "HEAD");
+    if (mergeBase.status !== 0 || !mergeBase.stdout.trim()) continue;
+    const base = mergeBase.stdout.trim();
+    const head = git("rev-parse", "HEAD");
+    return head.status === 0 && head.stdout.trim() === base ? null : base;
+  }
+  return null;
 }
 
 function main() {

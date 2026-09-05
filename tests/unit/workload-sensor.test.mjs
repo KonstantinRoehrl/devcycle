@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
 import { repoSlug, gitToplevel } from "../../scripts/run-record.mjs";
 
@@ -170,4 +171,65 @@ test("without an annotation, a topic branch at its merge-base is a no-op — no 
   writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
   assert.strictEqual(callHook(repo, runsDir).status, 0);
   assert.strictEqual(workloads(runsDir, repo).length, 0);
+});
+
+test("derives the base from the integration branch a topic was cut from, not from the default", () => {
+  // `references/branch.md` § "Deriving a branch's file set" puts the integration branch ahead of
+  // the default in the base order. An integration branch is permanently ahead of the default
+  // (squash-merge artifact), so measuring this topic against the default would bill every
+  // unreleased integration commit to this cycle instead of the two lines the topic added.
+  const repo = makeRepo(); const runsDir = makeRepo();
+  sh("git", ["checkout", "-q", "-b", "dev"], { cwd: repo });
+  writeInto(repo, "unreleased.txt", "a\nb\nc\n");
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  commitAll(repo, "unreleased dev work");
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  writeInto(repo, "f.txt", "hello\nworld\n");
+  commitAll(repo, "task 1");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  const wl = workloads(runsDir, repo);
+  assert.strictEqual(wl.length, 1);
+  // dev..topic is exactly f.txt, added, two lines.
+  assert.strictEqual(wl[0].filesChanged, 1);
+  assert.strictEqual(wl[0].filesCreated, 1);
+  assert.strictEqual(wl[0].insertions, 2);
+});
+
+test("derives the base in a clone whose default branch exists only as a remote-tracking ref", () => {
+  // A fresh clone with no local branch for the default: `refs/remotes/origin/HEAD` resolves but
+  // the bare name it points at does not, so the base must be spelled `origin/<name>`
+  // (`references/branch.md` § "Names first: validate, then quote"). Spelling it bare made
+  // `git merge-base` fail and the sensor silently record nothing.
+  const origin = makeRepo(); const runsDir = makeRepo();
+  const repo = join(mkdtempSync(join(tmpdir(), "devcycle-test-clone-")), "clone");
+  sh("git", ["clone", "-q", origin, repo]);
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  sh("git", ["branch", "-q", "-D", "main"], { cwd: repo });
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  writeInto(repo, "f.txt", "hello\nworld\n");
+  commitAll(repo, "task 1");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  const wl = workloads(runsDir, repo);
+  assert.strictEqual(wl.length, 1);
+  // origin/main..topic is the state file plus f.txt, both added.
+  assert.strictEqual(wl[0].filesChanged, 2);
+  assert.strictEqual(wl[0].filesCreated, 2);
+});
+
+test("falls back to main when origin/HEAD names a branch this clone cannot resolve", () => {
+  // The old `if (!def)` form made the main/master fallback dead code after any successful
+  // `symbolic-ref`, so an origin/HEAD pointing at a branch this clone does not carry left the
+  // sensor with an unusable base and nothing recorded.
+  const repo = makeRepo(); const runsDir = makeRepo();
+  sh("git", ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"], { cwd: repo });
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  writeInto(repo, "f.txt", "hello\nworld\n");
+  commitAll(repo, "task 1");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  const wl = workloads(runsDir, repo);
+  assert.strictEqual(wl.length, 1);
+  // main..topic is the state file plus f.txt, both added.
+  assert.strictEqual(wl[0].filesChanged, 2);
+  assert.strictEqual(wl[0].filesCreated, 2);
 });

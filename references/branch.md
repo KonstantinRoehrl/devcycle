@@ -13,11 +13,12 @@ or one the user names — create a topic branch and write it to the `branch:` li
 Write that line as `- branch: <name> (cut from <base-branch> at <sha>)`, with `<sha>` from
 `git rev-parse --short HEAD` at the moment the branch is cut — the annotation is required, not
 decorative: `hooks/workload-sensor.mjs` reads it to bound the cycle's diff, and derives the base
-from the default branch's merge-base only when it is missing.
+from the order below only when it is missing.
 
 **Resolving the default branch.** Try, in order, `git symbolic-ref
 refs/remotes/origin/HEAD`, then `gh repo view --json defaultBranchRef`, then fall back
-to `main` or `master` if one of those branches exists and neither command is available.
+to `main` or `master` if one of those branches exists and neither resolves to a branch
+this clone has.
 
 **Where this applies.** Every committing path, without exception — the full pipeline's
 pre-flight before wave 1, the fast path, the sweep path, re-entry via `/devcycle:continue`
