@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, realpathSync } from "node:fs";
+import { readFileSync, mkdtempSync, realpathSync, existsSync } from "node:fs";
 import { join, dirname, delimiter } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import agentCli from "../../workflows/lib/agent-cli.js";
 import { makeFakeBin } from "./helpers.mjs";
 
@@ -218,6 +219,91 @@ test("claudeStructured surfaces total_cost_usd from the envelope as cost", async
     })
   );
   assert.deepEqual(res, { ok: true, value: { ok: true }, cost: 0.0123 });
+});
+
+// Polls until `pid` is gone (ESRCH) or `ms` elapses; a SIGKILLed process can sit un-reaped for a
+// few milliseconds after the kill, during which kill(pid, 0) still succeeds.
+async function waitForExit(pid, ms) {
+  const until = Date.now() + ms;
+  for (;;) {
+    try { process.kill(pid, 0); } catch (e) { if (e.code === "ESRCH") return true; throw e; }
+    if (Date.now() > until) return false;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+// Audit 2026-09-05 H5: run() killed only the direct child and resolved on `close`, which waits for
+// every holder of the stdio pipes — a grandchild that inherited them kept the promise pending past
+// the timeout. The child here spawns a 4s sleeper with stdio: "inherit", prints its pid, and sleeps.
+test("run kills the whole process group on timeout and settles without waiting for a grandchild holding the pipes", async () => {
+  const child = `
+const { spawn } = require("node:child_process");
+const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 4000)"], { stdio: "inherit" });
+process.stdout.write(String(g.pid) + "\\n");
+setTimeout(() => {}, 4000);
+`;
+  const started = Date.now();
+  const res = await run(process.execPath, ["-e", child], { timeoutMs: 200 });
+  const elapsed = Date.now() - started;
+  assert.equal(res.timedOut, true);
+  assert.ok(elapsed < 200 + agentCli.DRAIN_GRACE_MS + 1000, `settled after ${elapsed}ms; the grandchild must not hold the promise`);
+  const pid = Number(res.stdout.trim());
+  assert.ok(Number.isInteger(pid) && pid > 0, `grandchild pid must be on stdout, got ${JSON.stringify(res.stdout)}`);
+  assert.equal(await waitForExit(pid, 500), true, "the grandchild must be dead after the group kill");
+});
+
+// A detached child no longer receives the terminal's Ctrl-C, so the parent's own SIGTERM must reach
+// every live group before the parent dies — otherwise a killed panel leaves claude subprocesses
+// orphaned. The runner is a separate node process so the signal can be sent for real.
+test("a parent taking SIGTERM kills every live child group before exiting", async () => {
+  const pidFile = join(mkdtempSync(join(tmpdir(), "devcycle-agent-cli-signal-")), "child.pid");
+  const runner = `
+const { run } = require(${JSON.stringify(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "workflows", "lib", "agent-cli.js"))});
+run(process.execPath, ["-e", 'require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 10000)'], { timeoutMs: 10000 });
+`;
+  const { spawn } = await import("node:child_process");
+  const parent = spawn(process.execPath, ["-e", runner], { stdio: "ignore" });
+  const until = Date.now() + 3000;
+  while (!existsSync(pidFile) && Date.now() < until) await new Promise((r) => setTimeout(r, 25));
+  assert.ok(existsSync(pidFile), "the child never started");
+  const childPid = Number(readFileSync(pidFile, "utf8"));
+  parent.kill("SIGTERM");
+  await new Promise((r) => parent.once("exit", r));
+  assert.equal(await waitForExit(childPid, 1000), true, "the child group must die with its parent");
+});
+
+// Audit 2026-09-05 L3: a `structured_output: null` envelope came back { ok: true, value: null } and the
+// panel reconciler dereferenced it. Every schema both engines pass is an object schema, so a
+// non-object is a validation failure and takes the retry path.
+test("claudeStructured rejects a null structured_output as a validation failure after the last attempt", async () => {
+  const tries = join(mkdtempSync(join(tmpdir(), "devcycle-agent-cli-null-")), "tries.log");
+  const bin = makeFakeBin(
+    "claude",
+    `
+require("node:fs").appendFileSync(${JSON.stringify(tries)}, "x");
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: null }));
+`
+  );
+  const res = await withPath(isolatedPath([bin]), () =>
+    claudeStructured({ prompt: "p", tools: "Read", schema: { type: "object" }, attempts: 2, errors: { agent: "editor agent", output: "editor", cap: 400 } })
+  );
+  assert.deepEqual(res, { ok: false, error: "editor agent returned a non-object structured output" });
+  assert.equal(readFileSync(tries, "utf8").length, 2, "a non-object output is retried like any validation failure");
+});
+
+test("claudeStructured rejects array and primitive structured_output the same way, and keeps accepting objects", async () => {
+  for (const bad of ["[1,2]", '"text"', "42"]) {
+    const bin = makeFakeBin("claude", `process.stdout.write(JSON.stringify({ is_error: false, structured_output: ${bad} }));`);
+    const res = await withPath(isolatedPath([bin]), () =>
+      claudeStructured({ prompt: "p", tools: "Read", schema: { type: "object" }, attempts: 1, errors: { agent: "a", output: "a", cap: 100 } })
+    );
+    assert.deepEqual(res, { ok: false, error: "a returned a non-object structured output" }, `structured_output ${bad} must be rejected`);
+  }
+  const good = makeFakeBin("claude", `process.stdout.write(JSON.stringify({ is_error: false, structured_output: { summary: "ok" } }));`);
+  const res = await withPath(isolatedPath([good]), () =>
+    claudeStructured({ prompt: "p", tools: "Read", schema: { type: "object" }, attempts: 1, errors: { agent: "a", output: "a", cap: 100 } })
+  );
+  assert.deepEqual(res, { ok: true, value: { summary: "ok" }, cost: null });
 });
 
 test("makeLogger tags every line with its engine's name", () => {

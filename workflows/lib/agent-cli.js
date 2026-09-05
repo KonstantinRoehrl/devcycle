@@ -24,19 +24,65 @@ function makeLogger(tag) {
   return { log, fatal };
 }
 
-// Spawn a child, buffer its output, SIGKILL it after timeoutMs. Never rejects:
-// transport failures come back on the resolved value as { spawnError } or
-// { timedOut } so callers branch on them instead of catching.
+// After the child exits, output still in flight in the pipes is drained for this long, then whatever
+// is buffered is returned — the promise never waits on a pipe-holder the caller cannot see.
+const DRAIN_GRACE_MS = 1000;
+
+// Every child run() has started and not yet seen exit. A detached child leads its own process group,
+// so it no longer receives the terminal's Ctrl-C; the parent's own termination must reach it.
+const live = new Set();
+let signalsHooked = false;
+function hookSignals() {
+  if (signalsHooked) return;
+  signalsHooked = true;
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.once(sig, () => {
+      for (const child of live) killGroup(child);
+      process.kill(process.pid, sig); // re-raise with the default disposition now that the listener is gone
+    });
+  }
+}
+
+// Kill the child's whole process group (audit H5: a grandchild that inherited the stdio pipes —
+// `sh -c "sleep 4; echo done"`, a backgrounded server in a verify command — survived a kill of the
+// direct child). Falls back to the direct child when the group is already gone (ESRCH).
+function killGroup(child) {
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    try { child.kill("SIGKILL"); } catch { /* already exited */ }
+  }
+}
+
+// Spawn a child as the leader of its own process group, buffer its output, SIGKILL the group after
+// timeoutMs. Settles on the child's `exit`, draining for DRAIN_GRACE_MS, not on `close`. Never
+// rejects: transport failures come back on the resolved value as { spawnError } or { timedOut } so
+// callers branch on them instead of catching.
 function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+    hookSignals();
+    const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], detached: true });
+    live.add(child);
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     let overflow = false;
-    const timer = setTimeout(() => {
+    let settled = false;
+    let timer = null;
+    let drainTimer = null;
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      live.delete(child);
+      clearTimeout(timer);
+      clearTimeout(drainTimer);
+      resolve(value);
+    };
+    const result = (code) =>
+      overflow ? { code, stdout, stderr, timedOut: false, overflow: true } : { code, stdout, stderr, timedOut };
+    timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killGroup(child);
     }, timeoutMs ?? AGENT_TIMEOUT_MS);
     const guard = () => {
       if (!overflow && stdout.length + stderr.length > maxBufferBytes) {
@@ -45,18 +91,15 @@ function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = 
         // accumulator can already sit well past the cap by the time this fires —
         // truncate what's kept, not just what's kept from growing further.
         if (stdout.length > maxBufferBytes) stdout = stdout.slice(0, maxBufferBytes);
-        child.kill("SIGKILL");
+        killGroup(child);
       }
     };
     child.stdout.on("data", (d) => { stdout += d; guard(); });
     child.stderr.on("data", (d) => { stderr += d; guard(); });
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      resolve({ code: null, stdout, stderr: String(err), timedOut, spawnError: err });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve(overflow ? { code, stdout, stderr, timedOut: false, overflow: true } : { code, stdout, stderr, timedOut });
+    child.on("error", (err) => settle({ code: null, stdout, stderr: String(err), timedOut, spawnError: err }));
+    child.on("exit", (code) => {
+      drainTimer = setTimeout(() => settle(result(code)), DRAIN_GRACE_MS);
+      child.once("close", () => settle(result(code)));
     });
     child.stdin.end();
   });
@@ -75,6 +118,8 @@ function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = 
 // its value is the last thing before the prompt, the prompt is swallowed
 // into the tools list and the call fails. The equals-form pins exactly one
 // value to the flag — never change this back to the two-element form.
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
 async function claudeStructured({ prompt, tools, schema, model, cwd, permissionMode, attempts = 1, errors }) {
   const argv = [
     "-p",
@@ -98,22 +143,30 @@ async function claudeStructured({ prompt, tools, schema, model, cwd, permissionM
       if (attempt === attempts) return { ok: false, error: `${errors.agent} output exceeded the buffer cap` };
       continue;
     }
+    let envelope;
     try {
-      const envelope = JSON.parse(res.stdout);
-      if (!envelope.is_error && envelope.structured_output !== undefined) {
-        const cost = typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd : null;
-        return { ok: true, value: envelope.structured_output, cost };
-      }
-      if (attempt === attempts) {
-        return { ok: false, error: `${errors.agent} error: ${envelope.result ?? res.stderr}`.slice(0, errors.cap) };
-      }
+      envelope = JSON.parse(res.stdout);
     } catch {
       if (attempt === attempts) {
         return { ok: false, error: `unparseable ${errors.output} output: ${(res.stderr || res.stdout).slice(0, 300)}` };
       }
+      continue;
+    }
+    if (!envelope.is_error && envelope.structured_output !== undefined) {
+      // Every schema both engines pass is an object schema, so null / an array / a primitive here
+      // is a validation failure (audit 2026-09-05 L3) and takes the retry path like an is_error envelope.
+      if (!isPlainObject(envelope.structured_output)) {
+        if (attempt === attempts) return { ok: false, error: `${errors.agent} returned a non-object structured output` };
+        continue;
+      }
+      const cost = typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd : null;
+      return { ok: true, value: envelope.structured_output, cost };
+    }
+    if (attempt === attempts) {
+      return { ok: false, error: `${errors.agent} error: ${envelope.result ?? res.stderr}`.slice(0, errors.cap) };
     }
   }
   return { ok: false, error: "unreachable" };
 }
 
-module.exports = { makeLogger, run, claudeStructured };
+module.exports = { makeLogger, run, claudeStructured, DRAIN_GRACE_MS };
