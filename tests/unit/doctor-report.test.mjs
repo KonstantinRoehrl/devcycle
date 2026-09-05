@@ -289,25 +289,29 @@ test("stageByVersionTable renders at most the six most recent versions, oldest f
   assert.deepEqual(t.versions, ["0.7.0", "0.8.0", "0.9.0", "0.10.0", "0.11.0", "0.12.0"]);
 });
 
-test("a stage carried by fewer than two versions has insufficient data, not a flat trend", () => {
-  const t = stageByVersionTable([sum({ costByStage: { execution: 5 } })]);
-  assert.equal(t.rows.find((r) => r.stage === "execution").trend, "insufficient data");
+const threeOf = (version, cost) =>
+  [1, 2, 3].map((i) => sum({ id: `${version}-${i}`, pluginVersion: version, costByStage: { execution: cost } }));
+
+test("a stage cell carries its sample count, and a trend needs three samples on both ends", () => {
+  const t = stageByVersionTable([...threeOf("0.11.0", 10), ...threeOf("0.12.0", 5)]);
+  const row = t.rows.find((r) => r.stage === "execution");
+  assert.deepEqual(row.byVersion["0.11.0"], { median: 10, n: 3 });
+  assert.deepEqual(row.byVersion["0.12.0"], { median: 5, n: 3 });
+  assert.equal(row.trend, "down");
 });
 
-test("a stage that halved across the rendered versions trends down", () => {
-  const t = stageByVersionTable([
-    sum({ id: "a", pluginVersion: "0.11.0", costByStage: { execution: 10 } }),
-    sum({ id: "b", pluginVersion: "0.12.0", costByStage: { execution: 5 } }),
-  ]);
-  assert.equal(t.rows.find((r) => r.stage === "execution").trend, "down");
-});
-
-test("a stage that moved less than five percent is flat", () => {
-  const t = stageByVersionTable([
-    sum({ id: "a", pluginVersion: "0.11.0", costByStage: { execution: 100 } }),
-    sum({ id: "b", pluginVersion: "0.12.0", costByStage: { execution: 102 } }),
-  ]);
+test("a stage that moved less than five percent across two three-sample versions is flat", () => {
+  const t = stageByVersionTable([...threeOf("0.11.0", 100), ...threeOf("0.12.0", 102)]);
   assert.equal(t.rows.find((r) => r.stage === "execution").trend, "flat");
+});
+
+test("a version with fewer than three samples never anchors a trend; the reason names both counts", () => {
+  const thin = stageByVersionTable([...threeOf("0.11.0", 10), sum({ id: "b", pluginVersion: "0.12.0", costByStage: { execution: 5 } })]);
+  assert.equal(thin.rows.find((r) => r.stage === "execution").trend, "insufficient data (n=3→1)");
+  const single = stageByVersionTable([sum({ costByStage: { execution: 5 } })]);
+  assert.equal(single.rows.find((r) => r.stage === "execution").trend, "insufficient data (n=1→1)");
+  const gap = stageByVersionTable([...threeOf("0.11.0", 10), sum({ id: "b", pluginVersion: "0.12.0", costByStage: { planning: 5 } })]);
+  assert.equal(gap.rows.find((r) => r.stage === "execution").trend, "insufficient data (n=3→3)");
 });
 
 test("trend vs previous window reads n/a with no window, never a fabricated zero", () => {
@@ -771,6 +775,20 @@ const ctx = (over = {}) => ({
   ...over,
 });
 
+// Two versions in the recency band, two same-shaped runs on each — the smallest corpus that
+// yields one At-a-glance step. Shared by every test that needs a rendered step.
+const matchedGlanceRuns = () => {
+  const dates = releaseDates(readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8"));
+  const band = recencyBand(installedVersion(), dates);
+  const [vOld, vNew] = [band.at(-2), band.at(-1)];
+  const workload = { requestKind: "feature", insertions: 100, deletions: 100, plannedTaskCount: 3 };
+  const run = (id, version, cost) => sum({
+    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough",
+    costUSD: cost, mainTurns: 10, subagentTurns: 4, medianDepth: 40000, workload,
+  });
+  return { vOld, vNew, runs: [run("o1", vOld, 10), run("o2", vOld, 10), run("n1", vNew, 12), run("n2", vNew, 12)] };
+};
+
 test("both playbook anchors render, in their specified positions", () => {
   const out = renderReport([sum()], ctx());
   const at = (needle) => out.indexOf(needle);
@@ -801,18 +819,8 @@ test("the section order is fixed", () => {
 });
 
 test("the report leads with an At a glance workload-adjusted step, carrying its confidence", () => {
-  const dates = releaseDates(readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8"));
-  const band = recencyBand(installedVersion(), dates);
-  const [vOld, vNew] = [band.at(-2), band.at(-1)];
-  const workload = { requestKind: "feature", insertions: 100, deletions: 100, plannedTaskCount: 3 };
-  const run = (id, version, cost) => sum({
-    id, runId: id.padEnd(16, "0"), pluginVersion: version, profile: "thorough",
-    costUSD: cost, mainTurns: 10, subagentTurns: 4, medianDepth: 40000, workload,
-  });
-  const out = renderReport([
-    run("o1", vOld, 10), run("o2", vOld, 10),
-    run("n1", vNew, 12), run("n2", vNew, 12),
-  ], ctx());
+  const { vOld, vNew, runs } = matchedGlanceRuns();
+  const out = renderReport(runs, ctx());
   const at = (needle) => out.indexOf(needle);
   assert.ok(at("## At a glance") !== -1, "the At a glance section is missing");
   assert.ok(at("## Read this first") < at("## At a glance"));
@@ -824,10 +832,22 @@ test("the report leads with an At a glance workload-adjusted step, carrying its 
 });
 
 test("the At a glance percentage column carries no $ glyph over a percent (issue #114)", () => {
-  const out = renderReport([sum()], ctx());
+  const out = renderReport(matchedGlanceRuns().runs, ctx());
   const glance = out.slice(out.indexOf("## At a glance"), out.indexOf("## Highlights"));
   assert.ok(!/workload-adj \$ Δ/.test(glance), "a $ glyph still sits over the percentage cell");
   assert.match(glance, /workload-adj cost Δ% \(derived\)/, "the honest percentage header is missing");
+});
+
+test("an empty At a glance explains itself from the data instead of printing a placeholder row", () => {
+  const out = renderReport([sum()], ctx());
+  const glance = out.slice(out.indexOf("## At a glance"), out.indexOf("## Highlights"));
+  assert.match(glance, /^No matched cohorts: 0 workload-bearing runs across 0 versions in the band; a row needs ≥2 same-shaped runs on two adjacent releases\.$/m);
+  assert.ok(!/_No rows:/.test(glance), "the At a glance placeholder row still renders");
+});
+
+test("the cost-by-stage cell carries its sample count", () => {
+  const out = renderReport([...threeOf("0.11.0", 10), ...threeOf("0.12.0", 5)], ctx());
+  assert.match(out, /\| execution \| \$10\.00 \(n=3\) \| \$5\.00 \(n=3\) \| down \|/);
 });
 
 test("changelogEntry returns a version's body bullets, or null when absent", () => {
@@ -1012,6 +1032,7 @@ test("every section carries a one-line gloss", () => {
     const window = lines.slice(i + 1, i + 4).join("\n");
     assert.match(window, /^\s*\*.+\*\s*$/m, `no gloss under "${lines[i]}"`);
   }
+  assert.ok(!lines.some((l) => l.trim() === "*undefined*"), "a section rendered *undefined* as its gloss");
 });
 
 test("the report renders no path, no session id, and no machine identity", () => {
@@ -1095,7 +1116,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     // column still matched after the Quality and Shipped columns were deleted.
     `| 0.12.0 | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | +36.4% | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
     // Cost by stage, across versions and within this window
-    "| execution | $10.00 | $5.00 | down |",
+    "| execution | $10.00 (n=3) | $5.00 (n=4) | down |",
     "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
     // Your culprits — out to the row's end, for the same reason as the cohort row above: a
     // needle that stopped at the Δ column still matched after the Trend column was deleted.
@@ -1128,7 +1149,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
       "[stage costs inferred — forward-filled, no run record]",
     // The vintage itself, not the label: a report rendering "prices as of undefined" passed the
     // label-only needle, which is the failure the whole appendix footer exists to prevent.
-    "prices as of 2026-08-01", // appendix footer
+    "prices as of 2026-09-05", // appendix footer
     "forward-filled within each transcript", // the attribution disclosure
     "fraction of the model's context window", // the depth disclosure
   ]) assert.ok(out.includes(needle), `the rendered report dropped "${needle}"`);

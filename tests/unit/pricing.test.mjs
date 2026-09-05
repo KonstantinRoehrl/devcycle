@@ -1,6 +1,7 @@
 // The versioned price/window table in scripts/pricing.mjs — the single place prices live.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { PRICING, priceFor } from "../../scripts/pricing.mjs";
 
 test("PRICING: asOf is an ISO date", () => {
@@ -20,20 +21,20 @@ test("PRICING: every entry carries input price, output price, and context window
   }
 });
 
-test("PRICING: covers every model id the measured corpus actually used", () => {
-  for (const id of [
-    "claude-opus-5",
-    "claude-opus-4-8",
-    "claude-fable-5",
-    "claude-sonnet-5",
-    "claude-haiku-4-5-20251001",
-  ])
-    assert.ok(PRICING.models[id], `${id} is priced`);
+test("PRICING: covers every model id the doctor corpus has recorded (tests/fixtures/observed-model-ids.json)", () => {
+  const observed = JSON.parse(readFileSync(new URL("../fixtures/observed-model-ids.json", import.meta.url), "utf8"));
+  assert.ok(Array.isArray(observed) && observed.length >= 6, "the fixture lists the observed ids");
+  for (const id of observed) assert.ok(PRICING.models[id], `${id} is priced`);
 });
 
 test("PRICING: fable is priced above opus, not below it", () => {
   assert.ok(PRICING.models["claude-fable-5"].in > PRICING.models["claude-opus-5"].in);
   assert.ok(PRICING.models["claude-fable-5"].out > PRICING.models["claude-opus-5"].out);
+});
+
+test("PRICING: fable 5.1 is priced above opus, like fable 5", () => {
+  assert.ok(PRICING.models["claude-fable-5-1"].in > PRICING.models["claude-opus-5"].in);
+  assert.ok(PRICING.models["claude-fable-5-1"].out > PRICING.models["claude-opus-5"].out);
 });
 
 test("priceFor: a known id returns its entry", () => {

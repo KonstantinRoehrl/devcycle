@@ -1861,6 +1861,18 @@ function trendAcross(values) {
   return present.length < 2 ? "insufficient data" : costTrend(present[present.length - 1], present[0]);
 }
 
+// Trend gating for the stage-by-version table: a per-version median from fewer than three
+// sessions is a sample, not a cohort, so it can anchor no trend. The reason carries both end
+// counts so a reader can tell "one thin release" from "no data at all".
+const MIN_TREND_N = 3;
+function gatedTrend(cells) {
+  const present = cells.filter((c) => c && c.n >= MIN_TREND_N);
+  if (present.length >= 2) return costTrend(present.at(-1).median, present[0].median);
+  const sampled = cells.filter(Boolean);
+  const a = sampled[0]?.n ?? 0, b = sampled.at(-1)?.n ?? 0;
+  return `insufficient data (n=${a}→${b})`;
+}
+
 // Spec §6 "Δ vs. previous (same profile)" and "Low confidence", implemented once so the version
 // table and the culprit table cannot drift into two different comparison rules. `rows` is in
 // report order; the nearest older same-profile row is the one to compare against, and a cohort
@@ -1932,6 +1944,14 @@ export function excessCost(runs) {
 const pctDelta = (from, to) =>
   from == null || to == null || from === 0 ? null : ((to - from) / from) * 100;
 
+// The runs a matched-cohort step can be built from: inside the recency band, with a request
+// kind and a workload band to match on. Exported so the empty-state line and the step builder
+// count the same population.
+export function matchableRuns(runs, band) {
+  return (runs ?? []).filter(
+    (r) => inBand(r.version, band) && r.requestKind != null && r.workloadBand != null);
+}
+
 // Adjacent version steps inside the recency band, workload-adjusted: for each adjacent version
 // pair in `band` and each matchKey both versions carry with >=2 runs, how the like-for-like cost
 // (and its main/sub turn counts, depth, and conformance) moved. A delta is emitted only where both
@@ -1939,8 +1959,7 @@ const pctDelta = (from, to) =>
 // per-run medians (run-level cost is not split by agent type, so a $/turn split is not derivable
 // here); the cost delta is the like-for-like median cost move.
 export function workloadAdjustedSteps(runs, band) {
-  const matchable = (runs ?? []).filter(
-    (r) => inBand(r.version, band) && r.requestKind != null && r.workloadBand != null);
+  const matchable = matchableRuns(runs, band);
   const byVersionKey = (version) => {
     const m = new Map();
     for (const r of matchable.filter((r) => r.version === version)) {
@@ -2049,12 +2068,13 @@ export function stageByVersionTable(summaries) {
     const byVersion = {};
     for (const version of versions) {
       const dollars = cohorts.get(version).byStage.get(stage);
-      // Absent, not zero: this version simply recorded no cost for this stage.
-      byVersion[version] = dollars ? median(dollars) : null;
+      // Absent, not zero: this version simply recorded no cost for this stage. A present cell
+      // carries its sample count so the trend gate and the render both see how thin it is.
+      byVersion[version] = dollars ? { median: median(dollars), n: dollars.length } : null;
     }
-    return { stage, byVersion, trend: trendAcross(versions.map((v) => byVersion[v])) };
+    return { stage, byVersion, trend: gatedTrend(versions.map((v) => byVersion[v])) };
   });
-  const rendered = (r) => Object.values(r.byVersion).reduce((n, d) => n + (d ?? 0), 0);
+  const rendered = (r) => Object.values(r.byVersion).reduce((n, d) => n + (d?.median ?? 0), 0);
   rows.sort((a, b) => rendered(b) - rendered(a) || byName(a.stage, b.stage));
   return { versions, rows };
 }
@@ -2407,6 +2427,9 @@ const GLOSSES = {
     "month where you happened to run `lean` more often cannot masquerade as an improvement.",
   "cost-by-stage": "Whether a stage is getting cheaper or dearer over releases — not just what it costs today.",
   "cost-by-stage-window": "Where this window's money actually went.",
+  "cost-by-lens":
+    "What each maintenance lens cost, straight off the lens-cost run records — the split to read " +
+    "when a maintain pass looks dear.",
   culprits:
     "Recurring problems, priced. The dollar figure is what each one actually cost you, summed " +
     "over every occurrence — not a severity guess. The Δ and Trend are per-session (derived), so " +
@@ -2572,7 +2595,11 @@ export function renderReport(summaries, ctx) {
     outerLoop: loop = null, compiledKnowledge: compiled = null, verification = null,
   } = ctx ?? {};
   const L = [];
-  const section = (heading, glossKey) => { L.push("", heading, "", `*${GLOSSES[glossKey]}*`, ""); };
+  const section = (heading, glossKey) => {
+    const gloss = GLOSSES[glossKey];
+    if (gloss === undefined) throw new Error(`missing gloss for ${glossKey}`);
+    L.push("", heading, "", `*${gloss}*`, "");
+  };
   const agg = aggregate(summaries);
   const candidates = emitCandidates(summaries);
   // The run-level, workload-adjusted view (issue #114): run aggregates over the settled corpus,
@@ -2608,16 +2635,24 @@ export function renderReport(summaries, ctx) {
 
   section("## At a glance", "ataglance");
   const pctText = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
-  L.push(...markdownTable(
-    ["Step", "matchKey", "n", "conf", "workload-adj cost Δ% (derived)", "main-turn Δ",
-      "sub-turn Δ", "depth Δ", "conformance Δ"],
-    glanceSteps.map((r) => [
-      `${r.from}→${r.to}`, r.matchKey, r.n, r.confidence, pctText(r.costDeltaPct),
-      pctText(r.mainTurnDeltaPct), pctText(r.subTurnDeltaPct), pctText(r.depthDeltaPct),
-      r.conformanceDelta == null ? null : `${r.conformanceDelta >= 0 ? "+" : ""}${(r.conformanceDelta * 100).toFixed(0)}pp`,
-    ]),
-    "no matched cohort spans two adjacent in-band versions yet",
-  ));
+  if (glanceSteps.length) {
+    L.push(...markdownTable(
+      ["Step", "matchKey", "n", "conf", "workload-adj cost Δ% (derived)", "main-turn Δ",
+        "sub-turn Δ", "depth Δ", "conformance Δ"],
+      glanceSteps.map((r) => [
+        `${r.from}→${r.to}`, r.matchKey, r.n, r.confidence, pctText(r.costDeltaPct),
+        pctText(r.mainTurnDeltaPct), pctText(r.subTurnDeltaPct), pctText(r.depthDeltaPct),
+        r.conformanceDelta == null ? null : `${r.conformanceDelta >= 0 ? "+" : ""}${(r.conformanceDelta * 100).toFixed(0)}pp`,
+      ]),
+      "unreachable: the table renders only with rows",
+    ));
+  } else {
+    // Built from the data, never a fixed placeholder: the reader learns how far the corpus is
+    // from its first matched step.
+    const matchable = matchableRuns(settledRuns, glanceBand);
+    const versions = new Set(matchable.map((r) => r.version)).size;
+    L.push(`No matched cohorts: ${matchable.length} workload-bearing runs across ${versions} versions in the band; a row needs ≥2 same-shaped runs on two adjacent releases.`);
+  }
   const priciestOverall = Object.entries(agg.costByStage).sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
   L.push("", priciestOverall
     ? `Priciest stage overall (derived): ${priciestOverall[0]} (${usd(priciestOverall[1])}).`
@@ -2677,7 +2712,7 @@ export function renderReport(summaries, ctx) {
     ["Stage", ...stageTrend.versions, "Trend (derived)"],
     stageTrend.rows.map((r) => [
       r.stage,
-      ...stageTrend.versions.map((v) => (r.byVersion[v] === null ? null : usd(r.byVersion[v]))),
+      ...stageTrend.versions.map((v) => (r.byVersion[v] === null ? null : `${usd(r.byVersion[v].median)} (n=${r.byVersion[v].n})`)),
       r.trend,
     ]),
     "no version-tagged sessions to compare across releases",
