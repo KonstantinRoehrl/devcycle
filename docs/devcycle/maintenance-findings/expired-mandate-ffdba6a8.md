@@ -4,7 +4,7 @@
 - culprit-kind: expired-mandate
 - severity: medium
 - confidence: verified
-- affected-files: docs/comparisons, DESIGN.md, .gitignore
+- affected-files: docs/comparisons, .gitignore
 - first-seen: 2026-08-25
 - last-seen: 2026-08-25
 - passes: 1
