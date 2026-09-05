@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Pre-flight check for a devcycle plan: every "### Task N" block must carry the required
-// dispatch fields, the Evidence value must name a valid class, and "## Dispatch Map" must list
-// every task. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
+// dispatch fields, the Evidence value must name a valid class, "## Dispatch Map" must list
+// every task, and a Files block that edits a budgeted file must list the size baseline that
+// edit trips. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
 // implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
 import { taskBlocks, parseDispatchMap, filesFieldValue } from "./task-files.mjs";
+import { budgetFixtureGaps } from "./budget-fixture-check.mjs";
 
 const planPath = process.argv[2];
 if (!planPath) {
@@ -52,6 +54,21 @@ for (const { num, text: block } of blocks) {
       errors.push(`Task ${num}: **Evidence:** does not name a valid class (${VALID_EVIDENCE_CLASSES.join(" | ")})`);
     }
   }
+}
+
+// An incomplete Files block is not only a missing field: a brief that mandates doc growth but
+// never lists the baseline fixture that growth trips hands the implementer a validate.mjs
+// failure the brief itself caused. budget-fixture-check.mjs owns which baselines a path sits
+// under -- deciding it here too is the drift duplication-check.mjs exists to stop.
+try {
+  for (const { task, file, fixture } of budgetFixtureGaps(text)) {
+    errors.push(
+      `Task ${task}: **Files:** edits ${file} but omits ${fixture}, the size baseline that edit trips — ` +
+        `add it, or record a "- Budget-fixture override: ${file} — <reason>"`
+    );
+  }
+} catch (e) {
+  errors.push(e.message);
 }
 
 const waves = parseDispatchMap(text);

@@ -109,3 +109,18 @@ test("a plan with no task headings is a parse failure, not an ok", () => {
   assert.equal(code, 1);
   assert.match(out, /no "### Task N" blocks found/);
 });
+
+const REFERENCE_ONLY = `# Plan
+### Task 1: Extend the evidence contract
+**Files:**
+- Modify: \`references/evidence.md\`
+- Modify: \`tests/fixtures/surface-budget.json\`
+## Dispatch Map
+- Wave 1: Task 1
+`;
+
+test("a reference edit needs context-budget.json too — a playbook's context budget counts the references it cites", () => {
+  const { code, out } = run(REFERENCE_ONLY);
+  assert.equal(code, 1);
+  assert.match(out, /tests\/fixtures\/context-budget\.json/);
+});
