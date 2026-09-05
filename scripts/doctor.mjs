@@ -23,15 +23,15 @@ import { atomicWrite } from "./atomic-write.mjs";
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
-// references/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
+// docs/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
 // not in a script's own environment, and the documented `--drift` invocation runs from the
 // target repo — so reading it from process.env resolved the changelog against the wrong
 // tree. See docs/platform-notes.md section (c).
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const CHANGELOG_PATH = join(PLUGIN_ROOT, "references", "config-changelog.md");
+const CHANGELOG_PATH = join(PLUGIN_ROOT, "docs", "configuration", "config-changelog.md");
 
 // The plugin's own release changelog, under a name distinct from CHANGELOG_PATH above, which
-// configDrift already holds for references/config-changelog.md. Resolved from PLUGIN_ROOT for
+// configDrift already holds for docs/configuration/config-changelog.md. Resolved from PLUGIN_ROOT for
 // the same reason that one is: --drift runs from the target repo, not from the plugin tree.
 const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
 
@@ -778,6 +778,8 @@ export function emitComplianceCandidates(turns, record) {
 // with no stale references apart from a changelog that yielded no stale keys to look for.
 // Every input failure throws — a changelog it could not read or parse is a broken run, and
 // reporting that as an empty findings list is the same as reporting the target clean.
+// No shipped record carries a removable kind (deprecated/renamed/removed) yet — every record is
+// `added` — so drift cannot fire until one is written; the drift mode's "nothing to check" line says so.
 export function configDrift(targetPath, changelogPath = CHANGELOG_PATH) {
   const changelogText = read(changelogPath, "config changelog");
   const yamlMatch = changelogText.match(/```yaml\n([\s\S]*?)```/);

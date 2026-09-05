@@ -1173,7 +1173,7 @@ test("doctor.mjs exports its transcript-walk helpers", async () => {
 
 // Installs a runnable copy of doctor.mjs at <dir>/scripts/, so the copy's own location —
 // not the working directory — is what its changelog resolution has to work from. `changelog`
-// null means the tree ships no references/config-changelog.md at all.
+// null means the tree ships no docs/configuration/config-changelog.md at all.
 function installDoctor(changelog) {
   // realpath: on macOS the temp dir is a symlink, and Node resolves an ESM entry point to its
   // real path — so an unresolved path would make the script's own `is this the entry point`
@@ -1195,8 +1195,8 @@ function installDoctor(changelog) {
   ])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
   if (changelog !== null) {
-    mkdirSync(join(dir, "references"), { recursive: true });
-    writeFileSync(join(dir, "references", "config-changelog.md"), changelog, "utf8");
+    mkdirSync(join(dir, "docs", "configuration"), { recursive: true });
+    writeFileSync(join(dir, "docs", "configuration", "config-changelog.md"), changelog, "utf8");
   }
   return dir;
 }

@@ -41,6 +41,8 @@ one bullet per task, appended by the task that trips the baseline:
   onboarding-a-repo 89123→89470, receiving-review 119343→119690, reviewing-code 126445→126792,
   sweeping-mechanical-changes 99375→99722, taking-the-fast-path 92543→92890, verifying-on-device
   95030→95377; surfaceTotal no raise needed.
+- Task 7: no raise needed — moving the config changelog out of `references/` shrinks both
+  figures, and a baseline above the count is never lowered.
 
 **Why:** every playbook cites `references/evidence.md`, `references/ledger.md`, and
 `references/handoff.md` transitively, so one sentence in any of them moves every playbook's

@@ -204,7 +204,7 @@ entirely and takes precedence over every other flag:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --drift <path>
 ```
 
-It resolves the changelog at `${CLAUDE_PLUGIN_ROOT}/references/config-changelog.md` — the same
+It resolves the changelog at `${CLAUDE_PLUGIN_ROOT}/docs/configuration/config-changelog.md` — the same
 engine `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md` calls into, one engine, two
 callers — and prints each finding as a `file:line` reference with the changelog's recorded
 replacement. Report them as printed; never re-parse the changelog or re-grep the target file yourself.

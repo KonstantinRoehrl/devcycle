@@ -156,7 +156,7 @@ test("changelogWithSection refuses a date that is not YYYY-MM-DD rather than wri
   );
 });
 
-// references/config-changelog.md:12-13 promises the release step replaces `version: "unreleased"`
+// docs/configuration/config-changelog.md:12-13 promises the release step replaces `version: "unreleased"`
 // with the version the change landed in. Before this, no script and no workflow did it — four
 // records sat permanently unreleased. These pin the promise.
 const FIXTURE_CHANGELOG = `# Config changelog
@@ -244,10 +244,10 @@ test("changelogWithReleasedMarkers: a CRLF file is stamped rather than falling i
 test("release path: a real bump stamps the config changelog alongside plugin.json and CHANGELOG.md", () => {
   const dir = mkdtempSync(join(tmpdir(), "bump-"));
   mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
-  mkdirSync(join(dir, "references"), { recursive: true });
+  mkdirSync(join(dir, "docs", "configuration"), { recursive: true });
   writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ version: "0.14.0" }) + "\n");
   writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\n## 0.14.0 — 2026-08-19\n\n- old\n");
-  writeFileSync(join(dir, "references", "config-changelog.md"), FIXTURE_CHANGELOG);
+  writeFileSync(join(dir, "docs", "configuration", "config-changelog.md"), FIXTURE_CHANGELOG);
 
   const r = spawnSync(
     process.execPath,
@@ -257,7 +257,7 @@ test("release path: a real bump stamps the config changelog alongside plugin.jso
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), "0.15.0");
 
-  const stamped = readFileSync(join(dir, "references", "config-changelog.md"), "utf8");
+  const stamped = readFileSync(join(dir, "docs", "configuration", "config-changelog.md"), "utf8");
   assert.equal((stamped.match(/version: "0\.15\.0"/g) ?? []).length, 2);
   assert.ok(
     !/- version: "unreleased"/.test(firstBlockOf(stamped)),
