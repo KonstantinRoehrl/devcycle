@@ -12,9 +12,12 @@
 // launcher in the bounded WRAPPERS set: setsid/sudo/exec/taskset/…), a `{ … }` group or `( … )`
 // subshell, backticks, or a write-capable option (git diff --output=<file>) — is denied. The WRAPPERS
 // set is a bounded launcher denylist: a git behind an UNLISTED head-position launcher is allowed, the
-// accepted bound per the design spec's § Parser robustness. Scope is git-only; non-git commands
-// (tests, greps) are allowed, and a non-reviewer origin (implementer, on-device-driver, main thread)
-// is never guarded.
+// accepted bound per the 2026-09-02 design spec's § Parser robustness. Shell reserved
+// words and process substitution are NOT a bound: a head that is a reserved word (`if`, `!`,
+// `for … do`, `while … do`) is stripped until the real command is reached, and `<(`/`>(` are denied
+// like backticks and `$(` — that spec's rule is that a missed destructive command is not acceptable.
+// Scope is git-only; non-git commands (tests, greps) are allowed, and a non-reviewer origin
+// (implementer, on-device-driver, main thread) is never guarded.
 import { readFileSync } from "node:fs";
 
 let input = {};
@@ -102,19 +105,47 @@ function gitSegmentIsReadOnly(tokens, i) {
   return false;                                  // everything else (checkout/reset/clean/stash/…) → deny
 }
 
-// Command substitution can hide a git write we cannot classify.
-if (/`|\$\(/.test(command) && /\bgit\b/.test(command))
+// Command and process substitution can hide a git write we cannot classify: backticks, `$(`, and
+// the `<(`/`>(` process-substitution forms (audit 2026-09-05 H1) are all denied when a git token
+// is present anywhere in the command, whatever the subcommand.
+if (/`|\$\(|<\(|>\(/.test(command) && /\bgit\b/.test(command))
   deny(`devcycle: reviewer dispatch (${agentType}) may not run git inside a command substitution (deny-on-ambiguity). command: ${command.slice(0, 200)}`);
+
+// Shell reserved words that may precede a command inside one segment. They are neither a command
+// nor a wrapper, so a segment whose head is one of them was skipped and the git after it never
+// classified (`for f in a b; do git checkout -- "$f"; done`, `! git reset --hard`,
+// `if git reset --hard; then :; fi` — audit 2026-09-05 H1). They are stripped until the real head
+// is reached. `for`/`select` are loop headers: everything up to and including the `do` of the same
+// segment carries no command, and when the `do` sits after a `;` (the usual spelling) the header
+// segment is simply empty — the body `git …` is then its own segment and classifies as git.
+const RESERVED = new Set(["if", "then", "elif", "else", "fi", "do", "done", "while", "until", "!", "{", "(", "}", ")"]);
+const LOOP_HEADS = new Set(["for", "select"]);
+
+// Drop leading env-assignments, grouping tokens, reserved words and loop headers so the head
+// re-derives to the real command. Returns the remaining tokens (possibly none).
+function stripLeading(tokens) {
+  let t = tokens;
+  for (;;) {
+    if (!t.length) return t;
+    const head = t[0];
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(head) || RESERVED.has(head)) { t = t.slice(1); continue; }
+    if (LOOP_HEADS.has(head)) {
+      const doAt = t.indexOf("do");
+      t = doAt === -1 ? [] : t.slice(doAt + 1);
+      continue;
+    }
+    return t;
+  }
+}
 
 // Split on shell operators that separate commands; classify each segment independently. A lone `&`
 // (background operator) separates commands just as `;` does, so `true & git reset --hard` must split
 // into two segments — `&&` is matched first so a logical-AND is never mis-split on its first `&`.
 for (const seg of command.split(/(?:&&|\|\||;|\||&|\n)/)) {
-  let tokens = seg.trim().split(/\s+/).filter(Boolean);
-  // Drop leading env-assignments and bare grouping tokens (`{`/`(`, a brace group or subshell) so the
-  // head re-derives to the real command — `{ git reset; }` and `( git reset )` must not hide the git.
+  // stripLeading drops env-assignments, `{`/`(` grouping tokens and reserved words so the head is
+  // the real command — `{ git reset; }`, `( git reset )` and `do git reset` must not hide the git.
   // (normalizeHead additionally strips a grouping char glued to the head, e.g. `(git`.)
-  while (tokens.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0]) || tokens[0] === "{" || tokens[0] === "(")) tokens.shift();
+  const tokens = stripLeading(seg.trim().split(/\s+/).filter(Boolean));
   if (!tokens.length) continue;
   const head = normalizeHead(tokens[0]);
   if (WRAPPERS.has(head)) {

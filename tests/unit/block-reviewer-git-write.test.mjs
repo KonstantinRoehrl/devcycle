@@ -189,6 +189,38 @@ test("reviewer + git diff with a double-dash pathspec stays allowed", () => {
   assert.equal(decide(REVIEWER, "git diff -- src/main.js"), "allow");
 });
 
+// Audit 2026-09-05 H1: a shell reserved word at a segment's head is neither `git` nor a wrapper, so
+// the segment was skipped and the git behind it never classified; `<(`/`>(` were absent from the
+// substitution test. Every spelling below returned allow before the fix.
+test("reviewer + destructive git behind a shell reserved word is denied", () => {
+  for (const cmd of [
+    'for f in a b; do git checkout -- "$f"; done',
+    "! git reset --hard",
+    "if git reset --hard; then :; fi",
+    "while true; do git reset --hard; break; done",
+    "until false; do git clean -fd; done",
+    'for f in a b\ndo git checkout -- "$f"\ndone',
+    "select x in a; do git stash drop; done",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for reserved-word git: ${cmd}`);
+});
+
+test("reviewer + git inside a process substitution is denied regardless of subcommand", () => {
+  for (const cmd of ["cat <(git stash drop)", "echo x | tee >(git checkout -- x)", "cat <(git log -1)"])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for process substitution: ${cmd}`);
+});
+
+// Reserved words around NON-git commands must not trip the guard: reviewers write these loops.
+test("reviewer + reserved words around non-git commands stay allowed", () => {
+  for (const cmd of [
+    'for f in *.js; do node --check "$f"; done',
+    "if grep -q x y; then echo ok; fi",
+    "while read l; do echo $l; done",
+    "! test -f x",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for reserved-word non-git: ${cmd}`);
+});
+
 test("both guarded reviewer spellings are guarded", () => {
   for (const origin of ["task-reviewer", "devcycle:task-reviewer", "red-team-reviewer", "devcycle:red-team-reviewer"])
     assert.equal(decide(origin, "git checkout -- x"), "deny", `expected deny for origin: ${origin}`);
