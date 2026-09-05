@@ -110,10 +110,11 @@ devcycle/                (public GitHub repo)
 │   ├── history-inspector.md      # read-only git-history lens for /devcycle:maintain; bounded traversal
 │   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
 │                                 # origin the browser guard below permits
-├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02)
-│   ├── hooks.json                # registers the guards on PreToolUse (browser + reviewer-git)
+├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05)
+│   ├── hooks.json                # registers the guards on PreToolUse (browser + reviewer-git) and the commit-sensor on PostToolUse
 │   ├── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
-│   └── block-reviewer-git-write.mjs   # denies destructive git from a reviewer origin (#165)
+│   ├── block-reviewer-git-write.mjs   # denies destructive git from a reviewer origin (#165)
+│   └── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
 ├── scripts/                      # L4 — validate.mjs, doctor.mjs, dream.mjs, the checkers, bump-version.mjs
 ├── workflows/                    # L4

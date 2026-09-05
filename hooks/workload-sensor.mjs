@@ -65,6 +65,25 @@ function parseState(text) {
   };
 }
 
+// The base to measure against when the branch line carries no `(cut from <base> at <sha>)`
+// annotation: the merge-base of the default branch and HEAD. Null — a no-op — when no default
+// branch resolves, when HEAD is that branch, or when the merge-base is HEAD itself (nothing
+// landed yet, the same phantom-zero-diff guard the annotated path applies).
+function deriveBase(repoRoot) {
+  const git = (...args) => spawnSync("git", ["-C", repoRoot, ...args], { encoding: "utf8" });
+  const remoteHead = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD");
+  let def = remoteHead.status === 0 ? remoteHead.stdout.trim().replace(/^origin\//, "") : null;
+  if (!def) def = ["main", "master"].find((b) => git("rev-parse", "--verify", "--quiet", `refs/heads/${b}`).status === 0) ?? null;
+  if (!def) return null;
+  const current = git("rev-parse", "--abbrev-ref", "HEAD");
+  if (current.status !== 0 || current.stdout.trim() === def) return null;
+  const mergeBase = git("merge-base", def, "HEAD");
+  if (mergeBase.status !== 0) return null;
+  const base = mergeBase.stdout.trim();
+  const head = git("rev-parse", "HEAD");
+  return head.status === 0 && head.stdout.trim() === base ? null : base;
+}
+
 function main() {
   const input = readInput();
   // Unreadable stdin (malformed JSON, or a parsed shape that isn't a plain object) must stop here,
@@ -80,7 +99,9 @@ function main() {
   if (!stateFile) return;
   const repoRoot = dirname(dirname(stateFile));
   const st = parseState(readFileSync(stateFile, "utf8"));
-  if (!st.run || !st.base || !st.kind || st.kind === "audit" || !COMMIT_STAGES.has(st.stage)) return;
+  if (!st.run || !st.kind || st.kind === "audit" || !COMMIT_STAGES.has(st.stage)) return;
+  const base = st.base ?? deriveBase(repoRoot);
+  if (!base) return;
 
   const head = spawnSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8" });
   if (head.status !== 0) return;
@@ -89,7 +110,7 @@ function main() {
   // commit yet — GC3). The pipeline records `base` ABBREVIATED (a 7-char sha in state.md), so a
   // raw `sha === st.base` never matches; normalize `base` to its full sha first. Fail-safe: an
   // unresolvable/garbage base (rev-parse non-zero) no-ops like every other unrecognized input.
-  const baseFull = spawnSync("git", ["-C", repoRoot, "rev-parse", `${st.base}^{commit}`], { encoding: "utf8" });
+  const baseFull = spawnSync("git", ["-C", repoRoot, "rev-parse", `${base}^{commit}`], { encoding: "utf8" });
   if (baseFull.status !== 0) return;
   if (sha === baseFull.stdout.trim()) return;
 
@@ -99,7 +120,7 @@ function main() {
   if (cursor.lastHead === sha && cursor.lastStage === st.stage) return;
 
   const w = spawnSync(process.execPath, [RUN_RECORD, "workload",
-    "--run", st.run, "--base", st.base, "--requestKind", st.kind,
+    "--run", st.run, "--base", base, "--requestKind", st.kind,
     "--planned-task-count", st.planned, "--wave-count", st.waves],
     { cwd: repoRoot, encoding: "utf8" });
   if (w.status !== 0) return;

@@ -87,17 +87,12 @@ identity, `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --auto-redac
 dir>` rewrites the flagged spans in place (it requires an explicit `--dir`/`--file`); re-run the
 screen after.
 
-**Refresh the run's workload signature (before closing the state file).** The workload record is
-already written progressively during the run: the `hooks/workload-sensor.mjs` commit-sensor (a
-`PostToolUse(Bash)` hook) fires on each HEAD-advancing commit in an active stage and re-derives the
-same record from the state file and git. This finish-stage append is therefore a **final refresh**,
-belt-and-suspenders — run once the diff is definitely complete, harmless because the last-wins join
-collapses it onto whatever the sensor already wrote — not the sole collector. Recover the run id
-from `.devcycle/state.md`'s `run:` line and the branch base from its `branch:` line, which
-records `(cut from <base-branch> at <sha>)` (the ledger's `Branch:` line carries the same). Pass
-that `<sha>` as `--base`; the `<base-branch>` name works too, since git accepts `<base>...HEAD`
-with a branch name. Read `requestKind` from the confirmed triage kind on the `request:`/`scope:`
-lines. Then append the workload record:
+**Refresh the run's workload signature (before closing the state file).** The
+`hooks/workload-sensor.mjs` commit-sensor owns collection: it re-derives the run's `workload` record
+on every HEAD-advancing commit, so by now the record is already written progressively. In a repo with
+hooks disabled, append it once yourself — the run id from `.devcycle/state.md`'s `run:` line, the base
+from its `branch:` annotation (`references/branch.md` owns the shape; the sensor's merge-base fallback
+covers a missing one), `requestKind` from the confirmed triage kind:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs" workload \
@@ -106,10 +101,9 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs" workload \
   --wave-count <wave count from the plan's Dispatch Map, 0 if none>
 ```
 
-`diffStats` derives the file and line counts from git itself, so pass no line counts. A cycle
-with no branch or no diff — an audit-only cycle, or a fast path that reached no commit — records
-nothing; doctor treats a missing workload record as *workload-unknown*, never as zero work. This
-append is counts-and-enums only: it never carries paths, prose, or diff content.
+`diffStats` derives every count from git and fails loudly on a base git cannot resolve. A cycle with
+no branch or no diff records nothing, and a missing workload record reads as *workload-unknown*,
+never as zero work. Counts and enums only — never paths, prose, or diff content.
 
 As this stage's final state-file write, set `stage: done` and a fresh `updated:` timestamp from `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now` — nothing remains to resume.
 

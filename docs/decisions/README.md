@@ -5,6 +5,21 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-09-05 — the workload commit-sensor, a third hook (#139)
+
+**Decision:** The plugin ships a third hook, `hooks/workload-sensor.mjs`, registered in
+`hooks/hooks.json` on `PostToolUse` over `Bash` (landed in 0.17.2 — CHANGELOG.md's 0.17.2 entry names
+it). It re-derives the run's `workload` record after every HEAD-advancing commit in a committing
+stage, and, from the measurement-truth cycle, derives the diff base from the default branch's
+merge-base when the state file's `branch:` line carries no `(cut from … at <sha>)` annotation.
+
+**Why:** collection must not depend on an agent remembering a finish-stage step, and it must not
+depend on a prose annotation either — the sensor was silent for every cycle whose branch line was
+written bare (audit M13, #210). A failed git call now throws instead of reading as zero work.
+
+**Supersedes:** the 2026-09-02 entry's implicit "two hooks"; the 2026-08-20 entry's "exactly one
+hook" was already superseded there.
+
 ## 2026-09-05 — budgets raised for the measurement-truth cycle
 
 **Decision:** `tests/fixtures/context-budget.json` and `tests/fixtures/surface-budget.json` are
@@ -22,6 +37,10 @@ one bullet per task, appended by the task that trips the baseline:
 - Task 3: context-budget learning-from-sessions 108827→109213, profiling-sessions
   110030→110359; surfaceTotal no raise needed.
 - Task 4: context-budget learning-from-sessions 109213→109370; surfaceTotal no raise needed.
+- Task 6: context-budget executing-waves 108183→108530, learning-from-sessions 109370→109717,
+  onboarding-a-repo 89123→89470, receiving-review 119343→119690, reviewing-code 126445→126792,
+  sweeping-mechanical-changes 99375→99722, taking-the-fast-path 92543→92890, verifying-on-device
+  95030→95377; surfaceTotal no raise needed.
 
 **Why:** every playbook cites `references/evidence.md`, `references/ledger.md`, and
 `references/handoff.md` transitively, so one sentence in any of them moves every playbook's

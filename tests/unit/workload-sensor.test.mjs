@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { makeRepo, commitAll, writeInto } from "./helpers.mjs";
+import { makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
 import { repoSlug, gitToplevel } from "../../scripts/run-record.mjs";
 
 const HOOK = new URL("../../hooks/workload-sensor.mjs", import.meta.url).pathname;
@@ -11,7 +11,7 @@ const HOOK = new URL("../../hooks/workload-sensor.mjs", import.meta.url).pathnam
 function stateMd({ stage = "execution", kind = "feature", run = "00000000000000a1", base }) {
   return [
     "# devcycle state", `- stage: ${stage}`, "- root: /x",
-    `- branch: topic (cut from main at ${base})`, "- request: x",
+    base ? `- branch: topic (cut from main at ${base})` : "- branch: topic", "- request: x",
     `- kind: ${kind}`, "- plan-counts: planned=3 waves=2", `- run: ${run}`,
     "- updated: 2026-08-28T00:00:00Z", "",
   ].join("\n");
@@ -138,5 +138,36 @@ test("malformed stdin is a silent no-op, exit 0, and writes nothing even in an a
     env: { ...process.env, DEVCYCLE_RUNS_DIR: runsDir } });
   assert.strictEqual(r.status, 0);
   assert.strictEqual(r.stdout, "");
+  assert.strictEqual(workloads(runsDir, repo).length, 0);
+});
+
+test("derives the base from the default branch's merge-base when the branch line carries no annotation", () => {
+  const repo = makeRepo(); const runsDir = makeRepo();
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  writeInto(repo, "f.txt", "hello\nworld\n");
+  commitAll(repo, "task 1");
+  const r = callHook(repo, runsDir);
+  assert.strictEqual(r.status, 0);
+  const wl = workloads(runsDir, repo);
+  assert.strictEqual(wl.length, 1);
+  assert.ok(wl[0].insertions >= 2);
+  assert.ok(wl[0].filesCreated >= 1, "f.txt (and the untracked state file, which git add -A also stages) count as created");
+});
+
+test("without an annotation, HEAD on the default branch itself is a no-op — nothing to measure", () => {
+  const repo = makeRepo(); const runsDir = makeRepo();
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  writeInto(repo, "f.txt", "hello\n");
+  commitAll(repo, "on main");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  assert.strictEqual(workloads(runsDir, repo).length, 0);
+});
+
+test("without an annotation, a topic branch at its merge-base is a no-op — no phantom zero-diff record", () => {
+  const repo = makeRepo(); const runsDir = makeRepo();
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
   assert.strictEqual(workloads(runsDir, repo).length, 0);
 });
