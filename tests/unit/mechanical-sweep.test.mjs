@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, readFileSync, mkdtempSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { writeFileSync, readFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { makeRepo, commitAll, makeFakeBin, runScript } from "./helpers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -276,4 +277,79 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { chan
   assert.ok(!argv.includes("--tools"), "the bare two-element --tools form must never come back");
   // The whole point of the equals form: the prompt survives as the final positional.
   assert.match(argv[argv.length - 1], /^You are performing one step of a mechanical sweep/);
+});
+
+// Audit 2026-09-05 L4 (1): `git add -A` honoured .gitignore, so an ignored target never entered the
+// sweep-base commit, its edit was invisible to `git status`, and the file was reported "agent made
+// no change". The target is now force-added, so its edit shows and is applied.
+function repoWithIgnoredTarget() {
+  const repo = repoWithJsFiles();
+  writeFileSync(join(repo, ".gitignore"), "gen/\n");
+  commitAll(repo, "ignore gen/");
+  mkdirSync(join(repo, "gen"));
+  writeFileSync(join(repo, "gen", "c.js"), "const c = 3;\n"); // ignored, never committed
+  return repo;
+}
+
+test("a gitignored target is edited and applied like any other", () => {
+  const repo = repoWithIgnoredTarget();
+  const bin = makeFakeBin("claude", WELL_BEHAVED_EDITOR);
+  const res = runScript(
+    SCRIPT,
+    { files: ["gen/c.js"], instruction: "append marker", verifyCommand: "true" },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.deepEqual(report.applied, ["gen/c.js"]);
+  assert.deepEqual(report.skipped, []);
+  assert.match(readFileSync(join(repo, "gen", "c.js"), "utf8"), /\/\/ swept/);
+});
+
+// L4 (2): a collateral file the editor creates under an ignored path was invisible to the purity
+// check; `--ignored=matching` makes it a foreign change that reverts the attempt.
+test("a collateral file the editor creates under an ignored path reverts the attempt", () => {
+  const repo = repoWithIgnoredTarget();
+  const bin = makeFakeBin(
+    "claude",
+    `
+const fs = require("node:fs");
+const prompt = process.argv[process.argv.length - 1];
+const target = prompt.match(/^file: (.+)$/m)[1];
+fs.appendFileSync(target, "// swept\\n");
+fs.mkdirSync("gen", { recursive: true });
+fs.writeFileSync("gen/collateral.js", "collateral\\n");
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: { changed: true, note: "also wrote scratch" } }));
+`
+  );
+  const res = runScript(
+    SCRIPT,
+    { files: ["a.js"], instruction: "append marker", verifyCommand: "true" },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.deepEqual(report.applied, []);
+  assert.match(report.skipped[0].reason, /modified files other than the target/);
+  assert.ok(!readFileSync(join(repo, "a.js"), "utf8").includes("swept"));
+});
+
+// L4 (3): a previous sweep SIGKILLed mid-run leaves a worktree registration whose directory is gone;
+// `git worktree prune` before `worktree add` removes it instead of tripping over it.
+test("a stale worktree registration from a killed sweep is pruned, not tripped over", () => {
+  const repo = repoWithJsFiles();
+  const staleParent = mkdtempSync(join(tmpdir(), "devcycle-stale-wt-"));
+  const stale = join(staleParent, "wt");
+  execFileSync("git", ["worktree", "add", "--detach", stale, "HEAD"], { cwd: repo, stdio: "ignore" });
+  rmSync(stale, { recursive: true, force: true });
+  const bin = makeFakeBin("claude", WELL_BEHAVED_EDITOR);
+  const res = runScript(
+    SCRIPT,
+    { files: ["a.js"], instruction: "append marker", verifyCommand: "true" },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  assert.deepEqual(JSON.parse(res.stdout).applied, ["a.js"]);
+  const list = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: repo, encoding: "utf8" });
+  assert.ok(!list.includes(basename(staleParent)), `the stale registration must be pruned:\n${list}`);
 });

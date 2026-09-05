@@ -27,6 +27,10 @@
 // in the worktree; any collateral change reverts the attempt). Deletions are
 // never applied. The real repository is only written on the applied path.
 //
+// Targets are force-added to the sweep base so a gitignored target is swept like any other, and
+// the purity check counts ignored collateral. Stale worktree registrations from a killed run are
+// pruned before the new worktree is added.
+//
 // Optional env: DEVCYCLE_SWEEP_MODEL sets --model for the claude editor
 // subagents (unset -> the CLI's configured default model).
 //
@@ -96,8 +100,10 @@ async function runEditorAgent(relPath, instruction, worktree, model) {
   });
 }
 
+// Paths that differ from the sweep base, INCLUDING ignored ones (`--ignored=matching`): a collateral
+// file the agent creates under an ignored path is still a foreign change and reverts the attempt.
 function changedPaths(worktree) {
-  return git(["status", "--porcelain"], worktree)
+  return git(["status", "--porcelain", "--ignored=matching"], worktree)
     .split("\n")
     .filter(Boolean)
     .map((line) => {
@@ -222,13 +228,18 @@ async function main() {
     process.exitCode = code;
   };
   try {
+    // A sweep killed mid-run leaves a registration whose directory is already gone; prune it so the
+    // next `worktree add` neither fails on it nor points at a missing path.
+    git(["worktree", "prune"], repoRoot);
     git(["worktree", "add", "--detach", "--force", worktree, "HEAD"], repoRoot);
     worktreeAdded = true;
     for (const t of targets) {
       mkdirSync(dirname(join(worktree, t.rel)), { recursive: true });
       copyFileSync(join(repoRoot, t.rel), join(worktree, t.rel));
     }
-    git(["add", "-A"], worktree);
+    // -f: a gitignored target must still be tracked by the sweep base, or its later edit is
+    // invisible to the purity check and reported as "agent made no change" (audit 2026-09-05 L4).
+    git(["add", "-A", "-f", "--", ...targets.map((t) => t.rel)], worktree);
     git([...GIT_IDENT, "commit", "--allow-empty", "-m", "sweep base"], worktree);
 
     // Baseline: a verifyCommand that fails before any edit would blame the
