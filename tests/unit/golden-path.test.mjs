@@ -2099,6 +2099,24 @@ test("C6: plugin.json, the configuration hub, references/config.md and DESIGN §
   );
 });
 
+test("C6: the workload sensor's integration-branch list matches the prose that owns it", () => {
+  // references/branch.md § Committing owns that list; hooks/workload-sensor.mjs carries its only
+  // runtime spelling, because prose cannot be handed to a hook. Parsed and compared the way C3
+  // leg 1 parses dream.mjs's SUBCOMMANDS, so a name added on one side and not the other fails
+  // here instead of silently narrowing which cut-points a cycle can be measured against.
+  const block = read("hooks/workload-sensor.mjs").match(/const INTEGRATION_BRANCHES = \[([\s\S]*?)\];/);
+  assert.ok(block, "INTEGRATION_BRANCHES array not found in hooks/workload-sensor.mjs");
+  const runtime = [...block[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
+  const sentence = read("references/branch.md")
+    .match(/on an integration branch — ([\s\S]*?)or one the user names/);
+  assert.ok(sentence, "references/branch.md § Committing no longer states the integration-branch list");
+  const owned = [...sentence[1].matchAll(/`([a-z-]+)`/g)].map((m) => m[1]);
+  assert.ok(owned.length >= 4, `expected the full prose list, got ${owned.length}`);
+  assert.deepEqual(runtime, owned,
+    "hooks/workload-sensor.mjs's INTEGRATION_BRANCHES must spell exactly the branches " +
+      "references/branch.md § Committing names — the hook is that prose's only runtime copy");
+});
+
 test("cycle.md writes the kind line and appends a triage record after triage", () => {
   const t = read("commands/cycle.md");
   assert.match(t, /- kind: <feature\|bug\|refactor\|audit\|docs\|chore>/,

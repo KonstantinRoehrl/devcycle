@@ -71,21 +71,23 @@ function parseState(text) {
 const INTEGRATION_BRANCHES = ["dev", "develop", "development", "integration"];
 
 // The base to measure against when the branch line carries no `(cut from <base> at <sha>)`
-// annotation: the merge-base of HEAD and the first sanctioned cut-point that resolves.
-// references/branch.md § "Deriving a branch's file set" owns that preference order — the
-// integration branch when one exists, else the default branch — and this only follows it:
-// measuring a topic cut from an integration branch against the default instead bills every
-// unreleased integration commit to this cycle. Each candidate is spelled the way this clone can
+// annotation: among the sanctioned cut-points that resolve, the merge-base NEAREST to HEAD.
+// references/branch.md owns the candidate set; the selection is by ancestry, never by a fixed
+// name order. Which cut-point a branch descends from is a property of history, not of naming, and
+// a fixed order gets one topology wrong whichever way it is written: default-first bills a topic
+// cut from `dev` every unreleased integration commit, integration-first bills a topic cut from the
+// default every commit since the two diverged. Each candidate is spelled the way this clone can
 // resolve it, local branch else `origin/<name>`, per that file's § "Names first" — a fresh clone
 // carries the default only as a remote-tracking ref. Null — a no-op — when no candidate resolves,
-// when HEAD is on a candidate branch itself, or when the merge-base is HEAD (nothing landed yet,
-// the same phantom-zero-diff guard the annotated path applies).
+// when HEAD is on a candidate branch itself, or when the nearest merge-base is HEAD (nothing
+// landed yet, the same phantom-zero-diff guard the annotated path applies).
 function deriveBase(repoRoot) {
   const git = (...args) => spawnSync("git", ["-C", repoRoot, ...args], { encoding: "utf8" });
   const remoteHead = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD");
   const named = remoteHead.status === 0 ? remoteHead.stdout.trim().replace(/^origin\//, "") : "";
   // main/master trails the reported default rather than replacing it, so the fallback stays
-  // reachable when `symbolic-ref` succeeds but names a branch this clone cannot resolve.
+  // reachable when `symbolic-ref` succeeds but names a branch this clone cannot resolve. The
+  // order is the candidate set's enumeration only; it no longer decides which candidate wins.
   const candidates = [...new Set([...INTEGRATION_BRANCHES, ...(named ? [named] : []), "main", "master"])];
 
   const current = git("rev-parse", "--abbrev-ref", "HEAD");
@@ -93,6 +95,7 @@ function deriveBase(repoRoot) {
   const branch = current.stdout.trim();
   if (candidates.includes(branch)) return null;
 
+  let nearest = null;
   for (const name of candidates) {
     const ref = [`refs/heads/${name}`, `refs/remotes/origin/${name}`]
       .find((r) => git("rev-parse", "--verify", "--quiet", r).status === 0);
@@ -100,10 +103,20 @@ function deriveBase(repoRoot) {
     const mergeBase = git("merge-base", ref, "HEAD");
     if (mergeBase.status !== 0 || !mergeBase.stdout.trim()) continue;
     const base = mergeBase.stdout.trim();
-    const head = git("rev-parse", "HEAD");
-    return head.status === 0 && head.stdout.trim() === base ? null : base;
+    // Every candidate's merge-base is an ancestor of HEAD, so "nearer to HEAD" is exactly
+    // "descends from the other": the incumbent loses when it is an ancestor of the challenger.
+    // `--is-ancestor` also holds for two equal shas, so the `!==` keeps a tie with the earlier
+    // candidate — the same sha either way, and deterministic in which candidate produced it.
+    // Two bases on unrelated branches of the DAG are incomparable in both directions; the
+    // incumbent keeps the slot, which is the candidate list's own order.
+    if (nearest === null
+      || (base !== nearest && git("merge-base", "--is-ancestor", nearest, base).status === 0)) {
+      nearest = base;
+    }
   }
-  return null;
+  if (nearest === null) return null;
+  const head = git("rev-parse", "HEAD");
+  return head.status === 0 && head.stdout.trim() === nearest ? null : nearest;
 }
 
 function main() {

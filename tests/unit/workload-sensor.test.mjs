@@ -233,3 +233,45 @@ test("falls back to main when origin/HEAD names a branch this clone cannot resol
   assert.strictEqual(wl[0].filesChanged, 2);
   assert.strictEqual(wl[0].filesCreated, 2);
 });
+
+test("derives the base from the default branch when the topic was cut from it, even beside a diverged integration branch", () => {
+  // The mirror of the test above, and the case a fixed candidate order cannot get right: this
+  // topic descends from `main`, in a repo that also carries a `dev` that diverged earlier.
+  // Preferring `dev` by name measures from the divergence point and bills main's post-divergence
+  // release commit to this cycle. Which cut-point a branch descends from is a property of
+  // history, so the base is the merge-base NEAREST to HEAD, not the first name that resolves.
+  const repo = makeRepo(); const runsDir = makeRepo();
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  commitAll(repo, "state file on main");
+  sh("git", ["checkout", "-q", "-b", "dev"], { cwd: repo });
+  writeInto(repo, "unreleased.txt", "a\nb\nc\n");
+  commitAll(repo, "unreleased dev work");
+  sh("git", ["checkout", "-q", "main"], { cwd: repo });
+  writeInto(repo, "released.txt", "x\ny\n");
+  commitAll(repo, "release commit on main, after dev diverged");
+  sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
+  writeInto(repo, "f.txt", "hello\nworld\n");
+  commitAll(repo, "task 1");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  const wl = workloads(runsDir, repo);
+  assert.strictEqual(wl.length, 1);
+  // main..topic is exactly f.txt, added, two lines. Measuring from merge-base(dev, topic) instead
+  // would add released.txt's file and its two lines.
+  assert.strictEqual(wl[0].filesChanged, 1);
+  assert.strictEqual(wl[0].filesCreated, 1);
+  assert.strictEqual(wl[0].insertions, 2);
+});
+
+test("without an annotation, HEAD on an integration branch is a no-op — nothing to measure", () => {
+  // The default-branch arm of this guard is covered above; this pins the arm the widening added.
+  // Nearest-merge-base selection reaches the same no-op independently (HEAD is its own branch's
+  // merge-base, so the phantom-zero-diff guard also fires), so what this test pins is the
+  // outcome: a commit made while sitting on `dev` records no workload.
+  const repo = makeRepo(); const runsDir = makeRepo();
+  sh("git", ["checkout", "-q", "-b", "dev"], { cwd: repo });
+  writeInto(repo, ".devcycle/state.md", stateMd({ base: null }));
+  writeInto(repo, "f.txt", "hello\n");
+  commitAll(repo, "on dev");
+  assert.strictEqual(callHook(repo, runsDir).status, 0);
+  assert.strictEqual(workloads(runsDir, repo).length, 0);
+});
