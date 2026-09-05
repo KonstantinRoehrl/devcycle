@@ -19,6 +19,8 @@ one bullet per task, appended by the task that trips the baseline:
   100231→100858, scoping-the-request 85910→86537, sweeping-mechanical-changes 98748→99375,
   taking-the-fast-path 91916→92543, verifying-on-device 94403→95030; surfaceTotal no raise
   needed (5320 still holds).
+- Task 3: context-budget learning-from-sessions 108827→109213, profiling-sessions
+  110030→110359; surfaceTotal no raise needed.
 
 **Why:** every playbook cites `references/evidence.md`, `references/ledger.md`, and
 `references/handoff.md` transitively, so one sentence in any of them moves every playbook's

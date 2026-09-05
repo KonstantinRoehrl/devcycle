@@ -91,8 +91,8 @@ the mining cost. The engine scores each promotion and the section carries one li
 promotion — `<culprit-id> (<rung>): <verdict>` — with its verdict one of: `held` (runs observed,
 no recurrence), `recurred` (the pattern came back), `errored` (the check itself failed to run to
 completion — a timeout, an output overflow, or a spawn failure; a broken harness, never a verdict
-on the lesson), `unmeasurable` (zero runs observed, never read
-as `held`), or `broken` (an r3 check that now fails). Each `recurred` hit is its own finding,
+on the lesson), `unmeasurable` (zero runs observed, or runs observed but none attributed — never
+read as `held`), or `broken` (an r3 check that now fails). Each `recurred` hit is its own finding,
 ranked like everything above: a reappearance means the promotion did not fix the pattern, not a
 reason to re-promote it. With nothing scored yet, the section renders the single line
 `_No promoted lesson has been measured against a run yet._`.

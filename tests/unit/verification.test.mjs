@@ -18,7 +18,7 @@ test("r0-r2: a run with no recurrence is held; a recurrence is recurred + escala
   // The promotion's culprit-id is the <kind>:<slug> form; run-record.mjs only ever writes the
   // bare slug into a journal event's culprit field (never "friction:a"), so the recurrence must
   // be found through that shape or this test is vacuous.
-  const runs = [ev(null, "2026-08-05T00:00:00Z", "r1")];
+  const runs = [ev("other-slug", "2026-08-05T00:00:00Z", "r1")];
   const held = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(held.scoreboard[0].verdict, "held");
   const recur = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })],
@@ -31,6 +31,32 @@ test("r0-r2: the novel:<slug> form still matches after normalization (do not bre
   const runs = [ev(null, "2026-08-05T00:00:00Z", "r1"), ev("novel:foo-bar", "2026-08-06T00:00:00Z", "r2")];
   const out = verify([promo({ culpritId: "novel:foo-bar", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(out.scoreboard[0].verdict, "recurred");
+});
+
+test("r0-r2: runs observed but none attributed is unmeasurable, never held, and never retires", () => {
+  const p = [promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })];
+  const runs = Array.from({ length: 11 }, (_, i) => ev(null, `2026-08-${String(i + 2).padStart(2, "0")}T00:00:00Z`, `r${i}`));
+  const out = verify(p, runs, "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(out.scoreboard[0].verdict, "unmeasurable");
+  assert.equal(out.scoreboard[0].detail, "11 runs, 0 attributed");
+  assert.deepEqual(out.candidates.retirement, []);
+});
+
+test("r0-r2: the detail says why — zero runs, or runs with nothing attributed — and is null on a real verdict", () => {
+  const p = [promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })];
+  assert.equal(verify(p, [], "0.14.0", { now: Date.parse("2026-08-20") }).scoreboard[0].detail, "0 runs");
+  const one = verify(p, [ev(null, "2026-08-05T00:00:00Z", "r1")], "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(one.scoreboard[0].detail, "1 run, 0 attributed");
+  const held = verify(p, [ev("other-slug", "2026-08-05T00:00:00Z", "r1")], "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(held.scoreboard[0].verdict, "held");
+  assert.equal(held.scoreboard[0].detail, null);
+});
+
+test("journal-reinforcement: runs with no attributed event are unmeasurable, never not-adopted", () => {
+  const p = [promo({ culpritId: "win:clean-round-one", rung: "r2", landed: "2026-08-01", verify: "journal-reinforcement" })];
+  const out = verify(p, [ev(null, "2026-08-10T00:00:00Z", "r1")], "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(out.scoreboard[0].verdict, "unmeasurable");
+  assert.equal(out.scoreboard[0].detail, "1 run, 0 attributed");
 });
 
 test("journal-reinforcement: recurrence after landing is held (the practice is followed)", () => {
@@ -55,7 +81,7 @@ test("journal-reinforcement: zero runs is unmeasurable, never not-adopted", () =
 });
 
 test("retirement fires on held past 10 runs OR 90 days", () => {
-  const runs = Array.from({ length: 11 }, (_, i) => ev(null, `2026-08-${String(i + 2).padStart(2, "0")}T00:00:00Z`, `r${i}`));
+  const runs = Array.from({ length: 11 }, (_, i) => ev("other-slug", `2026-08-${String(i + 2).padStart(2, "0")}T00:00:00Z`, `r${i}`));
   const out = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(out.candidates.retirement[0].culpritId, "friction:a");
 });

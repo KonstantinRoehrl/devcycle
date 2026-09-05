@@ -118,12 +118,20 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
     }
     const after = eventsAfter(journalEvents, p.landed);
     const runs = runsObserved(after);
+    // A run counts as evidence only when at least one of its events carries a culprit: a run that
+    // journaled nothing attributable could not have matched this promotion whatever happened in
+    // it, so "N runs, none attributed" is unmeasurable, never held (#254 — eight lessons were
+    // retired on exactly that vacuous signal).
+    const attributed = runsObserved(after.filter((e) => e.culprit));
     const recurrences = after.filter((e) => e.culprit && ids.has(e.culprit)).length;
     const reinforcement = p.verify === "journal-reinforcement";
-    const verdict = runs === 0 ? "unmeasurable"
+    const detail = runs === 0 ? "0 runs"
+      : attributed === 0 ? `${runs} run${runs === 1 ? "" : "s"}, 0 attributed`
+      : null;
+    const verdict = detail !== null ? "unmeasurable"
       : reinforcement ? (recurrences > 0 ? "held" : "not-adopted")
       : (recurrences > 0 ? "recurred" : "held");
-    scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: runs, recurrences, detail: null });
+    scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: runs, recurrences, detail });
     if (verdict === "recurred" && p.rung === "r2") escalation.push({ culpritId: p.culpritId, rung: p.rung, reason: `recurred ${recurrences}×` });
     if (verdict === "held" && (p.rung === "r1" || p.rung === "r2")
         && (runs >= RETIRE_RUNS || now - Date.parse(p.landed) >= RETIRE_DAYS * DAY_MS)) {

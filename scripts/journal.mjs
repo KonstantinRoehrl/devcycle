@@ -70,9 +70,6 @@ export function eventsByCulprit(events) {
   return map;
 }
 
-export const lastRecurrence = (events, culpritId) =>
-  events.filter((e) => e.culprit === culpritId).map((e) => e.ts).sort().at(-1) ?? null;
-
 export function runsObserved(events, since = null) {
   const sinceMs = isIso(since) ? Date.parse(since) : null;
   const ids = new Set();

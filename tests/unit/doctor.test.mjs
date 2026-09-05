@@ -1597,6 +1597,17 @@ test("the report prints the depth-band fraction-of-window caveat", () => {
   assert.match(text, /fraction of the .*window/i);
 });
 
+test("deriveEvents derives review-reject only for a record with no explicit review-reject event", () => {
+  const verdicts = [{ taskId: "1", round: 1, blockingCount: 2, evidenceClass: "red-green", conformance: "fail" }];
+  const legacy = deriveEvents({ verdicts, dispatches: [], stages: [], events: [] });
+  assert.deepEqual(legacy.map((e) => e.event), ["review-reject"]);
+  const explicit = deriveEvents({
+    verdicts, dispatches: [], stages: [],
+    events: [{ event: "review-reject", stage: "execution", task: "1", culprit: "partial-evidence-capture", ts: "2026-09-05T10:00:00Z" }],
+  });
+  assert.deepEqual(explicit.map((e) => e.event), []);
+});
+
 // --- qualitySignals: every cost figure is paired with a quality signal (A6) ---
 
 test("qualitySignals aggregates rounds, retries and blocking findings per run", () => {

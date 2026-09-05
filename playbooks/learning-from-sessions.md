@@ -124,7 +124,8 @@ not chosen by the reader**: no candidate moves into the bulk to avoid a per-item
 promotion carrying `verify: journal-recurrence` is checked by counting journal events with its
 culprit-id dated after it landed. Four verdicts, and the last two are load-bearing — `held` (N runs
 observed, no recurrence), `recurred`, `errored` (the check could not run to completion), and
-`unmeasurable` (zero runs observed). **Never report `unmeasurable` or `errored` as `held`**: a
+`unmeasurable` (zero runs observed, or runs observed with no culprit-bearing event among them — the
+scoreboard's detail says which). **Never report `unmeasurable` or `errored` as `held`**: a
 matcher that could not fire is not a clean bill of health, and a harness that broke is not a
 measurement. `--check-recurrence` runs an r3 `verify:` check only when passed `--run-checks`.
 

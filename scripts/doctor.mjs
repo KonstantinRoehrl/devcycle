@@ -1727,11 +1727,16 @@ export function deriveEvents(record) {
   const stageOf = (ts) =>
     (record.stages ?? []).find((s) => ts >= Date.parse(s.startedAt) && ts < Date.parse(s.endedAt))?.stage
     ?? "unattributed";
+  // A run written by a version that journals review-reject at the writer carries explicit events;
+  // deriving them again from its verdict lines would count every rejection twice. An older run
+  // carries none and keeps its derived ones (references/impact-scoring.md § Signals that are derived).
+  const explicitReject = (record.events ?? []).some((e) => e.event === "review-reject");
   for (const v of collapseVerdicts(record.verdicts)) {
-    if (v.blockingCount > 0 || v.conformance === "fail")
-      out.push({ event: "review-reject", stage: "execution", task: v.taskId, ts: null });
-    else if (v.round === 1 && v.blockingCount === 0 && v.conformance === "pass")
+    if (v.blockingCount > 0 || v.conformance === "fail") {
+      if (!explicitReject) out.push({ event: "review-reject", stage: "execution", task: v.taskId, ts: null });
+    } else if (v.round === 1 && v.blockingCount === 0 && v.conformance === "pass") {
       out.push({ event: "first-round-accept", stage: "execution", task: v.taskId, ts: null });
+    }
   }
   const byTask = new Map();
   for (const d of record.dispatches ?? []) {
