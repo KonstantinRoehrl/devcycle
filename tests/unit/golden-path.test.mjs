@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DESIGN_DOC } from "../../scripts/doc-paths.mjs";
+import { PLAYBOOK_STAGE } from "../../scripts/doctor.mjs";
 
 const root = process.cwd();
 const read = (p) => readFileSync(join(root, p), "utf8");
@@ -1606,6 +1607,11 @@ test("every stage playbook reads its own lessons section, and no other file clai
     assert.doesNotMatch(text, /--lessons [a-z-]+\b(?![^\n]*owns)/,
       `playbooks/${file} is not a stage playbook and takes no lessons line`);
   }
+});
+
+test("every PLAYBOOK_STAGE key doctor re-attributes by names a playbook that exists", () => {
+  for (const name of Object.keys(PLAYBOOK_STAGE))
+    assert.ok(existsSync(join(root, "playbooks", `${name}.md`)), `playbooks/${name}.md is missing`);
 });
 
 test("the lessons line is short enough that duplication-check exempts it", () => {

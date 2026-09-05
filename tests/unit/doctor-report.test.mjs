@@ -882,6 +882,18 @@ test("the cost-by-stage cell carries its sample count", () => {
   assert.match(out, /\| execution \| \$10\.00 \(n=3\) \| \$5\.00 \(n=3\) \| down \|/);
 });
 
+test("the cost-by-stage table says how much of each stage's money is forward-filled", () => {
+  const out = renderReport([
+    ...threeOf("0.11.0", 10),
+    ...threeOf("0.12.0", 10).map((s, i) => (i === 0 ? { ...s, attributionSource: "forward-filled" } : s)),
+  ], ctx());
+  const stage = out.slice(out.indexOf("## Cost by stage"), out.indexOf("### Cost by stage (this window)"));
+  assert.match(stage, /\| Forward-filled \(derived\) \|/);
+  assert.match(stage, /^\| execution \| \$10\.00 \(n=3\) \| \$10\.00 \(n=3\) \| flat \| 17% \|$/m);
+  const none = renderReport(threeOf("0.12.0", 10), ctx());
+  assert.match(none, /^\| execution \| \$10\.00 \(n=3\) \| insufficient data \(n=3→3\) \| — \|$/m);
+});
+
 test("changelogEntry returns a version's body bullets, or null when absent", () => {
   const cl = "# Changelog\n\n## 0.12.0 — 2026-08-07\n\n- feat(x): a thing\n- fix(y): another\n\n## 0.11.0 — 2026-08-05\n\n- fix\n";
   assert.deepEqual(changelogEntry(cl, "0.12.0"), ["- feat(x): a thing", "- fix(y): another"]);
@@ -1001,8 +1013,13 @@ test("every rendered metric column in the pre-existing tables is tagged observed
 
   const stage = out.slice(out.indexOf("## Cost by stage"), out.indexOf("### Cost by stage (this window)"));
   assert.match(stage, /\| Trend \(derived\) \|/, "Cost by stage's Trend column is not tagged");
+  assert.match(stage, /\| Forward-filled \(derived\) \|/, "Cost by stage's Forward-filled column is not tagged");
   assert.ok(
-    stage.includes("_Dollar cells are derived per-version medians; Trend is derived._"),
+    stage.includes(
+      "_Dollar cells are derived per-version medians; Trend is derived. Forward-filled is the " +
+        "share of the stage's settled dollars whose stage was inferred from the transcript rather " +
+        "than read off a run record._",
+    ),
     "the Cost by stage caption is missing",
   );
 
@@ -1142,13 +1159,13 @@ test("every legacy line-class still has a home in the rendered report", () => {
     // Read this first
     "- UNPRICED MODEL: some-unpriced-model (3 requests)",
     "- Cost $4.00 (inferred: cache-write TTL, range $3.00–$6.00; 50.0% of cache-write tokens lack a TTL split).",
-    "- 1 session(s) have inferred stage costs (forward-filled — no run record)",
+    "- 1 session(s) have inferred stage costs — predates run records",
     "- 1 session(s) still in flight (newest record < 30 min old) — in-flight sessions have only part of their cost recorded",
     // Cost by version — the whole row, out to its last cell: a needle that stopped at the depth
     // column still matched after the Quality and Shipped columns were deleted.
     `| 0.12.0 | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | +36.4% | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
     // Cost by stage, across versions and within this window
-    "| execution | $10.00 (n=3) | $5.00 (n=4) | down |",
+    "| execution | $10.00 (n=3) | $5.00 (n=4) | down | 3% |",
     "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
     // Your culprits — out to the row's end, for the same reason as the cohort row above: a
     // needle that stopped at the Δ column still matched after the Trend column was deleted.
@@ -1340,8 +1357,10 @@ test("the empty corpus renders a report rather than throwing", () => {
 // affirmation came to be dropped from this report while formatReport still emitted it.
 const EXACT_LINE = "- Cost is exact: every cache write in this corpus carries its TTL split.";
 const NO_CAVEATS_LINE = "- No caveats apply to this corpus.";
+// sum() carries pluginVersion "0.12.0", which predates the run record, so its forward-filled
+// caveat is the "predates run records" one of the three splitReason buckets.
 const FORWARD_FILLED_LINE =
-  "- 1 session(s) have inferred stage costs (forward-filled — no run record); the session ids " +
+  "- 1 session(s) have inferred stage costs — predates run records; the session ids " +
   "are in the appendix's per-session detail.";
 
 test("a collapsed cache band affirms the cost is exact even when another caveat applies", () => {
@@ -1374,6 +1393,18 @@ test("an uncollapsed cache band renders its range and claims no exactness", () =
   );
   assert.ok(!out.includes(EXACT_LINE), "an inferred band was reported as exact");
   assert.ok(!out.includes(NO_CAVEATS_LINE), "an inferred band was reported as carrying no caveat");
+});
+
+test("the caveat block splits forward-filled sessions three ways and names each reason", () => {
+  const out = renderReport([
+    sum({ id: "a", attributionSource: "forward-filled", firstTag: "devcycle:doctor", pluginVersion: "0.19.0" }),
+    sum({ id: "b", attributionSource: "forward-filled", pluginVersion: "0.12.0" }),
+    sum({ id: "c", attributionSource: "forward-filled", firstTag: "devcycle:cycle", pluginVersion: "0.19.0" }),
+    sum({ id: "d", attributionSource: "forward-filled", firstTag: "devcycle:cycle", pluginVersion: "0.19.0" }),
+  ], ctx());
+  assert.ok(out.includes("- 1 session(s) have inferred stage costs — standalone command (no run by design);"));
+  assert.ok(out.includes("- 1 session(s) have inferred stage costs — predates run records;"));
+  assert.ok(out.includes("- 2 session(s) have inferred stage costs — record expected, missing;"));
 });
 
 // --- the issue draft ---

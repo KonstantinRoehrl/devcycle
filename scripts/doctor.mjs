@@ -72,6 +72,56 @@ const OUTER_LOOP_QUERY_LIMIT = 200;
 const DEVCYCLE_PREFIX = /^devcycle:/;
 const PLUGIN_VERSION_RE = /devcycle\/devcycle\/(\d+\.\d+\.\d+)\//;
 
+export const ENTRY_TAGS = new Set(["devcycle:continue", "devcycle:cycle"]);
+// Neither entry tag is a stage: the stage a resumed session works in is read off the first
+// stage signal after the tag (a playbook read, or a state-file write naming the stage). Keys are
+// playbook basenames; tests/unit/golden-path.test.mjs pins that each exists under playbooks/.
+export const PLAYBOOK_STAGE = Object.freeze({
+  "scoping-the-request": "scoping",
+  "reviewing-code": "audit",
+  "planning-waves": "planning",
+  "executing-waves": "execution",
+  "reviewing-the-branch": "branch-review",
+  "verifying-on-device": "on-device",
+  "taking-the-fast-path": "fast-path",
+  "sweeping-mechanical-changes": "sweep",
+  "receiving-review": "receiving-review",
+  "finishing-the-cycle": "finish",
+  "profiling-sessions": "doctor",
+  "learning-from-sessions": "learn",
+  "maintaining-the-repo": "maintain",
+  "onboarding-a-repo": "onboard",
+});
+
+const UNKNOWN_STAGE = { "devcycle:continue": "resumed (stage unknown)", "devcycle:cycle": "entry (stage unknown)" };
+const READ_PLAYBOOK_RE = /\/playbooks\/([a-z-]+)\.md$/;
+const BASH_PLAYBOOK_RE = /playbooks\/([a-z-]+)\.md/;
+const STATE_FILE_RE = /\.devcycle\/state\.md/;
+const STAGE_LINE_RE = /^- stage: (\w[\w-]*)/m;
+
+// The stage a turn's tool calls reveal, or null. Auto mode routes reads and writes through Bash,
+// so the Bash command text is a signal carrier alongside Read/Write/Edit.
+export function stageSignal(turn) {
+  const content = turn?.message?.content;
+  if (!Array.isArray(content)) return null;
+  for (const item of content) {
+    if (!item || item.type !== "tool_use" || !item.input || typeof item.input !== "object") continue;
+    const { name, input } = item;
+    const path = typeof input.file_path === "string" ? input.file_path : "";
+    const command = name === "Bash" && typeof input.command === "string" ? input.command : "";
+    const playbook = name === "Read" ? path.match(READ_PLAYBOOK_RE) : command.match(BASH_PLAYBOOK_RE);
+    if (playbook && PLAYBOOK_STAGE[playbook[1]]) return PLAYBOOK_STAGE[playbook[1]];
+    // A stage name is only read off text the session wrote to the state file — never off prose
+    // that merely mentions one, which is why a Grep or an echo carries no signal.
+    const stateText = (name === "Write" || name === "Edit") && STATE_FILE_RE.test(path)
+      ? String(input.content ?? input.new_string ?? "")
+      : STATE_FILE_RE.test(command) ? command : "";
+    const stage = stateText.match(STAGE_LINE_RE);
+    if (stage) return stage[1];
+  }
+  return null;
+}
+
 // hashSession from scripts/run-record.mjs, reimplemented in one line rather than imported, so
 // the reader keeps no dependency on the writer. The algorithm, encoding and digest form must
 // stay byte-identical to the writer's or the join silently misses every session.
@@ -306,6 +356,27 @@ export function compareVersions(a, b) {
   }
   return 0;
 }
+
+export const STANDALONE_TAGS = new Set([
+  "devcycle:doctor", "devcycle:learn", "devcycle:maintain", "devcycle:review",
+  "devcycle:verify", "devcycle:reconcile", "devcycle:onboard",
+]);
+// The release that introduced the run record (CHANGELOG.md 0.13.0); a session from before it
+// legitimately has none.
+export const RUN_RECORD_SINCE = "0.13.0";
+// Why a forward-filled session has no run record: a standalone command mints none by design, a
+// session from before 0.13.0 predates the record, and anything else expected one and is missing it.
+export function splitReason({ firstTag = null, pluginVersion = null } = {}) {
+  if (firstTag && STANDALONE_TAGS.has(firstTag)) return "standalone";
+  if (!pluginVersion || pluginVersion === "unknown" || compareVersions(pluginVersion, RUN_RECORD_SINCE) < 0)
+    return "predates-run-records";
+  return "record-missing";
+}
+const SPLIT_REASON_TEXT = {
+  standalone: "standalone command (no run by design)",
+  "predates-run-records": "predates run records",
+  "record-missing": "record expected, missing",
+};
 
 // Buckets a run's changed-line count (insertions + deletions) into a size band by the published
 // thresholds (GC6 — no invented weighted score). A null count is workload-unknown, never zero.
@@ -792,7 +863,8 @@ function transcriptOf(r) {
 // Forward-fills attributionSkill within each transcript (main thread and each subagent's
 // own transcript, kept separate via transcriptOf) from the last explicit tag through to
 // that transcript's end or the next tag — a turn with no tag anywhere earlier in its own
-// transcript stays unattributed.
+// transcript stays unattributed. An entry tag is not a stage, so it fills a stage read off the
+// turns themselves (stageSignal) instead of the tag's own name.
 function attributeForwardFill(turns) {
   const byTranscript = new Map();
   turns.forEach((r, i) => {
@@ -802,10 +874,17 @@ function attributeForwardFill(turns) {
   });
   const effective = new Array(turns.length).fill(undefined);
   for (const indices of byTranscript.values()) {
-    let current;
+    let current, signalled = null;
     for (const i of indices) {
-      if (turns[i].attributionSkill) current = turns[i].attributionSkill;
-      effective[i] = current;
+      if (turns[i].attributionSkill) { current = turns[i].attributionSkill; signalled = null; }
+      if (current && ENTRY_TAGS.has(current)) {
+        // From the signal turn onward the stage is the signal's stage, until the next explicit
+        // tag or signal; turns before any signal are labelled unknown, never guessed.
+        signalled = stageSignal(turns[i]) ?? signalled;
+        effective[i] = signalled ?? UNKNOWN_STAGE[current];
+      } else {
+        effective[i] = current;
+      }
     }
   }
   return effective;
@@ -1049,6 +1128,10 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   // (`if (!record || !record.stages?.length) return null;`) — otherwise every turn fell back to
   // attributeForwardFill uniformly, so "forward-filled" is never a per-turn mix at this level.
   const attributionSource = attributionRecord && attributionRecord.stages?.length ? "record" : "forward-filled";
+  // The main transcript's own first devcycle tag: what the session was entered as, which is what
+  // decides both the entry-tag bucket and why a forward-filled session has no record.
+  const firstTag = turns.find((r) => !r.isSidechain && !r.agentId && DEVCYCLE_PREFIX.test(r.attributionSkill ?? ""))?.attributionSkill ?? null;
+  const attributionEntry = firstTag && ENTRY_TAGS.has(firstTag) ? firstTag : null;
   // Coordinator-reported per-lens cost, taken straight off the run record's lens-cost lines — not
   // joined to a transcript turn, so it does not depend on attribution trust (schemaMismatch et al.).
   for (const lc of record?.lensCosts ?? []) bump(costByLens, lc.lens, lc.cost ?? 0);
@@ -1141,6 +1224,11 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     impact: record ? impactScores(record, costByStage) : null,
     culpritsByKey: culpritsByKey(record),
     attributionSource,
+    firstTag,
+    attributionEntry,
+    attributionSplitReason: attributionSource === "forward-filled"
+      ? splitReason({ firstTag, pluginVersion: pluginVersion ?? "unknown" })
+      : null,
     complianceCandidates: emitComplianceCandidates(toolCallEvents, record),
     inFlight: newestRecordMs !== null && isInFlight(newestRecordMs),
     quality: qualitySignals(record),
@@ -1151,7 +1239,9 @@ const DISCLOSURE =
   "note: skill attribution is forward-filled within each transcript from the last " +
   "explicit skill invocation through to that transcript's end (or the next invocation) — " +
   "genuinely unrelated work with no further skill call in the same transcript is still " +
-  "counted under the earlier skill.";
+  "counted under the earlier skill. The two entry tags (devcycle:cycle, devcycle:continue) name " +
+  "no stage, so their turns are attributed to the stage the session's own playbook reads and " +
+  "state-file writes reveal, and to an explicit \"stage unknown\" bucket until the first such signal.";
 
 const IN_FLIGHT_NOTE =
   "in-flight sessions have only part of their cost recorded, so they are excluded from the " +
@@ -1512,6 +1602,11 @@ export function buildJsonReport(summaries, ctx = {}) {
     sessions: summaries.map((s) => ({
       ...s,
       inferred: s.attributionSource === "forward-filled" ? "forward-filled" : null,
+      attribution: {
+        source: s.attributionSource ?? null,
+        entry: s.attributionEntry ?? null,
+        splitReason: s.attributionSource === "forward-filled" ? (s.attributionSplitReason ?? splitReason(s)) : null,
+      },
       quality: s.quality ?? null,
     })),
     candidates: [...emitCandidates(summaries), ...complianceCandidatesOf(summaries)],
@@ -2073,6 +2168,15 @@ export function stageByVersionTable(summaries) {
   const versions = [...cohorts.keys()].filter((v) => v !== "unknown")
     .sort(compareVersions).slice(-TREND_VERSIONS);
   const stages = new Set(versions.flatMap((v) => [...cohorts.get(v).byStage.keys()]));
+  // How much of a stage's money was never joined to a run record but inferred from the transcript.
+  // A stage read mostly off inference is a weaker number than one read off records, and a column
+  // that does not say so lets the two be compared as if they were equally trustworthy.
+  const settled = summaries.filter((s) => !s.inFlight);
+  const forwardFilledShare = (stage) => {
+    const dollars = (list) => list.reduce((n, s) => n + (s.costByStage?.[stage] ?? 0), 0);
+    const total = dollars(settled);
+    return total > 0 ? dollars(settled.filter((s) => s.attributionSource === "forward-filled")) / total : 0;
+  };
   const rows = [...stages].map((stage) => {
     const byVersion = {};
     for (const version of versions) {
@@ -2081,7 +2185,12 @@ export function stageByVersionTable(summaries) {
       // carries its sample count so the trend gate and the render both see how thin it is.
       byVersion[version] = dollars ? { median: median(dollars), n: dollars.length } : null;
     }
-    return { stage, byVersion, trend: gatedTrend(versions.map((v) => byVersion[v])) };
+    return {
+      stage,
+      byVersion,
+      trend: gatedTrend(versions.map((v) => byVersion[v])),
+      forwardFilledShare: forwardFilledShare(stage),
+    };
   });
   const rendered = (r) => Object.values(r.byVersion).reduce((n, d) => n + (d?.median ?? 0), 0);
   rows.sort((a, b) => rendered(b) - rendered(a) || byName(a.stage, b.stage));
@@ -2547,20 +2656,29 @@ function caveatLines(summaries, agg) {
   if (!summaries.length) return ["- no sessions matched."];
   const out = [];
   const unpriced = Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]);
-  const filled = summaries.filter((s) => s.attributionSource === "forward-filled").length;
+  const filled = summaries.filter((s) => s.attributionSource === "forward-filled");
   const inFlight = summaries.filter((s) => s.inFlight).length;
   const band = agg.cacheBand;
   for (const [model, count] of unpriced)
     out.push(`- UNPRICED MODEL: ${model} (${count} requests)`);
   out.push(`- ${cacheBandLine(band)}`);
-  if (filled > 0)
-    out.push(
-      `- ${filled} session(s) have inferred stage costs (forward-filled — no run record); the ` +
-        "session ids are in the appendix's per-session detail.",
-    );
+  // Split by why the record is absent rather than counted as one undifferentiated class: a
+  // standalone command mints no record by design, and reading that as a gap in the telemetry
+  // sends the reader looking for a writer bug that is not there.
+  const byReason = new Map();
+  for (const s of filled) {
+    const reason = s.attributionSplitReason ?? splitReason(s);
+    byReason.set(reason, (byReason.get(reason) ?? 0) + 1);
+  }
+  for (const reason of ["standalone", "predates-run-records", "record-missing"])
+    if (byReason.has(reason))
+      out.push(
+        `- ${byReason.get(reason)} session(s) have inferred stage costs — ${SPLIT_REASON_TEXT[reason]}; the ` +
+          "session ids are in the appendix's per-session detail.",
+      );
   if (inFlight > 0)
     out.push(`- ${inFlight} session(s) still in flight (newest record < 30 min old) — ${IN_FLIGHT_NOTE}`);
-  if (band.collapsed && !unpriced.length && filled === 0 && inFlight === 0)
+  if (band.collapsed && !unpriced.length && filled.length === 0 && inFlight === 0)
     out.push("- No caveats apply to this corpus.");
   return out;
 }
@@ -2712,15 +2830,20 @@ export function renderReport(summaries, ctx) {
   section("## Cost by stage", "cost-by-stage");
   const stageTrend = stageByVersionTable(summaries);
   L.push(...markdownTable(
-    ["Stage", ...stageTrend.versions, "Trend (derived)"],
+    ["Stage", ...stageTrend.versions, "Trend (derived)", "Forward-filled (derived)"],
     stageTrend.rows.map((r) => [
       r.stage,
       ...stageTrend.versions.map((v) => (r.byVersion[v] === null ? null : `${usd(r.byVersion[v].median)} (n=${r.byVersion[v].n})`)),
       r.trend,
+      // An em dash, not "0%": no forward-filled dollars in this stage at all is a different
+      // statement from a share that rounded down to zero.
+      r.forwardFilledShare > 0 ? `${(r.forwardFilledShare * 100).toFixed(0)}%` : null,
     ]),
     "no version-tagged sessions to compare across releases",
   ));
-  L.push("", "_Dollar cells are derived per-version medians; Trend is derived._");
+  L.push("", "_Dollar cells are derived per-version medians; Trend is derived. Forward-filled is " +
+    "the share of the stage's settled dollars whose stage was inferred from the transcript rather " +
+    "than read off a run record._");
   // stageByVersionTable drops the undetectable-version cohort from every column and every trend,
   // because "unknown" cannot sit on a version axis — right, but silent, and an omission nobody
   // names reads as a clean bill of health. cohortTable is the sibling that keeps that bucket,
