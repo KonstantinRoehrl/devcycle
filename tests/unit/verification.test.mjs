@@ -119,12 +119,39 @@ test("resolved-in: a post-release run for a different culprit is held (the previ
 test("resolved-in: a culprit event dated before the release is not counted (date boundary)", () => {
   const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
   const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
-  const runs = [
-    ev("friction:flaky-test-retry", "2026-01-01T00:00:00Z", "r0"),
-    ev(null, "2026-08-10T00:00:00Z", "r1"),
-  ];
+  const before = ev("friction:flaky-test-retry", "2026-01-01T00:00:00Z", "r0");
+  // The only in-window run journals nothing attributable, so the window cannot say the fix held.
+  const unattributed = verify([], [before, ev(null, "2026-08-10T00:00:00Z", "r1")], "0.14.0",
+    { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(unattributed.resolvedIn[0].verdict, "unmeasurable");
+  // Give the same window an attributed event and the boundary is what is under test again: the
+  // pre-release recurrence is still not counted, so the verdict is held rather than recurred.
+  const attributed = verify([], [before, ev("other-slug", "2026-08-10T00:00:00Z", "r1")], "0.14.0",
+    { now: Date.parse("2026-08-20"), vocab, releaseDates });
+  assert.equal(attributed.resolvedIn[0].verdict, "held");
+});
+
+test("resolved-in: runs observed but none attributed is unmeasurable, never held", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const runs = [ev(null, "2026-08-10T00:00:00Z", "r1"), ev(null, "2026-08-11T00:00:00Z", "r2")];
   const out = verify([], runs, "0.14.0", { now: Date.parse("2026-08-20"), vocab, releaseDates });
-  assert.equal(out.resolvedIn[0].verdict, "held");
+  assert.equal(out.resolvedIn[0].verdict, "unmeasurable");
+  assert.equal(out.resolvedIn[0].runsObserved, 2);
+  assert.equal(out.resolvedIn[0].detail, "2 runs, 0 attributed");
+});
+
+test("resolved-in: the detail says which unmeasurable this is, and is null on a real verdict", () => {
+  const vocab = [{ kind: "friction", slug: "flaky-test-retry", "resolved-in": "0.14.0" }];
+  const releaseDates = new Map([["0.14.0", "2026-08-05"]]);
+  const at = (installed, runs, dates = releaseDates) =>
+    verify([], runs, installed, { now: Date.parse("2026-08-20"), vocab, releaseDates: dates }).resolvedIn[0];
+  assert.equal(at("0.13.0", []).detail, "not reached");
+  assert.equal(at("0.14.0", [], new Map()).detail, "no release date");
+  assert.equal(at("0.14.0", []).detail, "0 runs");
+  assert.equal(at("0.14.0", [ev(null, "2026-08-10T00:00:00Z", "r1")]).detail, "1 run, 0 attributed");
+  assert.equal(at("0.14.0", [ev("other-slug", "2026-08-10T00:00:00Z", "r1")]).detail, null);
+  assert.equal(at("0.14.0", [ev("flaky-test-retry", "2026-08-10T00:00:00Z", "r1")]).detail, null);
 });
 
 test("resolved-in: reached but the resolving version has no CHANGELOG date is unmeasurable, never held", () => {
