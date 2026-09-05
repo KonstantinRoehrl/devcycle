@@ -71,7 +71,7 @@ runs everything except `doctor.mjs` — that one is local-only, so it's the one 
 catch for you:
 
 ```
-node scripts/validate.mjs             # manifests, command frontmatter, description budget, routing table, fences — CI
+node scripts/validate.mjs             # manifests, command frontmatter, description budget, routing table (incl. description/consequence parity), fences — CI
 node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-listed terms — CI
 node scripts/duplication-check.mjs    # duplicated prose across commands/playbooks/agents/references, and within a file — CI
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
@@ -138,8 +138,10 @@ results, plans, and specs out of the repository — they are records of one run 
 they date immediately, and nobody installing the plugin has a use for them. `.devcycle/` is
 gitignored and is where those belong.
 
-`docs/known-issues.md` is the one place open defects are recorded. Fixing a defect means
-deleting its entry in the same commit.
+`docs/known-issues.md` is the hand-curated store of confirmed defects in devcycle's own engines;
+fixing one means deleting its entry in the same commit. Maintenance-detected defects are recorded
+separately, under `docs/devcycle/maintenance-findings/`, where a record carries a `lifecycle:` field
+a later pass resolves rather than an entry anyone deletes.
 
 ## Releasing
 
