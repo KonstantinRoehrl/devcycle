@@ -238,8 +238,11 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       if (at !== -1) fail(`playbooks/${f}:${at + 1}: emits a handoff block without referencing references/handoff.md`);
     }
 
-  // 6. Every command appears exactly once in the routing table, and its declared consequence
-  //    agrees with its disable-model-invocation frontmatter.
+  // 6. Every command appears exactly once in the routing table; the classes docs/routing.md
+  //    defines are exactly the classes this check acts on; every row's consequence is one
+  //    of those classes; and that consequence agrees with the
+  //    command's disable-model-invocation frontmatter, with the confirm-first justification
+  //    requirement, and with the command's own description prose.
   const routingPath = join(root, "docs/routing.md");
   if (!existsSync(routingPath)) fail("docs/routing.md: missing (the routing table has no owner)");
   else if (existsSync(join(root, "commands"))) {
@@ -249,7 +252,59 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       if (rows.has(name)) fail(`docs/routing.md: ${name} appears more than once`);
       rows.set(name, consequence);
     }
+    // The class vocabulary has one owner: routing.md's own "`consequence` is one of:" list,
+    // whose entries open "- `<class>` — ". Reading it here rather than hardcoding a copy keeps
+    // this script from being a second owner of the vocabulary; the set-equality check below keeps
+    // it from being a second owner of the *semantics*, which is the half that could still drift.
+    // An unknown class — a typo, or one no clause acts on — matches none of the clauses below, so
+    // it would otherwise waive every guard it silently switched off.
+    const classes = new Set();
+    const lines = routing.split("\n");
+    const listAt = lines.findIndex((l) => l.includes("`consequence` is one of:"));
+    // Indented lines continue a wrapped bullet, and the blank line before the list is skipped;
+    // the scan then ends at the first blank line after the list, so a bullet of the same shape
+    // further down the file cannot be absorbed into the vocabulary.
+    for (let i = listAt + 1; listAt !== -1 && i < lines.length; i++) {
+      const entry = /^- `([a-z-]+)` — /.exec(lines[i]);
+      if (entry) classes.add(entry[1]);
+      else if (lines[i].trim() === "") { if (classes.size) break; }
+      else if (!/^\s/.test(lines[i])) break;
+    }
+    // Each clause below names its class through one of these four constants, and the set of
+    // classes this check acts on is derived from them rather than restated a third time. The two
+    // sets must agree exactly: a class routing.md defines that no clause acts on is exempt from
+    // every guard, and a class a clause acts on that routing.md no longer defines is a guard with
+    // no vocabulary behind it. A disagreement is reported alongside the per-row check, not instead
+    // of it: a typo'd cell is an independently actionable error either way, so withholding it would
+    // cost a round-trip. Only an unreadable list stays exclusive — there is then no vocabulary left
+    // to check any row against.
     const GUARD_REQUIRED = new Set(["side-effectful", "resume"]);
+    const GUARD_FORBIDDEN = "read-only";
+    const JUSTIFICATION_REQUIRED = "confirm-first";
+    const PARITY_TERMS = ["read-only", "side-effectful", "confirm-first"];
+    const handled = new Set([...GUARD_REQUIRED, GUARD_FORBIDDEN, JUSTIFICATION_REQUIRED, ...PARITY_TERMS]);
+    const definedButUnhandled = [...classes].filter((c) => !handled.has(c));
+    const handledButUndefined = [...handled].filter((c) => !classes.has(c));
+    if (classes.size === 0)
+      fail(
+        'docs/routing.md: the `consequence` class list is unreadable, so no cell can be checked — ' +
+          'restore the bullets under "`consequence` is one of:", each opening "- `<class>` — "'
+      );
+    else {
+      for (const c of definedButUnhandled)
+        fail(
+          `docs/routing.md: class "${c}" is defined here but no clause in scripts/validate.mjs check 6 acts on it — a row using it would be exempt from every guard`
+        );
+      for (const c of handledButUndefined)
+        fail(
+          `docs/routing.md: scripts/validate.mjs check 6 acts on class "${c}", which this file no longer defines — restore its bullet under "\`consequence\` is one of:" or drop the clause`
+        );
+      for (const [name, consequence] of rows)
+        if (!classes.has(consequence))
+          fail(
+            `docs/routing.md: row "${name}" has consequence "${consequence}", not one of: ${[...classes].join(", ")}`
+          );
+    }
     // `confirm-first` is the deliberate exception class, so each member names its
     // justification inline — as prose, since the table has no column for one. A bare label
     // ("**`cycle`'s justification.**" with nothing behind it) is not a justification, which
@@ -266,13 +321,23 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       const name = f.replace(/\.md$/, "");
       if (!rows.has(name)) { fail(`commands/${f}: missing from the routing table in docs/routing.md`); continue; }
       const consequence = rows.get(name);
-      const guarded = frontmatter(join(root, "commands", f))?.["disable-model-invocation"] === "true";
+      const fm = frontmatter(join(root, "commands", f));
+      const guarded = fm?.["disable-model-invocation"] === "true";
       if (GUARD_REQUIRED.has(consequence) && !guarded)
         fail(`commands/${f}: consequence "${consequence}" requires disable-model-invocation: true`);
-      if (consequence === "read-only" && guarded)
-        fail(`commands/${f}: consequence "read-only" forbids disable-model-invocation`);
-      if (consequence === "confirm-first" && !justifies(name))
+      if (consequence === GUARD_FORBIDDEN && guarded)
+        fail(`commands/${f}: consequence "${GUARD_FORBIDDEN}" forbids disable-model-invocation`);
+      if (consequence === JUSTIFICATION_REQUIRED && !justifies(name))
         fail(`docs/routing.md: \`${name}\` is confirm-first but names no justification — the exception class requires one inline`);
+      // The description is the prose a user reads instead of the routing table, so when it names a
+      // consequence class that class must be the one the table assigns. One-directional by design:
+      // five commands name no class at all, and requiring one everywhere is a separate decision.
+      // `resume` is not a term here: the other three are hyphenated jargon that only ever appear as
+      // a class claim, while `resume` is an ordinary verb a description may use without claiming any
+      // consequence — scanning it would fail a future "resume the walkthrough" for nothing.
+      for (const term of PARITY_TERMS)
+        if (term !== consequence && new RegExp(`\\b${term}\\b`, "i").test(fm?.description ?? ""))
+          fail(`commands/${f}: description says "${term}" but docs/routing.md assigns "${consequence}"`);
     }
     for (const name of rows.keys())
       if (!existsSync(join(root, `commands/${name}.md`)))
