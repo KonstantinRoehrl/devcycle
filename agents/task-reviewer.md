@@ -72,6 +72,10 @@ supplied); the short envelope `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`'s
 `## Return envelopes` defines is what the dispatch actually returns, and it names
 that findings path.
 
+A `needs-changes` verdict carries the `Culprit: <slug>` line that section defines, directly under
+`Verdict:` — the `references/culprits.json` slug that names the rejection's pattern, or
+`novel:<kebab-slug>` when none fits.
+
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`, each finding carrying
 the severity vocabulary, the core fields, and the symptom-first phrasing
 `${CLAUDE_PLUGIN_ROOT}/references/findings.md` owns — used from there, never

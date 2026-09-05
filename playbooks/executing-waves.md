@@ -82,8 +82,9 @@ file conflicts these invariants already preserve.)
    outcome=rejected (missing report file)`, `ref=` the named path, back to the implementer, no
    reviewer dispatch. Otherwise write the `dispatch` line now — `run-record.mjs append --kind
    dispatch` — using step 3's own `startedAt`, this step's time as `endedAt`, the envelope's
-   outcome, and the current round/retry index: every field this line needs is only known from
-   here on. The coordinator neither produces nor reads the task diff; step 5 does both.
+   outcome (`complete|blocked|rejected`), its `modelSource` (`explicit` when the brief named the
+   model, `inherited` otherwise), and the current round/retry index: every field this line needs is
+   only known from here on. The coordinator neither produces nor reads the task diff; step 5 does both.
 5. **Dispatch devcycle:task-reviewer** (read-only apart from its own findings file) with the brief,
    the report path, the task's file list, the two evidence-file paths the report names, and the
    task's constraints block, instructing it to produce the diff itself: `git add -N <new files>`
@@ -99,9 +100,11 @@ file conflicts these invariants already preserve.)
    `verdict` run-record line. Otherwise ledger `event=review-round` per reviewer dispatch (round n),
    `event=review-verdict` for its outcome, then the `verdict` line — `run-record.mjs append --kind
    verdict` — this round's number, blocking count, the task's declared evidence class, `conformance`
-   = `pass` on acceptance else `fail`. Non-zero blocking sends the findings path back to the
-   implementer; re-review after fixes logs the next `review-round` (and, once the fix pass's envelope
-   returns, another step-4 `dispatch` line).
+   = `pass` on acceptance else `fail`. On a `needs-changes` verdict, also append
+   `run-record.mjs append --run <id> --kind event --event review-reject --stage execution --task <task-id> --culprit <the verdict's Culprit slug> --attributedBy coordinator`.
+   Non-zero blocking sends the findings path back to the implementer; re-review after fixes logs
+   the next `review-round` (and, once the fix pass's envelope returns, another step-4 `dispatch`
+   line).
 
    Cap: 3 rounds per task; one round is one reviewer dispatch plus the implementer's fix pass.
    Statuses and their reporting are owned by `${CLAUDE_PLUGIN_ROOT}/references/loops.md` — a task
@@ -113,8 +116,10 @@ file conflicts these invariants already preserve.)
    `event=review-verdict outcome=rejected (green gate: <symptom>)`, back to the implementer; if this
    round's own reviewer wrote `conformance=pass`, also append a `verdict` line with `conformance=fail` for
    this round — a reviewer-rejected round never wrote `conformance=pass`. Journal the outcome either way:
-   `run-record.mjs append --run <id> --kind event --event gate-fail --stage execution --task <task-id>` on
-   a failure, `--event gate-pass-clean` on a clean pass. Enums and ids only — never the failure text.
+   `run-record.mjs append --run <id> --kind event --event gate-fail --stage execution --task <task-id> --culprit <slug> --attributedBy coordinator`
+   on a failure — `<slug>` is this round's reviewer `Culprit` when that reviewer rejected, else
+   `gate-caught-regression` — and `--event gate-pass-clean` with no culprit on a clean pass, since a
+   win is not a culprit. Enums and ids only — never the failure text.
    On a whole-suite failure, before attributing the red to this task, run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/foreign-change-check.mjs" <this task's **Files:** list>` (the
    concurrent-sibling guard `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § File-backed evidence

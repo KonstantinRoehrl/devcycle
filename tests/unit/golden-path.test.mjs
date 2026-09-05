@@ -941,6 +941,22 @@ test("the run-record write-site table declares the event kind", () => {
   assert.match(row, /user-correction-at-gate/);
 });
 
+test("every rejecting writer journals a culprit, and the boundary sentences name their enums", () => {
+  const waves = read("playbooks/executing-waves.md");
+  assert.match(waves, /--kind event --event review-reject --stage execution --task <task-id> --culprit <the verdict's Culprit slug> --attributedBy coordinator/,
+    "step 5 must journal review-reject with the verdict's Culprit slug");
+  assert.match(waves, /--event gate-fail --stage execution --task <task-id> --culprit <slug> --attributedBy coordinator/,
+    "step 6's gate-fail must carry a culprit");
+  assert.match(waves, /gate-caught-regression/, "step 6 must name the fallback slug for a gate the reviewer did not reject");
+  assert.match(waves, /`complete\|blocked\|rejected`/, "step 4 must name the dispatch outcome enum");
+  assert.match(waves, /modelSource/, "step 4 must name modelSource");
+  assert.match(read("references/evidence.md"), /Culprit: <slug>/, "the needs-changes verdict block must carry a Culprit line");
+  assert.match(read("agents/task-reviewer.md"), /Culprit: <slug>/, "the reviewer's output contract must name the Culprit line");
+  const row = read("references/ledger.md").split("\n").find((l) => l.startsWith("| `event` |"));
+  assert.match(row, /user-correction-at-gate[^|]*--culprit/, "user-correction-at-gate must carry a culprit");
+  assert.match(read("references/handoff.md"), /`complete\|blocked\|skipped\|partial`/, "the stage boundary must name the outcome enum");
+});
+
 // The invariant, not today's file list: a surface that asks the user anything is a surface
 // where an "Other" answer can happen, so it must point at the rule that owns the append —
 // wherever that append is possible at all. It needs a run record, and a command that never

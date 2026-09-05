@@ -317,6 +317,20 @@ test("the event kind accepts a full line and rejects a bad enum value", () => {
   assert.match(bad.stderr, /is not one of/);
 });
 
+test("review-reject is a valid run-record event and carries its culprit", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-review-reject-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const r = runRecord(["append", "--run", runId, "--kind", "event", "--event", "review-reject",
+    "--stage", "execution", "--task", "3", "--culprit", "partial-evidence-capture",
+    "--attributedBy", "coordinator", "--ts", "2026-09-05T10:00:00Z"], runs);
+  assert.equal(r.status, 0, r.stderr);
+  const file = join(runs, repoSlug(gitToplevel(process.cwd())), `${runId}.jsonl`);
+  const line = JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1));
+  assert.equal(line.event, "review-reject");
+  assert.equal(line.culprit, "partial-evidence-capture");
+  assert.equal(line.attributedBy, "coordinator");
+});
+
 test("an event omitting --ts is stamped rather than rejected as missing a required field", () => {
   const runs = mkdtempSync(join(tmpdir(), "rr-ts-"));
   const runId = "0f1e2d3c4b5a6978";

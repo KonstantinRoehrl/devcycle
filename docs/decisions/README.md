@@ -5,6 +5,28 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-09-05 — budgets raised for the measurement-truth cycle
+
+**Decision:** `tests/fixtures/context-budget.json` and `tests/fixtures/surface-budget.json` are
+raised task by task, by exactly the bytes and lines each writer clause of the measurement-truth
+cycle adds (spec: `docs/superpowers/specs/2026-09-05-measurement-truth-design.md`, local). Figures,
+one bullet per task, appended by the task that trips the baseline:
+
+- Task 1: context-budget executing-waves 107007→108183, finishing-the-cycle 96938→97565,
+  learning-from-sessions 108200→108827, maintaining-the-repo 91983→92612, onboarding-a-repo
+  88496→89123, planning-waves 93888→94517, profiling-sessions 109500→110030,
+  receiving-review 118716→119343, reviewing-code 125959→126445, reviewing-the-branch
+  100231→100858, scoping-the-request 85910→86537, sweeping-mechanical-changes 98748→99375,
+  taking-the-fast-path 91916→92543, verifying-on-device 94403→95030; surfaceTotal no raise
+  needed (5320 still holds).
+
+**Why:** every playbook cites `references/evidence.md`, `references/ledger.md`, and
+`references/handoff.md` transitively, so one sentence in any of them moves every playbook's
+context budget. The raise is the reviewed cost of journaling a culprit at the writer instead of
+deriving it — the one change the 2026-09-05 audit named as highest leverage.
+**Supersedes:** nothing. The 2026-08-20 rule that growth is a reviewed decision stands; this entry
+records the figures.
+
 ## 2026-09-02 — the reviewer git-write guard, a second hook (#165)
 
 **Decision:** The plugin ships a second hook, `hooks/block-reviewer-git-write.mjs`, registered
