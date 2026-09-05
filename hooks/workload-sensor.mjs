@@ -71,16 +71,12 @@ function parseState(text) {
 const INTEGRATION_BRANCHES = ["dev", "develop", "development", "integration"];
 
 // The base to measure against when the branch line carries no `(cut from <base> at <sha>)`
-// annotation: among the sanctioned cut-points that resolve, the merge-base NEAREST to HEAD.
-// references/branch.md owns the candidate set; the selection is by ancestry, never by a fixed
-// name order. Which cut-point a branch descends from is a property of history, not of naming, and
-// a fixed order gets one topology wrong whichever way it is written: default-first bills a topic
-// cut from `dev` every unreleased integration commit, integration-first bills a topic cut from the
-// default every commit since the two diverged. Each candidate is spelled the way this clone can
-// resolve it, local branch else `origin/<name>`, per that file's § "Names first" — a fresh clone
-// carries the default only as a remote-tracking ref. Null — a no-op — when no candidate resolves,
-// when HEAD is on a candidate branch itself, or when the nearest merge-base is HEAD (nothing
-// landed yet, the same phantom-zero-diff guard the annotated path applies).
+// annotation. references/branch.md § "Deriving a branch's file set" → Base owns the rule this
+// implements — the candidate set, the ancestry selection, and how each candidate is spelled; this
+// is its runtime spelling, which prose cannot hand a hook. Sensor-local and not that file's:
+// null — a no-op — when no candidate resolves, when HEAD is on a candidate branch itself, or when
+// the nearest merge-base is HEAD (nothing landed yet, the same phantom-zero-diff guard the
+// annotated path applies).
 function deriveBase(repoRoot) {
   const git = (...args) => spawnSync("git", ["-C", repoRoot, ...args], { encoding: "utf8" });
   const remoteHead = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD");

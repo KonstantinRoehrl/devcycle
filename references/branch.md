@@ -13,9 +13,8 @@ or one the user names — create a topic branch and write it to the `branch:` li
 Write that line as `- branch: <name> (cut from <base-branch> at <sha>)`, with `<sha>` from
 `git rev-parse --short HEAD` at the moment the branch is cut — the annotation is required, not
 decorative: `hooks/workload-sensor.mjs` reads it to bound the cycle's diff. Only when it is
-missing does the sensor derive a base itself, from the cut-point candidates § Deriving a branch's
-file set names under **Base** — the merge-base nearest to HEAD among the candidates that resolve,
-chosen by ancestry and never by the order they are listed in.
+missing does the sensor derive a base itself, by the rule § Deriving a branch's file set states
+under **Base**.
 
 **Resolving the default branch.** Try, in order, `git symbolic-ref
 refs/remotes/origin/HEAD`, then `gh repo view --json defaultBranchRef`, then fall back
@@ -64,9 +63,14 @@ resolved names to shell variables and reference them quoted — `"$branch"`, `"$
 every command below and every command a stage builds from them. Never splice a raw name into
 a command line.
 
-**Base**, in order: an explicitly supplied base; the repo's integration branch — the
-committing rule above holds that list — when one exists locally or on the remote; else the
-default branch, resolved as above.
+**Base.** An explicitly supplied base wins outright. With none supplied, the base is the
+merge-base **nearest to HEAD** among the sanctioned cut-points that resolve — the repo's
+integration branches, the list the committing rule above holds, and the default branch, resolved
+as above — chosen by ancestry, never by the order they are listed in. Which cut-point a branch
+descends from is a property of history, not of naming: a fixed order gets one topology wrong
+whichever way it is written, default-first over-billing a topic cut from an integration branch,
+integration-first over-billing one cut from the default. Each candidate is spelled the way
+§ "Names first" above prescribes; one that resolves neither way is not a cut-point here.
 
 **Changed files.** Resolve the merge base as its own step, check it, and only then diff:
 

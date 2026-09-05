@@ -72,8 +72,8 @@ supplied); the short envelope `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`'s
 `## Return envelopes` defines is what the dispatch actually returns, and it names
 that findings path.
 
-A `needs-changes` verdict carries the `Culprit: <slug>` line that section defines, directly under
-`Verdict:`, and the envelope repeats it in its `culprit` field —
+A `needs-changes` verdict carries the `Culprit: <slug>` line that section defines, and the
+envelope repeats it in its `culprit` field —
 `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` `## Return envelopes` owns that field's values and
 why it carries the slug. Read them there.
 

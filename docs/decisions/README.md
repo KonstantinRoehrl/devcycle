@@ -58,6 +58,11 @@ one bullet per task, appended by the task that trips the baseline:
   reviewing-code 127263→127757, reviewing-the-branch 101329→101614, scoping-the-request
   87008→87293, sweeping-mechanical-changes 100193→100687, taking-the-fast-path 93361→93855,
   verifying-on-device 95848→96342; surfaceTotal no raise needed (5320 still holds).
+- branch-fix-3-1: context-budget executing-waves 109511→109892, finishing-the-cycle
+  98329→98710, learning-from-sessions 110682→111063, onboarding-a-repo 90435→90816,
+  receiving-review 120655→121036, reviewing-code 127757→128138, sweeping-mechanical-changes
+  100687→101068, taking-the-fast-path 93855→94236, verifying-on-device 96342→96723;
+  surfaceTotal no raise needed (5320 still holds).
 
 **Why:** every playbook cites `references/evidence.md`, `references/ledger.md`, and
 `references/handoff.md` transitively, so one sentence in any of them moves every playbook's

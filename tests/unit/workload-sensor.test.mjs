@@ -174,8 +174,9 @@ test("without an annotation, a topic branch at its merge-base is a no-op — no 
 });
 
 test("derives the base from the integration branch a topic was cut from, not from the default", () => {
-  // `references/branch.md` § "Deriving a branch's file set" puts the integration branch ahead of
-  // the default in the base order. An integration branch is permanently ahead of the default
+  // `references/branch.md` § "Deriving a branch's file set" → Base takes the merge-base nearest
+  // to HEAD, which here is `dev`'s — the topic was cut from it, so no candidate's merge-base is
+  // nearer. An integration branch is permanently ahead of the default
   // (squash-merge artifact), so measuring this topic against the default would bill every
   // unreleased integration commit to this cycle instead of the two lines the topic added.
   const repo = makeRepo(); const runsDir = makeRepo();
