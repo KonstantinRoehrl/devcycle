@@ -340,6 +340,38 @@ test("routing check: a routing row naming no command fails", () => {
   failsWith(runValidate(dir), /docs\/routing\.md.*"ghost" names no command/);
 });
 
+// --- check 6, fourth clause: the description's consequence term vs. the routing row ---
+
+test("consequence parity: a description naming its own consequence passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, ROUTING_PATH, routing("| review code | `review` | read-only | yes |\n"));
+  writeInto(dir, "commands/review.md", '---\ndescription: "Review a branch. Read-only, starts no cycle."\n---\n');
+  ok(runValidate(dir));
+});
+
+test("consequence parity: a description naming a different consequence fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, ROUTING_PATH, routing("| review code | `review` | read-only | yes |\n"));
+  writeInto(dir, "commands/review.md", '---\ndescription: "Review a branch. Side-effectful — it edits docs."\n---\n');
+  failsWith(runValidate(dir), /review\.md/, /side-effectful/, /docs\/routing\.md assigns "read-only"/);
+});
+
+test("consequence parity: a description naming no consequence passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, ROUTING_PATH, routing("| review code | `review` | read-only | yes |\n"));
+  writeInto(dir, "commands/review.md", '---\ndescription: "Review a branch. Standalone: no cycle is started."\n---\n');
+  ok(runValidate(dir));
+});
+
+// continue.md's real description is unquoted where every other command's is quoted, so a
+// quoted-only reader would skip exactly the file most likely to drift.
+test("consequence parity: an unquoted description is read, not skipped", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, ROUTING_PATH, routing("| review code | `review` | read-only | yes |\n"));
+  writeInto(dir, "commands/review.md", "---\ndescription: Review a branch. Confirm-first, it asks before writing.\n---\n");
+  failsWith(runValidate(dir), /review\.md/, /confirm-first/, /docs\/routing\.md assigns "read-only"/);
+});
+
 // --- check 7: skills/ is not part of the surface any more ---
 
 test("structure check: a resurrected skills/ directory fails", () => {

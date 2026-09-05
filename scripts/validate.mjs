@@ -239,7 +239,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
 
   // 6. Every command appears exactly once in the routing table, and its declared consequence
-  //    agrees with its disable-model-invocation frontmatter.
+  //    agrees with its disable-model-invocation frontmatter and with its own description prose.
   const routingPath = join(root, "docs/routing.md");
   if (!existsSync(routingPath)) fail("docs/routing.md: missing (the routing table has no owner)");
   else if (existsSync(join(root, "commands"))) {
@@ -266,13 +266,21 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       const name = f.replace(/\.md$/, "");
       if (!rows.has(name)) { fail(`commands/${f}: missing from the routing table in docs/routing.md`); continue; }
       const consequence = rows.get(name);
-      const guarded = frontmatter(join(root, "commands", f))?.["disable-model-invocation"] === "true";
+      const fm = frontmatter(join(root, "commands", f));
+      const guarded = fm?.["disable-model-invocation"] === "true";
       if (GUARD_REQUIRED.has(consequence) && !guarded)
         fail(`commands/${f}: consequence "${consequence}" requires disable-model-invocation: true`);
       if (consequence === "read-only" && guarded)
         fail(`commands/${f}: consequence "read-only" forbids disable-model-invocation`);
       if (consequence === "confirm-first" && !justifies(name))
         fail(`docs/routing.md: \`${name}\` is confirm-first but names no justification — the exception class requires one inline`);
+      // The description is the prose a user reads instead of the routing table, so when it names a
+      // consequence class that class must be the one the table assigns. One-directional by design:
+      // five commands name no class at all, and requiring one everywhere is a separate decision.
+      // `resume` is not a term here — continue.md's description opens with the verb "Resume".
+      for (const term of ["read-only", "side-effectful", "confirm-first"])
+        if (term !== consequence && new RegExp(`\\b${term}\\b`, "i").test(fm?.description ?? ""))
+          fail(`commands/${f}: description says "${term}" but docs/routing.md assigns "${consequence}"`);
     }
     for (const name of rows.keys())
       if (!existsSync(join(root, `commands/${name}.md`)))
