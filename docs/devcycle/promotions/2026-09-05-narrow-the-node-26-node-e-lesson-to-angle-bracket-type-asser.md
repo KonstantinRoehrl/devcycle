@@ -1,0 +1,14 @@
+# Narrow the Node 26 node -e lesson to angle-bracket type assertions
+- promotion-type: doc-edit
+- cluster-signature: novel:node26-dash-e-parsed-as-typescript|15 forms tested live on Node v26.4.0|1 breaking case
+- files-touched: ~/.claude/devcycle/learnings/devcycle-cc59abf5/lessons.md, ~/.claude/devcycle/learnings/global/lessons.md
+- affected-files: ~/.claude/devcycle/learnings/devcycle-cc59abf5/lessons.md, ~/.claude/devcycle/learnings/global/lessons.md
+- landed: 2026-09-05
+- commit: 
+- plugin-version: 0.19.0
+- sourced-from-memory: false
+- culprit-id: novel:node26-dash-e-parsed-as-typescript
+- rung: r2
+- audience: just-me
+- verify: journal-recurrence
+- aliases: 
