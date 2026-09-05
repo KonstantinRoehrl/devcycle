@@ -42,6 +42,13 @@ executables placed first on `PATH`, so a full pipeline is exercised without a mo
 you change `review-panel.js`, `mechanical-sweep.js`, or any `scripts/*.mjs`, extend that
 script's suite with the behavior you changed.
 
+**Enforcement scripts deny on ambiguity.** A script or hook whose job is to block or gate — a
+`PreToolUse` hook, a plan or evidence check, an intake's read-only guard — treats every input it
+cannot classify as the blocking outcome, never as a pass, and its suite names each ambiguity class
+it denies (a reserved-word spelling, a process substitution, a missing argument). A `PostToolUse`
+hook is the documented exception: the platform gives it no deny channel, so exit 0 with no output
+is its only correct response to input it cannot act on (`docs/platform-notes.md`).
+
 ### Give a script a shebang only if it is a CLI
 
 Add `#!/usr/bin/env node` to a `scripts/*.mjs` file only when something outside it invokes it
