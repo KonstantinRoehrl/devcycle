@@ -15,7 +15,16 @@ const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 // name its justification; helpers.mjs's base table predates that arm and is owned
 // elsewhere, so every fixture tree gets the table from here instead.
 const ROUTING_PATH = "docs/routing.md";
-const ROUTING_HEAD = "# Routing\n\n| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n";
+const ROUTING_HEAD =
+  "# Routing\n\n" +
+  // Check 6 reads the allowed consequence classes out of this bullet list rather than from a
+  // hardcoded copy, so every fixture table has to carry one. Entries open "- `<class>` — ".
+  "`consequence` is one of:\n\n" +
+  "- `read-only` — writes nothing outside its own report. Must **not** carry `disable-model-invocation`.\n" +
+  "- `confirm-first` — may write, but takes no irreversible action before its first confirmation.\n" +
+  "- `side-effectful` — writes before any confirmation gate. Must carry `disable-model-invocation`.\n" +
+  "- `resume` — acts on existing state. Must carry `disable-model-invocation`.\n\n" +
+  "| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n";
 const CYCLE_ROW = "| run the pipeline | `cycle` | confirm-first | yes |\n";
 const CYCLE_JUSTIFICATION =
   "\n**`cycle`'s justification.** Model-invocable by deliberate exception so a wrapper can drive the\n" +
@@ -370,6 +379,56 @@ test("consequence parity: an unquoted description is read, not skipped", () => {
   writeInto(dir, ROUTING_PATH, routing("| review code | `review` | read-only | yes |\n"));
   writeInto(dir, "commands/review.md", "---\ndescription: Review a branch. Confirm-first, it asks before writing.\n---\n");
   failsWith(runValidate(dir), /review\.md/, /confirm-first/, /docs\/routing\.md assigns "read-only"/);
+});
+
+// The mirror image of the test above: `read-only` has to be caught as a *detected* term and
+// not only as the matching consequence. A command whose description calls itself read-only
+// while the table assigns side-effectful is exactly the drift this clause exists to catch.
+test("consequence parity: a description claiming read-only against a side-effectful row fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, ROUTING_PATH, routing("| turn sessions into rules | `learn` | side-effectful | no |\n"));
+  writeInto(
+    dir,
+    "commands/learn.md",
+    '---\ndescription: "Distil sessions into landed rules. Read-only — it writes nothing."\ndisable-model-invocation: true\n---\n'
+  );
+  failsWith(runValidate(dir), /learn\.md/, /read-only/, /docs\/routing\.md assigns "side-effectful"/);
+});
+
+// --- check 6, fifth clause: the routing row's consequence is one of routing.md's own classes ---
+
+test("consequence classes: a typo'd consequence cell fails, naming the row and the allowed classes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, ROUTING_PATH, routing("| review code | `review` | readonly | yes |\n"));
+  writeInto(dir, "commands/review.md", '---\ndescription: "Review a branch."\n---\n');
+  failsWith(
+    runValidate(dir),
+    /docs\/routing\.md.*"review".*"readonly"/,
+    /read-only.*confirm-first.*side-effectful.*resume/
+  );
+});
+
+// A typo is not merely unnoticed: an unknown class matches none of the three guard clauses, so
+// it silently waives the guard the real class would have required.
+test("consequence classes: a typo'd side-effectful row no longer waives disable-model-invocation", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, ROUTING_PATH, routing("| turn sessions into rules | `learn` | side-effectfull | no |\n"));
+  writeInto(dir, "commands/learn.md", '---\ndescription: "Distil sessions into landed rules."\n---\n');
+  failsWith(runValidate(dir), /docs\/routing\.md.*"learn".*"side-effectfull"/);
+});
+
+// Losing the class list must be reported as itself. Falling through to "no classes known, so
+// every cell is fine" would disarm this clause exactly when routing.md is the thing that broke.
+test("consequence classes: a routing.md whose class list is unreadable fails loudly", () => {
+  const dir = makePluginFixture();
+  writeInto(
+    dir,
+    ROUTING_PATH,
+    "# Routing\n\n| intent | entry point | consequence | model-invocable |\n| --- | --- | --- | --- |\n" +
+      CYCLE_ROW +
+      CYCLE_JUSTIFICATION
+  );
+  failsWith(runValidate(dir), /docs\/routing\.md.*class list/);
 });
 
 // --- check 7: skills/ is not part of the surface any more ---

@@ -238,8 +238,10 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       if (at !== -1) fail(`playbooks/${f}:${at + 1}: emits a handoff block without referencing references/handoff.md`);
     }
 
-  // 6. Every command appears exactly once in the routing table, and its declared consequence
-  //    agrees with its disable-model-invocation frontmatter and with its own description prose.
+  // 6. Every command appears exactly once in the routing table; every row's consequence is one
+  //    of the classes docs/routing.md itself defines; and that consequence agrees with the
+  //    command's disable-model-invocation frontmatter, with the confirm-first justification
+  //    requirement, and with the command's own description prose.
   const routingPath = join(root, "docs/routing.md");
   if (!existsSync(routingPath)) fail("docs/routing.md: missing (the routing table has no owner)");
   else if (existsSync(join(root, "commands"))) {
@@ -249,6 +251,29 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       if (rows.has(name)) fail(`docs/routing.md: ${name} appears more than once`);
       rows.set(name, consequence);
     }
+    // The class vocabulary has one owner: routing.md's own "`consequence` is one of:" list,
+    // whose entries open "- `<class>` — ". Reading it here rather than hardcoding a copy keeps
+    // this script from becoming a second owner that drifts. An unknown class matches none of
+    // the clauses below, so a typo would otherwise waive every guard it silently switched off.
+    const classes = new Set();
+    const lines = routing.split("\n");
+    const listAt = lines.findIndex((l) => l.includes("`consequence` is one of:"));
+    for (let i = listAt + 1; listAt !== -1 && i < lines.length; i++) {
+      const entry = /^- `([a-z-]+)` — /.exec(lines[i]);
+      if (entry) classes.add(entry[1]);
+      else if (lines[i].trim() !== "" && !/^\s/.test(lines[i])) break;
+    }
+    if (classes.size === 0)
+      fail(
+        'docs/routing.md: the `consequence` class list is unreadable, so no cell can be checked — ' +
+          'restore the bullets under "`consequence` is one of:", each opening "- `<class>` — "'
+      );
+    else
+      for (const [name, consequence] of rows)
+        if (!classes.has(consequence))
+          fail(
+            `docs/routing.md: row "${name}" has consequence "${consequence}", not one of: ${[...classes].join(", ")}`
+          );
     const GUARD_REQUIRED = new Set(["side-effectful", "resume"]);
     // `confirm-first` is the deliberate exception class, so each member names its
     // justification inline — as prose, since the table has no column for one. A bare label
