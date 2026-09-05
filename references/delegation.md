@@ -147,10 +147,15 @@ lessons: <N matched / M read>
 
 ```
 verdict: <per references/evidence.md>
+culprit: <slug> | none
 blocking findings: <count>
 findings: .devcycle/findings/<task-id>-round-<n>.md | none
 lessons: <N matched / M read>
 ```
+
+`culprit` repeats the verdict block's `Culprit` line verbatim and is `none` wherever that line is
+absent; `references/evidence.md` § Reviewer verdicts owns both the slug's shape and which verdicts
+carry it.
 
 The reviewer writes its findings file to the named path itself, as the implementer writes its
 report — `references/evidence.md` owns both file-write contracts.
@@ -163,7 +168,9 @@ generate the on-device checklist in the same wave a task reports rendered change
 deviations count tells the coordinator whether opening the file is a decision it has to make.
 An envelope that dropped either field would trade a real gate for a token saving. The `lessons`
 count makes lesson consultation observable at the coordinator without mandating a read — `M = 0`
-is legitimate when none applied.
+is legitimate when none applied. `culprit` earns its place the same way: the coordinator journals
+the rejecting event's slug from the envelope alone, so an envelope without the field would force it
+to open the findings file for one token or record the event unattributed.
 
 ## The short paths
 

@@ -74,7 +74,8 @@ that findings path.
 
 A `needs-changes` verdict carries the `Culprit: <slug>` line that section defines, directly under
 `Verdict:` — the `references/culprits.json` slug that names the rejection's pattern, or
-`novel:<kebab-slug>` when none fits.
+`novel:<kebab-slug>` when none fits. The envelope's `culprit` field repeats that slug, so
+the coordinator journals the rejection without opening your findings file.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`, each finding carrying
 the severity vocabulary, the core fields, and the symptom-first phrasing

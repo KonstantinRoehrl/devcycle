@@ -10,8 +10,10 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 **Decision:** The plugin ships a third hook, `hooks/workload-sensor.mjs`, registered in
 `hooks/hooks.json` on `PostToolUse` over `Bash` (landed in 0.17.2 — CHANGELOG.md's 0.17.2 entry names
 it). It re-derives the run's `workload` record after every HEAD-advancing commit in a committing
-stage, and, from the measurement-truth cycle, derives the diff base from the default branch's
-merge-base when the state file's `branch:` line carries no `(cut from … at <sha>)` annotation.
+stage, and, from the measurement-truth cycle, derives the diff base from the merge-base of the first
+sanctioned cut-point that resolves — the integration branch when one exists, else the default branch,
+the order `references/branch.md` owns — when the state file's `branch:` line carries no
+`(cut from … at <sha>)` annotation.
 
 **Why:** collection must not depend on an agent remembering a finish-stage step, and it must not
 depend on a prose annotation either — the sensor was silent for every cycle whose branch line was
@@ -43,6 +45,12 @@ one bullet per task, appended by the task that trips the baseline:
   95030→95377; surfaceTotal no raise needed.
 - Task 7: no raise needed — moving the config changelog out of `references/` shrinks both
   figures, and a baseline above the count is never lowered.
+- branch-fix-1-3: context-budget executing-waves 108530→109017, finishing-the-cycle
+  97565→97835, learning-from-sessions 109717→110188, maintaining-the-repo 92612→93083,
+  onboarding-a-repo 89470→89941, planning-waves 94517→94988, receiving-review 119690→120161,
+  reviewing-code 126792→127263, reviewing-the-branch 100858→101329, scoping-the-request
+  86537→87008, sweeping-mechanical-changes 99722→100193, taking-the-fast-path 92890→93361,
+  verifying-on-device 95377→95848; surfaceTotal no raise needed (5320 still holds).
 
 **Why:** every playbook cites `references/evidence.md`, `references/ledger.md`, and
 `references/handoff.md` transitively, so one sentence in any of them moves every playbook's

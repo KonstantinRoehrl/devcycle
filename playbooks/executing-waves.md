@@ -101,7 +101,7 @@ file conflicts these invariants already preserve.)
    `event=review-verdict` for its outcome, then the `verdict` line — `run-record.mjs append --kind
    verdict` — this round's number, blocking count, the task's declared evidence class, `conformance`
    = `pass` on acceptance else `fail`. On a `needs-changes` verdict, also append
-   `run-record.mjs append --run <id> --kind event --event review-reject --stage execution --task <task-id> --culprit <the verdict's Culprit slug> --attributedBy coordinator`.
+   `run-record.mjs append --run <id> --kind event --event review-reject --stage execution --task <task-id> --culprit <the reviewer envelope's culprit> --attributedBy coordinator`.
    Non-zero blocking sends the findings path back to the implementer; re-review after fixes logs
    the next `review-round` (and, once the fix pass's envelope returns, another step-4 `dispatch`
    line).
@@ -117,7 +117,7 @@ file conflicts these invariants already preserve.)
    round's own reviewer wrote `conformance=pass`, also append a `verdict` line with `conformance=fail` for
    this round — a reviewer-rejected round never wrote `conformance=pass`. Journal the outcome either way:
    `run-record.mjs append --run <id> --kind event --event gate-fail --stage execution --task <task-id> --culprit <slug> --attributedBy coordinator`
-   on a failure — `<slug>` is this round's reviewer `Culprit` when that reviewer rejected, else
+   on a failure — `<slug>` is this round's reviewer envelope's `culprit` when that reviewer rejected, else
    `gate-caught-regression` — and `--event gate-pass-clean` with no culprit on a clean pass, since a
    win is not a culprit. Enums and ids only — never the failure text.
    On a whole-suite failure, before attributing the red to this task, run

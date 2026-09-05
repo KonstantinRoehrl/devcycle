@@ -944,8 +944,10 @@ test("the run-record write-site table declares the event kind", () => {
 
 test("every rejecting writer journals a culprit, and the boundary sentences name their enums", () => {
   const waves = read("playbooks/executing-waves.md");
-  assert.match(waves, /--kind event --event review-reject --stage execution --task <task-id> --culprit <the verdict's Culprit slug> --attributedBy coordinator/,
-    "step 5 must journal review-reject with the verdict's Culprit slug");
+  assert.match(waves, /--kind event --event review-reject --stage execution --task <task-id> --culprit <the reviewer envelope's culprit> --attributedBy coordinator/,
+    "step 5 must journal review-reject with the culprit the reviewer envelope carries");
+  assert.match(read("references/delegation.md"), /^culprit: <slug> \| none$/m,
+    "the reviewer envelope must carry the slug, or step 5 has no data path to it");
   assert.match(waves, /--event gate-fail --stage execution --task <task-id> --culprit <slug> --attributedBy coordinator/,
     "step 6's gate-fail must carry a culprit");
   assert.match(waves, /gate-caught-regression/, "step 6 must name the fallback slug for a gate the reviewer did not reject");
