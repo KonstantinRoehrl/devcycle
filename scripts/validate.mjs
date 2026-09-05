@@ -274,8 +274,10 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     // classes this check acts on is derived from them rather than restated a third time. The two
     // sets must agree exactly: a class routing.md defines that no clause acts on is exempt from
     // every guard, and a class a clause acts on that routing.md no longer defines is a guard with
-    // no vocabulary behind it. A disagreement is reported instead of the per-row check, because a
-    // wrong vocabulary makes every row verdict meaningless.
+    // no vocabulary behind it. A disagreement is reported alongside the per-row check, not instead
+    // of it: a typo'd cell is an independently actionable error either way, so withholding it would
+    // cost a round-trip. Only an unreadable list stays exclusive — there is then no vocabulary left
+    // to check any row against.
     const GUARD_REQUIRED = new Set(["side-effectful", "resume"]);
     const GUARD_FORBIDDEN = "read-only";
     const JUSTIFICATION_REQUIRED = "confirm-first";
@@ -288,7 +290,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         'docs/routing.md: the `consequence` class list is unreadable, so no cell can be checked — ' +
           'restore the bullets under "`consequence` is one of:", each opening "- `<class>` — "'
       );
-    else if (definedButUnhandled.length || handledButUndefined.length) {
+    else {
       for (const c of definedButUnhandled)
         fail(
           `docs/routing.md: class "${c}" is defined here but no clause in scripts/validate.mjs check 6 acts on it — a row using it would be exempt from every guard`
@@ -297,12 +299,12 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         fail(
           `docs/routing.md: scripts/validate.mjs check 6 acts on class "${c}", which this file no longer defines — restore its bullet under "\`consequence\` is one of:" or drop the clause`
         );
-    } else
       for (const [name, consequence] of rows)
         if (!classes.has(consequence))
           fail(
             `docs/routing.md: row "${name}" has consequence "${consequence}", not one of: ${[...classes].join(", ")}`
           );
+    }
     // `confirm-first` is the deliberate exception class, so each member names its
     // justification inline — as prose, since the table has no column for one. A bare label
     // ("**`cycle`'s justification.**" with nothing behind it) is not a justification, which
@@ -330,7 +332,9 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       // The description is the prose a user reads instead of the routing table, so when it names a
       // consequence class that class must be the one the table assigns. One-directional by design:
       // five commands name no class at all, and requiring one everywhere is a separate decision.
-      // `resume` is not a term here — continue.md's description opens with the verb "Resume".
+      // `resume` is not a term here: the other three are hyphenated jargon that only ever appear as
+      // a class claim, while `resume` is an ordinary verb a description may use without claiming any
+      // consequence — scanning it would fail a future "resume the walkthrough" for nothing.
       for (const term of PARITY_TERMS)
         if (term !== consequence && new RegExp(`\\b${term}\\b`, "i").test(fm?.description ?? ""))
           fail(`commands/${f}: description says "${term}" but docs/routing.md assigns "${consequence}"`);

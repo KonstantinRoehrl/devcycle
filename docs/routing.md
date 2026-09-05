@@ -10,8 +10,9 @@ is unreadable), when the classes below and the classes the script's own clauses 
 either direction, when a `consequence` disagrees with the command's `disable-model-invocation`
 frontmatter, when a `confirm-first` row names no justification in the prose below, or when a
 command's own description names `read-only`, `side-effectful` or `confirm-first` and its row
-assigns a different one. `resume` is not scanned in a description, because `continue.md`'s opens
-with the verb.
+assigns a different one. `resume` is not scanned: those three are hyphenated jargon that only ever
+appear as a class claim, while `resume` is an ordinary verb a description may use without claiming
+any consequence.
 
 `consequence` is one of:
 

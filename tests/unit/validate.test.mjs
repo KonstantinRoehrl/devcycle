@@ -472,6 +472,21 @@ test("consequence vocabulary: a class the guards act on that routing.md stops de
 // The scan ends at the blank line after the list, so a later top-level bullet of the same shape is
 // not absorbed into the vocabulary. Only the table's position prevented that before; here the list
 // is followed by a stray bullet, and the run has to stay green.
+// A wrong vocabulary and a typo'd cell are independently actionable, so reporting only the
+// vocabulary would hide the typo until someone fixed the vocabulary and CI ran again.
+test("consequence vocabulary: a disagreement and a typo'd row are both reported in one run", () => {
+  const dir = makePluginFixture();
+  const renamed = ROUTING_CLASS_BULLETS.map((b) => b.replace("`side-effectful`", "`mutating`"));
+  writeInto(dir, ROUTING_PATH, routingWithClasses(renamed, "| review code | `review` | readonly | yes |\n"));
+  writeInto(dir, "commands/review.md", '---\ndescription: "Review a branch."\n---\n');
+  failsWith(
+    runValidate(dir),
+    /docs\/routing\.md.*"mutating".*no clause/,
+    /docs\/routing\.md.*"side-effectful".*no longer defines/,
+    /docs\/routing\.md.*"review".*"readonly"/
+  );
+});
+
 test("consequence vocabulary: a top-level bullet past the end of the list is not absorbed", () => {
   const dir = makePluginFixture();
   const stray = [...ROUTING_CLASS_BULLETS, "", "- `legacy` — a later top-level bullet, not part of the vocabulary."];
