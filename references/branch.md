@@ -12,8 +12,10 @@ or one the user names — create a topic branch and write it to the `branch:` li
 `.devcycle/state.md`. Never commit cycle work directly to either.
 Write that line as `- branch: <name> (cut from <base-branch> at <sha>)`, with `<sha>` from
 `git rev-parse --short HEAD` at the moment the branch is cut — the annotation is required, not
-decorative: `hooks/workload-sensor.mjs` reads it to bound the cycle's diff, and derives the base
-from the order below only when it is missing.
+decorative: `hooks/workload-sensor.mjs` reads it to bound the cycle's diff. Only when it is
+missing does the sensor derive a base itself, from the cut-point candidates § Deriving a branch's
+file set names under **Base** — the merge-base nearest to HEAD among the candidates that resolve,
+chosen by ancestry and never by the order they are listed in.
 
 **Resolving the default branch.** Try, in order, `git symbolic-ref
 refs/remotes/origin/HEAD`, then `gh repo view --json defaultBranchRef`, then fall back

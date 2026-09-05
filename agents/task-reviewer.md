@@ -73,9 +73,9 @@ supplied); the short envelope `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`'s
 that findings path.
 
 A `needs-changes` verdict carries the `Culprit: <slug>` line that section defines, directly under
-`Verdict:` — the `references/culprits.json` slug that names the rejection's pattern, or
-`novel:<kebab-slug>` when none fits. The envelope's `culprit` field repeats that slug, so
-the coordinator journals the rejection without opening your findings file.
+`Verdict:`, and the envelope repeats it in its `culprit` field —
+`${CLAUDE_PLUGIN_ROOT}/references/delegation.md` `## Return envelopes` owns that field's values and
+why it carries the slug. Read them there.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`, each finding carrying
 the severity vocabulary, the core fields, and the symptom-first phrasing

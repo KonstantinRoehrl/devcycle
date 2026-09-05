@@ -10,10 +10,11 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 **Decision:** The plugin ships a third hook, `hooks/workload-sensor.mjs`, registered in
 `hooks/hooks.json` on `PostToolUse` over `Bash` (landed in 0.17.2 — CHANGELOG.md's 0.17.2 entry names
 it). It re-derives the run's `workload` record after every HEAD-advancing commit in a committing
-stage, and, from the measurement-truth cycle, derives the diff base from the merge-base of the first
-sanctioned cut-point that resolves — the integration branch when one exists, else the default branch,
-the order `references/branch.md` owns — when the state file's `branch:` line carries no
-`(cut from … at <sha>)` annotation.
+stage, and, from the measurement-truth cycle, derives the diff base — when the state file's `branch:`
+line carries no `(cut from … at <sha>)` annotation — as the merge-base **nearest to HEAD** among the
+sanctioned cut-points that resolve. `references/branch.md` owns the candidate set; the selection is by
+ancestry, never by the order the candidates are listed in, because a fixed order gets one topology
+wrong whichever way it is written.
 
 **Why:** collection must not depend on an agent remembering a finish-stage step, and it must not
 depend on a prose annotation either — the sensor was silent for every cycle whose branch line was
@@ -51,6 +52,12 @@ one bullet per task, appended by the task that trips the baseline:
   reviewing-code 126792→127263, reviewing-the-branch 100858→101329, scoping-the-request
   86537→87008, sweeping-mechanical-changes 99722→100193, taking-the-fast-path 92890→93361,
   verifying-on-device 95377→95848; surfaceTotal no raise needed (5320 still holds).
+- branch-fix-2-2: context-budget executing-waves 109017→109511, finishing-the-cycle
+  97835→98329, learning-from-sessions 110188→110682, maintaining-the-repo 93083→93368,
+  onboarding-a-repo 89941→90435, planning-waves 94988→95273, receiving-review 120161→120655,
+  reviewing-code 127263→127757, reviewing-the-branch 101329→101614, scoping-the-request
+  87008→87293, sweeping-mechanical-changes 100193→100687, taking-the-fast-path 93361→93855,
+  verifying-on-device 95848→96342; surfaceTotal no raise needed (5320 still holds).
 
 **Why:** every playbook cites `references/evidence.md`, `references/ledger.md`, and
 `references/handoff.md` transitively, so one sentence in any of them moves every playbook's
