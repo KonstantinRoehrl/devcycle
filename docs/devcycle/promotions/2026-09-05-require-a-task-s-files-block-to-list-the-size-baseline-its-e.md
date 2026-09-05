@@ -1,0 +1,14 @@
+# Require a task's Files block to list the size baseline its edit trips
+- promotion-type: enforcement-gap
+- cluster-signature: incomplete-dispatch-brief|5 occurrences since the 2026-08-27 retirement|4 sessions
+- files-touched: scripts/brief-completeness-check.mjs, scripts/budget-fixture-check.mjs, tests/unit/brief-completeness-check.test.mjs, tests/unit/budget-fixture-check.test.mjs, tests/fixtures/context-budget.json, playbooks/planning-waves.md, docs/playbooks/planning-waves/README.md
+- affected-files: scripts/brief-completeness-check.mjs, scripts/budget-fixture-check.mjs, tests/unit/brief-completeness-check.test.mjs, tests/unit/budget-fixture-check.test.mjs, tests/fixtures/context-budget.json, playbooks/planning-waves.md, docs/playbooks/planning-waves/README.md
+- landed: 2026-09-05
+- commit: b1144d46eb90625dd3650d9e6985532fbd0a302f
+- plugin-version: 0.19.0
+- sourced-from-memory: false
+- culprit-id: incomplete-dispatch-brief
+- rung: r3
+- audience: repo-devs
+- verify: scripts/brief-completeness-check.mjs
+- aliases: 

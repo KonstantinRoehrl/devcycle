@@ -143,3 +143,49 @@ test("a mid-line mention of the Files label is not a Files field -- the shared-o
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /Task 1: missing \*\*Files:\*\* field/);
 });
+
+// The budget-fixture join: a brief that mandates doc growth but never lists the baseline that
+// growth trips sends the implementer into a validate.mjs failure the brief itself caused.
+// The join is owned by budget-fixture-check.mjs; this gate runs it as a leg so the first
+// scripted check a planner runs already names the missing fixture.
+
+const SURFACE_EDIT = COMPLETE.replace("- Create: \`a.mjs\`", "- Modify: \`playbooks/planning-waves.md\`");
+
+test("fails when a task edits a budgeted surface file but omits the baseline fixtures that edit trips", () => {
+  const r = run(SURFACE_EDIT);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: .*playbooks\/planning-waves\.md.*tests\/fixtures\/surface-budget\.json/);
+  assert.match(r.out, /Task 1: .*playbooks\/planning-waves\.md.*tests\/fixtures\/context-budget\.json/);
+});
+
+test("passes once the surface edit lists both baseline fixtures", () => {
+  const r = run(
+    SURFACE_EDIT.replace(
+      "- Modify: \`playbooks/planning-waves.md\`",
+      "- Modify: \`playbooks/planning-waves.md\`\n- Modify: \`tests/fixtures/surface-budget.json\`\n- Modify: \`tests/fixtures/context-budget.json\`",
+    ),
+  );
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /ok/);
+});
+
+test("honours the same Budget-fixture override grammar the standalone gate reads", () => {
+  const r = run(
+    SURFACE_EDIT.replace(
+      "- Modify: \`playbooks/planning-waves.md\`",
+      "- Modify: \`playbooks/planning-waves.md\`\n- Budget-fixture override: playbooks/planning-waves.md — copy-only, no growth",
+    ),
+  );
+  assert.equal(r.code, 0, r.out);
+});
+
+test("reports a reasonless Budget-fixture override as malformed rather than silently ignoring it", () => {
+  const r = run(
+    SURFACE_EDIT.replace(
+      "- Modify: \`playbooks/planning-waves.md\`",
+      "- Modify: \`playbooks/planning-waves.md\`\n- Budget-fixture override: playbooks/planning-waves.md",
+    ),
+  );
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /malformed override/i);
+});

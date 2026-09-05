@@ -1,0 +1,14 @@
+# Review against the source docs, not the plan's framing of them
+- promotion-type: doc-edit
+- cluster-signature: first-round-clean-accept|4 occurrences|4 sessions
+- files-touched: docs/devcycle/lessons.md
+- affected-files: docs/devcycle/lessons.md
+- landed: 2026-09-05
+- commit: 
+- plugin-version: 0.19.0
+- sourced-from-memory: false
+- culprit-id: first-round-clean-accept
+- rung: r2
+- audience: repo-devs
+- verify: journal-reinforcement
+- aliases: 
