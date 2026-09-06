@@ -1050,52 +1050,142 @@ test("a backslash the inner or outer parse keeps is not git and stays allowed", 
   }
 });
 
-// Round 12 (F3), the heredoc/substitution interaction. The substitution pre-check is a regex over the
-// RAW command, so a heredoc body quoting a git command inside backticks or `$( )` — the single most
-// common shape of report or findings file this repo asks its agents to write — was re-classified as
-// a live substitution and DENIED, defeating the round-6 exemption that exists for exactly that file.
-// A QUOTED delimiter (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) suppresses expansion, so nothing in those
-// bodies runs: the shim oracle recorded no git call for any row below, in either shell. Both arms
-// flip on the `stash` rows (the main-thread pre-check fires on a `stash` word beside a substitution);
-// the rows naming `reset --hard`/`rev-parse` flip on the guarded arm alone.
-test("a quoted heredoc body quoting a git command is data, not a substitution, and may be written", () => {
+// Round 14 (F1), the substitution backstop's canonicalization. The pre-check tested a RAW-text
+// `\bgit\b`, so every word-level obfuscation the shell resolves BEFORE it runs the binary made the
+// backstop silent: `echo $(g\it stash)` handed git the argv `stash` in /bin/bash and in /bin/zsh
+// alike (shim oracle) and reached ALLOW on both arms, and so did the backtick, the double-quoted
+// `$( )`, the `<( )` process substitution, `gi""t` and `g'it'`. The segment classifier cannot reach
+// those heads either — stripLeading returns the OUTER command (`echo`) and the substitution's words
+// are merely its arguments — so the backstop now runs the same headForms reduction the classifier
+// uses over the command's tokens. Both arms flip on the `stash` rows; the `reset --hard` rows flip
+// on the guarded arm alone, whose ban is not stash-only.
+test("guarded origin + a substitution whose git is obfuscated is denied", () => {
+  for (const cmd of [
+    "echo $(g\\it stash)",
+    "echo `g\\it stash`",
+    'echo "$(g\\it stash)"',
+    "printf %s $(g\\it reset --hard)",
+    "cat <(g\\it stash)",
+    'echo $(gi""t stash)',
+    "echo $(g'it' stash)",
+    // Double quotes do not suppress a backtick substitution, so the head inside one has to reduce
+    // there too; and the body of a substitution is RE-READ, so the backslash-newline the outer
+    // single quotes made literal is a line continuation in it and joins the halves. Both spellings
+    // ran a real git in both shells (shim oracle).
+    'echo "`g\\it reset --hard`"',
+    'echo "`$\'\\x67\'it reset --hard`"',
+    "echo `'g\\\nit' reset --hard`",
+    "echo \"`'g\\\nit' reset --hard`\"",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for an obfuscated substituted git: ${JSON.stringify(cmd)}`);
+});
+
+// The same class on the main-thread arm, which needs a `stash` word beside the substituted git: the
+// SUBCOMMAND obfuscations flip only here, because a guarded origin denies any substituted git
+// already. `echo $(git st\ash)` ran a real `git stash` in both shells (shim oracle) while the raw
+// `\bstash\b` read it as "not stash" and allowed — the one command the #235 ban exists to stop.
+test("main thread + an obfuscated git or stash inside a substitution is denied in an active cycle", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "echo $(g\\it stash)",
+    "echo `g\\it stash`",
+    'echo "$(g\\it stash)"',
+    "cat <(g\\it stash)",
+    "echo $(git st\\ash)",
+    "echo `git st\\ash`",
+    'echo "`g\\it stash`"',
+    "echo `'g\\\nit' stash`",
+    "echo `git 's\\\ntash'`",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for an obfuscated substituted stash: ${JSON.stringify(cmd)}`);
+});
+
+// Round 14 (F2), the reverted heredoc widening. Round 13 exempted the body of a QUOTED-delimiter
+// heredoc from the substitution pre-check, falling back to the raw command only when a segment head
+// was in WRAPPERS. Everything that executes a body without being listed kept the exemption, so
+// `ksh <<'EOF'` (ksh ships with macOS) and writing the body to a file and sourcing it with `.` or
+// `source` each ran a real `git stash` in BOTH shells (shim oracle) while both arms ALLOWED — a deny
+// that commit 0e1dc9d had. The widening is reverted rather than re-bounded: the pre-check reads the
+// raw command again, bodies included. The last four rows were denied by round 13 too and are kept so
+// the revert cannot quietly narrow them.
+test("a heredoc body carrying a substitution is denied whatever executes the body", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "cat <<'EOF' > f\n$(git stash)\nEOF\n. ./f",             // an unlisted executor: the `.` builtin
+    "cat <<'EOF' > f\n$(git stash)\nEOF\nsource ./f",
+    "ksh <<'EOF'\n$(git stash)\nEOF",                        // an interpreter that is not in WRAPPERS
+    "bash <<'EOF'\n$(git stash)\nEOF",                       // one that is
+    "cat <<'EOF' | bash\n$(git stash)\nEOF",
+    "cat <<EOF > f\nrun `git reset --hard` here\nEOF",       // a BARE delimiter really expands the body
+    "cat <<EOF > f\nuse $(git rev-parse HEAD)\nEOF",
+    "cat <<'EOF' > f\nprose\nEOF\necho $(git reset --hard)", // the substitution is outside the body
+    "cat <<'EOF' > f\nuse $(git reset --hard)\n",            // unterminated: no body boundary to trust
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a live substitution: ${JSON.stringify(cmd)}`);
+  for (const cmd of [
+    "cat <<'EOF' > f\n$(git stash)\nEOF\n. ./f",
+    "cat <<'EOF' > f\n$(git stash)\nEOF\nsource ./f",
+    "ksh <<'EOF'\n$(git stash)\nEOF",
+    "bash <<'EOF'\n$(git stash)\nEOF",
+    "cat <<'EOF' | bash\n$(git stash)\nEOF",
+    "echo `git stash`\ncat <<'EOF' > f\nprose\nEOF",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for a live substitution: ${JSON.stringify(cmd)}`);
+});
+
+// The COST of that revert, pinned here so it stays a visible decision instead of being rediscovered
+// as a bug: a heredoc body that merely NAMES a git command inside markdown backticks or a `$( )` —
+// the ordinary shape of the report and findings files this repo asks its agents to write — is denied
+// again, and no git runs in any of these (the shim oracle recorded no git call, in either shell).
+// Round 13 removed this deny, and the removal was wider than the shells' behaviour (see above); the
+// decision at the round-14 gate was to revert and accept the over-denial rather than re-bound the
+// exemption a third time. The `reset --hard`/`rev-parse` rows are guarded-arm only.
+test("a quoted heredoc body naming a git command in a substitution is denied (the accepted over-denial)", () => {
   const cwd = cycleDir(stateAt("execution"));
   for (const cmd of [
     "cat <<'EOF' > f\nrun `git reset --hard` here\nEOF",
     "cat <<'EOF' > f\nuse $(git rev-parse HEAD)\nEOF",
-    "cat <<\"EOF\" > f\nuse $(git reset --hard)\nEOF",
+    'cat <<"EOF" > f\nuse $(git reset --hard)\nEOF',
     "cat <<\\EOF > f\nuse $(git reset --hard)\nEOF",
     "cat <<-'EOF' > f\n\trun `git stash` here\n\tEOF",
     "cat <<'EOF' > f\n- ran `git stash` by mistake\nEOF",
   ])
-    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a quoted heredoc body: ${JSON.stringify(cmd)}`);
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a quoted heredoc body: ${JSON.stringify(cmd)}`);
   for (const cmd of [
     "cat <<-'EOF' > f\n\trun `git stash` here\n\tEOF",
     "cat <<'EOF' > f\n- ran `git stash` by mistake\nEOF",
   ])
-    assert.equal(decideMain(cwd, cmd), "allow", `expected allow for a quoted heredoc body: ${JSON.stringify(cmd)}`);
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for a quoted heredoc body: ${JSON.stringify(cmd)}`);
+  // The bound on that cost: the pre-check needs substitution punctuation, so a body that names a git
+  // command WITHOUT any is still data and the round-6 exemption an agent leans on is untouched.
+  for (const cmd of [
+    "cat <<'EOF' > f\n- the guard denies git reset --hard\nEOF",
+    "cat <<EOF > notes.md\nordinary prose, no command here\nEOF",
+    "python3 - <<'PY'\nprint('git reset --hard')\nPY",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a substitution-free body: ${JSON.stringify(cmd)}`);
 });
 
-// The bound on that exemption, and it is three-sided. An UNQUOTED delimiter leaves the body EXPANDED,
-// so a substitution in it really runs (`cat <<EOF` with a `$(git rev-parse HEAD)` body called git in
-// both shells); a substitution OUTSIDE any body is untouched; an unterminated heredoc has no body
-// boundary to trust; and an interpreter READING the body executes it, so a body fed to `bash` keeps
-// its deny. Every row stays denied.
-test("the substitution pre-check still fires outside a non-expanding heredoc body", () => {
+// Round 14 (F3), the comment-fabricated heredoc. tokenizeCommand had no comment handling, so the
+// `<<` inside `echo hi # <<'EOF'` registered a heredoc the shell never opens, and skipHeredocBodies
+// then consumed the REAL commands on the following lines as body data: `git stash` ran in both
+// shells and both arms allowed it (shim oracle recorded the `stash` argv). The command is now
+// classified in BOTH readings — as written, and with the `#` comments removed — and denied on either.
+test("a # comment cannot fabricate a heredoc that hides the commands behind it", () => {
   const cwd = cycleDir(stateAt("execution"));
   for (const cmd of [
-    "cat <<EOF > f\nrun `git reset --hard` here\nEOF",       // unquoted delimiter: the body expands
-    "cat <<EOF > f\nuse $(git rev-parse HEAD)\nEOF",
-    "cat <<'EOF' > f\nprose\nEOF\necho $(git reset --hard)", // the substitution is outside the body
-    "cat <<'EOF' > f\nuse $(git reset --hard)\n",            // unterminated: no body boundary
-    "bash <<'EOF'\n$(git stash)\nEOF",                       // an interpreter reads the body and runs it
-    "cat <<'EOF' | bash\n$(git stash)\nEOF",
+    "echo hi # <<'EOF'\ngit stash\nEOF",
+    "echo hi #<<'EOF'\ngit stash\nEOF",
+    "echo hi # <<EOF\ngit stash\nEOF",
+    "echo hi # <<'EOF'\n$(git reset --hard)\nEOF",
   ])
-    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a live substitution: ${JSON.stringify(cmd)}`);
-  for (const cmd of [
-    "echo `git stash`\ncat <<'EOF' > f\nprose\nEOF",
-    "bash <<'EOF'\n$(git stash)\nEOF",
-    "cat <<'EOF' | bash\n$(git stash)\nEOF",
-  ])
-    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for a live substitution: ${JSON.stringify(cmd)}`);
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a fabricated heredoc: ${JSON.stringify(cmd)}`);
+  for (const cmd of ["echo hi # <<'EOF'\ngit stash\nEOF", "echo hi # <<EOF\ngit stash\nEOF"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for a fabricated heredoc: ${JSON.stringify(cmd)}`);
+  // The bound: a `#` opens a comment only where the shells make it one — at the start of a WORD and
+  // unquoted. Quoted or escaped it is an ordinary character, the heredoc it opens is REAL, and its
+  // body stays data (`echo '#' <<EOF … EOF` ran no git in either shell); and a comment carrying no
+  // heredoc opener hides nothing, so the command behind it classifies exactly as before.
+  for (const cmd of ["echo '#' <<EOF\ngit stash\nEOF", "echo a\\#b; git log", "echo hi # heredoc\ngit log"])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a hash the shell does not read as a comment: ${JSON.stringify(cmd)}`);
 });

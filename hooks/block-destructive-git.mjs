@@ -47,15 +47,18 @@
 // those lines are data the shell writes, never commands it runs, and reading them as commands denied
 // a guarded agent the report and fixture files this repo's own workflow asks it to write (round 6).
 // An unterminated heredoc has no body boundary to trust, so it falls back to classifying the body.
-// The substitution pre-check reads the same boundary since round 12 — a body under a QUOTED
-// delimiter is literal text there too, so a report quoting a git command in a code span is writable —
-// while a body under a bare delimiter, which the shell really expands, keeps its deny.
+// The substitution pre-check deliberately does NOT read that boundary: round 13 exempted a
+// quoted-delimiter body there too, and the exemption was wider than the shells' own behaviour, so
+// round 14 reverted it and named the over-denial it restores in the coverage block below.
+// A `#` that starts a word is a comment in both shells, and a comment can FABRICATE a heredoc the
+// shell never opens, so the command is classified in BOTH readings — as written and with its
+// comments removed — and denied on either (round 14).
 // Scope is git-only; non-git commands (tests, greps) are allowed. Three dispatch origins are guarded
 // by the allowlist — task-reviewer, red-team-reviewer and, since #235, implementer — and the main
 // thread (no agent_type) is guarded for `git stash` alone, only while a .devcycle/state.md at or
 // above the call's cwd reports a stage other than done. Every other origin is never guarded.
 //
-// WHAT THE EVIDENCE FOR THIS FILE DOES NOT COVER (branch review round 12). The differential corpus
+// WHAT THE EVIDENCE FOR THIS FILE DOES NOT COVER (branch review round 14). The differential corpus
 // behind the "residual fail-opens: 0" claim (.devcycle/evidence/branch-fix-8-3-gen-corpus.mjs)
 // crosses obfuscation SPELLINGS with syntactic CONTEXTS, and neither dimension contains a shell
 // EXPANSION — so that 0 is 0 over what the corpus covers, not over every destructive spelling. These
@@ -77,10 +80,26 @@
 // from both arms: `bash <<'EOF' … git stash … EOF` and `sh <<EOF … git reset --hard … EOF` ran real
 // destructive gits in both shells (shim oracle, round 12) and reach allow, because the body is
 // consumed as data before any segment is formed. Only the SUBSTITUTION spellings of it are denied,
-// by the pre-check's `startsAShell` read below; classifying the body of a heredoc whose command is a
-// shell is what would close it, and round 12 left skipHeredocBodies untouched.
-// The NUL class (`g$'\x00'it stash`) and the eval-rejoin class (`eval \ git stash`) were open here
-// until round 12 and are now closed on both arms, with the shim oracle's argv for each spelling.
+// and only because the pre-check below reads the RAW command text; classifying the body of a heredoc
+// whose command is a shell is what would close it, and no round has touched skipHeredocBodies for it.
+// The NUL class (`g$'\x00'it stash`), the eval-rejoin class (`eval \ git stash`), the substitution
+// obfuscation class (`echo $(g\it stash)`) and the comment-fabricated heredoc (`echo hi # <<'EOF'`)
+// were open here until rounds 12 and 14 and are now closed on both arms, with the shim oracle's argv
+// for each spelling.
+//
+// The one OVER-denial this file carries deliberately, restored by round 14 and recorded here so the
+// next reader knows it is a decision and not an oversight: a heredoc body that quotes a git command
+// inside markdown backticks or a `$( )` — `cat <<'EOF' > f`, body ``run `git reset --hard` here``,
+// `EOF` — is DENIED to a guarded origin, and denied on the main thread too when the body names
+// `stash`. No git runs in any of those (shim oracle, both shells: no call recorded), and that is the
+// ordinary shape of the report and findings files this repo asks its agents to write. Round 13
+// exempted the body of a QUOTED-delimiter heredoc from the pre-check to fix exactly this; the
+// exemption was keyed on a segment head being in WRAPPERS, so everything that executes a body
+// without being listed kept it — `ksh <<'EOF' … $(git stash) … EOF` and `cat <<'EOF' > f … EOF;
+// . ./f` each ran a real `git stash` in both shells while both arms allowed (round 14, F2). The
+// widening was reverted rather than re-bounded, and this over-denial is its accepted cost: an agent
+// that hits it writes the file some other way (a printf, an editor tool, a body with no substitution
+// punctuation in it).
 import { readFileSync } from "node:fs";
 import { findStateFile } from "./lib/find-state-file.mjs";
 
@@ -380,12 +399,9 @@ const SEPARATORS = new Set([";", ";;", "&&", "||", "|", "&", "\n"]);
 // `stash\ ` (an escaped space) all reach git as words that are not `stash`.
 // Read the delimiter word a `<<` operator opens, starting just past that operator. `<<-` is the
 // tab-stripping form, and the delimiter may be written quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) or
-// bare, so the word is compared with its quoting removed. That quoting is reported as well
-// (`expands`), because it decides whether the shell expands the BODY: under a bare delimiter a
-// `$( … )` or a backtick in the body really runs — `cat <<EOF` with a `$(git rev-parse HEAD)` body
-// called git in both shells — while a quoted one makes every line of it literal text (round 12, F3).
-// Returns null when no word follows (`cat <<`), which leaves the operator to tokenize as an ordinary
-// redirection.
+// bare — the quoting only decides whether the shell expands the body, which this parser never does,
+// so the word is compared with its quoting removed. Returns null when no word follows (`cat <<`),
+// which leaves the operator to tokenize as an ordinary redirection.
 function readHeredocDelimiter(raw, from) {
   let j = from;
   let stripTabs = false;
@@ -402,7 +418,7 @@ function readHeredocDelimiter(raw, from) {
     word += c;
     j += 1;
   }
-  return word ? { delim: stripQuoting(word), stripTabs, expands: !/['"\\]/.test(word), end: j } : null;
+  return word ? { delim: stripQuoting(word), stripTabs, end: j } : null;
 }
 
 // A heredoc BODY is DATA, not commands: `cat <<'EOF' … EOF` writes those lines to a file, it never
@@ -413,11 +429,9 @@ function readHeredocDelimiter(raw, from) {
 // TABS from the body and from its delimiter line. An unterminated heredoc is an ambiguous command,
 // so it returns -1 and the caller tokenizes the body as commands instead — the same deny direction
 // an unterminated quote takes.
-function skipHeredocBodies(raw, start, heredocs, literalSpans) {
+function skipHeredocBodies(raw, start, heredocs) {
   let pos = start;
-  const spans = [];
-  for (const { delim, stripTabs, expands } of heredocs) {
-    const bodyStart = pos;
+  for (const { delim, stripTabs } of heredocs) {
     let terminated = false;
     while (pos <= raw.length) {
       const eol = raw.indexOf("\n", pos);
@@ -429,13 +443,26 @@ function skipHeredocBodies(raw, start, heredocs, literalSpans) {
       if (eol === -1) break;
     }
     if (!terminated) return -1;
-    if (!expands) spans.push([bodyStart, pos]); // a quoted delimiter: this body is literal text
   }
-  if (literalSpans) literalSpans.push(...spans);
   return pos;
 }
 
-function tokenizeCommand(raw, ignoreQuotes = false, literalSpans = []) {
+// How one tokenizing pass reads the command. Three passes exist, and each is a READING a shell
+// really performs, so classifying their union is the deny direction rather than a widening:
+// CLASSIFY is the command as written; COMMENTLESS drops what a `#` starting a word hides, which is
+// what both shells do when they are not interactive; SCAN is the substitution backstop's pass, which
+// keeps every heredoc body (that backstop reads the raw command, bodies included) and reads a
+// BACKTICK as syntax — outside quotes and inside `"…"`, the two places the shell expands one — so
+// the head inside `` `…` `` reduces on its own instead of staying glued to the punctuation. `$(`
+// needs no such rule: reduceName already drops a leading run of `$`/`(`.
+const CLASSIFY = {};
+const COMMENTLESS = { stripComments: true };
+const SCAN = { heredocBodies: false, substitution: true };
+const SUBSTITUTION_OPERATORS = [...OPERATORS, "`"];
+
+function tokenizeCommand(raw, opts = CLASSIFY, ignoreQuotes = false) {
+  const { stripComments = false, heredocBodies = true, substitution = false } = opts;
+  const operators = substitution ? SUBSTITUTION_OPERATORS : OPERATORS;
   const tokens = [];
   const heredocs = []; // bodies opened on the line being read, consumed at that line's newline
   let word = "";
@@ -464,6 +491,9 @@ function tokenizeCommand(raw, ignoreQuotes = false, literalSpans = []) {
         continue;
       }
       if (c === (quote === "$'" ? "'" : quote)) { word += c; quote = null; continue; }
+      // Double quotes do not suppress a backtick substitution — `echo "`git stash`"` runs it — so
+      // the SCAN pass gives it a token here too, leaving the quote open around it.
+      if (substitution && quote === '"' && c === "`") { push(c); continue; }
       if (/\s/.test(c)) { flush(); continue; }
       word += c;
       continue;
@@ -482,21 +512,32 @@ function tokenizeCommand(raw, ignoreQuotes = false, literalSpans = []) {
       push("\n");
       if (c === "\r" && next === "\n") i += 1;
       if (heredocs.length) {                                    // the bodies this line opened are data
-        const bodyEnd = skipHeredocBodies(raw, i + 1, heredocs, literalSpans);
+        const bodyEnd = skipHeredocBodies(raw, i + 1, heredocs);
         heredocs.length = 0;
         if (bodyEnd !== -1) i = bodyEnd - 1;                    // resume just past the last delimiter line
       }
       continue;
     }
+    // A `#` that starts a WORD opens a comment; the rest of the line is text the shell discards. It
+    // is only read that way in the COMMENTLESS pass — see the classifier's call site for why both
+    // readings are classified. Mid-word (`a#b`) and escaped or quoted (`\#`, `'#'`) it is an ordinary
+    // character in both shells, and `word` being non-empty is exactly that distinction: a backslash
+    // or an opening quote has already put a character in the word by the time the `#` is reached.
+    if (stripComments && c === "#" && !word) {
+      const eol = raw.indexOf("\n", i);
+      if (eol === -1) break;
+      i = eol - 1;                               // the newline itself is still a separator token
+      continue;
+    }
     if (/\s/.test(c)) { flush(); continue; }
     if ((c === "{" || c === "}") && !word && (next === undefined || /[\s;&|)]/.test(next))) { push(c); continue; }
-    const op = OPERATORS.find((o) => raw.startsWith(o, i));
+    const op = operators.find((o) => raw.startsWith(o, i));
     if (op) {
       const fd = /^[<>]/.test(op) && /^\d+$/.test(word) ? word : ""; // in `2>&1` the descriptor is the operator's
       if (fd) word = "";
       push(fd + op);
       i += op.length - 1;
-      if (op === "<<") { // a heredoc: its delimiter is data, and so is the body opened at the newline
+      if (op === "<<" && heredocBodies) { // a heredoc: its delimiter is data, and so is the body opened at the newline
         const here = readHeredocDelimiter(raw, i + 1);
         if (here) { heredocs.push(here); i = here.end - 1; }
       }
@@ -505,17 +546,7 @@ function tokenizeCommand(raw, ignoreQuotes = false, literalSpans = []) {
     word += c;
   }
   flush();
-  if (!quote || ignoreQuotes) return tokens;
-  literalSpans.length = 0;                     // the re-read decides the spans; this pass's are stale
-  return tokenizeCommand(raw, true, literalSpans);
-}
-
-// The text of `raw` the tokenizer did NOT consume as a literal heredoc body, in order.
-function outsideSpans(raw, spans) {
-  let out = "";
-  let pos = 0;
-  for (const [start, end] of spans) { out += raw.slice(pos, start); pos = Math.max(pos, end); }
-  return out + raw.slice(pos);
+  return quote && !ignoreQuotes ? tokenizeCommand(raw, opts, true) : tokens;
 }
 
 // Tokens a case pattern label may contain: an alternation, the `(*)` spelling's open paren, and a
@@ -627,36 +658,60 @@ function stripLeading(tokens) {
 // the main thread it denies a command the parser could not read even when no stash is visible in it,
 // deliberately — a command this file cannot parse is exactly the one whose stash it cannot rule out.
 try {
-  const literalSpans = [];
-  const segments = splitSegments(dropCaseLabels(tokenizeCommand(command, false, literalSpans)));
+  // A `#` that starts a word is a comment in both shells when they are not interactive, and a
+  // comment can FABRICATE a heredoc the shell never opens: in `echo hi # <<'EOF'` the `<<` sits
+  // inside the comment, yet the tokenizer registered a heredoc and skipHeredocBodies then consumed
+  // the real `git stash` on the next line as data — it ran in both shells and both arms allowed
+  // (branch review round 14, F3; shim oracle recorded the `stash` argv). The comment-stripped
+  // reading is classified IN ADDITION to the command as written, never instead of it: a shell that
+  // reads comments as ordinary words (an interactive zsh) sees the other stream, and this file
+  // answers a fork between two readings by classifying both and denying on either.
+  const segments = splitSegments(dropCaseLabels(tokenizeCommand(command)));
+  if (command.includes("#"))
+    segments.push(...splitSegments(dropCaseLabels(tokenizeCommand(command, COMMENTLESS))));
 
   // Command and process substitution can hide a git write we cannot classify: backticks, `$(`, and
-  // the `<(`/`>(` process-substitution forms (audit 2026-09-05 H1) are all denied when a git token
-  // is present anywhere in the command, whatever the subcommand. On the main thread the same denial
-  // is scoped to commands that ALSO carry a `stash` token anywhere. Like the wrapper arm below, that
-  // scoping over-reaches — an unrelated `stash` word (a `--grep=stash`, an echoed word) beside any
-  // substituted git denies — which is the accepted cost of not parsing inside a substitution; the
-  // reason therefore states what was seen instead of asserting a stash was run.
-  // This is a REGEX over the command text, so it is read AFTER tokenization and only over the text
-  // the tokenizer did not consume as the literal body of a quoted heredoc. Reading the raw command
-  // re-classified those bodies as live substitutions and denied a guarded agent the report or
-  // findings file that quotes `git reset --hard` in a markdown code span — the fourth time this
-  // over-denial class obstructed this repo's own agents (branch review round 12, F3). The exemption
-  // is exactly as wide as the shells' own behaviour and no wider: a BARE delimiter leaves the body
-  // expanded, so its substitutions run and its span is not exempt (readHeredocDelimiter's `expands`);
-  // an unterminated heredoc yields no span at all; and when the command starts a shell anywhere, the
-  // whole raw command is read again, because an interpreter READING a body executes it
-  // (`bash <<'EOF'`, `cat <<'EOF' | bash`). Its over-reach outside a heredoc is unchanged.
-  const startsAShell = segments.some((seg) => {
-    const t = stripLeading(seg);
-    return t.length > 0 && headForms(t[0]).some((h) => WRAPPERS.has(h));
-  });
-  const scanned = startsAShell ? command : outsideSpans(command, literalSpans);
-  if (/`|\$\(|<\(|>\(/.test(scanned) && /\bgit\b/.test(scanned) && (guarded || /\bstash\b/.test(scanned)))
-    deny(denyReason(
-      "run git inside a command substitution (deny-on-ambiguity).",
-      "this command names `stash` and runs git inside a command substitution, which can hide one (deny-on-ambiguity)."
-    ));
+  // the `<(`/`>(` process-substitution forms (audit 2026-09-05 H1) are all denied when the command
+  // NAMES git anywhere, whatever the subcommand. On the main thread the same denial is scoped to
+  // commands that ALSO name `stash`. Like the wrapper arm below, that scoping over-reaches — an
+  // unrelated `stash` word (a `--grep=stash`, an echoed word) beside any substituted git denies —
+  // which is the accepted cost of not parsing inside a substitution; the reason therefore states
+  // what was seen instead of asserting a stash was run.
+  // "Names git" is decided TWO ways, and either one denies. A raw-text `\bgit\b` alone was silent on
+  // every word-level obfuscation, because the shell resolves the quoting inside a word before it
+  // runs the binary and the regex does not: `echo $(g\it stash)` ran a real `git stash` in both
+  // shells and reached ALLOW on both arms, and so did the `` ` ` ``, `"$( )"`, `<( )` and `gi""t` /
+  // `g'it'` spellings of it (branch review round 14, F1; shim oracle). The segment classifier cannot
+  // reach those heads either — stripLeading returns the OUTER command (`echo`), and the
+  // substitution's words are merely its arguments — so this backstop CANONICALIZES first: it
+  // tokenizes the command with the same tokenizer (SCAN) and puts every token through the same
+  // headForms reduction the classifier uses. The regex is kept BESIDE that read rather than replaced
+  // by it, because raw text also matches a git no token reduction reaches (`--grep=git`) and this
+  // file never trades a deny away.
+  // The text read is the RAW command, heredoc bodies included. Round 13 exempted the body of a
+  // quoted-delimiter heredoc here so a report quoting a git command in a code span could be written;
+  // the exemption was keyed on a segment head being in WRAPPERS, so everything that executes a body
+  // without being listed kept it, and `ksh <<'EOF' … $(git stash) … EOF` and `cat <<'EOF' > f …
+  // EOF; . ./f` each ran a real `git stash` in both shells while both arms allowed (round 14, F2).
+  // It was reverted rather than re-bounded; the over-denial that restores is named in the coverage
+  // block at the top of this file.
+  // A substitution's body is RE-READ by the shell before it runs, exactly as a wrapper's quoted
+  // script is, so the backslash-newline the outer single quotes made literal is a line continuation
+  // in there and joins the halves: ``echo `'g\<newline>it' stash` `` ran a real `git stash` in both
+  // shells (shim oracle) while neither half spells git. Each token is therefore reduced both as it
+  // stands and with that join applied — the same bound the wrapper arm below takes, and for the same
+  // reason.
+  if (/`|\$\(|<\(|>\(/.test(command)) {
+    const scanTokens = tokenizeCommand(command, SCAN);
+    const reducesTo = (name) => scanTokens.some((t) => headIs(t, name) || headIs(t.replace(/\\\n/g, ""), name));
+    const namesGit = /\bgit\b/.test(command) || reducesTo("git");
+    const namesStash = /\bstash\b/.test(command) || reducesTo("stash");
+    if (namesGit && (guarded || namesStash))
+      deny(denyReason(
+        "run git inside a command substitution (deny-on-ambiguity).",
+        "this command names `stash` and runs git inside a command substitution, which can hide one (deny-on-ambiguity)."
+      ));
+  }
 
   for (const seg of segments) {
     // stripLeading drops env-assignments, `{`/`(` grouping tokens, reserved words, redirections and
@@ -688,7 +743,14 @@ try {
       // and the arm returned without denying (branch review round 12, F2). One backslash is dropped,
       // not a run of them: `eval \\\\git` hands the inner shell `\\git`, the literal command name
       // `\git`, which no shell has and the oracle recorded no git call for. The cost is the same kind
-      // of over-deny as above — `xargs \ git …` denies a git xargs would not launch this way.
+      // of over-deny as above, and it is a CLASS, not the single spelling this comment used to name
+      // (`xargs \ git …`): the arm cannot tell which WRAPPERS entry re-reads its argument as shell
+      // text, so an escaped space or tab in front of git denies behind EVERY one of them —
+      // `env \ git reset --hard`, `bash \ git stash`, `exec \<tab>git …`. Measured on the round-14
+      // differential corpus: 384 rows on which no shell ran a forbidden git (192 backslash-space,
+      // 192 backslash-tab) spread across all 34 entries. The NUL union adds a second, smaller class
+      // the old wording omitted — 9 rows of `coproc $'\x00'git reset --hard`, denied on a head
+      // realization only one of the two shells produces.
       const inner = tokens.map((t) => t.replace(/\\\n/g, ""));
       const reJoinsAsGit = (t) => headForms(t).some((h) => reduceName(h.replace(/^\s+/, "").replace(/^\\/, "")) === "git");
       if (inner.slice(1).some(reJoinsAsGit) && (guarded || mentionsStash(inner))) // git behind a wrapper we cannot see into
