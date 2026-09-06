@@ -39,10 +39,13 @@
 // directory once (`dist/`), so judging by entry paths alone would hide every file the agent writes
 // inside a directory the verify had already created. A charge the attempt CREATED is deleted by
 // path; one it merely overwrote is left where it is, because the sweep cannot put back contents it
-// never held — and the skip reason names it rather than implying the revert undid it. A tree still
-// holding such an overwrite is one the sweep cannot restore, and the verifyCommand is the only gate
-// on copying a file into the real repository, so the run STOPS there instead of asking a verify it
-// cannot trust to authorize that write. Which paths count as created is decided by the set read off
+// never held — and the skip reason names it rather than implying the revert undid it. EVERY attempt
+// is swept this way, including one whose editor failed: `git clean -fd` leaves ignored paths alone,
+// so a failed agent's collateral would otherwise stay in the tree with nothing charged for it and
+// nothing stopping the run (branch review round 8, F2). Whatever an attempt is charged with and the
+// revert could not remove leaves a tree the sweep cannot restore, and the verifyCommand is the only
+// gate on copying a file into the real repository, so the run STOPS there instead of asking a verify
+// it cannot trust to authorize that write. Which paths count as created is decided by the set read off
 // disk after every attempt — after its verify, not only after its purity check — or a later attempt
 // would take what the verify wrote for its own creation and delete it. Stale worktree registrations
 // from a killed run are pruned before the new worktree is added.
@@ -230,32 +233,33 @@ function knownPaths(worktree) {
   return changedPaths(worktree, { since: Infinity, known: new Set() }).seen;
 }
 
-// The outcome of an attempt that touched something other than its target. An ignored path the
-// attempt overwrote instead of creating cannot be reverted: the sweep knows only that it changed,
-// never what it held, and deleting it would destroy the dependency, cache or artifact the
-// verifyCommand needs rather than restore it. So it stays where the agent left it, the reason says
-// so instead of claiming a revert that did not happen, and the run stops — the verifyCommand is the
-// only gate on writing the real repository, and no verify run in a tree the sweep cannot restore may
-// be asked to open that gate (branch review round 6, F1).
-function collateralSkip(changed) {
+// What an attempt's revert left behind, said once for every caller. An ignored path the attempt
+// overwrote instead of creating cannot be reverted: the sweep knows only that it changed, never what
+// it held, and deleting it would destroy the dependency, cache or artifact the verifyCommand needs
+// rather than restore it. So it stays where the agent left it, the reason says so instead of
+// claiming a revert that did not happen, and the run stops — the verifyCommand is the only gate on
+// writing the real repository, and no verify run in a tree the sweep cannot restore may be asked to
+// open that gate (branch review round 6, F1).
+function unrestorableNote(residue) {
+  return (
+    `these ignored paths keep what the agent wrote because the sweep cannot restore what they held: ` +
+    `${residue.join(", ")} — the worktree is no longer restorable, so the sweep stopped rather than run any ` +
+    `further verification in it`
+  );
+}
+
+// The outcome of an attempt that touched something other than its target.
+function collateralSkip(changed, residue) {
   const head = `agent modified files other than the target (${changed.map((c) => c.path).join(", ")})`;
-  const overwritten = changed.filter((c) => c.ignored && !c.created).map((c) => c.path);
-  if (!overwritten.length) return { skip: `${head}; reverted` };
-  return {
-    skip:
-      `${head}; the tracked edits were reverted, but these ignored paths keep what the agent wrote because the ` +
-      `sweep cannot restore what they held: ${overwritten.join(", ")} — the worktree is no longer restorable, so ` +
-      `the sweep stopped rather than run any further verification in it`,
-    hard: true,
-    stop: true,
-  };
+  if (!residue.length) return { skip: `${head}; reverted` };
+  return { skip: `${head}; the tracked edits were reverted, but ${unrestorableNote(residue)}`, hard: true, stop: true };
 }
 
 // `git clean -fd` leaves ignored paths alone, and `-x` is not the answer: it would also wipe the
 // node_modules, build caches and coverage data the verifyCommand needs. So the ignored paths the
 // attempt CREATED are deleted by path — exactly those, nothing else — or they would survive the
 // revert and pollute the tree every later verify runs in. Paths the attempt only overwrote are not
-// passed here (see overwrittenNote): deleting them would be destruction, not a revert.
+// passed here (revertAttempt decides): deleting them would be destruction, not a revert.
 function revertWorktree(worktree, createdIgnored = []) {
   git(["checkout", "--", "."], worktree);
   git(["clean", "-fd"], worktree);
@@ -263,6 +267,17 @@ function revertWorktree(worktree, createdIgnored = []) {
     const abs = resolve(worktree, p);
     if (abs.startsWith(worktree + sep)) rmSync(abs, { recursive: true, force: true });
   }
+}
+
+// Undo one attempt and report what could not be undone. This is the single decision point for the
+// created-vs-overwrote split: the charges the attempt CREATED go to revertWorktree to be deleted,
+// and the residue is then read back off disk rather than assumed — every ignored charge still
+// present once the revert has run, whether it was overwritten (never deletable) or created and not
+// actually removed. A non-empty residue is a tree the sweep cannot restore. Callers must route every
+// revert of a charged attempt through here, or a filter drifts in one place and not the other.
+function revertAttempt(worktree, changed) {
+  revertWorktree(worktree, changed.filter((c) => c.ignored && c.created).map((c) => c.path));
+  return changed.filter((c) => c.ignored && existsSync(join(worktree, c.path))).map((c) => c.path);
 }
 
 async function runVerify(verifyCommand, worktree) {
@@ -292,8 +307,11 @@ async function processFile(relPath, opts) {
     try {
       opts.known = knownPaths(opts.worktree);
     } catch {
-      // Keep the previous set. Believing a path already known only ever leaves it alone; an empty set
-      // would mark everything as this run's creation and put it up for deletion.
+      // Keep the previous set — the lesser of two bad sets, not a safe one. It is stale: anything
+      // written since it was taken reads as the next attempt's creation, i.e. as deletable. An empty
+      // set makes that true of every ignored path in the tree at once. In practice neither is acted
+      // on: the only throw here comes from the `git status` inside knownPaths, and the next attempt
+      // opens with the same call, so the run ends with a fatal before the stale set decides anything.
     }
   }
 }
@@ -307,17 +325,20 @@ async function attemptFile(relPath, opts) {
   log(`editing ${relPath}...`);
   const edit = await runEditorAgent(relPath, instruction, worktree, model);
   if (!edit.ok) {
-    revertWorktree(worktree);
-    return { skip: `editor agent failed: ${edit.error}`, hard: true };
+    // A failed editor is charged with what it wrote exactly like a successful one. Its collateral is
+    // usually deletable, and then the run goes on; residue the revert cannot remove ends the run,
+    // because no later verify may run in a tree the sweep knows it cannot restore (round 8, F2).
+    const residue = revertAttempt(worktree, changedPaths(worktree, attempt).changed);
+    const failed = `editor agent failed: ${edit.error}`;
+    if (!residue.length) return { skip: failed, hard: true };
+    return { skip: `${failed}; ${unrestorableNote(residue)}`, hard: true, stop: true };
   }
-  const { changed, seen } = changedPaths(worktree, attempt);
-  opts.known = seen;
+  const { changed } = changedPaths(worktree, attempt);
   if (changed.length === 0) {
     return { skip: `agent made no change: ${edit.value.note || "no reason given"}` };
   }
   if (changed.length > 1 || changed[0].path !== relPath) {
-    revertWorktree(worktree, changed.filter((c) => c.ignored && c.created).map((c) => c.path));
-    return collateralSkip(changed);
+    return collateralSkip(changed, revertAttempt(worktree, changed));
   }
   if (!existsSync(join(worktree, relPath))) {
     revertWorktree(worktree);
@@ -501,5 +522,8 @@ if (require.main === module) {
 
 // Exported for the deterministic tests in tests/unit/: the created-vs-overwrote decision and the
 // revert that acts on it are the invariant a whole-sweep test can no longer observe, because the run
-// now stops at an overwrite and the worktree is removed before it returns.
-module.exports = { changedPaths, knownPaths, openWindow, revertWorktree };
+// now stops at an overwrite and the worktree is removed before it returns. `revertAttempt` is
+// exported rather than only `revertWorktree` so that test drives the production filter instead of
+// restating it — a restated filter leaves the one line that can destroy a pre-existing artifact
+// untested (branch review round 8, F3).
+module.exports = { changedPaths, knownPaths, openWindow, revertAttempt, revertWorktree };
