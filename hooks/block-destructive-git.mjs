@@ -18,7 +18,10 @@
 // `case … in`, `coproc`, `function`), a case pattern label (`*)`, `1)`), a function-definition head
 // (`f()`, `f () {`), or a redirection (`>/dev/null git …`) is stripped until the real command is
 // reached; a line continuation is joined before splitting; and `<(`/`>(` are denied like backticks
-// and `$(` — that spec's rule is that a missed destructive command is not acceptable.
+// and `$(` — that spec's rule is that a missed destructive command is not acceptable. Because the
+// parser tokenizes on whitespace alone, each of those spellings also has a GLUED form where the
+// syntax sits flush against the command (`f(){ git …; }`, `case x in *)git …`, `2>&1 git …`); the
+// stripping is written to reach through it (branch review round 2).
 // Scope is git-only; non-git commands (tests, greps) are allowed. Three dispatch origins are guarded
 // by the allowlist — task-reviewer, red-team-reviewer and, since #235, implementer — and the main
 // thread (no agent_type) is guarded for `git stash` alone, only while a .devcycle/state.md at or
@@ -133,7 +136,10 @@ function normalizeHead(token) {
 // origin's read-only `git --git-dir /r/.git log` was wrongly denied for the "subcommand" `/r/.git`.
 // The attached spellings (`--git-dir=.git`) need no entry — the generic `-`-prefixed skip covers
 // them. `--exec-path` and `--attr-source` also have valueless/attached uses; skipping a token that
-// is not there just runs the index off the end, which classifies as an unreadable git → deny.
+// is not there runs the index off the end, and the two arms then part by design: a guarded origin
+// reads an unclassifiable git → deny, while the main thread reads the missing token as `""` → not
+// `stash` → allow. That is correct, not a gap — its ban is stash-only (spec §2), and a git left
+// with no subcommand runs nothing at all (`git --git-dir` exits 129 with a usage error).
 const VALUE_OPTIONS = new Set([
   "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env",
   "--super-prefix", "--attr-source",
@@ -199,10 +205,14 @@ const RESERVED = new Set([
 // `git …` is then its own segment and classifies as git.
 const BLOCK_HEADS = new Map([["for", "do"], ["select", "do"], ["case", "in"]]);
 
-// A head that classification itself keys off: the git binary, or a recognized wrapper. Every
-// widening in stripLeading is gated on this, which is what keeps the "stripping only ever adds
-// denies, never removes one" invariant true — a token that would have been classified is never
-// consumed as syntax.
+// A head that classification itself keys off: the git binary, or a recognized wrapper. The
+// redirection lookahead below is gated on this so a bare `>` never swallows the command itself.
+// The invariant stripping keeps is narrower than "it only ever adds denies": it is that stripping
+// never lets a DESTRUCTIVE git through — a token consumed as syntax is never the command the shell
+// runs, and whatever stands behind it is classified in its place. Dropping a `case` label that
+// happens to spell `git)` or `sh)` does REMOVE a deny (branch review round 2, F4), deliberately:
+// the arm's real command is the `echo x` or `git log` behind the label, and that is what gets
+// classified.
 const isClassifiedHead = (token) => {
   const h = normalizeHead(token);
   return h === "git" || WRAPPERS.has(h);
@@ -214,10 +224,15 @@ const isClassifiedHead = (token) => {
 const BARE_REDIRECTION = /^\d*(?:<{1,2}|>{1,2})$/;
 const REDIRECTION = /^\d*[<>]/;
 // A `case` arm's body sits behind its pattern label (`*)`, `1)`, `(*)`), and a function definition
-// behind its head (`f()`, or `f` `()` / `f` `{` when the whitespace split separates them). Neither
-// is a command, so the git after it was never classified. Both are bounded by shape — a token
-// ending in `)`, or a token whose successor is `{`/`()` — and never applied to a classified head.
-const isSyntaxLabel = (token) => /\)$/.test(token) && !isClassifiedHead(token);
+// behind its head (`f()`, `f(){`, `f()(`, or `f` `()` / `f` `{` when a space separates them).
+// Neither is a command, so the git after it was never classified. In the ordinary `start)start_it`
+// and `f(){ …; }` spellings the label is glued to what follows, so a head token CONTAINING `)` is
+// stripped through its first `)` and the remainder of the token is re-classified as the head:
+// `*)git` → `git`, `f(){` → `{`, `f()(` → `(`. The strip is unconditional — in this position `git)`
+// and `sh)` are pattern labels too, not commands (round 2, F3/F4) — with one bound: it never
+// empties the segment, so a token with nothing behind its label (`(git)`) is classified as a
+// command and still reaches deny-on-ambiguity.
+const behindLabel = (token) => { const at = token.indexOf(")"); return at === -1 ? null : token.slice(at + 1); };
 
 // Drop leading env-assignments, grouping tokens, reserved words, compound-command headers,
 // redirections, case labels and function-definition heads so the head re-derives to the real
@@ -235,8 +250,9 @@ function stripLeading(tokens) {
     }
     if (BARE_REDIRECTION.test(head)) { t = isClassifiedHead(t[1] ?? "") ? t.slice(1) : t.slice(2); continue; }
     if (REDIRECTION.test(head)) { t = t.slice(1); continue; }
-    if (!isClassifiedHead(head) && (t[1] === "{" || t[1] === "()")) { t = t.slice(1); continue; }
-    if (isSyntaxLabel(head)) { t = t.slice(1); continue; }
+    if (t[1] === "{" || t[1] === "()") { t = t.slice(1); continue; } // `f () {`, `f ()` — a spaced definition head
+    const rest = behindLabel(head);
+    if (rest !== null && (rest || t.length > 1)) { t = rest ? [rest, ...t.slice(1)] : t.slice(1); continue; }
     return t;
   }
 }
@@ -244,9 +260,12 @@ function stripLeading(tokens) {
 // Split on shell operators that separate commands; classify each segment independently. A lone `&`
 // (background operator) separates commands just as `;` does, so `true & git reset --hard` must split
 // into two segments — `&&` is matched first so a logical-AND is never mis-split on its first `&`.
+// An `&` preceded by `<`/`>` is a file-descriptor duplication (`2>&1`), not a separator: splitting
+// there left a `2>` segment and stranded the `1` in front of the command, so the git behind an
+// ordinary `2>&1 git …` was never classified (branch review round 2).
 // A backslash-newline is a line continuation, not a separator: joining it first keeps `git \`+newline
 // +`stash pop` one command instead of a `git \` segment and an unrelated-looking `stash pop` one.
-for (const seg of command.replace(/\\\r?\n/g, " ").split(/(?:&&|\|\||;|\||&|\n)/)) {
+for (const seg of command.replace(/\\\r?\n/g, " ").split(/(?:&&|\|\||;|\||(?<![<>])&|\n)/)) {
   // stripLeading drops env-assignments, `{`/`(` grouping tokens and reserved words so the head is
   // the real command — `{ git reset; }`, `( git reset )` and `do git reset` must not hide the git.
   // (normalizeHead additionally strips a grouping char glued to the head, e.g. `(git`.)

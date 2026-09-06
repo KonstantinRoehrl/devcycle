@@ -329,6 +329,21 @@ const AMBIGUITY_CLASSES = [
   ["separated global option: --work-tree", "git --work-tree . clean -fd", "git --work-tree . stash"],
   ["separated global option: --namespace", "git --namespace n reset --hard", "git --namespace n stash"],
   ["line continuation", "git \\\n reset --hard", "git \\\nstash pop"],
+  // Branch review round 2: the same four classes in their GLUED spellings. The parser tokenizes on
+  // whitespace only, so a shell metacharacter written flush against the next word (`f(){`, `*)git`)
+  // stayed part of the head token and hid the git from both round-1 rules; `2>&1` additionally lost
+  // its `&` to the segment splitter's background-operator alternative. Every row below returned
+  // allow on at least one arm before the round-2 fix.
+  ["function-definition head glued to its brace body", "f(){ git reset --hard; }; f", "f(){ git stash; }; f"],
+  ["function-definition head glued to its subshell body", "f()( git reset --hard )", "f()( git stash )"],
+  ["function-definition head that names the git binary", "git () { git reset --hard; }; git", "git () { git stash; }; git"],
+  ["case pattern label glued to its command", "case x in *)git reset --hard;; esac", "case x in *)git stash;; esac"],
+  ["case pattern label that spells the git binary", "case $x in git) git reset --hard;; esac", "case $x in git) git stash;; esac"],
+  ["case pattern label that spells the git binary on a multi-line arm", "case $x in\n  git) git reset --hard ;;\nesac", "case $x in\n  git) git stash ;;\nesac"],
+  ["leading redirection: stderr duplication (2>&1)", "2>&1 git reset --hard", "2>&1 git stash"],
+  ["leading redirection: input with a separated target (<)", "< /dev/null git reset --hard", "< /dev/null git stash"],
+  ["leading redirection: append with a glued target (>>)", ">>out git reset --hard", ">>out git stash"],
+  ["leading redirection: numbered descriptor with a glued target (2>)", "2>/dev/null git reset --hard", "2>/dev/null git stash"],
 ];
 
 test("guarded origin + every named ambiguity class hiding a destructive git is denied", () => {
@@ -374,7 +389,9 @@ test("main thread + git stash list/show stay allowed through the newly parsed sp
     "git stash list",
     "git stash show -p",
     "case x in *) git stash list;; esac",
+    "case $x in git) git stash list;; esac",
     "f() { git stash show -p; }; f",
+    "f(){ git stash show -p; }; f",
     "git --git-dir /r/.git stash list",
   ])
     assert.equal(decideMain(cwd, cmd), "allow", `expected allow for main-thread read-only stash: ${cmd}`);
@@ -389,4 +406,98 @@ test("guarded origin + git symbolic-ref is denied (it writes HEAD)", () => {
   assert.equal(decide(IMPLEMENTER, "git symbolic-ref HEAD refs/heads/other"), "deny");
   assert.equal(decide(REVIEWER, "git symbolic-ref --short HEAD"), "deny");
   assert.equal(decide(REVIEWER, "git rev-parse --abbrev-ref HEAD"), "allow"); // the read path stays open
+});
+
+// Branch review round 2 (F4): a `case` pattern label is syntax, never a command, whatever it happens
+// to spell. Refusing to drop a label that reduces to a classified head over-DENIED: the label `git)`
+// made the classifier read the arm's own `echo` as a git subcommand, and the label `sh)` denied
+// through the wrapper arm even though the only reachable git is a read-only `git log`.
+test("guarded origin + a case pattern label spelling a command classifies the arm's body, not the label", () => {
+  for (const cmd of [
+    'case "$1" in git) echo x;; esac',
+    "case $x in sh) git log;; esac",
+    "case $x in git) git log;; esac",
+    'case "$1" in\n  sh) echo ok ;;\nesac',
+    "case $x in *)echo ok;; esac",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for case-label spelling: ${cmd}`);
+});
+
+// The label strip must never empty a segment: `(git)` is a subshell running a bare, unclassifiable
+// git, not a labelled arm, so deny-on-ambiguity still owns it.
+test("guarded origin + a bare git inside a subshell is still denied", () => {
+  assert.equal(decide(REVIEWER, "(git)"), "deny");
+  assert.equal(decide(REVIEWER, "(git stash)"), "deny");
+});
+
+// Fold-in F6: every VALUE_OPTIONS entry is exercised on both arms — a separated value must not be
+// read as the subcommand, and the option must not hide a destructive one behind it.
+test("guarded origin + git's separated global options skip their value, on both verdicts", () => {
+  for (const cmd of [
+    "git --config-env x.y=Z log",
+    "git --super-prefix p/ log",
+    "git --attr-source HEAD log",
+    "git --exec-path=/p log",
+    "git -c user.name=x log",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a read-only git behind a global option: ${cmd}`);
+  for (const cmd of [
+    "git --config-env x.y=Z reset --hard",
+    "git --super-prefix p/ clean -fd",
+    "git --attr-source HEAD checkout -- x",
+    "git --exec-path /p reset --hard",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a destructive git behind a global option: ${cmd}`);
+});
+
+test("main thread + a stash behind git's separated global options is denied", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "git --config-env x.y=Z stash",
+    "git --super-prefix p/ stash",
+    "git --attr-source HEAD stash",
+    "git --exec-path /p stash",
+    "git -c user.name=x stash",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for main-thread stash behind a global option: ${cmd}`);
+});
+
+// F6, pinned: `git --exec-path log` is the valueless print-and-exit spelling — git prints its exec
+// path and never runs `log` (verified: `git --exec-path log -1 --oneline` on git 2.39.2 prints only
+// the path). The parser consumes `log` as the option's value, so the index runs off the end and a
+// guarded origin gets an unclassifiable git. Pinned as a DENY: the spelling runs no subcommand at
+// all, so denying it withholds nothing a guarded origin can act on.
+test("guarded origin + the valueless git --exec-path spelling is denied as unclassifiable", () => {
+  assert.equal(decide(REVIEWER, "git --exec-path log"), "deny");
+  assert.equal(decide(REVIEWER, "git --exec-path"), "deny");
+});
+
+// Fold-in F5: an option whose value is absent runs the subcommand index off the end, and the two
+// arms then differ by design — a guarded origin sees an unclassifiable git and denies, the main
+// thread reads the missing token as "" and allows, because its ban is stash-only (spec §2) and a
+// git with no subcommand runs nothing (`git --git-dir` exits 129 with a usage error on git 2.39.2).
+test("a global option with its value missing: denied to a guarded origin, allowed on the main thread", () => {
+  assert.equal(decide(REVIEWER, "git --git-dir"), "deny");
+  assert.equal(decideMain(cycleDir(stateAt("execution")), "git --git-dir"), "allow");
+});
+
+// Round-2 regression guards for the two widenings: a `)` inside an ARGUMENT is not a pattern label,
+// and a trailing `2>&1` (whose `&` no longer splits the command) must not turn an ordinary redirect
+// into a denied segment.
+test("guarded origin + a parenthesis inside an argument or a trailing redirection stays allowed", () => {
+  for (const cmd of [
+    "git log --grep=')' -1",
+    "git diff -- 'a)b'",
+    "git status 2>&1",
+    "npm test 2>&1 | tail -5",
+    "grep -rn ')' playbooks/",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a non-label parenthesis: ${cmd}`);
+});
+
+// A case arm's alternation (`git|sh)`) is split by the segment loop's `|`, so the label reaching the
+// head is the last alternative — still a label, on both arms.
+test("a case arm with alternated patterns is still classified by its body", () => {
+  assert.equal(decide(REVIEWER, "case $x in git|sh) git reset --hard;; esac"), "deny");
+  assert.equal(decideMain(cycleDir(stateAt("execution")), "case $x in git|sh) git stash;; esac"), "deny");
 });
