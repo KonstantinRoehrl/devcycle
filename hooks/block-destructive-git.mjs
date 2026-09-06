@@ -61,12 +61,14 @@
 // only; zsh does not word-split). Resolving them needs shell-level expansion this parser
 // deliberately does not do, so the whole class is a stated bound rather than a backstopped case —
 // the `$git` note in normalizeHead explains ONE spelling, not the bound on the measurement. Two
-// further known allows, both pre-existing and both outside that corpus: on the main-thread arm
+// further known allows, both pre-existing and both outside that corpus, both on the main-thread arm:
 // `git -c alias.z=stash z` reaches allow, because `-c` is a VALUE_OPTIONS skip and the subcommand
-// read lands on `z` (it also requires a configured alias); and a command ending in a dangling
-// backslash — `git stash\` — reaches allow on that same arm, because the backslash stays in the
-// `stash\` token while both shells drop it and run a real `git stash` (round 10 measured it; the
-// guarded arm denies it, since there the head alone decides).
+// read lands on `z` (it also requires a configured alias); and a wrapper's quoted script that ENDS
+// in a dangling backslash — `sh -c 'git stash\'`, `eval 'git stash\'` — reaches allow, because the
+// inner shell drops that backslash and runs a real `git stash` (shim oracle, both shells) while the
+// outer quotes keep it, leaving `stash\'` a token mentionsStash cannot read as `stash`. The
+// top-level spelling of the same class (`git stash\`) is closed; resolving the wrapper one means
+// resolving a dangling escape inside the wrapper join, which round 10's fix round left untouched.
 import { readFileSync } from "node:fs";
 import { findStateFile } from "./lib/find-state-file.mjs";
 
@@ -328,6 +330,14 @@ const SEPARATORS = new Set([";", ";;", "&&", "||", "|", "&", "\n"]);
 // here: no expansion, no substitution, no word splitting. An unterminated quote is an ambiguous
 // command, so it is re-read with quoting disabled (the deny direction: more syntax is seen, not
 // less).
+// An UNQUOTED backslash that ends the command escapes nothing, and both /bin/bash and /bin/zsh drop
+// it: `git stash\` hands git the argv `stash`, a real stash. Keeping the character made the
+// subcommand read as `stash\`, so that spelling reached ALLOW on the main-thread arm — the one
+// command the #235 ban exists to stop (branch review round 10, fix round). It is dropped here, at
+// the only place `next === undefined` can occur, which is exactly the shell's own rule. A backslash
+// with anything behind it is untouched, so the spellings the shell KEEPS a backslash in stay what
+// they were: `'stash\'` (literal inside single quotes), `stash\\` (an escaped backslash) and
+// `stash\ ` (an escaped space) all reach git as words that are not `stash`.
 // Read the delimiter word a `<<` operator opens, starting just past that operator. `<<-` is the
 // tab-stripping form, and the delimiter may be written quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) or
 // bare — the quoting only decides whether bash expands the body, which this parser never does, so
@@ -414,7 +424,7 @@ function tokenizeCommand(raw, ignoreQuotes = false) {
     if (!ignoreQuotes && (c === "'" || c === '"')) { word += c; quote = c; continue; }
     if (!ignoreQuotes && c === "$" && next === "'") { word += "$'"; i += 1; quote = "$'"; continue; }
     if (c === "\\") {
-      if (next === undefined) { word += c; break; }
+      if (next === undefined) break;      // dangling: nothing to escape, and both shells drop it
       i += 1;
       if (next === "\n") continue;                                            // line continuation
       if (next === "\r" && raw[i + 1] === "\n") { i += 1; continue; }

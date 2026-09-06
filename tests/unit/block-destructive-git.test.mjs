@@ -906,3 +906,52 @@ test("a parser failure ends in a deny, not in a fail-open exit", () => {
   assert.equal(unguarded.status, 0);
   assert.equal(unguarded.stdout.trim(), "");
 });
+
+// Round 10 fix round. A command that ENDS in a backslash carries a DANGLING escape: there is no
+// character behind it to escape, and both shells drop it — `git stash\` invoked git with argv
+// `stash` in /bin/bash and in /bin/zsh alike (verified with a `git` shim first on PATH that records
+// the argv it is handed). The tokenizer kept the character in the word instead, so the subcommand
+// read as `stash\`, which is not `stash`, and the one command the #235 ban exists to stop reached
+// ALLOW. Only the MAIN arm flips: a guarded origin denies every row here already, because there the
+// head alone decides and the subcommand never has to be read (verified against HEAD before this test
+// was written).
+test("main thread + a stash subcommand ending in a dangling backslash is denied in an active cycle", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["git stash\\", "true && git stash\\", "git -C . stash\\"]) {
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for a dangling backslash: ${JSON.stringify(cmd)}`);
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a dangling backslash: ${JSON.stringify(cmd)}`);
+  }
+});
+
+// The bound on that drop, in the direction that must NOT move: a backslash the shell KEEPS is not a
+// dangling escape and may not deny. Inside single quotes it is literal (`git 'stash\'` hands git the
+// argv `stash\`), an escaped backslash leaves one literal backslash (`git stash\\` → argv `stash\`),
+// and a backslash-space is an escaped space (`git stash\ ` → argv `stash `, with the space) — the
+// shim oracle recorded each of those argvs in both shells, and none of them is `git stash`. The
+// non-git spellings an agent writes carry the same character and must stay allowed too: a quoted
+// Windows-style path, a `find … -exec … \;`, and a single-quoted trailing backslash.
+test("a backslash the shell keeps is not a dangling escape and stays allowed", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "git 'stash\\'",
+    "git stash\\\\",
+    "git stash\\ ",
+    "echo 'a\\'",
+    "echo 'C:\\Users\\me\\repo\\'",
+    "find . -name '*.mjs' -exec grep -l stash {} \\;",
+  ])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow for a backslash the shell keeps: ${JSON.stringify(cmd)}`);
+});
+
+// The same drop in the relaxing direction, pinned because it is a behavior change and not a side
+// effect: a trailing backslash on a READ-ONLY subcommand read as `status\`/`log\`/`stash list\`,
+// which no allowlist entry matches, so a guarded origin was denied `git status\` and the main thread
+// `git stash list\` — commands the shells run as plain `git status` and `git stash list` (shim
+// oracle, both shells). Dropping the dangling backslash makes both classify as what actually runs.
+test("a read-only subcommand ending in a dangling backslash is allowed on both arms", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["git status\\", "git log\\", "git diff\\"])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a read-only git: ${JSON.stringify(cmd)}`);
+  for (const cmd of ["git stash list\\", "git stash show\\"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow for an inspecting stash: ${JSON.stringify(cmd)}`);
+});
