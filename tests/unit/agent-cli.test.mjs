@@ -310,6 +310,11 @@ test("run() leaves nothing alive in the child's group once it has settled, and s
 // a stranger is exactly the case where the group is empty and the kill buys nothing. The difference
 // between "signalled a pgid we no longer own" and "signalled nothing" is invisible on the resolved
 // value, so a spy on process.kill is the only faithful instrument for it.
+//
+// Round 4: the round-3 guard asked the kernel instead — `process.kill(-pid, 0)` before the SIGKILL.
+// That question is "does SOME group have this pgid", which a stranger who became their own group
+// leader on the recycled pid answers just as well, so the settle path must not address the pgid at
+// all unless this run holds its own evidence the group is still non-empty.
 async function recordKills(fn) {
   const saved = process.kill;
   const calls = [];
@@ -333,11 +338,41 @@ test("run() sends no group kill when the child exited on its own and left an emp
   const pid = Number(res.stdout.trim());
   assert.equal(res.code, 0);
   assert.ok(Number.isInteger(pid) && pid > 0, `the child must report its own pid; got ${JSON.stringify(res.stdout)}`);
-  const groupSignals = calls.filter((c) => c.pid < 0 && c.signal !== 0);
+  const groupSignals = calls.filter((c) => c.pid < 0);
   assert.deepEqual(
     groupSignals,
     [],
-    `settling a cleanly exited child must signal nothing: its leader is reaped and its group empty, so -${pid} may already be a stranger's group. Sent ${JSON.stringify(groupSignals)}`
+    `settling a cleanly exited child must not address its pgid at all, probes included: its leader is reaped and its group empty, so -${pid} may already be a stranger's group and no signal — 0 or otherwise — can tell the two apart. Sent ${JSON.stringify(groupSignals)}`
+  );
+});
+
+// The hazard the round-3 probe left open, made deterministic: process.kill is stubbed so every
+// negative pid answers as if a group with that pgid existed (which is what a recycled pid handed to
+// a stranger looks like) and so no signal actually leaves the test. A settle that has seen `close`
+// has no evidence the group is its own, so a probe that answers must not escalate into a SIGKILL.
+test("run() does not escalate to a group SIGKILL when a cleanly exited child's pgid answers a liveness probe", async () => {
+  const saved = process.kill;
+  const calls = [];
+  let res;
+  process.kill = (pid, signal) => {
+    if (pid < 0) {
+      calls.push({ pid, signal });
+      return true; // the pgid "exists"; nothing is forwarded, so a stranger's group is never signalled for real
+    }
+    return saved.call(process, pid, signal);
+  };
+  try {
+    res = await run(process.execPath, ["-e", "process.stdout.write(String(process.pid))"]);
+  } finally {
+    process.kill = saved;
+  }
+  assert.equal(res.code, 0);
+  assert.equal(res.stdout.trim().length > 0, true, "the child must have run and reported its pid");
+  const kills = calls.filter((c) => c.signal === "SIGKILL");
+  assert.deepEqual(
+    kills,
+    [],
+    `a pgid that answers a probe is not evidence the group is still this run's, so the probe must never license the SIGKILL. Sent ${JSON.stringify(calls)}`
   );
 });
 

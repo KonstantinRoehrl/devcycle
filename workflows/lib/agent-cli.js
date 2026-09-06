@@ -28,8 +28,11 @@ function makeLogger(tag) {
 // is buffered is returned — the promise never waits on a pipe-holder the caller cannot see.
 const DRAIN_GRACE_MS = 1000;
 
-// Every child run() has started and not yet seen exit. A detached child leads its own process group,
-// so it no longer receives the terminal's Ctrl-C; the parent's own termination must reach it.
+// Every child run() has started and not yet settled. A detached child leads its own process group,
+// so it no longer receives the terminal's Ctrl-C; the parent's own termination must reach it. A
+// child is dropped from this set by settle(), which runs when `close` fires or the drain grace
+// elapses, so a member is always either unreaped or still waiting on a holder of its pipes — the
+// same evidence settle() kills on below.
 const live = new Set();
 let signalsHooked = false;
 function hookSignals() {
@@ -48,38 +51,31 @@ function hookSignals() {
 // direct child).
 //
 // `-pid` names a process group, not this child, and once the leader has been reaped that number is
-// only still ours while the group exists: POSIX will not recycle a pid that is an existing group's
-// pgid, but the moment the group empties the kernel may hand the pid to a stranger who leads a
-// group of their own. So for a reaped leader the group is probed with signal 0 and killed only if
-// it answers — which loses nothing, because an empty group is exactly the case where the kill had
-// nothing to kill. While the leader is still alive (timeout, overflow, the signal sweep) the pid
-// cannot have moved, so the kill goes out unconditionally and falls back to the direct child if the
-// group kill throws — ESRCH in the window before the child has finished becoming its own leader.
+// only still this run's while the group still has a member: POSIX will not recycle a pid that is an
+// existing group's pgid, but the moment the group empties the kernel may hand the pid to a stranger
+// who leads a group of their own. Asking the kernel does not separate the two — `kill(-pid, 0)`
+// answers "some group has this pgid", which the stranger answers as well as we do — so the evidence
+// has to come from the caller: call this only while the child is unreaped (timeout, overflow, the
+// signal sweep), or while something is still demonstrably holding the group open (see settle()).
+// The fallback to the direct child covers ESRCH in the window before the child has finished
+// becoming its own group leader; after the reap its pid is no safer a target than its pgid, so the
+// fallback stays on the unreaped side of the same rule.
 function killGroup(child) {
-  const reaped = child.exitCode !== null || child.signalCode !== null;
-  if (!reaped) {
-    try {
-      process.kill(-child.pid, "SIGKILL");
-    } catch {
-      try { child.kill("SIGKILL"); } catch { /* already exited */ }
-    }
-    return;
-  }
-  try {
-    process.kill(-child.pid, 0);
-  } catch {
-    return; // ESRCH: the group is empty, and this pid may already belong to someone else
-  }
   try {
     process.kill(-child.pid, "SIGKILL");
-  } catch { /* the last member exited between the probe and the kill */ }
+  } catch {
+    if (child.exitCode === null && child.signalCode === null) {
+      try { child.kill("SIGKILL"); } catch { /* already exited */ }
+    }
+  }
 }
 
 // Spawn a child as the leader of its own process group, buffer its output, SIGKILL the group after
 // timeoutMs. Settles on the child's `exit`, draining for DRAIN_GRACE_MS, not on `close`. Settling
-// ends the call by contract, so it also sweeps any survivor left in the group and destroys the
-// stdio pipes: a grandchild that inherited them would otherwise hold the parent's event loop open
-// long after the promise resolved (the engine writes its report and then hangs). Never rejects:
+// ends the call by contract, so it destroys the stdio pipes on every path and, where a survivor is
+// still holding them, sweeps the group first: a grandchild that inherited those pipes would
+// otherwise hold the parent's event loop open long after the promise resolved (the engine writes
+// its report and then hangs). Never rejects:
 // transport failures come back on the resolved value as { spawnError } or { timedOut } so callers
 // branch on them instead of catching.
 function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = {}) {
@@ -92,6 +88,7 @@ function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = 
     let timedOut = false;
     let overflow = false;
     let settled = false;
+    let closed = false;
     let timer = null;
     let drainTimer = null;
     const settle = (value) => {
@@ -101,10 +98,13 @@ function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = 
       clearTimeout(drainTimer);
       // `value` already carries the output buffered so far, so releasing the child cannot discard
       // it. Sweep the group before dropping the child from `live`, so nothing leaves the sweep set
-      // still running. On the ordinary path the child exited and left an empty group behind and
-      // killGroup sends nothing; when a grandchild is still holding the pipes the group is provably
-      // this run's own, and it takes the SIGKILL that stops it outliving the call.
-      killGroup(child);
+      // still running — but only on the evidence that the group still has a member. `close` fires
+      // once every holder of the stdio pipes has let go, so settling without it means a survivor is
+      // holding them: the group is non-empty, its pgid cannot have been recycled underneath us, and
+      // the SIGKILL is exactly the one H5 is about. Settling with `close` already fired leaves no
+      // holder to kill, and an empty group is precisely the pgid that may since have become a
+      // stranger's — so that path signals nothing at all.
+      if (!closed) killGroup(child);
       live.delete(child);
       for (const stream of [child.stdout, child.stderr, child.stdin]) stream?.destroy();
       resolve(value);
@@ -133,7 +133,7 @@ function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = 
       // window and flip `timedOut` on a run that never timed out.
       clearTimeout(timer);
       drainTimer = setTimeout(() => settle(result(code)), DRAIN_GRACE_MS);
-      child.once("close", () => settle(result(code)));
+      child.once("close", () => { closed = true; settle(result(code)); });
     });
     child.stdin.end();
   });
