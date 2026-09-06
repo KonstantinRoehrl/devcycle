@@ -3,13 +3,25 @@
 The single owner of the user-facing surface. No existing reference fits: `${CLAUDE_PLUGIN_ROOT}/references/config.md`
 owns knobs, profiles and model routing, `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns who does the work once a
 stage is running, and neither maps a user's intent to an entry point or says what a command may
-do before its first confirmation. Every entry point appears exactly once; `scripts/validate.mjs`
-fails the build if a command is missing from this table or if its `consequence` disagrees with
-its frontmatter.
+do before its first confirmation. Every entry point appears exactly once. `scripts/validate.mjs`
+fails the build when a command is missing from this table, when a row names no command, when a
+command is listed twice, when a `consequence` cell is not one of the classes below (or that list
+is unreadable), when the classes below and the classes the script's own clauses act on disagree in
+either direction, when a `consequence` disagrees with the command's `disable-model-invocation`
+frontmatter, when a `confirm-first` row names no justification in the prose below, or when a
+command's own description names `read-only`, `side-effectful` or `confirm-first` and its row
+assigns a different one. `resume` is not scanned: those three are hyphenated jargon that only ever
+appear as a class claim, while `resume` is an ordinary verb a description may use without claiming
+any consequence.
 
 `consequence` is one of:
 
-- `read-only` — writes nothing outside a report. Must **not** carry `disable-model-invocation`.
+- `read-only` — never modifies the repo's source and starts no cycle; its writes are confined to
+  its own report and the devcycle-owned records that same pass derives
+  (`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking owns which of those are committed).
+  Anything it writes beyond those — `review`'s PR comments, `doctor`'s filed issues — is an opt-in
+  step it confirms before posting, never automatic.
+  Must **not** carry `disable-model-invocation`.
 - `confirm-first` — may write, but takes no irreversible action before its first user
   confirmation. The deliberate exception class; each member names its justification below.
 - `side-effectful` — writes before any confirmation gate. Must carry `disable-model-invocation`.
@@ -45,7 +57,12 @@ ranked findings document. Its abstraction and history lenses and its cross-pass 
 behavioural today, so it reads the code across passes rather than only as it stands now; that is
 what sets it apart from `review` (single-shot, the code as it stands now), from `doctor` (pipeline
 cost, depth and model routing — not the code), and from `learn` (distilling sessions into landed
-rules — not assessing the repo).
+rules — not assessing the repo). Its cross-pass memory — the per-finding
+`docs/devcycle/maintenance-findings/` store — is a devcycle-owned record of the kind the
+`read-only` definition above admits, not a write outside one. Whether that store is committed or
+stays local is the doc-tracking policy's call, never this class's
+(`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, whose `commit` cells
+`git check-ignore` can still veto).
 
 **Naming.** Commands are verbs, playbooks are gerunds, agents are role nouns. `doctor` is the
 single recorded exception, justified by `brew doctor` / `flutter doctor` / `npm doctor`.

@@ -1,0 +1,3 @@
+{"type":"assistant","timestamp":"2026-08-03T14:00:00.000Z","message":{"model":"claude-fable-5","usage":{"input_tokens":3100,"output_tokens":720},"content":[]}}
+{"type":"assistant","timestamp":"2026-08-03T14:05:00.000Z","message":{"model":"claude-fable-5-1","usage":{"input_tokens":2900,"output_tokens":640},"content":[]}}
+{"type":"assistant","timestamp":"2026-08-03T14:10:00.000Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":1500,"output_tokens":210},"content":[]}}

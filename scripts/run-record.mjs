@@ -128,17 +128,27 @@ function parseArgs(argv) {
 // Derives workload counts from git itself rather than the caller, so a workload line always
 // reflects what actually landed between base and HEAD — never a self-reported count.
 export function diffStats(base, cwd = process.cwd()) {
-  const num = spawnSync("git", ["-C", cwd, "diff", "--numstat", `${base}...HEAD`], { encoding: "utf8" });
-  const status = spawnSync("git", ["-C", cwd, "diff", "--name-status", `${base}...HEAD`], { encoding: "utf8" });
+  // A failed git call is a failed measurement, never zero work: throw with git's own message so
+  // the finish-stage call fails loudly, while the hook's non-zero-status guard keeps it a no-op.
+  const git = (args) => {
+    const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+    if (r.error || r.status !== 0) {
+      const why = r.error?.message ?? ((r.stderr ?? "").trim() || `exit ${r.status}`);
+      throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${why}`);
+    }
+    return r.stdout ?? "";
+  };
+  const num = git(["diff", "--numstat", `${base}...HEAD`]);
+  const status = git(["diff", "--name-status", `${base}...HEAD`]);
   let insertions = 0, deletions = 0, filesChanged = 0;
-  for (const line of (num.stdout ?? "").split("\n").filter(Boolean)) {
+  for (const line of num.split("\n").filter(Boolean)) {
     const [add, del] = line.split("\t");
     filesChanged++;
     if (add !== "-") insertions += Number(add);   // "-" marks a binary file
     if (del !== "-") deletions += Number(del);
   }
   let filesCreated = 0, filesDeleted = 0;
-  for (const line of (status.stdout ?? "").split("\n").filter(Boolean)) {
+  for (const line of status.split("\n").filter(Boolean)) {
     const code = line[0];
     if (code === "A") filesCreated++;
     else if (code === "D") filesDeleted++;
@@ -187,7 +197,8 @@ function main() {
     const runId = flags.run;
     if (!runId) die("workload requires --run <runId>");
     if (!flags.base) die("workload requires --base <sha>");
-    const stats = diffStats(flags.base, toplevel);
+    let stats;
+    try { stats = diffStats(flags.base, toplevel); } catch (e) { die(e.message); }
     const obj = {
       kind: "workload", runId,
       requestKind: flags.requestKind ?? die("workload requires --requestKind"),

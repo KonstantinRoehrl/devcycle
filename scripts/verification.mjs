@@ -89,6 +89,21 @@ const VERDICT_BY_STATUS = {
 const eventsAfter = (events, boundary) =>
   events.filter((e) => isIso(e.ts) && String(e.ts).slice(0, 10) > boundary);
 
+// The measurability gate both journal-scored paths share — the scoreboard below and resolvedIn.
+// A run counts as evidence only when at least one of its events carries a culprit: a run that
+// journaled nothing attributable could not have matched whatever is being scored, so "N runs,
+// none attributed" is unmeasurable, never held (#254 — eight lessons were retired on exactly that
+// vacuous signal). Returns the run count plus the reason the window cannot carry a verdict, or a
+// null reason when it can.
+function measureWindow(after) {
+  const runs = runsObserved(after);
+  const attributed = runsObserved(after.filter((e) => e.culprit));
+  const reason = runs === 0 ? "0 runs"
+    : attributed === 0 ? `${runs} run${runs === 1 ? "" : "s"}, 0 attributed`
+    : null;
+  return { runs, reason };
+}
+
 export function verify(promotions, journalEvents, installed, opts = {}) {
   const { now = Date.now(), runCheck = skipRunCheck, vocab = loadVocab(), root = process.cwd(),
     timeoutMs = VERIFY_TIMEOUT_MS, maxBuffer = VERIFY_MAX_BUFFER,
@@ -117,13 +132,13 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
       continue;
     }
     const after = eventsAfter(journalEvents, p.landed);
-    const runs = runsObserved(after);
+    const { runs, reason: detail } = measureWindow(after);
     const recurrences = after.filter((e) => e.culprit && ids.has(e.culprit)).length;
     const reinforcement = p.verify === "journal-reinforcement";
-    const verdict = runs === 0 ? "unmeasurable"
+    const verdict = detail !== null ? "unmeasurable"
       : reinforcement ? (recurrences > 0 ? "held" : "not-adopted")
       : (recurrences > 0 ? "recurred" : "held");
-    scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: runs, recurrences, detail: null });
+    scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: runs, recurrences, detail });
     if (verdict === "recurred" && p.rung === "r2") escalation.push({ culpritId: p.culpritId, rung: p.rung, reason: `recurred ${recurrences}×` });
     if (verdict === "held" && (p.rung === "r1" || p.rung === "r2")
         && (runs >= RETIRE_RUNS || now - Date.parse(p.landed) >= RETIRE_DAYS * DAY_MS)) {
@@ -141,10 +156,15 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
     const reached = installed && SEMVER_RE.test(installed) && cmpSemver(installed, rv) >= 0;
     const since = reached ? (relDates.get(rv) ?? null) : null;   // CHANGELOG date of the resolving version
     const after = since ? eventsAfter(journalEvents, since) : [];
-    const runs = runsObserved(after);
+    const { runs, reason } = measureWindow(after);
     const recurrences = after.filter((ev) => ev.culprit === id || ev.culprit === novelId).length;
-    const verdict = (!reached || !since || runs === 0) ? "unmeasurable" : recurrences > 0 ? "recurred" : "held";
-    return { culpritId: id, resolvedIn: rv, verdict, runsObserved: runs };
+    // Four ways this axis can fail to measure anything, told apart in `detail` because
+    // `doctor --json` is now the only consumer of these rows: the installed version never reached
+    // the fix, the fix's release has no CHANGELOG date to open a window from, the window holds no
+    // runs, or its runs journaled nothing attributable. Only a real window yields held/recurred.
+    const detail = !reached ? "not reached" : !since ? "no release date" : reason;
+    const verdict = detail !== null ? "unmeasurable" : recurrences > 0 ? "recurred" : "held";
+    return { culpritId: id, resolvedIn: rv, verdict, runsObserved: runs, detail };
   });
   return { scoreboard, candidates: { escalation, retirement }, resolvedIn };
 }

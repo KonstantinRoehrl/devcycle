@@ -8,7 +8,6 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 | `branch.md` | Branch discipline — the rule every committing path follows and the derivation every branch-scoped stage runs to turn a branch into a file set. |
 | `checklist.md` | The on-device checklist contract — paths, item shape, dimensions, and the `(auto)` boundary — shared by checklist generation and the on-device stage. |
 | `commit-convention.md` | How a devcycle-driven commit's subject matches the target repo's own commit-message rules — deriving and recording them. |
-| `config-changelog.md` | The `userConfig` knob history — every addition, rename, and deprecation and the version each landed in. |
 | `config.md` | How devcycle resolves configuration — the knobs, the profile, and the model tiers, in one place. |
 | `culprits.json` | The culprit vocabulary — each slug with its kind, phase, description, and the version it entered. |
 | `delegation.md` | Who does the work inside a stage — the coordinator's closed duty list, the stage budget, the research-dispatch contract, and the return envelopes. |

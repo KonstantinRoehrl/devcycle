@@ -65,6 +65,56 @@ function parseState(text) {
   };
 }
 
+// The integration branches a topic branch may be cut from, in the order references/branch.md
+// § Committing lists them. That file owns the list; this is its runtime spelling, which prose
+// cannot hand a hook.
+const INTEGRATION_BRANCHES = ["dev", "develop", "development", "integration"];
+
+// The base to measure against when the branch line carries no `(cut from <base> at <sha>)`
+// annotation. references/branch.md § "Deriving a branch's file set" → Base owns the rule this
+// implements — the candidate set, the ancestry selection, and how each candidate is spelled; this
+// is its runtime spelling, which prose cannot hand a hook. Sensor-local and not that file's:
+// null — a no-op — when no candidate resolves, when HEAD is on a candidate branch itself, or when
+// the nearest merge-base is HEAD (nothing landed yet, the same phantom-zero-diff guard the
+// annotated path applies).
+function deriveBase(repoRoot) {
+  const git = (...args) => spawnSync("git", ["-C", repoRoot, ...args], { encoding: "utf8" });
+  const remoteHead = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD");
+  const named = remoteHead.status === 0 ? remoteHead.stdout.trim().replace(/^origin\//, "") : "";
+  // main/master trails the reported default rather than replacing it, so the fallback stays
+  // reachable when `symbolic-ref` succeeds but names a branch this clone cannot resolve. The
+  // order is the candidate set's enumeration only; it no longer decides which candidate wins.
+  const candidates = [...new Set([...INTEGRATION_BRANCHES, ...(named ? [named] : []), "main", "master"])];
+
+  const current = git("rev-parse", "--abbrev-ref", "HEAD");
+  if (current.status !== 0) return null;
+  const branch = current.stdout.trim();
+  if (candidates.includes(branch)) return null;
+
+  let nearest = null;
+  for (const name of candidates) {
+    const ref = [`refs/heads/${name}`, `refs/remotes/origin/${name}`]
+      .find((r) => git("rev-parse", "--verify", "--quiet", r).status === 0);
+    if (!ref) continue;
+    const mergeBase = git("merge-base", ref, "HEAD");
+    if (mergeBase.status !== 0 || !mergeBase.stdout.trim()) continue;
+    const base = mergeBase.stdout.trim();
+    // Every candidate's merge-base is an ancestor of HEAD, so "nearer to HEAD" is exactly
+    // "descends from the other": the incumbent loses when it is an ancestor of the challenger.
+    // `--is-ancestor` also holds for two equal shas, so the `!==` keeps a tie with the earlier
+    // candidate — the same sha either way, and deterministic in which candidate produced it.
+    // Two bases on unrelated branches of the DAG are incomparable in both directions; the
+    // incumbent keeps the slot, which is the candidate list's own order.
+    if (nearest === null
+      || (base !== nearest && git("merge-base", "--is-ancestor", nearest, base).status === 0)) {
+      nearest = base;
+    }
+  }
+  if (nearest === null) return null;
+  const head = git("rev-parse", "HEAD");
+  return head.status === 0 && head.stdout.trim() === nearest ? null : nearest;
+}
+
 function main() {
   const input = readInput();
   // Unreadable stdin (malformed JSON, or a parsed shape that isn't a plain object) must stop here,
@@ -80,7 +130,9 @@ function main() {
   if (!stateFile) return;
   const repoRoot = dirname(dirname(stateFile));
   const st = parseState(readFileSync(stateFile, "utf8"));
-  if (!st.run || !st.base || !st.kind || st.kind === "audit" || !COMMIT_STAGES.has(st.stage)) return;
+  if (!st.run || !st.kind || st.kind === "audit" || !COMMIT_STAGES.has(st.stage)) return;
+  const base = st.base ?? deriveBase(repoRoot);
+  if (!base) return;
 
   const head = spawnSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8" });
   if (head.status !== 0) return;
@@ -89,7 +141,7 @@ function main() {
   // commit yet — GC3). The pipeline records `base` ABBREVIATED (a 7-char sha in state.md), so a
   // raw `sha === st.base` never matches; normalize `base` to its full sha first. Fail-safe: an
   // unresolvable/garbage base (rev-parse non-zero) no-ops like every other unrecognized input.
-  const baseFull = spawnSync("git", ["-C", repoRoot, "rev-parse", `${st.base}^{commit}`], { encoding: "utf8" });
+  const baseFull = spawnSync("git", ["-C", repoRoot, "rev-parse", `${base}^{commit}`], { encoding: "utf8" });
   if (baseFull.status !== 0) return;
   if (sha === baseFull.stdout.trim()) return;
 
@@ -99,7 +151,7 @@ function main() {
   if (cursor.lastHead === sha && cursor.lastStage === st.stage) return;
 
   const w = spawnSync(process.execPath, [RUN_RECORD, "workload",
-    "--run", st.run, "--base", st.base, "--requestKind", st.kind,
+    "--run", st.run, "--base", base, "--requestKind", st.kind,
     "--planned-task-count", st.planned, "--wave-count", st.waves],
     { cwd: repoRoot, encoding: "utf8" });
   if (w.status !== 0) return;

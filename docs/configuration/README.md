@@ -6,6 +6,10 @@ default; configure nothing and the pipeline still runs. The first time `/devcycl
 runs with nothing configured, it asks one question — which `profile` to run — and never asks
 again; answer *customize* instead and it asks the five behavioral options in one batch.
 
+The knob history — every `userConfig` addition, rename, and deprecation and the version each
+landed in — is [`config-changelog.md`](config-changelog.md), read by `doctor`'s config-drift mode
+and stamped by the release step.
+
 ## `profile`
 
 **`profile`** is the one knob most people need. It is a preset that sizes the whole run — which

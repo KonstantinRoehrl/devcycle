@@ -18,6 +18,7 @@ import {
   bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
   renderReport, complianceIssueBody, COMPLIANCE_TYPES, NoComplianceCandidateError,
   formatComplianceCandidate, parseDraftedMarkers, complianceType, COMPLIANCE_TITLES,
+  ENTRY_TAGS, PLAYBOOK_STAGE, stageSignal, splitReason,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -56,6 +57,13 @@ const turn = (over = {}) => ({
   timestamp: "2026-07-20T10:00:00.000Z", cwd: "/secret/project/path",
   gitBranch: "secret-branch",
   message: { model: "claude-opus-5", usage: usage(10, 100, 1000, 20) },
+  ...over,
+});
+
+// A turn carrying exactly one tool call, priced identically to turn() so a stage-attribution
+// assertion compares dollars that differ only in how many turns landed under each stage.
+const toolTurn = (name, input, over = {}) => turn({
+  message: { model: "claude-opus-5", usage: usage(10, 100, 1000, 20), content: [{ type: "tool_use", name, input }] },
   ...over,
 });
 
@@ -124,26 +132,92 @@ test("summarizeSession: identifies the session by id prefix only", () => {
   assert.equal("sess-abcdef123456".startsWith(s.id), true);
 });
 
-test("summarizeSession: forward-fills attribution onto trailing untagged turns in the same transcript", () => {
-  const recs = [
-    turn({ attributionSkill: "devcycle:cycle" }),
-    turn({}),
-    turn({}),
-  ];
-  const s = summarizeSession("sess-abcdef123456", recs);
+test("summarizeSession: an entry tag with no stage signal lands in entry (stage unknown), never under the tag", () => {
+  const s = summarizeSession("sess-abcdef123456", [turn({ attributionSkill: "devcycle:cycle" }), turn({}), turn({})]);
   assert.equal(s.costByStage.unattributed, undefined);
-  assert.equal(s.costByStage["devcycle:cycle"] > 0, true);
+  assert.equal(s.costByStage["devcycle:cycle"], undefined);
+  assert.ok(s.costByStage["entry (stage unknown)"] > 0);
 });
 
 test("summarizeSession: forward-fill does not cross transcripts", () => {
-  const recs = [
-    turn({ attributionSkill: "devcycle:cycle" }),
+  const s = summarizeSession("sess-abcdef123456", [
+    turn({ attributionSkill: "devcycle:cycle" }), turn({}), turn({ isSidechain: true, agentId: "agent-1" }),
+  ]);
+  assert.ok(s.costByStage.unattributed > 0);
+  assert.ok(s.costByStage["entry (stage unknown)"] > s.costByStage.unattributed);
+});
+
+test("a resumed session re-attributes from the first stage signal onward — a Read of the playbook", () => {
+  const s = summarizeSession("sess-abcdef123456", [
+    turn({ attributionSkill: "devcycle:continue" }),
+    toolTurn("Read", { file_path: "/x/.claude/plugins/cache/devcycle/devcycle/0.19.0/playbooks/executing-waves.md" }),
     turn({}),
-    turn({ isSidechain: true, agentId: "agent-1" }),
-  ];
-  const s = summarizeSession("sess-abcdef123456", recs);
-  assert.equal(s.costByStage.unattributed > 0, true);
-  assert.equal(s.costByStage["devcycle:cycle"] > s.costByStage.unattributed, true);
+  ]);
+  assert.equal(s.costByStage["devcycle:continue"], undefined);
+  assert.ok(s.costByStage["resumed (stage unknown)"] > 0, "the turn before the signal is labelled unknown");
+  assert.ok(s.costByStage.execution > s.costByStage["resumed (stage unknown)"], "the signal turn and its successors are execution");
+});
+
+test("a Bash read of a playbook and a Bash heredoc that writes the state file are stage signals too", () => {
+  const bashRead = summarizeSession("sess-abcdef123456", [
+    turn({ attributionSkill: "devcycle:continue" }),
+    toolTurn("Bash", { command: "cat /x/plugins/devcycle/playbooks/planning-waves.md" }),
+  ]);
+  assert.ok(bashRead.costByStage.planning > 0);
+  const bashWrite = summarizeSession("sess-abcdef123456", [
+    turn({ attributionSkill: "devcycle:continue" }),
+    toolTurn("Bash", { command: "cat > .devcycle/state.md <<'EOF'\n# devcycle state\n- stage: branch-review\n- root: /x\nEOF" }),
+    turn({}),
+  ]);
+  assert.ok(bashWrite.costByStage["branch-review"] > 0);
+});
+
+test("a Write or Edit of the state file labels the stage it wrote, and a later signal supersedes it", () => {
+  const s = summarizeSession("sess-abcdef123456", [
+    turn({ attributionSkill: "devcycle:cycle" }),
+    toolTurn("Write", { file_path: "/repo/.devcycle/state.md", content: "# devcycle state\n- stage: planning\n" }),
+    toolTurn("Edit", { file_path: "/repo/.devcycle/state.md", old_string: "- stage: planning", new_string: "- stage: execution" }),
+    turn({}),
+  ]);
+  assert.ok(s.costByStage.planning > 0);
+  assert.ok(s.costByStage.execution > s.costByStage.planning);
+});
+
+test("stageSignal ignores unknown playbooks, other tools, and prose that merely mentions a stage", () => {
+  assert.equal(stageSignal(toolTurn("Read", { file_path: "/x/playbooks/not-a-playbook.md" })), null);
+  assert.equal(stageSignal(toolTurn("Grep", { pattern: "stage: execution", path: ".devcycle/state.md" })), null);
+  assert.equal(stageSignal(toolTurn("Bash", { command: "echo 'the stage: execution is next'" })), null);
+  assert.equal(stageSignal(turn({})), null);
+  for (const name of Object.keys(PLAYBOOK_STAGE))
+    assert.equal(stageSignal(toolTurn("Read", { file_path: `/x/playbooks/${name}.md` })), PLAYBOOK_STAGE[name]);
+});
+
+test("the record path still wins over an entry-tag signal", () => {
+  const sessionId = "sess-abcdef123456";
+  const record = {
+    runId: "0123456789abcdef", pluginVersion: "0.19.0", profile: "thorough", knobs: {},
+    stages: [{ stage: "planning", startedAt: "2026-07-20T09:00:00.000Z", endedAt: "2026-07-20T11:00:00.000Z", outcome: "complete" }],
+    dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [], workload: null,
+  };
+  const s = summarizeSession(sessionId, [
+    turn({ attributionSkill: "devcycle:continue" }),
+    toolTurn("Read", { file_path: "/x/playbooks/executing-waves.md" }),
+  ], new Map([[createHash("sha256").update(sessionId).digest("hex"), record]]));
+  assert.equal(s.attributionSource, "record");
+  assert.ok(s.costByStage.planning > 0);
+  assert.equal(s.costByStage.execution, undefined);
+});
+
+test("splitReason buckets a forward-filled session by why it has no record", () => {
+  assert.equal(splitReason({ firstTag: "devcycle:doctor", pluginVersion: "0.19.0" }), "standalone");
+  assert.equal(splitReason({ firstTag: "devcycle:cycle", pluginVersion: "0.12.0" }), "predates-run-records");
+  assert.equal(splitReason({ firstTag: "devcycle:cycle", pluginVersion: "unknown" }), "predates-run-records");
+  assert.equal(splitReason({ firstTag: "devcycle:cycle", pluginVersion: "0.13.0" }), "record-missing");
+  const s = summarizeSession("sess-abcdef123456", [turn({ attributionSkill: "devcycle:learn" })]);
+  assert.equal(s.attributionSplitReason, "standalone");
+  assert.equal(s.attributionEntry, null);
+  const json = buildJsonReport([s]);
+  assert.deepEqual(json.sessions[0].attribution, { source: "forward-filled", entry: null, splitReason: "standalone" });
 });
 
 test("summarizeSession: no explicit attribution anywhere in the transcript stays unattributed", () => {
@@ -1099,7 +1173,7 @@ test("doctor.mjs exports its transcript-walk helpers", async () => {
 
 // Installs a runnable copy of doctor.mjs at <dir>/scripts/, so the copy's own location —
 // not the working directory — is what its changelog resolution has to work from. `changelog`
-// null means the tree ships no references/config-changelog.md at all.
+// null means the tree ships no docs/configuration/config-changelog.md at all.
 function installDoctor(changelog) {
   // realpath: on macOS the temp dir is a symlink, and Node resolves an ESM entry point to its
   // real path — so an unresolved path would make the script's own `is this the entry point`
@@ -1121,8 +1195,8 @@ function installDoctor(changelog) {
   ])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
   if (changelog !== null) {
-    mkdirSync(join(dir, "references"), { recursive: true });
-    writeFileSync(join(dir, "references", "config-changelog.md"), changelog, "utf8");
+    mkdirSync(join(dir, "docs", "configuration"), { recursive: true });
+    writeFileSync(join(dir, "docs", "configuration", "config-changelog.md"), changelog, "utf8");
   }
   return dir;
 }
@@ -1595,6 +1669,17 @@ test("the report prints the depth-band fraction-of-window caveat", () => {
     { ...rendered, pluginVersion: "0.10.1", costByStage: { a: 1.0 }, medianDepth: 10 },
   ]);
   assert.match(text, /fraction of the .*window/i);
+});
+
+test("deriveEvents derives review-reject only for a record with no explicit review-reject event", () => {
+  const verdicts = [{ taskId: "1", round: 1, blockingCount: 2, evidenceClass: "red-green", conformance: "fail" }];
+  const legacy = deriveEvents({ verdicts, dispatches: [], stages: [], events: [] });
+  assert.deepEqual(legacy.map((e) => e.event), ["review-reject"]);
+  const explicit = deriveEvents({
+    verdicts, dispatches: [], stages: [],
+    events: [{ event: "review-reject", stage: "execution", task: "1", culprit: "partial-evidence-capture", ts: "2026-09-05T10:00:00Z" }],
+  });
+  assert.deepEqual(explicit.map((e) => e.event), []);
 });
 
 // --- qualitySignals: every cost figure is paired with a quality signal (A6) ---

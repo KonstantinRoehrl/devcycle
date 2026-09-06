@@ -11,7 +11,7 @@ transcript under `~/.claude/projects` carrying a `devcycle:`-prefixed attributio
 widens that to every transcript, tagged or not; `--since`/`--until` narrow the measurement window
 within each kept session. A separate `--drift <path>` mode takes precedence over all of that: it
 skips cost analysis entirely and flags stale `userConfig` references in a target file against
-`references/config-changelog.md`.
+`docs/configuration/config-changelog.md`.
 
 Interpretation, not transcription, is the playbook's real job: it leads from the report's
 workload-adjusted, matched-cohort `## At a glance` figures as the headline, treats the full

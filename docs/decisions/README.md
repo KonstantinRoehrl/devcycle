@@ -5,6 +5,72 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-09-05 — the workload commit-sensor, a third hook (#139)
+
+**Decision:** The plugin ships a third hook, `hooks/workload-sensor.mjs`, registered in
+`hooks/hooks.json` on `PostToolUse` over `Bash` (landed in 0.17.2 — CHANGELOG.md's 0.17.2 entry names
+it). It re-derives the run's `workload` record after every HEAD-advancing commit in a committing
+stage, and, from the measurement-truth cycle, derives the diff base — when the state file's `branch:`
+line carries no `(cut from … at <sha>)` annotation — as the merge-base **nearest to HEAD** among the
+sanctioned cut-points that resolve. `references/branch.md` owns the candidate set; the selection is by
+ancestry, never by the order the candidates are listed in, because a fixed order gets one topology
+wrong whichever way it is written.
+
+**Why:** collection must not depend on an agent remembering a finish-stage step, and it must not
+depend on a prose annotation either — the sensor was silent for every cycle whose branch line was
+written bare (audit M13, #210). A failed git call now throws instead of reading as zero work.
+
+**Supersedes:** the 2026-09-02 entry's implicit "two hooks"; the 2026-08-20 entry's "exactly one
+hook" was already superseded there.
+
+## 2026-09-05 — budgets raised for the measurement-truth cycle
+
+**Decision:** `tests/fixtures/context-budget.json` and `tests/fixtures/surface-budget.json` are
+raised task by task, by exactly the bytes and lines each writer clause of the measurement-truth
+cycle adds (spec: `docs/superpowers/specs/2026-09-05-measurement-truth-design.md`, local). Figures,
+one bullet per task, appended by the task that trips the baseline:
+
+- Task 1: context-budget executing-waves 107007→108183, finishing-the-cycle 96938→97565,
+  learning-from-sessions 108200→108827, maintaining-the-repo 91983→92612, onboarding-a-repo
+  88496→89123, planning-waves 93888→94517, profiling-sessions 109500→110030,
+  receiving-review 118716→119343, reviewing-code 125959→126445, reviewing-the-branch
+  100231→100858, scoping-the-request 85910→86537, sweeping-mechanical-changes 98748→99375,
+  taking-the-fast-path 91916→92543, verifying-on-device 94403→95030; surfaceTotal no raise
+  needed (5320 still holds).
+- Task 3: context-budget learning-from-sessions 108827→109213, profiling-sessions
+  110030→110359; surfaceTotal no raise needed.
+- Task 4: context-budget learning-from-sessions 109213→109370; surfaceTotal no raise needed.
+- Task 6: context-budget executing-waves 108183→108530, learning-from-sessions 109370→109717,
+  onboarding-a-repo 89123→89470, receiving-review 119343→119690, reviewing-code 126445→126792,
+  sweeping-mechanical-changes 99375→99722, taking-the-fast-path 92543→92890, verifying-on-device
+  95030→95377; surfaceTotal no raise needed.
+- Task 7: no raise needed — moving the config changelog out of `references/` shrinks both
+  figures, and a baseline above the count is never lowered.
+- branch-fix-1-3: context-budget executing-waves 108530→109017, finishing-the-cycle
+  97565→97835, learning-from-sessions 109717→110188, maintaining-the-repo 92612→93083,
+  onboarding-a-repo 89470→89941, planning-waves 94517→94988, receiving-review 119690→120161,
+  reviewing-code 126792→127263, reviewing-the-branch 100858→101329, scoping-the-request
+  86537→87008, sweeping-mechanical-changes 99722→100193, taking-the-fast-path 92890→93361,
+  verifying-on-device 95377→95848; surfaceTotal no raise needed (5320 still holds).
+- branch-fix-2-2: context-budget executing-waves 109017→109511, finishing-the-cycle
+  97835→98329, learning-from-sessions 110188→110682, maintaining-the-repo 93083→93368,
+  onboarding-a-repo 89941→90435, planning-waves 94988→95273, receiving-review 120161→120655,
+  reviewing-code 127263→127757, reviewing-the-branch 101329→101614, scoping-the-request
+  87008→87293, sweeping-mechanical-changes 100193→100687, taking-the-fast-path 93361→93855,
+  verifying-on-device 95848→96342; surfaceTotal no raise needed (5320 still holds).
+- branch-fix-3-1: context-budget executing-waves 109511→109892, finishing-the-cycle
+  98329→98710, learning-from-sessions 110682→111063, onboarding-a-repo 90435→90816,
+  receiving-review 120655→121036, reviewing-code 127757→128138, sweeping-mechanical-changes
+  100687→101068, taking-the-fast-path 93855→94236, verifying-on-device 96342→96723;
+  surfaceTotal no raise needed (5320 still holds).
+
+**Why:** every playbook cites `references/evidence.md`, `references/ledger.md`, and
+`references/handoff.md` transitively, so one sentence in any of them moves every playbook's
+context budget. The raise is the reviewed cost of journaling a culprit at the writer instead of
+deriving it — the one change the 2026-09-05 audit named as highest leverage.
+**Supersedes:** nothing. The 2026-08-20 rule that growth is a reviewed decision stands; this entry
+records the figures.
+
 ## 2026-09-02 — the reviewer git-write guard, a second hook (#165)
 
 **Decision:** The plugin ships a second hook, `hooks/block-reviewer-git-write.mjs`, registered

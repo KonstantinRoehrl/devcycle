@@ -158,3 +158,10 @@ test("prepare-release: setup-node matches validate.yml's pin and reads .nvmrc, n
     "prepare-release.yml does not read node-version-file from .nvmrc"
   );
 });
+
+test("prepare-release: the bump commit stages the config changelog at its docs/configuration path", () => {
+  const yaml = read(".github/workflows/prepare-release.yml");
+  assert.match(yaml, /git add \.claude-plugin\/plugin\.json CHANGELOG\.md docs\/configuration\/config-changelog\.md/,
+    "the release commit does not stage docs/configuration/config-changelog.md — a stamped `unreleased` marker would be left uncommitted");
+  assert.doesNotMatch(yaml, /references\/config-changelog\.md/, "the workflow still names the old path");
+});

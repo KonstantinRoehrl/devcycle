@@ -1,0 +1,14 @@
+# Instruct the implementer to verify the brief against the code rather than trust it
+- promotion-type: doc-edit
+- cluster-signature: novel:implementer-verifies-brief-against-code|4 occurrences|4 sessions
+- files-touched: docs/devcycle/lessons.md, ~/.claude/devcycle/learnings/global/lessons.md
+- affected-files: docs/devcycle/lessons.md, ~/.claude/devcycle/learnings/global/lessons.md
+- landed: 2026-09-05
+- commit: 
+- plugin-version: 0.19.0
+- sourced-from-memory: false
+- culprit-id: novel:implementer-verifies-brief-against-code
+- rung: r2
+- audience: repo-devs
+- verify: journal-reinforcement
+- aliases: 

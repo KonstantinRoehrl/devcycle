@@ -22,7 +22,7 @@ import { pathToFileURL } from "node:url";
 
 const PLUGIN_PATH = ".claude-plugin/plugin.json";
 const CHANGELOG_PATH = "CHANGELOG.md";
-const CONFIG_CHANGELOG_PATH = "references/config-changelog.md";
+const CONFIG_CHANGELOG_PATH = "docs/configuration/config-changelog.md";
 const CC = /^(feat|fix|perf|docs|chore|ci|refactor|style|test|build)(\([a-z0-9-]+\))?(!)?: /;
 
 /** Subjects a release counts. A subject that is not a Conventional Commit is invisible to
@@ -76,7 +76,7 @@ export const changelogWithSection = (changelog, version, notes, date) => {
 };
 
 /** Stamps every `version: "unreleased"` record with the version now being released, keeping the
- *  promise references/config-changelog.md:12-13 makes. Scoped to the FIRST fenced yaml block — the
+ *  promise docs/configuration/config-changelog.md:12-13 makes. Scoped to the FIRST fenced yaml block — the
  *  only one `scripts/doctor.mjs:556` parses for config drift — so the prose below it is never
  *  rewritten. A file with no pending record is the common case, not an error, and comes back
  *  unchanged. */
@@ -133,7 +133,7 @@ function main() {
     CHANGELOG_PATH,
     changelogWithSection(readFileSync(CHANGELOG_PATH, "utf8"), version, `- ${subject}`, date),
   );
-  // The one step references/config-changelog.md:12-13 promises and nobody used to perform: a record
+  // The one step docs/configuration/config-changelog.md:12-13 promises and nobody used to perform: a record
   // written before its release carries `version: "unreleased"` until the release computes the number.
   // Skipped when the file is absent so the script stays runnable against a minimal fixture.
   if (existsSync(CONFIG_CHANGELOG_PATH)) {

@@ -36,7 +36,10 @@ Blast-radius override:` line; `content-coupling-check.mjs` flags a same-wave tas
 names a file another same-wave task edits, cleared by a dependency or a `- Content-coupling
 override:` line. `budget-fixture-check.mjs` hard-fails when a task's Files touch a budgeted
 surface (`playbooks/`, `commands/`, `agents/`, `references/` markdown) without also touching the
-matching budget fixture, cleared by adding the fixture or a `- Budget-fixture override:` line;
+matching budget fixture — a `references/` edit matches the context budget too, since a playbook's
+budget counts the bytes of every reference it cites — cleared by adding the fixture or a `-
+Budget-fixture override:` line, and run as a leg of `brief-completeness-check.mjs` so the earlier
+gate names the same gap;
 `authored-claims-check.mjs` is a blocking lint flagging an unguarded `path.ext:line` reference or
 a bare count claim, cleared by a `(verified: <cmd>)` or `(assumption)` marker. A non-zero exit
 from the brief-completeness, blast-radius, content-coupling, budget-fixture, or authored-claims

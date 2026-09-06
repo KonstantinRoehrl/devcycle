@@ -5,7 +5,8 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, realpathSync, mkd
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { repoSlug, hashSession, recordPath, gitToplevel } from "../../scripts/run-record.mjs";
+import { makeRepo } from "./helpers.mjs";
+import { repoSlug, hashSession, recordPath, gitToplevel, diffStats } from "../../scripts/run-record.mjs";
 
 const SCRIPT = new URL("../../scripts/run-record.mjs", import.meta.url).pathname;
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
@@ -315,6 +316,20 @@ test("the event kind accepts a full line and rejects a bad enum value", () => {
     "--stage", "execution", "--ts", "2026-08-12T10:00:00Z"], runs);
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /is not one of/);
+});
+
+test("review-reject is a valid run-record event and carries its culprit", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-review-reject-"));
+  const runId = "0f1e2d3c4b5a6978";
+  const r = runRecord(["append", "--run", runId, "--kind", "event", "--event", "review-reject",
+    "--stage", "execution", "--task", "3", "--culprit", "partial-evidence-capture",
+    "--attributedBy", "coordinator", "--ts", "2026-09-05T10:00:00Z"], runs);
+  assert.equal(r.status, 0, r.stderr);
+  const file = join(runs, repoSlug(gitToplevel(process.cwd())), `${runId}.jsonl`);
+  const line = JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1));
+  assert.equal(line.event, "review-reject");
+  assert.equal(line.culprit, "partial-evidence-capture");
+  assert.equal(line.attributedBy, "coordinator");
 });
 
 test("an event omitting --ts is stamped rather than rejected as missing a required field", () => {
@@ -638,4 +653,20 @@ test("gitToplevel canonicalizes a linked worktree to the main checkout (#104)", 
   } finally {
     spawnSync("git", ["-C", tempRepo, "worktree", "remove", "--force", wt]);
   }
+});
+
+test("diffStats throws on a base git cannot resolve instead of reporting zero work", () => {
+  const repo = makeRepo();
+  assert.throws(() => diffStats("no-such-ref", repo), /git diff --numstat no-such-ref\.\.\.HEAD failed/);
+  assert.throws(() => diffStats("HEAD", mkdtempSync(join(tmpdir(), "not-a-repo-"))), /failed/);
+});
+
+test("the workload subcommand exits 1 with the git error on an unresolvable base", () => {
+  const runs = mkdtempSync(join(tmpdir(), "rr-wl-bad-base-"));
+  const repo = makeRepo();
+  const runId = "0f1e2d3c4b5a6978";
+  const r = run(["workload", "--run", runId, "--repo", repo, "--base", "no-such-ref",
+    "--requestKind", "feature"], runs);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /run-record: git diff --numstat no-such-ref\.\.\.HEAD failed/);
 });

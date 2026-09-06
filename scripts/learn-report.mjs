@@ -94,20 +94,6 @@ export function renderLearnReport({ candidates, promotions, outcome = false, ver
   };
   const landed = cands.filter((c) => c.disposition === "landed");
   const rest = cands.filter((c) => c.disposition !== "landed");
-  // Unmeasurable is not zero (`references/impact-scoring.md`): summing a non-numeric impact in as
-  // 0 would let a mixed batch's partial subtotal read as the whole run, and a run with nothing
-  // scorable read as a measured $0.00. Only scored candidates are summed, and the line says how
-  // many of the landed set that sum covers.
-  const scored = landed.filter((c) => typeof c.impact === "number");
-  const unscored = landed.length - scored.length;
-  const impact = scored.reduce((n, c) => n + c.impact, 0);
-  const impactLine = unscored === 0
-    ? `Impact addressed this run: ${usd(impact)}`
-    : (scored.length
-        ? `Impact addressed this run: ${usd(impact)} across ${scored.length} of ${landed.length} landed · ` +
-          `${unscored} unmeasurable`
-        : `Impact addressed this run: unmeasurable · 0 of ${landed.length} landed scored`) +
-      " (no attributable cost — see `references/impact-scoring.md`)";
   const journal = corpus.journalEmpty
     ? "Journal: empty (no run records yet)"
     : `Journal: ${corpus.journalEvents} events (${corpus.journalEvents === 0 ? "read, nothing in window" : "read"})`;
@@ -129,7 +115,6 @@ export function renderLearnReport({ candidates, promotions, outcome = false, ver
       (roll.unbucketed === 1 ? "record predates `rung:` and does not bucket" : "records predate `rung:` and do not bucket") +
       "; the all-time count accumulates from this phase's ship date.*",
     "",
-    impactLine,
     `Sourced this run: ${landed.filter((c) => c.sourcedFromMemory).length} from memory · ` +
       `${landed.filter((c) => !c.sourcedFromMemory).length} from journal/transcript mining`,
     `Sourced all-time: ${roll.sourced.memory} from memory · ${roll.sourced.mining} from journal/transcript mining`,

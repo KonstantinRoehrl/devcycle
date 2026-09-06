@@ -128,28 +128,12 @@ test("the legacy-record count is stated rather than silently excluded", () => {
     /1 record predates `rung:` and does not bucket/);
 });
 
-// Round-1 review, blocking finding 1: the run-level total coalesced a non-numeric impact to 0
-// before summing, so an unscorable run rendered a measured-looking $0.00.
-test("a run with nothing scorable renders unmeasurable at run level, never a measured $0.00", () => {
-  const unscored = { ...CANDIDATES, candidates: [{ ...CANDIDATES.candidates[0], impact: null }] };
-  const out = renderLearnReport({ candidates: unscored, promotions: PROMOTIONS });
-  assert.match(out,
-    /^Impact addressed this run: unmeasurable · 0 of 1 landed scored \(no attributable cost — see `references\/impact-scoring\.md`\)$/m);
-  assert.doesNotMatch(out, /^Impact addressed this run: \$/m,
-    "a matcher that could not fire never renders as a dollar figure");
-});
-
-test("a run mixing scored and unscored candidates never presents the scored subtotal as the whole", () => {
-  const mixed = {
-    ...CANDIDATES,
-    candidates: [
-      CANDIDATES.candidates[0],
-      { ...CANDIDATES.candidates[0], title: "Stage had cost but no dispatches to attribute it to",
-        culpritId: "friction:unattributable-stage", impact: null },
-    ],
-  };
-  assert.match(renderLearnReport({ candidates: mixed, promotions: PROMOTIONS }),
-    /^Impact addressed this run: \$4\.10 across 1 of 2 landed · 1 unmeasurable \(no attributable cost — see `references\/impact-scoring\.md`\)$/m);
+// The run-level impact total had no honest input while no event carried a culprit (audit M7);
+// per-candidate impact stays, the aggregate line goes.
+test("the report renders no run-level impact total", () => {
+  const out = renderLearnReport({ candidates: CANDIDATES, promotions: PROMOTIONS });
+  assert.doesNotMatch(out, /^Impact addressed this run/m);
+  assert.match(out, /^- Impact: \$4\.10 \(7 occurrences\)/m, "per-candidate impact must survive");
 });
 
 // Step 5's line-item diff found `sensitive` had no render home in either candidate section —

@@ -23,20 +23,20 @@ import { atomicWrite } from "./atomic-write.mjs";
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
-// references/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
+// docs/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
 // not in a script's own environment, and the documented `--drift` invocation runs from the
 // target repo — so reading it from process.env resolved the changelog against the wrong
 // tree. See docs/platform-notes.md section (c).
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const CHANGELOG_PATH = join(PLUGIN_ROOT, "references", "config-changelog.md");
+const CHANGELOG_PATH = join(PLUGIN_ROOT, "docs", "configuration", "config-changelog.md");
 
 // The plugin's own release changelog, under a name distinct from CHANGELOG_PATH above, which
-// configDrift already holds for references/config-changelog.md. Resolved from PLUGIN_ROOT for
+// configDrift already holds for docs/configuration/config-changelog.md. Resolved from PLUGIN_ROOT for
 // the same reason that one is: --drift runs from the target repo, not from the plugin tree.
 const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
 
 // `from-doctor` issues are filed against devcycle itself, wherever doctor happens to run. A
-// bare `gh issue list` resolves to the host repo, so the Outer loop section would render zeros
+// bare `gh issue list` resolves to the host repo, so `doctor --json`'s `outer_loop` would count zero
 // in every repo except this one — the failure this constant exists to prevent.
 export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
 
@@ -71,6 +71,56 @@ const OUTER_LOOP_QUERY_LIMIT = 200;
 
 const DEVCYCLE_PREFIX = /^devcycle:/;
 const PLUGIN_VERSION_RE = /devcycle\/devcycle\/(\d+\.\d+\.\d+)\//;
+
+export const ENTRY_TAGS = new Set(["devcycle:continue", "devcycle:cycle"]);
+// Neither entry tag is a stage: the stage a resumed session works in is read off the first
+// stage signal after the tag (a playbook read, or a state-file write naming the stage). Keys are
+// playbook basenames; tests/unit/golden-path.test.mjs pins that each exists under playbooks/.
+export const PLAYBOOK_STAGE = Object.freeze({
+  "scoping-the-request": "scoping",
+  "reviewing-code": "audit",
+  "planning-waves": "planning",
+  "executing-waves": "execution",
+  "reviewing-the-branch": "branch-review",
+  "verifying-on-device": "on-device",
+  "taking-the-fast-path": "fast-path",
+  "sweeping-mechanical-changes": "sweep",
+  "receiving-review": "receiving-review",
+  "finishing-the-cycle": "finish",
+  "profiling-sessions": "doctor",
+  "learning-from-sessions": "learn",
+  "maintaining-the-repo": "maintain",
+  "onboarding-a-repo": "onboard",
+});
+
+const UNKNOWN_STAGE = { "devcycle:continue": "resumed (stage unknown)", "devcycle:cycle": "entry (stage unknown)" };
+const READ_PLAYBOOK_RE = /\/playbooks\/([a-z-]+)\.md$/;
+const BASH_PLAYBOOK_RE = /playbooks\/([a-z-]+)\.md/;
+const STATE_FILE_RE = /\.devcycle\/state\.md/;
+const STAGE_LINE_RE = /^- stage: (\w[\w-]*)/m;
+
+// The stage a turn's tool calls reveal, or null. Auto mode routes reads and writes through Bash,
+// so the Bash command text is a signal carrier alongside Read/Write/Edit.
+export function stageSignal(turn) {
+  const content = turn?.message?.content;
+  if (!Array.isArray(content)) return null;
+  for (const item of content) {
+    if (!item || item.type !== "tool_use" || !item.input || typeof item.input !== "object") continue;
+    const { name, input } = item;
+    const path = typeof input.file_path === "string" ? input.file_path : "";
+    const command = name === "Bash" && typeof input.command === "string" ? input.command : "";
+    const playbook = name === "Read" ? path.match(READ_PLAYBOOK_RE) : command.match(BASH_PLAYBOOK_RE);
+    if (playbook && PLAYBOOK_STAGE[playbook[1]]) return PLAYBOOK_STAGE[playbook[1]];
+    // A stage name is only read off text the session wrote to the state file — never off prose
+    // that merely mentions one, which is why a Grep or an echo carries no signal.
+    const stateText = (name === "Write" || name === "Edit") && STATE_FILE_RE.test(path)
+      ? String(input.content ?? input.new_string ?? "")
+      : STATE_FILE_RE.test(command) ? command : "";
+    const stage = stateText.match(STAGE_LINE_RE);
+    if (stage) return stage[1];
+  }
+  return null;
+}
 
 // hashSession from scripts/run-record.mjs, reimplemented in one line rather than imported, so
 // the reader keeps no dependency on the writer. The algorithm, encoding and digest form must
@@ -306,6 +356,27 @@ export function compareVersions(a, b) {
   }
   return 0;
 }
+
+export const STANDALONE_TAGS = new Set([
+  "devcycle:doctor", "devcycle:learn", "devcycle:maintain", "devcycle:review",
+  "devcycle:verify", "devcycle:reconcile", "devcycle:onboard",
+]);
+// The release that introduced the run record (CHANGELOG.md 0.13.0); a session from before it
+// legitimately has none.
+export const RUN_RECORD_SINCE = "0.13.0";
+// Why a forward-filled session has no run record: a standalone command mints none by design, a
+// session from before 0.13.0 predates the record, and anything else expected one and is missing it.
+export function splitReason({ firstTag = null, pluginVersion = null } = {}) {
+  if (firstTag && STANDALONE_TAGS.has(firstTag)) return "standalone";
+  if (!pluginVersion || pluginVersion === "unknown" || compareVersions(pluginVersion, RUN_RECORD_SINCE) < 0)
+    return "predates-run-records";
+  return "record-missing";
+}
+const SPLIT_REASON_TEXT = {
+  standalone: "standalone command (no run by design)",
+  "predates-run-records": "predates run records",
+  "record-missing": "record expected, missing",
+};
 
 // Buckets a run's changed-line count (insertions + deletions) into a size band by the published
 // thresholds (GC6 — no invented weighted score). A null count is workload-unknown, never zero.
@@ -707,6 +778,8 @@ export function emitComplianceCandidates(turns, record) {
 // with no stale references apart from a changelog that yielded no stale keys to look for.
 // Every input failure throws — a changelog it could not read or parse is a broken run, and
 // reporting that as an empty findings list is the same as reporting the target clean.
+// No shipped record carries a removable kind (deprecated/renamed/removed) yet — every record is
+// `added` — so drift cannot fire until one is written; the drift mode's "nothing to check" line says so.
 export function configDrift(targetPath, changelogPath = CHANGELOG_PATH) {
   const changelogText = read(changelogPath, "config changelog");
   const yamlMatch = changelogText.match(/```yaml\n([\s\S]*?)```/);
@@ -792,7 +865,8 @@ function transcriptOf(r) {
 // Forward-fills attributionSkill within each transcript (main thread and each subagent's
 // own transcript, kept separate via transcriptOf) from the last explicit tag through to
 // that transcript's end or the next tag — a turn with no tag anywhere earlier in its own
-// transcript stays unattributed.
+// transcript stays unattributed. An entry tag is not a stage, so it fills a stage read off the
+// turns themselves (stageSignal) instead of the tag's own name.
 function attributeForwardFill(turns) {
   const byTranscript = new Map();
   turns.forEach((r, i) => {
@@ -802,10 +876,17 @@ function attributeForwardFill(turns) {
   });
   const effective = new Array(turns.length).fill(undefined);
   for (const indices of byTranscript.values()) {
-    let current;
+    let current, signalled = null;
     for (const i of indices) {
-      if (turns[i].attributionSkill) current = turns[i].attributionSkill;
-      effective[i] = current;
+      if (turns[i].attributionSkill) { current = turns[i].attributionSkill; signalled = null; }
+      if (current && ENTRY_TAGS.has(current)) {
+        // From the signal turn onward the stage is the signal's stage, until the next explicit
+        // tag or signal; turns before any signal are labelled unknown, never guessed.
+        signalled = stageSignal(turns[i]) ?? signalled;
+        effective[i] = signalled ?? UNKNOWN_STAGE[current];
+      } else {
+        effective[i] = current;
+      }
     }
   }
   return effective;
@@ -982,15 +1063,18 @@ export function isInFlight(newestRecordMs, nowMs = Date.now()) {
   return nowMs - newestRecordMs < IN_FLIGHT_MS;
 }
 
+// references/impact-scoring.md § The grouping key: the culprit-id when the event carries one,
+// else (event, stage). One definition, read by impactScores and culpritsByKey alike.
+export const impactKey = (e) => e.culprit ?? `${e.event}:${e.stage}`;
+
 // The culprit slugs each impact key's events carried, so a table can name the vocabulary entry
-// without impactScores having to key on it — the key stays (event, stage) until the release
-// references/impact-scoring.md § The grouping key names. A key whose events carry no slug is
+// without impactScores having to key on it. A key whose events carry no slug is
 // absent, never present with an empty list: absent is not "attributed to nothing".
 function culpritsByKey(record) {
   const out = {};
   for (const e of journalEvents(record)) {
     if (!e.culprit) continue;
-    const key = `${e.event}:${e.stage}`;
+    const key = impactKey(e);
     (out[key] ??= new Set()).add(e.culprit);
   }
   return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...v].sort()]));
@@ -1046,6 +1130,10 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   // (`if (!record || !record.stages?.length) return null;`) — otherwise every turn fell back to
   // attributeForwardFill uniformly, so "forward-filled" is never a per-turn mix at this level.
   const attributionSource = attributionRecord && attributionRecord.stages?.length ? "record" : "forward-filled";
+  // The main transcript's own first devcycle tag: what the session was entered as, which is what
+  // decides both the entry-tag bucket and why a forward-filled session has no record.
+  const firstTag = turns.find((r) => !r.isSidechain && !r.agentId && DEVCYCLE_PREFIX.test(r.attributionSkill ?? ""))?.attributionSkill ?? null;
+  const attributionEntry = firstTag && ENTRY_TAGS.has(firstTag) ? firstTag : null;
   // Coordinator-reported per-lens cost, taken straight off the run record's lens-cost lines — not
   // joined to a transcript turn, so it does not depend on attribution trust (schemaMismatch et al.).
   for (const lc of record?.lensCosts ?? []) bump(costByLens, lc.lens, lc.cost ?? 0);
@@ -1138,6 +1226,11 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     impact: record ? impactScores(record, costByStage) : null,
     culpritsByKey: culpritsByKey(record),
     attributionSource,
+    firstTag,
+    attributionEntry,
+    attributionSplitReason: attributionSource === "forward-filled"
+      ? splitReason({ firstTag, pluginVersion: pluginVersion ?? "unknown" })
+      : null,
     complianceCandidates: emitComplianceCandidates(toolCallEvents, record),
     inFlight: newestRecordMs !== null && isInFlight(newestRecordMs),
     quality: qualitySignals(record),
@@ -1148,7 +1241,9 @@ const DISCLOSURE =
   "note: skill attribution is forward-filled within each transcript from the last " +
   "explicit skill invocation through to that transcript's end (or the next invocation) — " +
   "genuinely unrelated work with no further skill call in the same transcript is still " +
-  "counted under the earlier skill.";
+  "counted under the earlier skill. The two entry tags (devcycle:cycle, devcycle:continue) name " +
+  "no stage, so their turns are attributed to the stage the session's own playbook reads and " +
+  "state-file writes reveal, and to an explicit \"stage unknown\" bucket until the first such signal.";
 
 const IN_FLIGHT_NOTE =
   "in-flight sessions have only part of their cost recorded, so they are excluded from the " +
@@ -1509,6 +1604,11 @@ export function buildJsonReport(summaries, ctx = {}) {
     sessions: summaries.map((s) => ({
       ...s,
       inferred: s.attributionSource === "forward-filled" ? "forward-filled" : null,
+      attribution: {
+        source: s.attributionSource ?? null,
+        entry: s.attributionEntry ?? null,
+        splitReason: s.attributionSource === "forward-filled" ? (s.attributionSplitReason ?? splitReason(s)) : null,
+      },
       quality: s.quality ?? null,
     })),
     candidates: [...emitCandidates(summaries), ...complianceCandidatesOf(summaries)],
@@ -1532,6 +1632,7 @@ export function buildJsonReport(summaries, ctx = {}) {
     // Absent, not zero: a probe that did not run renders null here for the same reason the
     // markdown renders "unavailable" — a 0 would read as "nothing filed".
     outer_loop: ctx.outerLoop ?? null,
+    verification: ctx.verification ?? null,
     compiled_knowledge: ctx.compiledKnowledge ?? null,
     cycles: cycleGroups(summaries),
   };
@@ -1669,7 +1770,7 @@ function main() {
   }
   // The draft path, before the report path: it prints one culprit's issue and returns. It never
   // posts, and it builds its own two tables rather than taking reportContext's, so drafting an
-  // issue never runs the `gh` probe the report's Outer loop section needs.
+  // issue never runs the `gh` probe `doctor --json`'s `outer_loop` needs.
   if (args.issueBody) {
     const slug = args.issueBody;
     const tables = {
@@ -1727,11 +1828,16 @@ export function deriveEvents(record) {
   const stageOf = (ts) =>
     (record.stages ?? []).find((s) => ts >= Date.parse(s.startedAt) && ts < Date.parse(s.endedAt))?.stage
     ?? "unattributed";
+  // A run written by a version that journals review-reject at the writer carries explicit events;
+  // deriving them again from its verdict lines would count every rejection twice. An older run
+  // carries none and keeps its derived ones (references/impact-scoring.md § Signals that are derived).
+  const explicitReject = (record.events ?? []).some((e) => e.event === "review-reject");
   for (const v of collapseVerdicts(record.verdicts)) {
-    if (v.blockingCount > 0 || v.conformance === "fail")
-      out.push({ event: "review-reject", stage: "execution", task: v.taskId, ts: null });
-    else if (v.round === 1 && v.blockingCount === 0 && v.conformance === "pass")
+    if (v.blockingCount > 0 || v.conformance === "fail") {
+      if (!explicitReject) out.push({ event: "review-reject", stage: "execution", task: v.taskId, ts: null });
+    } else if (v.round === 1 && v.blockingCount === 0 && v.conformance === "pass") {
       out.push({ event: "first-round-accept", stage: "execution", task: v.taskId, ts: null });
+    }
   }
   const byTask = new Map();
   for (const d of record.dispatches ?? []) {
@@ -1774,7 +1880,7 @@ export function impactScores(record, costByStage) {
   const all = journalEvents(record);
   const byKey = new Map();
   for (const e of all) {
-    const key = `${e.event}:${e.stage}`;
+    const key = impactKey(e);
     if (!byKey.has(key))
       byKey.set(key, { key, event: e.event, stage: e.stage, frequency: 0, impact: 0, measurable: true });
     const agg = byKey.get(key);
@@ -1861,6 +1967,18 @@ function trendAcross(values) {
   return present.length < 2 ? "insufficient data" : costTrend(present[present.length - 1], present[0]);
 }
 
+// Trend gating for the stage-by-version table: a per-version median from fewer than three
+// sessions is a sample, not a cohort, so it can anchor no trend. The reason carries both end
+// counts so a reader can tell "one thin release" from "no data at all".
+const MIN_TREND_N = 3;
+function gatedTrend(cells) {
+  const present = cells.filter((c) => c && c.n >= MIN_TREND_N);
+  if (present.length >= 2) return costTrend(present.at(-1).median, present[0].median);
+  const sampled = cells.filter(Boolean);
+  const a = sampled[0]?.n ?? 0, b = sampled.at(-1)?.n ?? 0;
+  return `insufficient data (n=${a}→${b})`;
+}
+
 // Spec §6 "Δ vs. previous (same profile)" and "Low confidence", implemented once so the version
 // table and the culprit table cannot drift into two different comparison rules. `rows` is in
 // report order; the nearest older same-profile row is the one to compare against, and a cohort
@@ -1932,6 +2050,14 @@ export function excessCost(runs) {
 const pctDelta = (from, to) =>
   from == null || to == null || from === 0 ? null : ((to - from) / from) * 100;
 
+// The runs a matched-cohort step can be built from: inside the recency band, with a request
+// kind and a workload band to match on. Exported so the empty-state line and the step builder
+// count the same population.
+export function matchableRuns(runs, band) {
+  return (runs ?? []).filter(
+    (r) => inBand(r.version, band) && r.requestKind != null && r.workloadBand != null);
+}
+
 // Adjacent version steps inside the recency band, workload-adjusted: for each adjacent version
 // pair in `band` and each matchKey both versions carry with >=2 runs, how the like-for-like cost
 // (and its main/sub turn counts, depth, and conformance) moved. A delta is emitted only where both
@@ -1939,8 +2065,7 @@ const pctDelta = (from, to) =>
 // per-run medians (run-level cost is not split by agent type, so a $/turn split is not derivable
 // here); the cost delta is the like-for-like median cost move.
 export function workloadAdjustedSteps(runs, band) {
-  const matchable = (runs ?? []).filter(
-    (r) => inBand(r.version, band) && r.requestKind != null && r.workloadBand != null);
+  const matchable = matchableRuns(runs, band);
   const byVersionKey = (version) => {
     const m = new Map();
     for (const r of matchable.filter((r) => r.version === version)) {
@@ -2045,16 +2170,31 @@ export function stageByVersionTable(summaries) {
   const versions = [...cohorts.keys()].filter((v) => v !== "unknown")
     .sort(compareVersions).slice(-TREND_VERSIONS);
   const stages = new Set(versions.flatMap((v) => [...cohorts.get(v).byStage.keys()]));
+  // How much of a stage's money was never joined to a run record but inferred from the transcript.
+  // A stage read mostly off inference is a weaker number than one read off records, and a column
+  // that does not say so lets the two be compared as if they were equally trustworthy.
+  const settled = summaries.filter((s) => !s.inFlight);
+  const forwardFilledShare = (stage) => {
+    const dollars = (list) => list.reduce((n, s) => n + (s.costByStage?.[stage] ?? 0), 0);
+    const total = dollars(settled);
+    return total > 0 ? dollars(settled.filter((s) => s.attributionSource === "forward-filled")) / total : 0;
+  };
   const rows = [...stages].map((stage) => {
     const byVersion = {};
     for (const version of versions) {
       const dollars = cohorts.get(version).byStage.get(stage);
-      // Absent, not zero: this version simply recorded no cost for this stage.
-      byVersion[version] = dollars ? median(dollars) : null;
+      // Absent, not zero: this version simply recorded no cost for this stage. A present cell
+      // carries its sample count so the trend gate and the render both see how thin it is.
+      byVersion[version] = dollars ? { median: median(dollars), n: dollars.length } : null;
     }
-    return { stage, byVersion, trend: trendAcross(versions.map((v) => byVersion[v])) };
+    return {
+      stage,
+      byVersion,
+      trend: gatedTrend(versions.map((v) => byVersion[v])),
+      forwardFilledShare: forwardFilledShare(stage),
+    };
   });
-  const rendered = (r) => Object.values(r.byVersion).reduce((n, d) => n + (d ?? 0), 0);
+  const rendered = (r) => Object.values(r.byVersion).reduce((n, d) => n + (d?.median ?? 0), 0);
   rows.sort((a, b) => rendered(b) - rendered(a) || byName(a.stage, b.stage));
   return { versions, rows };
 }
@@ -2170,6 +2310,8 @@ function impactRows(summaries, vocab = [], band = [], dates = new Map()) {
       // filed under a kind nobody assigned it.
       kind: entry?.kind ?? "unclassified",
       isWin: WIN_EVENTS.has(agg.event) || entry?.kind === "win",
+      // A culprit-keyed row always agrees on its one slug; an (event, stage) row has no slug list.
+      attributed: slug !== null,
       impact: agg.measurable ? agg.impact : null,
       occurrences: agg.occurrences,
       // Absent, not zero (QC1): a key seen only under an undetectable version has no range.
@@ -2192,8 +2334,8 @@ export function culpritTable(summaries, vocab) {
   const band = recencyBand(installedVersion(), dates);
   return impactRows(summaries, vocab, band, dates)
     .filter((r) => !r.isWin)
-    .map(({ name, kind, impact, occurrences, delta, trend, versions, lifecycle: life }) =>
-      ({ culprit: name, kind, impact, occurrences, delta, trend, versions, lifecycle: life }))
+    .map(({ name, kind, attributed, impact, occurrences, delta, trend, versions, lifecycle: life }) =>
+      ({ culprit: name, kind, attributed, impact, occurrences, delta, trend, versions, lifecycle: life }))
     // Live problems first, then by money at stake: a culprit still occurring in the recency band
     // is what the reader can act on, ahead of one a newer release has likely moved past.
     .sort((a, b) => (b.lifecycle === "active") - (a.lifecycle === "active") || byImpactDesc(a, b));
@@ -2407,6 +2549,9 @@ const GLOSSES = {
     "month where you happened to run `lean` more often cannot masquerade as an improvement.",
   "cost-by-stage": "Whether a stage is getting cheaper or dearer over releases — not just what it costs today.",
   "cost-by-stage-window": "Where this window's money actually went.",
+  "cost-by-lens":
+    "What each maintenance lens cost, straight off the lens-cost run records — the split to read " +
+    "when a maintain pass looks dear.",
   culprits:
     "Recurring problems, priced. The dollar figure is what each one actually cost you, summed " +
     "over every occurrence — not a severity guess. The Δ and Trend are per-session (derived), so " +
@@ -2420,7 +2565,6 @@ const GLOSSES = {
     "running far deeper than its own startup floor, a stage whose cost jumped between versions, and " +
     "each run's excess over its matched cohort (unmatched when the cohort has no peer).",
   promoted: "Whether lessons this repo already adopted actually stopped the problem recurring.",
-  "outer-loop": "Whether filing issues from this report is actually producing fixes.",
   "compiled-knowledge":
     "Whether lessons are getting cheaper to carry — a check costs nothing to read, prose costs " +
     "context on every run.",
@@ -2492,13 +2636,6 @@ const impactText = (v) => (v === null || v === undefined ? "unmeasurable" : usd(
 const cohortSessionsText = (r) =>
   r.lowConfidence ? `${r.sessions} (low confidence: n<${MIN_COHORT})` : String(r.sessions);
 
-// null means gh answered but no resolved culprit had a dated release — not a zero-day
-// turnaround; the string "unavailable" means gh itself could not be reached.
-const turnaroundText = (v) =>
-  v === null || v === undefined
-    ? "unavailable (no resolved culprit has a dated release)"
-    : v === "unavailable" ? "unavailable" : `${v} day(s)`;
-
 // Cost anomalies are ranked by the money at stake. A candidate carrying no dollar figure ranks
 // last rather than being sorted as if it had been measured at zero.
 const anomalyWeight = (c) => Math.abs(c.delta_dollars ?? c.dollars ?? 0);
@@ -2521,20 +2658,29 @@ function caveatLines(summaries, agg) {
   if (!summaries.length) return ["- no sessions matched."];
   const out = [];
   const unpriced = Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]);
-  const filled = summaries.filter((s) => s.attributionSource === "forward-filled").length;
+  const filled = summaries.filter((s) => s.attributionSource === "forward-filled");
   const inFlight = summaries.filter((s) => s.inFlight).length;
   const band = agg.cacheBand;
   for (const [model, count] of unpriced)
     out.push(`- UNPRICED MODEL: ${model} (${count} requests)`);
   out.push(`- ${cacheBandLine(band)}`);
-  if (filled > 0)
-    out.push(
-      `- ${filled} session(s) have inferred stage costs (forward-filled — no run record); the ` +
-        "session ids are in the appendix's per-session detail.",
-    );
+  // Split by why the record is absent rather than counted as one undifferentiated class: a
+  // standalone command mints no record by design, and reading that as a gap in the telemetry
+  // sends the reader looking for a writer bug that is not there.
+  const byReason = new Map();
+  for (const s of filled) {
+    const reason = s.attributionSplitReason ?? splitReason(s);
+    byReason.set(reason, (byReason.get(reason) ?? 0) + 1);
+  }
+  for (const reason of ["standalone", "predates-run-records", "record-missing"])
+    if (byReason.has(reason))
+      out.push(
+        `- ${byReason.get(reason)} session(s) have inferred stage costs — ${SPLIT_REASON_TEXT[reason]}; the ` +
+          "session ids are in the appendix's per-session detail.",
+      );
   if (inFlight > 0)
     out.push(`- ${inFlight} session(s) still in flight (newest record < 30 min old) — ${IN_FLIGHT_NOTE}`);
-  if (band.collapsed && !unpriced.length && filled === 0 && inFlight === 0)
+  if (band.collapsed && !unpriced.length && filled.length === 0 && inFlight === 0)
     out.push("- No caveats apply to this corpus.");
   return out;
 }
@@ -2569,10 +2715,14 @@ export function renderReport(summaries, ctx) {
   const {
     repo, today, scope,
     previousSummaries = null, vocab = [], promotions = [],
-    outerLoop: loop = null, compiledKnowledge: compiled = null, verification = null,
+    compiledKnowledge: compiled = null, verification = null,
   } = ctx ?? {};
   const L = [];
-  const section = (heading, glossKey) => { L.push("", heading, "", `*${GLOSSES[glossKey]}*`, ""); };
+  const section = (heading, glossKey) => {
+    const gloss = GLOSSES[glossKey];
+    if (gloss === undefined) throw new Error(`missing gloss for ${glossKey}`);
+    L.push("", heading, "", `*${gloss}*`, "");
+  };
   const agg = aggregate(summaries);
   const candidates = emitCandidates(summaries);
   // The run-level, workload-adjusted view (issue #114): run aggregates over the settled corpus,
@@ -2608,16 +2758,24 @@ export function renderReport(summaries, ctx) {
 
   section("## At a glance", "ataglance");
   const pctText = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
-  L.push(...markdownTable(
-    ["Step", "matchKey", "n", "conf", "workload-adj cost Δ% (derived)", "main-turn Δ",
-      "sub-turn Δ", "depth Δ", "conformance Δ"],
-    glanceSteps.map((r) => [
-      `${r.from}→${r.to}`, r.matchKey, r.n, r.confidence, pctText(r.costDeltaPct),
-      pctText(r.mainTurnDeltaPct), pctText(r.subTurnDeltaPct), pctText(r.depthDeltaPct),
-      r.conformanceDelta == null ? null : `${r.conformanceDelta >= 0 ? "+" : ""}${(r.conformanceDelta * 100).toFixed(0)}pp`,
-    ]),
-    "no matched cohort spans two adjacent in-band versions yet",
-  ));
+  if (glanceSteps.length) {
+    L.push(...markdownTable(
+      ["Step", "matchKey", "n", "conf", "workload-adj cost Δ% (derived)", "main-turn Δ",
+        "sub-turn Δ", "depth Δ", "conformance Δ"],
+      glanceSteps.map((r) => [
+        `${r.from}→${r.to}`, r.matchKey, r.n, r.confidence, pctText(r.costDeltaPct),
+        pctText(r.mainTurnDeltaPct), pctText(r.subTurnDeltaPct), pctText(r.depthDeltaPct),
+        r.conformanceDelta == null ? null : `${r.conformanceDelta >= 0 ? "+" : ""}${(r.conformanceDelta * 100).toFixed(0)}pp`,
+      ]),
+      "unreachable: the table renders only with rows",
+    ));
+  } else {
+    // Built from the data, never a fixed placeholder: the reader learns how far the corpus is
+    // from its first matched step.
+    const matchable = matchableRuns(settledRuns, glanceBand);
+    const versions = new Set(matchable.map((r) => r.version)).size;
+    L.push(`No matched cohorts: ${matchable.length} workload-bearing runs across ${versions} versions in the band; a row needs ≥2 same-shaped runs on two adjacent releases.`);
+  }
   const priciestOverall = Object.entries(agg.costByStage).sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
   L.push("", priciestOverall
     ? `Priciest stage overall (derived): ${priciestOverall[0]} (${usd(priciestOverall[1])}).`
@@ -2674,15 +2832,20 @@ export function renderReport(summaries, ctx) {
   section("## Cost by stage", "cost-by-stage");
   const stageTrend = stageByVersionTable(summaries);
   L.push(...markdownTable(
-    ["Stage", ...stageTrend.versions, "Trend (derived)"],
+    ["Stage", ...stageTrend.versions, "Trend (derived)", "Forward-filled (derived)"],
     stageTrend.rows.map((r) => [
       r.stage,
-      ...stageTrend.versions.map((v) => (r.byVersion[v] === null ? null : usd(r.byVersion[v]))),
+      ...stageTrend.versions.map((v) => (r.byVersion[v] === null ? null : `${usd(r.byVersion[v].median)} (n=${r.byVersion[v].n})`)),
       r.trend,
+      // An em dash, not "0%": no forward-filled dollars in this stage at all is a different
+      // statement from a share that rounded down to zero.
+      r.forwardFilledShare > 0 ? `${(r.forwardFilledShare * 100).toFixed(0)}%` : null,
     ]),
     "no version-tagged sessions to compare across releases",
   ));
-  L.push("", "_Dollar cells are derived per-version medians; Trend is derived._");
+  L.push("", "_Dollar cells are derived per-version medians; Trend is derived. Forward-filled is " +
+    "the share of the stage's settled dollars whose stage was inferred from the transcript rather " +
+    "than read off a run record._");
   // stageByVersionTable drops the undetectable-version cohort from every column and every trend,
   // because "unknown" cannot sit on a version axis — right, but silent, and an omission nobody
   // names reads as a clean bill of health. cohortTable is the sibling that keeps that bucket,
@@ -2732,10 +2895,11 @@ export function renderReport(summaries, ctx) {
 
   section("## Your culprits", "culprits");
   L.push(...markdownTable(
-    ["Culprit", "Kind", "Cost (observed)", "Occurrences (observed)", "Δ vs previous (derived)",
+    ["Culprit", "Cost (observed)", "Occurrences (observed)", "Δ vs previous (derived)",
       "Trend (derived)", "Versions (observed)", "Lifecycle (derived)"],
     culpritTable(summaries, vocab).map((r) => [
-      r.culprit, r.kind, impactText(r.impact), r.occurrences, deltaText(r.delta), r.trend,
+      r.attributed ? r.culprit : `${r.culprit} (unattributed)`,
+      impactText(r.impact), r.occurrences, deltaText(r.delta), r.trend,
       r.versions ? `${r.versions[0]}..${r.versions[1]}` : null, r.lifecycle,
     ]),
     "no scored culprit events in this corpus",
@@ -2800,12 +2964,12 @@ export function renderReport(summaries, ctx) {
 
   section("## Previously promoted — did it hold", "promoted");
   // The verification engine computes every verdict; this only renders it. One line per scoreboard
-  // entry (held / recurred / unmeasurable / broken / errored), then the resolved-in lines, then the
+  // entry (held / recurred / unmeasurable / broken / errored), then the
   // Actionability menu — each recurred lesson the engine flagged for escalation becomes a
   // `/devcycle:cycle` entry point the reader can run (playbooks/profiling-sessions.md).
   const v = verification ?? { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] };
   const overRuns = (n) => (n ? ` over ${n} run${n === 1 ? "" : "s"}` : "");
-  if (!v.scoreboard.length && !v.resolvedIn.length) {
+  if (!v.scoreboard.length) {
     L.push("_No promoted lesson has been measured against a run yet._");
   } else {
     for (const s of v.scoreboard)
@@ -2813,29 +2977,9 @@ export function renderReport(summaries, ctx) {
       // took: a skipped check (no --run-checks), an unrunnable path and an errored harness all
       // land on "unmeasurable"/"errored" and are only told apart by this suffix.
       L.push(`- ${s.culpritId} (${s.rung}): ${s.verdict}${overRuns(s.runsObserved)}${s.detail ? ` — ${s.detail}` : ""}`);
-    for (const r of v.resolvedIn)
-      L.push(`- ${r.culpritId}: resolved in ${r.resolvedIn} — ${r.verdict}${overRuns(r.runsObserved)}`);
     for (const e of v.candidates.escalation)
       L.push(`- Actionability — \`/devcycle:cycle\` re-address ${e.culpritId} (${e.reason}; escalate from ${e.rung})`);
   }
-
-  section("## Outer loop", "outer-loop");
-  // A probe that could not run renders "unavailable" for every field it feeds — never 0, which
-  // would read as "nothing has ever been filed".
-  const l = loop ?? {
-    drafted: "unavailable", draftedSince: DRAFTED_SINCE,
-    filed: "unavailable", resolved: "unavailable", medianTurnaroundDays: "unavailable",
-    truncated: false,
-  };
-  L.push(
-    `- Drafted: ${l.drafted} (issues; markers recorded since ${l.draftedSince})`,
-    `- Filed: ${l.filed}`,
-    `- Resolved: ${l.resolved}`,
-    ...(l.truncated
-      ? [`- Note: the issue query returned results at the ${OUTER_LOOP_QUERY_LIMIT}-issue query limit — the counts below are a lower bound`]
-      : []),
-    `- Median turnaround: ${turnaroundText(l.medianTurnaroundDays)}`,
-  );
 
   section("## Compiled knowledge (cumulative, by version)", "compiled-knowledge");
   const ck = compiled ?? { rows: [], note: "Unavailable — the compiled-knowledge probe did not run." };
@@ -2937,7 +3081,7 @@ function reportContext(args, result) {
     previousSummaries: result.previousSessions,
     vocab,
     promotions,
-    outerLoop: outerLoop(doctorDir()),
+    outerLoop: args.json ? outerLoop(doctorDir()) : null, // the funnel is --json only: nothing in the markdown reads it, so a markdown run makes no gh call
     compiledKnowledge: compiledKnowledge(promotions),
     verification: promotionVerification(promotions, args.runChecks),
   };
@@ -3297,8 +3441,8 @@ export function complianceIssueBody(slug, summaries, shape) {
 
 // Exactly what `--issue-body` prints. The repo line leads because it is the one field the filing
 // step must act on rather than paste: a bare `gh issue create` resolves to the repo the run
-// happened in, so a draft filed without it lands in the user's own tracker while the Outer loop
-// section queries DEVCYCLE_UPSTREAM and counts zero. Held here, not inlined in main(), so the
+// happened in, so a draft filed without it lands in the user's own tracker while
+// `doctor --json`'s `outer_loop` queries DEVCYCLE_UPSTREAM and counts zero. Held here, not inlined in main(), so the
 // printed form is pinned by a test rather than by nothing.
 export function issueDraftLines(draft) {
   return [

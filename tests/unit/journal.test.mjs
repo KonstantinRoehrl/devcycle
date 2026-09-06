@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { journalDir, readJournal, journalEvents, eventsByCulprit, lastRecurrence, runsObserved } from "../../scripts/journal.mjs";
+import { journalDir, readJournal, journalEvents, eventsByCulprit, runsObserved } from "../../scripts/journal.mjs";
 import { repoSlug } from "../../scripts/run-record.mjs";
 
 // A journal store on disk, laid out exactly as run-record.mjs writes one.
@@ -77,16 +77,6 @@ test("eventsByCulprit drops null-culprit events and keeps the rest keyed", () =>
   const map = eventsByCulprit(events);
   assert.deepEqual([...map.keys()], ["friction:a"]);
   assert.equal(map.get("friction:a").length, 2);
-});
-
-test("lastRecurrence returns the newest ts for an id, null for an id never seen", () => {
-  const repo = store([
-    ev(RUN_A, "friction:a", "2026-08-02T00:00:00Z"),
-    ev(RUN_A, "friction:a", "2026-08-09T00:00:00Z"),
-  ]);
-  const { events } = journalEvents({ toplevel: repo });
-  assert.equal(lastRecurrence(events, "friction:a"), "2026-08-09T00:00:00Z");
-  assert.equal(lastRecurrence(events, "friction:never"), null);
 });
 
 test("runsObserved counts distinct runs at or after `since`", () => {

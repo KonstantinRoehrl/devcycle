@@ -110,10 +110,11 @@ devcycle/                (public GitHub repo)
 │   ├── history-inspector.md      # read-only git-history lens for /devcycle:maintain; bounded traversal
 │   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
 │                                 # origin the browser guard below permits
-├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02)
-│   ├── hooks.json                # registers the guards on PreToolUse (browser + reviewer-git)
+├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05)
+│   ├── hooks.json                # registers the guards on PreToolUse (browser + reviewer-git) and the commit-sensor on PostToolUse
 │   ├── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
-│   └── block-reviewer-git-write.mjs   # denies destructive git from a reviewer origin (#165)
+│   ├── block-reviewer-git-write.mjs   # denies destructive git from a reviewer origin (#165)
+│   └── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
 ├── scripts/                      # L4 — validate.mjs, doctor.mjs, dream.mjs, the checkers, bump-version.mjs
 ├── workflows/                    # L4
@@ -303,8 +304,10 @@ gated by `userConfig.crossModelReview`.
   `devcycle:red-team-reviewer`, `devcycle:on-device-driver`, `devcycle:history-inspector`. The plugin id is not decoration:
   the harness passes `<plugin>:<name>` as a subagent's `agent_type`, which is the spelling the
   browser guard's allowlist must carry (`docs/platform-notes.md` § (e)).
-- Hooks: two — `block-main-thread-browser` and `block-reviewer-git-write` — named for what they
-  deny rather than what they guard; the only surface components not loaded by a command.
+- Hooks: three — two guards, `block-main-thread-browser` and `block-reviewer-git-write`, named for
+  what they deny rather than what they guard; and one sensor, `workload-sensor`, named for what it
+  watches rather than for the record it writes. They are the only surface components not loaded by
+  a command: each fires on a matched tool call instead (`docs/README.md` § Hooks).
 
 ## 15. Compaction — the reference layer, profiles, and the audit stage (added 2026-07-26)
 
@@ -471,12 +474,16 @@ The contract used to cover skills. It covers commands because, since 2026-08-06,
 the only files with frontmatter: playbooks are loaded by path and carry no description at all
 (§3), so nothing but a command can be selected by description. `docs/routing.md` carries
 the same information in prose a human reads, and `scripts/validate.mjs` fails the build when a
-command is absent from it — which is the closest thing to a mechanized sufficiency check the
-repo has.
+command is absent from it — and, since 2026-09-05, when a description names one of the
+consequence classes `read-only`, `side-effectful` or `confirm-first` while the routing table
+assigns that command a different one. So, on top of the presence check and §4.6's
+length budget, CI mechanizes two *routing* properties of a description: that the command it
+describes is on the routing surface at all, and that any consequence it claims there is the one
+the table assigns.
 
-The rest is a review-time convention, deliberately not a CI gate: judging whether a description
-is complete enough needs a model, and no model credential is available to GitHub Actions. A new
-or materially-changed command's description is written against the intents in `routing.md` and
-checked by the reviewer of the change. The prose scenario harness that formerly held this as a
+Completeness is not among them, and the rest stays a review-time convention, deliberately not a CI
+gate: judging whether a description is complete enough needs a model, and no model credential is
+available to GitHub Actions. A new or materially-changed command's description is written against
+the intents in `routing.md` and checked by the reviewer of the change. The prose scenario harness that formerly held this as a
 `description-sufficiency` test type was retired 2026-08-06 — see `CONTRIBUTING.md` and the
 decision log.

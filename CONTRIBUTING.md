@@ -71,7 +71,7 @@ runs everything except `doctor.mjs` — that one is local-only, so it's the one 
 catch for you:
 
 ```
-node scripts/validate.mjs             # manifests, command frontmatter, description budget, routing table, fences — CI
+node scripts/validate.mjs             # manifests, command frontmatter, description budget, routing table (incl. description/consequence parity), fences — CI
 node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-listed terms — CI
 node scripts/duplication-check.mjs    # duplicated prose across commands/playbooks/agents/references, and within a file — CI
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
@@ -101,7 +101,24 @@ runs from the installed plugin, not this repo.
 
 `scripts/doctor.mjs` prices what it measures against `scripts/pricing.mjs`, the data module
 that holds per-model dollar rates and context windows with no CLI of its own — update that
-file when prices change.
+file when prices change. What says the table is complete is
+`tests/fixtures/observed-model-ids.json`, the model ids real corpora recorded;
+`node scripts/refresh-observed-models.mjs` refreshes it (`--dir` for a corpus elsewhere,
+`--out` for another target) and names any id it found that has no price. Refresh it rather
+than editing it by hand: a hand-written copy of the table's own keys is what let
+`claude-fable-5-1` ship unpriced.
+
+A second committed file keeps that snapshot honest, and the invariant between the two is what
+the suite enforces. `tests/fixtures/observed-corpus/` is a corpus of transcript records in
+`~/.claude/projects` layout, and `tests/unit/pricing.test.mjs` requires the snapshot to hold
+every model id that corpus yields — so deleting an unpriced id from the snapshot to quiet the
+coverage test fails there instead. The refresh is therefore **additive**: it adds what the
+corpus it read records and keeps every id the snapshot already held, so running it the
+documented way over your own `~/.claude/projects` cannot drop the fixture corpus's ids and
+cannot red the tree by itself. It can still red the coverage test by adding a model nobody has
+priced — that is the signal, not a collision, and the script names the id as it writes. Dropping
+an id is the one deliberate hand edit here, and the corpus guard bounds it to ids that corpus
+does not record.
 
 Writing a new `scripts/*.mjs`? Reuse `doctor.mjs`'s exported helpers
 (`findTranscriptFiles`, `owningSession`, `readRecords`, `inWindow`) for corpus enumeration,
@@ -138,8 +155,12 @@ results, plans, and specs out of the repository — they are records of one run 
 they date immediately, and nobody installing the plugin has a use for them. `.devcycle/` is
 gitignored and is where those belong.
 
-`docs/known-issues.md` is the one place open defects are recorded. Fixing a defect means
-deleting its entry in the same commit.
+`docs/known-issues.md` is the hand-curated store of confirmed defects in devcycle's own engines;
+fixing one means deleting its entry in the same commit. The same rule holds for the second store,
+`docs/devcycle/maintenance-findings/`: a resolved finding's record is deleted outright — here,
+where that store is tracked, in its own `git rm` commit — rather than kept with a resolved marker.
+A *dismissed* finding is the one record that stays: deleting it would let the finding resurface as
+new on the next pass. `docs/known-issues.md` owns how the two stores split.
 
 ## Releasing
 
@@ -177,8 +198,9 @@ notes come from the PR title rather than from a commit range.
 
 ### Watching a fix past release: the maintainer-cohort check
 
-`doctor.mjs` tells one user whether a `resolved-in:` fix held for *their* own runs, but no local
-journal sees whether it held fleet-wide. After a `resolved-in:` release ships, watch
+`doctor --json`'s `verification.resolvedIn` tells one user whether a `resolved-in:` fix held for
+*their* own runs (the markdown report no longer renders the line), but no local journal sees
+whether it held fleet-wide. After a `resolved-in:` release ships, watch
 `gh issue list --label culprit:<slug> --label from-doctor` for that culprit-id: if new issues
 keep arriving post-release, the fix did not hold across the userbase even though it may show
 `held` in an individual doctor report.

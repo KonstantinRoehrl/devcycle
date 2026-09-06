@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { makeRepo } from "./helpers.mjs";
 import { recordPath, hashSession } from "../../scripts/run-record.mjs";
 import { readRunRecords, summarizeSession } from "../../scripts/doctor.mjs";
 
@@ -66,7 +67,7 @@ test("a real run/session/dispatch/verdict/commit chain, written via the real CLI
 
 test("a workload line written by the real CLI joins onto the session's record and summary", () => {
   const runs = mkdtempSync(join(tmpdir(), "rr-wl-"));
-  const repo = mkdtempSync(join(tmpdir(), "wl-repo-")); // not a git repo → diffStats reads zeros
+  const repo = makeRepo(); // a real repo: diffStats now refuses to read zeros off a failed git call
   const sessionId = "session-with-a-workload";
 
   const runId = runRecord(["new", "--repo", repo, "--plugin-version", "0.14.3",
