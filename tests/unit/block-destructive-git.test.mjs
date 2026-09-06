@@ -329,11 +329,13 @@ const AMBIGUITY_CLASSES = [
   ["separated global option: --work-tree", "git --work-tree . clean -fd", "git --work-tree . stash"],
   ["separated global option: --namespace", "git --namespace n reset --hard", "git --namespace n stash"],
   ["line continuation", "git \\\n reset --hard", "git \\\nstash pop"],
-  // Branch review round 2: the same four classes in their GLUED spellings. The parser tokenizes on
+  // Branch review round 2: the same four classes in their GLUED spellings. The parser tokenized on
   // whitespace only, so a shell metacharacter written flush against the next word (`f(){`, `*)git`)
   // stayed part of the head token and hid the git from both round-1 rules; `2>&1` additionally lost
-  // its `&` to the segment splitter's background-operator alternative. Every row below returned
-  // allow on at least one arm before the round-2 fix.
+  // its `&` to the segment splitter's background-operator alternative. The function-head, case-label
+  // and `2>&1` rows returned allow on at least one arm before the round-2 fix; the other three
+  // redirection rows (`<`, `>>out`, `2>/dev/null`) already denied and are carried as regression
+  // guards for the operator spellings around them (branch review round 4, test-integrity).
   ["function-definition head glued to its brace body", "f(){ git reset --hard; }; f", "f(){ git stash; }; f"],
   ["function-definition head glued to its subshell body", "f()( git reset --hard )", "f()( git stash )"],
   ["function-definition head that names the git binary", "git () { git reset --hard; }; git", "git () { git stash; }; git"],
@@ -344,6 +346,17 @@ const AMBIGUITY_CLASSES = [
   ["leading redirection: input with a separated target (<)", "< /dev/null git reset --hard", "< /dev/null git stash"],
   ["leading redirection: append with a glued target (>>)", ">>out git reset --hard", ">>out git stash"],
   ["leading redirection: numbered descriptor with a glued target (2>)", "2>/dev/null git reset --hard", "2>/dev/null git stash"],
+  // Branch review round 4: the HALF-glued twins of the classes rounds 1-3 closed. Splitting on
+  // whitespace alone gave every rule keyed to a token boundary a twin spelling, so `f() {` (round 1)
+  // and `f(){` (round 2) were closed while `f (){` — head `f`, with `(){` behind it — stayed open,
+  // and `2>& 1` stayed open after `2>&1` was closed. Each row below returned allow on BOTH arms
+  // before the tokenizer rewrite; they are the reason the parser now canonicalizes before it
+  // classifies rather than enumerating one more spelling.
+  ["function-definition head with a space before its glued brace body", "f (){ git reset --hard; }; f", "f (){ git stash; }; f"],
+  ["function-definition head with a space before its glued subshell body", "f ()( git reset --hard )", "f ()( git stash )"],
+  ["function-definition head naming git, spaced parens and a glued body", "git (){ git reset --hard; }; git", "git (){ git stash; }; git"],
+  ["leading redirection: descriptor duplication with a separated target (2>& 1)", "2>& 1 git reset --hard", "2>& 1 git stash"],
+  ["leading redirection: duplication onto stderr with a separated target (>& 2)", ">& 2 git reset --hard", ">& 2 git stash"],
 ];
 
 test("guarded origin + every named ambiguity class hiding a destructive git is denied", () => {
@@ -367,8 +380,85 @@ test("guarded origin + the same reserved words and labels around non-git command
     "function f { echo ok; }; f",
     ">/dev/null echo ok",
     "coproc node --test",
+    // Round 4: the glued and half-glued definition heads, and the separated-target redirections,
+    // in their non-git direction — closing a class must not turn it into a blanket deny.
+    "f(){ echo ok; }; f",
+    "f (){ echo ok; }; f",
+    "f ()( echo ok )",
+    "2>& 1 echo ok",
+    ">& 2 echo ok",
   ])
     assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for non-git: ${cmd}`);
+});
+
+// Round-4 lows: a case-pattern label is syntax whatever it spells, but two label spellings still
+// reached the classifier as a command — an alternated label's FIRST alternative (`git|sh)`, cut off
+// by the segment splitter's `|`) and a label whose arm body sits on the next line (`git)` alone in
+// its segment) — so a benign `echo` was denied to a guarded origin because the LABEL spelled git.
+test("guarded origin + a case label spelling git is never the arm's command, in either spelling", () => {
+  for (const cmd of [
+    "case $x in git|sh) echo ok;; esac",
+    'case "$1" in\n  git|sh) echo ok ;;\nesac',
+    "case $x in\n  git)\n    echo ok\n    ;;\nesac",
+    "case $x in sh|git) git log;; esac",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a case label spelling git: ${cmd}`);
+});
+
+// A metacharacter inside quotes is DATA, not syntax: canonicalizing it into its own token would
+// invent segments and commands that the shell never runs. Single, double and ANSI-C quoting all
+// hold, and a `;` inside a commit message must not split the command.
+test("a shell metacharacter inside quotes is data, not syntax", () => {
+  for (const cmd of [
+    "echo '(){}'",
+    'echo "a; git reset --hard is only text"',
+    "git log --grep='; git reset --hard' -1",
+    "grep -rn 'git stash' playbooks/",
+    "git diff -- 'a(b)c'",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a quoted metacharacter: ${cmd}`);
+  const cwd = cycleDir(stateAt("execution"));
+  assert.equal(decideMain(cwd, 'git commit -m "fix: git stash;"'), "allow");
+  assert.equal(decideMain(cwd, "echo 'git stash'"), "allow");
+});
+
+// An unterminated quote is an ambiguous command, and this file's answer to ambiguity is to classify
+// MORE, never less: the command is re-read with quoting disabled so the syntax the dangling quote
+// would have hidden still reaches the classifier. A denial then costs a malformed command; the
+// alternative costs a destructive git.
+test("an unterminated quote is classified as if the command were unquoted", () => {
+  assert.equal(decide(REVIEWER, 'echo "x; git reset --hard'), "deny");
+  assert.equal(decide(REVIEWER, "echo 'x; git reset --hard"), "deny");
+  assert.equal(decide(REVIEWER, 'echo "x; npm test'), "allow");
+});
+
+// Round-4 low: the background-`&` split had no regression row pairing a redirection with a REAL
+// background operator, so the rule that keeps `2>&1` intact could have swallowed one unnoticed.
+// The responsibility for telling the two apart now sits in the tokenizer, which glues a
+// duplication's `&` into its redirection operator and emits a background `&` as its own token.
+test("a background & after a redirection still separates the commands", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["node s.js >/dev/null & git reset --hard", "node s.js >/dev/null& git reset --hard"])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a backgrounded redirect: ${cmd}`);
+  assert.equal(decideMain(cwd, "node s.js >/dev/null & git stash"), "deny");
+  assert.equal(decide(REVIEWER, "node s.js >/dev/null & npm test"), "allow");
+});
+
+// No new false positives: the ordinary commands this cycle's own agents run every turn. A tokenizer
+// rewrite is exactly the change that breaks these, and round 1 already shipped two over-denials.
+test("the ordinary commands a cycle's agents run stay allowed", () => {
+  for (const cmd of [
+    "git status 2>&1",
+    "npm test 2>&1 | tail -5",
+    "git diff --stat -- a b",
+    "node --test tests/unit/*.test.mjs",
+    'grep -rn "git" playbooks/',
+    "find . -name '*.mjs' -exec node --check {} \\;",
+    "node scripts/validate.mjs && node scripts/xref-check.mjs",
+    "du -sh /tmp/devcycle-tests",
+    "git log --oneline -5 | cat",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for an ordinary agent command: ${cmd}`);
 });
 
 // A3's false-deny half: pairing a value only with -C/-c left the subcommand index on the VALUE, so
@@ -392,6 +482,7 @@ test("main thread + git stash list/show stay allowed through the newly parsed sp
     "case $x in git) git stash list;; esac",
     "f() { git stash show -p; }; f",
     "f(){ git stash show -p; }; f",
+    "f (){ git stash show -p; }; f",
     "git --git-dir /r/.git stash list",
   ])
     assert.equal(decideMain(cwd, cmd), "allow", `expected allow for main-thread read-only stash: ${cmd}`);
@@ -423,11 +514,13 @@ test("guarded origin + a case pattern label spelling a command classifies the ar
     assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for case-label spelling: ${cmd}`);
 });
 
-// The label strip must never empty a segment: `(git)` is a subshell running a bare, unclassifiable
-// git, not a labelled arm, so deny-on-ambiguity still owns it.
+// `(git)` is a subshell running a bare, unclassifiable git, not a labelled arm, so deny-on-ambiguity
+// still owns it — including with a redirection behind it, which round 4 found slipping through when
+// the whole `(git)` token was mistaken for a pattern label.
 test("guarded origin + a bare git inside a subshell is still denied", () => {
   assert.equal(decide(REVIEWER, "(git)"), "deny");
   assert.equal(decide(REVIEWER, "(git stash)"), "deny");
+  assert.equal(decide(REVIEWER, "(git) >/dev/null"), "deny");
 });
 
 // Fold-in F6: every VALUE_OPTIONS entry is exercised on both arms — a separated value must not be
@@ -495,9 +588,15 @@ test("guarded origin + a parenthesis inside an argument or a trailing redirectio
     assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a non-label parenthesis: ${cmd}`);
 });
 
-// A case arm's alternation (`git|sh)`) is split by the segment loop's `|`, so the label reaching the
-// head is the last alternative — still a label, on both arms.
-test("a case arm with alternated patterns is still classified by its body", () => {
+// A case arm's alternation (`git|sh)`) spans the `|` the segment splitter cuts on, so the whole
+// label — every alternative — is dropped before segments are formed. Both directions are pinned:
+// with the label gone the arm is classified by its BODY, which is the only thing that runs. Pinning
+// the deny alone proved nothing, because a bare `git` first alternative denied on ambiguity anyway
+// (branch review round 4, test-integrity).
+test("a case arm with alternated patterns is classified by its body, in both directions", () => {
+  const cwd = cycleDir(stateAt("execution"));
   assert.equal(decide(REVIEWER, "case $x in git|sh) git reset --hard;; esac"), "deny");
-  assert.equal(decideMain(cycleDir(stateAt("execution")), "case $x in git|sh) git stash;; esac"), "deny");
+  assert.equal(decideMain(cwd, "case $x in git|sh) git stash;; esac"), "deny");
+  assert.equal(decide(REVIEWER, "case $x in git|sh) git log;; esac"), "allow");
+  assert.equal(decideMain(cwd, "case $x in git|sh) git stash list;; esac"), "allow");
 });
