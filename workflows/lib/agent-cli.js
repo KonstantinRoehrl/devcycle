@@ -45,23 +45,43 @@ function hookSignals() {
 
 // Kill the child's whole process group (audit H5: a grandchild that inherited the stdio pipes —
 // `sh -c "sleep 4; echo done"`, a backgrounded server in a verify command — survived a kill of the
-// direct child). Falls back to the direct child when the group is already gone (ESRCH), so calling
-// this for a leader that has already exited on its own — the normal case at settle — is safe.
+// direct child).
+//
+// `-pid` names a process group, not this child, and once the leader has been reaped that number is
+// only still ours while the group exists: POSIX will not recycle a pid that is an existing group's
+// pgid, but the moment the group empties the kernel may hand the pid to a stranger who leads a
+// group of their own. So for a reaped leader the group is probed with signal 0 and killed only if
+// it answers — which loses nothing, because an empty group is exactly the case where the kill had
+// nothing to kill. While the leader is still alive (timeout, overflow, the signal sweep) the pid
+// cannot have moved, so the kill goes out unconditionally and falls back to the direct child if the
+// group kill throws — ESRCH in the window before the child has finished becoming its own leader.
 function killGroup(child) {
+  const reaped = child.exitCode !== null || child.signalCode !== null;
+  if (!reaped) {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      try { child.kill("SIGKILL"); } catch { /* already exited */ }
+    }
+    return;
+  }
+  try {
+    process.kill(-child.pid, 0);
+  } catch {
+    return; // ESRCH: the group is empty, and this pid may already belong to someone else
+  }
   try {
     process.kill(-child.pid, "SIGKILL");
-  } catch {
-    try { child.kill("SIGKILL"); } catch { /* already exited */ }
-  }
+  } catch { /* the last member exited between the probe and the kill */ }
 }
 
 // Spawn a child as the leader of its own process group, buffer its output, SIGKILL the group after
 // timeoutMs. Settles on the child's `exit`, draining for DRAIN_GRACE_MS, not on `close`. Settling
-// ends the call by contract, so it also kills the group and destroys the stdio pipes: a grandchild
-// that inherited them would otherwise hold the parent's event loop open long after the promise
-// resolved (the engine writes its report and then hangs). Never rejects: transport failures come
-// back on the resolved value as { spawnError } or { timedOut } so callers branch on them instead of
-// catching.
+// ends the call by contract, so it also sweeps any survivor left in the group and destroys the
+// stdio pipes: a grandchild that inherited them would otherwise hold the parent's event loop open
+// long after the promise resolved (the engine writes its report and then hangs). Never rejects:
+// transport failures come back on the resolved value as { spawnError } or { timedOut } so callers
+// branch on them instead of catching.
 function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = {}) {
   return new Promise((resolve) => {
     hookSignals();
@@ -80,8 +100,10 @@ function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = 
       clearTimeout(timer);
       clearTimeout(drainTimer);
       // `value` already carries the output buffered so far, so releasing the child cannot discard
-      // it. Kill the group before dropping the child from `live`: the signal sweep only has to
-      // reach children that are still running, and after this the group is not.
+      // it. Sweep the group before dropping the child from `live`, so nothing leaves the sweep set
+      // still running. On the ordinary path the child exited and left an empty group behind and
+      // killGroup sends nothing; when a grandchild is still holding the pipes the group is provably
+      // this run's own, and it takes the SIGKILL that stops it outliving the call.
       killGroup(child);
       live.delete(child);
       for (const stream of [child.stdout, child.stderr, child.stdin]) stream?.destroy();

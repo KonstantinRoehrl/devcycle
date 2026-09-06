@@ -303,6 +303,61 @@ test("run() leaves nothing alive in the child's group once it has settled, and s
   }
 });
 
+// Branch review round 2: settling group-killed unconditionally, but on the normal path the leader
+// has already exited and been reaped, so `-pid` addresses a process group this run no longer owns.
+// A pid the kernel has since handed to an unrelated group leader would take that SIGKILL. POSIX does
+// not recycle a pid while it is still an existing group's pgid, so the case where the target may be
+// a stranger is exactly the case where the group is empty and the kill buys nothing. The difference
+// between "signalled a pgid we no longer own" and "signalled nothing" is invisible on the resolved
+// value, so a spy on process.kill is the only faithful instrument for it.
+async function recordKills(fn) {
+  const saved = process.kill;
+  const calls = [];
+  process.kill = (pid, signal) => {
+    calls.push({ pid, signal });
+    return saved.call(process, pid, signal);
+  };
+  try {
+    await fn();
+  } finally {
+    process.kill = saved;
+  }
+  return calls;
+}
+
+test("run() sends no group kill when the child exited on its own and left an empty group", async () => {
+  let res;
+  const calls = await recordKills(async () => {
+    res = await run(process.execPath, ["-e", "process.stdout.write(String(process.pid))"]);
+  });
+  const pid = Number(res.stdout.trim());
+  assert.equal(res.code, 0);
+  assert.ok(Number.isInteger(pid) && pid > 0, `the child must report its own pid; got ${JSON.stringify(res.stdout)}`);
+  const groupSignals = calls.filter((c) => c.pid < 0 && c.signal !== 0);
+  assert.deepEqual(
+    groupSignals,
+    [],
+    `settling a cleanly exited child must signal nothing: its leader is reaped and its group empty, so -${pid} may already be a stranger's group. Sent ${JSON.stringify(groupSignals)}`
+  );
+});
+
+test("run() still kills the group at settle while a grandchild is holding it open", async () => {
+  let res;
+  const calls = await recordKills(async () => {
+    res = await run("/bin/sh", ["-c", BACKGROUNDS_A_GRANDCHILD]);
+  });
+  const pid = Number(res.stdout.trim());
+  try {
+    assert.ok(
+      calls.some((c) => c.pid < 0 && c.signal === "SIGKILL"),
+      `a group that still has a live member cannot have had its pgid recycled, so the H5 sweep must still fire; sent ${JSON.stringify(calls)}`
+    );
+    assert.equal(await waitForExit(pid, 1000), true, "the grandchild must still be dead once run() has settled");
+  } finally {
+    try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+  }
+});
+
 // The timeout timer used to be cleared only inside settle, so a child that exited on its own but
 // whose `close` was delayed into the drain window had the timeout fire mid-drain and flip the
 // resolved value to timedOut: true — a timeout reported for a child that exited cleanly.
