@@ -28,17 +28,17 @@
 // never applied. The real repository is only written on the applied path.
 //
 // Targets are force-added to the sweep base so a gitignored target is swept like any other, and the
-// purity check counts ignored collateral that is NEW against a per-attempt snapshot of the
-// worktree's ignored paths. The snapshot is retaken after every verifyCommand run and after every
-// revert, because a verify that builds, installs or measures coverage writes gitignored output that
-// `git clean -fd` cannot remove — without the snapshot the sweep blamed the editor agent for its own
-// verify's artifacts and skipped every file. The snapshot goes one level below what git reports:
-// git names a wholly ignored directory once (`dist/`), so a snapshot of entry paths alone would hide
-// every file the agent later writes inside a directory the verify had already created. Snapshotting
-// each such directory's contents makes that file a new entry of its own. A rejected attempt's
-// ignored collateral is then deleted by path before the re-snapshot, so it neither stays on disk nor
-// enters the next baseline. Stale worktree registrations from a killed run are pruned before the new
-// worktree is added.
+// purity check charges the editor agent with every ignored path written during its attempt's WINDOW
+// — the stretch between the marker the sweep stamps just before the agent runs and the purity check
+// straight after it. A verifyCommand that builds, installs or measures coverage writes gitignored
+// output that `git clean -fd` cannot remove, but it only ever runs between windows, so none of it is
+// ever mistaken for the agent's collateral; that is also why nothing has to be re-snapshotted after
+// a verify or a revert. The check goes one level below what git reports: git names a wholly ignored
+// directory once (`dist/`), so judging by entry paths alone would hide every file the agent writes
+// inside a directory the verify had already created. A charge the attempt CREATED is deleted by
+// path; one it merely overwrote is left where it is, because the sweep cannot put back contents it
+// never held — and the skip reason names it rather than implying the revert undid it. Stale worktree
+// registrations from a killed run are pruned before the new worktree is added.
 //
 // Optional env: DEVCYCLE_SWEEP_MODEL sets --model for the claude editor
 // subagents (unset -> the CLI's configured default model).
@@ -55,7 +55,7 @@
 "use strict";
 
 const { execFileSync } = require("node:child_process");
-const { existsSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } = require("node:fs");
+const { existsSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, lstatSync, writeFileSync } = require("node:fs");
 const { join, dirname, resolve, relative, isAbsolute, sep } = require("node:path");
 const os = require("node:os");
 const { makeLogger, run, claudeStructured } = require("./lib/agent-cli.js");
@@ -109,103 +109,133 @@ async function runEditorAgent(relPath, instruction, worktree, model) {
   });
 }
 
-// Every entry `git status --porcelain --ignored=matching` reports, split into its two-letter status
-// code and its path. `!!` marks an ignored entry; a wholly ignored directory is reported once as the
-// directory, anything else per file. That collapsing is what keeps this call cheap next to a
-// `node_modules/`, and it is why the purity check cannot judge ignored state by these entry paths
-// alone — one `dist/` line stands for however many files are under it.
+// Every entry `git status --porcelain --ignored=matching -z` reports, split into its two-letter
+// status code and its path. `!!` marks an ignored entry; a wholly ignored directory is reported once
+// as the directory (with a trailing slash), anything else per file. That collapsing is what keeps
+// this call cheap next to a `node_modules/`, and it is why the purity check cannot judge ignored
+// state by these entry paths alone — one `dist/` line stands for however many files are under it.
+// `-z` is what makes the paths usable: in its default form git C-quotes any path outside printable
+// ASCII (`"caf\303\251/"`), and those octal escapes are not JSON, so an ignored directory with a
+// non-ASCII name kept its quotes, stopped ending in a slash, and had its contents inspected by
+// nobody. The NUL-separated form quotes nothing.
 function statusEntries(worktree) {
-  return git(["status", "--porcelain", "--ignored=matching"], worktree)
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      let p = line.slice(3);
-      if (p.includes(" -> ")) p = p.split(" -> ").pop();
-      if (p.startsWith('"') && p.endsWith('"')) {
-        try { p = JSON.parse(p); } catch { /* keep quoted form */ }
-      }
-      return { ignored: line.slice(0, 2) === "!!", path: p };
-    });
+  const fields = git(["status", "--porcelain", "--ignored=matching", "-z"], worktree).split("\0");
+  const entries = [];
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    if (!field) continue;
+    const code = field.slice(0, 2);
+    // A rename or copy arrives as two NUL-terminated fields, the destination first and the source
+    // second. Only the destination exists now, so the source field is stepped over, not read as an
+    // entry of its own.
+    if (code.includes("R") || code.includes("C")) i++;
+    entries.push({ ignored: code === "!!", path: field.slice(3) });
+  }
+  return entries;
 }
 
-// Size and mtime are enough to notice a file being added or rewritten between two snapshots taken
-// minutes apart, and unlike hashing they stay affordable over a node_modules.
-function fingerprint(abs) {
+// lstat, never stat: a path is judged as itself, so a symlink the agent drops into an ignored
+// directory is charged for its own creation rather than for whatever it points at. A path that
+// cannot be stat'd reports 0, which no window can contain.
+function mtimeOf(abs) {
   try {
-    const st = statSync(abs);
-    return `${st.size}:${st.mtimeMs}`;
+    return lstatSync(abs).mtimeMs;
   } catch {
-    return "unreadable";
+    return 0;
   }
 }
 
-// Every file under `rel` (a directory git reported as one collapsed entry), keyed by its
-// worktree-relative path. A symlink is recorded as an entry but never descended into, so a link into
-// the wider filesystem cannot make this walk unbounded.
-function listTree(worktree, rel, out) {
+// Opens an attempt's window: the marker is written and its mtime read straight back, so the boundary
+// is expressed in the worktree filesystem's own clock and granularity rather than this process's —
+// nothing about `>= since` depends on the two agreeing. The marker sits beside the worktree, never
+// inside it, so `git status` never sees it.
+function openWindow(marker) {
+  writeFileSync(marker, "");
+  return mtimeOf(marker);
+}
+
+// Walks one directory git collapsed into a single ignored entry, charging every file written inside
+// the attempt's window and recording every path it passes for the next attempt's `known` set. A
+// symlink is recorded as an entry but never descended into, so a link into the wider filesystem
+// cannot make this walk unbounded.
+function scanIgnoredDir(worktree, rel, attempt, changed, seen) {
   let entries;
   try {
     entries = readdirSync(join(worktree, rel), { withFileTypes: true });
   } catch {
-    return out;
+    return;
   }
   for (const e of entries) {
-    if (e.isDirectory()) listTree(worktree, `${rel}${e.name}/`, out);
-    else out.set(`${rel}${e.name}`, fingerprint(join(worktree, rel, e.name)));
+    const path = `${rel}${e.name}`;
+    if (e.isDirectory()) {
+      seen.add(`${path}/`);
+      scanIgnoredDir(worktree, `${path}/`, attempt, changed, seen);
+      continue;
+    }
+    seen.add(path);
+    if (mtimeOf(join(worktree, path)) >= attempt.since) {
+      changed.push({ path, ignored: true, created: !attempt.known.has(path) });
+    }
   }
-  return out;
-}
-
-// The ignored state of the worktree right now — the baseline a later purity check subtracts. Keyed by
-// the status entry, but a directory entry maps to a listing of its contents rather than to the entry
-// itself: git collapses a wholly ignored directory into one line, so comparing entries alone would
-// treat everything the agent writes inside an already-listed directory as already seen.
-function ignoredSnapshot(worktree) {
-  const snapshot = new Map();
-  for (const e of statusEntries(worktree)) {
-    if (!e.ignored) continue;
-    snapshot.set(e.path, e.path.endsWith("/") ? listTree(worktree, e.path, new Map()) : fingerprint(join(worktree, e.path)));
-  }
-  return snapshot;
 }
 
 // Paths that differ from the sweep base and are attributable to the attempt: every tracked or
-// non-ignored change (the sweep base leaves the tracked tree clean, so any of those is the attempt's),
-// plus ignored paths that are new or rewritten since `ignoredBaseline` — collateral the agent created
-// under an ignored path (audit 2026-09-05 L4). For a collapsed directory entry the comparison
-// descends into the baseline's listing of it and reports the individual files that changed, so a
-// verify-created `dist/` in the baseline cannot cloak what the agent puts inside it. Ignored paths
-// unchanged since the snapshot are the sweep's own verify output and are not charged to the agent.
-// Each entry carries whether it is ignored, because those are the ones a revert has to delete itself.
-function changedPaths(worktree, ignoredBaseline) {
+// non-ignored change (the sweep base leaves the tracked tree clean, so any of those is the
+// attempt's), plus every ignored path written inside the attempt's window — collateral the agent
+// created OR overwrote under an ignored path (audit 2026-09-05 L4). The window is what separates the
+// agent's writes from the sweep's own: a verifyCommand's gitignored build, install or coverage
+// output is written between windows and so is never charged, which is why this is one pass per
+// attempt rather than a snapshot rebuilt after every verify and every revert. A collapsed directory
+// entry the attempt itself created is one charge and one delete; an already-known one is descended
+// into, so a verify-created `dist/` cannot cloak what the agent puts inside it. Each ignored charge
+// carries `created`, decided by the paths the previous pass saw, because a path the attempt created
+// can be deleted on revert and one it overwrote cannot be put back. The pass returns its full path
+// set, which becomes the next attempt's `known`.
+function changedPaths(worktree, attempt) {
   const changed = [];
+  const seen = new Set();
   for (const e of statusEntries(worktree)) {
     if (!e.ignored) {
       changed.push({ path: e.path, ignored: false });
       continue;
     }
-    const base = ignoredBaseline.get(e.path);
-    if (base === undefined) {
-      changed.push({ path: e.path, ignored: true }); // a wholly new ignored path, directory or file
-    } else if (base instanceof Map) {
-      for (const [p, fp] of listTree(worktree, e.path, new Map())) {
-        if (base.get(p) !== fp) changed.push({ path: p, ignored: true });
+    seen.add(e.path);
+    const abs = join(worktree, e.path);
+    if (!e.path.endsWith("/")) {
+      if (mtimeOf(abs) >= attempt.since) {
+        changed.push({ path: e.path, ignored: true, created: !attempt.known.has(e.path) });
       }
-    } else if (fingerprint(join(worktree, e.path)) !== base) {
-      changed.push({ path: e.path, ignored: true });
+      continue;
     }
+    if (!attempt.known.has(e.path) && mtimeOf(abs) >= attempt.since) {
+      changed.push({ path: e.path, ignored: true, created: true });
+      continue;
+    }
+    scanIgnoredDir(worktree, e.path, attempt, changed, seen);
   }
-  return changed;
+  return { changed, seen };
+}
+
+// An ignored path the attempt overwrote instead of creating cannot be reverted: the sweep knows only
+// that it changed, never what it held, and deleting it would destroy the dependency, cache or
+// artifact the verifyCommand needs rather than restore it. It stays where the agent left it and is
+// named in the skip reason, so "reverted" is never read as more than it is.
+function overwrittenNote(changed) {
+  const overwritten = changed.filter((c) => c.ignored && !c.created).map((c) => c.path);
+  return overwritten.length
+    ? `; left in place because the sweep cannot restore what they held: ${overwritten.join(", ")}`
+    : "";
 }
 
 // `git clean -fd` leaves ignored paths alone, and `-x` is not the answer: it would also wipe the
-// node_modules, build caches and coverage data the verifyCommand needs. So the attempt's own ignored
-// collateral is deleted by path — exactly the paths the purity check charged to it, nothing else —
-// or it would survive the revert and be adopted by the re-snapshot that follows.
-function revertWorktree(worktree, foreignIgnored = []) {
+// node_modules, build caches and coverage data the verifyCommand needs. So the ignored paths the
+// attempt CREATED are deleted by path — exactly those, nothing else — or they would survive the
+// revert and pollute the tree every later verify runs in. Paths the attempt only overwrote are not
+// passed here (see overwrittenNote): deleting them would be destruction, not a revert.
+function revertWorktree(worktree, createdIgnored = []) {
   git(["checkout", "--", "."], worktree);
   git(["clean", "-fd"], worktree);
-  for (const p of foreignIgnored) {
+  for (const p of createdIgnored) {
     const abs = resolve(worktree, p);
     if (abs.startsWith(worktree + sep)) rmSync(abs, { recursive: true, force: true });
   }
@@ -224,35 +254,38 @@ async function runVerify(verifyCommand, worktree) {
 // where hard marks failures that must trip the pilot gate (verification
 // failure or a broken editor), as opposed to benign per-file skips.
 async function processFile(relPath, opts) {
-  const { worktree, repoRoot, instruction, verifyCommand, model } = opts;
-  // An ignored path the sweep cannot undo stops being this attempt's fault once its verdict is in:
-  // re-snapshot after every revert and after every verify run, so the next file is judged against
-  // what is actually on disk. Never before a purity check — that would baseline the agent's own
-  // collateral and let it through.
-  const rebaseline = () => { opts.ignoredBaseline = ignoredSnapshot(worktree); };
-  const revert = (foreignIgnored) => { revertWorktree(worktree, foreignIgnored); rebaseline(); };
+  const { worktree, repoRoot, instruction, verifyCommand, model, marker } = opts;
+  // Everything written from here to the purity check below is this attempt's, and nothing outside it
+  // is — which is what lets the verifyCommand's own gitignored output stay uncharged without any
+  // re-snapshotting after a verify or a revert (branch review round 1, finding B).
+  const attempt = { since: openWindow(marker), known: opts.known };
   log(`editing ${relPath}...`);
   const edit = await runEditorAgent(relPath, instruction, worktree, model);
   if (!edit.ok) {
-    revert();
+    revertWorktree(worktree);
     return { skip: `editor agent failed: ${edit.error}`, hard: true };
   }
-  const changes = changedPaths(worktree, opts.ignoredBaseline);
-  if (changes.length === 0) {
+  const { changed, seen } = changedPaths(worktree, attempt);
+  opts.known = seen;
+  if (changed.length === 0) {
     return { skip: `agent made no change: ${edit.value.note || "no reason given"}` };
   }
-  if (changes.length > 1 || changes[0].path !== relPath) {
-    revert(changes.filter((c) => c.ignored).map((c) => c.path));
-    return { skip: `agent modified files other than the target (${changes.map((c) => c.path).join(", ")}); reverted` };
+  if (changed.length > 1 || changed[0].path !== relPath) {
+    const created = changed.filter((c) => c.ignored && c.created).map((c) => c.path);
+    revertWorktree(worktree, created);
+    // A deleted path must not stay in `known`, or the next attempt would read a recreation of it as
+    // something it merely overwrote and leave it on disk.
+    for (const p of created) opts.known.delete(p);
+    const names = changed.map((c) => c.path).join(", ");
+    return { skip: `agent modified files other than the target (${names}); reverted${overwrittenNote(changed)}` };
   }
   if (!existsSync(join(worktree, relPath))) {
-    revert();
+    revertWorktree(worktree);
     return { skip: "agent deleted the file; deletions are not applied; reverted" };
   }
   const verify = await runVerify(verifyCommand, worktree);
-  rebaseline();
   if (!verify.ok) {
-    revert();
+    revertWorktree(worktree);
     return { skip: `verification failed: ${verify.detail}`, hard: true };
   }
   // Verified: copy back into the real tree and advance the worktree baseline.
@@ -319,6 +352,9 @@ async function main() {
   // Isolated worktree at HEAD, seeded with the working-tree contents of the
   // targets and committed so per-file purity checks and reverts are clean.
   const worktree = mkdtempSync(join(os.tmpdir(), "devcycle-sweep-"));
+  // Beside the worktree, not in it: the window marker must be on the same filesystem as the paths it
+  // is compared against, and invisible to the `git status` that runs inside the worktree.
+  const marker = `${worktree}.window`;
   let worktreeAdded = false;
   const report = (code) => {
     process.stdout.write(JSON.stringify({ applied, skipped }, null, 2) + "\n");
@@ -349,15 +385,17 @@ async function main() {
       return;
     }
 
-    // Taken after the baseline verify, which may already have installed dependencies or written build
-    // output under ignored paths: none of that is the editor agent's doing.
+    // One pass over the ignored paths, taken after the baseline verify has installed dependencies or
+    // written build output: a window nothing can fall inside charges nothing, so this runs purely for
+    // the path set it returns — what the first attempt may overwrite but did not create.
     const opts = {
       worktree,
       repoRoot,
+      marker,
       instruction: args.instruction,
       verifyCommand: args.verifyCommand,
       model,
-      ignoredBaseline: ignoredSnapshot(worktree),
+      known: changedPaths(worktree, { since: Infinity, known: new Set() }).seen,
     };
     const pilotCount = Math.min(PILOT_MAX, targets.length);
     log(`pilot: first ${pilotCount} of ${targets.length} file(s)`);
@@ -399,6 +437,7 @@ async function main() {
       try { git(["worktree", "remove", "--force", worktree], repoRoot); } catch { /* fall through */ }
     }
     rmSync(worktree, { recursive: true, force: true });
+    rmSync(marker, { force: true });
   }
 }
 

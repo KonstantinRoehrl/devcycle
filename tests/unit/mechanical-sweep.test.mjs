@@ -10,6 +10,12 @@ import { makeRepo, commitAll, makeFakeBin, runScript } from "./helpers.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(here, "..", "..", "workflows", "mechanical-sweep.js");
 
+// The sweep's fixtures are the heaviest in this suite — a git repository plus a worktree per run —
+// and nothing else ever deletes them, so every fixture a test below creates is removed when it ends.
+function cleanup(...paths) {
+  for (const p of paths) rmSync(p, { recursive: true, force: true });
+}
+
 // Fake editor that appends a marker line to exactly the target file named in
 // the prompt — the behavior of a well-behaved editor agent.
 const WELL_BEHAVED_EDITOR = `
@@ -454,31 +460,149 @@ test("a rejected attempt's ignored collateral is deleted while the verify comman
   const repo = repoWithThreeTargetsAndIgnores();
   const bin = makeFakeBin("claude", COLLATERAL_INTO_VERIFY_DIR_EDITOR);
   // The sweep worktree is removed before the run returns, so the verify command — which runs inside
-  // it — is where its contents can be observed: every run appends a listing of gen/, and the last
-  // one runs after the rejected attempt was reverted.
-  const listing = join(mkdtempSync(join(tmpdir(), "devcycle-sweep-gen-")), "gen-listing.txt");
-  const res = runScript(
-    SCRIPT,
-    {
-      files: ["a.js", "b.js", "c.js"],
-      instruction: "append marker",
-      verifyCommand: `${VERIFY_MAKES_IGNORED_DIR} && { echo "== run"; ls gen; } >> ${JSON.stringify(listing)}`,
-    },
-    { cwd: repo, binDirs: [bin] }
+  // it — is where its contents can be observed: every run appends a listing of gen/, and the last one
+  // runs after the rejected attempt was reverted. The artifact ACCUMULATES one `x` per run instead of
+  // being recreated, so a revert that wiped the ignored directory cannot hide behind the next run
+  // making the file again: the survivor carries one `x` per run so far, a recreated file carries one.
+  const listingDir = mkdtempSync(join(tmpdir(), "devcycle-sweep-gen-"));
+  const listing = join(listingDir, "gen-listing.txt");
+  try {
+    const res = runScript(
+      SCRIPT,
+      {
+        files: ["a.js", "b.js", "c.js"],
+        instruction: "append marker",
+        verifyCommand: `mkdir -p gen && printf x >> gen/build.out && { echo "== run"; ls gen; echo "build=$(cat gen/build.out)"; } >> ${JSON.stringify(listing)}`,
+      },
+      { cwd: repo, binDirs: [bin] }
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    const report = JSON.parse(res.stdout);
+    assert.equal(report.skipped.length, 1, `precondition — b.js is rejected: ${JSON.stringify(report.skipped)}`);
+    const runs = readFileSync(listing, "utf8").split("== run").slice(1);
+    const afterRevert = runs[runs.length - 1];
+    assert.ok(
+      !afterRevert.includes("collateral.js"),
+      `the rejected attempt's collateral must be deleted from the worktree; the next verify still saw:\n${afterRevert}`
+    );
+    assert.match(
+      afterRevert,
+      new RegExp(`build=${"x".repeat(runs.length)}\\b`),
+      `the verify's own artifact must SURVIVE the revert, not be recreated by the next run: after ${runs.length} runs the next verify saw:\n${afterRevert}`
+    );
+  } finally {
+    cleanup(repo, listingDir);
+  }
+});
+
+// Branch review round 4 (M1/M5): the purity check charges an ignored path the agent OVERWROTE just as
+// it charges one the agent created, but a delete-only remedy cannot revert an overwrite — it destroys
+// the dependency, cache or artifact the verifyCommand needs instead of putting back what was there.
+// The sweep deletes only what the attempt created, leaves what it cannot restore, and names it in the
+// skip reason so "reverted" is never read as more than it is. Both ignored shapes are overwritten
+// here — a file inside the collapsed `gen/` entry and an individually reported `*.tmp` file — because
+// only the created-path arm of the comparison had coverage before.
+const VERIFY_SEEDS_IGNORED_FILES = (listing) =>
+  `mkdir -p gen; [ -e gen/.seeded ] || { echo original > gen/keep.txt; echo original > scratch.tmp; : > gen/.seeded; }; ` +
+  `{ echo "== run"; echo "keep=$(cat gen/keep.txt 2>/dev/null)"; echo "scratch=$(cat scratch.tmp 2>/dev/null)"; } >> ${JSON.stringify(listing)}`;
+
+// Edits its target, and while editing b.js overwrites two ignored files the verify seeded earlier.
+const OVERWRITE_IGNORED_EDITOR = `
+const fs = require("node:fs");
+const prompt = process.argv[process.argv.length - 1];
+const target = prompt.match(/^file: (.+)$/m)[1];
+fs.appendFileSync(target, "// swept\\n");
+if (target === "b.js") {
+  fs.writeFileSync("gen/keep.txt", "clobbered\\n");
+  fs.writeFileSync("scratch.tmp", "clobbered\\n");
+}
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: { changed: true, note: "edited" } }));
+`;
+
+test("an ignored file the agent overwrites is charged, and the revert leaves it instead of deleting it", () => {
+  const repo = repoWithThreeTargetsAndIgnores();
+  const bin = makeFakeBin("claude", OVERWRITE_IGNORED_EDITOR);
+  const listingDir = mkdtempSync(join(tmpdir(), "devcycle-sweep-overwrite-"));
+  const listing = join(listingDir, "seed-listing.txt");
+  try {
+    const res = runScript(
+      SCRIPT,
+      { files: ["a.js", "b.js", "c.js"], instruction: "append marker", verifyCommand: VERIFY_SEEDS_IGNORED_FILES(listing) },
+      { cwd: repo, binDirs: [bin] }
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    const report = JSON.parse(res.stdout);
+    assert.equal(report.skipped.length, 1, `only b.js is rejected: ${JSON.stringify(report.skipped)}`);
+    assert.equal(report.skipped[0].file, "b.js");
+    // Charged: an overwritten ignored path is collateral whether the agent created it or not.
+    assert.match(report.skipped[0].reason, /modified files other than the target \(b\.js, gen\/keep\.txt, scratch\.tmp\); reverted/);
+    // And the reason says what the revert could not undo, rather than implying it undid it.
+    assert.match(report.skipped[0].reason, /cannot restore.*gen\/keep\.txt, scratch\.tmp/);
+    assert.deepEqual(report.applied, ["a.js", "c.js"]);
+    // The seeding runs once, so the last verify — which runs after b.js was reverted — sees what the
+    // revert left behind: an overwritten pre-existing ignored file is left on disk, never deleted.
+    const runs = readFileSync(listing, "utf8").split("== run").slice(1);
+    const afterRevert = runs[runs.length - 1];
+    assert.match(
+      afterRevert,
+      /keep=clobbered/,
+      `an overwritten pre-existing ignored file must be left in place, not deleted; the next verify saw:\n${afterRevert}`
+    );
+    assert.match(
+      afterRevert,
+      /scratch=clobbered/,
+      `the same holds for an individually reported ignored file; the next verify saw:\n${afterRevert}`
+    );
+  } finally {
+    cleanup(repo, listingDir);
+  }
+});
+
+// Branch review round 4 (M2): git C-quotes any path outside the printable-ASCII range
+// (`"caf\303\251/"`), and those octal escapes are not JSON — so a non-ASCII ignored DIRECTORY kept
+// its quotes, stopped looking like a directory, and its contents were never inspected. That is
+// exactly the cloak the collapsed-directory work existed to remove, for any repo that ignores a
+// directory with a non-ASCII name.
+function repoWithNonAsciiIgnoredDir() {
+  const repo = makeRepo();
+  for (const f of ["a.js", "b.js", "c.js"]) writeFileSync(join(repo, f), `const ${f[0]} = 1;\n`);
+  writeFileSync(join(repo, ".gitignore"), "café/\n");
+  commitAll(repo, "add files, ignore café/");
+  return repo;
+}
+
+test("collateral inside an ignored directory with a non-ASCII name is caught, not cloaked by git's quoting", () => {
+  const repo = repoWithNonAsciiIgnoredDir();
+  const bin = makeFakeBin(
+    "claude",
+    `
+const fs = require("node:fs");
+const prompt = process.argv[process.argv.length - 1];
+const target = prompt.match(/^file: (.+)$/m)[1];
+fs.appendFileSync(target, "// swept\\n");
+if (target === "b.js") fs.writeFileSync("café/collateral.js", "collateral\\n");
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: { changed: true, note: "edited" } }));
+`
   );
-  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
-  const report = JSON.parse(res.stdout);
-  assert.equal(report.skipped.length, 1, `precondition — b.js is rejected: ${JSON.stringify(report.skipped)}`);
-  const runs = readFileSync(listing, "utf8").split("== run").slice(1);
-  const afterRevert = runs[runs.length - 1];
-  assert.ok(
-    !afterRevert.includes("collateral.js"),
-    `the rejected attempt's collateral must be deleted from the worktree; the next verify still saw:\n${afterRevert}`
-  );
-  assert.ok(
-    afterRevert.includes("build.out"),
-    `deleting the collateral must not take the verify command's own artifact with it; the next verify saw:\n${afterRevert}`
-  );
+  try {
+    const res = runScript(
+      SCRIPT,
+      { files: ["a.js", "b.js", "c.js"], instruction: "append marker", verifyCommand: "mkdir -p café && touch café/build.out" },
+      { cwd: repo, binDirs: [bin] }
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    const report = JSON.parse(res.stdout);
+    assert.equal(
+      report.skipped.length,
+      1,
+      `the attempt that wrote into the non-ASCII ignored directory must be skipped: ${JSON.stringify(report.skipped)}`
+    );
+    assert.equal(report.skipped[0].file, "b.js");
+    assert.match(report.skipped[0].reason, /modified files other than the target \(b\.js, café\/collateral\.js\); reverted/);
+    assert.deepEqual(report.applied, ["a.js", "c.js"]);
+  } finally {
+    cleanup(repo);
+  }
 });
 
 // L4 (3): a previous sweep SIGKILLed mid-run leaves a worktree registration whose directory is gone;
