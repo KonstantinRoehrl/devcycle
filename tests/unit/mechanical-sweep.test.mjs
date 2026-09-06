@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, readFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdtempSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import sweep from "../../workflows/mechanical-sweep.js";
 import { makeRepo, commitAll, makeFakeBin, runScript } from "./helpers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -346,15 +347,19 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { chan
 // check blamed the editor for them and every remaining target skipped the same way. Both tests
 // below are multi-target on purpose: the single-file test above stops after the first revert and
 // therefore cannot see the poisoning.
-function repoWithThreeTargetsAndIgnores() {
+function repoWithTargetsAndIgnores(names) {
   const repo = makeRepo();
-  for (const f of ["a.js", "b.js", "c.js"]) writeFileSync(join(repo, f), `const ${f[0]} = 1;\n`);
+  for (const f of names) writeFileSync(join(repo, f), `const ${f[0]} = 1;\n`);
   // Both ignore shapes: a wholly ignored directory (git status collapses it to `gen/`) and a
   // pattern that matches individual files (reported per file), so the snapshot is exercised at both
   // granularities.
   writeFileSync(join(repo, ".gitignore"), "gen/\n*.tmp\n");
   commitAll(repo, "add files, ignore gen/ and *.tmp");
   return repo;
+}
+
+function repoWithThreeTargetsAndIgnores() {
+  return repoWithTargetsAndIgnores(["a.js", "b.js", "c.js"]);
 }
 
 test("gitignored output written by the verify command itself never counts as the editor's collateral", () => {
@@ -499,7 +504,7 @@ test("a rejected attempt's ignored collateral is deleted while the verify comman
 // it charges one the agent created, but a delete-only remedy cannot revert an overwrite — it destroys
 // the dependency, cache or artifact the verifyCommand needs instead of putting back what was there.
 // The sweep deletes only what the attempt created, leaves what it cannot restore, and names it in the
-// skip reason so "reverted" is never read as more than it is. Both ignored shapes are overwritten
+// skip reason instead of claiming a revert that did not happen. Both ignored shapes are overwritten
 // here — a file inside the collapsed `gen/` entry and an individually reported `*.tmp` file — because
 // only the created-path arm of the comparison had coverage before.
 const VERIFY_SEEDS_IGNORED_FILES = (listing) =>
@@ -519,7 +524,12 @@ if (target === "b.js") {
 process.stdout.write(JSON.stringify({ is_error: false, structured_output: { changed: true, note: "edited" } }));
 `;
 
-test("an ignored file the agent overwrites is charged, and the revert leaves it instead of deleting it", () => {
+// Branch review round 6 (F1) closes what the round-4 remedy left open. Leaving the overwrite in place
+// keeps the tree contaminated, and the verifyCommand is the ONLY gate on copying a file into the
+// user's real repository — so a run that continues asks a verify it cannot trust to authorize that
+// write. The sweep now stops at the overwrite: the attempt is skipped with a reason that says what
+// could not be restored, and every remaining target is reported as not attempted.
+test("an ignored file the agent overwrites stops the sweep — no later verify, and no later apply, in a tree it cannot restore", () => {
   const repo = repoWithThreeTargetsAndIgnores();
   const bin = makeFakeBin("claude", OVERWRITE_IGNORED_EDITOR);
   const listingDir = mkdtempSync(join(tmpdir(), "devcycle-sweep-overwrite-"));
@@ -530,31 +540,166 @@ test("an ignored file the agent overwrites is charged, and the revert leaves it 
       { files: ["a.js", "b.js", "c.js"], instruction: "append marker", verifyCommand: VERIFY_SEEDS_IGNORED_FILES(listing) },
       { cwd: repo, binDirs: [bin] }
     );
-    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.equal(res.status, 1, `an unrestorable worktree is a hard stop with a report on stdout: ${res.stderr}`);
     const report = JSON.parse(res.stdout);
-    assert.equal(report.skipped.length, 1, `only b.js is rejected: ${JSON.stringify(report.skipped)}`);
     assert.equal(report.skipped[0].file, "b.js");
     // Charged: an overwritten ignored path is collateral whether the agent created it or not.
-    assert.match(report.skipped[0].reason, /modified files other than the target \(b\.js, gen\/keep\.txt, scratch\.tmp\); reverted/);
+    assert.match(report.skipped[0].reason, /modified files other than the target \(b\.js, gen\/keep\.txt, scratch\.tmp\)/);
     // And the reason says what the revert could not undo, rather than implying it undid it.
-    assert.match(report.skipped[0].reason, /cannot restore.*gen\/keep\.txt, scratch\.tmp/);
-    assert.deepEqual(report.applied, ["a.js", "c.js"]);
-    // The seeding runs once, so the last verify — which runs after b.js was reverted — sees what the
-    // revert left behind: an overwritten pre-existing ignored file is left on disk, never deleted.
-    const runs = readFileSync(listing, "utf8").split("== run").slice(1);
-    const afterRevert = runs[runs.length - 1];
-    assert.match(
-      afterRevert,
-      /keep=clobbered/,
-      `an overwritten pre-existing ignored file must be left in place, not deleted; the next verify saw:\n${afterRevert}`
+    assert.match(report.skipped[0].reason, /cannot restore what they held: gen\/keep\.txt, scratch\.tmp/);
+    // The run ends there: c.js is never edited, never verified, and never copied into the real repo.
+    assert.deepEqual(report.applied, ["a.js"]);
+    assert.equal(report.skipped.length, 2, `b.js and the untried remainder: ${JSON.stringify(report.skipped)}`);
+    assert.equal(report.skipped[1].file, "c.js");
+    assert.match(report.skipped[1].reason, /not attempted/);
+    assert.ok(
+      !readFileSync(join(repo, "c.js"), "utf8").includes("swept"),
+      "a verify run in a contaminated tree must never gate a write to the real repository"
     );
-    assert.match(
-      afterRevert,
-      /scratch=clobbered/,
-      `the same holds for an individually reported ignored file; the next verify saw:\n${afterRevert}`
+    // The verifyCommand appends one block per run, so the file holds every verify the sweep ran.
+    // None of them may have seen the clobbered content — that is what "no verify is attributed to an
+    // unrestorable tree" means on disk. Before round 6 the LAST run saw keep=clobbered, and c.js was
+    // applied on the strength of it.
+    const runs = readFileSync(listing, "utf8");
+    assert.ok(
+      !runs.includes("keep=clobbered") && !runs.includes("scratch=clobbered"),
+      `no verifyCommand may run after the overwrite; the runs recorded were:\n${runs}`
     );
   } finally {
-    cleanup(repo, listingDir);
+    cleanup(repo, listingDir, bin);
+  }
+});
+
+// Round 4's other invariant — a created ignored path is deleted by the revert, an overwritten one is
+// left on disk — used to be observed through the verify that ran after the revert. Round 6 stops the
+// run at an overwrite, so no such verify exists any more and the sweep's worktree is gone before the
+// run returns. The invariant is asserted directly against the two functions that carry it instead.
+test("the revert deletes the ignored paths an attempt created and leaves on disk the ones it overwrote", () => {
+  const repo = repoWithTargetsAndIgnores(["a.js"]);
+  const marker = `${repo}.window`;
+  try {
+    mkdirSync(join(repo, "gen"), { recursive: true });
+    writeFileSync(join(repo, "gen", "keep.txt"), "original\n"); // a pre-existing artifact, as a verify leaves
+    const known = sweep.knownPaths(repo);
+    assert.ok(known.has("gen/keep.txt"), `precondition — the pre-existing artifact is known: ${[...known].join(", ")}`);
+
+    const since = sweep.openWindow(marker); // the attempt starts here
+    writeFileSync(join(repo, "gen", "keep.txt"), "clobbered\n"); // overwritten by the agent
+    writeFileSync(join(repo, "gen", "made.txt"), "collateral\n"); // created by the agent
+    writeFileSync(join(repo, "a.js"), "const a = 2;\n"); // the tracked edit
+    const { changed } = sweep.changedPaths(repo, { since, known });
+    const flag = (p) => changed.find((c) => c.path === p);
+    assert.equal(flag("gen/keep.txt").created, false, "a path the previous pass saw was overwritten, not created");
+    assert.equal(flag("gen/made.txt").created, true, "a path no previous pass saw is the attempt's own creation");
+
+    sweep.revertWorktree(repo, changed.filter((c) => c.ignored && c.created).map((c) => c.path));
+    assert.ok(!existsSync(join(repo, "gen", "made.txt")), "the attempt's own ignored collateral is deleted");
+    assert.equal(
+      readFileSync(join(repo, "gen", "keep.txt"), "utf8"),
+      "clobbered\n",
+      "an overwritten pre-existing ignored file is left where it is — deleting it would destroy, not restore"
+    );
+    assert.equal(readFileSync(join(repo, "a.js"), "utf8"), "const a = 1;\n", "the tracked edit is reverted");
+  } finally {
+    cleanup(repo, marker);
+  }
+});
+
+// Branch review round 6 (F2): `known` — the path set that decides whether an ignored charge is one the
+// attempt CREATED (deletable) or one it merely overwrote (not) — was taken from the purity pass, which
+// runs BEFORE the verifyCommand. Anything the verify wrote after that pass was missing from the next
+// attempt's `known`, so an agent overwriting it was read as having created it and the revert deleted a
+// pre-existing artifact the sweep never held — the exact destruction the created/overwrote split
+// exists to prevent — while the skip reason called the attempt "reverted".
+test("an ignored artifact the verify wrote after the purity pass is not deleted as the next attempt's own creation", () => {
+  const repo = repoWithTargetsAndIgnores(["a.js", "b.js", "c.js", "d.js", "e.js"]);
+  const flagDir = mkdtempSync(join(tmpdir(), "devcycle-sweep-late-"));
+  // The verify writes gen/late.txt on the first run after c.js's editor — i.e. after c.js's purity
+  // pass and before d.js's attempt, which is the only window in which the stale `known` differs.
+  const flag = join(flagDir, "seed-now");
+  const bin = makeFakeBin(
+    "claude",
+    `
+const fs = require("node:fs");
+const prompt = process.argv[process.argv.length - 1];
+const target = prompt.match(/^file: (.+)$/m)[1];
+fs.appendFileSync(target, "// swept\\n");
+if (target === "c.js") fs.writeFileSync(${JSON.stringify(flag)}, "");
+if (target === "d.js") fs.writeFileSync("gen/late.txt", "clobbered\\n");
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: { changed: true, note: "edited" } }));
+`
+  );
+  try {
+    const res = runScript(
+      SCRIPT,
+      {
+        files: ["a.js", "b.js", "c.js", "d.js", "e.js"],
+        instruction: "append marker",
+        verifyCommand: `mkdir -p gen; [ -e ${JSON.stringify(flag)} ] && [ ! -e gen/late.txt ] && printf original > gen/late.txt; true`,
+      },
+      { cwd: repo, binDirs: [bin] }
+    );
+    const report = JSON.parse(res.stdout);
+    const skipOf = (f) => report.skipped.find((s) => s.file === f) ?? { reason: "<not skipped>" };
+    assert.match(
+      skipOf("d.js").reason,
+      /cannot restore what they held: gen\/late\.txt/,
+      `gen/late.txt existed before d.js's attempt, so the attempt cannot be charged with creating it: ${JSON.stringify(report)}`
+    );
+    // Consequently the tree is unrestorable and the run stops rather than verifying e.js in it.
+    assert.equal(res.status, 1, `stderr: ${res.stderr}`);
+    assert.deepEqual(report.applied, ["a.js", "b.js", "c.js"]);
+    assert.match(skipOf("e.js").reason, /not attempted/);
+    assert.ok(!readFileSync(join(repo, "e.js"), "utf8").includes("swept"));
+  } finally {
+    cleanup(repo, flagDir, bin);
+  }
+});
+
+// F2, second arm: the editor-failed path returned without refreshing `known` at all, so every later
+// attempt judged `created` against a set taken before the failure — including against the ignored
+// files the failed editor itself left behind, which the revert cannot remove.
+test("an ignored file a failed editor left behind is known to the next attempt, not deleted as its creation", () => {
+  const repo = repoWithTargetsAndIgnores(["a.js", "b.js", "c.js", "d.js", "e.js", "f.js"]);
+  const bin = makeFakeBin(
+    "claude",
+    `
+const fs = require("node:fs");
+const prompt = process.argv[process.argv.length - 1];
+const target = prompt.match(/^file: (.+)$/m)[1];
+if (target === "d.js") {
+  // Writes into an ignored directory and then fails: \`git clean -fd\` leaves ignored paths alone,
+  // so gen/orphan.txt survives the revert and is on disk before the next attempt runs.
+  fs.mkdirSync("gen", { recursive: true });
+  fs.writeFileSync("gen/orphan.txt", "orphan\\n");
+  process.stdout.write(JSON.stringify({ is_error: true, result: "model refused" }));
+} else {
+  fs.appendFileSync(target, "// swept\\n");
+  if (target === "e.js") fs.writeFileSync("gen/orphan.txt", "clobbered\\n");
+  process.stdout.write(JSON.stringify({ is_error: false, structured_output: { changed: true, note: "edited" } }));
+}
+`
+  );
+  try {
+    const res = runScript(
+      SCRIPT,
+      { files: ["a.js", "b.js", "c.js", "d.js", "e.js", "f.js"], instruction: "append marker", verifyCommand: "true" },
+      { cwd: repo, binDirs: [bin] }
+    );
+    const report = JSON.parse(res.stdout);
+    const skipOf = (f) => report.skipped.find((s) => s.file === f) ?? { reason: "<not skipped>" };
+    assert.match(skipOf("d.js").reason, /editor agent failed/, `precondition — d.js's editor fails: ${JSON.stringify(report)}`);
+    assert.match(
+      skipOf("e.js").reason,
+      /cannot restore what they held: gen\/orphan\.txt/,
+      `gen/orphan.txt was on disk before e.js's attempt, so e.js did not create it: ${JSON.stringify(report)}`
+    );
+    assert.equal(res.status, 1, `stderr: ${res.stderr}`);
+    assert.deepEqual(report.applied, ["a.js", "b.js", "c.js"]);
+    assert.match(skipOf("f.js").reason, /not attempted/);
+    assert.ok(!readFileSync(join(repo, "f.js"), "utf8").includes("swept"));
+  } finally {
+    cleanup(repo, bin);
   }
 });
 

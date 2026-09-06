@@ -20,8 +20,10 @@
 // reports every file (pilot failures with their reasons, the rest as "not
 // attempted"). After a green pilot, remaining files are processed one by one
 // with the same per-file verify; failures skip that file (reverted) and the
-// sweep continues. Verified changes are copied back into the real working
-// tree. Every skip carries a reason — nothing is capped or dropped silently.
+// sweep continues — the one exception is an attempt that leaves the worktree
+// unrestorable, which ends the run wherever it happens (see below). Verified
+// changes are copied back into the real working tree. Every skip carries a
+// reason — nothing is capped or dropped silently.
 //
 // The editor subagent may touch ONLY the target file (enforced by git status
 // in the worktree; any collateral change reverts the attempt). Deletions are
@@ -37,15 +39,21 @@
 // directory once (`dist/`), so judging by entry paths alone would hide every file the agent writes
 // inside a directory the verify had already created. A charge the attempt CREATED is deleted by
 // path; one it merely overwrote is left where it is, because the sweep cannot put back contents it
-// never held — and the skip reason names it rather than implying the revert undid it. Stale worktree
-// registrations from a killed run are pruned before the new worktree is added.
+// never held — and the skip reason names it rather than implying the revert undid it. A tree still
+// holding such an overwrite is one the sweep cannot restore, and the verifyCommand is the only gate
+// on copying a file into the real repository, so the run STOPS there instead of asking a verify it
+// cannot trust to authorize that write. Which paths count as created is decided by the set read off
+// disk after every attempt — after its verify, not only after its purity check — or a later attempt
+// would take what the verify wrote for its own creation and delete it. Stale worktree registrations
+// from a killed run are pruned before the new worktree is added.
 //
 // Optional env: DEVCYCLE_SWEEP_MODEL sets --model for the claude editor
 // subagents (unset -> the CLI's configured default model).
 //
 // Exit codes: 0 = sweep completed (report on stdout, individual skips
-// possible); 1 = hard stop (baseline or pilot verification failed — report
-// still on stdout) or fatal error (message on stderr).
+// possible); 1 = hard stop (baseline or pilot verification failed, or an
+// attempt left the worktree unrestorable — report still on stdout) or fatal
+// error (message on stderr).
 //
 // Smoke-tested (sandbox git repo, 4 js files, rename instruction,
 // verifyCommand running node --check over the tree):
@@ -216,15 +224,31 @@ function changedPaths(worktree, attempt) {
   return { changed, seen };
 }
 
-// An ignored path the attempt overwrote instead of creating cannot be reverted: the sweep knows only
-// that it changed, never what it held, and deleting it would destroy the dependency, cache or
-// artifact the verifyCommand needs rather than restore it. It stays where the agent left it and is
-// named in the skip reason, so "reverted" is never read as more than it is.
-function overwrittenNote(changed) {
+// The ignored paths on disk right now, with nothing charged: a window nothing can fall inside makes
+// the pass return purely the path set, which is what the NEXT attempt judges `created` against.
+function knownPaths(worktree) {
+  return changedPaths(worktree, { since: Infinity, known: new Set() }).seen;
+}
+
+// The outcome of an attempt that touched something other than its target. An ignored path the
+// attempt overwrote instead of creating cannot be reverted: the sweep knows only that it changed,
+// never what it held, and deleting it would destroy the dependency, cache or artifact the
+// verifyCommand needs rather than restore it. So it stays where the agent left it, the reason says
+// so instead of claiming a revert that did not happen, and the run stops — the verifyCommand is the
+// only gate on writing the real repository, and no verify run in a tree the sweep cannot restore may
+// be asked to open that gate (branch review round 6, F1).
+function collateralSkip(changed) {
+  const head = `agent modified files other than the target (${changed.map((c) => c.path).join(", ")})`;
   const overwritten = changed.filter((c) => c.ignored && !c.created).map((c) => c.path);
-  return overwritten.length
-    ? `; left in place because the sweep cannot restore what they held: ${overwritten.join(", ")}`
-    : "";
+  if (!overwritten.length) return { skip: `${head}; reverted` };
+  return {
+    skip:
+      `${head}; the tracked edits were reverted, but these ignored paths keep what the agent wrote because the ` +
+      `sweep cannot restore what they held: ${overwritten.join(", ")} — the worktree is no longer restorable, so ` +
+      `the sweep stopped rather than run any further verification in it`,
+    hard: true,
+    stop: true,
+  };
 }
 
 // `git clean -fd` leaves ignored paths alone, and `-x` is not the answer: it would also wipe the
@@ -250,10 +274,31 @@ async function runVerify(verifyCommand, worktree) {
 }
 
 // Process one file inside the worktree. Returns
-//   { applied: true } | { skip: string, hard?: true }
+//   { applied: true } | { skip: string, hard?: true, stop?: true }
 // where hard marks failures that must trip the pilot gate (verification
-// failure or a broken editor), as opposed to benign per-file skips.
+// failure or a broken editor), as opposed to benign per-file skips, and stop
+// marks a worktree the sweep can no longer restore — which ends the run
+// wherever it happens, pilot or not.
 async function processFile(relPath, opts) {
+  try {
+    return await attemptFile(relPath, opts);
+  } finally {
+    // `known` is what the NEXT attempt's ignored charges are judged against, and the purity check
+    // inside an attempt runs BEFORE its verifyCommand. Re-reading the paths here, on every exit —
+    // including the editor-failed one — is what keeps `created` true to disk: without it, anything a
+    // verify wrote, or a failed editor left where `git clean -fd` cannot reach, is read as the next
+    // attempt's own creation and deleted (branch review round 6, F2). It also means a path the revert
+    // just deleted cannot linger in the set.
+    try {
+      opts.known = knownPaths(opts.worktree);
+    } catch {
+      // Keep the previous set. Believing a path already known only ever leaves it alone; an empty set
+      // would mark everything as this run's creation and put it up for deletion.
+    }
+  }
+}
+
+async function attemptFile(relPath, opts) {
   const { worktree, repoRoot, instruction, verifyCommand, model, marker } = opts;
   // Everything written from here to the purity check below is this attempt's, and nothing outside it
   // is — which is what lets the verifyCommand's own gitignored output stay uncharged without any
@@ -271,13 +316,8 @@ async function processFile(relPath, opts) {
     return { skip: `agent made no change: ${edit.value.note || "no reason given"}` };
   }
   if (changed.length > 1 || changed[0].path !== relPath) {
-    const created = changed.filter((c) => c.ignored && c.created).map((c) => c.path);
-    revertWorktree(worktree, created);
-    // A deleted path must not stay in `known`, or the next attempt would read a recreation of it as
-    // something it merely overwrote and leave it on disk.
-    for (const p of created) opts.known.delete(p);
-    const names = changed.map((c) => c.path).join(", ");
-    return { skip: `agent modified files other than the target (${names}); reverted${overwrittenNote(changed)}` };
+    revertWorktree(worktree, changed.filter((c) => c.ignored && c.created).map((c) => c.path));
+    return collateralSkip(changed);
   }
   if (!existsSync(join(worktree, relPath))) {
     revertWorktree(worktree);
@@ -386,8 +426,7 @@ async function main() {
     }
 
     // One pass over the ignored paths, taken after the baseline verify has installed dependencies or
-    // written build output: a window nothing can fall inside charges nothing, so this runs purely for
-    // the path set it returns — what the first attempt may overwrite but did not create.
+    // written build output: what the first attempt may overwrite but did not create.
     const opts = {
       worktree,
       repoRoot,
@@ -395,7 +434,7 @@ async function main() {
       instruction: args.instruction,
       verifyCommand: args.verifyCommand,
       model,
-      known: changedPaths(worktree, { since: Infinity, known: new Set() }).seen,
+      known: knownPaths(worktree),
     };
     const pilotCount = Math.min(PILOT_MAX, targets.length);
     log(`pilot: first ${pilotCount} of ${targets.length} file(s)`);
@@ -424,12 +463,27 @@ async function main() {
       return;
     }
 
-    // Pilot green: sweep the remainder; per-file failures skip and continue.
+    // Pilot green: sweep the remainder; per-file failures skip and continue. The exception is an
+    // attempt that leaves the worktree unrestorable: every later verify would run in a tree the sweep
+    // knows is contaminated, and a verify is what authorizes the copy into the real repository — so
+    // the run ends here and the untried targets are reported as such.
     for (; index < targets.length; index++) {
       const t = targets[index];
       const outcome = await processFile(t.rel, opts);
-      if (outcome.applied) applied.push(t.input);
-      else skip(t.input, outcome.skip);
+      if (outcome.applied) {
+        applied.push(t.input);
+        continue;
+      }
+      skip(t.input, outcome.skip);
+      if (outcome.stop) {
+        const stopped = `${t.input}: ${outcome.skip}`;
+        for (index++; index < targets.length; index++) {
+          skip(targets[index].input, `not attempted: the sweep stopped (${stopped})`);
+        }
+        log("worktree no longer restorable — stop");
+        report(1);
+        return;
+      }
     }
     report(0);
   } finally {
@@ -444,3 +498,8 @@ async function main() {
 if (require.main === module) {
   main().catch((e) => fatal(String(e?.stack ?? e)));
 }
+
+// Exported for the deterministic tests in tests/unit/: the created-vs-overwrote decision and the
+// revert that acts on it are the invariant a whole-sweep test can no longer observe, because the run
+// now stops at an overwrite and the worktree is removed before it returns.
+module.exports = { changedPaths, knownPaths, openWindow, revertWorktree };
