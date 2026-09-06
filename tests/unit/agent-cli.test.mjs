@@ -252,6 +252,72 @@ setTimeout(() => {}, 4000);
   assert.equal(await waitForExit(pid, 500), true, "the grandchild must be dead after the group kill");
 });
 
+// A child that backgrounds a process and exits — `sh -c "sleep 10 & echo $!; exit 0"`, the everyday
+// shape of a verify command that starts a server — hands its inherited pipes to a grandchild that
+// outlives it. This is the path H5's own symptom runs on, and the one the timeout tests never touch:
+// there the group dies, so `close` fires at once and the drain window never matters.
+const BACKGROUNDS_A_GRANDCHILD = "sleep 10 & echo $!; exit 0";
+
+// Branch review round 1: settling resolved the promise but never released the child, so the
+// surviving grandchild kept the PARENT's event loop alive on the still-ref'd pipe handles — the
+// engine wrote its report and then hung until the grandchild died. Asserting that the promise
+// settled passes against that bug; only the parent's own exit discriminates it.
+test("the parent process exits promptly once run() settles, even with a grandchild still holding the pipes", async () => {
+  const agentCliPath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "workflows", "lib", "agent-cli.js");
+  const runner = `
+const { run } = require(${JSON.stringify(agentCliPath)});
+run("/bin/sh", ["-c", ${JSON.stringify(BACKGROUNDS_A_GRANDCHILD)}]).then((res) => {
+  process.stdout.write("SETTLED " + res.stdout.trim() + "\\n");
+});
+`;
+  const { spawn } = await import("node:child_process");
+  const parent = spawn(process.execPath, ["-e", runner], { stdio: ["ignore", "pipe", "inherit"] });
+  const started = Date.now();
+  let out = "";
+  parent.stdout.on("data", (d) => { out += d; });
+  // 5s is half the grandchild's life: comfortably past node's boot plus DRAIN_GRACE_MS on a loaded
+  // box, and comfortably short of the grandchild's death, which is what the buggy build waited for.
+  const exited = await new Promise((resolve) => {
+    const deadline = setTimeout(() => resolve(false), 5000);
+    parent.once("exit", () => { clearTimeout(deadline); resolve(true); });
+  });
+  const elapsed = Date.now() - started;
+  const grandchildPid = Number((out.match(/SETTLED (\d+)/) ?? [])[1]);
+  if (!exited) parent.kill("SIGKILL");
+  if (Number.isInteger(grandchildPid) && grandchildPid > 0) {
+    try { process.kill(grandchildPid, "SIGKILL"); } catch { /* already gone */ }
+  }
+  assert.match(out, /^SETTLED \d+/, `run() must settle and report the grandchild pid; got ${JSON.stringify(out)}`);
+  assert.ok(exited, `the parent was still running ${elapsed}ms after run() settled: settling must release the child instead of leaving a grandchild holding the parent's event loop open`);
+});
+
+test("run() leaves nothing alive in the child's group once it has settled, and still returns the buffered output", async () => {
+  const res = await run("/bin/sh", ["-c", BACKGROUNDS_A_GRANDCHILD]);
+  const pid = Number(res.stdout.trim());
+  try {
+    assert.equal(res.code, 0);
+    assert.ok(Number.isInteger(pid) && pid > 0, `output buffered before the drain must still come back; got ${JSON.stringify(res.stdout)}`);
+    assert.equal(await waitForExit(pid, 1000), true, "the grandchild must be dead once run() has settled — the call is over by contract");
+  } finally {
+    try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+  }
+});
+
+// The timeout timer used to be cleared only inside settle, so a child that exited on its own but
+// whose `close` was delayed into the drain window had the timeout fire mid-drain and flip the
+// resolved value to timedOut: true — a timeout reported for a child that exited cleanly.
+test("a child that exits cleanly is never reported as timedOut when its timeout falls inside the drain window", async () => {
+  const timeoutMs = agentCli.DRAIN_GRACE_MS - 300;
+  const res = await run("/bin/sh", ["-c", BACKGROUNDS_A_GRANDCHILD], { timeoutMs });
+  const pid = Number(res.stdout.trim());
+  try {
+    assert.equal(res.timedOut, false, "the child exited on its own well inside the timeout; only the delayed close ran past it");
+    assert.equal(res.code, 0);
+  } finally {
+    try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+  }
+});
+
 // A detached child no longer receives the terminal's Ctrl-C, so the parent's own SIGTERM must reach
 // every live group before the parent dies — otherwise a killed panel leaves claude subprocesses
 // orphaned. The runner is a separate node process so the signal can be sent for real.

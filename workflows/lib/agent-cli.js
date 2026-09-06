@@ -45,7 +45,8 @@ function hookSignals() {
 
 // Kill the child's whole process group (audit H5: a grandchild that inherited the stdio pipes —
 // `sh -c "sleep 4; echo done"`, a backgrounded server in a verify command — survived a kill of the
-// direct child). Falls back to the direct child when the group is already gone (ESRCH).
+// direct child). Falls back to the direct child when the group is already gone (ESRCH), so calling
+// this for a leader that has already exited on its own — the normal case at settle — is safe.
 function killGroup(child) {
   try {
     process.kill(-child.pid, "SIGKILL");
@@ -55,9 +56,12 @@ function killGroup(child) {
 }
 
 // Spawn a child as the leader of its own process group, buffer its output, SIGKILL the group after
-// timeoutMs. Settles on the child's `exit`, draining for DRAIN_GRACE_MS, not on `close`. Never
-// rejects: transport failures come back on the resolved value as { spawnError } or { timedOut } so
-// callers branch on them instead of catching.
+// timeoutMs. Settles on the child's `exit`, draining for DRAIN_GRACE_MS, not on `close`. Settling
+// ends the call by contract, so it also kills the group and destroys the stdio pipes: a grandchild
+// that inherited them would otherwise hold the parent's event loop open long after the promise
+// resolved (the engine writes its report and then hangs). Never rejects: transport failures come
+// back on the resolved value as { spawnError } or { timedOut } so callers branch on them instead of
+// catching.
 function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = {}) {
   return new Promise((resolve) => {
     hookSignals();
@@ -73,9 +77,14 @@ function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = 
     const settle = (value) => {
       if (settled) return;
       settled = true;
-      live.delete(child);
       clearTimeout(timer);
       clearTimeout(drainTimer);
+      // `value` already carries the output buffered so far, so releasing the child cannot discard
+      // it. Kill the group before dropping the child from `live`: the signal sweep only has to
+      // reach children that are still running, and after this the group is not.
+      killGroup(child);
+      live.delete(child);
+      for (const stream of [child.stdout, child.stderr, child.stdin]) stream?.destroy();
       resolve(value);
     };
     const result = (code) =>
@@ -98,6 +107,9 @@ function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = 
     child.stderr.on("data", (d) => { stderr += d; guard(); });
     child.on("error", (err) => settle({ code: null, stdout, stderr: String(err), timedOut, spawnError: err }));
     child.on("exit", (code) => {
+      // The child exited on its own; without this the timeout could still fire inside the drain
+      // window and flip `timedOut` on a run that never timed out.
+      clearTimeout(timer);
       drainTimer = setTimeout(() => settle(result(code)), DRAIN_GRACE_MS);
       child.once("close", () => settle(result(code)));
     });
