@@ -32,8 +32,13 @@
 // worktree's ignored paths. The snapshot is retaken after every verifyCommand run and after every
 // revert, because a verify that builds, installs or measures coverage writes gitignored output that
 // `git clean -fd` cannot remove — without the snapshot the sweep blamed the editor agent for its own
-// verify's artifacts and skipped every file. Stale worktree registrations from a killed run are
-// pruned before the new worktree is added.
+// verify's artifacts and skipped every file. The snapshot goes one level below what git reports:
+// git names a wholly ignored directory once (`dist/`), so a snapshot of entry paths alone would hide
+// every file the agent later writes inside a directory the verify had already created. Snapshotting
+// each such directory's contents makes that file a new entry of its own. A rejected attempt's
+// ignored collateral is then deleted by path before the re-snapshot, so it neither stays on disk nor
+// enters the next baseline. Stale worktree registrations from a killed run are pruned before the new
+// worktree is added.
 //
 // Optional env: DEVCYCLE_SWEEP_MODEL sets --model for the claude editor
 // subagents (unset -> the CLI's configured default model).
@@ -50,7 +55,7 @@
 "use strict";
 
 const { execFileSync } = require("node:child_process");
-const { existsSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } = require("node:fs");
+const { existsSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } = require("node:fs");
 const { join, dirname, resolve, relative, isAbsolute, sep } = require("node:path");
 const os = require("node:os");
 const { makeLogger, run, claudeStructured } = require("./lib/agent-cli.js");
@@ -106,8 +111,9 @@ async function runEditorAgent(relPath, instruction, worktree, model) {
 
 // Every entry `git status --porcelain --ignored=matching` reports, split into its two-letter status
 // code and its path. `!!` marks an ignored entry; a wholly ignored directory is reported once as the
-// directory (that collapsing is what keeps this call cheap next to a `node_modules/`), anything else
-// per file.
+// directory, anything else per file. That collapsing is what keeps this call cheap next to a
+// `node_modules/`, and it is why the purity check cannot judge ignored state by these entry paths
+// alone — one `dist/` line stands for however many files are under it.
 function statusEntries(worktree) {
   return git(["status", "--porcelain", "--ignored=matching"], worktree)
     .split("\n")
@@ -122,25 +128,87 @@ function statusEntries(worktree) {
     });
 }
 
-// The ignored paths present in the worktree right now — the baseline a later purity check subtracts.
+// Size and mtime are enough to notice a file being added or rewritten between two snapshots taken
+// minutes apart, and unlike hashing they stay affordable over a node_modules.
+function fingerprint(abs) {
+  try {
+    const st = statSync(abs);
+    return `${st.size}:${st.mtimeMs}`;
+  } catch {
+    return "unreadable";
+  }
+}
+
+// Every file under `rel` (a directory git reported as one collapsed entry), keyed by its
+// worktree-relative path. A symlink is recorded as an entry but never descended into, so a link into
+// the wider filesystem cannot make this walk unbounded.
+function listTree(worktree, rel, out) {
+  let entries;
+  try {
+    entries = readdirSync(join(worktree, rel), { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    if (e.isDirectory()) listTree(worktree, `${rel}${e.name}/`, out);
+    else out.set(`${rel}${e.name}`, fingerprint(join(worktree, rel, e.name)));
+  }
+  return out;
+}
+
+// The ignored state of the worktree right now — the baseline a later purity check subtracts. Keyed by
+// the status entry, but a directory entry maps to a listing of its contents rather than to the entry
+// itself: git collapses a wholly ignored directory into one line, so comparing entries alone would
+// treat everything the agent writes inside an already-listed directory as already seen.
 function ignoredSnapshot(worktree) {
-  return new Set(statusEntries(worktree).filter((e) => e.ignored).map((e) => e.path));
+  const snapshot = new Map();
+  for (const e of statusEntries(worktree)) {
+    if (!e.ignored) continue;
+    snapshot.set(e.path, e.path.endsWith("/") ? listTree(worktree, e.path, new Map()) : fingerprint(join(worktree, e.path)));
+  }
+  return snapshot;
 }
 
 // Paths that differ from the sweep base and are attributable to the attempt: every tracked or
 // non-ignored change (the sweep base leaves the tracked tree clean, so any of those is the attempt's),
-// plus ignored paths that are new against `ignoredBaseline` — collateral the agent created under an
-// ignored path (audit 2026-09-05 L4). Ignored paths already in the snapshot are the sweep's own
-// verify output and are not charged to the agent.
+// plus ignored paths that are new or rewritten since `ignoredBaseline` — collateral the agent created
+// under an ignored path (audit 2026-09-05 L4). For a collapsed directory entry the comparison
+// descends into the baseline's listing of it and reports the individual files that changed, so a
+// verify-created `dist/` in the baseline cannot cloak what the agent puts inside it. Ignored paths
+// unchanged since the snapshot are the sweep's own verify output and are not charged to the agent.
+// Each entry carries whether it is ignored, because those are the ones a revert has to delete itself.
 function changedPaths(worktree, ignoredBaseline) {
-  return statusEntries(worktree)
-    .filter((e) => !(e.ignored && ignoredBaseline.has(e.path)))
-    .map((e) => e.path);
+  const changed = [];
+  for (const e of statusEntries(worktree)) {
+    if (!e.ignored) {
+      changed.push({ path: e.path, ignored: false });
+      continue;
+    }
+    const base = ignoredBaseline.get(e.path);
+    if (base === undefined) {
+      changed.push({ path: e.path, ignored: true }); // a wholly new ignored path, directory or file
+    } else if (base instanceof Map) {
+      for (const [p, fp] of listTree(worktree, e.path, new Map())) {
+        if (base.get(p) !== fp) changed.push({ path: p, ignored: true });
+      }
+    } else if (fingerprint(join(worktree, e.path)) !== base) {
+      changed.push({ path: e.path, ignored: true });
+    }
+  }
+  return changed;
 }
 
-function revertWorktree(worktree) {
+// `git clean -fd` leaves ignored paths alone, and `-x` is not the answer: it would also wipe the
+// node_modules, build caches and coverage data the verifyCommand needs. So the attempt's own ignored
+// collateral is deleted by path — exactly the paths the purity check charged to it, nothing else —
+// or it would survive the revert and be adopted by the re-snapshot that follows.
+function revertWorktree(worktree, foreignIgnored = []) {
   git(["checkout", "--", "."], worktree);
   git(["clean", "-fd"], worktree);
+  for (const p of foreignIgnored) {
+    const abs = resolve(worktree, p);
+    if (abs.startsWith(worktree + sep)) rmSync(abs, { recursive: true, force: true });
+  }
 }
 
 async function runVerify(verifyCommand, worktree) {
@@ -162,7 +230,7 @@ async function processFile(relPath, opts) {
   // what is actually on disk. Never before a purity check — that would baseline the agent's own
   // collateral and let it through.
   const rebaseline = () => { opts.ignoredBaseline = ignoredSnapshot(worktree); };
-  const revert = () => { revertWorktree(worktree); rebaseline(); };
+  const revert = (foreignIgnored) => { revertWorktree(worktree, foreignIgnored); rebaseline(); };
   log(`editing ${relPath}...`);
   const edit = await runEditorAgent(relPath, instruction, worktree, model);
   if (!edit.ok) {
@@ -173,9 +241,9 @@ async function processFile(relPath, opts) {
   if (changes.length === 0) {
     return { skip: `agent made no change: ${edit.value.note || "no reason given"}` };
   }
-  if (changes.length > 1 || changes[0] !== relPath) {
-    revert();
-    return { skip: `agent modified files other than the target (${changes.join(", ")}); reverted` };
+  if (changes.length > 1 || changes[0].path !== relPath) {
+    revert(changes.filter((c) => c.ignored).map((c) => c.path));
+    return { skip: `agent modified files other than the target (${changes.map((c) => c.path).join(", ")}); reverted` };
   }
   if (!existsSync(join(worktree, relPath))) {
     revert();

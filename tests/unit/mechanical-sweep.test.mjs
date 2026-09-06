@@ -407,6 +407,80 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { chan
   assert.match(readFileSync(join(repo, "b.js"), "utf8"), /\/\/ swept/);
 });
 
+// Branch review round 2: the baseline is compared per git-status entry, and git reports a wholly
+// ignored directory as ONE collapsed entry (`gen/`). A verifyCommand that builds, tests or measures
+// coverage creates exactly such a directory, so from the second target onward every file the editor
+// writes inside it arrives under that same already-baselined entry. Comparing entry paths therefore
+// waved the collateral through and reopened L4 in its most common form; the two tests below drive
+// that exact combination, which no test above does.
+const VERIFY_MAKES_IGNORED_DIR = "mkdir -p gen && touch gen/build.out";
+
+// Edits its target, and while editing b.js also drops a file INSIDE the directory the verify made.
+const COLLATERAL_INTO_VERIFY_DIR_EDITOR = `
+const fs = require("node:fs");
+const prompt = process.argv[process.argv.length - 1];
+const target = prompt.match(/^file: (.+)$/m)[1];
+fs.appendFileSync(target, "// swept\\n");
+if (target === "b.js") fs.writeFileSync("gen/collateral.js", "collateral\\n");
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: { changed: true, note: "edited" } }));
+`;
+
+test("collateral written inside a verify-created ignored directory is caught, not hidden by the baselined directory", () => {
+  const repo = repoWithThreeTargetsAndIgnores();
+  const bin = makeFakeBin("claude", COLLATERAL_INTO_VERIFY_DIR_EDITOR);
+  const res = runScript(
+    SCRIPT,
+    { files: ["a.js", "b.js", "c.js"], instruction: "append marker", verifyCommand: VERIFY_MAKES_IGNORED_DIR },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.equal(
+    report.skipped.length,
+    1,
+    `the attempt that wrote into the baselined ignored directory must be skipped: ${JSON.stringify(report.skipped)}`
+  );
+  assert.equal(report.skipped[0].file, "b.js");
+  // The reason must name the file inside the directory. `gen/` alone is the collapsed entry the
+  // baseline already holds, so reporting it would mean the check never looked inside.
+  assert.match(report.skipped[0].reason, /modified files other than the target \(b\.js, gen\/collateral\.js\); reverted/);
+  assert.deepEqual(report.applied, ["a.js", "c.js"]);
+  assert.ok(!readFileSync(join(repo, "b.js"), "utf8").includes("swept"), "the rejected attempt is not applied");
+  assert.match(readFileSync(join(repo, "a.js"), "utf8"), /\/\/ swept/);
+  assert.match(readFileSync(join(repo, "c.js"), "utf8"), /\/\/ swept/);
+});
+
+test("a rejected attempt's ignored collateral is deleted while the verify command's own artifact survives", () => {
+  const repo = repoWithThreeTargetsAndIgnores();
+  const bin = makeFakeBin("claude", COLLATERAL_INTO_VERIFY_DIR_EDITOR);
+  // The sweep worktree is removed before the run returns, so the verify command — which runs inside
+  // it — is where its contents can be observed: every run appends a listing of gen/, and the last
+  // one runs after the rejected attempt was reverted.
+  const listing = join(mkdtempSync(join(tmpdir(), "devcycle-sweep-gen-")), "gen-listing.txt");
+  const res = runScript(
+    SCRIPT,
+    {
+      files: ["a.js", "b.js", "c.js"],
+      instruction: "append marker",
+      verifyCommand: `${VERIFY_MAKES_IGNORED_DIR} && { echo "== run"; ls gen; } >> ${JSON.stringify(listing)}`,
+    },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.equal(report.skipped.length, 1, `precondition — b.js is rejected: ${JSON.stringify(report.skipped)}`);
+  const runs = readFileSync(listing, "utf8").split("== run").slice(1);
+  const afterRevert = runs[runs.length - 1];
+  assert.ok(
+    !afterRevert.includes("collateral.js"),
+    `the rejected attempt's collateral must be deleted from the worktree; the next verify still saw:\n${afterRevert}`
+  );
+  assert.ok(
+    afterRevert.includes("build.out"),
+    `deleting the collateral must not take the verify command's own artifact with it; the next verify saw:\n${afterRevert}`
+  );
+});
+
 // L4 (3): a previous sweep SIGKILLed mid-run leaves a worktree registration whose directory is gone;
 // `git worktree prune` before `worktree add` removes it instead of tripping over it.
 test("a stale worktree registration from a killed sweep is pruned, not tripped over", () => {
