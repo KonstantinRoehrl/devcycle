@@ -357,6 +357,19 @@ const AMBIGUITY_CLASSES = [
   ["function-definition head naming git, spaced parens and a glued body", "git (){ git reset --hard; }; git", "git (){ git stash; }; git"],
   ["leading redirection: descriptor duplication with a separated target (2>& 1)", "2>& 1 git reset --hard", "2>& 1 git stash"],
   ["leading redirection: duplication onto stderr with a separated target (>& 2)", ">& 2 git reset --hard", ">& 2 git stash"],
+  // Branch review round 6 (F3): canonicalization stopped at the token's ENDS. normalizeHead
+  // re-derived the head with a leading/trailing-run regex, so a quote or backslash written INSIDE a
+  // word survived and the token stopped reducing to `git` — while bash runs `gi\t`, `"g"'it'` and
+  // `g""it` as exactly `git`. Both halves of the first four rows returned allow before the
+  // word-level canonicalization; the fifth is falsifiable on the main-thread half only (see below).
+  ["escape inside the git binary name", "gi\\t reset --hard", "gi\\t stash"],
+  ["quotes inside the git binary name", "\"g\"'it' reset --hard", "\"g\"'it' stash"],
+  ["empty quote pair inside the git binary name", 'g""it reset --hard', 'g""it stash'],
+  ["escape inside a wrapper's name", "s\\h -c 'git reset --hard'", "s\\h -c 'git stash'"],
+  // The guarded half here already denied before the fix — the wrapper arm denies any git behind
+  // `sh -c` whatever its subcommand, so only the main-thread half is falsifiable: mentionsStash read
+  // `st""ash` as not-stash and let the one command that ban exists to stop through.
+  ["empty quote pair inside a subcommand behind a wrapper", 'sh -c "git re""set --hard"', 'sh -c "git st""ash"'],
 ];
 
 test("guarded origin + every named ambiguity class hiding a destructive git is denied", () => {
@@ -457,6 +470,8 @@ test("the ordinary commands a cycle's agents run stay allowed", () => {
     "node scripts/validate.mjs && node scripts/xref-check.mjs",
     "du -sh /tmp/devcycle-tests",
     "git log --oneline -5 | cat",
+    "awk '{print $1}'",
+    "cat <<EOF > notes.md\nordinary prose, no command here\nEOF",
   ])
     assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for an ordinary agent command: ${cmd}`);
 });
@@ -599,4 +614,64 @@ test("a case arm with alternated patterns is classified by its body, in both dir
   assert.equal(decideMain(cwd, "case $x in git|sh) git stash;; esac"), "deny");
   assert.equal(decide(REVIEWER, "case $x in git|sh) git log;; esac"), "allow");
   assert.equal(decideMain(cwd, "case $x in git|sh) git stash list;; esac"), "allow");
+});
+
+// Round 6 (F3), the allow direction: canonicalizing the whole word must REDUCE the spelling, not
+// deny it. The same `gi\t` that denies `reset --hard` has to allow `log`, or the fix would trade a
+// fail-open for a blanket deny on every word carrying a quote.
+test("an intra-word quoted or escaped git that reduces to a read-only invocation stays allowed", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["gi\\t log", "\"g\"'it' status", 'g""it diff --stat -- a b', "gi\\t add -N x"])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a reduced read-only git: ${cmd}`);
+  for (const cmd of ['g""it stash list', "gi\\t stash show -p", "\"g\"'it' commit -m x"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow on the main thread: ${cmd}`);
+});
+
+// Round 6 (F4): a heredoc BODY is DATA, not commands. `<<` tokenized as an ordinary redirection, so
+// the body's newlines became separator tokens and every body line was classified as a command — a
+// guarded agent could not write a report or fixture naming `git reset --hard`. That over-denial
+// obstructed round 6's own reviewer, which had to encode every git token as a placeholder to finish
+// its review. The tokenizer now consumes the body up to its delimiter in every spelling bash
+// accepts: quoted, unquoted, and `<<-` with its leading tabs stripped.
+test("a heredoc body is data, so a report naming a destructive git may be written", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "cat <<EOF\ngit reset --hard\nEOF",
+    "cat <<-EOF\n\tgit clean -fd\n\tEOF",
+    "cat <<'EOF'\ngit reset --hard\nEOF",
+    'cat <<"EOF"\ngit checkout -- x\nEOF',
+    "cat <<EOF > findings.md\n- the guard denies git reset --hard\n- and git checkout -- x\nEOF",
+    "cat <<A <<B\ngit reset --hard\nA\ngit clean -fd\nB",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a heredoc body: ${JSON.stringify(cmd)}`);
+  for (const cmd of ["cat <<EOF\ngit stash\nEOF", "cat <<'EOF'\ngit stash pop\nEOF", "cat <<-EOF\n\tgit stash\n\tEOF"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow for a heredoc body: ${JSON.stringify(cmd)}`);
+});
+
+// The body is data only until its delimiter, and only from the next newline: a command sharing the
+// heredoc's own line, and anything after the delimiter line, is still a command.
+test("a command beside or after a heredoc is still classified", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  assert.equal(decide(REVIEWER, "cat <<EOF > f\nprose\nEOF\ngit reset --hard"), "deny");
+  assert.equal(decideMain(cwd, "cat <<EOF > f\nprose\nEOF\ngit stash"), "deny");
+  assert.equal(decide(REVIEWER, "cat <<'EOF'\ngit log\nEOF\ngit clean -fd"), "deny");
+  assert.equal(decide(REVIEWER, "cat <<EOF; git reset --hard\nprose\nEOF"), "deny");
+  assert.equal(decide(REVIEWER, "cat <<EOF > f\nprose\nEOF\nnpm test"), "allow");
+});
+
+// An unterminated heredoc is an ambiguous command, and this file answers ambiguity by classifying
+// MORE: the body is read as commands, exactly as before the fix. A denial then costs a malformed
+// command; the alternative is a destructive git parked under a delimiter that never arrives.
+test("an unterminated heredoc classifies its body as commands (deny-on-ambiguity)", () => {
+  assert.equal(decide(REVIEWER, "cat <<EOF\ngit reset --hard\n"), "deny");
+  assert.equal(decideMain(cycleDir(stateAt("execution")), "cat <<EOF\ngit stash\n"), "deny");
+  assert.equal(decide(REVIEWER, "cat <<EOF\nnpm test\n"), "allow");
+});
+
+// A herestring is not a heredoc: `<<<` must keep matching before `<<`, or its word would be read as
+// a delimiter and the rest of the command swallowed as a body.
+test("a herestring is not a heredoc", () => {
+  assert.equal(decide(REVIEWER, "git log <<< x"), "allow");
+  assert.equal(decide(REVIEWER, "git reset --hard <<< x"), "deny");
+  assert.equal(decide(REVIEWER, "cat <<< x; git reset --hard"), "deny");
 });

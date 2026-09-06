@@ -28,12 +28,19 @@
 // `)`, `;`, `&`, `|`, redirection operator and standalone `{`/`}` that is shell SYNTAX becomes a
 // token of its own, while the same character inside `'…'`, `"…"`, `$'…'` or behind a backslash stays
 // DATA. `f(){`, `f (){`, `f() {` and `f () {` all reduce to one stream (`f` `(` `)` `{`), so the
-// class is closed as a class. Telling a duplication's `&` (`2>&1`) from a background `&` is part of
-// that tokenization — the descriptor and the `&` are glued into one redirection operator token — so
+// class is closed as a class. Canonicalization runs to the WORD level, not just the token's ends:
+// quoting and escapes written INSIDE a word (`gi\t`, `"g"'it'`, `g""it`) are what bash strips before
+// it runs `git`, so normalizeHead strips them too and every such spelling reduces to `git` (round 6).
+// Telling a duplication's `&` (`2>&1`) from a background `&` is part of that tokenization — the
+// descriptor and the `&` are glued into one redirection operator token — so
 // a bare `&` token is always a command separator and the segment splitter needs no lookbehind.
 // A case pattern label is dropped before segments are formed, because an alternated label spans the
 // `|` the splitter cuts on. An unterminated quote is ambiguous, so the command is re-read with
 // quoting disabled: the syntax the dangling quote would have hidden is still classified.
+// The one place canonicalization deliberately classifies LESS is a heredoc body (`cat <<'EOF' … EOF`):
+// those lines are data the shell writes, never commands it runs, and reading them as commands denied
+// a guarded agent the report and fixture files this repo's own workflow asks it to write (round 6).
+// An unterminated heredoc has no body boundary to trust, so it falls back to classifying the body.
 // Scope is git-only; non-git commands (tests, greps) are allowed. Three dispatch origins are guarded
 // by the allowlist — task-reviewer, red-team-reviewer and, since #235, implementer — and the main
 // thread (no agent_type) is guarded for `git stash` alone, only while a .devcycle/state.md at or
@@ -127,17 +134,33 @@ const WRAPPERS = new Set([
   "arch", "chroot", "runcon", "catchsegv",
 ]);
 
+// Remove the quoting a word carries, WHEREVER it sits in that word: a `'` or `"` is syntax the shell
+// consumes rather than passes to the binary, and a backslash escapes the character behind it. So
+// `"g"'it'`, `g""it` and `gi\t` are all spellings bash runs as `git`. Doing this only at the word's
+// ENDS — which is what a leading/trailing-run regex does — left every intra-word spelling reducing
+// to a non-git head, and each of them reached ALLOW on both arms (branch review round 6, F3). A
+// backslash with nothing behind it escapes nothing and is kept.
+function stripQuoting(word) {
+  let out = "";
+  for (let i = 0; i < word.length; i += 1) {
+    const c = word[i];
+    if (c === "'" || c === '"') continue;
+    if (c === "\\" && i + 1 < word.length) { out += word[i + 1]; i += 1; continue; }
+    out += c;
+  }
+  return out;
+}
+
 // Normalize a command head to the bare command name so alternate spellings of the same binary all
-// reduce to one token before classification (deny-on-ambiguity depends on this being total): strip a
-// leading run of quotes, grouping characters and `$` (the quoted spelling `"git"`, the ANSI-C quoted
-// spelling `$'git` that `bash -c $'git reset --hard'` leaves on the token), then the same run at the
-// end (`stash"`, `stash'`), then a single leading backslash (`\git`, the alias-bypass spelling),
-// then the path basename (`/usr/bin/git`, `./git`). Grouping characters are tokens of their own
-// since canonicalization, so `(`/`)`/`{`/`}` here only cover a quoted or malformed leftover.
-// Whatever reduces to `git` is treated as git. Stripping only ever adds matches, so every extension
-// here denies more, never less.
+// reduce to one token before classification (deny-on-ambiguity depends on this being total): drop
+// the word's quoting and escapes (above), then a leading run of grouping characters and `$` (the
+// ANSI-C quoted spelling `$'git` that `bash -c $'git reset --hard'` leaves on the token), then the
+// same run of closers at the end, then the path basename (`/usr/bin/git`, `./git`). Grouping
+// characters are tokens of their own since canonicalization, so `(`/`)`/`{`/`}` here only cover a
+// quoted or malformed leftover. Whatever reduces to `git` is treated as git. Stripping only ever
+// adds matches, so every extension here denies more, never less.
 function normalizeHead(token) {
-  let t = token.replace(/^[({'"$]+/, "").replace(/[)}'"]+$/, "").replace(/^\\/, "");
+  const t = stripQuoting(token).replace(/^[({$]+/, "").replace(/[)}]+$/, "");
   const slash = t.lastIndexOf("/");
   return slash === -1 ? t : t.slice(slash + 1);
 }
@@ -228,8 +251,59 @@ const SEPARATORS = new Set([";", ";;", "&&", "||", "|", "&", "\n"]);
 // here: no expansion, no substitution, no word splitting. An unterminated quote is an ambiguous
 // command, so it is re-read with quoting disabled (the deny direction: more syntax is seen, not
 // less).
+// Read the delimiter word a `<<` operator opens, starting just past that operator. `<<-` is the
+// tab-stripping form, and the delimiter may be written quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) or
+// bare — the quoting only decides whether bash expands the body, which this parser never does, so
+// the word is compared with its quoting removed. Returns null when no word follows (`cat <<`),
+// which leaves the operator to tokenize as an ordinary redirection.
+function readHeredocDelimiter(raw, from) {
+  let j = from;
+  let stripTabs = false;
+  if (raw[j] === "-") { stripTabs = true; j += 1; }
+  while (raw[j] === " " || raw[j] === "\t") j += 1;
+  let word = "";
+  let quote = null;
+  while (j < raw.length) {
+    const c = raw[j];
+    if (quote) { word += c; if (c === quote) quote = null; j += 1; continue; }
+    if (c === "'" || c === '"') { word += c; quote = c; j += 1; continue; }
+    if (c === "\\" && j + 1 < raw.length) { word += c + raw[j + 1]; j += 2; continue; }
+    if (/[\s;&|<>()]/.test(c)) break;
+    word += c;
+    j += 1;
+  }
+  return word ? { delim: stripQuoting(word), stripTabs, end: j } : null;
+}
+
+// A heredoc BODY is DATA, not commands: `cat <<'EOF' … EOF` writes those lines to a file, it never
+// runs them, and writing a findings or report file that quotes `git reset --hard` is exactly what a
+// reviewer or implementer in this repo does — classifying the body denied that work (branch review
+// round 6, F4). Consume the bodies the line's heredoc operators opened, from `start` (just past that
+// line's newline), and return the offset just past the last delimiter line; `<<-` strips leading
+// TABS from the body and from its delimiter line. An unterminated heredoc is an ambiguous command,
+// so it returns -1 and the caller tokenizes the body as commands instead — the same deny direction
+// an unterminated quote takes.
+function skipHeredocBodies(raw, start, heredocs) {
+  let pos = start;
+  for (const { delim, stripTabs } of heredocs) {
+    let terminated = false;
+    while (pos <= raw.length) {
+      const eol = raw.indexOf("\n", pos);
+      const lineEnd = eol === -1 ? raw.length : eol;
+      let line = raw.slice(pos, lineEnd).replace(/\r$/, "");
+      if (stripTabs) line = line.replace(/^\t+/, "");
+      pos = eol === -1 ? raw.length : eol + 1;
+      if (line === delim) { terminated = true; break; }
+      if (eol === -1) break;
+    }
+    if (!terminated) return -1;
+  }
+  return pos;
+}
+
 function tokenizeCommand(raw, ignoreQuotes = false) {
   const tokens = [];
+  const heredocs = []; // bodies opened on the line being read, consumed at that line's newline
   let word = "";
   const flush = () => { if (word) { tokens.push(word); word = ""; } };
   const push = (token) => { flush(); tokens.push(token); };
@@ -258,7 +332,16 @@ function tokenizeCommand(raw, ignoreQuotes = false) {
       word += c + next;
       continue;
     }
-    if (c === "\n" || c === "\r") { push("\n"); if (c === "\r" && next === "\n") i += 1; continue; }
+    if (c === "\n" || c === "\r") {
+      push("\n");
+      if (c === "\r" && next === "\n") i += 1;
+      if (heredocs.length) {                                    // the bodies this line opened are data
+        const bodyEnd = skipHeredocBodies(raw, i + 1, heredocs);
+        heredocs.length = 0;
+        if (bodyEnd !== -1) i = bodyEnd - 1;                    // resume just past the last delimiter line
+      }
+      continue;
+    }
     if (/\s/.test(c)) { flush(); continue; }
     if ((c === "{" || c === "}") && !word && (next === undefined || /[\s;&|)]/.test(next))) { push(c); continue; }
     const op = OPERATORS.find((o) => raw.startsWith(o, i));
@@ -267,6 +350,10 @@ function tokenizeCommand(raw, ignoreQuotes = false) {
       if (fd) word = "";
       push(fd + op);
       i += op.length - 1;
+      if (op === "<<") { // a heredoc: its delimiter is data, and so is the body opened at the newline
+        const here = readHeredocDelimiter(raw, i + 1);
+        if (here) { heredocs.push(here); i = here.end - 1; }
+      }
       continue;
     }
     word += c;
