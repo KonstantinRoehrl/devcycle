@@ -13,14 +13,16 @@
 // launcher in the bounded WRAPPERS set: setsid/sudo/exec/taskset/…), a `{ … }` group or `( … )`
 // subshell, backticks, or a write-capable option (git diff --output=<file>) — is denied. The WRAPPERS
 // set is a bounded launcher denylist: a git behind an UNLISTED head-position launcher is allowed, the
-// accepted bound per the 2026-09-02 design spec's § Parser robustness. Shell reserved
-// words and process substitution are NOT a bound: a head that is a reserved word (`if`, `!`,
-// `for … do`, `while … do`) is stripped until the real command is reached, and `<(`/`>(` are denied
-// like backticks and `$(` — that spec's rule is that a missed destructive command is not acceptable.
+// accepted bound per the 2026-09-02 design spec's § Parser robustness. Shell syntax that merely sits
+// in FRONT of a command is NOT a bound: a head that is a reserved word (`if`, `!`, `for … do`,
+// `case … in`, `coproc`, `function`), a case pattern label (`*)`, `1)`), a function-definition head
+// (`f()`, `f () {`), or a redirection (`>/dev/null git …`) is stripped until the real command is
+// reached; a line continuation is joined before splitting; and `<(`/`>(` are denied like backticks
+// and `$(` — that spec's rule is that a missed destructive command is not acceptable.
 // Scope is git-only; non-git commands (tests, greps) are allowed. Three dispatch origins are guarded
 // by the allowlist — task-reviewer, red-team-reviewer and, since #235, implementer — and the main
-// thread (no agent_type) is guarded for `git stash` alone, only while a .devcycle/state.md above the
-// call's cwd reports a stage other than done. Every other origin is never guarded.
+// thread (no agent_type) is guarded for `git stash` alone, only while a .devcycle/state.md at or
+// above the call's cwd reports a stage other than done. Every other origin is never guarded.
 import { readFileSync } from "node:fs";
 import { findStateFile } from "./lib/find-state-file.mjs";
 
@@ -82,11 +84,14 @@ const denyReason = (guardedTail, mainThreadTail) =>
     : `devcycle: main thread may not run git stash while a devcycle cycle is active (stage: ${cycleStage}) — ${mainThreadTail}`) +
   ` command: ${command.slice(0, 200)}`;
 
-// Clearly read-only git subcommands (unconditional).
+// Clearly read-only git subcommands (unconditional). `symbolic-ref` is deliberately absent: with two
+// arguments it REPOINTS HEAD in the shared checkout (`git symbolic-ref HEAD refs/heads/other`), and
+// deny-on-ambiguity takes the whole subcommand rather than classifying its arguments — `rev-parse`
+// covers the read use.
 const READ_ONLY = new Set([
   "diff", "log", "show", "status", "blame", "rev-parse", "ls-files", "ls-tree", "cat-file",
   "describe", "grep", "shortlog", "merge-base", "rev-list", "name-rev", "for-each-ref",
-  "diff-tree", "diff-index", "symbolic-ref", "whatchanged",
+  "diff-tree", "diff-index", "whatchanged",
 ]);
 // Command-LAUNCHERS that run their trailing arguments as a command, so a git after one is EXECUTED
 // → deny-on-ambiguity when git appears. This is a bounded denylist (per the design's § Parser
@@ -109,17 +114,30 @@ const WRAPPERS = new Set([
 
 // Normalize a command head to the bare command name so alternate spellings of the same binary all
 // reduce to one token before classification (deny-on-ambiguity depends on this being total): strip a
-// leading run of grouping tokens and quotes (`(`/`{`/`\'`/`"` — the subshell/brace-group spelling
-// `(git`/`{git`, the quoted spelling `"git"`), then the same run at the end (`stash)`, `git}`, the
-// closing char the whitespace split leaves glued to the last word of a group — round-1 fix), then a
+// leading run of grouping tokens, quotes and `$` (`(`/`{`/`\'`/`"`/`$` — the subshell/brace-group
+// spelling `(git`/`{git`, the quoted spelling `"git"`, the ANSI-C quoted spelling `$'git` that
+// `bash -c $'git reset --hard'` tokenizes to), then the same run at the end (`stash)`, `git}`,
+// `stash'`, the closing char the whitespace split leaves glued to the last word of a group), then a
 // single leading backslash (`\git`, the alias-bypass spelling), then the path basename
 // (`/usr/bin/git`, `./git`). Whatever reduces to `git` is treated as git. Stripping only ever adds
 // matches, so every extension here denies more, never less.
 function normalizeHead(token) {
-  let t = token.replace(/^[({'"]+/, "").replace(/[)}'"]+$/, "").replace(/^\\/, "");
+  let t = token.replace(/^[({'"$]+/, "").replace(/[)}'"]+$/, "").replace(/^\\/, "");
   const slash = t.lastIndexOf("/");
   return slash === -1 ? t : t.slice(slash + 1);
 }
+
+// git's own global options that take a VALUE. Written separated (`git --git-dir .git stash`) the
+// value is a token of its own, so an option paired with nothing left the subcommand index on the
+// VALUE: `.git` was compared against `stash` and the main-thread ban missed the stash, and a guarded
+// origin's read-only `git --git-dir /r/.git log` was wrongly denied for the "subcommand" `/r/.git`.
+// The attached spellings (`--git-dir=.git`) need no entry — the generic `-`-prefixed skip covers
+// them. `--exec-path` and `--attr-source` also have valueless/attached uses; skipping a token that
+// is not there just runs the index off the end, which classifies as an unreadable git → deny.
+const VALUE_OPTIONS = new Set([
+  "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env",
+  "--super-prefix", "--attr-source",
+]);
 
 // A git segment is read-only iff its subcommand is confidently inspection-only.
 function gitSegmentIsReadOnly(tokens, i) {
@@ -169,26 +187,56 @@ if (/`|\$\(|<\(|>\(/.test(command) && /\bgit\b/.test(command) && (guarded || /\b
 // Shell reserved words that may precede a command inside one segment. They are neither a command
 // nor a wrapper, so a segment whose head is one of them was skipped and the git after it never
 // classified (`for f in a b; do git checkout -- "$f"; done`, `! git reset --hard`,
-// `if git reset --hard; then :; fi` — audit 2026-09-05 H1). They are stripped until the real head
-// is reached. `for`/`select` are loop headers: everything up to and including the `do` of the same
-// segment carries no command, and when the `do` sits after a `;` (the usual spelling) the header
-// segment is simply empty — the body `git …` is then its own segment and classifies as git.
-const RESERVED = new Set(["if", "then", "elif", "else", "fi", "do", "done", "while", "until", "!", "{", "(", "}", ")"]);
-const LOOP_HEADS = new Set(["for", "select"]);
+// `if git reset --hard; then :; fi` — audit 2026-09-05 H1; `case`/`esac`, `coproc` and `function`
+// — branch review round 1). They are stripped until the real head is reached.
+const RESERVED = new Set([
+  "if", "then", "elif", "else", "fi", "do", "done", "while", "until", "!", "{", "(", "}", ")",
+  "esac", "coproc", "function",
+]);
+// Compound-command headers: everything up to and including the terminator token carries no command,
+// so it is dropped wholesale. `for`/`select` end at `do`; `case` ends at `in`. When the terminator
+// sits after a `;` or a newline (the usual spelling) the header segment is simply empty — the body
+// `git …` is then its own segment and classifies as git.
+const BLOCK_HEADS = new Map([["for", "do"], ["select", "do"], ["case", "in"]]);
 
-// Drop leading env-assignments, grouping tokens, reserved words and loop headers so the head
-// re-derives to the real command. Returns the remaining tokens (possibly none).
+// A head that classification itself keys off: the git binary, or a recognized wrapper. Every
+// widening in stripLeading is gated on this, which is what keeps the "stripping only ever adds
+// denies, never removes one" invariant true — a token that would have been classified is never
+// consumed as syntax.
+const isClassifiedHead = (token) => {
+  const h = normalizeHead(token);
+  return h === "git" || WRAPPERS.has(h);
+};
+// A redirection in front of a command (`>/dev/null git reset --hard`, `2>&1 git …`) is not a
+// command, so the git behind it was never classified. A bare operator's target is the following
+// token (`> /dev/null git …`) and is dropped with it; a glued target (`>/dev/null`, `2>&1`) is one
+// token. Both forms are bounded to the leading-file-descriptor spelling the shell accepts.
+const BARE_REDIRECTION = /^\d*(?:<{1,2}|>{1,2})$/;
+const REDIRECTION = /^\d*[<>]/;
+// A `case` arm's body sits behind its pattern label (`*)`, `1)`, `(*)`), and a function definition
+// behind its head (`f()`, or `f` `()` / `f` `{` when the whitespace split separates them). Neither
+// is a command, so the git after it was never classified. Both are bounded by shape — a token
+// ending in `)`, or a token whose successor is `{`/`()` — and never applied to a classified head.
+const isSyntaxLabel = (token) => /\)$/.test(token) && !isClassifiedHead(token);
+
+// Drop leading env-assignments, grouping tokens, reserved words, compound-command headers,
+// redirections, case labels and function-definition heads so the head re-derives to the real
+// command. Returns the remaining tokens (possibly none).
 function stripLeading(tokens) {
   let t = tokens;
   for (;;) {
     if (!t.length) return t;
     const head = t[0];
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(head) || RESERVED.has(head)) { t = t.slice(1); continue; }
-    if (LOOP_HEADS.has(head)) {
-      const doAt = t.indexOf("do");
-      t = doAt === -1 ? [] : t.slice(doAt + 1);
+    if (BLOCK_HEADS.has(head)) {
+      const endAt = t.indexOf(BLOCK_HEADS.get(head));
+      t = endAt === -1 ? [] : t.slice(endAt + 1);
       continue;
     }
+    if (BARE_REDIRECTION.test(head)) { t = isClassifiedHead(t[1] ?? "") ? t.slice(1) : t.slice(2); continue; }
+    if (REDIRECTION.test(head)) { t = t.slice(1); continue; }
+    if (!isClassifiedHead(head) && (t[1] === "{" || t[1] === "()")) { t = t.slice(1); continue; }
+    if (isSyntaxLabel(head)) { t = t.slice(1); continue; }
     return t;
   }
 }
@@ -196,7 +244,9 @@ function stripLeading(tokens) {
 // Split on shell operators that separate commands; classify each segment independently. A lone `&`
 // (background operator) separates commands just as `;` does, so `true & git reset --hard` must split
 // into two segments — `&&` is matched first so a logical-AND is never mis-split on its first `&`.
-for (const seg of command.split(/(?:&&|\|\||;|\||&|\n)/)) {
+// A backslash-newline is a line continuation, not a separator: joining it first keeps `git \`+newline
+// +`stash pop` one command instead of a `git \` segment and an unrelated-looking `stash pop` one.
+for (const seg of command.replace(/\\\r?\n/g, " ").split(/(?:&&|\|\||;|\||&|\n)/)) {
   // stripLeading drops env-assignments, `{`/`(` grouping tokens and reserved words so the head is
   // the real command — `{ git reset; }`, `( git reset )` and `do git reset` must not hide the git.
   // (normalizeHead additionally strips a grouping char glued to the head, e.g. `(git`.)
@@ -215,10 +265,10 @@ for (const seg of command.split(/(?:&&|\|\||;|\||&|\n)/)) {
     continue; // a wrapper with no git (e.g. `timeout 30 npm test`) is a non-git command → allow
   }
   if (head !== "git") continue; // non-git command (basename never `git`) → allowed
-  let i = 1; // skip git's own global options and -C <dir> / -c <cfg> to reach the subcommand
+  let i = 1; // skip git's own global options, including each one's separated value, to reach the subcommand
   while (i < tokens.length) {
     const t = tokens[i];
-    if (t === "-C" || t === "-c") { i += 2; continue; }
+    if (VALUE_OPTIONS.has(t)) { i += 2; continue; }
     if (t.startsWith("-")) { i += 1; continue; }
     break;
   }

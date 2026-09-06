@@ -305,3 +305,88 @@ test("malformed / non-object stdin fails safe to allow, never throws", () => {
     assert.equal(r.stdout.trim(), "", `denied on unparseable stdin ${JSON.stringify(raw)}`);
   }
 });
+
+// Branch review round 1 (findings A1–A5): ordinary shell spellings that still reduced to a real
+// `git` invocation but reached `allow()` — for a guarded origin AND past the main-thread
+// cycle-scoped stash ban. The spec's § Parser robustness rule is that a missed destructive command
+// is not acceptable, so each is a live fail-open rather than an accepted bound. Every class is
+// asserted on BOTH arms from one table, because spec §2 pins that only the final classification
+// differs by origin: a fix that closes a spelling for guarded origins alone is not a fix.
+// Each row is [ambiguity class, guarded-origin command, main-thread command].
+const AMBIGUITY_CLASSES = [
+  ["reserved word: case/esac", "case x in *) git reset --hard;; esac", "case x in *) git stash;; esac"],
+  ["case pattern label on a multi-line arm", "case x in\n  1) git reset --hard ;;\nesac", "case x in\n  1) git stash ;;\nesac"],
+  ["case pattern label in its parenthesized form", "case x in\n  (*) git clean -fd ;;\nesac", "case x in\n  (*) git stash pop ;;\nesac"],
+  ["reserved word: coproc", "coproc git reset --hard", "coproc git stash"],
+  ["function body", "f() { git reset --hard; }; f", "f() { git stash; }; f"],
+  ["function body with a space before the parens", "f () { git reset --hard; }; f", "f () { git stash; }; f"],
+  ["reserved word: function keyword", "function f { git reset --hard; }; f", "function f { git stash; }; f"],
+  ["leading redirection with a glued target", ">/dev/null git reset --hard", ">/dev/null git stash"],
+  ["leading redirection with a separated target", "> /dev/null git reset --hard", "> /dev/null git stash"],
+  ["ANSI-C quoting behind a shell wrapper", "bash -c $'git reset --hard'", "sh -c $'git stash'"],
+  ["ANSI-C quoted subcommand", "git $'reset' --hard", "git $'stash'"],
+  ["separated global option: --git-dir", "git --git-dir .git reset --hard", "git --git-dir .git stash"],
+  ["separated global option: --work-tree", "git --work-tree . clean -fd", "git --work-tree . stash"],
+  ["separated global option: --namespace", "git --namespace n reset --hard", "git --namespace n stash"],
+  ["line continuation", "git \\\n reset --hard", "git \\\nstash pop"],
+];
+
+test("guarded origin + every named ambiguity class hiding a destructive git is denied", () => {
+  for (const [ambiguityClass, cmd] of AMBIGUITY_CLASSES)
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for ${ambiguityClass}: ${JSON.stringify(cmd)}`);
+});
+
+test("main thread + every named ambiguity class hiding git stash is denied in an active cycle", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const [ambiguityClass, , cmd] of AMBIGUITY_CLASSES)
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for ${ambiguityClass}: ${JSON.stringify(cmd)}`);
+});
+
+// The widening must not become a blanket deny: the same reserved words and labels around a non-git
+// command, and git's separated global options in front of a read-only subcommand, stay allowed.
+test("guarded origin + the same reserved words and labels around non-git commands stay allowed", () => {
+  for (const cmd of [
+    "case $x in *) echo ok;; esac",
+    "case $x in\n  1) echo ok ;;\nesac",
+    "f() { echo ok; }; f",
+    "function f { echo ok; }; f",
+    ">/dev/null echo ok",
+    "coproc node --test",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for non-git: ${cmd}`);
+});
+
+// A3's false-deny half: pairing a value only with -C/-c left the subcommand index on the VALUE, so
+// a read-only git carrying a separated global option was wrongly DENIED to a guarded origin.
+test("guarded origin + read-only git behind a separated global option is allowed", () => {
+  for (const cmd of [
+    "git --git-dir /r/.git log",
+    "git --work-tree . status",
+    "git --namespace n log -1",
+    "git --git-dir /r/.git diff -- path",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for separated global option: ${cmd}`);
+});
+
+test("main thread + git stash list/show stay allowed through the newly parsed spellings", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "git stash list",
+    "git stash show -p",
+    "case x in *) git stash list;; esac",
+    "f() { git stash show -p; }; f",
+    "git --git-dir /r/.git stash list",
+  ])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow for main-thread read-only stash: ${cmd}`);
+});
+
+// Fold-in F1: `symbolic-ref` writes — `git symbolic-ref HEAD refs/heads/other` repoints HEAD in the
+// shared checkout — so it does not belong in the unconditional read-only allowlist. Deny-on-
+// ambiguity takes the whole subcommand rather than classifying its arguments; `rev-parse` covers
+// the read case.
+test("guarded origin + git symbolic-ref is denied (it writes HEAD)", () => {
+  assert.equal(decide(REVIEWER, "git symbolic-ref HEAD refs/heads/other"), "deny");
+  assert.equal(decide(IMPLEMENTER, "git symbolic-ref HEAD refs/heads/other"), "deny");
+  assert.equal(decide(REVIEWER, "git symbolic-ref --short HEAD"), "deny");
+  assert.equal(decide(REVIEWER, "git rev-parse --abbrev-ref HEAD"), "allow"); // the read path stays open
+});
