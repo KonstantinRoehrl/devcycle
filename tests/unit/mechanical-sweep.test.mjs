@@ -334,6 +334,79 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { chan
   assert.ok(!readFileSync(join(repo, "a.js"), "utf8").includes("swept"));
 });
 
+// Branch review round 1, finding B: `--ignored=matching` also sees the gitignored artifacts the
+// sweep's OWN verifyCommand writes (coverage/, dist/, a node_modules/ from an install), and
+// `git clean -fd` cannot remove them — so without a per-attempt ignored baseline the first purity
+// check blamed the editor for them and every remaining target skipped the same way. Both tests
+// below are multi-target on purpose: the single-file test above stops after the first revert and
+// therefore cannot see the poisoning.
+function repoWithThreeTargetsAndIgnores() {
+  const repo = makeRepo();
+  for (const f of ["a.js", "b.js", "c.js"]) writeFileSync(join(repo, f), `const ${f[0]} = 1;\n`);
+  // Both ignore shapes: a wholly ignored directory (git status collapses it to `gen/`) and a
+  // pattern that matches individual files (reported per file), so the snapshot is exercised at both
+  // granularities.
+  writeFileSync(join(repo, ".gitignore"), "gen/\n*.tmp\n");
+  commitAll(repo, "add files, ignore gen/ and *.tmp");
+  return repo;
+}
+
+test("gitignored output written by the verify command itself never counts as the editor's collateral", () => {
+  const repo = repoWithThreeTargetsAndIgnores();
+  const bin = makeFakeBin("claude", WELL_BEHAVED_EDITOR);
+  const res = runScript(
+    SCRIPT,
+    {
+      files: ["a.js", "b.js", "c.js"],
+      instruction: "append marker",
+      // A fresh ignored artifact per run ($$ is the verify shell's pid), like a build or coverage
+      // step: the baseline run leaves one behind and so does every per-file run, so passing this
+      // needs the snapshot retaken after each verify, not only after the baseline one.
+      verifyCommand: 'mkdir -p gen && touch gen/out && touch "scratch.$$.tmp"',
+    },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.deepEqual(report.skipped, [], "the verify command's own ignored output is not a foreign change");
+  assert.deepEqual(report.applied, ["a.js", "b.js", "c.js"]);
+  for (const f of ["a.js", "b.js", "c.js"]) {
+    assert.match(readFileSync(join(repo, f), "utf8"), /\/\/ swept/);
+  }
+});
+
+test("agent collateral under an ignored path reverts that attempt only — the remaining targets still apply", () => {
+  const repo = repoWithThreeTargetsAndIgnores();
+  const bin = makeFakeBin(
+    "claude",
+    `
+const fs = require("node:fs");
+const prompt = process.argv[process.argv.length - 1];
+const target = prompt.match(/^file: (.+)$/m)[1];
+fs.appendFileSync(target, "// swept\\n");
+if (target === "a.js") {
+  fs.mkdirSync("gen", { recursive: true });
+  fs.writeFileSync("gen/collateral.js", "collateral\\n");
+}
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: { changed: true, note: "edited" } }));
+`
+  );
+  const res = runScript(
+    SCRIPT,
+    { files: ["a.js", "b.js", "c.js"], instruction: "append marker", verifyCommand: "true" },
+    { cwd: repo, binDirs: [bin] }
+  );
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.equal(report.skipped.length, 1, `only the attempt that created the collateral is skipped: ${res.stderr}`);
+  assert.equal(report.skipped[0].file, "a.js");
+  // `gen/` is wholly ignored, so git status names the directory rather than the file inside it.
+  assert.match(report.skipped[0].reason, /modified files other than the target \(a\.js, gen\/\); reverted/);
+  assert.deepEqual(report.applied, ["b.js", "c.js"]);
+  assert.ok(!readFileSync(join(repo, "a.js"), "utf8").includes("swept"), "the reverted attempt is not applied");
+  assert.match(readFileSync(join(repo, "b.js"), "utf8"), /\/\/ swept/);
+});
+
 // L4 (3): a previous sweep SIGKILLed mid-run leaves a worktree registration whose directory is gone;
 // `git worktree prune` before `worktree add` removes it instead of tripping over it.
 test("a stale worktree registration from a killed sweep is pruned, not tripped over", () => {

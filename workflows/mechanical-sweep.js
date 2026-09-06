@@ -27,8 +27,12 @@
 // in the worktree; any collateral change reverts the attempt). Deletions are
 // never applied. The real repository is only written on the applied path.
 //
-// Targets are force-added to the sweep base so a gitignored target is swept like any other, and
-// the purity check counts ignored collateral. Stale worktree registrations from a killed run are
+// Targets are force-added to the sweep base so a gitignored target is swept like any other, and the
+// purity check counts ignored collateral that is NEW against a per-attempt snapshot of the
+// worktree's ignored paths. The snapshot is retaken after every verifyCommand run and after every
+// revert, because a verify that builds, installs or measures coverage writes gitignored output that
+// `git clean -fd` cannot remove — without the snapshot the sweep blamed the editor agent for its own
+// verify's artifacts and skipped every file. Stale worktree registrations from a killed run are
 // pruned before the new worktree is added.
 //
 // Optional env: DEVCYCLE_SWEEP_MODEL sets --model for the claude editor
@@ -100,9 +104,11 @@ async function runEditorAgent(relPath, instruction, worktree, model) {
   });
 }
 
-// Paths that differ from the sweep base, INCLUDING ignored ones (`--ignored=matching`): a collateral
-// file the agent creates under an ignored path is still a foreign change and reverts the attempt.
-function changedPaths(worktree) {
+// Every entry `git status --porcelain --ignored=matching` reports, split into its two-letter status
+// code and its path. `!!` marks an ignored entry; a wholly ignored directory is reported once as the
+// directory (that collapsing is what keeps this call cheap next to a `node_modules/`), anything else
+// per file.
+function statusEntries(worktree) {
   return git(["status", "--porcelain", "--ignored=matching"], worktree)
     .split("\n")
     .filter(Boolean)
@@ -112,8 +118,24 @@ function changedPaths(worktree) {
       if (p.startsWith('"') && p.endsWith('"')) {
         try { p = JSON.parse(p); } catch { /* keep quoted form */ }
       }
-      return p;
+      return { ignored: line.slice(0, 2) === "!!", path: p };
     });
+}
+
+// The ignored paths present in the worktree right now — the baseline a later purity check subtracts.
+function ignoredSnapshot(worktree) {
+  return new Set(statusEntries(worktree).filter((e) => e.ignored).map((e) => e.path));
+}
+
+// Paths that differ from the sweep base and are attributable to the attempt: every tracked or
+// non-ignored change (the sweep base leaves the tracked tree clean, so any of those is the attempt's),
+// plus ignored paths that are new against `ignoredBaseline` — collateral the agent created under an
+// ignored path (audit 2026-09-05 L4). Ignored paths already in the snapshot are the sweep's own
+// verify output and are not charged to the agent.
+function changedPaths(worktree, ignoredBaseline) {
+  return statusEntries(worktree)
+    .filter((e) => !(e.ignored && ignoredBaseline.has(e.path)))
+    .map((e) => e.path);
 }
 
 function revertWorktree(worktree) {
@@ -135,27 +157,34 @@ async function runVerify(verifyCommand, worktree) {
 // failure or a broken editor), as opposed to benign per-file skips.
 async function processFile(relPath, opts) {
   const { worktree, repoRoot, instruction, verifyCommand, model } = opts;
+  // An ignored path the sweep cannot undo stops being this attempt's fault once its verdict is in:
+  // re-snapshot after every revert and after every verify run, so the next file is judged against
+  // what is actually on disk. Never before a purity check — that would baseline the agent's own
+  // collateral and let it through.
+  const rebaseline = () => { opts.ignoredBaseline = ignoredSnapshot(worktree); };
+  const revert = () => { revertWorktree(worktree); rebaseline(); };
   log(`editing ${relPath}...`);
   const edit = await runEditorAgent(relPath, instruction, worktree, model);
   if (!edit.ok) {
-    revertWorktree(worktree);
+    revert();
     return { skip: `editor agent failed: ${edit.error}`, hard: true };
   }
-  const changes = changedPaths(worktree);
+  const changes = changedPaths(worktree, opts.ignoredBaseline);
   if (changes.length === 0) {
     return { skip: `agent made no change: ${edit.value.note || "no reason given"}` };
   }
   if (changes.length > 1 || changes[0] !== relPath) {
-    revertWorktree(worktree);
+    revert();
     return { skip: `agent modified files other than the target (${changes.join(", ")}); reverted` };
   }
   if (!existsSync(join(worktree, relPath))) {
-    revertWorktree(worktree);
+    revert();
     return { skip: "agent deleted the file; deletions are not applied; reverted" };
   }
   const verify = await runVerify(verifyCommand, worktree);
+  rebaseline();
   if (!verify.ok) {
-    revertWorktree(worktree);
+    revert();
     return { skip: `verification failed: ${verify.detail}`, hard: true };
   }
   // Verified: copy back into the real tree and advance the worktree baseline.
@@ -252,7 +281,16 @@ async function main() {
       return;
     }
 
-    const opts = { worktree, repoRoot, instruction: args.instruction, verifyCommand: args.verifyCommand, model };
+    // Taken after the baseline verify, which may already have installed dependencies or written build
+    // output under ignored paths: none of that is the editor agent's doing.
+    const opts = {
+      worktree,
+      repoRoot,
+      instruction: args.instruction,
+      verifyCommand: args.verifyCommand,
+      model,
+      ignoredBaseline: ignoredSnapshot(worktree),
+    };
     const pilotCount = Math.min(PILOT_MAX, targets.length);
     log(`pilot: first ${pilotCount} of ${targets.length} file(s)`);
 
