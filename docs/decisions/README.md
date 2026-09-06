@@ -11,10 +11,11 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 hooks are named for what they deny, and it no longer denies only reviewers. It guards three dispatch
 origins with one read-only allowlist (`task-reviewer`, `red-team-reviewer`, and now `implementer`,
 each in its bare and `devcycle:`-namespaced spelling), and on the main thread it denies `git stash`
-(except `list`/`show`) while a `.devcycle/state.md` whose `stage:` is not `done` sits at or above the
-call's `cwd`. Everything else on the main thread stays unguarded: the coordinator commits, switches
-branches and merges. The parser also strips shell reserved words and denies `<(`/`>(` process
-substitution (audit 2026-09-05 H1).
+(`list`/`show` excepted only when written plainly — a stash behind a wrapper or a command
+substitution is denied on ambiguity) while a `.devcycle/state.md` whose `stage:` is not `done` sits
+at or above the call's `cwd`. Everything else on the main thread stays unguarded: the coordinator
+commits, switches branches and merges. The parser also strips shell reserved words and denies
+`<(`/`>(` process substitution (audit 2026-09-05 H1).
 
 **Why:** the learn pass behind #235 found the incident class was not reviewer-specific — an
 implementer's or the coordinator's own `git stash` discards every sibling's uncommitted edits across
