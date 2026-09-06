@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.0 — 2026-09-06
+
+- feat(devcycle): require Files-block size baselines and harden measurement honesty (#203, #204, #205, #206, #207, #210, #233, #254)
+
 ## 0.19.0 — 2026-09-04
 
 - feat(evidence-contract): harden the evidence-capture & verification contract (#143, #144, #150, #151, #230, #231, #232, #238)
