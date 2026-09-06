@@ -370,6 +370,28 @@ const AMBIGUITY_CLASSES = [
   // `sh -c` whatever its subcommand, so only the main-thread half is falsifiable: mentionsStash read
   // `st""ash` as not-stash and let the one command that ban exists to stop through.
   ["empty quote pair inside a subcommand behind a wrapper", 'sh -c "git re""set --hard"', 'sh -c "git st""ash"'],
+  // Branch review round 8 (F1): an ANSI-C quote (`$'…'`) written anywhere but the START of a word
+  // defeated the head reduction. stripQuoting dropped the quote characters but left the `$` that
+  // introduces the quote, and the head reduction stripped `$` only as a LEADING run — so `$'git'`
+  // reduced to `git` while `g$'it'` stopped at `g$it`, and every spelling below returned allow on
+  // BOTH arms (verified: the round-8 differential probe, 10784 rows). bash and zsh both print `git`
+  // for each of these words, so each is a real, executed git.
+  ["ANSI-C quote glued inside the git binary name", "g$'it' reset --hard", "g$'it' stash"],
+  ["ANSI-C quote glued before the last character of the git binary name", "gi$'t' reset --hard", "gi$'t' stash"],
+  ["ANSI-C quote concatenated onto a double-quoted git binary name", "\"g\"$'it' reset --hard", "\"g\"$'it' stash"],
+  ["ANSI-C quote concatenated between both halves of the git binary name", "\"g\"$'i't reset --hard", "\"g\"$'i't stash"],
+  ["empty ANSI-C quote pair inside the git binary name", "g$''it reset --hard", "g$''it stash"],
+  ["ANSI-C quoted git binary name behind a shell wrapper", "sh -c \"g$'it' reset --hard\"", "sh -c \"g$'it' stash\""],
+  ["ANSI-C quoted git binary name behind a reserved word", "for f in a; do g$'it' reset --hard; done", "for f in a; do g$'it' stash; done"],
+  ["ANSI-C quoted git binary name behind a case pattern label", "case x in *) g$'it' reset --hard;; esac", "case x in *) g$'it' stash;; esac"],
+  ["ANSI-C quoted git binary name behind a leading redirection", ">/dev/null g$'it' reset --hard", ">/dev/null g$'it' stash"],
+  // The escape forms of the same class: inside `$'…'` a `\xHH`, `\nnn` or `\uHHHH` escape stands for
+  // the character it encodes, so these spell the binary name without ever writing `g`. (`\u` is a
+  // zsh 5.9 escape that bash 3.2 leaves literal — the shell that runs an agent's Bash call here is
+  // zsh, so the guard must read it.)
+  ["ANSI-C hex escape spelling the git binary name", "$'\\x67it' reset --hard", "$'\\x67it' stash"],
+  ["ANSI-C octal escape spelling the git binary name", "$'\\147it' reset --hard", "$'\\147it' stash"],
+  ["ANSI-C unicode escape spelling the git binary name", "$'\\u0067it' reset --hard", "$'\\u0067it' stash"],
 ];
 
 test("guarded origin + every named ambiguity class hiding a destructive git is denied", () => {
@@ -674,4 +696,68 @@ test("a herestring is not a heredoc", () => {
   assert.equal(decide(REVIEWER, "git log <<< x"), "allow");
   assert.equal(decide(REVIEWER, "git reset --hard <<< x"), "deny");
   assert.equal(decide(REVIEWER, "cat <<< x; git reset --hard"), "deny");
+});
+
+// Round 8 (F1), the subcommand half of the ANSI-C class. Only the MAIN-THREAD arm is falsifiable
+// here: a guarded origin denies `git st$'ash'` already, because its allowlist compares the raw
+// subcommand token and has never contained `stash` in any spelling. The main thread reads the
+// subcommand through normalizeHead, so the undropped `$` made `st$'ash'` "not stash" and allowed the
+// single command the #235 ban exists to stop — a stash discards every in-flight implementer's
+// uncommitted edits across the shared checkout. Every row below returned allow in an active cycle
+// (verified: the round-8 differential probe's pre-fix column).
+test("main thread + an ANSI-C quoted stash subcommand is denied in an active cycle", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "git st$'ash'",
+    "git st$'ash' pop",
+    "git \"st\"$'ash'",
+    "git s$''tash",
+    "git $'\\x73tash'",
+    "git $'\\163tash'",
+    "git $'\\u0073tash'",
+    "sh -c \"git st$'ash'\"",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for an ANSI-C quoted stash: ${cmd}`);
+});
+
+// Round 8 (F1), the allow direction: inside `$'…'` an escape stands for the character it encodes, so
+// the quote is only removable where the shell removes it. `$'gi\t'` is `gi<TAB>` — a command neither
+// bash nor zsh has — and consuming the backslash the way an unquoted word's rule does read it as
+// `git` and DENIED a command the shell never runs. Decoding the escapes fixes both directions at
+// once: it is what turns `$'\x67it'` into a deny above and this row into an allow.
+test("an ANSI-C escape the shell does not read as the binary name stays allowed", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["$'gi\\tt' reset --hard", "$'gi\\t' reset --hard", "$'gi\\tt' log", "'g'\\''it' reset --hard"])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a significant ANSI-C escape: ${cmd}`);
+  for (const cmd of ["$'gi\\tt' stash", "$'gi\\t' stash", "git st$'\\tash'", "'g'\\''it' stash"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow on the main thread: ${cmd}`);
+  // Reducing the subcommand must not turn the ANSI-C spellings into a blanket stash deny either.
+  assert.equal(decideMain(cwd, "git st$'ash' list"), "allow");
+  assert.equal(decideMain(cwd, "git st$'ash' show -p"), "allow");
+  // A DELIBERATE over-deny, unchanged by this fix and pinned so it stays visible: `\$git` is a
+  // literal `$git` to the shell, not the binary, but normalizeHead's leading-`$` strip (which covers
+  // the `$git` variable spelling) reduces it to git. Denying costs a command that runs nothing.
+  assert.equal(decide(REVIEWER, "\\$git reset --hard"), "deny");
+});
+
+// No new false positives: an ANSI-C quote is ordinary punctuation in the commands this cycle's own
+// agents run, and dropping the `$` in front of one must not invent a git anywhere in them.
+test("the ordinary agent commands carrying an ANSI-C quote stay allowed", () => {
+  for (const cmd of [
+    "printf $'%s\\n' x",
+    "echo $'a\\tb'",
+    "grep -rn $'git\\treset' playbooks/",
+    "rg -n $'\\tstash' references/",
+    "sed -n $'1,40p' f",
+    "git log --grep=$'x\\ty' -1",
+    "node --test tests/unit/*.test.mjs",
+    "npm test 2>&1 | tail -5",
+    "find . -name '*.mjs' -maxdepth 2",
+    "jq '.[] | .id' out.json",
+    "gh pr view 235 --json title",
+    "make check",
+    "'/usr/local/bin/my git tool' --version",
+    "python3 - <<'PY'\nprint('git reset --hard')\nPY",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for an ordinary agent command: ${cmd}`);
 });

@@ -29,8 +29,11 @@
 // token of its own, while the same character inside `'…'`, `"…"`, `$'…'` or behind a backslash stays
 // DATA. `f(){`, `f (){`, `f() {` and `f () {` all reduce to one stream (`f` `(` `)` `{`), so the
 // class is closed as a class. Canonicalization runs to the WORD level, not just the token's ends:
-// quoting and escapes written INSIDE a word (`gi\t`, `"g"'it'`, `g""it`) are what bash strips before
-// it runs `git`, so normalizeHead strips them too and every such spelling reduces to `git` (round 6).
+// quoting and escapes written INSIDE a word (`gi\t`, `"g"'it'`, `g""it`, `g$'it'`) are what the
+// shell resolves before it runs `git`, so normalizeHead resolves them the same way — dropping the
+// quote characters, and DECODING the escapes an ANSI-C quote spells its characters with, so
+// `$'\x67it'` reduces to `git` (round 8) while `$'gi\t'` stays `gi<TAB>`, which is not a command any
+// shell has (round 6, round 8).
 // Telling a duplication's `&` (`2>&1`) from a background `&` is part of that tokenization — the
 // descriptor and the `&` are glued into one redirection operator token — so
 // a bare `&` token is always a command separator and the segment splitter needs no lookbehind.
@@ -134,16 +137,64 @@ const WRAPPERS = new Set([
   "arch", "chroot", "runcon", "catchsegv",
 ]);
 
+// The escapes an ANSI-C quote gives a NAME to. Each stands for one character, and the shell puts
+// that character in the word — `$'\t'` is a tab, not the two characters `\t`. An escape the shell
+// does not recognize keeps its backslash, which is what the default branch below reproduces.
+const ANSI_C_NAMED = new Map(Object.entries({
+  a: "\x07", b: "\b", e: "\x1b", E: "\x1b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v",
+  "\\": "\\", "'": "'", '"': '"', "?": "?",
+}));
+
+// Decode the body of an ANSI-C quote (`$'…'`), starting just past its opening `'`, exactly as the
+// shell expands it; returns the decoded text and the index of the closing `'` (or the word's end,
+// for an unterminated one). Decoding rather than merely dropping the quote is what closes the class
+// BOTH ways: `\x67`, `\147` and `g` each spell `g`, so `$'\x67it'` IS the git binary and must
+// deny — while `$'gi\t'` is `gi<TAB>`, a command no shell has, so consuming the backslash the way an
+// unquoted word's rule does would deny a command that never runs. (`\u`/`\U` are zsh 5.9 escapes
+// that bash 3.2 leaves literal; the shell running an agent's Bash call may be either, so the guard
+// reads the union — the deny direction.)
+function decodeAnsiC(word, from) {
+  let text = "";
+  let i = from;
+  for (; i < word.length && word[i] !== "'"; i += 1) {
+    if (word[i] !== "\\" || i + 1 >= word.length) { text += word[i]; continue; }
+    const rest = word.slice(i + 1);
+    const octal = /^[0-7]{1,3}/.exec(rest);
+    if (octal) { text += String.fromCharCode(parseInt(octal[0], 8) & 0xff); i += octal[0].length; continue; }
+    const escape = rest[0];
+    const hex = escape === "x" ? /^[0-9a-fA-F]{1,2}/.exec(rest.slice(1)) : null;
+    if (hex) { text += String.fromCharCode(parseInt(hex[0], 16)); i += 1 + hex[0].length; continue; }
+    const unicode = escape === "u" || escape === "U"
+      ? new RegExp(`^[0-9a-fA-F]{1,${escape === "u" ? 4 : 8}}`).exec(rest.slice(1)) : null;
+    if (unicode) { text += String.fromCodePoint(parseInt(unicode[0], 16)); i += 1 + unicode[0].length; continue; }
+    if (escape === "c" && rest.length > 1) { text += String.fromCharCode(rest.charCodeAt(1) & 31); i += 2; continue; }
+    text += ANSI_C_NAMED.get(escape) ?? ("\\" + escape);
+    i += 1;
+  }
+  return { text, end: i };
+}
+
 // Remove the quoting a word carries, WHEREVER it sits in that word: a `'` or `"` is syntax the shell
-// consumes rather than passes to the binary, and a backslash escapes the character behind it. So
-// `"g"'it'`, `g""it` and `gi\t` are all spellings bash runs as `git`. Doing this only at the word's
-// ENDS — which is what a leading/trailing-run regex does — left every intra-word spelling reducing
-// to a non-git head, and each of them reached ALLOW on both arms (branch review round 6, F3). A
+// consumes rather than passes to the binary, a `$` in front of either opens an ANSI-C (`$'…'`) or a
+// locale-translated (`$"…"`) quote and is consumed with it, and a backslash escapes the character
+// behind it. So `"g"'it'`, `g""it`, `gi\t`, `g$'it'` and `$'\x67it'` are all spellings the shell runs
+// as `git`. Doing this only at the word's ENDS — which is what a leading/trailing-run regex does —
+// left every intra-word spelling reducing to a non-git head, and each of them reached ALLOW on both
+// arms (branch review round 6, F3). Leaving the `$` of a mid-word ANSI-C quote in place did the same
+// to that whole class: `$'git'` reduced to `git` (the leading-`$` run was stripped) while `g$'it'`
+// stopped at `g$it`, so `g$'it' reset --hard` and `git st$'ash'` reached ALLOW (round 8, F1). A
 // backslash with nothing behind it escapes nothing and is kept.
 function stripQuoting(word) {
   let out = "";
   for (let i = 0; i < word.length; i += 1) {
     const c = word[i];
+    if (c === "$" && (word[i + 1] === "'" || word[i + 1] === '"')) {
+      if (word[i + 1] === '"') continue;         // `$"…"` translates its contents; the `$` is syntax
+      const { text, end } = decodeAnsiC(word, i + 2);
+      out += text;
+      i = end;                                   // resume at the closing quote (or the word's end)
+      continue;
+    }
     if (c === "'" || c === '"') continue;
     if (c === "\\" && i + 1 < word.length) { out += word[i + 1]; i += 1; continue; }
     out += c;
@@ -154,11 +205,12 @@ function stripQuoting(word) {
 // Normalize a command head to the bare command name so alternate spellings of the same binary all
 // reduce to one token before classification (deny-on-ambiguity depends on this being total): drop
 // the word's quoting and escapes (above), then a leading run of grouping characters and `$` (the
-// ANSI-C quoted spelling `$'git` that `bash -c $'git reset --hard'` leaves on the token), then the
+// variable spelling `$git`, which the shell expands to something this parser cannot see), then the
 // same run of closers at the end, then the path basename (`/usr/bin/git`, `./git`). Grouping
 // characters are tokens of their own since canonicalization, so `(`/`)`/`{`/`}` here only cover a
-// quoted or malformed leftover. Whatever reduces to `git` is treated as git. Stripping only ever
-// adds matches, so every extension here denies more, never less.
+// quoted or malformed leftover. Whatever reduces to `git` is treated as git. Every reduction here
+// resolves the word the way the shell does, so it adds the spellings the shell really runs as git
+// and drops only the ones it does not (`$'gi\t'`) — never a spelling that reaches the git binary.
 function normalizeHead(token) {
   const t = stripQuoting(token).replace(/^[({$]+/, "").replace(/[)}]+$/, "");
   const slash = t.lastIndexOf("/");
