@@ -873,13 +873,14 @@ test("a crashing token in front of a git segment does not disarm the guard", () 
 // input reaches a throw any more, so the only honest injection left is to run the REAL hook source
 // with one line mutated to throw, reached through the ordinary stdin path. Both replacements are
 // asserted, so a rename that stops the mutation from applying fails here instead of passing
-// vacuously.
+// vacuously — as it did in round 12, when the per-token entry point every command head passes
+// through became headForms (normalizeHead now reads that function's first realization).
 test("a parser failure ends in a deny, not in a fail-open exit", () => {
   const IMPORT = 'import { findStateFile } from "./lib/find-state-file.mjs";';
-  const SIGNATURE = "function normalizeHead(token) {";
+  const SIGNATURE = "function headForms(token) {";
   const source = readFileSync(HOOK, "utf8");
   assert.ok(source.includes(IMPORT), "the hook's find-state-file import moved; the mutant cannot resolve it");
-  assert.ok(source.includes(SIGNATURE), "normalizeHead's signature moved; the mutant would inject nothing");
+  assert.ok(source.includes(SIGNATURE), "headForms' signature moved; the mutant would inject nothing");
   const mutantDir = mkdtempSync(join(tmpdir(), "devcycle-git-guard-throw-"));
   fixtures.push(mutantDir);
   const mutant = join(mutantDir, "block-destructive-git.mjs");
@@ -954,4 +955,147 @@ test("a read-only subcommand ending in a dangling backslash is allowed on both a
     assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a read-only git: ${JSON.stringify(cmd)}`);
   for (const cmd of ["git stash list\\", "git stash show\\"])
     assert.equal(decideMain(cwd, cmd), "allow", `expected allow for an inspecting stash: ${JSON.stringify(cmd)}`);
+});
+
+// Round 12 (F1), the NUL class. `$'\x00'`, `$'\000'` and `$'\c@'` all materialise a NUL byte, and
+// neither shell hands that byte to the binary — each cuts the word short at it, in a DIFFERENT
+// place: /bin/bash truncates every `$'…'` expansion at its own first NUL and keeps concatenating
+// what the word spells around it (`g$'\x00'it` → `git`), while /bin/zsh truncates the WHOLE word
+// there (`git$'\x00'x` → `git`). So each spelling below reaches the real git binary in at least one
+// of the two shells — the `git` shim first on PATH logged `stash`, `reset --hard` and `status` argvs
+// for them — while the guard kept the NUL inside the word, compared it against "git" and allowed.
+// This arm flips for every row: the head never reduced to git, so the segment was read as a non-git
+// command. The deny direction is the union of the two shells, which is why both cut rules are
+// modelled rather than one.
+test("guarded origin + a NUL-cut git or wrapper head is denied", () => {
+  for (const cmd of [
+    "$'\\x00'git reset --hard",     // bash: the expansion is empty, the word is still `git`
+    "g$'\\x00'it stash",
+    "true && $'\\x00'git stash",
+    "g$'\\000'it stash",            // the octal spelling of the same byte
+    "g$'\\c@'it stash",             // the control-@ spelling of the same byte
+    "git$'\\x00' stash",            // both shells: the word is `git`
+    "$'git\\x00foo' reset --hard",  // bash cuts the expansion at the NUL, so the head is `git`
+    "git$'\\x00'x stash",           // zsh cuts the whole word at the NUL, so the head is `git`
+    "sh -c \"g$'\\x00'it stash\"",  // the same cut inside a wrapper's script
+    "s$'\\x00'h -c 'git stash'",    // and in the WRAPPER's own name
+    "$'sh\\x00x' -c 'git stash'",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a NUL-cut head: ${cmd}`);
+});
+
+// The same class on the main-thread arm, which reads the SUBCOMMAND through the same normalizer: a
+// NUL anywhere in `stash` left the token spelling something that is not `stash`, so the one command
+// the #235 ban exists to stop reached ALLOW. Every row ran a real `git stash` in at least one shell
+// (shim oracle); the rows whose head carries the NUL flip on both arms, the rows whose SUBCOMMAND
+// carries it flip only here (a guarded origin denies those already — its allowlist has never
+// contained `stash` in any spelling).
+test("main thread + a NUL-cut git stash is denied in an active cycle", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "g$'\\x00'it stash",
+    "true && $'\\x00'git stash",
+    "git$'\\x00' stash",
+    "git$'\\x00'x stash",
+    "git st$'\\x00'ash",            // bash: `stash`; zsh: `st`
+    "git stash$'\\x00'",
+    "git $'stash\\x00pop'",         // both shells cut the expansion at the NUL → `stash`
+    "git stash$'\\x00'x",           // zsh cuts the word at the NUL → `stash`
+    "sh -c \"g$'\\x00'it stash\"",
+    "$'sh\\x00x' -c 'git stash'",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for a NUL-cut stash: ${JSON.stringify(cmd)}`);
+});
+
+// The bound on that union, in the direction that must NOT move: a NUL that cuts a command name SHORT
+// leaves a name neither shell runs as git, and modelling the cut must not invent one. `$'gi\x00t'` is
+// `gi` in both shells and ran nothing; `git $'sta\x00sh'` invoked git with `sta`; and a NUL in front
+// of a read-only subcommand is still read-only (`$'\x00'git status` ran `git status` in bash). Each
+// argv below is the shim oracle's, in both shells.
+test("a NUL that cuts a command name short is not the git binary and stays allowed", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["$'gi\\x00t' reset --hard", "$'np\\x00m' test", "$'\\x00'git status", "$'git\\x00foo' status", "echo $'a\\x00b'"])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a NUL-cut name: ${cmd}`);
+  for (const cmd of ["$'gi\\x00t' stash", "git $'sta\\x00sh'", "git stash$'\\x00' list", "git st$'\\x00'ash show"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow on the main thread: ${cmd}`);
+});
+
+// Round 12 (F2), the eval-rejoin class. `eval` CONCATENATES its arguments and re-parses the result,
+// so a leading escaped space, tab or backslash in front of `git` is whitespace or an alias-bypass to
+// that second parse and disappears: `eval \ git stash` and `eval \\git stash` each ran a real
+// `git stash` in both shells (shim oracle). This outer parse resolves `\ git` to the word " git" and
+// `\\git` to "\git", neither of which equals "git", so the wrapper arm returned without denying —
+// the opposite of what the WRAPPERS comment promises. Both arms flip for the stash rows; the
+// `reset --hard` row flips on the guarded arm alone (the main-thread ban is stash-only).
+test("guarded origin + git behind an eval that re-joins its arguments is denied", () => {
+  for (const cmd of ["eval \\ git stash", "eval \\\tgit reset --hard", "eval \\\\git stash", "eval \" git stash\""])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for an eval-rejoined git: ${JSON.stringify(cmd)}`);
+});
+
+test("main thread + git stash behind an eval that re-joins its arguments is denied in an active cycle", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["eval \\ git stash", "eval \\\\git stash"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for an eval-rejoined stash: ${JSON.stringify(cmd)}`);
+});
+
+// The bound on that resolution: only the FIRST backslash is the inner parse's escape. `eval \\\\git`
+// hands the inner shell `\\git`, which it reads as the literal command name `\git` — no shell has
+// it, and the oracle recorded no git call in either shell. At the top level nothing re-parses at
+// all, so `\\git stash` is that same non-existent command and must stay allowed on both arms.
+test("a backslash the inner or outer parse keeps is not git and stays allowed", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["eval \\\\\\\\git stash", "\\\\git stash"]) {
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a kept backslash: ${JSON.stringify(cmd)}`);
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow for a kept backslash: ${JSON.stringify(cmd)}`);
+  }
+});
+
+// Round 12 (F3), the heredoc/substitution interaction. The substitution pre-check is a regex over the
+// RAW command, so a heredoc body quoting a git command inside backticks or `$( )` — the single most
+// common shape of report or findings file this repo asks its agents to write — was re-classified as
+// a live substitution and DENIED, defeating the round-6 exemption that exists for exactly that file.
+// A QUOTED delimiter (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) suppresses expansion, so nothing in those
+// bodies runs: the shim oracle recorded no git call for any row below, in either shell. Both arms
+// flip on the `stash` rows (the main-thread pre-check fires on a `stash` word beside a substitution);
+// the rows naming `reset --hard`/`rev-parse` flip on the guarded arm alone.
+test("a quoted heredoc body quoting a git command is data, not a substitution, and may be written", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "cat <<'EOF' > f\nrun `git reset --hard` here\nEOF",
+    "cat <<'EOF' > f\nuse $(git rev-parse HEAD)\nEOF",
+    "cat <<\"EOF\" > f\nuse $(git reset --hard)\nEOF",
+    "cat <<\\EOF > f\nuse $(git reset --hard)\nEOF",
+    "cat <<-'EOF' > f\n\trun `git stash` here\n\tEOF",
+    "cat <<'EOF' > f\n- ran `git stash` by mistake\nEOF",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a quoted heredoc body: ${JSON.stringify(cmd)}`);
+  for (const cmd of [
+    "cat <<-'EOF' > f\n\trun `git stash` here\n\tEOF",
+    "cat <<'EOF' > f\n- ran `git stash` by mistake\nEOF",
+  ])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow for a quoted heredoc body: ${JSON.stringify(cmd)}`);
+});
+
+// The bound on that exemption, and it is three-sided. An UNQUOTED delimiter leaves the body EXPANDED,
+// so a substitution in it really runs (`cat <<EOF` with a `$(git rev-parse HEAD)` body called git in
+// both shells); a substitution OUTSIDE any body is untouched; an unterminated heredoc has no body
+// boundary to trust; and an interpreter READING the body executes it, so a body fed to `bash` keeps
+// its deny. Every row stays denied.
+test("the substitution pre-check still fires outside a non-expanding heredoc body", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "cat <<EOF > f\nrun `git reset --hard` here\nEOF",       // unquoted delimiter: the body expands
+    "cat <<EOF > f\nuse $(git rev-parse HEAD)\nEOF",
+    "cat <<'EOF' > f\nprose\nEOF\necho $(git reset --hard)", // the substitution is outside the body
+    "cat <<'EOF' > f\nuse $(git reset --hard)\n",            // unterminated: no body boundary
+    "bash <<'EOF'\n$(git stash)\nEOF",                       // an interpreter reads the body and runs it
+    "cat <<'EOF' | bash\n$(git stash)\nEOF",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a live substitution: ${JSON.stringify(cmd)}`);
+  for (const cmd of [
+    "echo `git stash`\ncat <<'EOF' > f\nprose\nEOF",
+    "bash <<'EOF'\n$(git stash)\nEOF",
+    "cat <<'EOF' | bash\n$(git stash)\nEOF",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for a live substitution: ${JSON.stringify(cmd)}`);
 });
