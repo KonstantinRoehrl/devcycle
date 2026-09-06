@@ -51,6 +51,22 @@
 // by the allowlist — task-reviewer, red-team-reviewer and, since #235, implementer — and the main
 // thread (no agent_type) is guarded for `git stash` alone, only while a .devcycle/state.md at or
 // above the call's cwd reports a stage other than done. Every other origin is never guarded.
+//
+// WHAT THE EVIDENCE FOR THIS FILE DOES NOT COVER (branch review round 10). The differential corpus
+// behind the "residual fail-opens: 0" claim (.devcycle/evidence/branch-fix-8-3-gen-corpus.mjs)
+// crosses obfuscation SPELLINGS with syntactic CONTEXTS, and neither dimension contains a shell
+// EXPANSION — so that 0 is 0 over what the corpus covers, not over every destructive spelling. These
+// reach ALLOW and are real, executed destructive gits: `${x}git reset --hard`, `gi${x}t reset
+// --hard`, `${x:-git} reset --hard`, `G=git; $G reset --hard`, and `git${IFS}reset --hard` (bash
+// only; zsh does not word-split). Resolving them needs shell-level expansion this parser
+// deliberately does not do, so the whole class is a stated bound rather than a backstopped case —
+// the `$git` note in normalizeHead explains ONE spelling, not the bound on the measurement. Two
+// further known allows, both pre-existing and both outside that corpus: on the main-thread arm
+// `git -c alias.z=stash z` reaches allow, because `-c` is a VALUE_OPTIONS skip and the subcommand
+// read lands on `z` (it also requires a configured alias); and a command ending in a dangling
+// backslash — `git stash\` — reaches allow on that same arm, because the backslash stays in the
+// `stash\` token while both shells drop it and run a real `git stash` (round 10 measured it; the
+// guarded arm denies it, since there the head alone decides).
 import { readFileSync } from "node:fs";
 import { findStateFile } from "./lib/find-state-file.mjs";
 
@@ -169,7 +185,13 @@ function decodeAnsiC(word, from) {
     if (hex) { text += String.fromCharCode(parseInt(hex[0], 16)); i += 1 + hex[0].length; continue; }
     const unicode = escape === "u" || escape === "U"
       ? new RegExp(`^[0-9a-fA-F]{1,${escape === "u" ? 4 : 8}}`).exec(rest.slice(1)) : null;
-    if (unicode) { text += String.fromCodePoint(parseInt(unicode[0], 16)); i += 1 + unicode[0].length; continue; }
+    // `\U` spells up to EIGHT hex digits, and above U+10FFFF there is no code point to put in the
+    // word — String.fromCodePoint THROWS there, which killed the hook with exit 1 and empty stdout
+    // (branch review round 10). Out of range, the escape keeps its literal text, which is what bash
+    // 3.2 does with the whole sequence and what zsh's replacement bytes amount to: a command name
+    // that is not git either way. `\u` is capped at four digits and can never reach the boundary.
+    const codePoint = unicode ? parseInt(unicode[0], 16) : -1;
+    if (unicode && codePoint <= 0x10ffff) { text += String.fromCodePoint(codePoint); i += 1 + unicode[0].length; continue; }
     if (escape === "c" && rest.length > 1) { text += String.fromCharCode(rest.charCodeAt(1) & 31); i += 2; continue; }
     text += ANSI_C_NAMED.get(escape) ?? ("\\" + escape);
     i += 1;
@@ -532,51 +554,66 @@ function stripLeading(tokens) {
 // operator and separates commands just as `;` does (`true & git reset --hard` is two commands); a
 // duplication's `&` never reaches this point as a token of its own, because tokenizeCommand glued it
 // into its redirection operator.
-for (const seg of splitSegments(dropCaseLabels(tokenizeCommand(command)))) {
-  // stripLeading drops env-assignments, `{`/`(` grouping tokens, reserved words, redirections and
-  // function-definition heads so the head is the real command — `{ git reset; }`, `( git reset )`
-  // and `do git reset` must not hide the git. (normalizeHead additionally reduces a quoted or
-  // path-qualified head, e.g. `"git"` or `/usr/bin/git`.)
-  const tokens = stripLeading(seg);
-  if (!tokens.length) continue;
-  const head = normalizeHead(tokens[0]);
-  if (WRAPPERS.has(head)) {
-    // A wrapper's argument is often a quoted script (`sh -c 'git checkout -- x'`), so the naive
-    // whitespace split leaves a quote character glued to the word (`'git`, `"git`), and a wrapper may
-    // also name git by path — normalizeHead reduces every such spelling to `git` before comparing.
-    // A wrapper's argument is also RE-READ by the shell it starts, so the backslash-newline the outer
-    // single quotes made literal (tokenizeCommand kept the pair in the word) is a line continuation
-    // to that inner shell and joins the halves: `sh -c 'g\<newline>it stash'` runs a real git that
-    // neither `'g\` nor `it` spells (branch review round 8, fix round). Resolving the continuation
-    // HERE and nowhere else is the bound. This arm already denies any git token behind a recognized
-    // wrapper, so it adds no class of deny — only the spellings of that deny it was missing — while
-    // the head path keeps reading a top-level `'g\<newline>it'` as the literal command name the shell
-    // would actually look for. The narrower alternative, resolving it only behind a wrapper this file
-    // could name as a shell, was rejected: the set of launchers that hand their argument to `sh -c`
-    // is not enumerable here, and this file's rule is that a missed destructive git is not
-    // acceptable. Its cost is an over-deny on `sudo 'g\<newline>it' …`, a command name no shell has.
-    const inner = tokens.map((t) => t.replace(/\\\n/g, ""));
-    if (inner.slice(1).some((t) => normalizeHead(t) === "git") && (guarded || mentionsStash(inner))) // git behind a wrapper we cannot see into
+// Every throw inside the classifier ends in a DENY, never in an uncaught exception. A crash exits 1
+// with empty stdout, which a PreToolUse harness reads as "no decision" — the fail-open this whole
+// file exists to prevent — and heads are normalized segment by segment in order, so a crashing token
+// placed in FRONT of a git segment killed the process before any deny() was written and disarmed the
+// guard for the entire command (branch review round 10). The catch is on the CLASS, not on the one
+// input that reached it: the next parser change that throws lands here instead of failing open. On
+// the main thread it denies a command the parser could not read even when no stash is visible in it,
+// deliberately — a command this file cannot parse is exactly the one whose stash it cannot rule out.
+try {
+  for (const seg of splitSegments(dropCaseLabels(tokenizeCommand(command)))) {
+    // stripLeading drops env-assignments, `{`/`(` grouping tokens, reserved words, redirections and
+    // function-definition heads so the head is the real command — `{ git reset; }`, `( git reset )`
+    // and `do git reset` must not hide the git. (normalizeHead additionally reduces a quoted or
+    // path-qualified head, e.g. `"git"` or `/usr/bin/git`.)
+    const tokens = stripLeading(seg);
+    if (!tokens.length) continue;
+    const head = normalizeHead(tokens[0]);
+    if (WRAPPERS.has(head)) {
+      // A wrapper's argument is often a quoted script (`sh -c 'git checkout -- x'`), so the naive
+      // whitespace split leaves a quote character glued to the word (`'git`, `"git`), and a wrapper may
+      // also name git by path — normalizeHead reduces every such spelling to `git` before comparing.
+      // A wrapper's argument is also RE-READ by the shell it starts, so the backslash-newline the outer
+      // single quotes made literal (tokenizeCommand kept the pair in the word) is a line continuation
+      // to that inner shell and joins the halves: `sh -c 'g\<newline>it stash'` runs a real git that
+      // neither `'g\` nor `it` spells (branch review round 8, fix round). Resolving the continuation
+      // HERE and nowhere else is the bound. This arm already denies any git token behind a recognized
+      // wrapper, so it adds no class of deny — only the spellings of that deny it was missing — while
+      // the head path keeps reading a top-level `'g\<newline>it'` as the literal command name the shell
+      // would actually look for. The narrower alternative, resolving it only behind a wrapper this file
+      // could name as a shell, was rejected: the set of launchers that hand their argument to `sh -c`
+      // is not enumerable here, and this file's rule is that a missed destructive git is not
+      // acceptable. Its cost is an over-deny on `sudo 'g\<newline>it' …`, a command name no shell has.
+      const inner = tokens.map((t) => t.replace(/\\\n/g, ""));
+      if (inner.slice(1).some((t) => normalizeHead(t) === "git") && (guarded || mentionsStash(inner))) // git behind a wrapper we cannot see into
+        deny(denyReason(
+          "run git behind a shell wrapper (deny-on-ambiguity).",
+          "a git behind a shell wrapper can hide one (deny-on-ambiguity)."
+        ));
+      continue; // a wrapper with no git (e.g. `timeout 30 npm test`) is a non-git command → allow
+    }
+    if (head !== "git") continue; // non-git command (basename never `git`) → allowed
+    let i = 1; // skip git's own global options, including each one's separated value, to reach the subcommand
+    while (i < tokens.length) {
+      const t = tokens[i];
+      if (VALUE_OPTIONS.has(t)) { i += 2; continue; }
+      if (t.startsWith("-")) { i += 1; continue; }
+      break;
+    }
+    const denied = guarded ? !gitSegmentIsReadOnly(tokens, i) : stashIsDestructive(tokens, i);
+    if (denied)
       deny(denyReason(
-        "run git behind a shell wrapper (deny-on-ambiguity).",
-        "a git behind a shell wrapper can hide one (deny-on-ambiguity)."
+        `run destructive/ambiguous git — guarded dispatches are read-only apart from \`git add -N\` (${tokens[i] ?? "git"}).`,
+        `\`git ${normalizeHead(tokens[i] ?? "") || "stash"}\` discards every in-flight implementer's uncommitted edits across the shared checkout.`
       ));
-    continue; // a wrapper with no git (e.g. `timeout 30 npm test`) is a non-git command → allow
   }
-  if (head !== "git") continue; // non-git command (basename never `git`) → allowed
-  let i = 1; // skip git's own global options, including each one's separated value, to reach the subcommand
-  while (i < tokens.length) {
-    const t = tokens[i];
-    if (VALUE_OPTIONS.has(t)) { i += 2; continue; }
-    if (t.startsWith("-")) { i += 1; continue; }
-    break;
-  }
-  const denied = guarded ? !gitSegmentIsReadOnly(tokens, i) : stashIsDestructive(tokens, i);
-  if (denied)
-    deny(denyReason(
-      `run destructive/ambiguous git — guarded dispatches are read-only apart from \`git add -N\` (${tokens[i] ?? "git"}).`,
-      `\`git ${normalizeHead(tokens[i] ?? "") || "stash"}\` discards every in-flight implementer's uncommitted edits across the shared checkout.`
-    ));
+} catch {
+  deny(denyReason(
+    "run a command this guard could not parse (deny-on-ambiguity).",
+    "this command could not be parsed, so a git stash inside it cannot be ruled out (deny-on-ambiguity)."
+  ));
 }
 
 allow();

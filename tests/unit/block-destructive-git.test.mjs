@@ -4,11 +4,11 @@
 // PreToolUse stdin and assert the deny/allow decision. deny = a permissionDecision:"deny" object on
 // stdout; allow = empty stdout (defer to normal permission flow). Both exit 0 (a non-zero exit with
 // empty stdout is the fail-open a PreToolUse harness reads as "no decision").
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -29,8 +29,13 @@ const decide = (agentType, command) => decideRaw({ agent_type: agentType, tool_i
 // Main-thread cases pass a cwd; the hook walks upward from it for .devcycle/state.md exactly as
 // hooks/workload-sensor.mjs does. tmpdir() must sit outside the repo (the suite runs under an
 // out-of-repo TMPDIR), or the walk would find the repo's own state file.
+// Nothing else ever deletes these, and this file makes one per call across two dozen call sites, so
+// each is removed when the run ends — the convention tests/unit/mechanical-sweep.test.mjs documents.
+const fixtures = [];
+after(() => { for (const p of fixtures) rmSync(p, { recursive: true, force: true }); });
 function cycleDir(stateBody) {
   const dir = mkdtempSync(join(tmpdir(), "devcycle-git-guard-"));
+  fixtures.push(dir);
   if (stateBody !== null) {
     mkdirSync(join(dir, ".devcycle"));
     writeFileSync(join(dir, ".devcycle", "state.md"), stateBody);
@@ -826,4 +831,78 @@ test("the ordinary agent commands carrying an ANSI-C quote stay allowed", () => 
     "python3 - <<'PY'\nprint('git reset --hard')\nPY",
   ])
     assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for an ordinary agent command: ${cmd}`);
+});
+
+// Round 10 (F1). `\U` took up to EIGHT hex digits and handed the value straight to
+// String.fromCodePoint, which throws above U+10FFFF, so the hook died with exit 1 and empty stdout —
+// the fail-open this file's header names, the one a PreToolUse harness reads as "no decision". The
+// boundary is measured, not assumed: `$'\U10FFFF'` decodes, `$'\U110000'` and up threw (verified:
+// the round-10 finding's reproduction, re-run against HEAD before this test was written). decideRaw
+// asserts status === 0, so each row below fails on the crash itself rather than on the verdict.
+// Neither shell turns any of these into git — bash 3.2 leaves `\U…` literal and zsh emits the code
+// point (or its replacement bytes) — so allow is the correct verdict on both sides of the boundary.
+test("an out-of-range ANSI-C code point does not crash the guard", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "$'\\U10FFFF' reset --hard",
+    "$'\\U0010FFFF' reset --hard",
+    "$'\\U110000' reset --hard",
+    "$'\\U00110000' reset --hard",
+    "$'\\Uffffffff' reset --hard",
+    "$'\\u0067it\\U110000' reset --hard",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for an unreadable code point: ${cmd}`);
+  assert.equal(decideMain(cwd, "$'\\U110000' stash"), "allow");
+  // The in-range escape still decodes, so the class it was added for is untouched: `\U00000067` is
+  // `g`, and this spelling IS the git binary.
+  assert.equal(decide(REVIEWER, "$'\\U00000067'it reset --hard"), "deny");
+});
+
+// Round 10 (F1), the scenario the finding measured rather than the decode unit. Heads are normalized
+// segment by segment in order, so a crashing token placed BEFORE the git segment killed the process
+// before any deny() was written and disarmed the guard for the whole command.
+test("a crashing token in front of a git segment does not disarm the guard", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  assert.equal(decide(REVIEWER, "echo hi ; $'\\UFFFFFFFF' ; git reset --hard"), "deny");
+  assert.equal(decideMain(cwd, "echo hi ; $'\\UFFFFFFFF' ; git stash"), "deny");
+});
+
+// Round 10 (F1), the CLASS rather than the instance: whatever the parser throws on, the answer must
+// be a deny, not an uncaught exception — a guard whose failure mode is fail-open contradicts this
+// file's whole premise, and the next parser change could add another crash. With the decode fixed no
+// input reaches a throw any more, so the only honest injection left is to run the REAL hook source
+// with one line mutated to throw, reached through the ordinary stdin path. Both replacements are
+// asserted, so a rename that stops the mutation from applying fails here instead of passing
+// vacuously.
+test("a parser failure ends in a deny, not in a fail-open exit", () => {
+  const IMPORT = 'import { findStateFile } from "./lib/find-state-file.mjs";';
+  const SIGNATURE = "function normalizeHead(token) {";
+  const source = readFileSync(HOOK, "utf8");
+  assert.ok(source.includes(IMPORT), "the hook's find-state-file import moved; the mutant cannot resolve it");
+  assert.ok(source.includes(SIGNATURE), "normalizeHead's signature moved; the mutant would inject nothing");
+  const mutantDir = mkdtempSync(join(tmpdir(), "devcycle-git-guard-throw-"));
+  fixtures.push(mutantDir);
+  const mutant = join(mutantDir, "block-destructive-git.mjs");
+  writeFileSync(mutant, source
+    .replace(IMPORT, `import { findStateFile } from ${JSON.stringify(pathToFileURL(join(dirname(HOOK), "lib", "find-state-file.mjs")).href)};`)
+    .replace(SIGNATURE, `${SIGNATURE} if (token === "boom") throw new Error("injected parser failure");`));
+
+  const cwd = cycleDir(stateAt("execution"));
+  for (const input of [
+    { agent_type: REVIEWER, tool_input: { command: "boom ; git log" } },
+    { agent_type: IMPLEMENTER, tool_input: { command: "boom ; git log" } },
+    { cwd, tool_input: { command: "boom ; git log" } },
+  ]) {
+    const r = spawnSync("node", [mutant], { input: JSON.stringify(input), encoding: "utf8" });
+    assert.equal(r.status, 0, `the mutant exited ${r.status} with stdout ${JSON.stringify(r.stdout)}`);
+    assert.equal(JSON.parse(r.stdout).hookSpecificOutput?.permissionDecision, "deny",
+      `expected a deny for a parser failure, got ${JSON.stringify(r.stdout)}`);
+  }
+  // A parser failure on an origin the guard does not cover is still not this hook's business: those
+  // origins never reach the classification loop at all.
+  const unguarded = spawnSync("node", [mutant], {
+    input: JSON.stringify({ agent_type: "devcycle:planner", tool_input: { command: "boom ; git log" } }), encoding: "utf8",
+  });
+  assert.equal(unguarded.status, 0);
+  assert.equal(unguarded.stdout.trim(), "");
 });
