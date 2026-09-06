@@ -33,7 +33,10 @@
 // shell resolves before it runs `git`, so normalizeHead resolves them the same way — dropping the
 // quote characters, and DECODING the escapes an ANSI-C quote spells its characters with, so
 // `$'\x67it'` reduces to `git` (round 8) while `$'gi\t'` stays `gi<TAB>`, which is not a command any
-// shell has (round 6, round 8).
+// shell has (round 6, round 8). The one resolution that is deliberately NOT done at the word level is
+// a backslash-newline inside `'…'`: this shell keeps both characters literal, so joining the halves
+// here would invent a git out of a command name that carries them — the wrapper check joins them
+// instead, because that is where an inner shell genuinely re-reads the text (round 8, fix round).
 // Telling a duplication's `&` (`2>&1`) from a background `&` is part of that tokenization — the
 // descriptor and the `&` are glued into one redirection operator token — so
 // a bare `&` token is always a command separator and the segment splitter needs no lookbehind.
@@ -369,6 +372,18 @@ function tokenizeCommand(raw, ignoreQuotes = false) {
         if (next !== "\n") word += c + next;                   // a backslash-newline is a continuation
         continue;
       }
+      // Inside `'…'` a backslash-newline is LITERAL — this shell performs no continuation and passes
+      // both characters on. Whichever shell RE-READS that text (the inner `sh` of a wrapper) does
+      // perform it, joining the halves, so `sh -c 'g\<newline>it stash'` runs a real git that neither
+      // half spells. The pair is kept in the word instead of flushing at the newline, which is what
+      // lets the wrapper check below rejoin the halves; it is kept rather than deleted so ONLY that
+      // check sees the join, and a top-level `'g\<newline>it'` still classifies as the command name
+      // carrying those two literal characters, which is what this shell would look for.
+      if (quote === "'" && c === "\\" && (next === "\n" || (next === "\r" && raw[i + 2] === "\n"))) {
+        word += "\\\n";
+        i += next === "\r" ? 2 : 1;
+        continue;
+      }
       if (c === (quote === "$'" ? "'" : quote)) { word += c; quote = null; continue; }
       if (/\s/.test(c)) { flush(); continue; }
       word += c;
@@ -529,7 +544,19 @@ for (const seg of splitSegments(dropCaseLabels(tokenizeCommand(command)))) {
     // A wrapper's argument is often a quoted script (`sh -c 'git checkout -- x'`), so the naive
     // whitespace split leaves a quote character glued to the word (`'git`, `"git`), and a wrapper may
     // also name git by path — normalizeHead reduces every such spelling to `git` before comparing.
-    if (tokens.slice(1).some((t) => normalizeHead(t) === "git") && (guarded || mentionsStash(tokens))) // git behind a wrapper we cannot see into
+    // A wrapper's argument is also RE-READ by the shell it starts, so the backslash-newline the outer
+    // single quotes made literal (tokenizeCommand kept the pair in the word) is a line continuation
+    // to that inner shell and joins the halves: `sh -c 'g\<newline>it stash'` runs a real git that
+    // neither `'g\` nor `it` spells (branch review round 8, fix round). Resolving the continuation
+    // HERE and nowhere else is the bound. This arm already denies any git token behind a recognized
+    // wrapper, so it adds no class of deny — only the spellings of that deny it was missing — while
+    // the head path keeps reading a top-level `'g\<newline>it'` as the literal command name the shell
+    // would actually look for. The narrower alternative, resolving it only behind a wrapper this file
+    // could name as a shell, was rejected: the set of launchers that hand their argument to `sh -c`
+    // is not enumerable here, and this file's rule is that a missed destructive git is not
+    // acceptable. Its cost is an over-deny on `sudo 'g\<newline>it' …`, a command name no shell has.
+    const inner = tokens.map((t) => t.replace(/\\\n/g, ""));
+    if (inner.slice(1).some((t) => normalizeHead(t) === "git") && (guarded || mentionsStash(inner))) // git behind a wrapper we cannot see into
       deny(denyReason(
         "run git behind a shell wrapper (deny-on-ambiguity).",
         "a git behind a shell wrapper can hide one (deny-on-ambiguity)."

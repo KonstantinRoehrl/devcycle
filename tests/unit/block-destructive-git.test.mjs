@@ -392,6 +392,26 @@ const AMBIGUITY_CLASSES = [
   ["ANSI-C hex escape spelling the git binary name", "$'\\x67it' reset --hard", "$'\\x67it' stash"],
   ["ANSI-C octal escape spelling the git binary name", "$'\\147it' reset --hard", "$'\\147it' stash"],
   ["ANSI-C unicode escape spelling the git binary name", "$'\\u0067it' reset --hard", "$'\\u0067it' stash"],
+  // Branch review round 8, fix round: a backslash-newline the OUTER shell was told to keep LITERAL.
+  // Single quotes hand both characters through untouched, and the inner shell a wrapper starts reads
+  // them as the line continuation they are and joins the halves — `sh -c 'g<backslash><newline>it
+  // stash'` runs a real git that neither half spells. tokenizeCommand flushes a word on any
+  // whitespace inside quotes (deliberately: a wrapper's quoted script must still show its `git` to
+  // the wrapper check), so the word split into `'g\` and `it` and neither reduced to `git`. Seven of
+  // the eight rows below returned allow on BOTH arms before the fix; the row with the continuation in
+  // FRONT of the name already denied on both, because a leading `\` flushes as a token of its own and
+  // leaves an ordinary `git` token the wrapper arm already saw — it is carried as a regression guard
+  // for the position (verified: the branch-fix-8-3 differential probe's pre-fix column,
+  // .devcycle/evidence/branch-fix-8-3-probe.txt). bash and zsh both print `git` for each of these
+  // words, so each is a real, executed git.
+  ["literal line continuation splitting the git binary name inside a wrapper's quoted script", "sh -c 'g\\\nit reset --hard'", "sh -c 'g\\\nit stash'"],
+  ["literal line continuation before the last character of the git binary name", "sh -c 'gi\\\nt reset --hard'", "sh -c 'gi\\\nt stash'"],
+  ["literal line continuation in front of the git binary name", "sh -c '\\\ngit reset --hard'", "sh -c '\\\ngit stash'"],
+  ["literal line continuation after the git binary name", "sh -c 'git\\\n reset --hard'", "sh -c 'git\\\n stash'"],
+  ["literal line continuation inside a bash -c script", "bash -c 'g\\\nit reset --hard'", "bash -c 'g\\\nit stash'"],
+  ["literal line continuation inside a dash -c script", "dash -c 'g\\\nit reset --hard'", "dash -c 'g\\\nit stash'"],
+  ["literal line continuation inside an eval'd string", "eval 'g\\\nit reset --hard'", "eval 'g\\\nit stash'"],
+  ["literal line continuation inside a script behind stacked wrappers", "timeout 5 sh -c 'g\\\nit reset --hard'", "timeout 5 sh -c 'g\\\nit stash'"],
 ];
 
 test("guarded origin + every named ambiguity class hiding a destructive git is denied", () => {
@@ -738,6 +758,52 @@ test("an ANSI-C escape the shell does not read as the binary name stays allowed"
   // literal `$git` to the shell, not the binary, but normalizeHead's leading-`$` strip (which covers
   // the `$git` variable spelling) reduces it to git. Denying costs a command that runs nothing.
   assert.equal(decide(REVIEWER, "\\$git reset --hard"), "deny");
+});
+
+// Round 8 fix round, the subcommand half of the literal-continuation class. Only the MAIN-THREAD arm
+// is falsifiable: a guarded origin denies any git behind `sh -c` already, whatever its subcommand.
+// The main thread reads the subcommand through mentionsStash, and a `stash` split across the literal
+// continuation reduced to neither `st` nor `ash` — so the one command the #235 ban exists to stop
+// reached allow (verified: the branch-fix-8-3 differential probe's pre-fix column). The first and
+// third rows are the falsifiable ones; the middle row, whose continuation sits in FRONT of `stash`,
+// already denied, because that position leaves `stash` an ordinary token mentionsStash could read.
+test("main thread + a stash subcommand split by a literal line continuation is denied in an active cycle", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["sh -c 'git st\\\nash'", "sh -c 'git \\\nstash'", "bash -c 'git sta\\\nsh'"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for a split stash subcommand: ${JSON.stringify(cmd)}`);
+});
+
+// Round 8 fix round, the allow direction. A backslash before a SPACE or a TAB is an escaped
+// space/tab, not a continuation: the shell builds the single word `g it`, and no git ever runs. It
+// tokenizes exactly like the continuation — the word flushes at the whitespace, leaving a half that
+// ends in a backslash — so a fix that joined any token ending in a backslash with its successor
+// would deny every row here. Joining only across the backslash-NEWLINE the tokenizer preserved is
+// what keeps them apart. The bound holds at the top level too: `'g<backslash><newline>it'` outside a
+// wrapper is a command NAME carrying those two literal characters, which is not git in any shell.
+test("a backslash that is not a line continuation the shell performs stays allowed", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "sh -c 'echo g\\ it'",
+    "sh -c 'echo git\\ reset'",
+    "sh -c 'echo g\\\tit'",
+    "echo 'g\\ it'",
+    "'g\\\nit' reset --hard",
+    "echo 'a\\'",
+    "echo 'a\\\nb'",
+    "printf 'a\\\nb'",
+    "sh -c 'echo one \\\n  two'",
+    "sh -c 'set -e\ncd x\ngrep -rn stash playbooks/'",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a non-continuation backslash: ${JSON.stringify(cmd)}`);
+  for (const cmd of ["'g\\\nit' stash", "sh -c 'echo g\\ it stash'", "echo 'g\\\nit stash'"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow on the main thread: ${JSON.stringify(cmd)}`);
+  // A DELIBERATE over-deny, the price of the bound this fix took, pinned so it stays visible: behind
+  // a RECOGNIZED wrapper the guard cannot see whether that wrapper re-reads its argument as shell
+  // text (`sh -c`, `eval`) or execs it literally (`sudo`, `env`), so a quoted literal continuation
+  // denies behind all of them. The spelling names a command no shell has, so the deny withholds
+  // nothing runnable — while the narrower bound (join only behind a named shell) would fail open on
+  // every launcher that hands its argument to `sh -c`.
+  assert.equal(decide(REVIEWER, "sudo 'g\\\nit' reset --hard"), "deny");
 });
 
 // No new false positives: an ANSI-C quote is ordinary punctuation in the commands this cycle's own
