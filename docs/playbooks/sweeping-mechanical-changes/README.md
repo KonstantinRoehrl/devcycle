@@ -25,7 +25,8 @@ it can be, since the script starts copying files back as it runs — before the 
 Its exit shape then branches three ways: exit 0 saves the stdout report to
 `sweep-report.json` and, if anything was actually applied, moves to verify-and-commit (an empty
 `applied` list means nothing to commit, and the per-file skip reasons are relayed instead); exit
-1 with a stdout report is a pilot or baseline hard stop, relayed verbatim for a user decision
+1 with a stdout report is a pilot or baseline hard stop, or an attempt that left the worktree
+unrestorable, relayed verbatim for a user decision
 (retry / fall through to the normal pipeline / abort); exit 1 with no report is a broken
 invocation or environment, quoted from stderr and fixed rather than treated as a verification
 verdict. Before any re-run over targets already carrying this sweep's edits, the **re-run rule**

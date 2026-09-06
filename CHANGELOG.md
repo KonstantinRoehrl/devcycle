@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- fix(engine): bound agent-cli process groups, harden the git guard, review-panel refs and sweep worktrees (audit 2026-09-05 H1, H5, L2, L3, L4; #235, #242, #148)
+
 ## 0.19.0 — 2026-09-04
 
 - feat(evidence-contract): harden the evidence-capture & verification contract (#143, #144, #150, #151, #230, #231, #232, #238)

@@ -5,6 +5,17 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-09-06 — budget raised for the engine & hook safety branch review
+
+**Decision:** `tests/fixtures/context-budget.json` raises
+`playbooks/sweeping-mechanical-changes.md` 101068→101124, by exactly the bytes the branch-review
+clause adds.
+
+**Why:** branch review round 6 found the playbook and its docs mirror both gloss exit 1 with a
+stdout report as "baseline or pilot hard stop", while the sweep now has a third cause — an attempt
+that left the worktree unrestorable. The handling both already prescribe is correct for it; only
+the enumeration was short, and naming the third cause is what the bytes buy.
+
 ## 2026-09-05 — the git-write guard covers three origins and the coordinator's stash (#235)
 
 **Decision:** `hooks/block-reviewer-git-write.mjs` is renamed `hooks/block-destructive-git.mjs` —
