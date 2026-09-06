@@ -17,8 +17,11 @@
 // in FRONT of a command is NOT a bound: a head that is a reserved word (`if`, `!`, `for … do`,
 // `case … in`, `coproc`, `function`), a case pattern label (`*)`, `1)`), a function-definition head
 // (`f()`, `f () {`), or a redirection (`>/dev/null git …`) is stripped until the real command is
-// reached, and `<(`/`>(` are denied like backticks and `$(` — that spec's rule is that a missed
-// destructive command is not acceptable.
+// reached, and `<(`/`>(` — plus zsh's third process-substitution form `=(`, and its `=word` EQUALS
+// expansion (round 16) — are denied like backticks and `$(`; that spec's rule is that a missed
+// destructive command is not acceptable. The two shells are read as a UNION throughout: zsh is the
+// shell this plugin ships into, so a spelling only zsh runs as git is denied even where bash reports
+// a syntax error for it.
 //
 // CANONICALIZE, THEN CLASSIFY (branch review round 4). The parser used to split on whitespace, which
 // gave every rule keyed to a token boundary a twin spelling where the metacharacter sits flush
@@ -66,7 +69,7 @@
 // --hard`, `${x:-git} reset --hard`, `G=git; $G reset --hard`, and `git${IFS}reset --hard` (bash
 // only; zsh does not word-split). Resolving them needs shell-level expansion this parser
 // deliberately does not do, so the whole class is a stated bound rather than a backstopped case —
-// the `$git` note in headForms explains ONE spelling, not the bound on the measurement. Three
+// the `$git` note in headForms explains ONE spelling, not the bound on the measurement. Four
 // further known allows, all pre-existing and all outside that corpus:
 // (a) `git -c alias.z=stash z` reaches allow on the main-thread arm, because `-c` is a VALUE_OPTIONS
 // skip and the subcommand read lands on `z` (it also requires a configured alias);
@@ -76,30 +79,64 @@
 // leaving `stash\'` a token mentionsStash cannot read as `stash`. The top-level spelling of the same
 // class (`git stash\`) is closed; resolving the wrapper one means resolving a dangling escape inside
 // the wrapper join, which round 10's fix round left untouched;
-// (c) an INTERPRETER READING a heredoc body executes it, and the round-6 body exemption hides that
-// from both arms: `bash <<'EOF' … git stash … EOF` and `sh <<EOF … git reset --hard … EOF` ran real
-// destructive gits in both shells (shim oracle, round 12) and reach allow, because the body is
-// consumed as data before any segment is formed. Only the SUBSTITUTION spellings of it are denied,
-// and only because the pre-check below reads the RAW command text; classifying the body of a heredoc
-// whose command is a shell is what would close it, and no round has touched skipHeredocBodies for it.
+// (c) ANYTHING THAT EXECUTES A HEREDOC BODY executes it, and the round-6 body exemption hides that
+// from both arms. Three executors, one class: an interpreter reading the body
+// (`bash <<'EOF' … git stash … EOF`, `sh <<EOF … git reset --hard … EOF`), and — the shape round 14
+// filed, omitted from this list until round 16 — a body WRITTEN to a file and then run by the `.`
+// builtin or `source` (`cat <<'EOF' > f … git stash … EOF` then `. ./f`, or `source ./f`). All of
+// them ran real destructive gits in both shells (shim oracle, rounds 12 and 16) and reach allow,
+// because the body is consumed as data before any segment is formed. Only the SUBSTITUTION spellings
+// of it are denied, and only because the pre-check below reads the RAW command text; classifying the
+// body of a heredoc whose command is a shell is what would close it, and no round has touched
+// skipHeredocBodies for it;
+// (d) zsh's UNLISTED HEAD-POSITION LAUNCHERS, which are inside the WRAPPERS bound stated above rather
+// than a defect of it: `noglob git stash` and `nocorrect git reset --hard` run real destructive gits
+// in /bin/zsh (shim oracle, round 16; /bin/bash reports `command not found`) and reach allow on both
+// arms, exactly as any other launcher this file does not list does. Closing them means listing them,
+// which is the design's accepted bound, not this file's rule.
 // The NUL class (`g$'\x00'it stash`), the eval-rejoin class (`eval \ git stash`), the substitution
-// obfuscation class (`echo $(g\it stash)`) and the comment-fabricated heredoc (`echo hi # <<'EOF'`)
-// were open here until rounds 12 and 14 and are now closed on both arms, with the shim oracle's argv
-// for each spelling.
+// obfuscation class (`echo $(g\it stash)`), the comment-fabricated heredoc (`echo hi # <<'EOF'`),
+// zsh's `=(…)` and `=word` forms (`cat =(git stash)`, `=git reset --hard`) and the COMPOSITION of
+// the eval-rejoin and substitution classes (`echo $(eval \ g\it stash)`) were open here until rounds
+// 12, 14 and 16 and are now closed on both arms, with the shim oracle's argv for each spelling. Their
+// COMPOSITIONS are not systematically measured — the corpus crosses one spelling with one context, so
+// a spelling that composes two obfuscations is generated by neither axis. Round 16 found and closed
+// one such composition by sharing a single reduction (reReadsAs) between the two arms that apply it,
+// so a later addition to either cannot part company with the other again; the rest of the
+// composition space is untested, which is a bound on the measurement, not a claim about it.
 //
-// The one OVER-denial this file carries deliberately, restored by round 14 and recorded here so the
-// next reader knows it is a decision and not an oversight: a heredoc body that quotes a git command
-// inside markdown backticks or a `$( )` — `cat <<'EOF' > f`, body ``run `git reset --hard` here``,
-// `EOF` — is DENIED to a guarded origin, and denied on the main thread too when the body names
-// `stash`. No git runs in any of those (shim oracle, both shells: no call recorded), and that is the
-// ordinary shape of the report and findings files this repo asks its agents to write. Round 13
-// exempted the body of a QUOTED-delimiter heredoc from the pre-check to fix exactly this; the
-// exemption was keyed on a segment head being in WRAPPERS, so everything that executes a body
-// without being listed kept it — `ksh <<'EOF' … $(git stash) … EOF` and `cat <<'EOF' > f … EOF;
-// . ./f` each ran a real `git stash` in both shells while both arms allowed (round 14, F2). The
-// widening was reverted rather than re-bounded, and this over-denial is its accepted cost: an agent
-// that hits it writes the file some other way (a printf, an editor tool, a body with no substitution
-// punctuation in it).
+// THE OVER-DENIALS this file carries deliberately, recorded here so the next reader knows each is a
+// decision and not an oversight.
+// 1. THE SUBSTITUTION PRE-CHECK'S SHAPE, restored by round 14. It is not heredoc-shaped, which is how
+// this paragraph described it until round 16 measured it: the rule is ANY command that names git in
+// the same text as a backtick, `$(`, `<(`, `>(` or `=(` — denied to a guarded origin, and on the main
+// thread too when the text also names `stash`, whether or not a shell would run anything.
+// `printf '%s\n' '- ran `git stash` here' > f` and `echo '- ran `git stash`' >> notes.md` are both
+// DENIED (shim oracle, both shells: no git call recorded), and so is the heredoc spelling of the same
+// note (`cat <<'EOF' > f`, body ``run `git reset --hard` here``, `EOF`). That is the ordinary shape of
+// the review notes, findings and report files this repo asks its agents to write, and it has
+// obstructed five review rounds. What an agent that hits it actually does is write the text with NO
+// substitution punctuation beside the git (`- ran git stash here` is allowed) or use a file-editing
+// tool; a printf is NOT an escape hatch — it is denied by the very same rule, which is what the old
+// wording here sent the next reader to try. Round 13 exempted the body of a QUOTED-delimiter heredoc
+// from the pre-check to fix exactly this; the exemption was keyed on a segment head being in WRAPPERS,
+// so everything that executes a body without being listed kept it — `ksh <<'EOF' … $(git stash) …
+// EOF` and `cat <<'EOF' > f … EOF; . ./f` each ran a real `git stash` in both shells while both arms
+// allowed (round 14, F2). The widening was reverted rather than re-bounded, and the decision at the
+// round-16 gate was to KEEP that revert and make this text true instead.
+// 2. THE WRAPPER ARM'S ESCAPED WHITESPACE, round 12's cost: an escaped space or tab in front of a git
+// denies behind EVERY WRAPPERS entry, because the arm cannot tell which of them re-reads its argument
+// as shell text. Measured on the round-14 differential corpus: 384 rows on which no shell ran a
+// forbidden git (192 backslash-space + 192 backslash-tab, across all 34 entries), plus 9 NUL rows.
+// (The cdc3338 commit message says "213 rows across all wrappers"; 384 is the measured figure, which
+// the wrapper arm below carries and the probe re-measures. The commit message cannot be amended, so
+// the correction lives here.)
+// 3. ROUND 16's OWN, the narrowest of the three: a token inside a substitution that reduces to git
+// only after a leading escaped space/tab or backslash is dropped — `echo $(\ g\it stash)` — is denied
+// although no shell runs a git there (shim oracle, both shells: `command not found:  git`).
+// Constructing one takes an obfuscated git AND a leading escape AND a substitution; spelled without
+// the obfuscation (`echo $(\ git stash)`) it was already denied by the raw-text read, and with the
+// escape inside the word instead of in front of it (`echo $(g\ it stash)`) it is still allowed.
 import { readFileSync } from "node:fs";
 import { findStateFile } from "./lib/find-state-file.mjs";
 
@@ -307,12 +344,33 @@ function headForms(token) {
   const text = stripQuoting(token);
   const nul = text.indexOf("\0");
   const forms = nul === -1 ? [text] : [text.replace(/\0/g, ""), text.slice(0, nul)];
-  return [...new Set(forms.map(reduceName))];
+  const reduced = forms.map(reduceName);
+  // zsh's EQUALS expansion is a third realization of the same kind: `=word` is the PATH of the
+  // command `word`, so `=git reset --hard` ran a real reset in /bin/zsh while /bin/bash reported
+  // `=git: command not found` (shim oracle, branch review round 16, F1) — and zsh is the shell this
+  // plugin ships into. The `=`-stripped spelling is ADDED as a realization rather than stripped in
+  // reduceName for the same reason the NUL cut is: a read that must not widen an ALLOW asks whether
+  // EVERY realization is harmless (`git stash =list`), and stripping the `=` outright would answer
+  // that question with zsh's reading alone.
+  const equals = reduced.filter((f) => f.startsWith("=")).map((f) => reduceName(f.slice(1)));
+  return [...new Set([...reduced, ...equals])];
 }
 // The bash realization, for the reason strings and for the reads that must not widen a deny.
 const normalizeHead = (token) => headForms(token)[0];
 // The deny-direction read: does this word reach `name` in EITHER shell?
 const headIs = (token, name) => headForms(token).includes(name);
+// The extra reduction a shell performs when it RE-READS text it was handed, on top of the word-level
+// one above: it CONCATENATES what it re-reads, so a leading escaped space or tab in front of the word
+// is whitespace to it and a leading backslash is an alias bypass — `eval \ git stash` and
+// `eval \\git stash` each ran a real `git stash` in both shells (round 12). One backslash is dropped,
+// not a run of them (`eval \\\\git` is the literal command name `\git`, which no shell has). TWO
+// places re-read text and both must ask this, which is why it lives here rather than inside one of
+// them: the wrapper arm, and the substitution backstop — a substitution's body is re-read exactly as a
+// wrapper's script is, and while each class was closed on its own, their COMPOSITION was not:
+// `echo $(eval \ g\it stash)` ran a real `git stash` in both shells and reached ALLOW on both arms
+// (branch review round 16, F2).
+const reReadsAs = (token, name) =>
+  headForms(token).some((h) => reduceName(h.replace(/^\s+/, "").replace(/^\\/, "")) === name);
 
 // git's own global options that take a VALUE. Written separated (`git --git-dir .git stash`) the
 // value is a token of its own, so an option paired with nothing left the subcommand index on the
@@ -670,9 +728,10 @@ try {
   if (command.includes("#"))
     segments.push(...splitSegments(dropCaseLabels(tokenizeCommand(command, COMMENTLESS))));
 
-  // Command and process substitution can hide a git write we cannot classify: backticks, `$(`, and
-  // the `<(`/`>(` process-substitution forms (audit 2026-09-05 H1) are all denied when the command
-  // NAMES git anywhere, whatever the subcommand. On the main thread the same denial is scoped to
+  // Command and process substitution can hide a git write we cannot classify: backticks, `$(`, the
+  // `<(`/`>(` process-substitution forms (audit 2026-09-05 H1) and zsh's third one, `=(…)` (branch
+  // review round 16, F1), are all denied when the command NAMES git anywhere, whatever the
+  // subcommand. On the main thread the same denial is scoped to
   // commands that ALSO name `stash`. Like the wrapper arm below, that scoping over-reaches — an
   // unrelated `stash` word (a `--grep=stash`, an echoed word) beside any substituted git denies —
   // which is the accepted cost of not parsing inside a substitution; the reason therefore states
@@ -699,11 +758,19 @@ try {
   // script is, so the backslash-newline the outer single quotes made literal is a line continuation
   // in there and joins the halves: ``echo `'g\<newline>it' stash` `` ran a real `git stash` in both
   // shells (shim oracle) while neither half spells git. Each token is therefore reduced both as it
-  // stands and with that join applied — the same bound the wrapper arm below takes, and for the same
-  // reason.
-  if (/`|\$\(|<\(|>\(/.test(command)) {
+  // stands and with that join applied — and through reReadsAs, the SAME reduction the wrapper arm
+  // applies. Taking only part of that reduction is what left the two classes' COMPOSITION open:
+  // `echo $(eval \ g\it stash)` ran a real `git stash` in both shells and reached ALLOW on both arms,
+  // because `\ g\it` reduces to `" git"`, which is neither `git` by headForms nor a raw `\bgit\b`
+  // match, while the segment classifier saw only the outer `echo` (round 16, F2). The `=(` form of
+  // the regex above is anchored to a WORD-INITIAL `=`, because that is the only place either shell
+  // reads one as syntax: `arr=(a b c)` is an ordinary array assignment and `cat x=(git stash)` ran no
+  // git at all (shim oracle), so an unanchored `=\(` would deny every array assignment written beside
+  // a read-only git.
+  if (/`|\$\(|<\(|>\(|(?:^|[\s;&|()<>])=\(/.test(command)) {
     const scanTokens = tokenizeCommand(command, SCAN);
-    const reducesTo = (name) => scanTokens.some((t) => headIs(t, name) || headIs(t.replace(/\\\n/g, ""), name));
+    const reducesTo = (name) => scanTokens.some((t) =>
+      [t, t.replace(/\\\n/g, "")].some((x) => headIs(x, name) || reReadsAs(x, name)));
     const namesGit = /\bgit\b/.test(command) || reducesTo("git");
     const namesStash = /\bstash\b/.test(command) || reducesTo("stash");
     if (namesGit && (guarded || namesStash))
@@ -751,9 +818,11 @@ try {
       // 192 backslash-tab) spread across all 34 entries. The NUL union adds a second, smaller class
       // the old wording omitted — 9 rows of `coproc $'\x00'git reset --hard`, denied on a head
       // realization only one of the two shells produces.
+      // That inner-parse reduction is reReadsAs, shared with the substitution backstop above: the two
+      // places a shell re-reads text must apply the SAME reduction, or their composition reopens both
+      // classes (round 16, F2).
       const inner = tokens.map((t) => t.replace(/\\\n/g, ""));
-      const reJoinsAsGit = (t) => headForms(t).some((h) => reduceName(h.replace(/^\s+/, "").replace(/^\\/, "")) === "git");
-      if (inner.slice(1).some(reJoinsAsGit) && (guarded || mentionsStash(inner))) // git behind a wrapper we cannot see into
+      if (inner.slice(1).some((t) => reReadsAs(t, "git")) && (guarded || mentionsStash(inner))) // git behind a wrapper we cannot see into
         deny(denyReason(
           "run git behind a shell wrapper (deny-on-ambiguity).",
           "a git behind a shell wrapper can hide one (deny-on-ambiguity)."

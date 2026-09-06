@@ -1189,3 +1189,94 @@ test("a # comment cannot fabricate a heredoc that hides the commands behind it",
   for (const cmd of ["echo '#' <<EOF\ngit stash\nEOF", "echo a\\#b; git log", "echo hi # heredoc\ngit log"])
     assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a hash the shell does not read as a comment: ${JSON.stringify(cmd)}`);
 });
+
+// Round 16 (F1), the zsh-only forms. zsh is the shell this plugin ships into, and it has a THIRD
+// process-substitution form the backstop's regex did not carry (`=(…)`) plus an EQUALS expansion that
+// turns `=word` into the path of the command `word`. Both run a real destructive git with no quoting
+// and no escaping anywhere: `cat =(git stash)` handed git the argv `stash` and `=git reset --hard`
+// handed it `reset --hard` in /bin/zsh (shim oracle; /bin/bash reports a syntax error and
+// `=git: command not found`), and BOTH ARMS ALLOWED them. Two causes, one per row group: the
+// substitution pre-check's regex covered `` ` ``, `$(`, `<(` and `>(` only, so it never fired and the
+// segment head was the outer `cat`; and `=git` reduced to `=git`, a command name that is not git, so
+// the classifier skipped the segment. The `stash` rows flip on both arms, the `reset --hard` /
+// `push --force` rows on the guarded arm alone (the main-thread ban is stash-only).
+test("guarded origin + zsh's =(…) process substitution and =word expansion are denied", () => {
+  for (const cmd of [
+    "cat =(git stash)",
+    "cat =(git reset --hard)",
+    "wc -l =(git push --force)",
+    "=git reset --hard",
+    "=git stash",
+    "cat =(g\\it stash)",
+    "=g\\it stash",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a zsh = form: ${JSON.stringify(cmd)}`);
+});
+
+test("main thread + a zsh =(…) or =word git stash is denied in an active cycle", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["cat =(git stash)", "=git stash", "cat =(g\\it stash)", "=g\\it stash"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for a zsh = form: ${JSON.stringify(cmd)}`);
+});
+
+// The bound on that: `=(` opens a process substitution only where the `=` STARTS a word. `arr=(a b c)`
+// is an ordinary array assignment in both shells, and a `=(` that follows a word character
+// substitutes nothing at all (`cat x=(git stash)` ran no git in either shell — zsh reports a
+// glob-qualifier error), so an array assignment beside a read-only git must stay allowed. Quoted, the
+// text is data in both shells too.
+test("an = that does not start a word is not a zsh process substitution and stays allowed", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["arr=(a b c); git log", 'paths=(a b); git log -- "${paths[@]}"', "echo '=(git stash)'"]) {
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a non-word-initial =: ${JSON.stringify(cmd)}`);
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow for a non-word-initial =: ${JSON.stringify(cmd)}`);
+  }
+});
+
+// Round 16 (F2), the COMPOSITION of two classes each of which is closed on its own. The eval-rejoin
+// class (round 12) is closed by the wrapper arm, which strips a leading escaped space/tab and one
+// leading backslash before reducing; the substitution-obfuscation class (round 14) is closed by the
+// backstop, which reduces every token with headForms plus the backslash-newline join. Compose them —
+// put the wrapper INSIDE the substitution — and neither fires: the backstop's reduction omits the two
+// the wrapper arm applies, so `\ g\it` reduces to `" git"`, which is neither `git` by headForms nor a
+// raw `\bgit\b` match, and the segment classifier only ever sees the outer `echo`.
+// `echo $(eval \ g\it stash)` ran a real `git stash` in /bin/bash AND /bin/zsh (shim oracle) and
+// allowed on both arms. The `stash` rows flip on both arms, the `reset --hard` row on the guarded arm.
+test("guarded origin + a wrapper that re-joins its arguments inside a substitution is denied", () => {
+  for (const cmd of [
+    "echo $(eval \\ g\\it stash)",
+    "echo `eval \\ g\\it stash`",
+    'echo "$(eval \\ g\\it stash)"',
+    "cat <(eval \\ g\\it reset --hard)",
+    "echo hi > >(eval \\ g\\it stash)",
+    "printf %s $(eval \\ g\\it stash)",
+    "echo $(eval \\\\g\\it stash)",
+    "echo $(eval \\\tg\\it stash)",
+    "for x in $(eval \\ g\\it stash); do :; done",
+    "cat =(eval \\ g\\it stash)",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a wrapper inside a substitution: ${JSON.stringify(cmd)}`);
+});
+
+test("main thread + a wrapper that re-joins its arguments inside a substitution is denied in an active cycle", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of [
+    "echo $(eval \\ g\\it stash)",
+    "echo `eval \\ g\\it stash`",
+    'echo "$(eval \\ g\\it stash)"',
+    "echo hi > >(eval \\ g\\it stash)",
+    "echo $(eval \\\\g\\it stash)",
+    "for x in $(eval \\ g\\it stash); do :; done",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for a wrapper inside a substitution: ${JSON.stringify(cmd)}`);
+});
+
+// The bound on THAT: the escape has to sit in front of the word for the re-read to join it. An
+// escaped space INSIDE the word is what it looks like — `echo $(g\ it stash)` is the command `g it`,
+// which no shell has and neither shell ran (shim oracle), so it stays allowed on both arms.
+test("an escaped space inside the word is not a re-joined git and stays allowed", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["echo $(g\\ it stash)", "echo `gi\\ t stash`"]) {
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for an intra-word escaped space: ${JSON.stringify(cmd)}`);
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow for an intra-word escaped space: ${JSON.stringify(cmd)}`);
+  }
+});
