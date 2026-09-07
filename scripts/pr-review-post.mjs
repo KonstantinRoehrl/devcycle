@@ -20,11 +20,11 @@
 //   submit:  gh api graphql -f query='mutation($id:ID!,$event:PullRequestReviewEvent!,$body:String){submitPullRequestReview(input:{pullRequestReviewId:$id,event:$event,body:$body}){pullRequestReview{state}}}' -F id=<PRR_> -F event=<EVENT> -F body=<b>
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { djb2, normalizeBody } from "./pr-review-intake.mjs";
+import { makeTempDir } from "./temp-dir.mjs";
 
 export const FOOTER_MARKER = "🤖 Posted by Claude Code on behalf of";
 
@@ -64,7 +64,7 @@ export const defaultPostRunner = (exec = execFileSync) => {
       }
     },
     postPrLevel: (repo, pr, body) => {
-      const dir = mkdtempSync(join(tmpdir(), "prpost-"));
+      const dir = makeTempDir("prpost-");
       try {
         const f = join(dir, "body.md");
         writeFileSync(f, body);
@@ -89,7 +89,7 @@ export const defaultPostRunner = (exec = execFileSync) => {
       return match ? match.id : null;
     },
     createReview: (repo, pr, payload) => {
-      const dir = mkdtempSync(join(tmpdir(), "prreview-"));
+      const dir = makeTempDir("prreview-");
       try {
         const f = join(dir, "review.json");
         writeFileSync(f, JSON.stringify(payload));
