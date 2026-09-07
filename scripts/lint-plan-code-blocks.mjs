@@ -7,12 +7,12 @@
 // names nothing IS an error: a gate pointed at a target that found nothing has not passed.
 import {
   readFileSync, readdirSync, existsSync, statSync, accessSync, constants,
-  mkdtempSync, writeFileSync, rmSync,
+  writeFileSync, rmSync,
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
+import { makeTempDir } from "./temp-dir.mjs";
 
 const args = process.argv.slice(2);
 const USAGE =
@@ -90,7 +90,7 @@ for (const file of files) {
     const code = match[2];
     if (!LINTED_LANGS.has(lang)) continue;
     blockNum += 1;
-    const tmpDir = mkdtempSync(join(tmpdir(), "lint-plan-code-block-"));
+    const tmpDir = makeTempDir("lint-plan-code-block-");
     const tmpFile = join(tmpDir, "block.mjs");
     try {
       writeFileSync(tmpFile, code, "utf8");

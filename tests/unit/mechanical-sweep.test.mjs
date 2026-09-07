@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, readFileSync, mkdtempSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import sweep from "../../workflows/mechanical-sweep.js";
 import { makeRepo, commitAll, makeFakeBin, runScript } from "./helpers.mjs";
 
@@ -12,7 +12,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(here, "..", "..", "workflows", "mechanical-sweep.js");
 
 // The sweep's fixtures are the heaviest in this suite — a git repository plus a worktree per run —
-// and nothing else ever deletes them, so every fixture a test below creates is removed when it ends.
+// so every fixture a test below creates is removed when it ends, rather than accumulating until
+// makeTempDir's exit handler reclaims them at the end of the whole run.
 function cleanup(...paths) {
   for (const p of paths) rmSync(p, { recursive: true, force: true });
 }
@@ -258,7 +259,7 @@ test("an editor that reports no change skips the file with its reason and does n
 // by argument order.
 test("the editor agent is invoked with the equals form of --tools", () => {
   const repo = repoWithJsFiles();
-  const argvLog = join(mkdtempSync(join(tmpdir(), "devcycle-sweep-argv-")), "argv.json");
+  const argvLog = join(makeTempDir("devcycle-sweep-argv-"), "argv.json");
   const bin = makeFakeBin(
     "claude",
     `
@@ -469,7 +470,7 @@ test("a rejected attempt's ignored collateral is deleted while the verify comman
   // runs after the rejected attempt was reverted. The artifact ACCUMULATES one `x` per run instead of
   // being recreated, so a revert that wiped the ignored directory cannot hide behind the next run
   // making the file again: the survivor carries one `x` per run so far, a recreated file carries one.
-  const listingDir = mkdtempSync(join(tmpdir(), "devcycle-sweep-gen-"));
+  const listingDir = makeTempDir("devcycle-sweep-gen-");
   const listing = join(listingDir, "gen-listing.txt");
   try {
     const res = runScript(
@@ -532,7 +533,7 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { chan
 test("an ignored file the agent overwrites stops the sweep — no later verify, and no later apply, in a tree it cannot restore", () => {
   const repo = repoWithThreeTargetsAndIgnores();
   const bin = makeFakeBin("claude", OVERWRITE_IGNORED_EDITOR);
-  const listingDir = mkdtempSync(join(tmpdir(), "devcycle-sweep-overwrite-"));
+  const listingDir = makeTempDir("devcycle-sweep-overwrite-");
   const listing = join(listingDir, "seed-listing.txt");
   try {
     const res = runScript(
@@ -625,7 +626,7 @@ test("the revert deletes the ignored paths an attempt created and leaves on disk
 // exists to prevent — while the skip reason called the attempt "reverted".
 test("an ignored artifact the verify wrote after the purity pass is not deleted as the next attempt's own creation", () => {
   const repo = repoWithTargetsAndIgnores(["a.js", "b.js", "c.js", "d.js", "e.js"]);
-  const flagDir = mkdtempSync(join(tmpdir(), "devcycle-sweep-late-"));
+  const flagDir = makeTempDir("devcycle-sweep-late-");
   // The verify writes gen/late.txt on the first run after c.js's editor — i.e. after c.js's purity
   // pass and before d.js's attempt, which is the only window in which the stale `known` differs.
   const flag = join(flagDir, "seed-now");
@@ -699,7 +700,7 @@ const SIX_TARGETS = ["a.js", "b.js", "c.js", "d.js", "e.js", "f.js"];
 test("an ignored file a failed editor created is deleted, so no later verify runs in a tree carrying it", () => {
   const repo = repoWithTargetsAndIgnores(SIX_TARGETS);
   const bin = makeFakeBin("claude", EDITOR_FAILING_AFTER(`fs.writeFileSync("gen/agent-junk.txt", "junk\\n");`));
-  const listingDir = mkdtempSync(join(tmpdir(), "devcycle-sweep-failed-created-"));
+  const listingDir = makeTempDir("devcycle-sweep-failed-created-");
   const listing = join(listingDir, "gen-listing.txt");
   try {
     const res = runScript(
@@ -736,7 +737,7 @@ test("an ignored file a failed editor created is deleted, so no later verify run
 test("an ignored file a failed editor overwrote stops the sweep — the untried targets never reach the real repository", () => {
   const repo = repoWithTargetsAndIgnores(SIX_TARGETS);
   const bin = makeFakeBin("claude", EDITOR_FAILING_AFTER(`fs.writeFileSync("gen/keep.txt", "clobbered\\n");`));
-  const listingDir = mkdtempSync(join(tmpdir(), "devcycle-sweep-failed-overwrote-"));
+  const listingDir = makeTempDir("devcycle-sweep-failed-overwrote-");
   const listing = join(listingDir, "seed-listing.txt");
   try {
     const res = runScript(
@@ -870,7 +871,7 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { chan
 // `git worktree prune` before `worktree add` removes it instead of tripping over it.
 test("a stale worktree registration from a killed sweep is pruned, not tripped over", () => {
   const repo = repoWithJsFiles();
-  const staleParent = mkdtempSync(join(tmpdir(), "devcycle-stale-wt-"));
+  const staleParent = makeTempDir("devcycle-stale-wt-");
   const stale = join(staleParent, "wt");
   execFileSync("git", ["worktree", "add", "--detach", stale, "HEAD"], { cwd: repo, stdio: "ignore" });
   rmSync(stale, { recursive: true, force: true });

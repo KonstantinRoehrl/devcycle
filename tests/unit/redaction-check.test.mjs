@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, sh } from "./helpers.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/redaction-check.mjs");
@@ -20,7 +21,7 @@ const SESSION_ID = ["0f9a1b2c", "3d4e", "5f60", "7a8b", "9c0d1e2f3a4b"].join("-"
 const TRANSCRIPT_SLUG = `projects${SLASH}-Users-someone-Programming-thing`;
 
 function makeFixture(files) {
-  const dir = mkdtempSync(join(tmpdir(), "redaction-check-"));
+  const dir = makeTempDir("redaction-check-");
   for (const [rel, content] of Object.entries(files)) writeFileSync(join(dir, rel), content, "utf8");
   return dir;
 }
@@ -484,7 +485,7 @@ test("a bare path fails naming the token, rather than scanning git ls-files and 
 // --auto-redact: the same scan engine, but it first rewrites every detected class in place,
 // then re-scans so the run's exit code proves the POST-rewrite state is clean.
 test("--auto-redact rewrites every detected class in place, then the dir scans clean", () => {
-  const dir = mkdtempSync(join(tmpdir(), "redact-"));
+  const dir = makeTempDir("redact-");
   const f = join(dir, "artifact.md");
   // Fixtures assembled from the fragment constants above, never literal patterns, so this test
   // file does not itself trip the tracked-tree redaction screen CI runs.
@@ -510,7 +511,7 @@ test("--auto-redact rewrites every detected class in place, then the dir scans c
 });
 
 test("--auto-redact leaves a clean file byte-identical (no gratuitous rewrites)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "redact-"));
+  const dir = makeTempDir("redact-");
   const f = join(dir, "clean.md");
   const original = "plugin version 0.12.0, profile thorough, 4 events\n";
   writeFileSync(f, original);
@@ -551,7 +552,7 @@ test("--auto-redact without --dir or --file is refused (never rewrites the whole
 });
 
 test("--auto-redact reports the spans it rewrote, per file, so a false-positive rewrite is visible", () => {
-  const dir = mkdtempSync(join(tmpdir(), "redact-"));
+  const dir = makeTempDir("redact-");
   writeFileSync(join(dir, "artifact.md"), `path ${MAC_HOME}/x and session ${SESSION_ID}\n`);
   try {
     const res = spawnSync(process.execPath, [SCRIPT, "--auto-redact", "--dir", dir], { encoding: "utf8" });
@@ -577,7 +578,7 @@ test("redaction-check: --dir on a nonexistent path prints a named diagnostic, no
 });
 
 test("redaction-check: --dir naming a file (not a directory) prints the named diagnostic", () => {
-  const base = mkdtempSync(join(tmpdir(), "c9-redaction-"));
+  const base = makeTempDir("c9-redaction-");
   const f = join(base, "afile.txt");
   writeFileSync(f, "hello\n");
   try {
@@ -606,7 +607,7 @@ test("--advisory-identity: machine identity is reported to stderr but does not f
 
 test("--advisory-identity does NOT downgrade a deny-listed term", () => {
   const token = "denyword";
-  const hdir = mkdtempSync(join(tmpdir(), "rh-"));
+  const hdir = makeTempDir("rh-");
   const hashesFile = join(hdir, "h.txt");
   writeFileSync(hashesFile, createHash("sha256").update(token).digest("hex") + "\n");
   const dir = makeFixture({ "a.md": `contains ${token} here\n` });
@@ -638,7 +639,7 @@ test("inline `redaction-allow` exempts a single line from machine-identity class
 
 test("inline `redaction-allow` never exempts a deny-listed term", () => {
   const term = "quarantineword";
-  const hdir = mkdtempSync(join(tmpdir(), "rh-"));
+  const hdir = makeTempDir("rh-");
   const hashesFile = join(hdir, "h.txt");
   writeFileSync(hashesFile, createHash("sha256").update(term).digest("hex") + "\n");
   const dir = makeFixture({ "a.md": `contains ${term} here <!-- redaction-allow -->\n` });

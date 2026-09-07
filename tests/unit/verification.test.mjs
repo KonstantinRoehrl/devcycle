@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { verify, defaultRunCheck, skipRunCheck, VERIFY_TIMEOUT_MS } from "../../scripts/verification.mjs";
 
 const ev = (culprit, ts, runId) => ({ event: "gate-fail", culprit, ts, runId });
@@ -166,7 +166,7 @@ test("resolved-in: reached but the resolving version has no CHANGELOG date is un
 });
 
 test("defaultRunCheck runs an existing runnable script/test and uses its exit code (F3)", () => {
-  const root = mkdtempSync(join(tmpdir(), "verif-runcheck-"));
+  const root = makeTempDir("verif-runcheck-");
   writeFileSync(join(root, "fail.sh"), "exit 3\n");
   writeFileSync(join(root, "pass.sh"), "exit 0\n");
   writeFileSync(join(root, "data.json"), "{}\n");
@@ -176,7 +176,7 @@ test("defaultRunCheck runs an existing runnable script/test and uses its exit co
 });
 
 test("defaultRunCheck reports an existing but non-runnable verify: path as unmeasurable, not held", () => {
-  const dir = mkdtempSync(join(tmpdir(), "verif-"));
+  const dir = makeTempDir("verif-");
   writeFileSync(join(dir, "fixture.json"), "{}\n");           // exists, not runnable-as-a-check
   const r = defaultRunCheck("fixture.json", { root: dir });
   assert.deepEqual(r, { status: "unrunnable", detail: "unrunnable: check did not execute" });
@@ -184,14 +184,14 @@ test("defaultRunCheck reports an existing but non-runnable verify: path as unmea
 
 test("verify() maps a non-runnable r3 verify: path to unmeasurable", () => {
   const promotions = [{ culpritId: "x:y", rung: "r3", verify: "fixture.json", landed: "2026-01-01" }];
-  const dir = mkdtempSync(join(tmpdir(), "verif-"));
+  const dir = makeTempDir("verif-");
   writeFileSync(join(dir, "fixture.json"), "{}\n");
   const { scoreboard } = verify(promotions, [], "0.13.1", { root: dir, runCheck: defaultRunCheck });
   assert.equal(scoreboard[0].verdict, "unmeasurable");
 });
 
 test("F1: verify() executes nothing by default — a hostile verify: line has no side effect", () => {
-  const root = mkdtempSync(join(tmpdir(), "verif-f1-"));
+  const root = makeTempDir("verif-f1-");
   const promotions = [{
     culpritId: "friction:hostile", rung: "r3", verify: `touch ${join(root, "pwned")}`,
     landed: "2026-01-01", aliases: [], lifecycle: null,
@@ -203,7 +203,7 @@ test("F1: verify() executes nothing by default — a hostile verify: line has no
 });
 
 test("F1: passing defaultRunCheck explicitly opts back into execution", () => {
-  const root = mkdtempSync(join(tmpdir(), "verif-f1-optin-"));
+  const root = makeTempDir("verif-f1-optin-");
   const promotions = [{
     culpritId: "friction:hostile", rung: "r3", verify: `touch ${join(root, "pwned")}`,
     landed: "2026-01-01", aliases: [], lifecycle: null,
@@ -218,14 +218,14 @@ test("skipRunCheck reports skipped and names the flag", () => {
 });
 
 test("F48: a check that outlives its timeout is errored, not unmeasurable and not broken", () => {
-  const root = mkdtempSync(join(tmpdir(), "verif-timeout-"));
+  const root = makeTempDir("verif-timeout-");
   const r = defaultRunCheck("sleep 30", { root, timeoutMs: 250 });
   assert.equal(r.status, "errored");
   assert.match(r.detail, /errored:/);
 });
 
 test("F48: a check that floods stdout past maxBuffer is errored, not unmeasurable", () => {
-  const root = mkdtempSync(join(tmpdir(), "verif-enobuf-"));
+  const root = makeTempDir("verif-enobuf-");
   const r = defaultRunCheck("yes hello", { root, timeoutMs: 5000, maxBuffer: 64 });
   assert.equal(r.status, "errored");
   assert.match(r.detail, /errored:/);
@@ -237,7 +237,7 @@ test("F48: verify() maps an errored check to the errored verdict, distinct from 
     landed: "2026-01-01", aliases: [], lifecycle: null,
   }];
   const { scoreboard } = verify(promotions, [], "0.14.0", {
-    root: mkdtempSync(join(tmpdir(), "verif-errored-")), runCheck: defaultRunCheck, timeoutMs: 250,
+    root: makeTempDir("verif-errored-"), runCheck: defaultRunCheck, timeoutMs: 250,
   });
   assert.equal(scoreboard[0].verdict, "errored");
   assert.match(scoreboard[0].detail, /\(errored: /);

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   promoDir, readPromotions, recordPromotion, recordLifecycle, validatePromotion,
   suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById,
@@ -10,7 +10,7 @@ import {
 import { verify } from "../../scripts/verification.mjs";
 
 function repo(files = {}) {
-  const root = mkdtempSync(join(tmpdir(), "devcycle-promo-"));
+  const root = makeTempDir("devcycle-promo-");
   mkdirSync(promoDir(root), { recursive: true });
   for (const [name, body] of Object.entries(files)) writeFileSync(join(promoDir(root), name), body);
   return root;
@@ -191,7 +191,7 @@ test("a malformed culprit-id is rejected", () => {
 });
 
 test("recordLifecycle writes a retirement record readPromotions tags", () => {
-  const root = mkdtempSync(join(tmpdir(), "life-"));
+  const root = makeTempDir("life-");
   mkdirSync(join(root, "docs", "devcycle", "promotions"), { recursive: true });
   const path = recordLifecycle(root, {
     title: "Flaky retry masks a real dependency-order bug",

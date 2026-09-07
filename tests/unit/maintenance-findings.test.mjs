@@ -1,16 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   maintDir, findingId, validateMaintenanceFinding, recordMaintenanceFinding,
   readMaintenanceFindings, findMaintenanceFindingById, rankByTrending,
   removeMaintenanceFinding,
 } from "../../scripts/maintenance-findings.mjs";
 
-const root = () => mkdtempSync(join(tmpdir(), "maint-"));
+const root = () => makeTempDir("maint-");
 const base = {
   findingKind: "maintenance-finding", findingId: "dead-code:a1b2c3d4", culpritKind: "dead-code",
   title: "Unreachable helper", severity: "medium", confidence: "verified",

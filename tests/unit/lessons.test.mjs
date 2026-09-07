@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   SECTION_CAP, STAGES, repoStorePath, userRepoStorePath, userGlobalStorePath,
   readSection, renderLessons, planLanding,
@@ -12,7 +13,7 @@ import {
 import { readFileSync } from "node:fs";
 
 function storeFile(text) {
-  const p = join(mkdtempSync(join(tmpdir(), "devcycle-lessons-")), "lessons.md");
+  const p = join(makeTempDir("devcycle-lessons-"), "lessons.md");
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, text);
   return p;

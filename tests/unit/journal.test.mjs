@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { journalDir, readJournal, journalEvents, eventsByCulprit, runsObserved } from "../../scripts/journal.mjs";
 import { repoSlug } from "../../scripts/run-record.mjs";
 
 // A journal store on disk, laid out exactly as run-record.mjs writes one.
 function store(lines, { repo = "/tmp/fake-repo" } = {}) {
-  const base = mkdtempSync(join(tmpdir(), "devcycle-journal-"));
+  const base = makeTempDir("devcycle-journal-");
   process.env.DEVCYCLE_RUNS_DIR = base;
   const dir = join(base, repoSlug(repo));
   mkdirSync(dir, { recursive: true });
@@ -34,7 +34,7 @@ test("journalDir points at this repo's run directory under DEVCYCLE_RUNS_DIR", (
 });
 
 test("an absent store is journalEmpty, not an error", () => {
-  process.env.DEVCYCLE_RUNS_DIR = mkdtempSync(join(tmpdir(), "devcycle-journal-"));
+  process.env.DEVCYCLE_RUNS_DIR = makeTempDir("devcycle-journal-");
   const res = journalEvents({ toplevel: "/tmp/never-ran" });
   assert.equal(res.journalEmpty, true);
   assert.deepEqual(res.events, []);

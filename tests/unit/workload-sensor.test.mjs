@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, existsSync, readdirSync, mkdtempSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
 import { repoSlug, gitToplevel } from "../../scripts/run-record.mjs";
 
@@ -202,7 +202,7 @@ test("derives the base in a clone whose default branch exists only as a remote-t
   // (`references/branch.md` § "Names first: validate, then quote"). Spelling it bare made
   // `git merge-base` fail and the sensor silently record nothing.
   const origin = makeRepo(); const runsDir = makeRepo();
-  const repo = join(mkdtempSync(join(tmpdir(), "devcycle-test-clone-")), "clone");
+  const repo = join(makeTempDir("devcycle-test-clone-"), "clone");
   sh("git", ["clone", "-q", origin, repo]);
   sh("git", ["checkout", "-q", "-b", "topic"], { cwd: repo });
   sh("git", ["branch", "-q", "-D", "main"], { cwd: repo });

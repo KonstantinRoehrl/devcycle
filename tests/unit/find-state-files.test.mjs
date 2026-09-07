@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { findStateFiles, describe as describeState } from "../../scripts/find-state-files.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/find-state-files.mjs", import.meta.url));
@@ -15,7 +15,7 @@ function writeState(dir, body) {
 }
 
 test("finds root and nested state files and prunes node_modules", () => {
-  const root = mkdtempSync(join(tmpdir(), "fsf-"));
+  const root = makeTempDir("fsf-");
   try {
     writeState(root, "# devcycle state\n- stage: planning\n- branch: dev\n- request: root cycle\n");
     const sub = join(root, "sub");
@@ -36,7 +36,7 @@ test("finds root and nested state files and prunes node_modules", () => {
 });
 
 test("describe parses fields, last ledger event, and age", () => {
-  const root = mkdtempSync(join(tmpdir(), "fsf-"));
+  const root = makeTempDir("fsf-");
   try {
     writeState(root, "# devcycle state\n- stage: execution\n- branch: feat-x\n- request: do a thing\n- updated: 2020-01-01T00:00:00Z\n");
     writeFileSync(
@@ -57,7 +57,7 @@ test("describe parses fields, last ledger event, and age", () => {
 });
 
 test("--json prints an array and zero candidates exits 0 with a message", () => {
-  const empty = mkdtempSync(join(tmpdir(), "fsf-"));
+  const empty = makeTempDir("fsf-");
   try {
     const j = spawnSync("node", [SCRIPT, "--dir", empty, "--json"], { encoding: "utf8" });
     assert.equal(j.status, 0);

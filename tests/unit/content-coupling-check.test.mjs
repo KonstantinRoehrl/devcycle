@@ -1,18 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/content-coupling-check.mjs");
 
 function runPlan(text) {
-  const dir = mkdtempSync(join(tmpdir(), "coupling-"));
+  const dir = makeTempDir("coupling-");
   const plan = join(dir, "plan.md");
   writeFileSync(plan, text, "utf8");
   const r = spawnSync("node", [SCRIPT, plan], { encoding: "utf8" });
-  rmSync(dir, { recursive: true, force: true });
   return r;
 }
 

@@ -2,10 +2,10 @@
 // plugin trees. Every test starts from a green fixture and breaks one thing.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { spawnSync, execFileSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makePluginFixture as makeBaseFixture, writeInto, runValidate, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
 import { lessonsTrackingErrors } from "../../scripts/validate.mjs";
 
@@ -724,7 +724,7 @@ test("state-file check: a resume.md that declares no template fails instead of g
 // --- check 13: the run-record schema and its golden fixture ---
 
 test("check 13 accepts the golden run record against its schema", () => {
-  const dir = mkdtempSync(join(tmpdir(), "validate-runrecord-"));
+  const dir = makeTempDir("validate-runrecord-");
   cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const r = spawnSync(process.execPath, [join(dir, "scripts/validate.mjs")], {
     cwd: dir,
@@ -734,7 +734,7 @@ test("check 13 accepts the golden run record against its schema", () => {
 });
 
 test("check 13 fails when the golden record violates the schema", () => {
-  const dir = mkdtempSync(join(tmpdir(), "validate-runrecord-bad-"));
+  const dir = makeTempDir("validate-runrecord-bad-");
   cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   writeFileSync(
     join(dir, "tests/fixtures/run-record.golden.jsonl"),
@@ -749,7 +749,7 @@ test("check 13 fails when the golden record violates the schema", () => {
 });
 
 test("check 13 fails when the schema declares a kind the golden record never exercises", () => {
-  const dir = mkdtempSync(join(tmpdir(), "validate-runrecord-unexercised-"));
+  const dir = makeTempDir("validate-runrecord-unexercised-");
   cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const schema = JSON.parse(
     readFileSync(join(dir, "tests/fixtures/run-record.schema.json"), "utf8")
@@ -782,7 +782,7 @@ test("check 13 fails when the schema declares a kind the golden record never exe
 // red-green pair for the added `|| obj[req] === undefined` arm — kept as a regression test for
 // the missing-field message, with the finding disclosed rather than a fabricated red.
 test("check 13 rejects a golden line missing a required field via JSON.stringify's undefined-drop", () => {
-  const dir = mkdtempSync(join(tmpdir(), "validate13-"));
+  const dir = makeTempDir("validate13-");
   cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const golden = readFileSync(join(dir, "tests/fixtures/run-record.golden.jsonl"), "utf8").trim().split("\n");
   const runLine = JSON.parse(golden[0]);
@@ -794,7 +794,7 @@ test("check 13 rejects a golden line missing a required field via JSON.stringify
 });
 
 test("check 13 rejects a golden line whose integer field violates the schema's minimum", () => {
-  const dir = mkdtempSync(join(tmpdir(), "validate13b-"));
+  const dir = makeTempDir("validate13b-");
   cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const golden = readFileSync(join(dir, "tests/fixtures/run-record.golden.jsonl"), "utf8").trim().split("\n");
   const verdictLine = JSON.parse(golden.find((l) => JSON.parse(l).kind === "verdict"));
@@ -807,7 +807,7 @@ test("check 13 rejects a golden line whose integer field violates the schema's m
 });
 
 test("check 13 fails when a declared optional schema field is never exercised by the golden fixture", () => {
-  const dir = mkdtempSync(join(tmpdir(), "validate13c-"));
+  const dir = makeTempDir("validate13c-");
   cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const schemaPath = join(dir, "tests/fixtures/run-record.schema.json");
   const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
@@ -822,7 +822,7 @@ test("check 13 fails when a declared optional schema field is never exercised by
 });
 
 test("check 13 rule 2 fails when the schema declares a field no surface file's run-record.mjs append instruction names", () => {
-  const dir = mkdtempSync(join(tmpdir(), "validate13d-"));
+  const dir = makeTempDir("validate13d-");
   cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const schemaPath = join(dir, "tests/fixtures/run-record.schema.json");
   const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
@@ -849,7 +849,7 @@ test("check 13 rule 2 fails when the schema declares a field no surface file's r
 
 test("check 13 rule 2 fails when no surface instruction names --knob for the knobs field, and passes once commands/cycle.md does", () => {
   // Failing half: a surface stripped of every --knob mention must not be waved through.
-  const failDir = mkdtempSync(join(tmpdir(), "validate13e-fail-"));
+  const failDir = makeTempDir("validate13e-fail-");
   cpSync(REPO_ROOT, failDir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const cyclePath = join(failDir, "commands/cycle.md");
   writeFileSync(cyclePath, readFileSync(cyclePath, "utf8").replaceAll("--knob ", ""));
@@ -858,14 +858,14 @@ test("check 13 rule 2 fails when no surface instruction names --knob for the kno
   assert.match(rFail.stdout + rFail.stderr, /knobs/);
 
   // Passing half: the real, unmodified tree wires --knob into commands/cycle.md's mint command.
-  const passDir = mkdtempSync(join(tmpdir(), "validate13e-pass-"));
+  const passDir = makeTempDir("validate13e-pass-");
   cpSync(REPO_ROOT, passDir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const rPass = spawnSync(process.execPath, [join(passDir, "scripts/validate.mjs")], { cwd: passDir, encoding: "utf8" });
   assert.strictEqual(rPass.status, 0, rPass.stdout + rPass.stderr);
 });
 
 test("check 13 catches a minimum that is not a number", () => {
-  const dir = mkdtempSync(join(tmpdir(), "validate-runrecord-badmin-"));
+  const dir = makeTempDir("validate-runrecord-badmin-");
   cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const schemaPath = join(dir, "tests/fixtures/run-record.schema.json");
   const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
@@ -882,7 +882,7 @@ test("check 13 catches a minimum that is not a number", () => {
 });
 
 test("check 13 rejects a golden line naming an unknown culprit slug", () => {
-  const dir = mkdtempSync(join(tmpdir(), "validate-runrecord-culprit-"));
+  const dir = makeTempDir("validate-runrecord-culprit-");
   cpSync(REPO_ROOT, dir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const goldenPath = join(dir, "tests/fixtures/run-record.golden.jsonl");
   const lines = readFileSync(goldenPath, "utf8").trim().split("\n").map((l) => JSON.parse(l));
@@ -1279,7 +1279,7 @@ test("changelog dates: a heading date that is not a real calendar date fails", (
 // --- lessonsTrackingErrors: the learn loop's compiled memory must stay tracked ---
 
 test("lessonsTrackingErrors flags a re-ignored learn store, passes when tracked", () => {
-  const root = mkdtempSync(join(tmpdir(), "track-"));
+  const root = makeTempDir("track-");
   execFileSync("git", ["init", "-q"], { cwd: root });
   mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
   writeFileSync(join(root, "docs/devcycle/lessons.md"), "# Lessons\n");
@@ -1294,7 +1294,7 @@ test("lessonsTrackingErrors still fires when the store is tracked AND re-ignored
   // learn store is committed/staged the guard is dead unless it consults the ignore rules
   // regardless of index state (--no-index). Reproduce the tracked-and-re-ignored state and
   // assert the guard still fires.
-  const root = mkdtempSync(join(tmpdir(), "track-indexed-"));
+  const root = makeTempDir("track-indexed-");
   execFileSync("git", ["init", "-q"], { cwd: root });
   mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
   writeFileSync(join(root, "docs/devcycle/lessons.md"), "# Lessons\n");

@@ -1,9 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo } from "./helpers.mjs";
 import { recordPath, hashSession } from "../../scripts/run-record.mjs";
 import { readRunRecords, summarizeSession } from "../../scripts/doctor.mjs";
@@ -18,7 +17,7 @@ function runRecord(args, runsDir) {
 }
 
 test("a real run/session/dispatch/verdict/commit chain, written via the real CLI, joins in doctor's read path — not forward-filled", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   const repo = "/tmp/acceptance-demo";
   const sessionId = ["11111111", "2222", "3333", "4444", "555555555555"].join("-");
 
@@ -66,7 +65,7 @@ test("a real run/session/dispatch/verdict/commit chain, written via the real CLI
 });
 
 test("a workload line written by the real CLI joins onto the session's record and summary", () => {
-  const runs = mkdtempSync(join(tmpdir(), "rr-wl-"));
+  const runs = makeTempDir("rr-wl-");
   const repo = makeRepo(); // a real repo: diffStats now refuses to read zeros off a failed git call
   const sessionId = "session-with-a-workload";
 
@@ -94,7 +93,7 @@ test("a workload line written by the real CLI joins onto the session's record an
 });
 
 test("event lines written by the real CLI survive into doctor's read path, across two sessions", () => {
-  const runs = mkdtempSync(join(tmpdir(), "rr-e2e-"));
+  const runs = makeTempDir("rr-e2e-");
   const sessionA = "session-a", sessionB = "session-b";
   const runId = runRecord(["new", "--plugin-version", "0.13.0", "--plugin-sha", "abc1234",
     "--profile", "thorough"], runs).stdout.trim();
@@ -119,7 +118,7 @@ test("event lines written by the real CLI survive into doctor's read path, acros
 // run id writes — merge into a single entry. Only two separate .jsonl files make readRunRecords'
 // `prior` defined; two sessions inside one file (the test above) never reach that branch.
 test("a session written into two run files keeps the events of both after the cross-file merge", () => {
-  const runs = mkdtempSync(join(tmpdir(), "rr-merge-"));
+  const runs = makeTempDir("rr-merge-");
   const sessionId = "session-resumed-under-a-second-run";
   const newRun = () => runRecord(["new", "--plugin-version", "0.13.0", "--plugin-sha", "abc1234",
     "--profile", "thorough"], runs).stdout.trim();

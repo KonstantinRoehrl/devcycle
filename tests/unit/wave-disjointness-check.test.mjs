@@ -1,16 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/wave-disjointness-check.mjs");
 
 // realpath: on macOS the temp dir is a symlink, which would otherwise make every
 // reported path a chain of `../` when the script echoes back the plan path.
 function makeFixture(planText) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "wave-disjointness-")));
+  const dir = realpathSync(makeTempDir("wave-disjointness-"));
   mkdirSync(dir, { recursive: true });
   const planPath = join(dir, "plan.md");
   writeFileSync(planPath, planText, "utf8");

@@ -2,11 +2,11 @@
 // and the coverage guard that says the table knows every model id a doctor corpus recorded.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { PRICING, priceFor } from "../../scripts/pricing.mjs";
 import { collectModelIds, formatFixture, readFixture, unpricedIds } from "../../scripts/refresh-observed-models.mjs";
 
@@ -25,7 +25,7 @@ const turn = (model) =>
 // Builds a throwaway corpus in the same <slug>/<session>.jsonl layout as ~/.claude/projects.
 // Every test that reads a corpus reads one of these, never the operator's real one.
 function corpus(sessions) {
-  const root = mkdtempSync(join(tmpdir(), "observed-models-"));
+  const root = makeTempDir("observed-models-");
   for (const [name, lines] of Object.entries(sessions)) {
     const slug = join(root, "repo-slug");
     mkdirSync(slug, { recursive: true });
@@ -61,7 +61,7 @@ test("PRICING: covers every model id in the observed-ids snapshot (tests/fixture
 });
 
 test("the coverage guard reports a snapshot id that is genuinely unpriced", () => {
-  const dir = mkdtempSync(join(tmpdir(), "observed-models-"));
+  const dir = makeTempDir("observed-models-");
   const path = join(dir, "observed-model-ids.json");
   writeFileSync(path, formatFixture(["claude-opus-5", "claude-nimbus-9"]));
   try {
@@ -84,7 +84,7 @@ test("the snapshot on disk is in the refresh script's canonical shape: sorted, d
 // the edit that would disarm the coverage guard above by removing whatever is unpriced — fails
 // here, because the corpus still records it.
 test("the committed snapshot holds every model id the refresh script derives from the fixture corpus", () => {
-  const root = mkdtempSync(join(tmpdir(), "observed-models-"));
+  const root = makeTempDir("observed-models-");
   const out = join(root, "out.json");
   const r = spawnSync(process.execPath, [REFRESH, "--dir", CORPUS, "--out", out], {
     encoding: "utf8",
@@ -207,7 +207,7 @@ test("refresh CLI: --dir reads the named corpus and --out writes the snapshot th
 
 // An empty snapshot would disarm the guard silently — exactly the failure this task exists to fix.
 test("refresh CLI: refuses to write an empty snapshot when the corpus yields no ids", () => {
-  const root = mkdtempSync(join(tmpdir(), "observed-models-"));
+  const root = makeTempDir("observed-models-");
   const out = join(root, "out.json");
   const r = spawnSync(process.execPath, [REFRESH, "--dir", join(root, "no-such-corpus"), "--out", out], {
     encoding: "utf8",
@@ -226,7 +226,7 @@ test("refresh CLI: refuses to write an empty snapshot when the corpus yields no 
 test("refresh CLI: an unreadable corpus reports the script's prefixed error, not a stack trace", {
   skip: process.getuid?.() === 0 ? "root reads a directory whose permission bits forbid it" : false,
 }, () => {
-  const root = mkdtempSync(join(tmpdir(), "observed-models-"));
+  const root = makeTempDir("observed-models-");
   const locked = join(root, "corpus", "repo-slug");
   mkdirSync(locked, { recursive: true });
   writeFileSync(join(locked, "sess-one.jsonl"), turn("claude-opus-5") + "\n");
