@@ -5,9 +5,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
@@ -476,7 +477,7 @@ const GH_RESPONSE = JSON.stringify([
 ]);
 
 function reportsFixture(files) {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-reports-"));
+  const dir = makeTempDir("doctor-reports-");
   for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content, "utf8");
   return dir;
 }
@@ -1566,7 +1567,7 @@ const SCRIPT = new URL("../../scripts/doctor.mjs", import.meta.url).pathname;
 // One transcript carrying a devcycle attribution, and the run record that gives its cost a stage
 // and names a culprit — the smallest corpus in which a culprit is rankable and so draftable.
 function issueBodyFixture() {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-issue-body-"));
+  const dir = makeTempDir("doctor-issue-body-");
   const proj = join(dir, "projects", "-some-project");
   mkdirSync(proj, { recursive: true });
   writeFileSync(join(proj, "sess-abcdef123456.jsonl"),
@@ -1615,7 +1616,7 @@ test("--issue-body prints the whole draft and nothing else, naming the upstream 
 // One transcript carrying a devcycle attribution, and a run record whose dispatch inherited its
 // model — the smallest corpus in which the inherited-model compliance candidate is draftable.
 function complianceFixture() {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-compliance-body-"));
+  const dir = makeTempDir("doctor-compliance-body-");
   const proj = join(dir, "projects", "-some-project");
   mkdirSync(proj, { recursive: true });
   writeFileSync(join(proj, "sess-abcdef123456.jsonl"),
@@ -1829,7 +1830,7 @@ test("a row with no detail renders unchanged, with no trailing separator", () =>
 // --- revert candidates: cost-driven, same-profile, stage-scoped, written as a sidecar ---
 
 test("revertCandidates emits a same-profile stage-scoped regression with the sidecar fields", () => {
-  const root = mkdtempSync(join(tmpdir(), "doctor-revert-"));
+  const root = makeTempDir("doctor-revert-");
   try {
     const summaries = [
       sum({ id: "o1", pluginVersion: "0.11.0", profile: "thorough", costByStage: { execution: 5 } }),
@@ -1855,7 +1856,7 @@ test("revertCandidates emits a same-profile stage-scoped regression with the sid
 });
 
 test("revertCandidates never fires on a profile-mix shift — the regression is compared within one profile", () => {
-  const root = mkdtempSync(join(tmpdir(), "doctor-revert-mix-"));
+  const root = makeTempDir("doctor-revert-mix-");
   try {
     // The dearer newer cohort is a different profile: same-profile scoping means no candidate.
     const summaries = [

@@ -65,6 +65,8 @@ jobs:
         run: node scripts/redaction-check.mjs
       - name: Check for duplicated prose across the runtime surface
         run: node scripts/duplication-check.mjs
+      - name: Check that temp directories are created through the self-cleaning helper
+        run: node scripts/temp-dir-check.mjs
       - name: Workflow script tests (stubbed CLIs — no model call, no API key)
         run: node --test tests/unit/*.test.mjs
       - name: Secret scan — full history

@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync, copyFileSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync, copyFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo } from "./helpers.mjs";
 import { repoSlug, hashSession, recordPath, gitToplevel, diffStats } from "../../scripts/run-record.mjs";
 
@@ -52,7 +52,7 @@ test("hashSession returns 64 lowercase hex chars and never the raw id", () => {
 });
 
 test("new mints a run id and writes a schema-valid run line", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   const r = run(
     ["new", "--repo", "/tmp/demo", "--plugin-version", "0.13.0",
      "--plugin-sha", "ded29c6", "--profile", "thorough", "--knob", "gitPolicy=open-pr"],
@@ -71,7 +71,7 @@ test("new mints a run id and writes a schema-valid run line", () => {
 });
 
 test("append adds one line per call and never rewrites earlier lines", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   const runId = run(
     ["new", "--repo", "/tmp/demo2", "--plugin-version", "0.13.0",
      "--plugin-sha", "ded29c6", "--profile", "lean"],
@@ -92,7 +92,7 @@ test("append adds one line per call and never rewrites earlier lines", () => {
 });
 
 test("append rejects a missing required field before writing anything", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   const runId = run(
     ["new", "--repo", "/tmp/demo3", "--plugin-version", "0.13.0",
      "--plugin-sha", "ded29c6", "--profile", "lean"],
@@ -109,7 +109,7 @@ test("append rejects a missing required field before writing anything", () => {
 });
 
 test("new rejects a required field that is present but explicitly undefined", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   // --plugin-sha is omitted entirely, so flags["plugin-sha"] is JS `undefined`, and the object
   // literal in main() still sets pluginSha: undefined — "pluginSha" in obj is true even though
   // no real value exists. The pattern check on pluginSha (a controlled regex) would still catch
@@ -124,7 +124,7 @@ test("new rejects a required field that is present but explicitly undefined", ()
 });
 
 test("a --knob or --json flag with no = does not crash the process", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   const r = run(
     ["new", "--repo", "/tmp/demo7", "--plugin-version", "0.13.0", "--plugin-sha", "ded29c6",
      "--profile", "thorough", "--knob", "malformed-no-equals"],
@@ -138,7 +138,7 @@ test("a --knob or --json flag with no = does not crash the process", () => {
 });
 
 test("append rejects an enum value the schema does not permit", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   const runId = run(
     ["new", "--repo", "/tmp/demo4", "--plugin-version", "0.13.0",
      "--plugin-sha", "ded29c6", "--profile", "lean"],
@@ -157,7 +157,7 @@ test("append rejects an enum value the schema does not permit", () => {
 });
 
 test("append writes a session line carrying only a hash, never a raw session id", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   const runId = run(
     ["new", "--repo", "/tmp/demo5", "--plugin-version", "0.13.0",
      "--plugin-sha", "ded29c6", "--profile", "lean"],
@@ -175,7 +175,7 @@ test("append writes a session line carrying only a hash, never a raw session id"
 });
 
 test("append rejects a dispatch reviewRound below the schema's minimum", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   const runId = run(
     ["new", "--repo", "/tmp/demo8", "--plugin-version", "0.13.0",
      "--plugin-sha", "ded29c6", "--profile", "lean"],
@@ -196,7 +196,7 @@ test("append rejects a dispatch reviewRound below the schema's minimum", () => {
 });
 
 test("append rejects a dispatch retryIndex below the schema's minimum", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   const runId = run(
     ["new", "--repo", "/tmp/demo9", "--plugin-version", "0.13.0",
      "--plugin-sha", "ded29c6", "--profile", "lean"],
@@ -215,7 +215,7 @@ test("append rejects a dispatch retryIndex below the schema's minimum", () => {
 });
 
 test("append rejects a verdict round below the schema's minimum", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   const runId = run(
     ["new", "--repo", "/tmp/demo10", "--plugin-version", "0.13.0",
      "--plugin-sha", "ded29c6", "--profile", "lean"],
@@ -232,7 +232,7 @@ test("append rejects a verdict round below the schema's minimum", () => {
 });
 
 test("append rejects a verdict blockingCount below the schema's minimum", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   const runId = run(
     ["new", "--repo", "/tmp/demo11", "--plugin-version", "0.13.0",
      "--plugin-sha", "ded29c6", "--profile", "lean"],
@@ -264,11 +264,11 @@ test("repoSlug falls back to a fixed literal when sanitizing empties the basenam
 });
 
 test("new derives repoSlug from the real git toplevel, not the invoking cwd", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   // Create a temporary git repo and spawn from a nested subdirectory inside it (not the root).
   // Without --repo, the script should derive repoSlug from the real git toplevel, not the
   // nested subdir's path.
-  const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-")));
+  const tempRepo = realpathSync(makeTempDir("temp-repo-"));
   // Initialize git repo in temp directory
   spawnSync("git", ["init", "-q"], { cwd: tempRepo });
   // Create nested subdirectory and spawn from there
@@ -293,7 +293,7 @@ test("new derives repoSlug from the real git toplevel, not the invoking cwd", ()
 });
 
 test("gitToplevel resolves a nested subdirectory to the real git repo root", () => {
-  const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-")));
+  const tempRepo = realpathSync(makeTempDir("temp-repo-"));
   spawnSync("git", ["init", "-q"], { cwd: tempRepo });
   const nestedDir = join(tempRepo, "nested", "subdir");
   mkdirSync(nestedDir, { recursive: true });
@@ -306,7 +306,7 @@ test("gitToplevel resolves a nested subdirectory to the real git repo root", () 
 const runRecord = run;
 
 test("the event kind accepts a full line and rejects a bad enum value", () => {
-  const runs = mkdtempSync(join(tmpdir(), "rr-event-"));
+  const runs = makeTempDir("rr-event-");
   const runId = "0f1e2d3c4b5a6978";
   const ok = runRecord(["append", "--run", runId, "--kind", "event", "--event", "gate-fail",
     "--stage", "execution", "--task", "3", "--ts", "2026-08-12T10:00:00Z"], runs);
@@ -319,7 +319,7 @@ test("the event kind accepts a full line and rejects a bad enum value", () => {
 });
 
 test("review-reject is a valid run-record event and carries its culprit", () => {
-  const runs = mkdtempSync(join(tmpdir(), "rr-review-reject-"));
+  const runs = makeTempDir("rr-review-reject-");
   const runId = "0f1e2d3c4b5a6978";
   const r = runRecord(["append", "--run", runId, "--kind", "event", "--event", "review-reject",
     "--stage", "execution", "--task", "3", "--culprit", "partial-evidence-capture",
@@ -333,7 +333,7 @@ test("review-reject is a valid run-record event and carries its culprit", () => 
 });
 
 test("an event omitting --ts is stamped rather than rejected as missing a required field", () => {
-  const runs = mkdtempSync(join(tmpdir(), "rr-ts-"));
+  const runs = makeTempDir("rr-ts-");
   const runId = "0f1e2d3c4b5a6978";
   const r = runRecord(["append", "--run", runId, "--kind", "event",
     "--event", "gate-pass-clean", "--stage", "execution"], runs);
@@ -346,7 +346,7 @@ test("an event omitting --ts is stamped rather than rejected as missing a requir
 });
 
 test("culprit accepts null, a vocabulary slug and a novel: slug, and rejects anything else", () => {
-  const runs = mkdtempSync(join(tmpdir(), "rr-culprit-"));
+  const runs = makeTempDir("rr-culprit-");
   const runId = "0f1e2d3c4b5a6978";
   const base = ["append", "--run", runId, "--kind", "event", "--event", "gate-fail",
     "--stage", "execution", "--ts", "2026-08-12T10:00:00Z"];
@@ -370,7 +370,7 @@ test("an event line may carry attributedBy, and the schema declares it", () => {
 });
 
 test("run-record append accepts --attributedBy on an event line", () => {
-  const runs = mkdtempSync(join(tmpdir(), "rr-attributed-"));
+  const runs = makeTempDir("rr-attributed-");
   const runId = "0f1e2d3c4b5a6978";
   const r = runRecord(["append", "--run", runId, "--kind", "event", "--event", "gate-fail",
     "--stage", "execution", "--culprit", "novel:brief-omitted-a-field",
@@ -382,7 +382,7 @@ test("run-record append accepts --attributedBy on an event line", () => {
 });
 
 test("an undeclared attribution value is rejected at write time", () => {
-  const runs = mkdtempSync(join(tmpdir(), "rr-attributed-bad-"));
+  const runs = makeTempDir("rr-attributed-bad-");
   const runId = "0f1e2d3c4b5a6978";
   const r = runRecord(["append", "--run", runId, "--kind", "event", "--event", "gate-fail",
     "--stage", "execution", "--attributedBy", "guessed", "--ts", "2026-08-14T00:00:00Z"], runs);
@@ -391,7 +391,7 @@ test("an undeclared attribution value is rejected at write time", () => {
 });
 
 test("a stage line accepts outcome=partial alongside complete|blocked|skipped", () => {
-  const runs = mkdtempSync(join(tmpdir(), "rr-stage-partial-"));
+  const runs = makeTempDir("rr-stage-partial-");
   const runId = "0f1e2d3c4b5a6978";
   const base = ["append", "--run", runId, "--kind", "stage", "--stage", "execution",
     "--startedAt", "2026-08-18T10:00:00Z", "--endedAt", "2026-08-18T10:01:00Z"];
@@ -419,7 +419,7 @@ test("culprit lookup fails cleanly, not with a stack trace, when culprits.json i
   // from a tree shaped like the repo's — but only those fixtures plus the script's own imports
   // (stamp.mjs, git-identity.mjs), not a full copy of the working tree (which would drag
   // gitignored local files into /tmp and leave them there).
-  const treeDir = realpathSync(mkdtempSync(join(tmpdir(), "rr-vocab-tree-")));
+  const treeDir = realpathSync(makeTempDir("rr-vocab-tree-"));
   try {
     mkdirSync(join(treeDir, "scripts"), { recursive: true });
     mkdirSync(join(treeDir, "tests/fixtures"), { recursive: true });
@@ -433,7 +433,7 @@ test("culprit lookup fails cleanly, not with a stack trace, when culprits.json i
     );
     writeFileSync(join(treeDir, "references/culprits.json"), JSON.stringify({ not: "an array" }));
 
-    const runs = mkdtempSync(join(tmpdir(), "rr-vocab-runs-"));
+    const runs = makeTempDir("rr-vocab-runs-");
     const runId = "0f1e2d3c4b5a6978";
     const r = spawnSync(process.execPath, [
       join(treeDir, "scripts/run-record.mjs"), "append", "--run", runId, "--kind", "event",
@@ -495,7 +495,7 @@ test("subSchemaFor selects by kind from an already-parsed schema", () => {
 });
 
 test("validateCulprit reads the vocabulary from the path it is given", () => {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "culprits-")));
+  const dir = realpathSync(makeTempDir("culprits-"));
   const p = join(dir, "culprits.json");
   writeFileSync(p, JSON.stringify([{ slug: "known-slug" }]));
   assert.deepEqual(validateCulprit("known-slug", p), []);
@@ -519,11 +519,11 @@ test("a valid workload record passes validation and rejects unknown fields", () 
 });
 
 test("the workload subcommand computes real git diff stats and writes a schema-valid line", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-"));
+  const runs = makeTempDir("runs-");
   // Same temp-git-repo idiom as "new derives repoSlug from the real git toplevel" above: a real
   // repo under tmpdir(), not the fixture-string "/tmp/demo" paths the non-git tests use, because
   // diffStats shells out to real `git diff` against it.
-  const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-workload-")));
+  const tempRepo = realpathSync(makeTempDir("temp-repo-workload-"));
   spawnSync("git", ["init", "-q"], { cwd: tempRepo });
   spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: tempRepo });
   spawnSync("git", ["config", "user.name", "Test"], { cwd: tempRepo });
@@ -573,7 +573,7 @@ test("reconcile-reply and reconcile-resolve marker kinds validate", () => {
 });
 
 test("append --kind triage writes a schema-valid triage line", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-triage-"));
+  const runs = makeTempDir("runs-triage-");
   const mk = run(["new", "--plugin-version", "0.0.0", "--plugin-sha", "abcdef1",
     "--profile", "standard"], runs);
   const runId = mk.stdout.trim();
@@ -588,7 +588,7 @@ test("append --kind triage writes a schema-valid triage line", () => {
 });
 
 test("append --kind triage rejects a requestKind outside the enum", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-triage-bad-"));
+  const runs = makeTempDir("runs-triage-bad-");
   const runId = run(["new", "--plugin-version", "0.0.0", "--plugin-sha", "abcdef1",
     "--profile", "standard"], runs).stdout.trim();
   const r = run(["append", "--run", runId, "--kind", "triage",
@@ -598,7 +598,7 @@ test("append --kind triage rejects a requestKind outside the enum", () => {
 });
 
 test("append --kind review-writeback writes a schema-valid marker line (documented filing step)", () => {
-  const runs = mkdtempSync(join(tmpdir(), "runs-review-writeback-"));
+  const runs = makeTempDir("runs-review-writeback-");
   const runId = run(
     ["new", "--repo", "/tmp/demo-writeback", "--plugin-version", "0.13.0",
      "--plugin-sha", "ded29c6", "--profile", "standard"],
@@ -638,14 +638,14 @@ test("gate-deferred-foreign-change is a valid run-record event (#167)", () => {
 });
 
 test("gitToplevel canonicalizes a linked worktree to the main checkout (#104)", () => {
-  const tempRepo = realpathSync(mkdtempSync(join(tmpdir(), "temp-repo-")));
+  const tempRepo = realpathSync(makeTempDir("temp-repo-"));
   spawnSync("git", ["init", "-q"], { cwd: tempRepo });
   spawnSync("git", ["-C", tempRepo, "config", "user.email", "t@e.st"]);
   spawnSync("git", ["-C", tempRepo, "config", "user.name", "t"]);
   writeFileSync(join(tempRepo, "f"), "x");
   spawnSync("git", ["-C", tempRepo, "add", "-A"]);
   spawnSync("git", ["-C", tempRepo, "commit", "-qm", "init"]);
-  const wt = realpathSync(mkdtempSync(join(tmpdir(), "wt-"))) + "/w";
+  const wt = realpathSync(makeTempDir("wt-")) + "/w";
   spawnSync("git", ["-C", tempRepo, "worktree", "add", "-q", "--detach", wt, "HEAD"]);
   try {
     assert.strictEqual(gitToplevel(wt), tempRepo, "worktree did not resolve to the main root");
@@ -658,11 +658,11 @@ test("gitToplevel canonicalizes a linked worktree to the main checkout (#104)", 
 test("diffStats throws on a base git cannot resolve instead of reporting zero work", () => {
   const repo = makeRepo();
   assert.throws(() => diffStats("no-such-ref", repo), /git diff --numstat no-such-ref\.\.\.HEAD failed/);
-  assert.throws(() => diffStats("HEAD", mkdtempSync(join(tmpdir(), "not-a-repo-"))), /failed/);
+  assert.throws(() => diffStats("HEAD", makeTempDir("not-a-repo-")), /failed/);
 });
 
 test("the workload subcommand exits 1 with the git error on an unresolvable base", () => {
-  const runs = mkdtempSync(join(tmpdir(), "rr-wl-bad-base-"));
+  const runs = makeTempDir("rr-wl-bad-base-");
   const repo = makeRepo();
   const runId = "0f1e2d3c4b5a6978";
   const r = run(["workload", "--run", runId, "--repo", repo, "--base", "no-such-ref",

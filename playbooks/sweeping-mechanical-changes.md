@@ -53,7 +53,8 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    with `DEVCYCLE_SWEEP_MODEL` as resolved in step 2. The script reads its JSON from `argv[2]` only; the
    double-quoted command substitution hands the file's contents through as one intact argument, so no
    escaping is needed whatever the instruction contains.
-   - **Exit 1 with a stdout report** (baseline or pilot hard stop): files applied before the stop sit in the
+   - **Exit 1 with a stdout report** (baseline or pilot hard stop, or an attempt that left the worktree
+     unrestorable): files applied before the stop sit in the
      real tree, uncommitted and unreviewed. Relay the per-file reasons verbatim and stop for a user
      decision, stating what each option does to those edits — **retry** with corrected parameters (the
      re-run rule reverts them first); **fall through** to the normal pipeline (edits handed over, explicitly

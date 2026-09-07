@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/evidence-completeness-check.mjs");
 
 function makeReport(content) {
-  const dir = mkdtempSync(join(tmpdir(), "evidence-completeness-check-"));
+  const dir = makeTempDir("evidence-completeness-check-");
   const file = join(dir, "report.md");
   writeFileSync(file, content, "utf8");
   return { dir, file };
@@ -26,7 +26,7 @@ const NODE_SUMMARY = ["ℹ pass 11", "ℹ fail 0", "ℹ duration_ms 42.0"].join(
 // is contract-faithful by construction — the check now compares each header against cmd:,
 // not merely before against after.
 function makeReportWithEvidence(reportBody, afterContent) {
-  const dir = mkdtempSync(join(tmpdir(), "evidence-completeness-check-"));
+  const dir = makeTempDir("evidence-completeness-check-");
   const file = join(dir, "report.md");
   const declaredCmd = (reportBody.match(/\bcmd:\s*(.+)/)?.[1] ?? "").trim();
   const header = `# devcycle-cmd: ${declaredCmd}\n`;
@@ -37,7 +37,7 @@ function makeReportWithEvidence(reportBody, afterContent) {
 }
 
 test("a report file that does not exist fails naming the missing path", () => {
-  const dir = mkdtempSync(join(tmpdir(), "evidence-completeness-check-"));
+  const dir = makeTempDir("evidence-completeness-check-");
   const missing = join(dir, "does-not-exist.md");
   try {
     const res = run(missing);

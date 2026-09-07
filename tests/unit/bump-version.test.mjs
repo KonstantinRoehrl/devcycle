@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   bumpLevel,
   nextVersion,
@@ -32,7 +32,7 @@ test("bumpLevel: a `!` subject promotes to major even alongside a feat", () => {
 // can see, because main() has always called bumpLevel([subject]) with a single argument. The
 // direct-call test after them is the one that discriminates the removal.
 function bumpFixture() {
-  const dir = mkdtempSync(join(tmpdir(), "bump-"));
+  const dir = makeTempDir("bump-");
   mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
   writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ version: "0.14.0" }) + "\n");
   return dir;
@@ -48,7 +48,6 @@ test("release path: a `!` title is the major trigger, end to end", () => {
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), "major 1.0.0");
-  rmSync(dir, { recursive: true, force: true });
 });
 
 test("release path: a BREAKING CHANGE trailer is NOT a trigger — no body reaches versioning", () => {
@@ -63,7 +62,6 @@ test("release path: a BREAKING CHANGE trailer is NOT a trigger — no body reach
   );
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), "patch 0.14.1");
-  rmSync(dir, { recursive: true, force: true });
 });
 
 test("bumpLevel: everything past the subjects argument is ignored, so `bodies` cannot come back", () => {
@@ -242,7 +240,7 @@ test("changelogWithReleasedMarkers: a CRLF file is stamped rather than falling i
 });
 
 test("release path: a real bump stamps the config changelog alongside plugin.json and CHANGELOG.md", () => {
-  const dir = mkdtempSync(join(tmpdir(), "bump-"));
+  const dir = makeTempDir("bump-");
   mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
   mkdirSync(join(dir, "docs", "configuration"), { recursive: true });
   writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ version: "0.14.0" }) + "\n");
@@ -263,5 +261,4 @@ test("release path: a real bump stamps the config changelog alongside plugin.jso
     !/- version: "unreleased"/.test(firstBlockOf(stamped)),
     "the release left a pending marker behind",
   );
-  rmSync(dir, { recursive: true, force: true });
 });

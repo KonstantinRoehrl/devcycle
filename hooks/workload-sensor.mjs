@@ -5,10 +5,11 @@
 // counts from .devcycle/state.md and shells out to run-record.mjs, whose `workload` subcommand
 // derives diffStats from git. Any error, malformed input, subagent origin, or absent/partial cycle =>
 // exit 0 with no stdout (PostToolUse cannot block; that is the canonical no-op). Counts/enums only.
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { findStateFile } from "./lib/find-state-file.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("../scripts/run-record.mjs", import.meta.url));
 // Every post-planning, commit-bearing stage. A HEAD-advancing coordinator commit can land in any
@@ -31,20 +32,6 @@ function readInput() {
     const parsed = JSON.parse(readFileSync(0, "utf8") || "{}");
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
   } catch { return null; }
-}
-
-// Bounded walk from `start` upward for a dir holding .devcycle/state.md. No git spawn: the idle
-// path (a Bash call outside any cycle — the common case) must stay near-free (QC2).
-function findStateFile(start) {
-  let dir = start;
-  for (let i = 0; i < 64; i++) {
-    const p = join(dir, ".devcycle", "state.md");
-    if (existsSync(p)) return p;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
 }
 
 function field(text, name) {

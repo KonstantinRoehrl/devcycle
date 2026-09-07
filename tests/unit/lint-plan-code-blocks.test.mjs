@@ -1,16 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, chmodSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, rmSync, realpathSync, chmodSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/lint-plan-code-blocks.mjs");
 
 // realpath: on macOS the temp dir is a symlink, which would otherwise make every
 // reported path a chain of `../` when the script is run with cwd set to the fixture.
 function makeFixture(files) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "lint-plan-")));
+  const dir = realpathSync(makeTempDir("lint-plan-"));
   for (const [rel, content] of Object.entries(files)) {
     const full = join(dir, rel);
     mkdirSync(dirname(full), { recursive: true });
@@ -22,7 +22,7 @@ function makeFixture(files) {
 const PIPE = { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
 
 test("neither docs/superpowers/plans nor docs/superpowers/specs exists: exits 0 with a one-line message", () => {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "lint-plan-")));
+  const dir = realpathSync(makeTempDir("lint-plan-"));
   try {
     const out = execFileSync(process.execPath, [SCRIPT, "--dir", dir], PIPE);
     assert.match(out, /no plan\/spec files found/);

@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/run-record.mjs", import.meta.url));
 const run = (args, runsDir) =>
@@ -20,8 +20,8 @@ function readLines(runsDir) {
 }
 
 test("append --kind lens-cost stores cost as a number and validates", () => {
-  const runsDir = mkdtempSync(join(tmpdir(), "runs-"));
-  const repo = mkdtempSync(join(tmpdir(), "repo-"));
+  const runsDir = makeTempDir("runs-");
+  const repo = makeTempDir("repo-");
   const id = newRun(repo, runsDir);
   run(["append", "--run", id, "--kind", "lens-cost", "--stage", "maintain", "--lens", "abstraction", "--cost", "0.42", "--repo", repo], runsDir);
   const line = readLines(runsDir).find((o) => o.kind === "lens-cost");

@@ -104,3 +104,12 @@ test("redaction scrubs BOTH title and body, and body carries no injected header 
   assert.ok(!it.body.includes("bug in"), "F2: title must not be duplicated into body");
   rmSync(scratch, { recursive: true, force: true });
 });
+
+// #148: scripts/issue-intake.mjs is read-only — its only gh call is `gh issue list`. The same
+// field-flagged body= guard tests/unit/pr-review-intake.test.mjs pins for the PR intake is pinned
+// here per script, so a reader of either test sees the rule; the repo-wide sweep lives in
+// tests/unit/golden-path.test.mjs.
+test("issue-intake never carries a field-flagged body= write", () => {
+  const src = readFileSync(join(root, "scripts", "issue-intake.mjs"), "utf8");
+  assert.doesNotMatch(src, /-(?:f|F|-field|-raw-field)\s+["']?body=/);
+});

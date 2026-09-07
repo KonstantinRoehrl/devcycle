@@ -69,6 +69,8 @@ A self-contained task brief containing:
 `git stash`, `git checkout -- <path>` / `git restore <path>`, and `git reset` all discard or
 unstage another task's in-progress edits across that shared tree — never run them. Your capture
 is already scoped to your own `**Files:**`, so none of them is ever needed here.
+`hooks/block-destructive-git.mjs` now enforces this structurally: an implementer origin's git is
+denied unless it is an inspection command or `git add -N`.
 
 ## Evidence files and report
 

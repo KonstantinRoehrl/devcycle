@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, existsSync } from "node:fs";
+import { writeFileSync, chmodSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   FOOTER_MARKER, footer, withFooter, alreadyPosted, runReply, runResolve, runReview,
 } from "../../scripts/pr-review-post.mjs";
@@ -15,13 +15,13 @@ const SCRIPT = fileURLToPath(new URL("../../scripts/pr-review-post.mjs", import.
 // exits 0 and prints `[]` (a valid empty listReplies payload). This exercises the argument gate
 // exactly as an operator would, which is the surface the unit tests calling runReply directly miss.
 function runCli(args) {
-  const ghDir = mkdtempSync(join(tmpdir(), "fakegh-"));
+  const ghDir = makeTempDir("fakegh-");
   const ghPath = join(ghDir, "gh");
   writeFileSync(ghPath, "#!/bin/sh\necho '[]'\nexit 0\n");
   chmodSync(ghPath, 0o755);
-  const bodyFile = join(mkdtempSync(join(tmpdir(), "prbody-")), "body.md");
+  const bodyFile = join(makeTempDir("prbody-"), "body.md");
   writeFileSync(bodyFile, "Fixed in abc123: intake now carries thread_id.");
-  const commentsFile = join(mkdtempSync(join(tmpdir(), "prcomments-")), "comments.json");
+  const commentsFile = join(makeTempDir("prcomments-"), "comments.json");
   writeFileSync(commentsFile, "[]");
   return spawnSync(process.execPath, [SCRIPT, ...args.map((a) => {
     if (a === "@body") return bodyFile;
@@ -260,7 +260,7 @@ test("defaultPostRunner.listPrLevelComments hits the issue-comments endpoint wit
   assert.ok(seen[0].includes("--paginate"));
 });
 
-test("defaultPostRunner.postPrLevel removes its mkdtempSync temp dir after posting", async () => {
+test("defaultPostRunner.postPrLevel removes its temp dir after posting", async () => {
   const { defaultPostRunner } = await import("../../scripts/pr-review-post.mjs");
   let capturedDir;
   const exec = (_bin, args) => {
@@ -274,7 +274,7 @@ test("defaultPostRunner.postPrLevel removes its mkdtempSync temp dir after posti
   assert.equal(existsSync(capturedDir), false);
 });
 
-test("defaultPostRunner.createReview removes its mkdtempSync temp dir after posting", async () => {
+test("defaultPostRunner.createReview removes its temp dir after posting", async () => {
   const { defaultPostRunner } = await import("../../scripts/pr-review-post.mjs");
   let capturedDir;
   const exec = (_bin, args) => {

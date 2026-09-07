@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   readCheckpoint,
   writeCheckpoint,
@@ -31,12 +32,12 @@ const SCRIPT = new URL("../../scripts/dream.mjs", import.meta.url).pathname;
 // This repo itself, for the criteria that must run against its real promotion records.
 const REPO_ROOT = new URL("../../", import.meta.url).pathname;
 
-const repo = () => mkdtempSync(join(tmpdir(), "dream-repo-"));
+const repo = () => makeTempDir("dream-repo-");
 
 // Places session fixtures under repoRoot's own escaped-cwd project directory (the
 // convention fix 1 scopes planCorpus to), not an arbitrary slug.
 function projects(repoRoot, sessions) {
-  const dir = mkdtempSync(join(tmpdir(), "dream-proj-"));
+  const dir = makeTempDir("dream-proj-");
   const slug = join(dir, repoRoot.replaceAll("/", "-"));
   mkdirSync(slug, { recursive: true });
   for (const [id, ts] of sessions) {
@@ -52,7 +53,7 @@ const run = (args, cwd, env = {}) =>
   spawnSync(process.execPath, [SCRIPT, ...args], {
     encoding: "utf8",
     cwd,
-    env: { ...process.env, CLAUDE_DREAM_PROJECTS: mkdtempSync(join(tmpdir(), "dream-cli-empty-")), ...env },
+    env: { ...process.env, CLAUDE_DREAM_PROJECTS: makeTempDir("dream-cli-empty-"), ...env },
   });
 
 // Claude Code's real project-directory convention (verified on this machine): every
@@ -127,7 +128,7 @@ test("since excludes sessions that ended before the checkpoint", () => {
 
 test("planCorpus reads only this repo's own transcripts, not every project under the projects root", () => {
   const root = repo();
-  const projectsDir = mkdtempSync(join(tmpdir(), "dream-multi-project-"));
+  const projectsDir = makeTempDir("dream-multi-project-");
   const otherSlug = join(projectsDir, "-some-other-repo");
   mkdirSync(otherSlug, { recursive: true });
   writeFileSync(
@@ -149,7 +150,7 @@ test("planCorpus reads only this repo's own transcripts, not every project under
 // the opposite case, covered separately below: that one now fails per §9.)
 test("planCorpus tolerates a missing project directory under an existing projects root instead of crashing", () => {
   const root = repo();
-  const projectsDir = mkdtempSync(join(tmpdir(), "dream-parent-"));
+  const projectsDir = makeTempDir("dream-parent-");
   assert.doesNotThrow(() => planCorpus({ repoRoot: root, projectsDir, since: null, cap: 100 }));
   const m = planCorpus({ repoRoot: root, projectsDir, since: null, cap: 100 });
   assert.deepEqual(m.sessions, []);
@@ -160,7 +161,7 @@ test("planCorpus tolerates a missing project directory under an existing project
 // success. Fixture directory name mirrors the real convention exactly.
 test("planCorpus mines sessions for a repo whose path contains underscores and dots", () => {
   const repoRoot = "/srv/code/my_project.site";
-  const projectsDir = mkdtempSync(join(tmpdir(), "dream-underscore-"));
+  const projectsDir = makeTempDir("dream-underscore-");
   const slug = join(projectsDir, escapedSlug(repoRoot));
   mkdirSync(slug, { recursive: true });
   writeFileSync(
@@ -174,7 +175,7 @@ test("planCorpus mines sessions for a repo whose path contains underscores and d
 // Same defect, the other reported case.
 test("planCorpus mines sessions for a repo whose path is a bare dotted name like site.com", () => {
   const repoRoot = "/srv/code/site.com";
-  const projectsDir = mkdtempSync(join(tmpdir(), "dream-dotted-"));
+  const projectsDir = makeTempDir("dream-dotted-");
   const slug = join(projectsDir, escapedSlug(repoRoot));
   mkdirSync(slug, { recursive: true });
   writeFileSync(
@@ -192,7 +193,7 @@ test("planCorpus mines sessions for a repo whose path is a bare dotted name like
 // sessions still never leak in.
 test("planCorpus falls back to a cwd-matched search when the expected slug directory is missing", () => {
   const repoRoot = "/srv/code/another-project";
-  const projectsDir = mkdtempSync(join(tmpdir(), "dream-fallback-"));
+  const projectsDir = makeTempDir("dream-fallback-");
   const legacySlug = join(projectsDir, "some-unexpected-legacy-name");
   mkdirSync(legacySlug, { recursive: true });
   writeFileSync(
@@ -226,7 +227,7 @@ test("planCorpus falls back to a cwd-matched search when the expected slug direc
 // on every platform, unlike a chmod trick that root or some CI runners ignore).
 test("planCorpus throws instead of silently returning an empty corpus when the project directory is unreadable", () => {
   const root = repo();
-  const projectsDir = mkdtempSync(join(tmpdir(), "dream-unreadable-"));
+  const projectsDir = makeTempDir("dream-unreadable-");
   const slug = join(projectsDir, root.replaceAll("/", "-"));
   writeFileSync(slug, "not a directory\n");
   assert.throws(() => planCorpus({ repoRoot: root, projectsDir, since: null, cap: 100 }));
@@ -239,7 +240,7 @@ test("cli: --plan fails loudly instead of printing an empty manifest when the pr
   // the same way before deriving the slug, or the fixture and the CLI process disagree on
   // which directory the escaped-cwd rule even points at.
   const realRoot = realpathSync(root);
-  const projectsDir = mkdtempSync(join(tmpdir(), "dream-cli-unreadable-"));
+  const projectsDir = makeTempDir("dream-cli-unreadable-");
   const slug = join(projectsDir, realRoot.replaceAll("/", "-"));
   writeFileSync(slug, "not a directory\n");
   const res = run(["--plan"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
@@ -349,7 +350,7 @@ const selfRecord = (ts) => ({
 const plainRecord = (ts) => ({ timestamp: ts, type: "assistant", message: { content: [] } });
 
 function projectsWith(repoRoot, entries) {
-  const dir = mkdtempSync(join(tmpdir(), "dream-proj-"));
+  const dir = makeTempDir("dream-proj-");
   // Same escaping rule the engine uses: every non-alphanumeric character becomes "-".
   const slug = join(dir, repoRoot.replace(/[^A-Za-z0-9]/g, "-"));
   mkdirSync(slug, { recursive: true });
@@ -390,7 +391,7 @@ function corpusRecord({ role = "user", ts, text, toolResult }) {
 // after planCorpus has already run once (F5's reopened-slice case).
 function corpusWithSession({ text, records, padding = 0 } = {}) {
   const root = realpathSync(repo());
-  const dir = mkdtempSync(join(tmpdir(), "dream-proj-"));
+  const dir = makeTempDir("dream-proj-");
   const slug = join(dir, root.replace(/[^A-Za-z0-9]/g, "-"));
   mkdirSync(slug, { recursive: true });
   const file = join(slug, `${CORPUS_SESSION_ID}.jsonl`);
@@ -531,7 +532,7 @@ test("memoryDir follows the escaped-cwd rule, not basename", () => {
 
 test("the manifest leaks no message text and no branch name", () => {
   const root = repo();
-  const dir = mkdtempSync(join(tmpdir(), "dream-secret-"));
+  const dir = makeTempDir("dream-secret-");
   const slug = join(dir, root.replaceAll("/", "-"));
   mkdirSync(slug, { recursive: true });
   writeFileSync(
@@ -555,7 +556,7 @@ test("the manifest leaks no message text and no branch name", () => {
 
 test("planCorpus excludes devcycle's own dreaming/doctor sessions only when asked", () => {
   const root = repo();
-  const dir = mkdtempSync(join(tmpdir(), "dream-self-"));
+  const dir = makeTempDir("dream-self-");
   const slug = join(dir, root.replaceAll("/", "-"));
   mkdirSync(slug, { recursive: true });
   writeFileSync(
@@ -580,7 +581,7 @@ test("planCorpus excludes devcycle's own dreaming/doctor sessions only when aske
 // cluster signatures back in the recurrence corpus, where they self-seed a permanent hit.
 test("planCorpus excludes a session attributed to the learn command as one of devcycle's own", () => {
   const root = repo();
-  const dir = mkdtempSync(join(tmpdir(), "dream-self-learn-"));
+  const dir = makeTempDir("dream-self-learn-");
   const slug = join(dir, root.replaceAll("/", "-"));
   mkdirSync(slug, { recursive: true });
   writeFileSync(
@@ -1369,7 +1370,7 @@ test("happy-path gap: an observation file with an out-of-enum kind counts as unm
 // the same writer the CLI itself uses.
 function corpusWithJournal({ events = [], promotions = [], text = "one" } = {}) {
   const { root, projects, append } = corpusWithSession({ text });
-  const runsDir = mkdtempSync(join(tmpdir(), "dream-runs-"));
+  const runsDir = makeTempDir("dream-runs-");
   const byRun = new Map();
   for (const e of events) {
     const runId = e.runId ?? "0".repeat(16);
@@ -1404,7 +1405,7 @@ function corpusWithJournal({ events = [], promotions = [], text = "one" } = {}) 
 // The candidate file exactly as spec §3 pins it — no field added, renamed, dropped or re-typed
 // (QC1). Written to a temp path so --render-report has a real file to read.
 function writeCandidateFixture() {
-  const dir = mkdtempSync(join(tmpdir(), "dream-candidates-"));
+  const dir = makeTempDir("dream-candidates-");
   const path = join(dir, "candidates.json");
   writeFileSync(
     path,
@@ -1577,7 +1578,7 @@ test("criterion 11: --record-promotion rejects an r3 verify that does not resolv
 });
 
 test("--lessons prints three labelled subsections and rejects an unknown stage", () => {
-  const learnings = mkdtempSync(join(tmpdir(), "dream-learnings-"));
+  const learnings = makeTempDir("dream-learnings-");
   const ok = run(["--lessons", "execution"], REPO_ROOT, { DEVCYCLE_LEARNINGS_DIR: learnings });
   assert.equal(ok.status, 0);
   assert.match(ok.stdout, /repo \(docs\/devcycle\/lessons\.md\)/);
@@ -1738,7 +1739,7 @@ test("--record-lifecycle rejects a missing record argument with a dream: error",
 // growth paired with an eviction passes and renders the net-byte line. Fixtures carry real bloat
 // (a >1200-byte landed line), never a vacuous zero.
 function writeBudgetFixture({ evict }) {
-  const dir = mkdtempSync(join(tmpdir(), "dream-budget-"));
+  const dir = makeTempDir("dream-budget-");
   const path = join(dir, "candidates.json");
   writeFileSync(
     path,
@@ -1808,8 +1809,8 @@ test("alwaysLoadedNetBytes excludes just-me candidates from the always-loaded su
 });
 
 test("dream --match returns only file-relevant lessons with a pull hint", () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-match-")));
-  const learnings = mkdtempSync(join(tmpdir(), "dream-match-learn-"));
+  const root = realpathSync(makeTempDir("dream-match-"));
+  const learnings = makeTempDir("dream-match-learn-");
   mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
   writeFileSync(join(root, "docs/devcycle/lessons.md"),
     "# Lessons\n\n## execution\n- Guard the thing [novel:guard-thing]\n");
@@ -1824,8 +1825,8 @@ test("dream --match returns only file-relevant lessons with a pull hint", () => 
 });
 
 test("dream --match selects lessons for a review-stage diff's files, not only execution", () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-match-review-")));
-  const learnings = mkdtempSync(join(tmpdir(), "dream-match-review-learn-"));
+  const root = realpathSync(makeTempDir("dream-match-review-"));
+  const learnings = makeTempDir("dream-match-review-learn-");
   mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
   writeFileSync(join(root, "docs/devcycle/lessons.md"),
     "# Lessons\n\n## branch-review\n- Re-review the finding [novel:review-thing]\n");
@@ -1840,8 +1841,8 @@ test("dream --match selects lessons for a review-stage diff's files, not only ex
 });
 
 test("dream --match delivers a lesson for a top-level extensionless file named in --files", () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-match-dockerfile-")));
-  const learnings = mkdtempSync(join(tmpdir(), "dream-match-dockerfile-learn-"));
+  const root = realpathSync(makeTempDir("dream-match-dockerfile-"));
+  const learnings = makeTempDir("dream-match-dockerfile-learn-");
   mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
   writeFileSync(join(root, "docs/devcycle/lessons.md"),
     "# Lessons\n\n## execution\n- Pin the base image digest [novel:docker-thing]\n");
@@ -1854,15 +1855,15 @@ test("dream --match delivers a lesson for a top-level extensionless file named i
 });
 
 test("dream --match errors loudly on an unrecognised flag", () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-match-bogus-")));
+  const root = realpathSync(makeTempDir("dream-match-bogus-"));
   const res = run(["--match", "--stage", "planning", "--files", "a.mjs", "--bogus", "x"], root);
   assert.equal(res.status, 1);
   assert.match(res.stderr, /dream: unrecognised flag --bogus/);
 });
 
 test("dream --match --culprits/--keywords narrow the matched lessons", () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-match-filters-")));
-  const learnings = mkdtempSync(join(tmpdir(), "dream-match-filters-learn-"));
+  const root = realpathSync(makeTempDir("dream-match-filters-"));
+  const learnings = makeTempDir("dream-match-filters-learn-");
   mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
   writeFileSync(join(root, "docs/devcycle/lessons.md"),
     "# Lessons\n\n## execution\n- Guard the thing [novel:guard-thing]\n- Reuse the parser [novel:reuse-parser]\n");
@@ -1891,7 +1892,7 @@ test("dream --match --culprits/--keywords narrow the matched lessons", () => {
 });
 
 test("dream --lesson prints the record; unknown id exits 1", () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "dream-lesson-")));
+  const root = realpathSync(makeTempDir("dream-lesson-"));
   mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
   writeFileSync(join(root, "docs/devcycle/promotions/2026-08-16-guard-thing.md"),
     "# Guard the thing\n- culprit-id: novel:guard-thing\n- files-touched: scripts/x.mjs\n");
@@ -1906,7 +1907,7 @@ test("dream --lesson prints the record; unknown id exits 1", () => {
 // F1, dream side: --check-recurrence must not execute a committed verify: line either. The
 // engine's default is non-executing, so the flag is the only path to execution.
 test("cli: --check-recurrence does not execute a promotion verify: line without --run-checks", () => {
-  const root = mkdtempSync(join(tmpdir(), "dream-runchecks-"));
+  const root = makeTempDir("dream-runchecks-");
   mkdirSync(join(root, "docs", "devcycle", "promotions"), { recursive: true });
   writeFileSync(
     join(root, "docs", "devcycle", "promotions", "2026-08-19-hostile.md"),
@@ -2007,7 +2008,7 @@ test("--plan-landing is guarded against being combined with another subcommand",
 // escapeProjectPath, so --staleness's planCorpus actually counts them) and returns the dir to
 // hand back via CLAUDE_DREAM_PROJECTS. Sessions timestamped after last-run count as unmined.
 const seedStaleCorpus = (root, sessions) => {
-  const dir = mkdtempSync(join(tmpdir(), "dream-stale-proj-"));
+  const dir = makeTempDir("dream-stale-proj-");
   const slug = join(dir, escapedSlug(root));
   mkdirSync(slug, { recursive: true });
   for (const [id, ts] of sessions)
@@ -2110,7 +2111,7 @@ const gitFakeFallback = (main, wt) => (cmd, args) => {
 };
 
 test("corpus unions worktree sessions and excludes a sibling project (primary path)", () => {
-  const projectsDir = mkdtempSync(join(tmpdir(), "proj-"));
+  const projectsDir = makeTempDir("proj-");
   const main = "/x/repo", wt = "/x/repo-wt", other = "/x/other";
   seedProject(projectsDir, main); seedProject(projectsDir, wt); seedProject(projectsDir, other);
   const { sessions } = planCorpus({
@@ -2122,7 +2123,7 @@ test("corpus unions worktree sessions and excludes a sibling project (primary pa
 });
 
 test("corpus fallback scan unions worktrees and excludes a sibling project (fallback path)", () => {
-  const projectsDir = mkdtempSync(join(tmpdir(), "proj-"));
+  const projectsDir = makeTempDir("proj-");
   const main = "/x/repo", wt = "/x/repo-wt", other = "/x/other";
   seedProject(projectsDir, main); seedProject(projectsDir, wt); seedProject(projectsDir, other);
   // `worktree list` names /x/nope (no slug dir) → primary is empty → whole-root scan runs,
@@ -2136,7 +2137,7 @@ test("corpus fallback scan unions worktrees and excludes a sibling project (fall
 });
 
 test("the fallback scan memoizes gitToplevel per cwd (spec Component 3: one git call per distinct cwd)", () => {
-  const projectsDir = mkdtempSync(join(tmpdir(), "proj-"));
+  const projectsDir = makeTempDir("proj-");
   const main = "/x/repo", other = "/x/other";
   seedProject(projectsDir, main);
   // A sibling project whose single transcript holds TWO records sharing one cwd: without per-cwd

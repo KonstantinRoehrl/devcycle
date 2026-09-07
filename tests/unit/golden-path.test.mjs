@@ -1677,6 +1677,24 @@ test("C3 leg 2: every module-only script has a non-test importer", () => {
   assert.deepEqual(orphans, [], "a module nothing imports and nothing runs is dead code");
 });
 
+// #148: `gh api` turns into a POST whenever a field flag carries body=, so a read-only script can
+// start writing by a one-flag edit. tests/unit/pr-review-intake.test.mjs pins this for one script;
+// this scans every gh-spawning script under scripts/ and hooks/ so a new caller inherits the guard.
+// scripts/pr-review-post.mjs is the one sanctioned writer; its own suite owns its posting contract.
+const GH_SPAWN = /\b(?:execFileSync|execFile|spawnSync|spawn|exec)\(\s*"gh"/;
+const GH_BODY_WRITE = /-(?:f|F|-field|-raw-field)\s+["']?body=/;
+test("every gh-spawning script except the sanctioned poster is free of field-flagged body= writes", () => {
+  const candidates = [
+    ...scriptFiles().map((f) => `scripts/${f}`),
+    ...readdirSync(join(root, "hooks")).filter((f) => f.endsWith(".mjs")).map((f) => `hooks/${f}`),
+  ];
+  const spawners = candidates.filter((f) => GH_SPAWN.test(read(f)));
+  for (const known of ["scripts/doctor.mjs", "scripts/issue-intake.mjs", "scripts/pr-review-intake.mjs", "scripts/pr-review-post.mjs"])
+    assert.ok(spawners.includes(known), `${known} spawns gh; the scan must see it or this test is vacuous`);
+  for (const f of spawners.filter((f) => f !== "scripts/pr-review-post.mjs"))
+    assert.doesNotMatch(read(f), GH_BODY_WRITE, `${f} carries a field-flagged body= — that turns a gh api read into a POST (#148)`);
+});
+
 // A real invocation's own syntax is the bound, not an arbitrary character budget: `node`,
 // then only whitespace (which \s matches across a line break too, so a prose wrap such as
 // commands/continue.md:29-31 and :32-33, commands/cycle.md:24-25 still matches — CommonMark
@@ -1979,21 +1997,21 @@ test("the browser guard is named by DESIGN.md's blueprint and the hub's inventor
   );
 });
 
-// #165 reviewer-git guard: the same tie the browser guard has, so a reviewer-agent rename fails the
+// #165/#235 git guard: the same tie the browser guard has, so a guarded-agent rename fails the
 // suite instead of silently leaving a guarded origin unmatched. The GUARDED list must be exactly the
-// two reviewer agents' frontmatter names and their <plugin>:-namespaced forms.
-const REVIEWER_HOOK_SRC = "hooks/block-reviewer-git-write.mjs";
+// three guarded agents' frontmatter names and their <plugin>:-namespaced forms.
+const GIT_GUARD_SRC = "hooks/block-destructive-git.mjs";
 
 const guardedAgentTypes = () => {
-  const m = read(REVIEWER_HOOK_SRC).match(/const GUARDED_AGENT_TYPES = \[([^\]]*)\];/);
-  assert.ok(m, `${REVIEWER_HOOK_SRC} must declare GUARDED_AGENT_TYPES as a single-line array literal`);
+  const m = read(GIT_GUARD_SRC).match(/const GUARDED_AGENT_TYPES = \[([^\]]*)\];/);
+  assert.ok(m, `${GIT_GUARD_SRC} must declare GUARDED_AGENT_TYPES as a single-line array literal`);
   return [...m[1].matchAll(/"([^"]+)"/g)].map(([, v]) => v);
 };
 
-test("the reviewer-git guard's guarded list is the reviewer agents' names and their namespaced forms", () => {
+test("the git guard's guarded list is the three guarded agents' names and their namespaced forms", () => {
   const plugin = JSON.parse(read(".claude-plugin/plugin.json")).name;
   const expected = [];
-  for (const agent of ["agents/task-reviewer.md", "agents/red-team-reviewer.md"]) {
+  for (const agent of ["agents/task-reviewer.md", "agents/red-team-reviewer.md", "agents/implementer.md"]) {
     const name = read(agent).match(/^name:\s*(\S+)\s*$/m)?.[1];
     assert.ok(name, `${agent} must carry a frontmatter name:`);
     expected.push(name, `${plugin}:${name}`);
@@ -2001,19 +2019,19 @@ test("the reviewer-git guard's guarded list is the reviewer agents' names and th
   assert.deepEqual(
     guardedAgentTypes(),
     expected,
-    `${REVIEWER_HOOK_SRC}'s GUARDED_AGENT_TYPES must be exactly the two reviewer agents' frontmatter ` +
+    `${GIT_GUARD_SRC}'s GUARDED_AGENT_TYPES must be exactly the three guarded agents' frontmatter ` +
       "names and their namespaced forms — the harness passes the namespaced spelling (docs/platform-notes.md § (e)), " +
-      "and drift from the agents' name: would leave a reviewer origin unguarded"
+      "and drift from an agent's name: would leave that origin unguarded"
   );
 });
 
-test("the reviewer-git guard is registered on PreToolUse over Bash", () => {
+test("the git guard is registered on PreToolUse over Bash", () => {
   const doc = JSON.parse(read("hooks/hooks.json"));
   const entry = (doc.hooks?.PreToolUse ?? []).find((e) =>
-    (e.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(REVIEWER_HOOK_SRC))
+    (e.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(GIT_GUARD_SRC))
   );
-  assert.ok(entry, `hooks/hooks.json must register ${REVIEWER_HOOK_SRC} on PreToolUse`);
-  assert.equal(entry.matcher, "Bash", `${REVIEWER_HOOK_SRC} must match Bash, got "${entry.matcher}"`);
+  assert.ok(entry, `hooks/hooks.json must register ${GIT_GUARD_SRC} on PreToolUse`);
+  assert.equal(entry.matcher, "Bash", `${GIT_GUARD_SRC} must match Bash, got "${entry.matcher}"`);
 });
 
 test("DESIGN.md §10 no longer rejects the hooks that ship", () => {

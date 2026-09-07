@@ -5,6 +5,37 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-09-06 — budget raised for the engine & hook safety branch review
+
+**Decision:** `tests/fixtures/context-budget.json` raises
+`playbooks/sweeping-mechanical-changes.md` 101068→101124, by exactly the bytes the branch-review
+clause adds.
+
+**Why:** branch review round 6 found the playbook and its docs mirror both gloss exit 1 with a
+stdout report as "baseline or pilot hard stop", while the sweep now has a third cause — an attempt
+that left the worktree unrestorable. The handling both already prescribe is correct for it; only
+the enumeration was short, and naming the third cause is what the bytes buy.
+
+## 2026-09-05 — the git-write guard covers three origins and the coordinator's stash (#235)
+
+**Decision:** `hooks/block-reviewer-git-write.mjs` is renamed `hooks/block-destructive-git.mjs` —
+hooks are named for what they deny, and it no longer denies only reviewers. It guards three dispatch
+origins with one read-only allowlist (`task-reviewer`, `red-team-reviewer`, and now `implementer`,
+each in its bare and `devcycle:`-namespaced spelling), and on the main thread it denies `git stash`
+(`list`/`show` excepted only when written plainly — a stash behind a wrapper or a command
+substitution is denied on ambiguity) while a `.devcycle/state.md` whose `stage:` is not `done` sits
+at or above the call's `cwd`. Everything else on the main thread stays unguarded: the coordinator
+commits, switches branches and merges. The parser also strips shell reserved words and denies
+`<(`/`>(` process substitution (audit 2026-09-05 H1).
+
+**Why:** the learn pass behind #235 found the incident class was not reviewer-specific — an
+implementer's or the coordinator's own `git stash` discards every sibling's uncommitted edits across
+the shared checkout just as a reviewer's `git checkout --` did. `agents/implementer.md`'s contract was
+already read-only apart from `git add -N`, so the allowlist fits it unchanged; the coordinator
+legitimately writes, so only its one sibling-destroying command is taken away, and only during a cycle.
+
+**Supersedes:** the 2026-09-02 entry's reviewer-only scope and its file name, below.
+
 ## 2026-09-05 — the workload commit-sensor, a third hook (#139)
 
 **Decision:** The plugin ships a third hook, `hooks/workload-sensor.mjs`, registered in

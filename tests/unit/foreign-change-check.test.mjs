@@ -4,15 +4,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "scripts", "foreign-change-check.mjs");
 
 function makeRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "fcc-"));
+  const dir = makeTempDir("fcc-");
   const git = (...args) => spawnSync("git", args, { cwd: dir, encoding: "utf8" });
   git("init", "-q");
   git("config", "user.email", "t@t");

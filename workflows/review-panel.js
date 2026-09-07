@@ -123,6 +123,12 @@ function parseArgs() {
   if (hasRef === hasPaths) {
     fatal("args.scope must carry exactly one of ref (non-empty string) or paths (non-empty string[])");
   }
+  // A ref beginning with `-` would be read by git as an option (`--output=<file>` writes that
+  // file), so it is fatal here, before any git runs; the diff calls below also pass
+  // --end-of-options so no later ref spelling can be parsed as a flag (audit 2026-09-05 L2).
+  if (hasRef && scope.ref.startsWith("-")) {
+    fatal(`args.scope.ref must not start with "-" (got ${JSON.stringify(scope.ref)}) — git would read it as an option`);
+  }
   if (args.specPath !== undefined && (typeof args.specPath !== "string" || !args.specPath)) {
     fatal("args.specPath, when given, must be a non-empty string");
   }
@@ -645,7 +651,7 @@ async function reconcile(findings, notes, model) {
   ].join("\n");
   const res = await claudeStructured({ prompt, tools: "", schema: SUMMARY_SCHEMA, model });
   return {
-    text: res.ok && res.value.summary ? res.value.summary : fallbackSummary(findings, notes),
+    text: res.ok && res.value?.summary ? res.value.summary : fallbackSummary(findings, notes),
     cost: res.cost ?? 0,
   };
 }
@@ -718,7 +724,7 @@ async function main() {
   let diffChunks = [null]; // file-set branch reviews once, with no diff text
   if (args.scope.ref) {
     scopeLabel = `diff for ref ${args.scope.ref}`;
-    fullDiff = gitReadOnly(["diff", args.scope.ref]);
+    fullDiff = gitReadOnly(["diff", "--end-of-options", args.scope.ref]);
     const { chunks, notes: chunkNotes } = chunkDiff(fullDiff, DIFF_CHAR_CAP);
     for (const n of chunkNotes) {
       notes.push(n);
@@ -733,7 +739,7 @@ async function main() {
       log(note);
     }
     diffChunks = reviewed.length ? reviewed : [""];
-    fileList = gitReadOnly(["diff", "--name-only", args.scope.ref]).trim();
+    fileList = gitReadOnly(["diff", "--name-only", "--end-of-options", args.scope.ref]).trim();
   } else {
     scopeLabel = `file set below (${args.scope.paths.length} file(s))`;
     fileList = record(truncate(args.scope.paths.join("\n"), DIFF_CHAR_CAP, "file list")).text;

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.20.1 — 2026-09-07
+
+- fix(temp-dir): give every temp directory a self-cleaning owner (#257)
+- fix(engine): bound agent-cli process groups, harden the git guard, review-panel refs and sweep worktrees (audit 2026-09-05 H1, H5, L2, L3, L4; #235, #242, #148)
+
+**Self-cleaning temp directories (#257).** Fixtures created with `mkdtempSync` were never
+removed, so every suite run left its scratch directories behind and the system temp directory
+grew without bound. `scripts/temp-dir.mjs` now owns that lifetime: `makeTempDir()` creates the
+directory, registers it, and arms one process-exit handler that removes each registered
+directory inside its own try/catch, so an unremovable directory cannot change the process's
+exit status. All 217 `tmpdir()`-rooted call sites across 47 suites moved onto it; the sites
+nested inside an already-registered parent stay on `mkdtempSync` by design, since removing the
+parent takes the child with it. Because a convention enforced only by review is how the count
+reached 217 in the first place, `scripts/temp-dir-check.mjs` runs in CI and fails the build on
+any raw call site — and aborts rather than reporting a confident pass when its scan finds no
+files to read.
+
+**Engine safety hardening (#235, #242, #148).** Closes the H1/H5/L2/L3/L4 findings from the
+2026-09-05 whole-repo audit. The destructive-git hook no longer stops at the reviewer:
+`block-reviewer-git-write.mjs` becomes `block-destructive-git.mjs`, sees through shell reserved
+words and process substitution, guards the implementer origin, and denies `git stash` on the
+main thread while a cycle is active (H1, #235). `agent-cli` bounds the whole process group
+rather than the direct child, settles on exit with a drain grace, and rejects non-object
+structured output (H5, L3). `review-panel` rejects dash-prefixed refs, passes
+`--end-of-options`, and guards the reconciler summary read (L2). `mechanical-sweep` force-adds
+gitignored targets, counts ignored collateral, and prunes stale worktrees (L4). Enforcement
+scripts are now required to deny on ambiguity rather than pass (#242).
+
 ## 0.20.0 — 2026-09-06
 
 - feat(planning): require a task's Files block to list the size baseline its edit trips (#255)
@@ -36,6 +64,7 @@ subject disappeared (issue closed, file deleted, code fixed) never transitioned 
 open forever. This pass swept 86 → 63 open records, each verified against the live repo or
 GitHub. The engine gap itself is unfixed — closed-issue, vanished-subject, and staleness sweeps
 are queued as a roadmap item.
+>>>>>>> origin/dev
 
 ## 0.19.0 — 2026-09-04
 

@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   parseArgs, isDevcycleSession, contextDepth, costUSD, depthBand, median,
   summarizeSession, formatReport, budgetBand, resolveDepth,
@@ -238,7 +239,7 @@ test("readRunRecords returns an empty map when the runs directory does not exist
 });
 
 test("readRunRecords indexes a record by its hashed session id", () => {
-  const dir = mkdtempSync(join(tmpdir(), "runs-read-"));
+  const dir = makeTempDir("runs-read-");
   const slug = mkdtempSync(join(dir, "repo-"));
   const hash = createHash("sha256").update("sess-1").digest("hex");
   writeFileSync(join(slug, "abc.jsonl"),
@@ -286,7 +287,7 @@ test("stage windows leave nothing unattributed for a recorded session", () => {
 });
 
 test("readRunRecords tags a record from an unrecognized schemaVersion as mismatched, rather than silently misreading it", () => {
-  const dir = mkdtempSync(join(tmpdir(), "runs-schema-"));
+  const dir = makeTempDir("runs-schema-");
   const slug = mkdtempSync(join(dir, "repo-"));
   const hash = createHash("sha256").update("sess-1").digest("hex");
   writeFileSync(join(slug, "abc.jsonl"),
@@ -304,7 +305,7 @@ test("readRunRecords tags a record from an unrecognized schemaVersion as mismatc
 });
 
 test("readRunRecords does not tag a record at the current schemaVersion as mismatched", () => {
-  const dir = mkdtempSync(join(tmpdir(), "runs-schema-ok-"));
+  const dir = makeTempDir("runs-schema-ok-");
   const slug = mkdtempSync(join(dir, "repo-"));
   const hash = createHash("sha256").update("sess-1").digest("hex");
   writeFileSync(join(slug, "abc.jsonl"),
@@ -319,7 +320,7 @@ test("readRunRecords does not tag a record at the current schemaVersion as misma
 // `session` lines into one file — windowing must be by file position (which session line came
 // last), not by merging the whole file's stages/dispatches/verdicts into every session hash.
 test("readRunRecords windows a multi-session file by file position, not by merging the whole file into every session", () => {
-  const dir = mkdtempSync(join(tmpdir(), "runs-multisession-"));
+  const dir = makeTempDir("runs-multisession-");
   const slug = mkdtempSync(join(dir, "repo-"));
   const hashA = createHash("sha256").update("sess-a").digest("hex");
   const hashB = createHash("sha256").update("sess-b").digest("hex");
@@ -355,7 +356,7 @@ test("readRunRecords windows a multi-session file by file position, not by mergi
 // branch-fix-2-2 Part 2: the `run` line's `knobs` field, never read before, now lands on the
 // per-session record alongside runId/pluginVersion/profile.
 test("readRunRecords captures the run line's knobs onto the per-session record", () => {
-  const dir = mkdtempSync(join(tmpdir(), "runs-knobs-"));
+  const dir = makeTempDir("runs-knobs-");
   const slug = mkdtempSync(join(dir, "repo-"));
   const hash = createHash("sha256").update("sess-knobs").digest("hex");
   writeFileSync(join(slug, "abc.jsonl"),
@@ -418,7 +419,7 @@ test("a dispatch window cannot resolve an agentId-carrying turn to either of two
 // --- end to end over a synthetic transcript directory ---
 
 function fixtureDir() {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-"));
+  const dir = makeTempDir("doctor-");
   const proj = join(dir, "-some-project");
   mkdirSync(proj, { recursive: true });
   const lines = [
@@ -461,7 +462,7 @@ test("cli: reports the devcycle session and filters out the non-devcycle one", (
 // on this filter, so a filter that stopped keeping command-only sessions would report zero
 // turns while still exiting 0.
 test("cli: a session attributed only to a devcycle command is kept in the corpus", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-command-"));
+  const dir = makeTempDir("doctor-command-");
   const proj = join(dir, "-some-project");
   mkdirSync(proj, { recursive: true });
   writeFileSync(
@@ -504,7 +505,7 @@ test("cli: --since excludes records before the window", () => {
 // Session membership is a property of the whole transcript, so the marker sits on a
 // record that a mid-session --since excludes.
 function markerBeforeWindowDir() {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-window-"));
+  const dir = makeTempDir("doctor-window-");
   const proj = join(dir, "-some-project");
   mkdirSync(proj, { recursive: true });
   const lines = [
@@ -688,7 +689,7 @@ test("depthBand: the six measured bands, at their boundaries", () => {
 });
 
 test("cli: a transcript under subagents/ is walked and attributed to its owning session", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-subagents-"));
+  const dir = makeTempDir("doctor-subagents-");
   const slug = join(dir, "-Users-x-proj");
   mkdirSync(join(slug, "sess-aaaa", "subagents"), { recursive: true });
   writeFileSync(
@@ -707,7 +708,7 @@ test("cli: a transcript under subagents/ is walked and attributed to its owning 
 });
 
 test("cli: a <synthetic> record is skipped, not reported as an unpriced model", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-synthetic-"));
+  const dir = makeTempDir("doctor-synthetic-");
   const slug = join(dir, "-Users-x-proj");
   mkdirSync(slug, { recursive: true });
   writeFileSync(
@@ -730,7 +731,7 @@ test("cli: a <synthetic> record is skipped, not reported as an unpriced model", 
 });
 
 test("cli: an unpriced model gets its own line and is excluded from the dollar total", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-unpriced-"));
+  const dir = makeTempDir("doctor-unpriced-");
   const slug = join(dir, "-Users-x-proj");
   mkdirSync(slug, { recursive: true });
   writeFileSync(
@@ -756,7 +757,7 @@ test("formatReport: discloses the price vintage", () => {
 // emitCandidates() is computed but must actually reach the documented CLI surface — the
 // playbook layer (playbooks/profiling-sessions.md) has nothing to rank/report on otherwise.
 test("cli: --json emits a candidates array carrying emitCandidates' signals", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-candidates-"));
+  const dir = makeTempDir("doctor-candidates-");
   const slug = join(dir, "-Users-x-proj");
   mkdirSync(slug, { recursive: true });
   writeFileSync(
@@ -778,7 +779,7 @@ test("cli: --json emits a candidates array carrying emitCandidates' signals", ()
 });
 
 test("cli: the markdown report surfaces candidate signals, not just the raw aggregate", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-candidates-text-"));
+  const dir = makeTempDir("doctor-candidates-text-");
   const slug = join(dir, "-Users-x-proj");
   mkdirSync(slug, { recursive: true });
   writeFileSync(
@@ -803,7 +804,7 @@ test("cli: the markdown report surfaces candidate signals, not just the raw aggr
 });
 
 test("cli: a malformed trailing line is skipped rather than fatal", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-partial-"));
+  const dir = makeTempDir("doctor-partial-");
   const slug = join(dir, "-Users-x-proj");
   mkdirSync(slug, { recursive: true });
   writeFileSync(
@@ -863,8 +864,8 @@ function turnWithUsage(model, u) {
 // directory (not a literal placeholder) so the CLI tests can spawnSync with it: the
 // child process's working directory must actually exist on disk.
 function depthFixture(sessionId, records) {
-  const root = mkdtempSync(join(tmpdir(), "doctor-depth-"));
-  const cwd = mkdtempSync(join(tmpdir(), "doctor-cwd-"));
+  const root = makeTempDir("doctor-depth-");
+  const cwd = makeTempDir("doctor-cwd-");
   const slug = join(root, cwd.replaceAll("/", "-"));
   mkdirSync(slug, { recursive: true });
   writeFileSync(join(slug, `${sessionId}.jsonl`), records.map((r) => JSON.stringify(r)).join("\n") + "\n");
@@ -1115,7 +1116,7 @@ test("compliance candidates are absent, not zero, for a record-less session", ()
 });
 
 test("configDrift flags a stale superseded key with its exact line and replacement", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-drift-"));
+  const dir = makeTempDir("doctor-drift-");
   const changelogPath = join(dir, "config-changelog.md");
   const targetPath = join(dir, "CLAUDE.md");
   writeFileSync(
@@ -1149,7 +1150,7 @@ test("configDrift flags a stale superseded key with its exact line and replaceme
 });
 
 test("configDrift returns no findings for a target file with no stale references", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-drift-clean-"));
+  const dir = makeTempDir("doctor-drift-clean-");
   const changelogPath = join(dir, "config-changelog.md");
   const targetPath = join(dir, "CLAUDE.md");
   writeFileSync(
@@ -1178,7 +1179,7 @@ function installDoctor(changelog) {
   // realpath: on macOS the temp dir is a symlink, and Node resolves an ESM entry point to its
   // real path — so an unresolved path would make the script's own `is this the entry point`
   // check fail and main() would never run.
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "doctor-install-")));
+  const dir = realpathSync(makeTempDir("doctor-install-"));
   mkdirSync(join(dir, "scripts"), { recursive: true });
   // promotions.mjs travels with it: doctor.mjs imports readPromotions from it to name what each
   // version shipped, so a copy without it cannot be loaded at all. This list is doctor.mjs's whole
@@ -1214,7 +1215,7 @@ const ONE_STALE = yamlChangelog(
 test("--drift resolves its changelog from the script's own location, not the working directory", () => {
   // The documented invocation runs doctor from the target repo, where ./references does not
   // exist; CLAUDE_PLUGIN_ROOT is not in a script's environment (docs/platform-notes.md (c)).
-  const cwd = mkdtempSync(join(tmpdir(), "doctor-drift-foreign-cwd-"));
+  const cwd = makeTempDir("doctor-drift-foreign-cwd-");
   writeFileSync(join(cwd, "CLAUDE.md"), "profile: standard\n", "utf8");
   try {
     const res = run(["--drift", join(cwd, "CLAUDE.md")], { CLAUDE_PLUGIN_ROOT: "" }, cwd);
@@ -1276,7 +1277,7 @@ test("--drift reports a clean target against a changelog that does carry stale k
 });
 
 test("configDrift reports what it parsed, so a changelog with no stale keys is not a clean bill of health", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-drift-counts-"));
+  const dir = makeTempDir("doctor-drift-counts-");
   const changelogPath = join(dir, "config-changelog.md");
   const targetPath = join(dir, "CLAUDE.md");
   writeFileSync(changelogPath, ADDED_ONLY, "utf8");
@@ -1292,7 +1293,7 @@ test("configDrift reports what it parsed, so a changelog with no stale keys is n
 });
 
 test("configDrift refuses a changelog it parsed nothing from instead of returning no findings", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-drift-unparsable-"));
+  const dir = makeTempDir("doctor-drift-unparsable-");
   const changelogPath = join(dir, "config-changelog.md");
   const targetPath = join(dir, "CLAUDE.md");
   writeFileSync(changelogPath, "# Config changelog\n\nProse only — no yaml block at all.\n", "utf8");
@@ -1305,7 +1306,7 @@ test("configDrift refuses a changelog it parsed nothing from instead of returnin
 });
 
 test("findTranscriptFiles raises an unreadable directory instead of reporting it as no transcripts", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-unreadable-"));
+  const dir = makeTempDir("doctor-unreadable-");
   const locked = join(dir, "locked");
   mkdirSync(locked);
   chmodSync(locked, 0o000);
@@ -1491,7 +1492,7 @@ test("the low-confidence marker reaches the machine shape, not the text report a
 });
 
 test("cli: --json labels the in-flight exclusion too, not the text report alone", () => {
-  const dir = mkdtempSync(join(tmpdir(), "doctor-inflight-"));
+  const dir = makeTempDir("doctor-inflight-");
   const proj = join(dir, "-some-project");
   mkdirSync(proj, { recursive: true });
   writeFileSync(
@@ -1520,7 +1521,7 @@ test("the per-version cohort table excludes in-flight sessions from its median, 
 });
 
 test("readRunRecords does not silently drop a run record on a session-hash collision", () => {
-  const dir = mkdtempSync(join(tmpdir(), "runs-collision-"));
+  const dir = makeTempDir("runs-collision-");
   const slug = mkdtempSync(join(dir, "repo-"));
   const hash = createHash("sha256").update("sess-1").digest("hex");
   // Two separate run-record files under two different run-id subdirectories that both
@@ -1937,7 +1938,7 @@ test("an unresolved concurrent-wave turn (agentId set, no matching dispatch) is 
 // --- the friction journal's `event` lines, read back per session ---
 
 test("readRunRecords collects event lines and merges them across session windows", () => {
-  const dir = mkdtempSync(join(tmpdir(), "rr-events-"));
+  const dir = makeTempDir("rr-events-");
   mkdirSync(join(dir, "repo-1a2b3c4d"), { recursive: true });
   writeFileSync(join(dir, "repo-1a2b3c4d", "aaaa.jsonl"), [
     JSON.stringify({ kind: "run", runId: "a".repeat(16), schemaVersion: 1, pluginVersion: "0.13.0",
@@ -2038,14 +2039,14 @@ test("a round the green gate rejects after the reviewer passed it scores as a re
 // F1 end-to-end: a promotion record is committed markdown that arrives through a PR. Running the
 // report over a repo that holds a hostile one must have no effect on the filesystem.
 test("cli: a hostile promotion verify: line does not execute without --run-checks, and does with it", () => {
-  const transcripts = mkdtempSync(join(tmpdir(), "doctor-runchecks-dir-"));
+  const transcripts = makeTempDir("doctor-runchecks-dir-");
   const slug = join(transcripts, "-Users-x-proj");
   mkdirSync(slug, { recursive: true });
   writeFileSync(
     join(slug, "sess-rc01.jsonl"),
     JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) + "\n",
   );
-  const repo = mkdtempSync(join(tmpdir(), "doctor-runchecks-repo-"));
+  const repo = makeTempDir("doctor-runchecks-repo-");
   mkdirSync(join(repo, "docs", "devcycle", "promotions"), { recursive: true });
   writeFileSync(
     join(repo, "docs", "devcycle", "promotions", "2026-08-19-hostile.md"),
@@ -2252,7 +2253,7 @@ test("formatCandidate keeps versions=[..] for a candidate with no from->to span"
 });
 
 test("readRunRecords carries file-scoped triage and window-scoped commits onto the record", () => {
-  const dir = mkdtempSync(join(tmpdir(), "runs-triage-commit-"));
+  const dir = makeTempDir("runs-triage-commit-");
   const slug = mkdtempSync(join(dir, "repo-"));
   const h = createHash("sha256").update("s1").digest("hex");
   writeFileSync(join(slug, "r.jsonl"),
@@ -2390,7 +2391,7 @@ test("complianceIssueBody: an inherited-model draft body screens clean through r
       inheritedByModel: { "claude-opus-5": 3 }, sessions_sampled: 1 }],
   }];
   const d = complianceIssueBody("inherited-model", summaries, { monorepo: false, language: "js", testRunner: "node" });
-  const tmp = mkdtempSync(join(tmpdir(), "compliance-draft-redact-"));
+  const tmp = makeTempDir("compliance-draft-redact-");
   try {
     const bodyFile = join(tmp, "draft-body.md");
     writeFileSync(bodyFile, d.body);
