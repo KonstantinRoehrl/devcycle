@@ -29,8 +29,11 @@ function removeAll() {
   }
 }
 
-// Creates a temp directory under tmpdir() and returns its absolute path. The directory is
-// removed when this process exits; callers neither can nor should remove it themselves.
+// Creates a temp directory under tmpdir() and returns its absolute path. This module guarantees
+// removal when the process exits, so no caller is ever required to remove it. A caller MAY remove
+// it earlier — idempotently, `rmSync(dir, { recursive: true, force: true })`, which makes the exit
+// handler's second removal a no-op — and the suites do, because eager removal is what bounds peak
+// temp usage during a run while the exit handler covers the paths that never reach their finally.
 export function makeTempDir(prefix) {
   if (!armed) {
     // Armed once, not per call: tests/unit/doctor.test.mjs alone makes 30 of these, and one
