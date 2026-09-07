@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.1 — 2026-09-07
+
+- fix: stop temp-dir fixture leaks and harden the engine safety guards
+
 ## Unreleased
 
 - fix(engine): bound agent-cli process groups, harden the git guard, review-panel refs and sweep worktrees (audit 2026-09-05 H1, H5, L2, L3, L4; #235, #242, #148)
