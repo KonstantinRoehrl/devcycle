@@ -4,6 +4,44 @@
 
 - fix(engine): bound agent-cli process groups, harden the git guard, review-panel refs and sweep worktrees (audit 2026-09-05 H1, H5, L2, L3, L4; #235, #242, #148)
 
+## 0.20.0 — 2026-09-06
+
+- feat(planning): require a task's Files block to list the size baseline its edit trips (#255)
+- fix(measurement): make run-record attribution and doctor honest (#210, #233, #254)
+- docs(maintain): align the maintain command surface with shipped behaviour (#203, #204, #205, #206, #207)
+- chore(findings): sweep 23 resolved maintenance-findings records the store could not retire itself
+
+**Files-block size baselines (#255).** `incomplete-dispatch-brief` recurred five times after
+its r2 prose retired: a dispatch brief's Files block kept omitting the budget fixture that the
+brief's own mandated doc growth then tripped. `brief-completeness-check` now runs
+`budget-fixture-check`'s `budgetFixtureGaps()` as a leg, and `requiredFixtures()` maps
+`references/*.md` to `context-budget.json` too, closing the hatch where a references-only edit
+grew a playbook's charged context budget with no gate demanding a bump.
+
+**Measurement honesty (#210, #233, #254).** Closes the "measurement truth" cluster from the
+2026-09-05 whole-repo audit: `run-record.mjs` gains a `review-reject` event kind so a rejecting
+write path journals its culprit slug at write time instead of it being reconstructed after the
+fact from report prose (#254); impact rows now key by culprit instead of conflating unrelated
+causes that share a stage (#233); and `diffStats()` checks git's exit status instead of letting
+a failed diff silently report as "zero changes" (#210). The workload sensor also now derives its
+base by nearest ancestor merge-base rather than a fixed candidate order, and a per-version median
+built from fewer than 3 sessions no longer anchors a trend.
+
+**Maintain-surface doc alignment (#203, #204, #205, #206, #207).** `commands/maintain.md`'s
+description now states shipped behaviour instead of a stale "Phase 1 … stops" framing, and owns
+its `$ARGUMENTS` grammar and issue-folding policy rather than restating what
+`playbooks/maintaining-the-repo.md` and `review.md` already own; `docs/routing.md` no longer
+classes `/devcycle:maintain` read-only, though it writes a persistent, git-committed findings
+store.
+
+**Findings-store sweep.** The maintenance-findings store's open count was not trustworthy —
+`resolved` is only reachable when a re-detection pass revisits a finding, so a finding whose
+subject disappeared (issue closed, file deleted, code fixed) never transitioned and counted as
+open forever. This pass swept 86 → 63 open records, each verified against the live repo or
+GitHub. The engine gap itself is unfixed — closed-issue, vanished-subject, and staleness sweeps
+are queued as a roadmap item.
+>>>>>>> origin/dev
+
 ## 0.19.0 — 2026-09-04
 
 - feat(evidence-contract): harden the evidence-capture & verification contract (#143, #144, #150, #151, #230, #231, #232, #238)
