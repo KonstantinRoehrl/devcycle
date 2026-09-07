@@ -1,11 +1,11 @@
 // Shared helpers for the deterministic workflow-script tests.
 // Everything here is keyless: the `claude`/`codex` CLIs are stubbed with fake
 // executables placed first on PATH — no model call ever happens.
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { join, dirname, delimiter } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const GIT_IDENT = ["-c", "user.name=devcycle-test", "-c", "user.email=test@devcycle.invalid"];
 const VALIDATE_SCRIPT = fileURLToPath(new URL("../../scripts/validate.mjs", import.meta.url));
@@ -16,7 +16,7 @@ export function sh(cmd, args, opts = {}) {
 
 // Throwaway git repo with one empty root commit on main.
 export function makeRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "devcycle-test-repo-"));
+  const dir = makeTempDir("devcycle-test-repo-");
   sh("git", ["init", "-q", "-b", "main"], { cwd: dir });
   sh("git", [...GIT_IDENT, "commit", "--allow-empty", "-qm", "init"], { cwd: dir });
   return dir;
@@ -30,7 +30,7 @@ export function commitAll(dir, msg) {
 // Writes an executable named `name` (e.g. "claude") into a fresh bin dir and
 // returns that dir, to be prepended to PATH. `body` is the Node program text.
 export function makeFakeBin(name, body) {
-  const dir = mkdtempSync(join(tmpdir(), "devcycle-test-bin-"));
+  const dir = makeTempDir("devcycle-test-bin-");
   const p = join(dir, name);
   writeFileSync(p, `#!/usr/bin/env node\n${body}`);
   chmodSync(p, 0o755);
@@ -53,7 +53,7 @@ export function writeInto(dir, relPath, text) {
 export const FIXTURE_PLAYBOOK_HEAD = "# Demoing things\n\nA fixture playbook.\n";
 
 export function makePluginFixture() {
-  const dir = mkdtempSync(join(tmpdir(), "devcycle-test-plugin-"));
+  const dir = makeTempDir("devcycle-test-plugin-");
   writeInto(
     dir,
     ".claude-plugin/plugin.json",
