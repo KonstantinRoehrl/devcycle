@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, mkdirSync, readFileSync, mkdtempSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, mkdtempSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -673,7 +674,7 @@ test("malformed lens envelopes (null and non-array) degrade to notes; the panel 
 const prompt = process.argv[process.argv.length - 1];
 let out;
 if (prompt.includes("You are one lens")) {
-  if (prompt.includes("Correctness and security")) out = null;              // malformed: null payload
+  if (prompt.includes("Correctness and security")) out = null;              // agent-cli rejects a null payload as non-object; surfaces as a lens-failed note
   else if (prompt.includes("Simplification")) out = { findings: "nope" };   // malformed: non-array findings
   else out = { findings: [{ file: "src/a.js", line: 1, claim: "exports 3 not 2", severity: "high", measuredAgainst: "the spec" }] };
 } else if (prompt.includes("adversarial verifier")) out = { verified: true, verification: "stands" };
@@ -684,7 +685,7 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: out })
   assert.equal(res.status, 0, `panel must survive malformed envelopes; stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   assert.equal(report.findings.length, 1, "the one healthy lens's finding survives");
-  assert.ok(report.notes.filter((n) => /malformed/.test(n)).length >= 2, `expected two malformed notes, got ${JSON.stringify(report.notes)}`);
+  assert.ok(report.notes.filter((n) => /malformed|non-object structured output/.test(n)).length >= 2, `expected two malformed notes, got ${JSON.stringify(report.notes)}`);
 });
 
 // #190 — a lens strength surfaces in its own channel, unranked and unverified.
@@ -833,4 +834,71 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: out })
     claims.includes("custom-spec:sawSpec=false"),
     `a caller-supplied lens keyed "spec" must NOT receive the spec; claims=${JSON.stringify(claims)}`,
   );
+});
+
+// Audit 2026-09-05 L2: scope.ref went to `git diff <ref>` unvalidated, so a dash-prefixed ref was
+// read by git as an option (`--output=<file>` writes that file). The panel has no injection point
+// for git, so the shim is a PATH-level fake that logs its argv and delegates to the real binary.
+const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+function loggingGit(logPath) {
+  return makeFakeBin(
+    "git",
+    `
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(process.argv.slice(2)) + "\\n");
+const r = require("node:child_process").spawnSync(${JSON.stringify(REAL_GIT)}, process.argv.slice(2), { stdio: "inherit" });
+process.exit(r.status ?? 1);
+`
+  );
+}
+
+test("a dash-prefixed scope.ref is rejected before any git runs", () => {
+  const repo = makeRepo();
+  const log = join(mkdtempSync(join(tmpdir(), "devcycle-panel-git-")), "git-argv.log");
+  const claude = makeFakeBin("claude", `process.stdout.write(JSON.stringify({ is_error: false, structured_output: { findings: [] } }));`);
+  const res = runScript(SCRIPT, { scope: { ref: "--output=/tmp/devcycle-panel-should-not-exist" } }, { cwd: repo, binDirs: [claude, loggingGit(log)] });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /args\.scope\.ref must not start with "-"/);
+  assert.ok(!existsSync(log), "no git call may run before the ref is validated");
+});
+
+test("both diff calls pass --end-of-options immediately before the ref", () => {
+  const repo = makeRepo();
+  writeFileSync(join(repo, "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "a.js"), "module.exports = 2;\n");
+  const log = join(mkdtempSync(join(tmpdir(), "devcycle-panel-git-")), "git-argv.log");
+  const claude = makeFakeBin("claude", `process.stdout.write(JSON.stringify({ is_error: false, structured_output: { findings: [] } }));`);
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [claude, loggingGit(log)] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const diffCalls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((a) => a[0] === "diff");
+  assert.equal(diffCalls.length, 2, `expected the full diff and the --name-only diff, got ${JSON.stringify(diffCalls)}`);
+  for (const argv of diffCalls) {
+    assert.equal(argv[argv.length - 2], "--end-of-options", `--end-of-options must directly precede the ref: ${argv.join(" ")}`);
+    assert.equal(argv[argv.length - 1], "HEAD");
+  }
+});
+
+// Belt and braces beside agent-cli's non-object rejection: a summary read never dereferences a
+// null value even if a future envelope shape slips one through.
+test("the reconciler falls back to the built-in summary when the summary agent returns no object", () => {
+  const repo = makeRepo();
+  writeFileSync(join(repo, "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "a.js"), "module.exports = 2;\n");
+  const claude = makeFakeBin(
+    "claude",
+    `
+const prompt = process.argv[process.argv.length - 1];
+let out;
+if (prompt.includes("You are one lens")) out = { findings: [{ file: "a.js", line: 1, claim: "exports 2", severity: "low", measuredAgainst: "the spec" }] };
+else if (prompt.includes("adversarial verifier")) out = { verified: true, verification: "read a.js" };
+else out = null;
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+`
+  );
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [claude] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.ok(report.summary.length > 0, "a fallback summary must be produced, not a crash");
 });

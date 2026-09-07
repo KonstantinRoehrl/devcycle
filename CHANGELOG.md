@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- fix(engine): bound agent-cli process groups, harden the git guard, review-panel refs and sweep worktrees (audit 2026-09-05 H1, H5, L2, L3, L4; #235, #242, #148)
+
 ## 0.20.0 — 2026-09-06
 
 - feat(planning): require a task's Files block to list the size baseline its edit trips (#255)
@@ -36,6 +40,7 @@ subject disappeared (issue closed, file deleted, code fixed) never transitioned 
 open forever. This pass swept 86 → 63 open records, each verified against the live repo or
 GitHub. The engine gap itself is unfixed — closed-issue, vanished-subject, and staleness sweeps
 are queued as a roadmap item.
+>>>>>>> origin/dev
 
 ## 0.19.0 — 2026-09-04
 
