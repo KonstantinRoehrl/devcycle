@@ -7,10 +7,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
-import { tmpdir } from "node:os";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "hooks", "block-destructive-git.mjs");
 
@@ -27,10 +27,10 @@ function decideRaw(input) {
 const decide = (agentType, command) => decideRaw({ agent_type: agentType, tool_input: { command } }).decision;
 
 // Main-thread cases pass a cwd; the hook walks upward from it for .devcycle/state.md exactly as
-// hooks/workload-sensor.mjs does. tmpdir() must sit outside the repo (the suite runs under an
+// hooks/workload-sensor.mjs does. The fixture must sit outside the repo (the suite runs under an
 // out-of-repo TMPDIR), or the walk would find the repo's own state file.
 function cycleDir(stateBody) {
-  const dir = mkdtempSync(join(tmpdir(), "devcycle-git-guard-"));
+  const dir = makeTempDir("devcycle-git-guard-");
   if (stateBody !== null) {
     mkdirSync(join(dir, ".devcycle"));
     writeFileSync(join(dir, ".devcycle", "state.md"), stateBody);

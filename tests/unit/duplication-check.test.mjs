@@ -1,16 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, chmodSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, rmSync, realpathSync, chmodSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/duplication-check.mjs");
 
 function makeFixture(files) {
   // realpath: on macOS the temp dir is a symlink, and the child's cwd is the resolved
   // path, which would otherwise make every reported path a chain of `../`.
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "dup-check-")));
+  const dir = realpathSync(makeTempDir("dup-check-"));
   for (const [rel, content] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, rel)), { recursive: true });
     writeFileSync(join(dir, rel), content, "utf8");

@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/budget-fixture-check.mjs");
 
 function run(planText) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "bfc-")));
+  const dir = realpathSync(makeTempDir("bfc-"));
   const plan = join(dir, "plan.md");
   writeFileSync(plan, planText);
   const r = spawnSync("node", [SCRIPT, plan], { encoding: "utf8" });

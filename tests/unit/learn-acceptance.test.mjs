@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { repoSlug } from "../../scripts/run-record.mjs";
 import { verify, installedVersion } from "../../scripts/verification.mjs";
 
@@ -13,7 +13,7 @@ const FIXTURES = new URL("../fixtures/learn/", import.meta.url).pathname;
 
 // A whole repo, journal and lesson store on disk, driven only through the CLI.
 function world({ journal = true } = {}) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "devcycle-accept-")));
+  const root = realpathSync(makeTempDir("devcycle-accept-"));
   const runsDir = join(root, "runs");
   const learnings = join(root, "learnings");
   cpSync(join(FIXTURES, "promotions"), join(root, "docs", "devcycle", "promotions"), { recursive: true });

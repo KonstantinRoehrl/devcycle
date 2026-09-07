@@ -1,15 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { taskFileMap } from "../../scripts/task-files.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/brief-completeness-check.mjs");
 
 function run(planText) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "bcc-")));
+  const dir = realpathSync(makeTempDir("bcc-"));
   const plan = join(dir, "plan.md");
   writeFileSync(plan, planText);
   try {

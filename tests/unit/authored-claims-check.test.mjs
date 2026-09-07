@@ -2,15 +2,15 @@
 // § Authored claims). Fixtures live under an out-of-repo TMPDIR per tests/unit/helpers.mjs.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/authored-claims-check.mjs");
 
 function run(text) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "acc-")));
+  const dir = realpathSync(makeTempDir("acc-"));
   const file = join(dir, "artifact.md");
   writeFileSync(file, text);
   const r = spawnSync("node", [SCRIPT, file], { encoding: "utf8" });

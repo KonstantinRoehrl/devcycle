@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { parsePool, rungFor, rank, resolveModel, loadTable } from "../../scripts/model-pool.mjs";
 
 const TABLE = [
@@ -186,7 +186,7 @@ test("cli: a non-numeric --signals is rejected rather than silently counted as z
 });
 
 test("cli: --table overrides the shipped tier table", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "model-pool-table-")), "tiers.json");
+  const path = join(makeTempDir("model-pool-table-"), "tiers.json");
   writeFileSync(path, JSON.stringify([{ family: "sonnet", rank: 1, match: "sonnet" }]));
   const res = cli("--value", "claude-sonnet-5", "--orchestrator", "claude-sonnet-5", "--table", path);
   assert.equal(res.status, 0);
