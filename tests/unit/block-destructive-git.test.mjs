@@ -135,7 +135,7 @@ test("reviewer + a non-git binary that contains 'git' is not swept into the guar
 // itself, and the guarded origins are read-only-contract Claude dispatches, not a hostile shell.
 // These are ALLOW today, by design; the test pins the bound so a future change to it is deliberate,
 // not silent. If the origins ever stop being cooperative, this is the trade to revisit.
-test("stated bounds: shell expansion, ANSI-C quoting, functions and case labels reach allow", () => {
+test("stated bounds: shell expansion, ANSI-C quoting, functions, case labels and in-substitution obfuscation reach allow", () => {
   for (const cmd of [
     "G=git; $G reset --hard",        // parameter expansion assembles the word
     "gi${x}t reset --hard",          // expansion spliced into the name
@@ -143,7 +143,9 @@ test("stated bounds: shell expansion, ANSI-C quoting, functions and case labels 
     "$'\\x67it' reset --hard",       // ANSI-C quoting spells git
     "f(){ git reset --hard; }; f",   // a shell function hides it
     "case x in *) git reset --hard;; esac", // a case label hides it
-  ])
+    "echo `gi\\t reset --hard`",     // git obfuscated by a backslash INSIDE a substitution:
+    "x=$(g\\it reset --hard)",       //   the substitution detector is a raw-text \bgit\b tripwire,
+  ])                                 //   so it sees a plain `git` in there but not a broken-up one
     assert.equal(decide(REVIEWER, cmd), "allow", `bound changed (now denied) for: ${cmd}`);
 });
 
@@ -257,8 +259,25 @@ test("reviewer + destructive git behind a shell reserved word is denied", () => 
 });
 
 test("reviewer + git inside a process substitution is denied regardless of subcommand", () => {
-  for (const cmd of ["cat <(git stash drop)", "echo x | tee >(git checkout -- x)", "cat <(git log -1)"])
+  // The family is <( , >( and zsh's =( ; all three are denied when a git token is present.
+  for (const cmd of ["cat <(git stash drop)", "echo x | tee >(git checkout -- x)", "cat <(git log -1)",
+    "cat =(git reset --hard)", "diff =(git checkout -- x) f", "cat =(git log -1)"])
     assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for process substitution: ${cmd}`);
+});
+
+// `=(` is anchored to word start / whitespace so the process-substitution spelling is caught without
+// denying an ARRAY ASSIGNMENT, whose `=(` is glued to a name — the git after it is read-only and must
+// still run. A raw `=\(` regex would wrongly deny these.
+test("reviewer + an array assignment beside a read-only git is not a false-positive deny", () => {
+  for (const cmd of ["files=(*.js); git diff -- x", "arr=(a b c); git status", "x=(1 2 3); git log -1"])
+    assert.equal(decide(REVIEWER, cmd), "allow", `array assignment wrongly denied: ${cmd}`);
+});
+
+test("main thread + git stash inside a zsh =() substitution is denied during an active cycle", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  assert.equal(decideMain(cwd, "cat =(git stash)"), "deny");
+  // ...but an array assignment beside a benign main-thread git is not swept in.
+  assert.equal(decideMain(cwd, "files=(a b); git status"), "allow");
 });
 
 // Reserved words around NON-git commands must not trip the guard: reviewers write these loops.

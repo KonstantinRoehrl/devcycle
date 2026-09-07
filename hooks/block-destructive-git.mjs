@@ -26,13 +26,16 @@
 // dispatch running a plain destructive git, not a complete parser hardened against an adversary
 // crafting evasions — the origins guarded here are Claude dispatches following a read-only contract,
 // not a hostile shell. So the guard denies plain, quoted, wrapped, reserved-word and process-
-// substitution spellings, and leaves these classes as ALLOW, each needing the shell itself to
-// resolve: a shell EXPANSION that assembles the word `git` (`G=git; $G reset --hard`, `${x}git …`,
-// `git${IFS}reset …`), an ANSI-C `$'…'` body that spells it (`$'\x67it' …`), a shell FUNCTION or
-// `case` label that hides it (`f(){ git reset; }; f`, `case x in *) git reset;; esac`), and a
-// metacharacter glued flush against a neighbour (`f(){`). Closing any of these needs a shell-grade
-// tokenizer, whose maintenance cost outweighs the evasion it stops for this threat model; if the
-// origins ever stop being cooperative, that trade is what to revisit.
+// substitution spellings — the process-substitution family it denies is `<(`, `>(` and zsh's `=(` —
+// and leaves these classes as ALLOW, each needing the shell itself to resolve: a shell EXPANSION
+// that assembles the word `git` (`G=git; $G reset --hard`, `${x}git …`, `git${IFS}reset …`, zsh's
+// `=git` EQUALS form), an ANSI-C `$'…'` body that spells it (`$'\x67it' …`), a shell FUNCTION or
+// `case` label that hides it (`f(){ git reset; }; f`, `case x in *) git reset;; esac`), a
+// metacharacter glued flush against a neighbour (`f(){`), and a git OBFUSCATED by a backslash or
+// quote INSIDE a substitution (`` `gi\t reset` ``, `$(g\it reset)`) — the substitution detector is a
+// raw-text `\bgit\b` tripwire, so it sees the plain spelling but not the broken-up one. Closing any
+// of these needs a shell-grade tokenizer, whose maintenance cost outweighs the evasion it stops for
+// this threat model; if the origins ever stop being cooperative, that trade is what to revisit.
 import { readFileSync } from "node:fs";
 import { findStateFile } from "./lib/find-state-file.mjs";
 
@@ -169,13 +172,19 @@ function stashIsDestructive(tokens, i) {
 const mentionsStash = (tokens) => tokens.some((t) => normalizeHead(t) === "stash");
 
 // Command and process substitution can hide a git write we cannot classify: backticks, `$(`, and
-// the `<(`/`>(` process-substitution forms (audit 2026-09-05 H1) are all denied when a git token
-// is present anywhere in the command, whatever the subcommand. On the main thread the same denial
-// is scoped to commands that ALSO carry a `stash` token anywhere. Like the wrapper arm below, that
-// scoping over-reaches — an unrelated `stash` word (a `--grep=stash`, an echoed word) beside any
-// substituted git denies — which is the accepted cost of not parsing inside a substitution; the
-// reason therefore states what was seen instead of asserting a stash was run.
-if (/`|\$\(|<\(|>\(/.test(command) && /\bgit\b/.test(command) && (guarded || /\bstash\b/.test(command)))
+// the `<(`/`>(` process-substitution forms (audit 2026-09-05 H1), plus zsh's third form `=(…)`, are
+// all denied when a git token is present anywhere in the command, whatever the subcommand. `=(` is
+// matched only at word start or after whitespace so it catches the process-substitution spelling
+// (`cat =(git reset)`) without tripping on an array assignment (`arr=(a b c); git diff`), whose `=(`
+// is glued to a name — a raw `=(` there would wrongly deny a legitimate read-only git. On the main
+// thread the same denial is scoped to commands that ALSO carry a `stash` token anywhere. Like the
+// wrapper arm below, that scoping over-reaches — an unrelated `stash` word (a `--grep=stash`, an
+// echoed word) beside any substituted git denies — which is the accepted cost of not parsing inside
+// a substitution; the reason therefore states what was seen instead of asserting a stash was run.
+// The detector is a raw-text tripwire (`\bgit\b`), not a normalized-token scan, so a git OBFUSCATED
+// inside the substitution (`` `gi\t reset` ``, `$(g\it reset)`) is a stated bound above, not caught.
+const hasSubstitution = /`|\$\(|<\(|>\(/.test(command) || /(^|\s)=\(/.test(command);
+if (hasSubstitution && /\bgit\b/.test(command) && (guarded || /\bstash\b/.test(command)))
   deny(denyReason(
     "run git inside a command substitution (deny-on-ambiguity).",
     "this command names `stash` and runs git inside a command substitution, which can hide one (deny-on-ambiguity)."
