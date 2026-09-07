@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, mkdirSync, rmSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, sh } from "./helpers.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/resume-check.mjs");
@@ -16,7 +16,7 @@ function makeState(dir, lines) {
 }
 
 test("passes when stage is valid and every named artifact exists", () => {
-  const dir = mkdtempSync(join(tmpdir(), "resume-check-"));
+  const dir = makeTempDir("resume-check-");
   mkdirSync(join(dir, "docs"), { recursive: true });
   writeFileSync(join(dir, "docs", "spec.md"), "x");
   const state = makeState(dir, [
@@ -32,7 +32,7 @@ test("passes when stage is valid and every named artifact exists", () => {
 });
 
 test("fails when a named artifact path is missing on disk", () => {
-  const dir = mkdtempSync(join(tmpdir(), "resume-check-"));
+  const dir = makeTempDir("resume-check-");
   const state = makeState(dir, [
     "- stage: execution",
     `- root: ${dir}`,
@@ -55,7 +55,7 @@ test("accepts every stage in commands/cycle.md's enum (binds to the single sourc
   assert.ok(enumMatch, "commands/cycle.md must declare the stage enum");
   const stages = enumMatch[1].split("|");
   assert.ok(stages.length >= 10, `expected the full stage enum, got ${stages.length}`);
-  const dir = mkdtempSync(join(tmpdir(), "resume-check-"));
+  const dir = makeTempDir("resume-check-");
   try {
     for (const stage of stages) {
       const state = makeState(dir, [
@@ -74,7 +74,7 @@ test("accepts every stage in commands/cycle.md's enum (binds to the single sourc
 });
 
 test("fails on an invalid stage enum value", () => {
-  const dir = mkdtempSync(join(tmpdir(), "resume-check-"));
+  const dir = makeTempDir("resume-check-");
   const state = makeState(dir, [
     "- stage: bogus",
     `- root: ${dir}`,
@@ -92,7 +92,7 @@ test("fails on an invalid stage enum value", () => {
 
 test("a state file whose root: names another checkout exits non-zero naming both paths", () => {
   const repo = makeRepo();
-  const foreign = mkdtempSync(join(tmpdir(), "resume-check-foreign-"));
+  const foreign = makeTempDir("resume-check-foreign-");
   try {
     mkdirSync(join(repo, ".devcycle"), { recursive: true });
     const state = join(repo, ".devcycle", "state.md");
@@ -143,7 +143,7 @@ test("a matching root: passes, even when it is written in unresolved symlink for
 
 test("the ownership check reports nothing else — a foreign root short-circuits artifact checks", () => {
   const repo = makeRepo();
-  const foreign = mkdtempSync(join(tmpdir(), "resume-check-foreign-"));
+  const foreign = makeTempDir("resume-check-foreign-");
   try {
     mkdirSync(join(repo, ".devcycle"), { recursive: true });
     const state = join(repo, ".devcycle", "state.md");
@@ -176,7 +176,7 @@ test("a foreign-root state file with a blank request prints empty, not '(none re
   // blank request — it prints empty. This locks the delta at the resume-check level; the parser
   // level is covered in md-field.test.mjs.
   const repo = makeRepo();
-  const foreign = mkdtempSync(join(tmpdir(), "resume-check-foreign-"));
+  const foreign = makeTempDir("resume-check-foreign-");
   try {
     mkdirSync(join(repo, ".devcycle"), { recursive: true });
     const state = join(repo, ".devcycle", "state.md");
@@ -205,7 +205,7 @@ test("a foreign-root state file with a blank request prints empty, not '(none re
 });
 
 test("a state file in a non-git directory skips the ownership check rather than failing", () => {
-  const dir = mkdtempSync(join(tmpdir(), "resume-check-"));
+  const dir = makeTempDir("resume-check-");
   try {
     const state = makeState(dir, [
       "- stage: planning",
@@ -366,7 +366,7 @@ test("branch: none skips the branch-existence check", () => {
 });
 
 test("a recorded branch in a non-git directory skips the branch check rather than failing", () => {
-  const dir = mkdtempSync(join(tmpdir(), "resume-check-"));
+  const dir = makeTempDir("resume-check-");
   try {
     const state = makeState(dir, [
       "- stage: planning",
