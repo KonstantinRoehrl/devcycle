@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, mkdirSync, readFileSync, mkdtempSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import panel from "../../workflows/review-panel.js";
 import { makeRepo, commitAll, makeFakeBin, runScript } from "./helpers.mjs";
 
@@ -625,7 +625,7 @@ test("stage 1 caps concurrent lens subprocesses instead of spawning one per job"
   commitAll(repo, "base");
   writeFileSync(join(repo, "src", "a.js"), "module.exports = 3;\n"); // the diff under review
 
-  const eventLog = join(mkdtempSync(join(tmpdir(), "devcycle-lens-conc-")), "events.log");
+  const eventLog = join(makeTempDir("devcycle-lens-conc-"), "events.log");
   const bin = makeFakeBin(
     "claude",
     `
@@ -854,7 +854,7 @@ process.exit(r.status ?? 1);
 
 test("a dash-prefixed scope.ref is rejected before any git runs", () => {
   const repo = makeRepo();
-  const log = join(mkdtempSync(join(tmpdir(), "devcycle-panel-git-")), "git-argv.log");
+  const log = join(makeTempDir("devcycle-panel-git-"), "git-argv.log");
   const claude = makeFakeBin("claude", `process.stdout.write(JSON.stringify({ is_error: false, structured_output: { findings: [] } }));`);
   const res = runScript(SCRIPT, { scope: { ref: "--output=/tmp/devcycle-panel-should-not-exist" } }, { cwd: repo, binDirs: [claude, loggingGit(log)] });
   assert.equal(res.status, 1);
@@ -867,7 +867,7 @@ test("both diff calls pass --end-of-options immediately before the ref", () => {
   writeFileSync(join(repo, "a.js"), "module.exports = 1;\n");
   commitAll(repo, "base");
   writeFileSync(join(repo, "a.js"), "module.exports = 2;\n");
-  const log = join(mkdtempSync(join(tmpdir(), "devcycle-panel-git-")), "git-argv.log");
+  const log = join(makeTempDir("devcycle-panel-git-"), "git-argv.log");
   const claude = makeFakeBin("claude", `process.stdout.write(JSON.stringify({ is_error: false, structured_output: { findings: [] } }));`);
   const res = runScript(SCRIPT, { scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [claude, loggingGit(log)] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
