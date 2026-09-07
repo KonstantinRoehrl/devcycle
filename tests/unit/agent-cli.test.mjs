@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, realpathSync, existsSync } from "node:fs";
+import { readFileSync, realpathSync, existsSync } from "node:fs";
 import { join, dirname, delimiter } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import agentCli from "../../workflows/lib/agent-cli.js";
 import { makeFakeBin } from "./helpers.mjs";
 
@@ -89,7 +89,7 @@ test("run() completes normally under the cap with no overflow flag", async () =>
 });
 
 test("claudeStructured pins --tools with the equals form and plumbs cwd, model and permission mode", async () => {
-  const argvLog = join(mkdtempSync(join(tmpdir(), "devcycle-agent-cli-")), "argv.json");
+  const argvLog = join(makeTempDir("devcycle-agent-cli-"), "argv.json");
   const bin = makeFakeBin(
     "claude",
     `
@@ -98,7 +98,7 @@ fs.writeFileSync(${JSON.stringify(argvLog)}, JSON.stringify({ argv: process.argv
 process.stdout.write(JSON.stringify({ is_error: false, structured_output: { ok: true } }));
 `
   );
-  const cwd = mkdtempSync(join(tmpdir(), "devcycle-agent-cli-cwd-"));
+  const cwd = makeTempDir("devcycle-agent-cli-cwd-");
   const res = await withPath(isolatedPath([bin]), () =>
     claudeStructured({
       prompt: "the prompt",
@@ -124,7 +124,7 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { ok: 
 });
 
 test("claudeStructured makes exactly `attempts` calls and labels the failure with the caller's vocabulary", async () => {
-  const tries = join(mkdtempSync(join(tmpdir(), "devcycle-agent-cli-tries-")), "tries.log");
+  const tries = join(makeTempDir("devcycle-agent-cli-tries-"), "tries.log");
   const bin = makeFakeBin(
     "claude",
     `
@@ -186,7 +186,7 @@ test("claudeStructured reports an agent that outlives its timeout in the caller'
 // runner that misses the window makes a correct retry loop fail the count. The
 // cost of that headroom is ~3s of suite time, two attempts of 1500ms each.
 test("claudeStructured retries a timed-out agent and reports the timeout after the last attempt", async () => {
-  const tries = join(mkdtempSync(join(tmpdir(), "devcycle-agent-cli-timeout-tries-")), "tries.log");
+  const tries = join(makeTempDir("devcycle-agent-cli-timeout-tries-"), "tries.log");
   const bin = await makeStalledClaude(`require("node:fs").appendFileSync(${JSON.stringify(tries)}, "x");`);
   const res = await withPath(isolatedPath([bin]), () =>
     withShortAgentTimeout(1500, () =>
@@ -412,7 +412,7 @@ test("a child that exits cleanly is never reported as timedOut when its timeout 
 // every live group before the parent dies — otherwise a killed panel leaves claude subprocesses
 // orphaned. The runner is a separate node process so the signal can be sent for real.
 test("a parent taking SIGTERM kills every live child group before exiting", async () => {
-  const pidFile = join(mkdtempSync(join(tmpdir(), "devcycle-agent-cli-signal-")), "child.pid");
+  const pidFile = join(makeTempDir("devcycle-agent-cli-signal-"), "child.pid");
   const runner = `
 const { run } = require(${JSON.stringify(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "workflows", "lib", "agent-cli.js"))});
 run(process.execPath, ["-e", 'require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 10000)'], { timeoutMs: 10000 });
@@ -432,7 +432,7 @@ run(process.execPath, ["-e", 'require("node:fs").writeFileSync(${JSON.stringify(
 // panel reconciler dereferenced it. Every schema both engines pass is an object schema, so a
 // non-object is a validation failure and takes the retry path.
 test("claudeStructured rejects a null structured_output as a validation failure after the last attempt", async () => {
-  const tries = join(mkdtempSync(join(tmpdir(), "devcycle-agent-cli-null-")), "tries.log");
+  const tries = join(makeTempDir("devcycle-agent-cli-null-"), "tries.log");
   const bin = makeFakeBin(
     "claude",
     `

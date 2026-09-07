@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { parsePatch, anchorFinding } from "../../scripts/pr-diff-anchor.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/pr-diff-anchor.mjs", import.meta.url));
@@ -114,7 +114,7 @@ test("anchorFinding anchors a finding in the second file of a multi-file diff", 
 });
 
 test("CLI partitions an in-hunk finding into anchored (RIGHT) and out-of-hunk / file-only findings into degraded", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pr-diff-anchor-cli-"));
+  const dir = makeTempDir("pr-diff-anchor-cli-");
   const diffFile = join(dir, "diff.patch");
   const findingsFile = join(dir, "findings.json");
   writeFileSync(diffFile, TWO_FILE_DIFF);
@@ -143,7 +143,7 @@ test("CLI partitions an in-hunk finding into anchored (RIGHT) and out-of-hunk / 
 });
 
 test("CLI accepts a review-panel-shaped finding (file, no path) and anchors it", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pr-diff-anchor-cli-"));
+  const dir = makeTempDir("pr-diff-anchor-cli-");
   const diffFile = join(dir, "diff.patch");
   const findingsFile = join(dir, "findings.json");
   writeFileSync(diffFile, TWO_FILE_DIFF);
@@ -168,7 +168,7 @@ test("CLI accepts a review-panel-shaped finding (file, no path) and anchors it",
 });
 
 test("CLI degrades a finding with neither path nor file, with a named reason", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pr-diff-anchor-cli-"));
+  const dir = makeTempDir("pr-diff-anchor-cli-");
   const diffFile = join(dir, "diff.patch");
   const findingsFile = join(dir, "findings.json");
   writeFileSync(diffFile, TWO_FILE_DIFF);
@@ -186,7 +186,7 @@ test("CLI degrades a finding with neither path nor file, with a named reason", (
 });
 
 test("CLI reports malformed findings JSON through its own pr-diff-anchor: error, not a raw stack trace", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pr-diff-anchor-cli-"));
+  const dir = makeTempDir("pr-diff-anchor-cli-");
   const diffFile = join(dir, "diff.patch");
   const findingsFile = join(dir, "findings.json");
   writeFileSync(diffFile, TWO_FILE_DIFF);
@@ -200,7 +200,7 @@ test("CLI reports malformed findings JSON through its own pr-diff-anchor: error,
 });
 
 test("CLI rejects an unrecognised flag rather than silently ignoring it", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pr-diff-anchor-cli-"));
+  const dir = makeTempDir("pr-diff-anchor-cli-");
   const diffFile = join(dir, "diff.patch");
   const findingsFile = join(dir, "findings.json");
   writeFileSync(diffFile, TWO_FILE_DIFF);
