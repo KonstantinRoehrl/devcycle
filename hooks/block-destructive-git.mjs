@@ -13,130 +13,26 @@
 // launcher in the bounded WRAPPERS set: setsid/sudo/exec/taskset/…), a `{ … }` group or `( … )`
 // subshell, backticks, or a write-capable option (git diff --output=<file>) — is denied. The WRAPPERS
 // set is a bounded launcher denylist: a git behind an UNLISTED head-position launcher is allowed, the
-// accepted bound per the 2026-09-02 design spec's § Parser robustness. Shell syntax that merely sits
-// in FRONT of a command is NOT a bound: a head that is a reserved word (`if`, `!`, `for … do`,
-// `case … in`, `coproc`, `function`), a case pattern label (`*)`, `1)`), a function-definition head
-// (`f()`, `f () {`), or a redirection (`>/dev/null git …`) is stripped until the real command is
-// reached, and `<(`/`>(` — plus zsh's third process-substitution form `=(`, and its `=word` EQUALS
-// expansion (round 16) — are denied like backticks and `$(`; that spec's rule is that a missed
-// destructive command is not acceptable. The two shells are read as a UNION throughout: zsh is the
-// shell this plugin ships into, so a spelling only zsh runs as git is denied even where bash reports
-// a syntax error for it.
-//
-// CANONICALIZE, THEN CLASSIFY (branch review round 4). The parser used to split on whitespace, which
-// gave every rule keyed to a token boundary a twin spelling where the metacharacter sits flush
-// against its neighbour — `f() {` vs `f(){` vs `f (){`, `2>&1` vs `2>& 1` — and three review rounds
-// running closed one twin and left the next open. Enumerating them is unbounded, so the command is
-// TOKENIZED first (tokenizeCommand) and only then split into segments and classified: every `(`,
-// `)`, `;`, `&`, `|`, redirection operator and standalone `{`/`}` that is shell SYNTAX becomes a
-// token of its own, while the same character inside `'…'`, `"…"`, `$'…'` or behind a backslash stays
-// DATA. `f(){`, `f (){`, `f() {` and `f () {` all reduce to one stream (`f` `(` `)` `{`), so the
-// class is closed as a class. Canonicalization runs to the WORD level, not just the token's ends:
-// quoting and escapes written INSIDE a word (`gi\t`, `"g"'it'`, `g""it`, `g$'it'`) are what the
-// shell resolves before it runs `git`, so headForms resolves them the same way — dropping the
-// quote characters, and DECODING the escapes an ANSI-C quote spells its characters with, so
-// `$'\x67it'` reduces to `git` (round 8) while `$'gi\t'` stays `gi<TAB>`, which is not a command any
-// shell has (round 6, round 8). The one resolution that is deliberately NOT done at the word level is
-// a backslash-newline inside `'…'`: this shell keeps both characters literal, so joining the halves
-// here would invent a git out of a command name that carries them — the wrapper check joins them
-// instead, because that is where an inner shell genuinely re-reads the text (round 8, fix round).
-// Telling a duplication's `&` (`2>&1`) from a background `&` is part of that tokenization — the
-// descriptor and the `&` are glued into one redirection operator token — so
-// a bare `&` token is always a command separator and the segment splitter needs no lookbehind.
-// A case pattern label is dropped before segments are formed, because an alternated label spans the
-// `|` the splitter cuts on. An unterminated quote is ambiguous, so the command is re-read with
-// quoting disabled: the syntax the dangling quote would have hidden is still classified.
-// The one place canonicalization deliberately classifies LESS is a heredoc body (`cat <<'EOF' … EOF`):
-// those lines are data the shell writes, never commands it runs, and reading them as commands denied
-// a guarded agent the report and fixture files this repo's own workflow asks it to write (round 6).
-// An unterminated heredoc has no body boundary to trust, so it falls back to classifying the body.
-// The substitution pre-check deliberately does NOT read that boundary: round 13 exempted a
-// quoted-delimiter body there too, and the exemption was wider than the shells' own behaviour, so
-// round 14 reverted it and named the over-denial it restores in the coverage block below.
-// A `#` that starts a word is a comment in both shells, and a comment can FABRICATE a heredoc the
-// shell never opens, so the command is classified in BOTH readings — as written and with its
-// comments removed — and denied on either (round 14).
+// accepted bound per the 2026-09-02 design spec's § Parser robustness. Shell reserved
+// words and process substitution are NOT a bound: a head that is a reserved word (`if`, `!`,
+// `for … do`, `while … do`) is stripped until the real command is reached, and `<(`/`>(` are denied
+// like backticks and `$(` — that spec's rule is that a missed destructive command is not acceptable.
 // Scope is git-only; non-git commands (tests, greps) are allowed. Three dispatch origins are guarded
 // by the allowlist — task-reviewer, red-team-reviewer and, since #235, implementer — and the main
-// thread (no agent_type) is guarded for `git stash` alone, only while a .devcycle/state.md at or
-// above the call's cwd reports a stage other than done. Every other origin is never guarded.
+// thread (no agent_type) is guarded for `git stash` alone, only while a .devcycle/state.md above the
+// call's cwd reports a stage other than done. Every other origin is never guarded.
 //
-// WHAT THE EVIDENCE FOR THIS FILE DOES NOT COVER (branch review round 14). The differential corpus
-// behind the "residual fail-opens: 0" claim (.devcycle/evidence/branch-fix-8-3-gen-corpus.mjs)
-// crosses obfuscation SPELLINGS with syntactic CONTEXTS, and neither dimension contains a shell
-// EXPANSION — so that 0 is 0 over what the corpus covers, not over every destructive spelling. These
-// reach ALLOW and are real, executed destructive gits: `${x}git reset --hard`, `gi${x}t reset
-// --hard`, `${x:-git} reset --hard`, `G=git; $G reset --hard`, and `git${IFS}reset --hard` (bash
-// only; zsh does not word-split). Resolving them needs shell-level expansion this parser
-// deliberately does not do, so the whole class is a stated bound rather than a backstopped case —
-// the `$git` note in headForms explains ONE spelling, not the bound on the measurement. Four
-// further known allows, all pre-existing and all outside that corpus:
-// (a) `git -c alias.z=stash z` reaches allow on the main-thread arm, because `-c` is a VALUE_OPTIONS
-// skip and the subcommand read lands on `z` (it also requires a configured alias);
-// (b) a wrapper's quoted script that ENDS in a dangling backslash — `sh -c 'git stash\'`,
-// `eval 'git stash\'` — reaches allow on the main-thread arm, because the inner shell drops that
-// backslash and runs a real `git stash` (shim oracle, both shells) while the outer quotes keep it,
-// leaving `stash\'` a token mentionsStash cannot read as `stash`. The top-level spelling of the same
-// class (`git stash\`) is closed; resolving the wrapper one means resolving a dangling escape inside
-// the wrapper join, which round 10's fix round left untouched;
-// (c) ANYTHING THAT EXECUTES A HEREDOC BODY executes it, and the round-6 body exemption hides that
-// from both arms. Three executors, one class: an interpreter reading the body
-// (`bash <<'EOF' … git stash … EOF`, `sh <<EOF … git reset --hard … EOF`), and — the shape round 14
-// filed, omitted from this list until round 16 — a body WRITTEN to a file and then run by the `.`
-// builtin or `source` (`cat <<'EOF' > f … git stash … EOF` then `. ./f`, or `source ./f`). All of
-// them ran real destructive gits in both shells (shim oracle, rounds 12 and 16) and reach allow,
-// because the body is consumed as data before any segment is formed. Only the SUBSTITUTION spellings
-// of it are denied, and only because the pre-check below reads the RAW command text; classifying the
-// body of a heredoc whose command is a shell is what would close it, and no round has touched
-// skipHeredocBodies for it;
-// (d) zsh's UNLISTED HEAD-POSITION LAUNCHERS, which are inside the WRAPPERS bound stated above rather
-// than a defect of it: `noglob git stash` and `nocorrect git reset --hard` run real destructive gits
-// in /bin/zsh (shim oracle, round 16; /bin/bash reports `command not found`) and reach allow on both
-// arms, exactly as any other launcher this file does not list does. Closing them means listing them,
-// which is the design's accepted bound, not this file's rule.
-// The NUL class (`g$'\x00'it stash`), the eval-rejoin class (`eval \ git stash`), the substitution
-// obfuscation class (`echo $(g\it stash)`), the comment-fabricated heredoc (`echo hi # <<'EOF'`),
-// zsh's `=(…)` and `=word` forms (`cat =(git stash)`, `=git reset --hard`) and the COMPOSITION of
-// the eval-rejoin and substitution classes (`echo $(eval \ g\it stash)`) were open here until rounds
-// 12, 14 and 16 and are now closed on both arms, with the shim oracle's argv for each spelling. Their
-// COMPOSITIONS are not systematically measured — the corpus crosses one spelling with one context, so
-// a spelling that composes two obfuscations is generated by neither axis. Round 16 found and closed
-// one such composition by sharing a single reduction (reReadsAs) between the two arms that apply it,
-// so a later addition to either cannot part company with the other again; the rest of the
-// composition space is untested, which is a bound on the measurement, not a claim about it.
-//
-// THE OVER-DENIALS this file carries deliberately, recorded here so the next reader knows each is a
-// decision and not an oversight.
-// 1. THE SUBSTITUTION PRE-CHECK'S SHAPE, restored by round 14. It is not heredoc-shaped, which is how
-// this paragraph described it until round 16 measured it: the rule is ANY command that names git in
-// the same text as a backtick, `$(`, `<(`, `>(` or `=(` — denied to a guarded origin, and on the main
-// thread too when the text also names `stash`, whether or not a shell would run anything.
-// `printf '%s\n' '- ran `git stash` here' > f` and `echo '- ran `git stash`' >> notes.md` are both
-// DENIED (shim oracle, both shells: no git call recorded), and so is the heredoc spelling of the same
-// note (`cat <<'EOF' > f`, body ``run `git reset --hard` here``, `EOF`). That is the ordinary shape of
-// the review notes, findings and report files this repo asks its agents to write, and it has
-// obstructed five review rounds. What an agent that hits it actually does is write the text with NO
-// substitution punctuation beside the git (`- ran git stash here` is allowed) or use a file-editing
-// tool; a printf is NOT an escape hatch — it is denied by the very same rule, which is what the old
-// wording here sent the next reader to try. Round 13 exempted the body of a QUOTED-delimiter heredoc
-// from the pre-check to fix exactly this; the exemption was keyed on a segment head being in WRAPPERS,
-// so everything that executes a body without being listed kept it — `ksh <<'EOF' … $(git stash) …
-// EOF` and `cat <<'EOF' > f … EOF; . ./f` each ran a real `git stash` in both shells while both arms
-// allowed (round 14, F2). The widening was reverted rather than re-bounded, and the decision at the
-// round-16 gate was to KEEP that revert and make this text true instead.
-// 2. THE WRAPPER ARM'S ESCAPED WHITESPACE, round 12's cost: an escaped space or tab in front of a git
-// denies behind EVERY WRAPPERS entry, because the arm cannot tell which of them re-reads its argument
-// as shell text. Measured on the round-14 differential corpus: 384 rows on which no shell ran a
-// forbidden git (192 backslash-space + 192 backslash-tab, across all 34 entries), plus 9 NUL rows.
-// (The cdc3338 commit message says "213 rows across all wrappers"; 384 is the measured figure, which
-// the wrapper arm below carries and the probe re-measures. The commit message cannot be amended, so
-// the correction lives here.)
-// 3. ROUND 16's OWN, the narrowest of the three: a token inside a substitution that reduces to git
-// only after a leading escaped space/tab or backslash is dropped — `echo $(\ g\it stash)` — is denied
-// although no shell runs a git there (shim oracle, both shells: `command not found:  git`).
-// Constructing one takes an obfuscated git AND a leading escape AND a substitution; spelled without
-// the obfuscation (`echo $(\ git stash)`) it was already denied by the raw-text read, and with the
-// escape inside the word instead of in front of it (`echo $(g\ it stash)`) it is still allowed.
+// STATED BOUNDS (deliberately not covered). This is a proportionate backstop against a cooperative
+// dispatch running a plain destructive git, not a complete parser hardened against an adversary
+// crafting evasions — the origins guarded here are Claude dispatches following a read-only contract,
+// not a hostile shell. So the guard denies plain, quoted, wrapped, reserved-word and process-
+// substitution spellings, and leaves these classes as ALLOW, each needing the shell itself to
+// resolve: a shell EXPANSION that assembles the word `git` (`G=git; $G reset --hard`, `${x}git …`,
+// `git${IFS}reset …`), an ANSI-C `$'…'` body that spells it (`$'\x67it' …`), a shell FUNCTION or
+// `case` label that hides it (`f(){ git reset; }; f`, `case x in *) git reset;; esac`), and a
+// metacharacter glued flush against a neighbour (`f(){`). Closing any of these needs a shell-grade
+// tokenizer, whose maintenance cost outweighs the evasion it stops for this threat model; if the
+// origins ever stop being cooperative, that trade is what to revisit.
 import { readFileSync } from "node:fs";
 import { findStateFile } from "./lib/find-state-file.mjs";
 
@@ -198,26 +94,18 @@ const denyReason = (guardedTail, mainThreadTail) =>
     : `devcycle: main thread may not run git stash while a devcycle cycle is active (stage: ${cycleStage}) — ${mainThreadTail}`) +
   ` command: ${command.slice(0, 200)}`;
 
-// Clearly read-only git subcommands (unconditional). `symbolic-ref` is deliberately absent: with two
-// arguments it REPOINTS HEAD in the shared checkout (`git symbolic-ref HEAD refs/heads/other`), and
-// deny-on-ambiguity takes the whole subcommand rather than classifying its arguments — `rev-parse`
-// covers the read use.
+// Clearly read-only git subcommands (unconditional).
 const READ_ONLY = new Set([
   "diff", "log", "show", "status", "blame", "rev-parse", "ls-files", "ls-tree", "cat-file",
   "describe", "grep", "shortlog", "merge-base", "rev-list", "name-rev", "for-each-ref",
-  "diff-tree", "diff-index", "whatchanged",
+  "diff-tree", "diff-index", "symbolic-ref", "whatchanged",
 ]);
 // Command-LAUNCHERS that run their trailing arguments as a command, so a git after one is EXECUTED
 // → deny-on-ambiguity when git appears. This is a bounded denylist (per the design's § Parser
 // robustness): a head-position launcher NOT in this set is allowed — that is the accepted bound, not
 // a backstopped case. There is no fallback that catches an unlisted launcher: the git-behind-wrapper
 // check below only runs for a head in this set, so completeness of the set is what keeps a launched
-// git from slipping through. A recognized wrapper hiding git, by contrast, is denied to a guarded
-// origin whenever the hidden git is a spelling this file RESOLVES — quoting, escapes, a path, a
-// NUL cut, a joined backslash-newline, an eval re-join — and not when reaching it would need a shell
-// EXPANSION the parser does not do (`sh -c '${x}git stash'`) or a dangling escape the inner shell
-// drops but the outer quotes keep (`sh -c 'git stash\'`); on the main thread that deny is narrower
-// still, gated on a `stash` word being visible beside the git. The set is
+// git from slipping through. A recognized wrapper hiding git, by contrast, is denied. The set is
 // deliberately launchers only: commands that take `git` as a DATA argument (grep/echo/cat/rg/find/
 // awk/sed) never execute it and MUST stay allowed, so a blanket "any segment containing a git token"
 // is wrong. Covered: shell interpreters and exec/eval helpers (including the `exec` builtin), plus
@@ -231,161 +119,22 @@ const WRAPPERS = new Set([
   "arch", "chroot", "runcon", "catchsegv",
 ]);
 
-// The escapes an ANSI-C quote gives a NAME to. Each stands for one character, and the shell puts
-// that character in the word — `$'\t'` is a tab, not the two characters `\t`. An escape the shell
-// does not recognize keeps its backslash, which is what the default branch below reproduces.
-const ANSI_C_NAMED = new Map(Object.entries({
-  a: "\x07", b: "\b", e: "\x1b", E: "\x1b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v",
-  "\\": "\\", "'": "'", '"': '"', "?": "?",
-}));
-
-// Decode the body of an ANSI-C quote (`$'…'`), starting just past its opening `'`, exactly as the
-// shell expands it; returns the decoded text and the index of the closing `'` (or the word's end,
-// for an unterminated one). Decoding rather than merely dropping the quote is what closes the class
-// BOTH ways: `\x67`, `\147` and `g` each spell `g`, so `$'\x67it'` IS the git binary and must
-// deny — while `$'gi\t'` is `gi<TAB>`, a command no shell has, so consuming the backslash the way an
-// unquoted word's rule does would deny a command that never runs. (`\u`/`\U` are zsh 5.9 escapes
-// that bash 3.2 leaves literal; the shell running an agent's Bash call may be either, so the guard
-// reads the union — the deny direction.)
-function decodeAnsiC(word, from) {
-  let text = "";
-  // A NUL byte never reaches the binary: `$'\x00'`, `$'\000'`, `$'\c@'` and `$'\u0000'` all spell it,
-  // and /bin/bash cuts THIS expansion short there while still concatenating whatever the word spells
-  // around it — `g$'\x00'it` is the command `git`, and `$'git\x00foo'` is the command `git` too
-  // (verified with a `git` shim first on PATH, which logged the argv both spellings handed it). The
-  // NUL is kept as the cut MARKER, because /bin/zsh cuts the whole WORD at that same byte instead:
-  // headForms reads the marker and derives both shells' realizations from it.
-  let cut = false;
-  const add = (chars) => {
-    if (cut) return;
-    const nul = chars.indexOf("\0");
-    if (nul === -1) { text += chars; return; }
-    text += chars.slice(0, nul + 1);
-    cut = true;
-  };
-  let i = from;
-  for (; i < word.length && word[i] !== "'"; i += 1) {
-    if (word[i] !== "\\" || i + 1 >= word.length) { add(word[i]); continue; }
-    const rest = word.slice(i + 1);
-    const octal = /^[0-7]{1,3}/.exec(rest);
-    if (octal) { add(String.fromCharCode(parseInt(octal[0], 8) & 0xff)); i += octal[0].length; continue; }
-    const escape = rest[0];
-    const hex = escape === "x" ? /^[0-9a-fA-F]{1,2}/.exec(rest.slice(1)) : null;
-    if (hex) { add(String.fromCharCode(parseInt(hex[0], 16))); i += 1 + hex[0].length; continue; }
-    const unicode = escape === "u" || escape === "U"
-      ? new RegExp(`^[0-9a-fA-F]{1,${escape === "u" ? 4 : 8}}`).exec(rest.slice(1)) : null;
-    // `\U` spells up to EIGHT hex digits, and above U+10FFFF there is no code point to put in the
-    // word — String.fromCodePoint THROWS there, which killed the hook with exit 1 and empty stdout
-    // (branch review round 10). Out of range, the escape keeps its literal text, which is what bash
-    // 3.2 does with the whole sequence and what zsh's replacement bytes amount to: a command name
-    // that is not git either way. `\u` is capped at four digits and can never reach the boundary.
-    const codePoint = unicode ? parseInt(unicode[0], 16) : -1;
-    if (unicode && codePoint <= 0x10ffff) { add(String.fromCodePoint(codePoint)); i += 1 + unicode[0].length; continue; }
-    if (escape === "c" && rest.length > 1) { add(String.fromCharCode(rest.charCodeAt(1) & 31)); i += 2; continue; }
-    add(ANSI_C_NAMED.get(escape) ?? ("\\" + escape));
-    i += 1;
-  }
-  return { text, end: i };
-}
-
-// Remove the quoting a word carries, WHEREVER it sits in that word: a `'` or `"` is syntax the shell
-// consumes rather than passes to the binary, a `$` in front of either opens an ANSI-C (`$'…'`) or a
-// locale-translated (`$"…"`) quote and is consumed with it, and a backslash escapes the character
-// behind it. So `"g"'it'`, `g""it`, `gi\t`, `g$'it'` and `$'\x67it'` are all spellings the shell runs
-// as `git`. Doing this only at the word's ENDS — which is what a leading/trailing-run regex does —
-// left every intra-word spelling reducing to a non-git head, and each of them reached ALLOW on both
-// arms (branch review round 6, F3). Leaving the `$` of a mid-word ANSI-C quote in place did the same
-// to that whole class: `$'git'` reduced to `git` (the leading-`$` run was stripped) while `g$'it'`
-// stopped at `g$it`, so `g$'it' reset --hard` and `git st$'ash'` reached ALLOW (round 8, F1). A
-// backslash with nothing behind it escapes nothing and is kept.
-function stripQuoting(word) {
-  let out = "";
-  for (let i = 0; i < word.length; i += 1) {
-    const c = word[i];
-    if (c === "$" && (word[i + 1] === "'" || word[i + 1] === '"')) {
-      if (word[i + 1] === '"') continue;         // `$"…"` translates its contents; the `$` is syntax
-      const { text, end } = decodeAnsiC(word, i + 2);
-      out += text;
-      i = end;                                   // resume at the closing quote (or the word's end)
-      continue;
-    }
-    if (c === "'" || c === '"') continue;
-    if (c === "\\" && i + 1 < word.length) { out += word[i + 1]; i += 1; continue; }
-    out += c;
-  }
-  return out;
-}
-
 // Normalize a command head to the bare command name so alternate spellings of the same binary all
-// reduce to one token before classification (deny-on-ambiguity depends on this being total): drop
-// the word's quoting and escapes (above), then a leading run of grouping characters and `$` (the
-// variable spelling `$git`, which the shell expands to something this parser cannot see), then the
-// same run of closers at the end, then the path basename (`/usr/bin/git`, `./git`). Grouping
-// characters are tokens of their own since canonicalization, so `(`/`)`/`{`/`}` here only cover a
-// quoted or malformed leftover. Whatever reduces to `git` is treated as git.
-const reduceName = (text) => {
-  const t = text.replace(/^[({$]+/, "").replace(/[)}]+$/, "");
+// reduce to one token before classification (deny-on-ambiguity depends on this being total). First
+// drop every quote and backslash the shell resolves in-word BEFORE it runs the command — `"git"`,
+// `g"i"t`, `g''it`, `\git`, `gi\t`, `\g\i\t` all name git — then strip a leading/trailing run of
+// grouping tokens the whitespace split leaves glued to a group's edge (`(git`, `{git`, `stash)`,
+// `git}`), then take the path basename (`/usr/bin/git`, `./git`). Removing a quote or backslash only
+// ever makes MORE tokens reduce to `git`, never fewer, so it can add a deny but never drop one — and
+// a genuinely different binary keeps its own name (`gitleaks` stays `gitleaks`, not `git`). What this
+// does NOT resolve is an ANSI-C `$'…'` body or a shell expansion (`$G`, `${x}git`, `git${IFS}reset`):
+// those need the shell itself and are the guard's stated bound below, not a backstopped case.
+function normalizeHead(token) {
+  let t = token.replace(/['"\\]/g, "");
+  t = t.replace(/^[({]+/, "").replace(/[)}]+$/, "");
   const slash = t.lastIndexOf("/");
   return slash === -1 ? t : t.slice(slash + 1);
-};
-// One word can be TWO command names, because the two shells cut a NUL-carrying word in different
-// places: /bin/bash cuts each `$'…'` expansion at its own first NUL and keeps the rest of the word
-// (`g$'\x00'it stash` ran a real `git stash`), while /bin/zsh cuts the whole word there
-// (`git$'\x00'x stash` ran one). Each realization is what a shell REALLY runs, so the classification
-// below asks whether ANY of them is git/stash/a wrapper — the union of the two shells, in the deny
-// direction (branch review round 12, F1; every spelling verified with a `git` shim first on PATH).
-// The invariant these reductions keep is bounded by what they READ: within the QUOTING the word
-// carries — quotes, backslash escapes, ANSI-C escapes, a NUL cut, a path — they add every spelling a
-// shell really runs as git and drop only the ones no shell does (`$'gi\t'`, `$'gi\x00t'`). A
-// spelling that reaches the git binary only through an EXPANSION (`${x}git`, `$G`) is outside what
-// this function reads at all: those reach allow, and the coverage block above states that bound
-// rather than this comment claiming a completeness it does not have.
-function headForms(token) {
-  const text = stripQuoting(token);
-  const nul = text.indexOf("\0");
-  const forms = nul === -1 ? [text] : [text.replace(/\0/g, ""), text.slice(0, nul)];
-  const reduced = forms.map(reduceName);
-  // zsh's EQUALS expansion is a third realization of the same kind: `=word` is the PATH of the
-  // command `word`, so `=git reset --hard` ran a real reset in /bin/zsh while /bin/bash reported
-  // `=git: command not found` (shim oracle, branch review round 16, F1) — and zsh is the shell this
-  // plugin ships into. The `=`-stripped spelling is ADDED as a realization rather than stripped in
-  // reduceName for the same reason the NUL cut is: a read that must not widen an ALLOW asks whether
-  // EVERY realization is harmless (`git stash =list`), and stripping the `=` outright would answer
-  // that question with zsh's reading alone.
-  const equals = reduced.filter((f) => f.startsWith("=")).map((f) => reduceName(f.slice(1)));
-  return [...new Set([...reduced, ...equals])];
 }
-// The bash realization, for the reason strings and for the reads that must not widen a deny.
-const normalizeHead = (token) => headForms(token)[0];
-// The deny-direction read: does this word reach `name` in EITHER shell?
-const headIs = (token, name) => headForms(token).includes(name);
-// The extra reduction a shell performs when it RE-READS text it was handed, on top of the word-level
-// one above: it CONCATENATES what it re-reads, so a leading escaped space or tab in front of the word
-// is whitespace to it and a leading backslash is an alias bypass — `eval \ git stash` and
-// `eval \\git stash` each ran a real `git stash` in both shells (round 12). One backslash is dropped,
-// not a run of them (`eval \\\\git` is the literal command name `\git`, which no shell has). TWO
-// places re-read text and both must ask this, which is why it lives here rather than inside one of
-// them: the wrapper arm, and the substitution backstop — a substitution's body is re-read exactly as a
-// wrapper's script is, and while each class was closed on its own, their COMPOSITION was not:
-// `echo $(eval \ g\it stash)` ran a real `git stash` in both shells and reached ALLOW on both arms
-// (branch review round 16, F2).
-const reReadsAs = (token, name) =>
-  headForms(token).some((h) => reduceName(h.replace(/^\s+/, "").replace(/^\\/, "")) === name);
-
-// git's own global options that take a VALUE. Written separated (`git --git-dir .git stash`) the
-// value is a token of its own, so an option paired with nothing left the subcommand index on the
-// VALUE: `.git` was compared against `stash` and the main-thread ban missed the stash, and a guarded
-// origin's read-only `git --git-dir /r/.git log` was wrongly denied for the "subcommand" `/r/.git`.
-// The attached spellings (`--git-dir=.git`) need no entry — the generic `-`-prefixed skip covers
-// them. `--exec-path` and `--attr-source` also have valueless/attached uses; skipping a token that
-// is not there runs the index off the end, and the two arms then part by design: a guarded origin
-// reads an unclassifiable git → deny, while the main thread reads the missing token as `""` → not
-// `stash` → allow. That is correct, not a gap — its ban is stash-only (spec §2), and a git left
-// with no subcommand runs nothing at all (`git --git-dir` exits 129 with a usage error).
-const VALUE_OPTIONS = new Set([
-  "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env",
-  "--super-prefix", "--attr-source",
-]);
 
 // A git segment is read-only iff its subcommand is confidently inspection-only.
 function gitSegmentIsReadOnly(tokens, i) {
@@ -405,450 +154,95 @@ function gitSegmentIsReadOnly(tokens, i) {
 }
 
 // Main-thread classification: only a stash subcommand other than `list`/`show` is denied. Both
-// tokens go through normalizeHead for the same reason heads do — a quote stays glued to the word it
-// wraps (`git "stash"` tokenizes as `"stash"`, `git $'stash'` as `$'stash'`), and a raw comparison
-// read those as "not stash" and allowed the one command this ban exists to stop (round-1 finding).
+// tokens go through normalizeHead for the same reason heads do — the whitespace split leaves a
+// grouping char or a quote glued to them (`(git stash)` tokenizes as `stash)`, `git "stash"` as
+// `"stash"`), and a raw comparison read those as "not stash" and allowed the one command this ban
+// exists to stop (round-1 finding).
 function stashIsDestructive(tokens, i) {
-  if (!headIs(tokens[i] ?? "", "stash")) return false;
-  // The operand is read in the ALLOW direction, so it is exempt only when EVERY realization of it is
-  // an inspecting one: a word the two shells cut differently is exactly the one whose `list` cannot
-  // be trusted.
-  return !headForms(tokens[i + 1] ?? "").every((op) => op === "list" || op === "show");
+  if (normalizeHead(tokens[i] ?? "") !== "stash") return false;
+  const op = normalizeHead(tokens[i + 1] ?? "");
+  return !(op === "list" || op === "show");
 }
 // Behind a wrapper or substitution the main thread cannot see the subcommand either; a `stash`
 // token next to a git token is denied on ambiguity (`sh -c 'git stash list'` included — the
 // coordinator can run that directly). Same normalizer, so a quoted or grouped spelling counts.
-const mentionsStash = (tokens) => tokens.some((t) => headIs(t, "stash"));
+const mentionsStash = (tokens) => tokens.some((t) => normalizeHead(t) === "stash");
 
-// ── Canonicalization ───────────────────────────────────────────────────────────────────────────
-// Operator spellings the shell reads as syntax wherever they appear, longest match first so `&&` is
-// never read as two background operators and a `2>&1` never loses its `&` to one. `{`/`}` are
-// absent deliberately: the shell treats them as reserved WORDS, so they open a group only when they
-// stand alone (`{ git …; }`) while `{a,b}` and `${X}` are ordinary words — tokenizeCommand applies
-// that rule instead of splitting every brace.
-const OPERATORS = [";;", "&&", "&>>", "&>", "||", "<<<", "<<", "<&", "<>", ">>", ">&", ">|", ";", "&", "|", "<", ">", "(", ")"];
-// A redirection operator token, including the file descriptor the tokenizer glues onto its front
-// (`2>&`) and the `&` of a descriptor duplication. This is where the old segment splitter's
-// `(?<![<>])&` lookbehind now lives: a duplication's `&` is part of THIS token, so any `&` that
-// survives as a token of its own is a background operator and separates commands.
-const REDIRECTION_OP = /^(?:\d*(?:<{1,3}|>{1,2}|<>)&?|&>{1,2}|\d*>\|)$/;
-const OPERATOR_TOKENS = new Set([...OPERATORS, "{", "}", "\n"]);
-const isOperatorToken = (t) => OPERATOR_TOKENS.has(t) || REDIRECTION_OP.test(t);
-// Tokens that separate one command from the next. An unquoted newline is one of them, which is why
-// tokenizeCommand emits it as a token rather than as whitespace.
-const SEPARATORS = new Set([";", ";;", "&&", "||", "|", "&", "\n"]);
-
-// Split a command into shell tokens, giving every metacharacter that is SYNTAX a token of its own
-// and leaving the same character alone where it is DATA: inside `'…'` (everything literal), `"…"`
-// and `$'…'` (where a backslash still escapes), or behind a backslash outside quotes (`\git`, and a
-// backslash-newline, which is a line continuation and joins its two halves). Whitespace ends a token
-// inside quotes too — a wrapper's quoted script (`sh -c 'git stash'`) must still show its `git` to
-// the wrapper check, exactly as the old whitespace split did. Quoting is the ONLY thing interpreted
-// here: no expansion, no substitution, no word splitting. An unterminated quote is an ambiguous
-// command, so it is re-read with quoting disabled (the deny direction: more syntax is seen, not
-// less).
-// An UNQUOTED backslash that ends the command escapes nothing, and both /bin/bash and /bin/zsh drop
-// it: `git stash\` hands git the argv `stash`, a real stash. Keeping the character made the
-// subcommand read as `stash\`, so that spelling reached ALLOW on the main-thread arm — the one
-// command the #235 ban exists to stop (branch review round 10, fix round). It is dropped here, at
-// the only place `next === undefined` can occur, which is exactly the shell's own rule. A backslash
-// with anything behind it is untouched, so the spellings the shell KEEPS a backslash in stay what
-// they were: `'stash\'` (literal inside single quotes), `stash\\` (an escaped backslash) and
-// `stash\ ` (an escaped space) all reach git as words that are not `stash`.
-// Read the delimiter word a `<<` operator opens, starting just past that operator. `<<-` is the
-// tab-stripping form, and the delimiter may be written quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) or
-// bare — the quoting only decides whether the shell expands the body, which this parser never does,
-// so the word is compared with its quoting removed. Returns null when no word follows (`cat <<`),
-// which leaves the operator to tokenize as an ordinary redirection.
-function readHeredocDelimiter(raw, from) {
-  let j = from;
-  let stripTabs = false;
-  if (raw[j] === "-") { stripTabs = true; j += 1; }
-  while (raw[j] === " " || raw[j] === "\t") j += 1;
-  let word = "";
-  let quote = null;
-  while (j < raw.length) {
-    const c = raw[j];
-    if (quote) { word += c; if (c === quote) quote = null; j += 1; continue; }
-    if (c === "'" || c === '"') { word += c; quote = c; j += 1; continue; }
-    if (c === "\\" && j + 1 < raw.length) { word += c + raw[j + 1]; j += 2; continue; }
-    if (/[\s;&|<>()]/.test(c)) break;
-    word += c;
-    j += 1;
-  }
-  return word ? { delim: stripQuoting(word), stripTabs, end: j } : null;
-}
-
-// A heredoc BODY is DATA, not commands: `cat <<'EOF' … EOF` writes those lines to a file, it never
-// runs them, and writing a findings or report file that quotes `git reset --hard` is exactly what a
-// reviewer or implementer in this repo does — classifying the body denied that work (branch review
-// round 6, F4). Consume the bodies the line's heredoc operators opened, from `start` (just past that
-// line's newline), and return the offset just past the last delimiter line; `<<-` strips leading
-// TABS from the body and from its delimiter line. An unterminated heredoc is an ambiguous command,
-// so it returns -1 and the caller tokenizes the body as commands instead — the same deny direction
-// an unterminated quote takes.
-function skipHeredocBodies(raw, start, heredocs) {
-  let pos = start;
-  for (const { delim, stripTabs } of heredocs) {
-    let terminated = false;
-    while (pos <= raw.length) {
-      const eol = raw.indexOf("\n", pos);
-      const lineEnd = eol === -1 ? raw.length : eol;
-      let line = raw.slice(pos, lineEnd).replace(/\r$/, "");
-      if (stripTabs) line = line.replace(/^\t+/, "");
-      pos = eol === -1 ? raw.length : eol + 1;
-      if (line === delim) { terminated = true; break; }
-      if (eol === -1) break;
-    }
-    if (!terminated) return -1;
-  }
-  return pos;
-}
-
-// How one tokenizing pass reads the command. Three passes exist, and each is a READING a shell
-// really performs, so classifying their union is the deny direction rather than a widening:
-// CLASSIFY is the command as written; COMMENTLESS drops what a `#` starting a word hides, which is
-// what both shells do when they are not interactive; SCAN is the substitution backstop's pass, which
-// keeps every heredoc body (that backstop reads the raw command, bodies included) and reads a
-// BACKTICK as syntax — outside quotes and inside `"…"`, the two places the shell expands one — so
-// the head inside `` `…` `` reduces on its own instead of staying glued to the punctuation. `$(`
-// needs no such rule: reduceName already drops a leading run of `$`/`(`.
-const CLASSIFY = {};
-const COMMENTLESS = { stripComments: true };
-const SCAN = { heredocBodies: false, substitution: true };
-const SUBSTITUTION_OPERATORS = [...OPERATORS, "`"];
-
-function tokenizeCommand(raw, opts = CLASSIFY, ignoreQuotes = false) {
-  const { stripComments = false, heredocBodies = true, substitution = false } = opts;
-  const operators = substitution ? SUBSTITUTION_OPERATORS : OPERATORS;
-  const tokens = [];
-  const heredocs = []; // bodies opened on the line being read, consumed at that line's newline
-  let word = "";
-  const flush = () => { if (word) { tokens.push(word); word = ""; } };
-  const push = (token) => { flush(); tokens.push(token); };
-  let quote = null; // "'", '"' or "$'" while inside that quoting form
-  for (let i = 0; i < raw.length; i += 1) {
-    const c = raw[i];
-    const next = raw[i + 1];
-    if (quote) {
-      if (quote !== "'" && c === "\\" && next !== undefined) { // `"…"` and `$'…'` honour backslash escapes
-        i += 1;
-        if (next !== "\n") word += c + next;                   // a backslash-newline is a continuation
-        continue;
-      }
-      // Inside `'…'` a backslash-newline is LITERAL — this shell performs no continuation and passes
-      // both characters on. Whichever shell RE-READS that text (the inner `sh` of a wrapper) does
-      // perform it, joining the halves, so `sh -c 'g\<newline>it stash'` runs a real git that neither
-      // half spells. The pair is kept in the word instead of flushing at the newline, which is what
-      // lets the wrapper check below rejoin the halves; it is kept rather than deleted so ONLY that
-      // check sees the join, and a top-level `'g\<newline>it'` still classifies as the command name
-      // carrying those two literal characters, which is what this shell would look for.
-      if (quote === "'" && c === "\\" && (next === "\n" || (next === "\r" && raw[i + 2] === "\n"))) {
-        word += "\\\n";
-        i += next === "\r" ? 2 : 1;
-        continue;
-      }
-      if (c === (quote === "$'" ? "'" : quote)) { word += c; quote = null; continue; }
-      // Double quotes do not suppress a backtick substitution — `echo "`git stash`"` runs it — so
-      // the SCAN pass gives it a token here too, leaving the quote open around it.
-      if (substitution && quote === '"' && c === "`") { push(c); continue; }
-      if (/\s/.test(c)) { flush(); continue; }
-      word += c;
-      continue;
-    }
-    if (!ignoreQuotes && (c === "'" || c === '"')) { word += c; quote = c; continue; }
-    if (!ignoreQuotes && c === "$" && next === "'") { word += "$'"; i += 1; quote = "$'"; continue; }
-    if (c === "\\") {
-      if (next === undefined) break;      // dangling: nothing to escape, and both shells drop it
-      i += 1;
-      if (next === "\n") continue;                                            // line continuation
-      if (next === "\r" && raw[i + 1] === "\n") { i += 1; continue; }
-      word += c + next;
-      continue;
-    }
-    if (c === "\n" || c === "\r") {
-      push("\n");
-      if (c === "\r" && next === "\n") i += 1;
-      if (heredocs.length) {                                    // the bodies this line opened are data
-        const bodyEnd = skipHeredocBodies(raw, i + 1, heredocs);
-        heredocs.length = 0;
-        if (bodyEnd !== -1) i = bodyEnd - 1;                    // resume just past the last delimiter line
-      }
-      continue;
-    }
-    // A `#` that starts a WORD opens a comment; the rest of the line is text the shell discards. It
-    // is only read that way in the COMMENTLESS pass — see the classifier's call site for why both
-    // readings are classified. Mid-word (`a#b`) and escaped or quoted (`\#`, `'#'`) it is an ordinary
-    // character in both shells, and `word` being non-empty is exactly that distinction: a backslash
-    // or an opening quote has already put a character in the word by the time the `#` is reached.
-    if (stripComments && c === "#" && !word) {
-      const eol = raw.indexOf("\n", i);
-      if (eol === -1) break;
-      i = eol - 1;                               // the newline itself is still a separator token
-      continue;
-    }
-    if (/\s/.test(c)) { flush(); continue; }
-    if ((c === "{" || c === "}") && !word && (next === undefined || /[\s;&|)]/.test(next))) { push(c); continue; }
-    const op = operators.find((o) => raw.startsWith(o, i));
-    if (op) {
-      const fd = /^[<>]/.test(op) && /^\d+$/.test(word) ? word : ""; // in `2>&1` the descriptor is the operator's
-      if (fd) word = "";
-      push(fd + op);
-      i += op.length - 1;
-      if (op === "<<" && heredocBodies) { // a heredoc: its delimiter is data, and so is the body opened at the newline
-        const here = readHeredocDelimiter(raw, i + 1);
-        if (here) { heredocs.push(here); i = here.end - 1; }
-      }
-      continue;
-    }
-    word += c;
-  }
-  flush();
-  return quote && !ignoreQuotes ? tokenizeCommand(raw, opts, true) : tokens;
-}
-
-// Tokens a case pattern label may contain: an alternation, the `(*)` spelling's open paren, and a
-// line break between `in`/`;;` and the pattern.
-const LABEL_TOKENS = new Set(["|", "(", "\n"]);
-// A `case` arm's pattern label (`*)`, `1)`, `(*)`, `git|sh)`) is syntax, never a command, whatever
-// it happens to spell — the arm's real command is the `echo x` or `git log` behind the label. Labels
-// are dropped BEFORE segments are formed because an alternated label spans the `|` the splitter cuts
-// on: its first alternative used to reach the classifier alone, so `case $x in git|sh) echo ok;;
-// esac` denied a command in which no git runs (branch review round 4). A label runs from `case … in`
-// or from a `;;` up to and including its `)`, and the run is dropped only when that `)` is actually
-// there, so a malformed `case` can never swallow the command behind it.
-function dropCaseLabels(tokens) {
-  const out = [];
-  let depth = 0;
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i];
-    if (token === "case") depth += 1;
-    else if (token === "esac" && depth > 0) depth -= 1;
-    out.push(token);
-    if (depth === 0 || (token !== "in" && token !== ";;")) continue;
-    let j = i + 1;
-    while (j < tokens.length && tokens[j] !== "case" && tokens[j] !== "esac" &&
-      (LABEL_TOKENS.has(tokens[j]) || !isOperatorToken(tokens[j]))) j += 1;
-    if (tokens[j] === ")") i = j; // the whole label, its `)` included, carries no command
-  }
-  return out;
-}
-
-// Split the token stream on the operators that separate commands; each segment is classified
-// independently.
-function splitSegments(tokens) {
-  const segments = [[]];
-  for (const token of tokens) {
-    if (SEPARATORS.has(token)) segments.push([]);
-    else segments[segments.length - 1].push(token);
-  }
-  return segments;
-}
+// Command and process substitution can hide a git write we cannot classify: backticks, `$(`, and
+// the `<(`/`>(` process-substitution forms (audit 2026-09-05 H1) are all denied when a git token
+// is present anywhere in the command, whatever the subcommand. On the main thread the same denial
+// is scoped to commands that ALSO carry a `stash` token anywhere. Like the wrapper arm below, that
+// scoping over-reaches — an unrelated `stash` word (a `--grep=stash`, an echoed word) beside any
+// substituted git denies — which is the accepted cost of not parsing inside a substitution; the
+// reason therefore states what was seen instead of asserting a stash was run.
+if (/`|\$\(|<\(|>\(/.test(command) && /\bgit\b/.test(command) && (guarded || /\bstash\b/.test(command)))
+  deny(denyReason(
+    "run git inside a command substitution (deny-on-ambiguity).",
+    "this command names `stash` and runs git inside a command substitution, which can hide one (deny-on-ambiguity)."
+  ));
 
 // Shell reserved words that may precede a command inside one segment. They are neither a command
 // nor a wrapper, so a segment whose head is one of them was skipped and the git after it never
 // classified (`for f in a b; do git checkout -- "$f"; done`, `! git reset --hard`,
-// `if git reset --hard; then :; fi` — audit 2026-09-05 H1; `case`/`esac` and `coproc` — branch
-// review round 1). They are stripped until the real head is reached. `function` is handled
-// separately in stripLeading: it is the only construct in which the NAME after it is not a command.
-const RESERVED = new Set([
-  "if", "then", "elif", "else", "fi", "do", "done", "while", "until", "!", "{", "(", "}", ")",
-  "esac", "coproc",
-]);
-// Compound-command headers: everything up to and including the terminator token carries no command,
-// so it is dropped wholesale. `for`/`select` end at `do`; `case` ends at `in`. When the terminator
-// sits after a `;` or a newline (the usual spelling) the header segment is simply empty — the body
-// `git …` is then its own segment and classifies as git.
-const BLOCK_HEADS = new Map([["for", "do"], ["select", "do"], ["case", "in"]]);
+// `if git reset --hard; then :; fi` — audit 2026-09-05 H1). They are stripped until the real head
+// is reached. `for`/`select` are loop headers: everything up to and including the `do` of the same
+// segment carries no command, and when the `do` sits after a `;` (the usual spelling) the header
+// segment is simply empty — the body `git …` is then its own segment and classifies as git.
+const RESERVED = new Set(["if", "then", "elif", "else", "fi", "do", "done", "while", "until", "!", "{", "(", "}", ")"]);
+const LOOP_HEADS = new Set(["for", "select"]);
 
-// A head that classification itself keys off: the git binary, or a recognized wrapper. The
-// redirection lookahead below is gated on this so a bare `>` never swallows the command itself.
-// The invariant stripping keeps is narrower than "it only ever adds denies": it is that stripping
-// never lets a DESTRUCTIVE git through — a token consumed as syntax is never the command the shell
-// runs, and whatever stands behind it is classified in its place. Dropping a `case` label that
-// happens to spell `git)` or `sh)` does REMOVE a deny (branch review round 2, F4), deliberately:
-// the arm's real command is the `echo x` or `git log` behind the label, and that is what gets
-// classified. A `(git)` subshell is not a label and keeps its deny, because dropCaseLabels only
-// drops inside a `case`.
-const isClassifiedHead = (token) => headForms(token).some((h) => h === "git" || WRAPPERS.has(h));
-// Drop leading env-assignments, grouping tokens, reserved words, compound-command headers,
-// redirections and function-definition heads so the head re-derives to the real command. Returns the
-// remaining tokens (possibly none). Case labels are already gone (dropCaseLabels), and every
-// metacharacter is already its own token (tokenizeCommand), so each rule below is written once per
-// CLASS rather than once per spelling.
+// Drop leading env-assignments, grouping tokens, reserved words and loop headers so the head
+// re-derives to the real command. Returns the remaining tokens (possibly none).
 function stripLeading(tokens) {
   let t = tokens;
-  let namedFunction = false; // `function f { … }` — the only construct where the name is not a command
   for (;;) {
     if (!t.length) return t;
     const head = t[0];
-    if (head === "function") { namedFunction = true; t = t.slice(1); continue; }
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(head) || RESERVED.has(head)) { t = t.slice(1); continue; }
-    if (BLOCK_HEADS.has(head)) {
-      const endAt = t.indexOf(BLOCK_HEADS.get(head));
-      t = endAt === -1 ? [] : t.slice(endAt + 1);
+    if (LOOP_HEADS.has(head)) {
+      const doAt = t.indexOf("do");
+      t = doAt === -1 ? [] : t.slice(doAt + 1);
       continue;
     }
-    // A redirection in front of a command (`>/dev/null git …`, `2>&1 git …`, `2>& 1 git …`) is not a
-    // command, so the git behind it must still be classified. The operator's target is the next
-    // token and is dropped with it — unless that token is itself git or a wrapper, where dropping it
-    // would hide the command instead of the syntax.
-    if (REDIRECTION_OP.test(head)) { t = isClassifiedHead(t[1] ?? "") ? t.slice(1) : t.slice(2); continue; }
-    // A function-definition head (`f ( )`, and `f` alone after the `function` keyword) is not a
-    // command either; the body behind it is. Every glued spelling — `f(){`, `f (){`, `f()(` — reaches
-    // this rule as the same `f` `(` stream, and the grouping tokens behind it fall to RESERVED.
-    if (t[1] === "(" || (namedFunction && t[1] === "{")) { t = t.slice(1); namedFunction = false; continue; }
     return t;
   }
 }
 
-// Canonicalize, then classify: tokenize once (quote-aware), drop case labels, split on the
-// separator tokens, and classify each segment independently. A lone `&` token is a background
-// operator and separates commands just as `;` does (`true & git reset --hard` is two commands); a
-// duplication's `&` never reaches this point as a token of its own, because tokenizeCommand glued it
-// into its redirection operator.
-// Every throw inside the classifier ends in a DENY, never in an uncaught exception. A crash exits 1
-// with empty stdout, which a PreToolUse harness reads as "no decision" — the fail-open this whole
-// file exists to prevent — and heads are normalized segment by segment in order, so a crashing token
-// placed in FRONT of a git segment killed the process before any deny() was written and disarmed the
-// guard for the entire command (branch review round 10). The catch is on the CLASS, not on the one
-// input that reached it: the next parser change that throws lands here instead of failing open. On
-// the main thread it denies a command the parser could not read even when no stash is visible in it,
-// deliberately — a command this file cannot parse is exactly the one whose stash it cannot rule out.
-try {
-  // A `#` that starts a word is a comment in both shells when they are not interactive, and a
-  // comment can FABRICATE a heredoc the shell never opens: in `echo hi # <<'EOF'` the `<<` sits
-  // inside the comment, yet the tokenizer registered a heredoc and skipHeredocBodies then consumed
-  // the real `git stash` on the next line as data — it ran in both shells and both arms allowed
-  // (branch review round 14, F3; shim oracle recorded the `stash` argv). The comment-stripped
-  // reading is classified IN ADDITION to the command as written, never instead of it: a shell that
-  // reads comments as ordinary words (an interactive zsh) sees the other stream, and this file
-  // answers a fork between two readings by classifying both and denying on either.
-  const segments = splitSegments(dropCaseLabels(tokenizeCommand(command)));
-  if (command.includes("#"))
-    segments.push(...splitSegments(dropCaseLabels(tokenizeCommand(command, COMMENTLESS))));
-
-  // Command and process substitution can hide a git write we cannot classify: backticks, `$(`, the
-  // `<(`/`>(` process-substitution forms (audit 2026-09-05 H1) and zsh's third one, `=(…)` (branch
-  // review round 16, F1), are all denied when the command NAMES git anywhere, whatever the
-  // subcommand. On the main thread the same denial is scoped to
-  // commands that ALSO name `stash`. Like the wrapper arm below, that scoping over-reaches — an
-  // unrelated `stash` word (a `--grep=stash`, an echoed word) beside any substituted git denies —
-  // which is the accepted cost of not parsing inside a substitution; the reason therefore states
-  // what was seen instead of asserting a stash was run.
-  // "Names git" is decided TWO ways, and either one denies. A raw-text `\bgit\b` alone was silent on
-  // every word-level obfuscation, because the shell resolves the quoting inside a word before it
-  // runs the binary and the regex does not: `echo $(g\it stash)` ran a real `git stash` in both
-  // shells and reached ALLOW on both arms, and so did the `` ` ` ``, `"$( )"`, `<( )` and `gi""t` /
-  // `g'it'` spellings of it (branch review round 14, F1; shim oracle). The segment classifier cannot
-  // reach those heads either — stripLeading returns the OUTER command (`echo`), and the
-  // substitution's words are merely its arguments — so this backstop CANONICALIZES first: it
-  // tokenizes the command with the same tokenizer (SCAN) and puts every token through the same
-  // headForms reduction the classifier uses. The regex is kept BESIDE that read rather than replaced
-  // by it, because raw text also matches a git no token reduction reaches (`--grep=git`) and this
-  // file never trades a deny away.
-  // The text read is the RAW command, heredoc bodies included. Round 13 exempted the body of a
-  // quoted-delimiter heredoc here so a report quoting a git command in a code span could be written;
-  // the exemption was keyed on a segment head being in WRAPPERS, so everything that executes a body
-  // without being listed kept it, and `ksh <<'EOF' … $(git stash) … EOF` and `cat <<'EOF' > f …
-  // EOF; . ./f` each ran a real `git stash` in both shells while both arms allowed (round 14, F2).
-  // It was reverted rather than re-bounded; the over-denial that restores is named in the coverage
-  // block at the top of this file.
-  // A substitution's body is RE-READ by the shell before it runs, exactly as a wrapper's quoted
-  // script is, so the backslash-newline the outer single quotes made literal is a line continuation
-  // in there and joins the halves: ``echo `'g\<newline>it' stash` `` ran a real `git stash` in both
-  // shells (shim oracle) while neither half spells git. Each token is therefore reduced both as it
-  // stands and with that join applied — and through reReadsAs, the SAME reduction the wrapper arm
-  // applies. Taking only part of that reduction is what left the two classes' COMPOSITION open:
-  // `echo $(eval \ g\it stash)` ran a real `git stash` in both shells and reached ALLOW on both arms,
-  // because `\ g\it` reduces to `" git"`, which is neither `git` by headForms nor a raw `\bgit\b`
-  // match, while the segment classifier saw only the outer `echo` (round 16, F2). The `=(` form of
-  // the regex above is anchored to a WORD-INITIAL `=`, because that is the only place either shell
-  // reads one as syntax: `arr=(a b c)` is an ordinary array assignment and `cat x=(git stash)` ran no
-  // git at all (shim oracle), so an unanchored `=\(` would deny every array assignment written beside
-  // a read-only git.
-  if (/`|\$\(|<\(|>\(|(?:^|[\s;&|()<>])=\(/.test(command)) {
-    const scanTokens = tokenizeCommand(command, SCAN);
-    const reducesTo = (name) => scanTokens.some((t) =>
-      [t, t.replace(/\\\n/g, "")].some((x) => headIs(x, name) || reReadsAs(x, name)));
-    const namesGit = /\bgit\b/.test(command) || reducesTo("git");
-    const namesStash = /\bstash\b/.test(command) || reducesTo("stash");
-    if (namesGit && (guarded || namesStash))
+// Split on shell operators that separate commands; classify each segment independently. A lone `&`
+// (background operator) separates commands just as `;` does, so `true & git reset --hard` must split
+// into two segments — `&&` is matched first so a logical-AND is never mis-split on its first `&`.
+for (const seg of command.split(/(?:&&|\|\||;|\||&|\n)/)) {
+  // stripLeading drops env-assignments, `{`/`(` grouping tokens and reserved words so the head is
+  // the real command — `{ git reset; }`, `( git reset )` and `do git reset` must not hide the git.
+  // (normalizeHead additionally strips a grouping char glued to the head, e.g. `(git`.)
+  const tokens = stripLeading(seg.trim().split(/\s+/).filter(Boolean));
+  if (!tokens.length) continue;
+  const head = normalizeHead(tokens[0]);
+  if (WRAPPERS.has(head)) {
+    // A wrapper's argument is often a quoted script (`sh -c 'git checkout -- x'`), so the naive
+    // whitespace split leaves a quote character glued to the word (`'git`, `"git`), and a wrapper may
+    // also name git by path — normalizeHead reduces every such spelling to `git` before comparing.
+    if (tokens.slice(1).some((t) => normalizeHead(t) === "git") && (guarded || mentionsStash(tokens))) // git behind a wrapper we cannot see into
       deny(denyReason(
-        "run git inside a command substitution (deny-on-ambiguity).",
-        "this command names `stash` and runs git inside a command substitution, which can hide one (deny-on-ambiguity)."
+        "run git behind a shell wrapper (deny-on-ambiguity).",
+        "a git behind a shell wrapper can hide one (deny-on-ambiguity)."
       ));
+    continue; // a wrapper with no git (e.g. `timeout 30 npm test`) is a non-git command → allow
   }
-
-  for (const seg of segments) {
-    // stripLeading drops env-assignments, `{`/`(` grouping tokens, reserved words, redirections and
-    // function-definition heads so the head is the real command — `{ git reset; }`, `( git reset )`
-    // and `do git reset` must not hide the git. (normalizeHead additionally reduces a quoted or
-    // path-qualified head, e.g. `"git"` or `/usr/bin/git`.)
-    const tokens = stripLeading(seg);
-    if (!tokens.length) continue;
-    const heads = headForms(tokens[0]);
-    if (heads.some((h) => WRAPPERS.has(h))) {
-      // A wrapper's argument is often a quoted script (`sh -c 'git checkout -- x'`), so the naive
-      // whitespace split leaves a quote character glued to the word (`'git`, `"git`), and a wrapper may
-      // also name git by path — normalizeHead reduces every such spelling to `git` before comparing.
-      // A wrapper's argument is also RE-READ by the shell it starts, so the backslash-newline the outer
-      // single quotes made literal (tokenizeCommand kept the pair in the word) is a line continuation
-      // to that inner shell and joins the halves: `sh -c 'g\<newline>it stash'` runs a real git that
-      // neither `'g\` nor `it` spells (branch review round 8, fix round). Resolving the continuation
-      // HERE and nowhere else is the bound. This arm already denies any git token behind a recognized
-      // wrapper, so it adds no class of deny — only the spellings of that deny it was missing — while
-      // the head path keeps reading a top-level `'g\<newline>it'` as the literal command name the shell
-      // would actually look for. The narrower alternative, resolving it only behind a wrapper this file
-      // could name as a shell, was rejected: the set of launchers that hand their argument to `sh -c`
-      // is not enumerable here, and this file's rule is that a missed destructive git is not
-      // acceptable. Its cost is an over-deny on `sudo 'g\<newline>it' …`, a command name no shell has.
-      // That inner parse also CONCATENATES what it re-reads — `eval` joins its arguments before
-      // parsing them — so a leading escaped space or tab in front of git is whitespace to it and a
-      // leading backslash is an alias bypass: `eval \ git stash` and `eval \\git stash` each ran a
-      // real `git stash` in both shells, while this outer parse resolved them to " git" and "\git"
-      // and the arm returned without denying (branch review round 12, F2). One backslash is dropped,
-      // not a run of them: `eval \\\\git` hands the inner shell `\\git`, the literal command name
-      // `\git`, which no shell has and the oracle recorded no git call for. The cost is the same kind
-      // of over-deny as above, and it is a CLASS, not the single spelling this comment used to name
-      // (`xargs \ git …`): the arm cannot tell which WRAPPERS entry re-reads its argument as shell
-      // text, so an escaped space or tab in front of git denies behind EVERY one of them —
-      // `env \ git reset --hard`, `bash \ git stash`, `exec \<tab>git …`. Measured on the round-14
-      // differential corpus: 384 rows on which no shell ran a forbidden git (192 backslash-space,
-      // 192 backslash-tab) spread across all 34 entries. The NUL union adds a second, smaller class
-      // the old wording omitted — 9 rows of `coproc $'\x00'git reset --hard`, denied on a head
-      // realization only one of the two shells produces.
-      // That inner-parse reduction is reReadsAs, shared with the substitution backstop above: the two
-      // places a shell re-reads text must apply the SAME reduction, or their composition reopens both
-      // classes (round 16, F2).
-      const inner = tokens.map((t) => t.replace(/\\\n/g, ""));
-      if (inner.slice(1).some((t) => reReadsAs(t, "git")) && (guarded || mentionsStash(inner))) // git behind a wrapper we cannot see into
-        deny(denyReason(
-          "run git behind a shell wrapper (deny-on-ambiguity).",
-          "a git behind a shell wrapper can hide one (deny-on-ambiguity)."
-        ));
-      continue; // a wrapper with no git (e.g. `timeout 30 npm test`) is a non-git command → allow
-    }
-    if (!heads.includes("git")) continue; // non-git command (basename never `git`) → allowed
-    let i = 1; // skip git's own global options, including each one's separated value, to reach the subcommand
-    while (i < tokens.length) {
-      const t = tokens[i];
-      if (VALUE_OPTIONS.has(t)) { i += 2; continue; }
-      if (t.startsWith("-")) { i += 1; continue; }
-      break;
-    }
-    const denied = guarded ? !gitSegmentIsReadOnly(tokens, i) : stashIsDestructive(tokens, i);
-    if (denied)
-      deny(denyReason(
-        `run destructive/ambiguous git — guarded dispatches are read-only apart from \`git add -N\` (${tokens[i] ?? "git"}).`,
-        `\`git ${normalizeHead(tokens[i] ?? "") || "stash"}\` discards every in-flight implementer's uncommitted edits across the shared checkout.`
-      ));
+  if (head !== "git") continue; // non-git command (basename never `git`) → allowed
+  let i = 1; // skip git's own global options and -C <dir> / -c <cfg> to reach the subcommand
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (t === "-C" || t === "-c") { i += 2; continue; }
+    if (t.startsWith("-")) { i += 1; continue; }
+    break;
   }
-} catch {
-  deny(denyReason(
-    "run a command this guard could not parse (deny-on-ambiguity).",
-    "this command could not be parsed, so a git stash inside it cannot be ruled out (deny-on-ambiguity)."
-  ));
+  const denied = guarded ? !gitSegmentIsReadOnly(tokens, i) : stashIsDestructive(tokens, i);
+  if (denied)
+    deny(denyReason(
+      `run destructive/ambiguous git — guarded dispatches are read-only apart from \`git add -N\` (${tokens[i] ?? "git"}).`,
+      `\`git ${normalizeHead(tokens[i] ?? "") || "stash"}\` discards every in-flight implementer's uncommitted edits across the shared checkout.`
+    ));
 }
 
 allow();
