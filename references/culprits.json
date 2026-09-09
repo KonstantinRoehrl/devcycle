@@ -18,7 +18,9 @@
     "kind": "win",
     "phase": ["execution"],
     "desc": "A task passed review and the green gate on its first round, with no rework.",
-    "since": "0.13.0"
+    "since": "0.13.0",
+    "observes": ["first-round-accept:execution"],
+    "prevents": ["review-reject:execution"]
   },
   {
     "slug": "fix-misses-the-convention",
@@ -32,7 +34,8 @@
     "kind": "win",
     "phase": ["execution"],
     "desc": "The green gate caught a regression that the review round had already accepted.",
-    "since": "0.13.0"
+    "since": "0.13.0",
+    "observes": ["gate-pass-clean:execution"]
   },
   {
     "slug": "incomplete-dispatch-brief",
