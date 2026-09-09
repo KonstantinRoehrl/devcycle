@@ -5,6 +5,53 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-09-09 — a pending changelog entry carries no heading of its own
+
+**Decision:** work waiting for a release writes its `CHANGELOG.md` prose directly under
+`# Changelog` with no heading above it. `scripts/bump-version.mjs`'s `changelogWithSection`
+inserts `## <version> — <date>` immediately after `# Changelog`, so headingless prose becomes the
+released section's body and reaches the GitHub release notes, while a hand-written heading — the
+`## Unreleased` this branch first wrote — is pushed below the new one and orphaned there
+permanently. The version's own subject bullet is not written by hand either: the release takes it
+from the PR title.
+
+**Why:** the release tooling reads one section per version and nothing outside one. Guessing the
+next version number is not an option — the bump is computed from the PR title at release time —
+so the only shape that survives is the one that needs no heading. This is the third time the
+defect has been found (`docs(changelog): drop Unreleased entries already shipped in 0.8.0` in
+0.8.1, disposition-register BR7, and this branch's review); recording the shape here is what ends
+the cycle of re-adding it.
+
+## 2026-09-09 — budgets raised for the learn-corpus memory hardening
+
+**Decision:** `tests/fixtures/context-budget.json` is raised by exactly the bytes each commit of
+the corpus-hardening branch adds, one bullet per commit that tripped a baseline:
+
+- `fix(config): add the learnSessionCap knob to all four roster surfaces`: executing-waves
+  109892→110181, finishing-the-cycle 98710→98999, learning-from-sessions 111063→111352,
+  maintaining-the-repo 93368→93657, onboarding-a-repo 90816→91105, planning-waves 95273→95562,
+  receiving-review 121036→121325, reviewing-code 128138→128423, reviewing-the-branch
+  101614→101903, scoping-the-request 87293→87582, sweeping-mechanical-changes 101124→101413,
+  taking-the-fast-path 94236→94525, verifying-on-device 96723→97012.
+- `fix(learn): cap mining concurrency, gate on cost, and pass the session cap`: executing-waves
+  110181→110255, finishing-the-cycle 98999→99135, learning-from-sessions 111352→112097,
+  maintaining-the-repo 93657→93731, onboarding-a-repo 91105→91179, planning-waves 95562→95636,
+  receiving-review 121325→121399, reviewing-code 128423→128497, reviewing-the-branch
+  101903→101977, scoping-the-request 87582→87656, sweeping-mechanical-changes 101413→101487,
+  taking-the-fast-path 94525→94599, verifying-on-device 97012→97086.
+- `fix(learn): carry the oversized override through to the mining dispatch`:
+  learning-from-sessions 112097→112218.
+- branch-fix-1-5 (the docs pass that closed the branch review): learning-from-sessions
+  112218→112457.
+
+`tests/fixtures/surface-budget.json` needed no raise: 5320 / 124 / 294 still hold.
+
+**Why:** `references/config.md` is reachable from every playbook except `profiling-sessions.md`,
+which is why one knob row there moves thirteen budgets and leaves the fourteenth alone. The rest
+is the learn playbook's own: the pre-dispatch cost gate and the 8-in-flight mining ceiling, the
+`--include-oversized` pass-through that reaches `--extract`, and the line naming the
+`.devcycle/dreaming/corpus.json` a plan now writes.
+
 ## 2026-09-06 — budget raised for the engine & hook safety branch review
 
 **Decision:** `tests/fixtures/context-budget.json` raises

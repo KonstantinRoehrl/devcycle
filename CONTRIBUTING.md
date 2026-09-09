@@ -180,6 +180,13 @@ release PR's body is written by the workflow and never reaches versioning), and 
 `CHANGELOG.md` entry and — because the PR is squash-merged — `main`'s commit subject. A title
 outside the convention is refused rather than treated as a patch, since it would ship no bump.
 
+Prose written ahead of a release goes directly under `# Changelog` with **no heading of its own**.
+`Prepare release` inserts the `## X.Y.Z — <date>` heading immediately after `# Changelog`, above
+whatever sits there, so headingless prose becomes the released section's body — and anything under
+a hand-written `## Unreleased` lands outside it, where the release notes stop short of it and the
+stray heading stays in the file for good. Do not hand-write the version's subject bullet either;
+the release takes that from the PR title. `docs/decisions/README.md` records why.
+
 Prepare commits `chore(release): prepare vX.Y.Z` to `dev` and opens the `main` ← `dev` PR.
 Squash-merge it **with that same title** once checks pass. `Release` then tags
 `devcycle--vX.Y.Z` and publishes the GitHub release from that version's CHANGELOG section.

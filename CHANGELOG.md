@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- fix(learn): scale `/devcycle:learn` corpus planning with sessions mined, not sessions ever created
-
 **Bounded learn-corpus planning.** Planning a `/devcycle:learn` run used to read every transcript
 under `~/.claude/projects` in full before deciding which sessions to mine, so both memory and wall
 clock grew with every session ever created on the machine. Planning now runs in two phases: it
@@ -14,10 +10,14 @@ flag. A single session larger than 50 MB is skipped rather than read, and named 
 `oversized` list; `--include-oversized` mines it anyway. `--plan` output also gains
 `corpusResolution`, which says whether the corpus came from the repo's own project slug or from
 the whole-root fallback scan, plus `readSessions` and `readFiles` counters for what the planning
-pass actually opened. Mining dispatches are capped at 8 in flight, and a plan whose extraction
-would exceed 10 MB stops for confirmation before dispatching. Measured before/after numbers and
-what they do not prove are in `docs/design/README.md` §18; the paths that stayed unbounded are in
-`docs/known-issues.md`.
+pass actually opened, and it persists the corpus it resolved to
+`<git-toplevel>/.devcycle/dreaming/corpus.json` so `--extract` can reach a session's files without
+repeating the resolve — an entry whose transcript has since disappeared is re-resolved live rather
+than trusted. `--cap`, `--max-sessions` and `--max-days` now refuse an empty, non-numeric, zero or
+negative value by name instead of silently coercing it. Mining dispatches are capped at 8 in
+flight, and a plan whose extraction would exceed 10 MB stops for confirmation before dispatching.
+What the change does and does not establish is in `docs/design/README.md` §18; the paths that
+stayed unbounded are in `docs/known-issues.md`.
 
 ## 0.20.1 — 2026-09-07
 

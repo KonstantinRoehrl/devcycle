@@ -30,7 +30,10 @@ Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --plan --cap <n>`, where `<n
 engine's corpus spans every live git worktree of the invoking repo — a worktree run mines the main
 checkout and its siblings too — landing all results in the invoking checkout. It
 prints the manifest as JSON. Every stage's work list is its own slice ids minus the manifest's
-`observations`, and `capped: true` is reported as a bounded run, never a failure.
+`observations`, and `capped: true` is reported as a bounded run, never a failure. It also writes
+the corpus it resolved to `<git-toplevel>/.devcycle/dreaming/corpus.json`, which every `--extract`
+below reads instead of resolving the corpus again — so plan before extracting, and expect that
+file to appear in the repo.
 
 **The journal is the first corpus and is never mined.** `journal.events` counts the run-record
 events since the checkpoint; read them with
