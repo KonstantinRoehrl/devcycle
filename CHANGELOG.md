@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- fix(learn): scale `/devcycle:learn` corpus planning with sessions mined, not sessions ever created
+
+**Bounded learn-corpus planning.** Planning a `/devcycle:learn` run used to read every transcript
+under `~/.claude/projects` in full before deciding which sessions to mine, so both memory and wall
+clock grew with every session ever created on the machine. Planning now runs in two phases: it
+ranks candidates from file metadata alone, then content-reads only the sessions it will actually
+mine, streaming each transcript record by record instead of loading it whole. How many sessions a
+run mines is now a knob, `learnSessionCap` (default 100), with `dream.mjs --plan --cap <n>` as its
+flag. A single session larger than 50 MB is skipped rather than read, and named in `--plan`'s new
+`oversized` list; `--include-oversized` mines it anyway. `--plan` output also gains
+`corpusResolution`, which says whether the corpus came from the repo's own project slug or from
+the whole-root fallback scan, plus `readSessions` and `readFiles` counters for what the planning
+pass actually opened. Mining dispatches are capped at 8 in flight, and a plan whose extraction
+would exceed 10 MB stops for confirmation before dispatching. Measured before/after numbers and
+what they do not prove are in `docs/design/README.md` §18; the paths that stayed unbounded are in
+`docs/known-issues.md`.
+
 ## 0.20.1 — 2026-09-07
 
 - fix(temp-dir): give every temp directory a self-cleaning owner (#257)

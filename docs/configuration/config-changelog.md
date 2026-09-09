@@ -91,6 +91,11 @@ marker with the version the change lands in, since only the release computes tha
   key: learnStalenessDays
   default: 14
   note: "days since the last /devcycle:learn before the finish stage nudges; paired with learnStalenessSessions, whichever crosses first"
+- version: "unreleased"
+  change: added
+  key: learnSessionCap
+  default: 100
+  note: "bounds how many sessions one /devcycle:learn run mines, so planning cost scales with sessions mined rather than sessions ever created; --plan and --staleness both take it as --cap"
 ```
 
 ## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)

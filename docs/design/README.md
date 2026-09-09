@@ -497,3 +497,36 @@ available to GitHub Actions. A new or materially-changed command's description i
 the intents in `routing.md` and checked by the reviewer of the change. The prose scenario harness that formerly held this as a
 `description-sufficiency` test type was retired 2026-08-06 — see `CONTRIBUTING.md` and the
 decision log.
+
+## 18. Learn-corpus planning cost (measured 2026-09-09)
+
+`/devcycle:learn`'s corpus planning used to read every transcript under `~/.claude/projects`
+before deciding which sessions to mine, so its cost scaled with sessions ever created rather
+than sessions mined. The 2026-09-09 hardening split planning into a metadata-only ranking pass
+and a bounded read pass, streamed transcripts record by record, bounded the whole-root fallback
+scan, and capped the corpus with `learnSessionCap` (§7). Two probes measure it — the primary
+slug lookup hitting, and the whole-root fallback forced by planning against a repo root that has
+no project slug — each counting `git` subprocesses through an injected `gitRunner`:
+
+| Path | Wall clock | Peak RSS | `git` subprocesses |
+| --- | --- | --- | --- |
+| `--plan`, primary slug lookup hits — before | 10.2 s | 488 MB | 2 |
+| `--plan`, primary slug lookup hits — after | 2.5 s | 130 MB | 1 |
+| `--plan`, whole-root fallback forced — before | 23.7 s | 711 MB | 175 |
+| `--plan`, whole-root fallback forced — after | 4.0 s | 101 MB | 120 |
+
+The "before" rows are the baseline measured while designing the change; the "after" rows are the
+same two probes re-run on this machine against the shipped code, reporting `maximum resident set
+size` of 129,859,584 and 100,630,528 bytes respectively. Both columns are single runs on one
+machine and one session corpus, not a benchmark: they establish the order of magnitude, not a
+guaranteed figure. The after-run of the primary probe planned 100 sessions from 125 sessions
+read across 570 files, with 1 session over the per-session ceiling; the fallback probe read 0
+sessions, because a repo root with no transcripts of its own has no candidates — its remaining
+cost lives in the resolve scan, which the `readSessions`/`readFiles` counters do not cover
+because they count only the second, content-reading phase.
+
+**What this does not prove.** No OOM was reproduced, before or after. The link between these
+mechanisms and the reporter's specific crash remains inferred, not established: the change
+removes an unbounded input to memory and I/O, which is a reason to expect the crash cannot
+recur for that cause, not a demonstration that this cause produced it. `docs/known-issues.md`
+records the paths that stayed unbounded.
