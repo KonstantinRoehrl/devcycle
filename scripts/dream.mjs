@@ -5,7 +5,7 @@
 // The stores each have one owner, and this file is the CLI over them rather than a second
 // copy: journal.mjs (run records), promotions.mjs (landed lessons), lessons.mjs (the three
 // capped stores), learn-report.mjs (the report).
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
@@ -22,6 +22,7 @@ import { renderLearnReport } from "./learn-report.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { fieldText } from "./md-field.mjs";
 import { gitToplevel, worktreeRoots } from "./git-identity.mjs";
+import { eachRecord } from "./jsonl.mjs";
 
 const CAP = 100;
 const dreamDir = (root) => join(root, ".devcycle", "dreaming");
@@ -322,7 +323,7 @@ function defaultReadText(session) {
 // the 100-session cap and the checkpoint window bound *mining*, and a caller holding a session
 // id must be able to read that session's text regardless of either.
 export function extractSession({ repoRoot, projectsDir, sessionId, gitRunner }) {
-  const files = resolveProjectFiles(repoRoot, projectsDir, gitRunner).filter(
+  const files = resolveProjectFiles(repoRoot, projectsDir, gitRunner).files.filter(
     (f) => owningSession(f) === sessionId,
   );
   if (!files.length) throw new Error(`no transcript for session: ${sessionId}`);
@@ -348,6 +349,10 @@ function readTranscriptsOrFail(dir, label) {
   throw new Error(`${label} exists but could not be read: ${dir}`);
 }
 
+// A worktree path that no longer exists must degrade to its literal form, never throw: the
+// corpus of a deleted worktree is still worth resolving.
+const realpathOr = (p) => { try { return realpathSync(p); } catch { return p; } };
+
 // The learn corpus spans every live worktree of the invoking repo, not only the exact-cwd
 // checkout: each worktree is a distinct project slug, so the common path enumerates them
 // (`git worktree list`, one call — never a per-session git call, keeping the machine-wide scan
@@ -356,15 +361,47 @@ function readTranscriptsOrFail(dir, label) {
 // fallback filters on git-repo identity. Documented gaps: a deleted worktree (gone from
 // `git worktree list`) and a session launched from a subdir of a worktree (its slug is the
 // subdir, not the worktree root — a pre-existing gap for the main checkout too).
-function sessionRepoMatches(file, mineTop, topOf) {
-  return readRecords(file).some((r) => r.cwd && topOf(r.cwd) === mineTop);
+// The FIRST record carrying a `cwd` decides. This narrows the previous
+// `readRecords(file).some(...)`, which accepted a match from any record in the file: a session
+// that cd'd from another repo into this one used to match and no longer does. Deliberate — a
+// session's cwd is fixed in practice, and it is the only version that bounds the whole-root
+// fallback, which otherwise parses every transcript the user has ever produced in full.
+//
+// `read` is injected for the same reason `statFile` and `gitRunner` are: the early exit is a
+// resource bound, and a bound asserted any way other than by counting calls through a
+// collaborator is the shape issues #89 and #154 record (QC6).
+export function sessionRepoMatches(file, mineTop, topOf, read = eachRecord) {
+  let matched = false;
+  read(file, (r) => {
+    if (!r.cwd) return true;
+    matched = topOf(r.cwd) === mineTop;
+    return false;
+  });
+  return matched;
 }
 
-function resolveProjectFiles(repoRoot, projectsDir, gitRunner) {
-  const roots = worktreeRoots(repoRoot, gitRunner);
-  const primary = roots.flatMap((r) =>
-    readTranscriptsOrFail(join(projectsDir, escapeProjectPath(r)), "project directory") ?? []);
-  if (primary.length) return primary;
+// Per-process memo, keyed on (repoRoot, projectsDir): those two arguments are the entire input to
+// the resolve. `gitRunner` is a test seam over the same repo, never a second corpus, so it is
+// deliberately not part of the key. There is no invalidation, which is what "per-process" means:
+// dream.mjs runs as a short-lived CLI over a corpus that does not change under it, and a stale
+// entry cannot outlive the process that made it.
+const resolveCache = new Map();
+
+export function resolveProjectFiles(repoRoot, projectsDir, gitRunner) {
+  const key = `${repoRoot} ${projectsDir}`;
+  let hit = resolveCache.get(key);
+  if (hit === undefined) resolveCache.set(key, (hit = resolveUncached(repoRoot, projectsDir, gitRunner)));
+  return hit;
+}
+
+function resolveUncached(repoRoot, projectsDir, gitRunner) {
+  // Both the literal and the realpath-resolved slug, unioned: replacing the literal one would
+  // silently change the slug computed for any path reached through a symlink (macOS /tmp ->
+  // /private/tmp), while the union can only ever find more.
+  const roots = [...new Set(worktreeRoots(repoRoot, gitRunner).flatMap((r) => [r, realpathOr(r)]))];
+  const primary = [...new Set(roots.flatMap((r) =>
+    readTranscriptsOrFail(join(projectsDir, escapeProjectPath(r)), "project directory") ?? []))];
+  if (primary.length) return { files: primary, corpusResolution: "primary" };
 
   const all = readTranscriptsOrFail(projectsDir, "projects root");
   if (all === null) throw new Error(`projects root does not exist: ${projectsDir}`);
@@ -379,7 +416,7 @@ function resolveProjectFiles(repoRoot, projectsDir, gitRunner) {
     return top;
   };
   const mineTop = topOf(repoRoot);
-  return all.filter((f) => sessionRepoMatches(f, mineTop, topOf));
+  return { files: all.filter((f) => sessionRepoMatches(f, mineTop, topOf)), corpusResolution: "fallback" };
 }
 
 // F5: a slice id that is only the session id can never reopen when the session grows, so every
@@ -391,7 +428,8 @@ export const sliceSessionId = (id) => String(id).split("@")[0];
 
 export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false, gitRunner }) {
   const groups = new Map();
-  for (const file of resolveProjectFiles(repoRoot, projectsDir, gitRunner)) {
+  const { files: resolvedFiles } = resolveProjectFiles(repoRoot, projectsDir, gitRunner);
+  for (const file of resolvedFiles) {
     const id = owningSession(file);
     if (!groups.has(id)) groups.set(id, []);
     groups.get(id).push(file);

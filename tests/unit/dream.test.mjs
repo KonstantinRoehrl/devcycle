@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -20,7 +20,10 @@ import {
   extractSession,
   messageText,
   alwaysLoadedNetBytes,
+  resolveProjectFiles,
+  sessionRepoMatches,
 } from "../../scripts/dream.mjs";
+import { eachRecord } from "../../scripts/jsonl.mjs";
 
 // The promotion reader/writer moved to promotions.mjs; the record-shape tests below were
 // written against it while it lived in dream.mjs and still pin the same behaviour, so they
@@ -61,6 +64,24 @@ const run = (args, cwd, env = {}) =>
 // escaping rule fix 2 gives `planCorpus`; `plain `.replaceAll("/", "-")` above still
 // matches it for the plain-name fixtures the pre-existing tests use.
 const escapedSlug = (root) => root.replace(/[^A-Za-z0-9]/g, "-");
+
+const fakeGit = (root) => (cmd, args) => {
+  if (args.includes("worktree")) return { status: 0, stdout: `worktree ${root}\n` };
+  // gitToplevel asks for --git-common-dir and returns dirname() of what it gets, so the fixture
+  // must emit the .git directory. Emitting `root` itself resolves every toplevel to root's PARENT,
+  // which silently relocates corpusCachePath one directory up.
+  return { status: 0, stdout: `${join(root, ".git")}\n` };
+};
+
+const seedPrimary = () => {
+  const root = makeTempDir("dream-repo-");
+  const projectsDir = makeTempDir("dream-projects-");
+  const slug = join(projectsDir, root.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(join(slug, "s.jsonl"),
+    JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } }) + "\n");
+  return { root, projectsDir };
+};
 
 test("checkpoint initializes to never and round-trips", () => {
   const root = repo();
@@ -2161,4 +2182,68 @@ test("the fallback scan memoizes gitToplevel per cwd (spec Component 3: one git 
   };
   planCorpus({ repoRoot: main, projectsDir, since: null, gitRunner: counting });
   assert.equal(otherCalls, 1, `expected one git call for ${other}, got ${otherCalls}`);
+});
+
+test("resolveProjectFiles reports which path resolved the corpus", () => {
+  const { root, projectsDir } = seedPrimary();
+  const out = resolveProjectFiles(root, projectsDir, fakeGit(root));
+  assert.equal(out.corpusResolution, "primary");
+  assert.ok(out.files.length > 0);
+});
+
+test("the fallback matcher stops reading a file at the first record carrying a cwd", () => {
+  const root = makeTempDir("dream-repo-");
+  const dir = makeTempDir("dream-earlyexit-");
+  const file = join(dir, "s.jsonl");
+  // One matching record, then 5000 more that must never be parsed.
+  const head = JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } });
+  const tail = Array.from({ length: 5000 }, (_, i) =>
+    JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "x".repeat(200) }, n: i }),
+  ).join("\n");
+  writeFileSync(file, `${head}\n${tail}\n`);
+
+  // The injected reader is the only way to observe the early exit: every assertion about the
+  // matcher's RESULT is equally true of the old readRecords(file).some(...) implementation, which
+  // parsed all 5001 records to reach it.
+  let parsed = 0;
+  const counting = (f, visit, options) =>
+    eachRecord(f, (r) => { parsed += 1; return visit(r); }, options);
+
+  assert.equal(sessionRepoMatches(file, root, (cwd) => cwd, counting), true);
+  assert.equal(parsed, 1,
+    `the matcher parsed ${parsed} records; it must stop at the first record carrying a cwd`);
+});
+
+test("resolveProjectFiles reports a whole-root fallback as fallback", () => {
+  const root = makeTempDir("dream-repo-");
+  const projectsDir = makeTempDir("dream-projects-");
+  // A legacy slug the primary lookup can never name, so only the whole-root scan can find it.
+  const slug = join(projectsDir, "-legacy-slug");
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(join(slug, "s.jsonl"),
+    JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } }) + "\n");
+
+  const out = resolveProjectFiles(root, projectsDir, fakeGit(root));
+  assert.equal(out.corpusResolution, "fallback");
+  assert.deepEqual(out.files, [join(slug, "s.jsonl")]);
+});
+
+test("resolveProjectFiles finds the corpus through a symlinked repo root", () => {
+  // realpathSync at the fixture boundary: makeTempDir hands back the un-resolved /var/folders/…
+  // form on macOS while the union below yields the /private/var/… form, so a slug named from the
+  // raw temp path misses the primary lookup and the test fails against a CORRECT implementation.
+  const realRoot = realpathSync(makeTempDir("dream-real-"));
+  const linkParent = makeTempDir("dream-link-");
+  const linkedRoot = join(linkParent, "link");
+  symlinkSync(realRoot, linkedRoot);
+  const projectsDir = makeTempDir("dream-projects-");
+  // The slug directory exists only under the REAL path's escaping.
+  const slug = join(projectsDir, realRoot.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(join(slug, "s.jsonl"),
+    JSON.stringify({ cwd: realRoot, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } }) + "\n");
+
+  const out = resolveProjectFiles(linkedRoot, projectsDir, fakeGit(linkedRoot));
+  assert.equal(out.corpusResolution, "primary",
+    "a symlinked root must resolve via the primary slug, not fall through to the whole-root scan");
 });
