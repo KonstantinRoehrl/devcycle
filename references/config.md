@@ -180,7 +180,8 @@ never mined (`last-run:` unset or `never`) is always stale. The nudge is advisor
 forces a mining run and advances no checkpoint.
 
 `learnSessionCap` reaches the engine the same way: `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`
-resolves it and passes `--cap <n>` to `scripts/dream.mjs --plan`.
+and `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` pass `--cap <n>` to
+`scripts/dream.mjs --plan` and `--staleness` respectively.
 
 ## Model tiers
 
