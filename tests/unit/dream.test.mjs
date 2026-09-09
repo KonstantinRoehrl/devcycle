@@ -2453,6 +2453,39 @@ test("extractSession refuses an oversized session unless told otherwise", () => 
     extractSession({ repoRoot: root, projectsDir, sessionId: "huge", gitRunner: fakeGit(root), includeOversized: true }));
 });
 
+// The mining stage is prose a coordinator follows, so the dispatch under test is read out of that
+// prose rather than hardcoded here: an override the engine accepts but the playbook never passes
+// is an override no documented run can reach.
+function documentedExtractArgv(sessionId) {
+  const playbook = readFileSync(new URL("../../playbooks/learning-from-sessions.md", import.meta.url), "utf8");
+  const start = playbook.indexOf("## Mine each slice");
+  assert.notEqual(start, -1, "the playbook must still carry a mining stage");
+  const mining = playbook.slice(start, playbook.indexOf("\n## ", start + 1));
+  const sentences = mining.replace(/\s+/g, " ").split(/(?<=[.!?]) /);
+  const carriesOverride = sentences.some((s) => s.includes("--extract") && s.includes("--include-oversized"));
+  return carriesOverride ? ["--extract", sessionId, "--include-oversized"] : ["--extract", sessionId];
+}
+
+test("the playbook's documented --extract dispatch mines a session --plan admitted as oversized", () => {
+  const root = realpathSync(makeTempDir("dream-repo-"));
+  const projectsDir = makeTempDir("dream-projects-");
+  const slug = join(projectsDir, escapedSlug(root));
+  mkdirSync(slug, { recursive: true });
+  const big = join(slug, "huge.jsonl");
+  writeFileSync(big, JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } }) + "\n");
+  truncateSync(big, MAX_SESSION_BYTES + 1);
+
+  const plan = run(["--plan", "--include-oversized"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.ok(JSON.parse(plan.stdout).sessions.some((s) => s.id === "huge"),
+    "the fixture must actually admit an oversized session into the plan");
+
+  const argv = documentedExtractArgv("huge");
+  const extract = run(argv, root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(extract.status, 0,
+    `the playbook dispatches \`dream.mjs ${argv.join(" ")}\`, which the engine refused: ${extract.stderr.trim()}`);
+});
+
 test("--plan honours an explicit --cap", () => {
   const { root, projectsDir } = seedMany(20);
   const plan = planCorpus({ repoRoot: root, projectsDir, cap: 5, gitRunner: fakeGit(root) });

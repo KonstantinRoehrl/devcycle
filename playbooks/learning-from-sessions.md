@@ -64,8 +64,9 @@ One dispatch per unmined slice the profile admits, per
 `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`, **each pinned to the fast tier in the dispatch
 itself, never inheriting the caller's model**. Run **at most 8 of those dispatches in flight at a
 time**; the ceiling bounds mining's own fan-out and is set here, for this stage alone. A
-session-sourced slice reads its text through the engine (`--extract <session-id>`). Each dispatch
-writes its slice's records to
+session-sourced slice reads its text through the engine (`--extract <session-id>`, carrying
+`--include-oversized` too when the plan was made with it — the engine re-checks the ceiling on
+every extract). Each dispatch writes its slice's records to
 `.devcycle/dreaming/observations/<slice-id>.json` as an array of objects carrying
 `session`, `ts` (the message timestamp of the quoted utterance, when known, so the reduce stage can dedup one utterance mined from sibling transcripts), `kind` (`friction | correction | rule-violation | decision | contradiction-side | win`),
 `subject`, `target` (a repo-relative path or `null`), `quote` and `confidence`. `subject` is the
