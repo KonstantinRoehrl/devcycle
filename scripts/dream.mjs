@@ -673,12 +673,37 @@ function loadVocab() {
 // filters are `mtimeMs < sinceMs` on candidates already ranked newest-first and `inWindow` on the
 // same `lastTimestamp` tested here, so the in-window subset of the wider plan is what the
 // narrower plan returns. references/impact-scoring.md owns both formulas.
-function ledgerWindows({ repoRoot, projectsDir, since }) {
+// Pure window partition for the ledger. Given corpus-plan sessions (each carrying its newest
+// record's `lastTimestamp`) and the candidates file's window edges, split them into the two windows
+// the report prices. Both edges anchor to `until` (= candidates.corpus.to): a session postdating the
+// window (`lastTimestamp > until`) enters neither — it must not price or populate a span it falls
+// past, which is what made `--render-report` on a stale candidates file sum figures over sessions
+// past the printed period end. The baseline then ends at the period's end and extends backward as
+// far as the plan's cap reached; the period additionally starts at `since` (= corpus.from).
+// Membership is decided on `lastTimestamp` — the session's exact newest-record time — which is
+// stricter than Phase A's mtime-approximate `since` in planCorpus (a file's mtime can drift from
+// its newest record) and is the correct edge for a window the figures are read against.
+export function partitionLedgerSessions(sessions, { since, until }) {
+  const period = [], baseline = [];
+  for (const session of sessions) {
+    if (!inWindow(session.lastTimestamp, null, until)) continue;
+    baseline.push(session);
+    if (inWindow(session.lastTimestamp, since, until)) period.push(session);
+  }
+  return { period, baseline };
+}
+
+function ledgerWindows({ repoRoot, projectsDir, since, until }) {
   const plan = planCorpus({ repoRoot, projectsDir, since: null });
   const runRecords = readRunRecords();
+  // The period is a subset of the baseline (both bounded above by `until`), so read and summarize
+  // each session once: iterate the baseline and mark the period members. `partitionLedgerSessions`
+  // owns the window predicate so the report path and its unit test share one code path.
+  const parts = partitionLedgerSessions(plan.sessions, { since, until });
+  const inPeriod = new Set(parts.period);
   const period = [], baseline = [];
   const stamps = [];
-  for (const session of plan.sessions) {
+  for (const session of parts.baseline) {
     const records = [];
     // readRecords delegates to the streaming reader and treats a missing file as empty, so a
     // transcript that vanished since the plan degrades this session out of the corpus rather
@@ -688,7 +713,7 @@ function ledgerWindows({ repoRoot, projectsDir, since }) {
     const summary = summarizeSession(session.id, records, runRecords);
     baseline.push(summary);
     stamps.push(session.lastTimestamp);
-    if (inWindow(session.lastTimestamp, since, null)) period.push(summary);
+    if (inPeriod.has(session)) period.push(summary);
   }
   // The baseline window's actual resolved span, which is what the report prints beside the
   // figures: a savings number is always read against the window that produced it.
@@ -1043,7 +1068,8 @@ function main() {
       // The period is the corpus window the candidates already describe; the baseline is every
       // session behind it, which is what prices a prevented culprit.
       const windows = ledgerWindows({
-        repoRoot: root, projectsDir: resolveProjectsRoot(), since: candidates.corpus.from,
+        repoRoot: root, projectsDir: resolveProjectsRoot(),
+        since: candidates.corpus.from, until: candidates.corpus.to,
       });
       const ledger = periodLedger({
         period: aggregateKeys(windows.period.summaries),

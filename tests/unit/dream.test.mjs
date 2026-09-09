@@ -25,6 +25,7 @@ import {
   planCandidates,
   RANK_MARGIN,
   MAX_SESSION_BYTES,
+  partitionLedgerSessions,
 } from "../../scripts/dream.mjs";
 import { eachRecord } from "../../scripts/jsonl.mjs";
 
@@ -2968,6 +2969,21 @@ function renderReport(fixture) {
   assert.equal(res.status, 0, res.stderr);
   return res.stdout;
 }
+
+// A session recorded after the corpus window's end (`until` = candidates.corpus.to) postdates the
+// span the ledger figures are read against, so it must price and populate neither window: not the
+// period (both edges bounded) and not the baseline (which ends at the period end and extends back).
+test("partitionLedgerSessions excludes a post-window session from both the period and the baseline", () => {
+  const sessions = [
+    { id: "before", lastTimestamp: "2026-06-15T10:00:00Z" }, // behind the period → baseline only
+    { id: "inside", lastTimestamp: "2026-08-10T10:00:00Z" }, // within the window → both
+    { id: "after", lastTimestamp: "2026-08-20T10:00:00Z" },  // past corpus.to → neither
+  ];
+  const { period, baseline } = partitionLedgerSessions(sessions, { since: "2026-08-01", until: "2026-08-14" });
+  const ids = (window) => window.map((s) => s.id);
+  assert.deepEqual(ids(period), ["inside"]);
+  assert.deepEqual(ids(baseline), ["before", "inside"]);
+});
 
 // Fixture (a): a held win with a priced prevents key. Baseline holds review-reject:execution at
 // 3 occurrences costing $9.00 total, so cost-per-occurrence is $3.00; the period holds 2 win
