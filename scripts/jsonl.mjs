@@ -15,7 +15,10 @@
 import { openSync, readSync, closeSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 
-const CHUNK = 64 * 1024;
+// Exported for the boundary tests alone: a fixture that has to straddle a chunk boundary can only
+// be built against the size the reader actually uses. Kept private, a change here left those
+// fixtures decoding wholly inside one chunk and passing while asserting nothing.
+export const CHUNK = 64 * 1024;
 
 export function eachRecord(file, visit, { onChunk } = {}) {
   let fd;

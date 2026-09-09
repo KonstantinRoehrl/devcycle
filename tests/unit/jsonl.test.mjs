@@ -4,7 +4,7 @@ import { writeFileSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { eachRecord } from "../../scripts/jsonl.mjs";
+import { eachRecord, CHUNK } from "../../scripts/jsonl.mjs";
 import { readRecords } from "../../scripts/doctor.mjs";
 
 const write = (name, text) => {
@@ -46,14 +46,19 @@ test("eachRecord reassembles a record split across a 64KB chunk boundary", () =>
 test("eachRecord reassembles a multi-byte character split across a chunk boundary", () => {
   // The character has to START on the last byte of a chunk: one that merely sits somewhere in the
   // second chunk is decoded whole even by a per-chunk buf.toString("utf8"), which is the defect
-  // this test exists to catch. So the padding runs to one byte short of the reader's 64KB chunk,
-  // leaving the 3-byte "€" split 1 + 2 across the boundary.
-  const CHUNK = 64 * 1024;
+  // this test exists to catch. So the padding runs to one byte short of a 64KB boundary, leaving
+  // the 3-byte "€" split 1 + 2 across it.
+  const FIXTURE_CHUNK = 64 * 1024;
+  assert.equal(CHUNK, FIXTURE_CHUNK,
+    "the reader's chunk size moved: this fixture pads to a 64KB boundary, so at any other size the € " +
+    "lands wholly inside one chunk and nothing here decodes across a boundary any more");
   const open = `{"s":"`;
-  const pad = "a".repeat(CHUNK - 1 - Buffer.byteLength(open));
-  assert.equal(Buffer.byteLength(open + pad), CHUNK - 1,
-    "the fixture must leave exactly one byte of the chunk free, or nothing straddles the boundary");
+  const pad = "a".repeat(FIXTURE_CHUNK - 1 - Buffer.byteLength(open));
   const file = write("s.jsonl", `${open}${pad}€"}\n`);
+  // The straddle measured on the bytes on disk, not restated from the arithmetic that built them:
+  // decoding the reader's first chunk alone has to end in a replacement character.
+  assert.ok(readFileSync(file).subarray(0, CHUNK).toString("utf8").endsWith("\uFFFD"),
+    "the first chunk must end mid-character, or the read below never crosses one");
   let value = null;
   eachRecord(file, (r) => { value = r.s; });
   assert.equal(value, `${pad}€`, "a decoder that splits UTF-8 mid-character corrupts the string");
