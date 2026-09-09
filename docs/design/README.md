@@ -276,7 +276,8 @@ gated by `userConfig.crossModelReview`.
   cap the user actually set. `--plan` reports `oversized` (sessions past the 50 MB per-session
   ceiling, skipped without being read — `--extract --include-oversized` mines one anyway),
   `corpusResolution` (`primary` when the project slug resolved the corpus, `fallback` when the
-  whole-root scan did), and the read counters `readSessions` / `readFiles`.
+  whole-root scan did), and the read counters `readSessions` / `readFiles` (resolution and
+  ownership, including this knob's floor, in `references/config.md` § Learn staleness).
 - Once encoded, corresponding personal memories (e.g. never-local-merge-to-dev) are deleted.
 
 ---

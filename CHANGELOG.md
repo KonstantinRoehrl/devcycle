@@ -13,9 +13,12 @@ the whole-root fallback scan, plus `readSessions` and `readFiles` counters for w
 pass actually opened, and it persists the corpus it resolved to
 `<git-toplevel>/.devcycle/dreaming/corpus.json` so `--extract` can reach a session's files without
 repeating the resolve — an entry whose transcript has since disappeared is re-resolved live rather
-than trusted. `--cap`, `--max-sessions` and `--max-days` now refuse an empty, non-numeric, zero or
-negative value by name instead of silently coercing it. Mining dispatches are capped at 8 in
-flight, and a plan whose extraction would exceed 10 MB stops for confirmation before dispatching.
+than trusted. `--cap`, `--max-sessions` and `--max-days` now refuse an empty, non-numeric or
+negative value by name instead of silently coercing it, and each carries its own floor: `--cap`
+refuses `0` as well, since a cap of nothing mines nothing, while `0` stays legal for
+`--max-sessions` and `--max-days` — it is how the staleness knobs ask to be nudged after every
+cycle. Mining dispatches are capped at 8 in flight, and a plan whose extraction would exceed
+10 MB stops for confirmation before dispatching.
 What the change does and does not establish is in `docs/design/README.md` §18; the paths that
 stayed unbounded are in `docs/known-issues.md`.
 

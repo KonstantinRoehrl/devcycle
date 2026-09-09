@@ -96,6 +96,14 @@ marker with the version the change lands in, since only the release computes tha
   key: learnSessionCap
   default: 100
   note: "bounds how many sessions one /devcycle:learn run mines, so planning cost scales with sessions mined rather than sessions ever created; --plan and --staleness both take it as --cap"
+- version: "unreleased"
+  change: added
+  key: learnStalenessSessions
+  note: "accepted values pinned, not a new key: an integer 0 or more, where an empty, non-numeric or negative value is refused by name instead of coercing to NaN and silently disabling the nudge's session leg"
+- version: "unreleased"
+  change: added
+  key: learnStalenessDays
+  note: "accepted values pinned, not a new key: an integer 0 or more, where an empty, non-numeric or negative value is refused by name instead of coercing to NaN and silently disabling the nudge's day leg"
 ```
 
 ## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)
