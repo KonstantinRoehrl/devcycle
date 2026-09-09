@@ -133,10 +133,11 @@ Writing a new `scripts/*.mjs`? Reuse `doctor.mjs`'s exported helpers
 project-path escaping, and missing/unreadable-directory handling rather than
 reimplementing them.
 
-`plugin.json`'s `userConfig` descriptions are a third hand-kept copy of the config knobs,
-alongside README's config table and `references/config.md`'s own explanation — update all
-three by hand together when one changes; `validate.mjs` checks only that the key exists, never
-that the description text is current.
+`plugin.json`'s `userConfig` descriptions are one of the four hand-kept copies of the config
+knobs that `references/config.md` § The knob roster enumerates — the other three are that
+roster, `docs/configuration/README.md`'s option table and `docs/design/README.md` §7's schema.
+Change one, change all four. `tests/unit/golden-path.test.mjs` fails on a key only some of them
+carry, but no check compares the description text, so a stale description ships silently.
 
 **PR titles must be Conventional Commits** (`type(scope)?!: subject`), and so must every
 commit subject on the PR — CI checks both. PRs are

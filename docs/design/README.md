@@ -235,7 +235,8 @@ gated by `userConfig.crossModelReview`.
   "branchReviewModel": "auto | <model id>",
   "walkthroughModel": "auto | <model id>",
   "learnStalenessSessions": 5,
-  "learnStalenessDays": 14
+  "learnStalenessDays": 14,
+  "learnSessionCap": 100
 }
 ```
 
