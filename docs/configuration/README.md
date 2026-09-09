@@ -77,9 +77,9 @@ question once more the first time you run a cycle in a different repo.
 | `taskReviewerModel` | Model for per-task reviewers | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
 | `branchReviewModel` | Model for the whole-branch review | `auto` / model id / comma-separated pool | `auto` (inherits your session's model; set a model id to pin) |
 | `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id / comma-separated pool | `auto` (a fast model; set a model id to pin) |
-| `learnStalenessSessions` | Unmined sessions since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer | `5` |
-| `learnStalenessDays` | Days since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer | `14` |
-| `learnSessionCap` | How many sessions one `/devcycle:learn` run may mine | a positive integer | `100` |
+| `learnStalenessSessions` | Unmined sessions since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer `0` or more (`0` nudges every cycle) | `5` |
+| `learnStalenessDays` | Days since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer `0` or more (`0` nudges every cycle) | `14` |
+| `learnSessionCap` | How many sessions one `/devcycle:learn` run may mine | integer `1` or more (`0` is refused, not a no-op run) | `100` |
 
 ## Other options
 

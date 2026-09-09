@@ -80,19 +80,19 @@
       "type": "number",
       "title": "Learn staleness — sessions",
       "default": 5,
-      "description": "How many sessions may accrue since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessDays crosses first triggers the nudge. Default: 5."
+      "description": "How many sessions may accrue since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessDays crosses first triggers the nudge. Minimum 0, and 0 nudges after every cycle. Default: 5."
     },
     "learnStalenessDays": {
       "type": "number",
       "title": "Learn staleness — days",
       "default": 14,
-      "description": "How many days may pass since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessSessions crosses first triggers the nudge. Default: 14."
+      "description": "How many days may pass since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessSessions crosses first triggers the nudge. Minimum 0, and 0 nudges after every cycle. Default: 14."
     },
     "learnSessionCap": {
       "type": "number",
       "title": "Learn session cap",
       "default": 100,
-      "description": "How many sessions a single /devcycle:learn run may mine. Planning ranks candidates by recency and reads only this many, so raising it raises the run's cost proportionally. Default: 100."
+      "description": "How many sessions a single /devcycle:learn run may mine. Planning ranks candidates by recency and reads only this many, so raising it raises the run's cost proportionally. Minimum 1 — a cap of 0 is refused rather than silently mining nothing. Default: 100."
     }
   }
 }

@@ -95,21 +95,30 @@ export function requireValue(flags, name, noun = "a path argument") {
   return v;
 }
 
-// A count flag's value must be a whole number of at least one. `Number()` on its own is not that
-// check: it turns an empty or unset value into `0` and any non-numeric one -- including the literal
-// `${user_config.NAME}` an unresolved knob leaves behind, which is exactly what a playbook's
-// substitution passes when the knob is unset -- into `NaN`. Both then flow into arithmetic that
-// yields a confident empty result and a zero exit rather than an error: `--cap ""` capped a session
-// corpus at nothing and printed a manifest indistinguishable from a fully mined corpus.
+// A count flag's value must be a whole number at or above the floor its caller states. `Number()`
+// on its own is not that check: it turns an empty or unset value into `0` and any non-numeric one
+// -- including the literal `${user_config.NAME}` an unresolved knob leaves behind, which is exactly
+// what a playbook's substitution passes when the knob is unset -- into `NaN`. Both then flow into
+// arithmetic that yields a confident empty result and a zero exit rather than an error: `--cap ""`
+// capped a session corpus at nothing and printed a manifest indistinguishable from a fully mined
+// corpus.
 //
-// Zero is refused along with the rest, because a count of zero asks for the same do-nothing run the
-// coercion bug produced silently, and an operator who means it can say so another way.
+// `min` is a parameter because the flags sharing this owner do not share a floor, and hardcoding
+// one broke the other: `--cap 0` asks for the same do-nothing run the coercion bug produced
+// silently, while `--max-sessions 0` carries the user-settable learnStalenessSessions knob and is
+// how a user asks to be nudged every cycle. The default stays 1, so a caller inherits the strict
+// floor and only a caller whose zero means something says so.
 //
-// Builds on requireValue so the empty and missing-value half keeps one owner and one message.
-export function requireCount(flags, name, noun = "a positive whole number") {
+// Builds on requireValue so the empty and missing-value half keeps one owner and one message, and
+// so a rejected value names its flag and its constraint at either floor.
+export function requireCount(
+  flags,
+  name,
+  { min = 1, noun = min === 1 ? "a positive whole number" : `a whole number of at least ${min}` } = {},
+) {
   const raw = requireValue(flags, name, noun);
   if (raw === undefined) return undefined;
   const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1) throw new Error(`${name} requires ${noun}, got ${JSON.stringify(raw)}`);
+  if (!Number.isInteger(n) || n < min) throw new Error(`${name} requires ${noun}, got ${JSON.stringify(raw)}`);
   return n;
 }

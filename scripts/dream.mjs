@@ -1041,8 +1041,11 @@ function main() {
         "--staleness": "none", "--max-sessions": "value", "--max-days": "value", "--cap": "value",
       });
       const cap = requireCount(flags, "--cap") ?? CAP;
-      const maxSessions = requireCount(flags, "--max-sessions") ?? 5;
-      const maxDays = requireCount(flags, "--max-days") ?? 14;
+      // Floor 0, not 1: both flags carry a user-settable knob (learnStalenessSessions,
+      // learnStalenessDays) whose zero means "nudge me every cycle", and the finish stage that
+      // runs this probe has no tolerance for a non-zero exit.
+      const maxSessions = requireCount(flags, "--max-sessions", { min: 0 }) ?? 5;
+      const maxDays = requireCount(flags, "--max-days", { min: 0 }) ?? 14;
       const dsPath = join(root, ".devcycle", "distilling-state.md");
       const lastRun = existsSync(dsPath) ? (fieldText(readFileSync(dsPath, "utf8"), "last-run") || null) : null;
       // `never` (or an empty/missing line) means the corpus was never mined — the strongest stale

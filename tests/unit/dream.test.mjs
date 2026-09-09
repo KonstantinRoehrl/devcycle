@@ -2706,11 +2706,14 @@ test("--plan honours an explicit --cap", () => {
 // `--cap ${user_config.learnSessionCap}` — so an unset knob reaches the CLI as an empty token or
 // as the literal placeholder. Both used to pass a bare Number() as 0/NaN, empty the manifest, and
 // still exit 0, which reads exactly like a corpus with nothing left to mine.
-const BAD_NUMERIC = ["", "abc", "${user_config.learnSessionCap}", "0", "-1", "2.5"];
+// `0` is not on this list: it is refused only where the flag's floor is one (`--cap`), and is a
+// legitimate "nudge me every cycle" for the staleness thresholds, so each test below adds it to
+// its own list where its flag refuses it.
+const BAD_NUMERIC = ["", "abc", "${user_config.learnSessionCap}", "-1", "2.5"];
 
 test("--plan refuses a --cap that is not a positive integer instead of mining nothing", () => {
   const root = realpathSync(repo());
-  for (const bad of BAD_NUMERIC) {
+  for (const bad of [...BAD_NUMERIC, "0"]) {
     const r = run(["--plan", "--cap", bad], root);
     assert.equal(r.status, 1,
       `--cap ${JSON.stringify(bad)} must fail; got status ${r.status} and manifest ${r.stdout}`);
@@ -2718,17 +2721,36 @@ test("--plan refuses a --cap that is not a positive integer instead of mining no
   }
 });
 
-test("--staleness refuses a --cap, --max-sessions or --max-days that is not a positive integer", () => {
+test("--staleness refuses a --cap, --max-sessions or --max-days that is not a whole number", () => {
   const root = realpathSync(repo());
   writeLastRun(root, "2020-01-01T00:00:00Z");
-  for (const flag of ["--cap", "--max-sessions", "--max-days"]) {
-    for (const bad of BAD_NUMERIC) {
-      const r = run(["--staleness", flag, bad], root);
+  // `--cap 0` is the do-nothing run the coercion bug produced silently, so zero stays refused
+  // there; the two thresholds carry it as a meaningful value and are checked below instead.
+  for (const [flag, bad] of [["--cap", [...BAD_NUMERIC, "0"]], ["--max-sessions", BAD_NUMERIC], ["--max-days", BAD_NUMERIC]]) {
+    for (const value of bad) {
+      const r = run(["--staleness", flag, value], root);
       assert.equal(r.status, 1,
-        `${flag} ${JSON.stringify(bad)} must fail; got status ${r.status} and report ${r.stdout}`);
+        `${flag} ${JSON.stringify(value)} must fail; got status ${r.status} and report ${r.stdout}`);
       assert.match(r.stderr, new RegExp(flag), "the message must name the flag the operator has to fix");
     }
   }
+});
+
+// `learnStalenessSessions` and `learnStalenessDays` are user-settable knobs with no minimum in the
+// manifest, and finishing-the-cycle.md pipes them straight into these two flags. Zero is the
+// natural way to ask for a nudge every cycle, and the finish stage has no tolerance for a probe
+// that exits 1 — so zero must nudge, not fail.
+test("--staleness accepts 0 for --max-sessions and --max-days and nudges every cycle", () => {
+  const root = realpathSync(repo());
+  const recent = new Date(Date.now() - 2 * 86400000).toISOString();
+  writeLastRun(root, recent);
+  // The corpus is empty and the checkpoint is two days old, so the default thresholds report
+  // not-stale (the test above this fixture's shape). At zero, both thresholds are crossed.
+  const r = run(["--staleness", "--max-sessions", "0", "--max-days", "0"], root);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.threshold, { maxSessions: 0, maxDays: 0 }, "the zeros must reach the probe, not be swallowed by the defaults");
+  assert.equal(out.stale, true, "a zero threshold means every cycle is stale enough to nudge");
 });
 
 test("a valid numeric flag value still reaches --plan and --staleness unchanged", () => {

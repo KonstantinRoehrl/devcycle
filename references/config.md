@@ -166,9 +166,9 @@ reference implementation of that order.
 ## Learn staleness
 
 `learnStalenessSessions` (default `5`) and `learnStalenessDays` (default `14`) are two
-non-profile integer knobs. They sit outside the profile matrix — no profile column moves
-them — and gate the single staleness nudge
-`${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` surfaces at cycle end.
+non-profile integer knobs, each accepting `0` or more — **`0` nudges after every cycle**.
+They sit outside the profile matrix — no profile column moves them — and gate the single
+staleness nudge `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` surfaces at cycle end.
 
 That playbook runs `scripts/dream.mjs --staleness`, which reads the distilling checkpoint's
 `last-run:` (`.devcycle/distilling-state.md`, owned by
@@ -181,7 +181,9 @@ forces a mining run and advances no checkpoint.
 
 `learnSessionCap` reaches the engine the same way: `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`
 and `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` pass `--cap <n>` to
-`scripts/dream.mjs --plan` and `--staleness` respectively.
+`scripts/dream.mjs --plan` and `--staleness` respectively. **Its minimum is `1`**, unlike the two
+thresholds above: a cap of `0` is refused rather than mining nothing and printing a manifest
+indistinguishable from a corpus with nothing left to mine.
 
 ## Model tiers
 
