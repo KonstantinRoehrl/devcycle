@@ -166,7 +166,9 @@ landed candidate: it is what makes ladder-first checkable rather than claimed.
 Then render the proposal:
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --render-report .devcycle/dreaming/<date>-candidates.json`,
 writing it to `.devcycle/dreaming/<YYYY-MM-DD>-dream.md`. `${CLAUDE_PLUGIN_ROOT}/references/impact-scoring.md`
-owns how each candidate's `impact` is computed; do not restate the formula here. Advance the corpus
+owns how each candidate's `impact` is computed; do not restate the formula here. That same
+reference owns the figures in the rendered report's `## Ledger` section, which nets each period's
+win savings against culprit cost. Advance the corpus
 checkpoint with `--commit-checkpoint <now, ISO-8601 UTC>`.
 
 **`--preview` stops here**, the loop's other exit: report the artifact path and stop, promoting

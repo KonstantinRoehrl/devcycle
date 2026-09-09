@@ -11,8 +11,9 @@ verdict, not a script's.
 
 Beyond building the change, devcycle closes the loop around a pull request: it reads a PR's
 review comments and reconciles them into the right fixes and consented replies. And it
-benchmarks its own runs and learns from past sessions — so the pipeline gets better the more
-you use it.
+benchmarks its own runs and learns from past sessions, its learning report carrying a per-period
+ledger that nets win savings against culprit cost — so the pipeline gets better the more you use
+it.
 
 Policy — what it may do with git, which models it runs, how deep reviews go — is
 configuration, not something you re-explain each session, and a single `profile` preset sets
