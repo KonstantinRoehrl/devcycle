@@ -270,6 +270,13 @@ gated by `userConfig.crossModelReview`.
   against the distilling checkpoint's `last-run:` and, when either threshold is crossed,
   surfaces one advisory line suggesting another `/devcycle:learn` pass (resolution and
   ownership in `references/config.md` § Learn staleness).
+- `learnSessionCap` (100) bounds how many sessions one `/devcycle:learn` run mines.
+  `playbooks/learning-from-sessions.md` resolves it and passes it to the engine as
+  `dream.mjs --plan --cap <n>`; `--staleness` takes the same flag so the nudge counts against the
+  cap the user actually set. `--plan` reports `oversized` (sessions past the 50 MB per-session
+  ceiling, skipped without being read — `--extract --include-oversized` mines one anyway),
+  `corpusResolution` (`primary` when the project slug resolved the corpus, `fallback` when the
+  whole-root scan did), and the read counters `readSessions` / `readFiles`.
 - Once encoded, corresponding personal memories (e.g. never-local-merge-to-dev) are deleted.
 
 ---

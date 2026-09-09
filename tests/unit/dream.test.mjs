@@ -2347,3 +2347,116 @@ test("planCandidates applies the since window on metadata alone, reading nothing
   assert.equal(out.candidates.length, 0, "a since bound in the future admits no candidate");
   assert.equal(reads, 50, "the window is decided by stat, not by reading");
 });
+
+test("--plan persists the resolved corpus so --extract does not re-derive it", () => {
+  const { root, projectsDir } = seedMany(3);
+  planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), writeCache: true });
+  const cache = JSON.parse(readFileSync(join(root, ".devcycle", "dreaming", "corpus.json"), "utf8"));
+  assert.equal(cache.corpusResolution, "primary");
+  assert.equal(cache.projectsDir, projectsDir);
+  assert.equal(Object.keys(cache.sessions).length, 3);
+
+  // A cache hit still makes exactly one git call — the toplevel lookup that locates the cache
+  // file itself. What it must NOT do is enumerate worktrees to re-resolve the corpus. Note the
+  // in-process resolve memo would also suppress the enumeration for this same repoRoot; the
+  // subdirectory test below is the one that isolates the cache, because its repoRoot is a key the
+  // memo has never seen.
+  const calls = [];
+  const countingGit = (cmd, args) => { calls.push(args.join(" ")); return fakeGit(root)(cmd, args); };
+  extractSession({ repoRoot: root, projectsDir, sessionId: "s0000", gitRunner: countingGit });
+  assert.equal(calls.filter((a) => a.includes("worktree")).length, 0,
+    "a cache hit must not enumerate worktrees to re-resolve the corpus");
+  assert.equal(calls.length, 1, "only the toplevel lookup that locates the cache file");
+});
+
+test("--extract run from a subdirectory of the repo hits the cache --plan wrote", () => {
+  const { root, projectsDir } = seedMany(3);
+  planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), writeCache: true });
+  const sub = join(root, "packages", "app");
+  mkdirSync(sub, { recursive: true });
+
+  // A different repoRoot, so neither the per-process resolve memo nor a cwd-keyed cache could
+  // help: only anchoring the cache path at the git toplevel makes this a hit.
+  const calls = [];
+  const countingGit = (cmd, args) => { calls.push(args.join(" ")); return fakeGit(root)(cmd, args); };
+  assert.match(extractSession({ repoRoot: sub, projectsDir, sessionId: "s0000", gitRunner: countingGit }), /user:/);
+  assert.equal(calls.filter((a) => a.includes("worktree")).length, 0,
+    "a subdirectory invocation must hit the toplevel-anchored cache, not re-resolve the corpus");
+});
+
+test("--extract reuses the cache for a session the cache covers", () => {
+  const { root, projectsDir } = seedMany(2);
+  planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), writeCache: true });
+  // cap is 100 and there are 2 sessions, so both are kept and both are in the cache: this is a
+  // cache HIT, and naming it a fall-through would describe a condition the fixture never creates.
+  const text = extractSession({ repoRoot: root, projectsDir, sessionId: "s0001", gitRunner: fakeGit(root) });
+  assert.match(text, /user:/);
+});
+
+test("--extract falls through to a live resolve when the cache names a different projects root", () => {
+  const { root, projectsDir } = seedMany(2);
+  planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), writeCache: true });
+
+  // A cache written against a different projects root must be ignored, not trusted.
+  const other = makeTempDir("dream-other-");
+  const cachePath = join(root, ".devcycle", "dreaming", "corpus.json");
+  const doc = JSON.parse(readFileSync(cachePath, "utf8"));
+  writeFileSync(cachePath, JSON.stringify({ ...doc, projectsDir: other }));
+  assert.match(extractSession({ repoRoot: root, projectsDir, sessionId: "s0001", gitRunner: fakeGit(root) }), /user:/);
+});
+
+test("--plan then N --extract performs one whole-root discovery, not N + 1", () => {
+  const root = makeTempDir("dream-repo-");
+  const projectsDir = makeTempDir("dream-projects-");
+  // A legacy slug the primary lookup can never name, so every uncached resolve is a whole-root
+  // scan — the expensive path the cache and the memo exist to stop repeating.
+  const slug = join(projectsDir, "-legacy-slug");
+  mkdirSync(slug, { recursive: true });
+  const ids = ["s0", "s1", "s2"];
+  for (const id of ids)
+    writeFileSync(join(slug, `${id}.jsonl`),
+      JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } }) + "\n");
+
+  const calls = [];
+  const countingGit = (cmd, args) => { calls.push(args.join(" ")); return fakeGit(root)(cmd, args); };
+  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: countingGit, writeCache: true });
+  assert.equal(plan.corpusResolution, "fallback", "the fixture must actually exercise the fallback");
+  for (const id of ids) extractSession({ repoRoot: root, projectsDir, sessionId: id, gitRunner: countingGit });
+
+  const discoveries = calls.filter((a) => a.includes("worktree")).length;
+  assert.equal(discoveries, 1,
+    `--plan plus ${ids.length} --extract performed ${discoveries} whole-root discoveries, expected 1`);
+});
+
+test("--plan still accepts the --run-checks modifier now that the branch parses flags", () => {
+  const root = realpathSync(repo());
+  // parseFlags throws on any flag its spec omits, and --run-checks is deliberately not a
+  // subcommand (dream.mjs's own comment says so), so the branch accepted it before this change.
+  const r = run(["--plan", "--run-checks"], root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).cap, 100, "--plan must still print its manifest");
+});
+
+test("extractSession refuses an oversized session unless told otherwise", () => {
+  const { root, projectsDir } = seedMany(1);
+  const slug = join(projectsDir, root.replace(/[^A-Za-z0-9]/g, "-"));
+  const big = join(slug, "huge.jsonl");
+  writeFileSync(big, JSON.stringify({ cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } }) + "\n");
+  truncateSync(big, MAX_SESSION_BYTES + 1);
+
+  assert.throws(
+    () => extractSession({ repoRoot: root, projectsDir, sessionId: "huge", gitRunner: fakeGit(root) }),
+    /--include-oversized/,
+    "the error must name the flag that overrides it",
+  );
+  assert.doesNotThrow(() =>
+    extractSession({ repoRoot: root, projectsDir, sessionId: "huge", gitRunner: fakeGit(root), includeOversized: true }));
+});
+
+test("--plan honours an explicit --cap", () => {
+  const { root, projectsDir } = seedMany(20);
+  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 5, gitRunner: fakeGit(root) });
+  assert.equal(plan.sessions.length, 5);
+  assert.equal(plan.cap, 5);
+  assert.equal(plan.capped, true);
+});

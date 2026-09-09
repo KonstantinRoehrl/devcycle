@@ -6,11 +6,11 @@
 // copy: journal.mjs (run records), promotions.mjs (landed lessons), lessons.mjs (the three
 // capped stores), learn-report.mjs (the report).
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { findTranscriptFiles, owningSession, readRecords, inWindow } from "./doctor.mjs";
+import { findTranscriptFiles, owningSession, inWindow } from "./doctor.mjs";
 import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
 import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding, MATCH_CAP } from "./lessons.mjs";
@@ -34,6 +34,28 @@ export const RANK_MARGIN = 25;
 export const MAX_SESSION_BYTES = 50 * 1024 * 1024;
 const dreamDir = (root) => join(root, ".devcycle", "dreaming");
 const statePath = (root) => join(dreamDir(root), "state.md");
+
+// Anchored at the git toplevel, not process.cwd(): --plan and --extract both derive their root
+// from cwd, so a dispatch invoked from a subdirectory would otherwise miss the cache silently —
+// the fix would quietly fail to apply exactly where mining runs. gitToplevel resolves a linked
+// worktree to its shared checkout, so one cache serves every worktree of the repo.
+const corpusCachePath = (repoRoot, gitRunner) =>
+  join(gitToplevel(repoRoot, gitRunner), ".devcycle", "dreaming", "corpus.json");
+
+// Every miss — absent file, unparseable, a different projects root, an unknown session — returns
+// null and lets the caller resolve live. That self-healing miss path is the whole invalidation
+// strategy, and it is what keeps --extract independent of --plan having run first.
+function cachedSessionFiles(repoRoot, projectsDir, sessionId, gitRunner) {
+  let doc;
+  try {
+    doc = JSON.parse(readFileSync(corpusCachePath(repoRoot, gitRunner), "utf8"));
+  } catch {
+    return null;
+  }
+  if (doc?.projectsDir !== projectsDir) return null;
+  const files = doc?.sessions?.[sessionId];
+  return Array.isArray(files) && files.length ? files : null;
+}
 
 // The durable store the map stage writes and both the reduce stage and every later dream
 // read (spec §5.4). Local-only under the already-gitignored .devcycle/, so nothing is added
@@ -318,10 +340,9 @@ export function messageText(record) {
 }
 
 function defaultReadText(session) {
-  return session.files
-    .flatMap((f) => readRecords(f))
-    .map(messageText)
-    .join("\n");
+  const parts = [];
+  for (const f of session.files) eachRecord(f, (r) => { parts.push(messageText(r)); });
+  return parts.join("\n");
 }
 
 // The one subcommand that emits message text, by definition (spec §3.1). It is called by a
@@ -329,11 +350,16 @@ function defaultReadText(session) {
 // keeps the manifest's redaction property intact. Deliberately not routed through planCorpus:
 // the 100-session cap and the checkpoint window bound *mining*, and a caller holding a session
 // id must be able to read that session's text regardless of either.
-export function extractSession({ repoRoot, projectsDir, sessionId, gitRunner }) {
-  const files = resolveProjectFiles(repoRoot, projectsDir, gitRunner).files.filter(
-    (f) => owningSession(f) === sessionId,
-  );
+export function extractSession({ repoRoot, projectsDir, sessionId, gitRunner, includeOversized = false }) {
+  const files = cachedSessionFiles(repoRoot, projectsDir, sessionId, gitRunner)
+    ?? resolveProjectFiles(repoRoot, projectsDir, gitRunner).files.filter((f) => owningSession(f) === sessionId);
   if (!files.length) throw new Error(`no transcript for session: ${sessionId}`);
+  const bytes = files.reduce((n, f) => n + statSync(f).size, 0);
+  if (!includeOversized && bytes > MAX_SESSION_BYTES)
+    throw new Error(
+      `session ${sessionId} is ${bytes} bytes, over the ${MAX_SESSION_BYTES}-byte ceiling; ` +
+        `re-run with --include-oversized to mine it anyway`,
+    );
   return defaultReadText({ files });
 }
 
@@ -437,7 +463,7 @@ export const sliceSessionId = (id) => String(id).split("@")[0];
 // the cost of deciding WHICH sessions to mine no longer scales with how many have ever existed.
 // Note this is only content-free when the primary slug lookup hits; on the fallback path
 // resolveProjectFiles must itself probe every transcript under the projects root.
-export function planCandidates({ repoRoot, projectsDir, since, cap = CAP, gitRunner, statFile = statSync }) {
+export function planCandidates({ repoRoot, projectsDir, since, cap = CAP, gitRunner, statFile = statSync, includeOversized = false }) {
   const { files, corpusResolution } = resolveProjectFiles(repoRoot, projectsDir, gitRunner);
   const groups = new Map();
   for (const file of files) {
@@ -457,7 +483,10 @@ export function planCandidates({ repoRoot, projectsDir, since, cap = CAP, gitRun
       bytes += st.size;
       if (st.mtimeMs > mtimeMs) mtimeMs = st.mtimeMs;
     }
-    if (bytes > MAX_SESSION_BYTES) { oversized.push({ id, bytes }); continue; }
+    if (bytes > MAX_SESSION_BYTES) {
+      oversized.push({ id, bytes });
+      if (!includeOversized) continue;
+    }
     // Conservative in one direction only: a record's timestamp cannot postdate the write that
     // stored it, so a session whose newest file predates the checkpoint holds no in-window
     // record. This can over-keep (a copied file) and never under-keeps; Phase B's exact
@@ -469,9 +498,9 @@ export function planCandidates({ repoRoot, projectsDir, since, cap = CAP, gitRun
   return { candidates, oversized, corpusResolution };
 }
 
-export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false, gitRunner, statFile = statSync }) {
+export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false, gitRunner, statFile = statSync, includeOversized = false, writeCache = false }) {
   const { candidates, oversized, corpusResolution } =
-    planCandidates({ repoRoot, projectsDir, since, cap, gitRunner, statFile });
+    planCandidates({ repoRoot, projectsDir, since, cap, gitRunner, statFile, includeOversized });
 
   const sessions = [];
   let readFiles = 0;
@@ -535,6 +564,21 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
   // is preserved except in one case: if every survivor is a self-session while a non-self one
   // sits below the margin, `fresh` flips from false to true.
   const { fresh, path } = artifactFresh(repoRoot, since, sessions);
+
+  if (writeCache) {
+    // atomicWrite does not create directories — writeCheckpoint does its own mkdirSync for the
+    // same reason. The directory must come from the cache path itself: dreamDir(repoRoot) is
+    // join(repoRoot, ".devcycle", "dreaming"), while the cache lives under the git TOPLEVEL, and
+    // those are different directories in exactly the subdirectory case the cache exists to serve
+    // — creating one and writing into the other throws ENOENT rather than degrading.
+    mkdirSync(dirname(corpusCachePath(repoRoot, gitRunner)), { recursive: true });
+    atomicWrite(corpusCachePath(repoRoot, gitRunner), JSON.stringify({
+      resolvedAt: new Date().toISOString(),
+      projectsDir,
+      corpusResolution,
+      sessions: Object.fromEntries(kept.map((s) => [s.id, s.files])),
+    }, null, 2) + "\n");
+  }
 
   return {
     since: since ?? null,
@@ -660,6 +704,9 @@ function main() {
           repoRoot: root,
           projectsDir: resolveProjectsRoot(),
           sessionId: argv[extractIdx + 1],
+          // The session id is positional and parseFlags refuses bare positionals, so presence is
+          // tested directly rather than by wrapping this branch in a flag parse.
+          includeOversized: argv.includes("--include-oversized"),
         }),
       );
     } catch (e) {
@@ -671,14 +718,22 @@ function main() {
 
   if (hasPlan) {
     try {
-      const { lastDreamedThrough } = readCheckpoint(root);
-      console.log(
-        JSON.stringify(
-          planCorpus({ repoRoot: root, projectsDir: resolveProjectsRoot(), since: lastDreamedThrough }),
-          null,
-          2,
-        ),
-      );
+      const { flags } = parseFlags(argv, {
+        "--plan": "none", "--cap": "value", "--include-oversized": "none",
+        // Tolerated before this branch parsed anything, and must stay tolerated: it is a modifier,
+        // not a subcommand, so it never trips the mutual-exclusivity guard above either.
+        "--run-checks": "none",
+      });
+      const cap = flags["--cap"] != null ? Number(flags["--cap"]) : CAP;
+      const plan = planCorpus({
+        repoRoot: root,
+        projectsDir: resolveProjectsRoot(),
+        since: readCheckpoint(root).lastDreamedThrough,
+        cap,
+        includeOversized: flags["--include-oversized"] === true,
+        writeCache: true,
+      });
+      console.log(JSON.stringify(plan, null, 2));
     } catch (e) {
       console.error(`dream: ${e.message}`);
       process.exit(1);
@@ -969,8 +1024,9 @@ function main() {
   if (argv.includes("--staleness")) {
     try {
       const { flags } = parseFlags(argv, {
-        "--staleness": "none", "--max-sessions": "value", "--max-days": "value",
+        "--staleness": "none", "--max-sessions": "value", "--max-days": "value", "--cap": "value",
       });
+      const cap = flags["--cap"] != null ? Number(flags["--cap"]) : CAP;
       const maxSessions = flags["--max-sessions"] != null ? Number(flags["--max-sessions"]) : 5;
       const maxDays = flags["--max-days"] != null ? Number(flags["--max-days"]) : 14;
       const dsPath = join(root, ".devcycle", "distilling-state.md");
@@ -981,8 +1037,8 @@ function main() {
       // Only the count is needed, so Phase A alone answers it — this used to run a full plan,
       // reading every transcript in the corpus, to read one number. The mtime-approximate since
       // boundary is adequate for a nudge that asks only whether enough sessions have accrued.
-      const { candidates } = planCandidates({ repoRoot: root, projectsDir: resolveProjectsRoot(), since: literal });
-      const unminedSessions = Math.min(candidates.length, CAP);
+      const { candidates } = planCandidates({ repoRoot: root, projectsDir: resolveProjectsRoot(), since: literal, cap });
+      const unminedSessions = Math.min(candidates.length, cap);
       // QC1: an unminable age is `null`, never `0` — a never-mined corpus has no elapsed days, and
       // reading that as zero days would falsely read as "just mined".
       const daysSince = literal ? Math.floor((Date.now() - Date.parse(literal)) / 86400000) : null;
@@ -996,14 +1052,15 @@ function main() {
   }
 
   console.error(
-    "usage: dream.mjs --plan | --extract <session-id> | --commit-checkpoint <iso> | --record-promotion <json> | " +
+    "usage: dream.mjs --plan [--cap N] [--include-oversized] | --extract <session-id> [--include-oversized] | " +
+      "--commit-checkpoint <iso> | --record-promotion <json> | " +
       "--record-lifecycle <json> | " +
       "--check-recurrence [--run-checks] | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
       "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --observations-deduped | --lessons <stage> | " +
       "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
       "--render-report <candidates.json> [--outcome] | " +
       "--plan-landing --stage <stage> --line \"<lesson line>\" [--store repo|user-repo|user-global] | " +
-      "--staleness [--max-sessions N] [--max-days M]",
+      "--staleness [--max-sessions N] [--max-days M] [--cap N]",
   );
   process.exit(1);
 }
