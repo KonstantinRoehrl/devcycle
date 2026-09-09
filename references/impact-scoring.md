@@ -50,12 +50,20 @@ optional fields, both absent by default — an entry without them behaves exactl
   mean(cost-per-occurrence over every prevented key)` — the **mean**, not the sum, so declaring
   more prevented keys never inflates the figure.
 
-Cost-per-occurrence is measured over a **baseline window that extends backwards past the period**,
-never inside it: a cost measured inside the period would drive a successful win's baseline toward
-zero occurrences, and the metric would then punish success. A win whose savings cannot be priced —
-no occurrences in the period, no `prevents`, or any prevented key unpriced in the baseline —
-renders `unmeasurable`, never `$0`; one unpriced win makes the whole period's win savings, and so
-its net, unmeasurable.
+Cost-per-occurrence is measured over a **baseline window that ends at the period's end and extends
+backwards past the period's start** — so it contains the period as its most-recent slice and, as far
+as the corpus scan's cap reaches, the history before it. Pricing a win inside the period alone would
+drive a successful win's baseline toward zero occurrences and the metric would punish success; the
+cap bounds how far back the baseline reaches, so the report prints the baseline's resolved span
+beside the figures and a savings number is always read against the window that produced it. Both
+windows are anchored to the candidates file's period end, so a stale candidates file — or sessions
+that arrive after it was written — never leaks past the printed span into either total.
+
+A win whose savings cannot be priced — no occurrences in the period, no `prevents`, or any prevented
+key unpriced in the baseline — renders `unmeasurable`, never `$0`; one such unpriced win makes the
+whole period's win savings, and so its net, unmeasurable. A period with **no held wins at all** is a
+different case: its win savings is an empty sum, a true `0`, so the net is `−cost` rather than
+`unmeasurable` — the absence of wins is a measured zero, not missing data.
 
 A key on the `unattributed` sentinel is excluded from both the savings and cost totals **and from
 the poison set** — it counts only into `excluded.events`. Because such a key is unmeasurable by
