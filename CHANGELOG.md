@@ -3,10 +3,10 @@
 **Bounded learn-corpus planning.** Planning a `/devcycle:learn` run used to read every transcript
 under `~/.claude/projects` in full before deciding which sessions to mine, so both memory and wall
 clock grew with every session ever created on the machine. Planning now runs in two phases: it
-ranks candidates from file metadata alone, then content-reads only the sessions it will actually
-mine, streaming each transcript record by record instead of loading it whole. How many sessions a
-run mines is now a knob, `learnSessionCap` (default 100), with `dream.mjs --plan --cap <n>` as its
-flag. A single session larger than 50 MB is skipped rather than read, and named in `--plan`'s new
+ranks candidates from file metadata alone, then content-reads only the top of that ranking — the
+cap plus a small margin, never the whole corpus — streaming each transcript record by record
+instead of loading it whole. How many sessions a run mines is now a knob, `learnSessionCap`
+(default 100), with `dream.mjs --plan --cap <n>` as its flag. A single session larger than 50 MB is skipped rather than read, and named in `--plan`'s new
 `oversized` list; `--include-oversized` mines it anyway. `--plan` output also gains
 `corpusResolution`, which says whether the corpus came from the repo's own project slug or from
 the whole-root fallback scan, plus `readSessions` and `readFiles` counters for what the planning

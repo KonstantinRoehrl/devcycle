@@ -99,11 +99,11 @@ marker with the version the change lands in, since only the release computes tha
 - version: "unreleased"
   change: added
   key: learnStalenessSessions
-  note: "accepted values pinned, not a new key: an integer 0 or more, where an empty, non-numeric or negative value is refused by name instead of coercing to NaN and silently disabling the nudge's session leg"
+  note: "accepted values pinned, not a new key: an integer 0 or more. A bad value is now refused by name instead of coercing. Coercion did not fail one way: an empty or negative value became 0 or a negative number, which every count clears, so the session leg fired on every cycle; only a non-numeric value became NaN, whose comparison is always false, so that leg never fired at all"
 - version: "unreleased"
   change: added
   key: learnStalenessDays
-  note: "accepted values pinned, not a new key: an integer 0 or more, where an empty, non-numeric or negative value is refused by name instead of coercing to NaN and silently disabling the nudge's day leg"
+  note: "accepted values pinned, not a new key: an integer 0 or more. A bad value is now refused by name instead of coercing. Coercion did not fail one way: an empty or negative value became 0 or a negative number, which every count clears, so the day leg fired on every cycle; only a non-numeric value became NaN, whose comparison is always false, so that leg never fired at all"
 ```
 
 ## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)
