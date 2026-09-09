@@ -24,8 +24,11 @@ the cycle of re-adding it.
 
 ## 2026-09-09 — budgets raised for the learn-corpus memory hardening
 
-**Decision:** `tests/fixtures/context-budget.json` is raised by exactly the bytes each commit of
-the corpus-hardening branch adds, one bullet per commit that tripped a baseline:
+**Decision:** `tests/fixtures/context-budget.json` is raised to the newly measured closure size of
+every playbook a commit of the corpus-hardening branch trips, one bullet per commit. Where a
+baseline sat flush against its measurement that raise equals the bytes the commit adds; the first
+bullet's `reviewing-code` moves 285 for the same +289 row only because its old baseline carried four
+bytes of headroom:
 
 - `fix(config): add the learnSessionCap knob to all four roster surfaces`: executing-waves
   109892→110181, finishing-the-cycle 98710→98999, learning-from-sessions 111063→111352,
@@ -43,14 +46,24 @@ the corpus-hardening branch adds, one bullet per commit that tripped a baseline:
   learning-from-sessions 112097→112218.
 - branch-fix-1-5 (the docs pass that closed the branch review): learning-from-sessions
   112218→112457.
+- `fix(config): let a staleness threshold of zero mean "every cycle" again`: the knob-minimum
+  sentences added to `references/config.md` grew all thirteen closures by 256 — executing-waves
+  110255→110511, finishing-the-cycle 99135→99391, learning-from-sessions 112457→112713,
+  maintaining-the-repo 93731→93987, onboarding-a-repo 91179→91435, planning-waves 95636→95892,
+  receiving-review 121399→121655, reviewing-code 128497→128753, reviewing-the-branch
+  101977→102233, scoping-the-request 87656→87912, sweeping-mechanical-changes 101487→101743,
+  taking-the-fast-path 94599→94855, verifying-on-device 97086→97342. `profiling-sessions.md`
+  again stayed at 110359, on the headroom the **Why** below describes.
 
 `tests/fixtures/surface-budget.json` needed no raise: 5320 / 124 / 294 still hold.
 
-**Why:** `references/config.md` is reachable from every playbook except `profiling-sessions.md`,
-which is why one knob row there moves thirteen budgets and leaves the fourteenth alone. The rest
-is the learn playbook's own: the pre-dispatch cost gate and the 8-in-flight mining ceiling, the
-`--include-oversized` pass-through that reaches `--extract`, and the line naming the
-`.devcycle/dreaming/corpus.json` a plan now writes.
+**Why:** `references/config.md` is in every playbook's citation closure, `profiling-sessions.md`
+included — four hops out, via `findings.md` → `evidence.md` → `delegation.md`, and `validate.mjs`
+check 15 follows citations to a fixed point. So the knob row grew all fourteen closures by the same
+289 bytes; the fourteenth baseline stayed put because it carries roughly 5 KB of headroom, not
+because the row failed to reach it. The rest is the learn playbook's own: the pre-dispatch cost gate
+and the 8-in-flight mining ceiling, the `--include-oversized` pass-through that reaches `--extract`,
+and the line naming the `.devcycle/dreaming/corpus.json` a plan now writes.
 
 ## 2026-09-06 — budget raised for the engine & hook safety branch review
 

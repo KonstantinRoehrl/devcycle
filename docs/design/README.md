@@ -506,8 +506,11 @@ than sessions mined. The 2026-09-09 hardening split planning into a metadata-onl
 and a bounded read pass, streamed transcripts record by record, bounded the whole-root fallback
 scan, and capped the corpus with `learnSessionCap` (§7). What keeps those bounds from eroding is a
 seam, not a benchmark: `planCorpus` takes its `gitRunner`, `statFile` and `reader` as injected
-parameters, so a test counts the subprocesses, stat calls and content reads a plan makes. A
-resource bound asserted any other way is not asserted at all.
+parameters, so a test counts the subprocesses a plan spawns, the stat calls its ranking pass makes,
+and the content reads of its read phase. The injected reader reaches no further: the whole-root
+fallback identifies a session's repo through `sessionRepoMatches`'s own default reader, so that
+scan's per-transcript read is off the count. A resource bound asserted any other way is not
+asserted at all.
 
 A run also reports its own cost: `readSessions` and `readFiles` count what the second,
 content-reading phase opened, and `corpusResolution` names whether the corpus came from the repo's

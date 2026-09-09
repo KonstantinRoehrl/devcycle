@@ -8,9 +8,11 @@ The loop plans its corpus from `dream.mjs --plan --cap`, bounded by the `learnSe
 you configure, rather than walking transcripts directly — so a run's cost follows the sessions it
 mines, not every session ever recorded on the machine. The run-record journal is read first and is
 never itself mined, so a cold-start repo with no journal falls through to the memory store and
-mining rather than reporting nothing found. Nothing is dispatched until the plan's own estimate
-clears: an extraction over 10 MB comes back to you first, as does any session too large to read at
-all. Each unmined slice the resolved profile admits — the memory store at every profile,
+mining rather than reporting nothing found. One number gates dispatch: an estimated extraction over
+10 MB comes back to you first. Sessions too large to read at all are skipped by default and are not
+counted into that estimate, so they raise no question of their own — the plan's skipped list is named
+inside the 10 MB question when it fires, and `--include-oversized` is what mines them. Each unmined
+slice the resolved profile admits — the memory store at every profile,
 archives/findings/ledgers and user-correction turns at `standard`/`thorough`, raw transcripts at
 `thorough` only — gets one fast-tier dispatch, at most 8 of them in flight at a time, that writes
 and self-verifies its own observation file, so an interrupted run resumes rather than re-mining. A
@@ -41,14 +43,15 @@ output before re-rendering the report in outcome mode and rewriting the run's ow
 ```mermaid
 ---
 title: learning-from-sessions — the observe-propose-confirm-land loop
-accDescr: Playbook-internal flowchart of the learn loop, from planning a capped corpus through the pre-dispatch cost gate and mining unmined slices, then clustering, screening and recurrence-checking into a rendered candidate proposal, the --preview exit, and a default run's Confirm routing and ladder-first Land steps ending at the outcome-mode report.
+accDescr: Playbook-internal flowchart of the learn loop, from planning a capped corpus through the pre-dispatch gate on the estimated extraction size — whose answer either proceeds to mining or loops back to re-plan a narrower corpus — and mining unmined slices, then clustering, screening and recurrence-checking into a rendered candidate proposal, the --preview exit, and a default run's Confirm routing and ladder-first Land steps ending at the outcome-mode report.
 ---
 flowchart TD
     PLAN("Plan the corpus — dream.mjs --plan --cap, bounded by learnSessionCap; journal read first, never mined"):::stage
-    PLAN --> GATE{"Estimate over 10 MB, or a session too large to read?"}:::stage
+    PLAN --> GATE{"Estimated extraction over 10 MB?"}:::stage
     GATE -->|yes| ASK(["back to you — mine as planned, narrow the window, or lower the cap"]):::tool
     GATE -->|no| MINE
-    ASK --> MINE
+    ASK -->|mine as planned| MINE
+    ASK -->|narrow the window, or lower the cap| PLAN
     MINE("Mine each unmined slice — one fast-tier dispatch per slice, at most 8 in flight, self-verified write"):::stage
     MINE --> CLUSTER("Cluster, screen, check recurrence — assign culprit-ids, partition bulk/explicit"):::stage
     CLUSTER --> CANDFILE[("dated candidates.json + rendered proposal doc")]:::structural
