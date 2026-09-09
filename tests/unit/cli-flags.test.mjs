@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseFlags, requireValue } from "../../scripts/cli-flags.mjs";
+import { parseFlags, requireValue, requireCount } from "../../scripts/cli-flags.mjs";
 
 // Every consumer declares each flag's arity beside its name: "value" for a flag that takes the
 // next token, "none" for one whose presence is the whole meaning. There is no default, so a
@@ -61,6 +61,71 @@ test("requireValue names what the flag wants, and still says a path by default",
   assert.throws(() => requireValue(parseFlags(["--file"], KNOWN).flags, "--file", "a date"), /--file requires a date$/);
   assert.throws(() => requireValue(parseFlags(["--file="], KNOWN).flags, "--file", "a value"), /--file requires a value$/);
   assert.equal(requireValue(parseFlags(["--file", "x"], KNOWN).flags, "--file", "a date"), "x");
+});
+
+// --- requireCount: the floor belongs to the caller, not to the owner ---
+//
+// requireCount is requireValue's numeric sibling and is pinned here for the same reason: its
+// edge semantics were otherwise exercised only through spawned dream.mjs runs, which never reach
+// the equals form. The floor is a parameter because the flags sharing this owner do not share
+// one -- `--cap 0` asks for the do-nothing run the coercion bug produced silently, while
+// `--max-sessions 0` is a user asking to be nudged every cycle.
+const COUNTS = { "--cap": "value", "--max-sessions": "value" };
+
+test("requireCount passes an absent flag through and reads a whole number in either form", () => {
+  assert.equal(requireCount(parseFlags([], COUNTS).flags, "--cap"), undefined);
+  assert.equal(requireCount(parseFlags(["--cap", "5"], COUNTS).flags, "--cap"), 5);
+  assert.equal(requireCount(parseFlags(["--cap=5"], COUNTS).flags, "--cap"), 5);
+});
+
+test("requireCount rejects an empty, missing or non-integer value, naming the flag", () => {
+  assert.throws(() => requireCount(parseFlags(["--cap"], COUNTS).flags, "--cap"),
+    /--cap requires a positive whole number$/);
+  assert.throws(() => requireCount(parseFlags(["--cap="], COUNTS).flags, "--cap"),
+    /--cap requires a positive whole number$/);
+  assert.throws(() => requireCount(parseFlags(["--cap=abc"], COUNTS).flags, "--cap"),
+    /--cap requires a positive whole number, got "abc"/);
+  assert.throws(() => requireCount(parseFlags(["--cap=2.5"], COUNTS).flags, "--cap"),
+    /--cap requires a positive whole number, got "2.5"/);
+  assert.throws(() => requireCount(parseFlags(["--cap=-1"], COUNTS).flags, "--cap"),
+    /--cap requires a positive whole number, got "-1"/);
+});
+
+// A floor of one is the safe default every count flag inherits; a caller whose zero is meaningful
+// says so, and says it once, rather than re-implementing the empty and non-integer rejections.
+test("requireCount floors at one by default and a caller can lower the floor to zero", () => {
+  assert.throws(() => requireCount(parseFlags(["--cap=0"], COUNTS).flags, "--cap"),
+    /--cap requires a positive whole number, got "0"/);
+  assert.equal(requireCount(parseFlags(["--max-sessions=0"], COUNTS).flags, "--max-sessions", { min: 0 }), 0);
+  assert.equal(requireCount(parseFlags(["--max-sessions", "0"], COUNTS).flags, "--max-sessions", { min: 0 }), 0);
+});
+
+// Lowering the floor must not cost the operator the message: a rejected value still names the
+// flag to fix, the constraint it broke, and what was actually passed.
+test("a floor-zero flag still names itself and its constraint when the value is refused", () => {
+  const zero = { min: 0 };
+  assert.throws(() => requireCount(parseFlags(["--max-sessions=-1"], COUNTS).flags, "--max-sessions", zero),
+    /--max-sessions requires a whole number of at least 0, got "-1"/);
+  assert.throws(() => requireCount(parseFlags(["--max-sessions=abc"], COUNTS).flags, "--max-sessions", zero),
+    /--max-sessions requires a whole number of at least 0, got "abc"/);
+  assert.throws(() => requireCount(parseFlags(["--max-sessions=2.5"], COUNTS).flags, "--max-sessions", zero),
+    /--max-sessions requires a whole number of at least 0, got "2.5"/);
+  assert.throws(() => requireCount(parseFlags(["--max-sessions="], COUNTS).flags, "--max-sessions", zero),
+    /--max-sessions requires a whole number of at least 0$/);
+  assert.throws(() => requireCount(parseFlags(["--max-sessions"], COUNTS).flags, "--max-sessions", zero),
+    /--max-sessions requires a whole number of at least 0$/);
+});
+
+// The third parameter used to be a positional `noun` string. A call left in that shape
+// destructures a string: it finds neither `min` nor `noun`, so the floor and the message silently
+// fall back to the defaults and a caller that meant to pass a custom noun gets the generic one with
+// no error. The superseded shape has to fail loudly rather than degrade.
+test("requireCount refuses the superseded positional third argument", () => {
+  assert.throws(
+    () => requireCount(parseFlags(["--cap=5"], COUNTS).flags, "--cap", "a date"),
+    /requireCount\("--cap"\) takes an options object \({ min, noun }\), got "a date"/,
+    "a stale positional noun must not be read as an options object and silently ignored",
+  );
 });
 
 // --- arity: a valueless flag must not eat the next token ---

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, appendFileSync, chmodSync, copyFileSync, readdirSync, realpathSync, readFileSync, rmSync, symlinkSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -20,7 +20,13 @@ import {
   extractSession,
   messageText,
   alwaysLoadedNetBytes,
+  resolveProjectFiles,
+  sessionRepoMatches,
+  planCandidates,
+  RANK_MARGIN,
+  MAX_SESSION_BYTES,
 } from "../../scripts/dream.mjs";
+import { eachRecord } from "../../scripts/jsonl.mjs";
 
 // The promotion reader/writer moved to promotions.mjs; the record-shape tests below were
 // written against it while it lived in dream.mjs and still pin the same behaviour, so they
@@ -61,6 +67,24 @@ const run = (args, cwd, env = {}) =>
 // escaping rule fix 2 gives `planCorpus`; `plain `.replaceAll("/", "-")` above still
 // matches it for the plain-name fixtures the pre-existing tests use.
 const escapedSlug = (root) => root.replace(/[^A-Za-z0-9]/g, "-");
+
+const fakeGit = (root) => (cmd, args) => {
+  if (args.includes("worktree")) return { status: 0, stdout: `worktree ${root}\n` };
+  // gitToplevel asks for --git-common-dir and returns dirname() of what it gets, so the fixture
+  // must emit the .git directory. Emitting `root` itself resolves every toplevel to root's PARENT,
+  // which silently relocates corpusCachePath one directory up.
+  return { status: 0, stdout: `${join(root, ".git")}\n` };
+};
+
+const seedPrimary = () => {
+  const root = makeTempDir("dream-repo-");
+  const projectsDir = makeTempDir("dream-projects-");
+  const slug = join(projectsDir, root.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(join(slug, "s.jsonl"),
+    JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } }) + "\n");
+  return { root, projectsDir };
+};
 
 test("checkpoint initializes to never and round-trips", () => {
   const root = repo();
@@ -2005,15 +2029,19 @@ test("--plan-landing is guarded against being combined with another subcommand",
 });
 
 // Seeds an unmined-session corpus under root's own escaped-cwd project dir (matching
-// escapeProjectPath, so --staleness's planCorpus actually counts them) and returns the dir to
+// escapeProjectPath, so --staleness's candidate count actually sees them) and returns the dir to
 // hand back via CLAUDE_DREAM_PROJECTS. Sessions timestamped after last-run count as unmined.
+// A null timestamp seeds a transcript that Phase A counts from metadata and that any
+// content-reading plan reports as no session at all — the fixture that tells the two apart.
 const seedStaleCorpus = (root, sessions) => {
   const dir = makeTempDir("dream-stale-proj-");
   const slug = join(dir, escapedSlug(root));
   mkdirSync(slug, { recursive: true });
-  for (const [id, ts] of sessions)
-    writeFileSync(join(slug, `${id}.jsonl`),
-      JSON.stringify({ timestamp: ts, type: "assistant", message: { content: [] } }) + "\n");
+  for (const [id, ts] of sessions) {
+    const record = { type: "assistant", message: { content: [] } };
+    if (ts) record.timestamp = ts;
+    writeFileSync(join(slug, `${id}.jsonl`), JSON.stringify(record) + "\n");
+  }
   return dir;
 };
 
@@ -2046,6 +2074,22 @@ test("--staleness reports stale via the session-count threshold with a recent la
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout);
   assert.equal(out.unminedSessions, 5);
+  assert.ok(out.daysSince < 14, "the days trigger must not fire, so the session count is what makes it stale");
+  assert.equal(out.stale, true);
+});
+
+test("--staleness counts candidates from metadata rather than running a full plan (L1)", () => {
+  const root = realpathSync(repo());
+  const recent = new Date(Date.now() - 2 * 86400000).toISOString(); // days threshold not crossed
+  writeLastRun(root, recent);
+  // Timestamp-free transcripts: the metadata count is 5, while the full plan this branch used to
+  // run reports 0 and would call a stale corpus fresh. The timestamped fixtures above return the
+  // same number either way, so only this one fails a revert to planCorpus.
+  const projects = seedStaleCorpus(root, ["s0", "s1", "s2", "s3", "s4"].map((id) => [id, null]));
+  const r = run(["--staleness", "--max-sessions", "5", "--max-days", "14"], root, { CLAUDE_DREAM_PROJECTS: projects });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.unminedSessions, 5, "a plan that content-reads these transcripts counts 0 of them");
   assert.ok(out.daysSince < 14, "the days trigger must not fire, so the session count is what makes it stale");
   assert.equal(out.stale, true);
 });
@@ -2161,4 +2205,688 @@ test("the fallback scan memoizes gitToplevel per cwd (spec Component 3: one git 
   };
   planCorpus({ repoRoot: main, projectsDir, since: null, gitRunner: counting });
   assert.equal(otherCalls, 1, `expected one git call for ${other}, got ${otherCalls}`);
+});
+
+test("resolveProjectFiles reports which path resolved the corpus", () => {
+  const { root, projectsDir } = seedPrimary();
+  const out = resolveProjectFiles(root, projectsDir, fakeGit(root));
+  assert.equal(out.corpusResolution, "primary");
+  assert.ok(out.files.length > 0);
+});
+
+test("the fallback matcher stops reading a file at the first record carrying a cwd", () => {
+  const root = makeTempDir("dream-repo-");
+  const dir = makeTempDir("dream-earlyexit-");
+  const file = join(dir, "s.jsonl");
+  // One matching record, then 5000 more that must never be parsed.
+  const head = JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } });
+  const tail = Array.from({ length: 5000 }, (_, i) =>
+    JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "x".repeat(200) }, n: i }),
+  ).join("\n");
+  writeFileSync(file, `${head}\n${tail}\n`);
+
+  // The injected reader is the only way to observe the early exit: every assertion about the
+  // matcher's RESULT is equally true of the old readRecords(file).some(...) implementation, which
+  // parsed all 5001 records to reach it.
+  let parsed = 0;
+  const counting = (f, visit, options) =>
+    eachRecord(f, (r) => { parsed += 1; return visit(r); }, options);
+
+  assert.equal(sessionRepoMatches(file, root, (cwd) => cwd, counting), true);
+  assert.equal(parsed, 1,
+    `the matcher parsed ${parsed} records; it must stop at the first record carrying a cwd`);
+});
+
+test("resolveProjectFiles reports a whole-root fallback as fallback", () => {
+  const root = makeTempDir("dream-repo-");
+  const projectsDir = makeTempDir("dream-projects-");
+  // A legacy slug the primary lookup can never name, so only the whole-root scan can find it.
+  const slug = join(projectsDir, "-legacy-slug");
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(join(slug, "s.jsonl"),
+    JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } }) + "\n");
+
+  const out = resolveProjectFiles(root, projectsDir, fakeGit(root));
+  assert.equal(out.corpusResolution, "fallback");
+  assert.deepEqual(out.files, [join(slug, "s.jsonl")]);
+});
+
+test("resolveProjectFiles finds the corpus through a symlinked repo root", () => {
+  // realpathSync at the fixture boundary: makeTempDir hands back the un-resolved /var/folders/…
+  // form on macOS while the union below yields the /private/var/… form, so a slug named from the
+  // raw temp path misses the primary lookup and the test fails against a CORRECT implementation.
+  const realRoot = realpathSync(makeTempDir("dream-real-"));
+  const linkParent = makeTempDir("dream-link-");
+  const linkedRoot = join(linkParent, "link");
+  symlinkSync(realRoot, linkedRoot);
+  const projectsDir = makeTempDir("dream-projects-");
+  // The slug directory exists only under the REAL path's escaping.
+  const slug = join(projectsDir, realRoot.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(join(slug, "s.jsonl"),
+    JSON.stringify({ cwd: realRoot, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } }) + "\n");
+
+  const out = resolveProjectFiles(linkedRoot, projectsDir, fakeGit(linkedRoot));
+  assert.equal(out.corpusResolution, "primary",
+    "a symlinked root must resolve via the primary slug, not fall through to the whole-root scan");
+});
+
+// `timestamps: false` seeds records with no `timestamp` field: a corpus every content-reading
+// implementation reports as zero sessions, which is what makes the metadata-only assertions below
+// discriminating rather than merely satisfied.
+// `subagentFiles` gives session s0000 that many EXTRA transcripts, under the
+// <slug>/<session>/subagents/ layout owningSession groups by, so a corpus can hold more files than
+// sessions. One file per session makes the two counts identical, and any assertion about per-FILE
+// work is then satisfied by an implementation that touches one file per session.
+const seedMany = (count, { bytesPerSession = 200, timestamps = true, subagentFiles = 0 } = {}) => {
+  const root = makeTempDir("dream-repo-");
+  const projectsDir = makeTempDir("dream-projects-");
+  const slug = join(projectsDir, root.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(slug, { recursive: true });
+  const baseSeconds = Date.UTC(2026, 0, 1) / 1000;
+  // Explicit, strictly increasing mtimes. Written in a tight loop these files can land on the
+  // same mtime, and Phase A's `sort((a, b) => b.mtimeMs - a.mtimeMs)` over a tied run is a
+  // stable no-op that keeps the OLDEST cap + RANK_MARGIN sessions — inverting the recency
+  // ranking while every count-shaped assertion still passes.
+  const stampAs = (file, i) => utimesSync(file, baseSeconds + i * 60, baseSeconds + i * 60);
+  const seedRecord = (i) => {
+    const record = { cwd: root, message: { role: "user", content: "x".repeat(bytesPerSession) } };
+    if (timestamps) record.timestamp = new Date(Date.UTC(2026, 0, 1) + i * 60000).toISOString();
+    return JSON.stringify(record) + "\n";
+  };
+  for (let i = 0; i < count; i += 1) {
+    const file = join(slug, `s${String(i).padStart(4, "0")}.jsonl`);
+    writeFileSync(file, seedRecord(i));
+    stampAs(file, i);
+  }
+  if (subagentFiles) {
+    assert.ok(count, "there is no session for the extra transcripts to belong to");
+    const dir = join(slug, "s0000", "subagents");
+    mkdirSync(dir, { recursive: true });
+    for (let j = 0; j < subagentFiles; j += 1) {
+      const file = join(dir, `agent-${j}.jsonl`);
+      writeFileSync(file, seedRecord(0));
+      // s0000's own slot, so the extra files add no recency and the seeded ranking is unchanged.
+      stampAs(file, 0);
+    }
+  }
+  return { root, projectsDir };
+};
+
+const sessionRange = (from, to) =>
+  Array.from({ length: to - from + 1 }, (_, i) => `s${String(from + i).padStart(4, "0")}`);
+
+// Makes every transcript in a seeded corpus unreadable except through the returned reader: each
+// file is copied aside and then chmod-ed 0, so a content read the planner performs on its own —
+// a readFileSync/readRecords pass beside the streaming one, the three-passes-per-file defect —
+// raises EACCES instead of quietly happening. A call counter alone cannot see a pass that bypasses
+// the injected reader, and no stat counter can witness the absence of a read at all.
+function sealCorpus(projectsDir) {
+  const shadowDir = makeTempDir("dream-shadow-");
+  const shadow = new Map();
+  const seal = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) { seal(path); continue; }
+      const copy = join(shadowDir, `${shadow.size}-${entry.name}`);
+      copyFileSync(path, copy);
+      chmodSync(path, 0o000);
+      shadow.set(path, copy);
+    }
+  };
+  seal(projectsDir);
+  assert.ok(shadow.size, "sealing an empty corpus would make every assertion below vacuous");
+  // root reads a 0-mode file regardless, which silently weakens the seal to the call counter
+  // alone: assert it bites where it can, and say so out loud where it cannot, rather than letting
+  // a container running as uid 0 report a green suite for a guarantee it never tested.
+  if (process.getuid?.() === 0)
+    console.error("WARNING: running as uid 0 — a 0-mode transcript is still readable, so the sealed " +
+      "corpus cannot prove a stray read did not happen; every assertion resting on it is weaker here.");
+  else
+    assert.throws(() => readFileSync([...shadow.keys()][0]), /EACCES/,
+      "the seal must actually block a direct read, or a bypassing pass goes unnoticed");
+  const reads = [];
+  return {
+    sealed: new Set(shadow.keys()),
+    reads,
+    reader: (file, visit, options) => {
+      reads.push(file);
+      return eachRecord(shadow.get(file) ?? file, visit, options);
+    },
+  };
+}
+
+// A read that bypasses the seal throws EACCES from inside the planner; report it as the defect it
+// stands for rather than as a bare filesystem error. Only that one failure, though: catching every
+// exception reported an unrelated planner fault — a TypeError, or readTranscriptsOrFail's "exists
+// but could not be read" — as a stray read that never happened, hiding the real defect behind a
+// confident wrong diagnosis. Anything but a permission error on a path this seal locked is rethrown
+// as itself.
+const withoutStrayReads = (label, seal, plan) => {
+  try {
+    return plan();
+  } catch (e) {
+    if (e.code === "EACCES" && seal.sealed.has(e.path))
+      return assert.fail(`${label} read a transcript it must not read: ${e.path}`);
+    throw e;
+  }
+};
+
+test("planCorpus content-reads at most cap + RANK_MARGIN sessions however large the corpus", () => {
+  const { root, projectsDir } = seedMany(400);
+  const statted = [];
+  const plan = planCorpus({
+    repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root),
+    statFile: (f) => { statted.push(f); return statSync(f); },
+  });
+  assert.equal(plan.sessions.length, 100);
+  assert.equal(plan.capped, true);
+  assert.equal(statted.length, 400, "every candidate is statted");
+  assert.ok(plan.readSessions <= 100 + RANK_MARGIN,
+    `content-read ${plan.readSessions} sessions, expected at most ${100 + RANK_MARGIN}`);
+  // WHICH sessions survived, not only how many: the bound exists to protect recency ranking, and
+  // a bound that kept the 100 oldest sessions would satisfy every assertion above.
+  assert.equal(plan.sessions[0].id, "s0399", "the most recently touched session must rank first");
+  assert.deepEqual(plan.sessions.map((s) => s.id).sort(), sessionRange(300, 399),
+    "the cap must keep the 100 most recent sessions, never the 100 oldest");
+});
+
+test("the --staleness path counts candidates without reading any transcript", () => {
+  // planCandidates is the whole of what --staleness runs after this task; these transcripts carry
+  // no `timestamp`, so the previous planCorpus-based count returns 0 where Phase A returns 7.
+  const { root, projectsDir } = seedMany(7, { timestamps: false });
+  // Sealed, so "without reading" is a property the corpus enforces: a stat counter counts stats
+  // and stays silent about any content read happening beside them.
+  const seal = sealCorpus(projectsDir);
+  const statted = [];
+  const out = withoutStrayReads("planCandidates", seal, () => planCandidates({
+    repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root),
+    statFile: (f) => { statted.push(f); return statSync(f); },
+  }));
+  assert.equal(out.candidates.length, 7, "every session is a candidate on metadata alone");
+  assert.equal(statted.length, 7, "one stat per file, and no other filesystem work");
+  assert.equal(out.corpusResolution, "primary",
+    "the primary slug must hit — a fallback would read every transcript and the claim would be false");
+});
+
+test("planCorpus content-reads each surviving file exactly once", () => {
+  // 12 files across 10 sessions, so "once per file" and "once per session" are different numbers:
+  // with one file each, an implementation that read only candidate.files[0] would still produce
+  // ten reads over ten distinct paths and satisfy every count below.
+  const { root, projectsDir } = seedMany(10, { subagentFiles: 2 });
+  // The injected reader is the only readable route to the corpus, so every content read is counted
+  // here — including one taken outside the reader, which fails the seal instead of being missed.
+  // plan.readFiles counts candidate files rather than read passes and cannot make this assertion.
+  const seal = sealCorpus(projectsDir);
+  const { reads, reader } = seal;
+  const plan = withoutStrayReads("planCorpus (bypassing its injected reader)", seal, () =>
+    planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), reader }));
+  assert.equal(plan.sessions.length, 10,
+    "the reader must actually supply the corpus, or the counts below are vacuous");
+  const perFile = new Map();
+  for (const f of reads) perFile.set(f, (perFile.get(f) ?? 0) + 1);
+  assert.equal(perFile.size, 12,
+    `every surviving file must be read, the subagent transcripts included; read ${perFile.size} of 12`);
+  assert.deepEqual([...perFile.values()], Array(12).fill(1),
+    `three read passes per file was the defect; got ${JSON.stringify([...perFile.values()])}`);
+  assert.equal(plan.readFiles, reads.length,
+    "the manifest's own counter must agree with the reads that actually happened");
+});
+
+// An over-ceiling transcript that a test which DOES read it can afford — in CPU and in bytes on
+// disk, which pull against each other here.
+//
+// CPU: padding the file out with truncateSync leaves one unbroken run of NUL bytes carrying no
+// newline, so eachRecord accumulates the whole 50 MiB in `carry` and re-flattens it on each of ~800
+// chunks — tens of GB of copying per read, in tests whose subject is bounding exactly that cost.
+// Newline-terminated filler keeps the only property these fixtures need (a size over the ceiling)
+// while letting the reader flush each line. The filler is not JSON, so it is skipped as a malformed
+// line and no record count moves.
+//
+// Bytes: that filler is real where truncateSync's padding was sparse, so each fixture materialises
+// just over 50 MiB. Six of them coexisting until the process exits is ~300 MiB of live temp data on
+// a machine whose tmpdir has filled before, so each is removed the moment its own test ends —
+// `t.after` runs on a failing test too, which keeps the peak at one fixture whatever the outcome.
+// The temp-dir owner still removes the enclosing directory at exit; this only stops the bytes from
+// waiting that long.
+//
+// There is deliberately no size assertion here: the loop appends until it is past the ceiling and
+// then appends one more block, so `size > MAX_SESSION_BYTES` could only ever catch a short write,
+// which Node's synchronous write calls raise on their own. Each consuming test binds the property
+// instead, by observing the engine skip or refuse this session.
+const FILLER_BLOCK = `${"f".repeat(4095)}\n`.repeat(256); // 1 MiB
+function seedOversized(t, file, record) {
+  const head = JSON.stringify(record) + "\n";
+  writeFileSync(file, head);
+  for (let size = Buffer.byteLength(head); size <= MAX_SESSION_BYTES; size += FILLER_BLOCK.length)
+    appendFileSync(file, FILLER_BLOCK);
+  t.after(() => rmSync(file, { force: true }));
+}
+
+test("planCorpus skips an oversized session without reading it and reports it", (t) => {
+  const { root, projectsDir } = seedMany(2);
+  const slug = join(projectsDir, root.replace(/[^A-Za-z0-9]/g, "-"));
+  const big = join(slug, "huge.jsonl");
+  seedOversized(t, big, { cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } });
+
+  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
+  assert.deepEqual(plan.oversized.map((o) => o.id), ["huge"]);
+  assert.ok(!plan.sessions.some((s) => s.id === "huge"), "an oversized session is not a candidate");
+  assert.equal(plan.readSessions, 2, "the oversized session must not be content-read");
+});
+
+// The one path the override exists to enable. `oversized` is what the learn playbook's cost gate
+// names to the user as "skipped without being read", so a session the same run content-read and
+// mined cannot also be on it.
+test("planCorpus --include-oversized mines the session rather than listing it as skipped", (t) => {
+  const { root, projectsDir } = seedMany(1);
+  const slug = join(projectsDir, escapedSlug(root));
+  const big = join(slug, "huge.jsonl");
+  seedOversized(t, big, { cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } });
+
+  // The negative control, and the fixture's own binding: without the override the engine has to
+  // put this session on `oversized`, or it never reached the ceiling and the empty list below says
+  // nothing. Skipped sessions are not content-read, so this costs a stat, not a 50 MiB read.
+  const skipped = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
+  assert.deepEqual(skipped.oversized.map((o) => o.id), ["huge"],
+    "the fixture must actually be over the ceiling, or the assertions below are vacuous");
+
+  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), includeOversized: true });
+  assert.ok(plan.sessions.some((s) => s.id === "huge"),
+    "the fixture must actually admit the oversized session, or the assertion below is vacuous");
+  assert.deepEqual(plan.oversized, [],
+    "a session this run content-read and mined was not skipped by the ceiling");
+});
+
+// The list is the cost gate's input, so it must name only sessions this run would mine if the
+// ceiling were lifted. An over-ceiling transcript older than the checkpoint is out of the window
+// on its own and would otherwise sit in the gate's question forever.
+test("planCandidates reports only the oversized sessions the ceiling actually kept out", (t) => {
+  const { root, projectsDir } = seedMany(1);
+  const slug = join(projectsDir, escapedSlug(root));
+  const big = join(slug, "huge.jsonl");
+  seedOversized(t, big, { cwd: root, timestamp: "2026-01-01T00:00:00Z", message: { role: "user", content: "y" } });
+  const stale = Date.UTC(2026, 0, 1) / 1000;
+  utimesSync(big, stale, stale);
+
+  const whole = planCandidates({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
+  assert.deepEqual(whole.oversized.map((o) => o.id), ["huge"],
+    "with no checkpoint the ceiling is the only thing that kept it out");
+
+  const windowed = planCandidates({
+    repoRoot: root, projectsDir, cap: 100, since: "2026-06-01T00:00:00Z", gitRunner: fakeGit(root),
+  });
+  assert.deepEqual(windowed.oversized, [],
+    "a session outside the checkpoint window was never this run's to mine, ceiling or not");
+});
+
+test("planCorpus reports which path resolved the corpus", () => {
+  const { root, projectsDir } = seedMany(1);
+  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
+  assert.equal(plan.corpusResolution, "primary");
+});
+
+test("planCandidates applies the since window on metadata alone, reading nothing", () => {
+  const { root, projectsDir } = seedMany(50);
+  // "Reading nothing" is the claim, so the corpus is sealed against reads: counting stats can only
+  // ever show that stats happened.
+  const seal = sealCorpus(projectsDir);
+  let stats = 0;
+  const out = withoutStrayReads("planCandidates", seal, () => planCandidates({
+    repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root),
+    since: new Date(Date.now() + 86400000).toISOString(),
+    statFile: (f) => { stats += 1; return statSync(f); },
+  }));
+  assert.equal(out.candidates.length, 0, "a since bound in the future admits no candidate");
+  assert.equal(stats, 50, "the window is decided by stat, not by reading");
+});
+
+test("--plan persists the resolved corpus so --extract does not re-derive it", () => {
+  const { root, projectsDir } = seedMany(3);
+  planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), writeCache: true });
+  const cache = JSON.parse(readFileSync(join(root, ".devcycle", "dreaming", "corpus.json"), "utf8"));
+  assert.equal(cache.corpusResolution, "primary");
+  assert.equal(cache.projectsDir, projectsDir);
+  assert.equal(Object.keys(cache.sessions).length, 3);
+
+  // A cache hit still makes exactly one git call — the toplevel lookup that locates the cache
+  // file itself. What it must NOT do is enumerate worktrees to re-resolve the corpus. Note the
+  // in-process resolve memo would also suppress the enumeration for this same repoRoot; the
+  // subdirectory test below is the one that isolates the cache, because its repoRoot is a key the
+  // memo has never seen.
+  const calls = [];
+  const countingGit = (cmd, args) => { calls.push(args.join(" ")); return fakeGit(root)(cmd, args); };
+  extractSession({ repoRoot: root, projectsDir, sessionId: "s0000", gitRunner: countingGit });
+  assert.equal(calls.filter((a) => a.includes("worktree")).length, 0,
+    "a cache hit must not enumerate worktrees to re-resolve the corpus");
+  assert.equal(calls.length, 1, "only the toplevel lookup that locates the cache file");
+});
+
+test("--extract run from a subdirectory of the repo hits the cache --plan wrote", () => {
+  const { root, projectsDir } = seedMany(3);
+  planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), writeCache: true });
+  const sub = join(root, "packages", "app");
+  mkdirSync(sub, { recursive: true });
+
+  // A different repoRoot, so neither the per-process resolve memo nor a cwd-keyed cache could
+  // help: only anchoring the cache path at the git toplevel makes this a hit.
+  const calls = [];
+  const countingGit = (cmd, args) => { calls.push(args.join(" ")); return fakeGit(root)(cmd, args); };
+  assert.match(extractSession({ repoRoot: sub, projectsDir, sessionId: "s0000", gitRunner: countingGit }), /user:/);
+  assert.equal(calls.filter((a) => a.includes("worktree")).length, 0,
+    "a subdirectory invocation must hit the toplevel-anchored cache, not re-resolve the corpus");
+});
+
+test("--extract reuses the cache for a session the cache covers", () => {
+  const { root, projectsDir } = seedMany(2);
+  planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), writeCache: true });
+  // cap is 100 and there are 2 sessions, so both are kept and both are in the cache: this is a
+  // cache HIT, and naming it a fall-through would describe a condition the fixture never creates.
+  const text = extractSession({ repoRoot: root, projectsDir, sessionId: "s0001", gitRunner: fakeGit(root) });
+  assert.match(text, /user:/);
+});
+
+test("--extract falls through to a live resolve when the cache names a different projects root", () => {
+  const { root, projectsDir } = seedMany(2);
+  planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), writeCache: true });
+
+  // A cache written against a different projects root must be ignored, not trusted. It has to name
+  // a file the live resolve would never return — an existing one, so the path-vanished miss is not
+  // what rejects it — or a trusting read and a fall-through return the same text and no assertion
+  // can tell the two apart.
+  const other = makeTempDir("dream-other-");
+  const decoy = join(other, "s0001.jsonl");
+  writeFileSync(decoy, JSON.stringify({
+    cwd: root, timestamp: "2026-09-01T00:00:00Z",
+    message: { role: "user", content: "text from the foreign cache" },
+  }) + "\n");
+  const cachePath = join(root, ".devcycle", "dreaming", "corpus.json");
+  const doc = JSON.parse(readFileSync(cachePath, "utf8"));
+  writeFileSync(cachePath, JSON.stringify({ ...doc, projectsDir: other, sessions: { s0001: [decoy] } }));
+
+  const text = extractSession({ repoRoot: root, projectsDir, sessionId: "s0001", gitRunner: fakeGit(root) });
+  assert.doesNotMatch(text, /text from the foreign cache/,
+    "a cache naming another projects root must be ignored, not read");
+  assert.match(text, /x{200}/, "the fall-through must mine the session the live resolve finds");
+});
+
+// The two tests below run --plan and --extract as separate processes on purpose: that is how a
+// real run invokes them, and in-process the resolve memo would hand the fall-through the very file
+// list --plan resolved before the transcript moved, so neither could observe the self-heal.
+function planThroughCli() {
+  const root = realpathSync(makeTempDir("dream-repo-"));
+  const projectsDir = makeTempDir("dream-projects-");
+  const slug = join(projectsDir, escapedSlug(root));
+  mkdirSync(slug, { recursive: true });
+  for (const id of ["s0", "s1"])
+    writeFileSync(join(slug, `${id}.jsonl`),
+      JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: `text of ${id}` } }) + "\n");
+
+  const plan = run(["--plan"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(plan.status, 0, plan.stderr);
+  const cache = JSON.parse(readFileSync(join(root, ".devcycle", "dreaming", "corpus.json"), "utf8"));
+  assert.deepEqual(cache.sessions.s1, [join(slug, "s1.jsonl")],
+    "the fixture must actually persist the path the tests below then remove");
+  return { root, projectsDir, slug };
+}
+
+test("--extract reports a transcript that vanished after --plan, not the raw stat failure", () => {
+  const { root, projectsDir, slug } = planThroughCli();
+  rmSync(join(slug, "s1.jsonl"));
+
+  const extract = run(["--extract", "s1"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.match(extract.stderr, /no transcript for session: s1/,
+    "a rotated or deleted transcript is an empty corpus for that session, the pre-cache behaviour");
+  assert.doesNotMatch(extract.stderr, /ENOENT/, "no raw filesystem error reaches the caller");
+});
+
+test("--extract re-resolves the corpus when the cached path moved but the session did not", () => {
+  const { root, projectsDir, slug } = planThroughCli();
+  // Same session under the other layout owningSession recognizes
+  // (<slug>/<session>/subagents/*.jsonl), so the session is still on disk while every path the
+  // cache recorded is gone. Tolerating the missing path instead of re-resolving would mine
+  // nothing here and say so nowhere.
+  rmSync(join(slug, "s1.jsonl"));
+  mkdirSync(join(slug, "s1", "subagents"), { recursive: true });
+  writeFileSync(join(slug, "s1", "subagents", "agent-1.jsonl"),
+    JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "rotated text" } }) + "\n");
+
+  const extract = run(["--extract", "s1"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(extract.status, 0, extract.stderr);
+  assert.match(extract.stdout, /rotated text/,
+    "the miss must fall through to a live resolve rather than mine an empty session");
+});
+
+test("--plan then N --extract performs one whole-root discovery, not N + 1", () => {
+  const root = makeTempDir("dream-repo-");
+  const projectsDir = makeTempDir("dream-projects-");
+  // A legacy slug the primary lookup can never name, so every uncached resolve is a whole-root
+  // scan — the expensive path the cache and the memo exist to stop repeating.
+  const slug = join(projectsDir, "-legacy-slug");
+  mkdirSync(slug, { recursive: true });
+  const ids = ["s0", "s1", "s2"];
+  for (const id of ids)
+    writeFileSync(join(slug, `${id}.jsonl`),
+      JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } }) + "\n");
+
+  const calls = [];
+  const countingGit = (cmd, args) => { calls.push(args.join(" ")); return fakeGit(root)(cmd, args); };
+  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: countingGit, writeCache: true });
+  assert.equal(plan.corpusResolution, "fallback", "the fixture must actually exercise the fallback");
+  for (const id of ids) extractSession({ repoRoot: root, projectsDir, sessionId: id, gitRunner: countingGit });
+
+  const discoveries = calls.filter((a) => a.includes("worktree")).length;
+  assert.equal(discoveries, 1,
+    `--plan plus ${ids.length} --extract performed ${discoveries} whole-root discoveries, expected 1`);
+});
+
+test("--plan still accepts the --run-checks modifier now that the branch parses flags", () => {
+  const root = realpathSync(repo());
+  // parseFlags throws on any flag its spec omits, and --run-checks is deliberately not a
+  // subcommand (dream.mjs's own comment says so), so the branch accepted it before this change.
+  const r = run(["--plan", "--run-checks"], root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).cap, 100, "--plan must still print its manifest");
+});
+
+test("extractSession refuses an oversized session unless told otherwise", (t) => {
+  const { root, projectsDir } = seedMany(1);
+  const slug = join(projectsDir, root.replace(/[^A-Za-z0-9]/g, "-"));
+  const big = join(slug, "huge.jsonl");
+  seedOversized(t, big, { cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } });
+
+  assert.throws(
+    () => extractSession({ repoRoot: root, projectsDir, sessionId: "huge", gitRunner: fakeGit(root) }),
+    /--include-oversized/,
+    "the error must name the flag that overrides it",
+  );
+  assert.doesNotThrow(() =>
+    extractSession({ repoRoot: root, projectsDir, sessionId: "huge", gitRunner: fakeGit(root), includeOversized: true }));
+});
+
+// The mining stage is prose a coordinator follows, so the dispatch under test is read out of that
+// prose rather than hardcoded here: an override the engine accepts but the playbook never passes
+// is an override no documented run can reach.
+function documentedExtractArgv(sessionId) {
+  const playbook = readFileSync(new URL("../../playbooks/learning-from-sessions.md", import.meta.url), "utf8");
+  const start = playbook.indexOf("## Mine each slice");
+  assert.notEqual(start, -1, "the playbook must still carry a mining stage");
+  const mining = playbook.slice(start, playbook.indexOf("\n## ", start + 1));
+  const sentences = mining.replace(/\s+/g, " ").split(/(?<=[.!?]) /);
+  // Naming both flags in one sentence is not the same as telling a coordinator to combine them:
+  // "never pass `--include-oversized` to `--extract`" names both and means the opposite, so a
+  // sentence carrying one of the negations below is not read as instruction to carry the flag.
+  //
+  // What this probe guarantees, stated as narrowly as it holds:
+  //  - exactly one sentence in the mining stage may name both flags. Prose that says it twice —
+  //    once affirmatively, once as a caveat — is ambiguous rather than documented, and fails here
+  //    instead of being decided by whichever sentence a `some()` reached first;
+  //  - under-reading is loud. A sentence that does mandate the combination while using one of
+  //    these words yields the bare argv, the engine refuses the session, and the assertion below
+  //    fails naming the argv it dispatched.
+  //
+  // What it does NOT guarantee, and no regex over free prose can: that the list covers every
+  // forbidding phrasing. A single sentence forbidding the combination in wording the list misses
+  // still reads as documentation and passes green. The list is best-effort — kept broad, and worth
+  // extending when a new phrasing appears — and no behaviour rests on it alone: the sibling test
+  // below pins the same argv plumbing without consulting the prose at all.
+  const FORBIDS =
+    /\b(never|not|cannot|without|instead of|rather than|refus\w*|forbid\w*|avoid\w*|prohibit\w*|omit\w*|exclud\w*)\b|n['’]t\b/i;
+  const naming = sentences.filter((s) => s.includes("--extract") && s.includes("--include-oversized"));
+  assert.ok(naming.length <= 1,
+    `the mining stage names --extract and --include-oversized together in ${naming.length} sentences, ` +
+    "so which one is the documented dispatch is undecidable here");
+  const carriesOverride = naming.length === 1 && !FORBIDS.test(naming[0]);
+  return carriesOverride ? ["--extract", sessionId, "--include-oversized"] : ["--extract", sessionId];
+}
+
+test("the playbook's documented --extract dispatch mines a session --plan admitted as oversized", (t) => {
+  const root = realpathSync(makeTempDir("dream-repo-"));
+  const projectsDir = makeTempDir("dream-projects-");
+  const slug = join(projectsDir, escapedSlug(root));
+  mkdirSync(slug, { recursive: true });
+  const big = join(slug, "huge.jsonl");
+  seedOversized(t, big, { cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } });
+
+  // A plain --plan first: the session has to land on `oversized` there, or the ceiling was never
+  // what kept it out and the dispatch below proves nothing about the override.
+  const skipped = run(["--plan"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(skipped.status, 0, skipped.stderr);
+  assert.deepEqual(JSON.parse(skipped.stdout).oversized.map((o) => o.id), ["huge"],
+    "the fixture must actually be over the ceiling, or this test passes without the override");
+
+  const plan = run(["--plan", "--include-oversized"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.ok(JSON.parse(plan.stdout).sessions.some((s) => s.id === "huge"),
+    "the fixture must actually admit an oversized session into the plan");
+
+  const argv = documentedExtractArgv("huge");
+  const extract = run(argv, root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(extract.status, 0,
+    `the playbook dispatches \`dream.mjs ${argv.join(" ")}\`, which the engine refused: ${extract.stderr.trim()}`);
+});
+
+// The playbook-derived test above only passes the override while the playbook's prose names it;
+// this one pins the argv plumbing itself, so dropping the flag from the --extract branch fails
+// here whatever the prose says.
+test("--extract carries --include-oversized from the command line into the read", (t) => {
+  const root = realpathSync(makeTempDir("dream-repo-"));
+  const projectsDir = makeTempDir("dream-projects-");
+  const slug = join(projectsDir, escapedSlug(root));
+  mkdirSync(slug, { recursive: true });
+  const big = join(slug, "huge.jsonl");
+  seedOversized(t, big, {
+    cwd: root, timestamp: "2026-09-01T00:00:00Z",
+    message: { role: "user", content: "over-ceiling transcript text" },
+  });
+
+  const refused = run(["--extract", "huge"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(refused.status, 1, "without the flag the ceiling must still refuse the session");
+  assert.match(refused.stderr, /--include-oversized/, "the error names the flag that overrides it");
+
+  const mined = run(["--extract", "huge", "--include-oversized"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(mined.status, 0, mined.stderr);
+  assert.match(mined.stdout, /over-ceiling transcript text/,
+    "the flag must reach extractSession, not merely be tolerated on the command line");
+});
+
+test("--plan honours an explicit --cap", () => {
+  const { root, projectsDir } = seedMany(20);
+  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 5, gitRunner: fakeGit(root) });
+  assert.equal(plan.sessions.length, 5);
+  assert.equal(plan.cap, 5);
+  assert.equal(plan.capped, true);
+});
+
+// A numeric flag's value arrives from a shell substitution — the learn playbook writes
+// `--cap ${user_config.learnSessionCap}` — so an unset knob reaches the CLI as an empty token or
+// as the literal placeholder. Both used to pass a bare Number() as 0/NaN, empty the manifest, and
+// still exit 0, which reads exactly like a corpus with nothing left to mine.
+// `0` is not on this list: it is refused only where the flag's floor is one (`--cap`), and is a
+// legitimate "nudge me every cycle" for the staleness thresholds, so each test below adds it to
+// its own list where its flag refuses it.
+const BAD_NUMERIC = ["", "abc", "${user_config.learnSessionCap}", "-1", "2.5"];
+
+test("--plan refuses a --cap that is not a positive integer instead of mining nothing", () => {
+  const root = realpathSync(repo());
+  for (const bad of [...BAD_NUMERIC, "0"]) {
+    const r = run(["--plan", "--cap", bad], root);
+    assert.equal(r.status, 1,
+      `--cap ${JSON.stringify(bad)} must fail; got status ${r.status} and manifest ${r.stdout}`);
+    assert.match(r.stderr, /--cap/, "the message must name the flag the operator has to fix");
+  }
+});
+
+test("--staleness refuses a --cap, --max-sessions or --max-days that is not a whole number", () => {
+  const root = realpathSync(repo());
+  writeLastRun(root, "2020-01-01T00:00:00Z");
+  // `--cap 0` is the do-nothing run the coercion bug produced silently, so zero stays refused
+  // there; the two thresholds carry it as a meaningful value and are checked below instead.
+  for (const [flag, bad] of [["--cap", [...BAD_NUMERIC, "0"]], ["--max-sessions", BAD_NUMERIC], ["--max-days", BAD_NUMERIC]]) {
+    for (const value of bad) {
+      const r = run(["--staleness", flag, value], root);
+      assert.equal(r.status, 1,
+        `${flag} ${JSON.stringify(value)} must fail; got status ${r.status} and report ${r.stdout}`);
+      assert.match(r.stderr, new RegExp(flag), "the message must name the flag the operator has to fix");
+    }
+  }
+});
+
+// `learnStalenessSessions` and `learnStalenessDays` are user-settable knobs with no minimum in the
+// manifest, and finishing-the-cycle.md pipes them straight into these two flags. Zero is the
+// natural way to ask for a nudge every cycle, and the finish stage has no tolerance for a probe
+// that exits 1 — so zero must nudge, not fail.
+test("--staleness accepts 0 for --max-sessions and --max-days and nudges every cycle", () => {
+  const root = realpathSync(repo());
+  const recent = new Date(Date.now() - 2 * 86400000).toISOString();
+  writeLastRun(root, recent);
+  // The corpus is empty and the checkpoint is two days old, so the default thresholds report
+  // not-stale (the test above this fixture's shape). At zero, both thresholds are crossed.
+  const r = run(["--staleness", "--max-sessions", "0", "--max-days", "0"], root);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.threshold, { maxSessions: 0, maxDays: 0 }, "the zeros must reach the probe, not be swallowed by the defaults");
+  // Only that both zeros survive parsing and that the probe nudges: with maxSessions 0 the session
+  // clause is true for any corpus and short-circuits the `||`, so this case cannot bind either
+  // comparison on its own. The two below do that, one threshold each.
+  assert.equal(out.stale, true, "a zero threshold means every cycle is stale enough to nudge");
+});
+
+// One threshold each, with the other clause held false and this one sitting exactly on the
+// boundary — the only place `>=` and `>` disagree, so a comparison flipped either way fails here.
+test("--staleness nudges on the days threshold alone when --max-days is 0", () => {
+  const root = realpathSync(repo());
+  writeLastRun(root, new Date().toISOString()); // mined just now → daysSince 0, on the threshold
+  const r = run(["--staleness", "--max-sessions", "5", "--max-days", "0"], root);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.unminedSessions, 0,
+    "the empty corpus must leave the session clause false, or the days comparison is not what decides this");
+  assert.equal(out.daysSince, 0, "days must sit on the threshold, or `>` and `>=` agree and nothing is bound");
+  assert.equal(out.stale, true, "at maxDays 0 a corpus mined today is already due for the next nudge");
+});
+
+test("--staleness nudges on the session threshold alone when --max-sessions is 0", () => {
+  const root = realpathSync(repo());
+  writeLastRun(root, new Date().toISOString()); // mined just now → the days clause cannot fire
+  const r = run(["--staleness", "--max-sessions", "0", "--max-days", "14"], root);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.daysSince, 0,
+    "the fresh checkpoint must leave the days clause false, or the session comparison is not what decides this");
+  assert.equal(out.unminedSessions, 0,
+    "the session count must sit on the threshold, or `>` and `>=` agree and nothing is bound");
+  assert.equal(out.stale, true, "at maxSessions 0 an empty corpus is already due for the next nudge");
+});
+
+test("a valid numeric flag value still reaches --plan and --staleness unchanged", () => {
+  const root = realpathSync(repo());
+  const plan = run(["--plan", "--cap", "5"], root);
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.equal(JSON.parse(plan.stdout).cap, 5);
+
+  writeLastRun(root, "2020-01-01T00:00:00Z");
+  const staleness = run(["--staleness", "--max-sessions", "5", "--max-days", "14", "--cap", "7"], root);
+  assert.equal(staleness.status, 0, staleness.stderr);
+  assert.deepEqual(JSON.parse(staleness.stdout).threshold, { maxSessions: 5, maxDays: 14 });
 });

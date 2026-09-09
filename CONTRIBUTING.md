@@ -133,10 +133,11 @@ Writing a new `scripts/*.mjs`? Reuse `doctor.mjs`'s exported helpers
 project-path escaping, and missing/unreadable-directory handling rather than
 reimplementing them.
 
-`plugin.json`'s `userConfig` descriptions are a third hand-kept copy of the config knobs,
-alongside README's config table and `references/config.md`'s own explanation — update all
-three by hand together when one changes; `validate.mjs` checks only that the key exists, never
-that the description text is current.
+`plugin.json`'s `userConfig` descriptions are one of the four hand-kept copies of the config
+knobs that `references/config.md` § The knob roster enumerates — the other three are that
+roster, `docs/configuration/README.md`'s option table and `docs/design/README.md` §7's schema.
+Change one, change all four. `tests/unit/golden-path.test.mjs` fails on a key only some of them
+carry, but no check compares the description text, so a stale description ships silently.
 
 **PR titles must be Conventional Commits** (`type(scope)?!: subject`), and so must every
 commit subject on the PR — CI checks both. PRs are
@@ -178,6 +179,13 @@ the whole input: it must be a Conventional Commit, its type sets the bump (`feat
 release PR's body is written by the workflow and never reaches versioning), and it becomes both the
 `CHANGELOG.md` entry and — because the PR is squash-merged — `main`'s commit subject. A title
 outside the convention is refused rather than treated as a patch, since it would ship no bump.
+
+Prose written ahead of a release goes directly under `# Changelog` with **no heading of its own**.
+`Prepare release` inserts the `## X.Y.Z — <date>` heading immediately after `# Changelog`, above
+whatever sits there, so headingless prose becomes the released section's body — and anything under
+a hand-written `## Unreleased` lands outside it, where the release notes stop short of it and the
+stray heading stays in the file for good. Do not hand-write the version's subject bullet either;
+the release takes that from the PR title. `docs/decisions/README.md` records why.
 
 Prepare commits `chore(release): prepare vX.Y.Z` to `dev` and opens the `main` ← `dev` PR.
 Squash-merge it **with that same title** once checks pass. `Release` then tags

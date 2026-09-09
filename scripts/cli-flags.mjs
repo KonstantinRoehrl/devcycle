@@ -94,3 +94,35 @@ export function requireValue(flags, name, noun = "a path argument") {
   if (v == null || v.trim() === "") throw new Error(`${name} requires ${noun}`);
   return v;
 }
+
+// A count flag's value must be a whole number at or above the floor its caller states. `Number()`
+// on its own is not that check: it turns an empty or unset value into `0` and any non-numeric one
+// -- including the literal `${user_config.NAME}` an unresolved knob leaves behind, which is exactly
+// what a playbook's substitution passes when the knob is unset -- into `NaN`. Both then flow into
+// arithmetic that yields a confident empty result and a zero exit rather than an error: `--cap ""`
+// capped a session corpus at nothing and printed a manifest indistinguishable from a fully mined
+// corpus.
+//
+// `min` is a parameter because the flags sharing this owner do not share a floor, and hardcoding
+// one broke the other: `--cap 0` asks for the same do-nothing run the coercion bug produced
+// silently, while `--max-sessions 0` carries the user-settable learnStalenessSessions knob and is
+// how a user asks to be nudged every cycle. The default stays 1, so a caller inherits the strict
+// floor and only a caller whose zero means something says so.
+//
+// Builds on requireValue so the empty and missing-value half keeps one owner and one message, and
+// so a rejected value names its flag and its constraint at either floor.
+export function requireCount(flags, name, options = {}) {
+  // The third parameter was a positional `noun` string before it became this options object, and a
+  // string destructures without complaint: a stale call would find neither `min` nor `noun`, fall
+  // back to both defaults, and hand the operator the generic message it was trying to replace --
+  // silently, at whatever floor the caller did not mean. The superseded shape fails here instead.
+  if (typeof options !== "object" || options === null || Array.isArray(options))
+    throw new TypeError(
+      `requireCount("${name}") takes an options object ({ min, noun }), got ${JSON.stringify(options)}`);
+  const { min = 1, noun = min === 1 ? "a positive whole number" : `a whole number of at least ${min}` } = options;
+  const raw = requireValue(flags, name, noun);
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min) throw new Error(`${name} requires ${noun}, got ${JSON.stringify(raw)}`);
+  return n;
+}
