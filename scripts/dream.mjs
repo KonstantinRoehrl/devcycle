@@ -507,7 +507,11 @@ export function planCandidates({ repoRoot, projectsDir, since, cap = CAP, gitRun
   return { candidates, oversized, corpusResolution };
 }
 
-export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false, gitRunner, statFile = statSync, includeOversized = false, writeCache = false }) {
+// `reader` is injected for the same reason `statFile` and `gitRunner` are, and is the pair the
+// spec's §C10 names: one content read per surviving file is a resource bound, and a bound asserted
+// any way other than by counting calls through a collaborator is the shape issues #89 and #154
+// record. Defaults to the real streaming reader, so no caller changes.
+export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false, gitRunner, statFile = statSync, reader = eachRecord, includeOversized = false, writeCache = false }) {
   const { candidates, oversized, corpusResolution } =
     planCandidates({ repoRoot, projectsDir, since, cap, gitRunner, statFile, includeOversized });
 
@@ -526,7 +530,7 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     const hash = createHash("sha256");
     for (const f of candidate.files) {
       readFiles += 1;
-      const { bytes: fileBytes } = eachRecord(f, (r) => {
+      const { bytes: fileBytes } = reader(f, (r) => {
         records += 1;
         if (r.timestamp) stamps.push(r.timestamp);
         if (!self && isSelfRecord(r)) self = true;

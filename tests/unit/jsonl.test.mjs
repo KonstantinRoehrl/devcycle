@@ -44,10 +44,16 @@ test("eachRecord reassembles a record split across a 64KB chunk boundary", () =>
 });
 
 test("eachRecord reassembles a multi-byte character split across a chunk boundary", () => {
-  // Places a 3-byte character so its bytes straddle the 64KB read boundary.
-  const pad = "a".repeat(65535);
-  const text = `{"s":"${pad}€"}\n`;
-  const file = write("s.jsonl", text);
+  // The character has to START on the last byte of a chunk: one that merely sits somewhere in the
+  // second chunk is decoded whole even by a per-chunk buf.toString("utf8"), which is the defect
+  // this test exists to catch. So the padding runs to one byte short of the reader's 64KB chunk,
+  // leaving the 3-byte "€" split 1 + 2 across the boundary.
+  const CHUNK = 64 * 1024;
+  const open = `{"s":"`;
+  const pad = "a".repeat(CHUNK - 1 - Buffer.byteLength(open));
+  assert.equal(Buffer.byteLength(open + pad), CHUNK - 1,
+    "the fixture must leave exactly one byte of the chunk free, or nothing straddles the boundary");
+  const file = write("s.jsonl", `${open}${pad}€"}\n`);
   let value = null;
   eachRecord(file, (r) => { value = r.s; });
   assert.equal(value, `${pad}€`, "a decoder that splits UTF-8 mid-character corrupts the string");

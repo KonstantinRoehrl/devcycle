@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync, rmSync, symlinkSync, statSync, truncateSync, utimesSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, appendFileSync, chmodSync, copyFileSync, readdirSync, realpathSync, readFileSync, rmSync, symlinkSync, statSync, truncateSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -2029,15 +2029,19 @@ test("--plan-landing is guarded against being combined with another subcommand",
 });
 
 // Seeds an unmined-session corpus under root's own escaped-cwd project dir (matching
-// escapeProjectPath, so --staleness's planCorpus actually counts them) and returns the dir to
+// escapeProjectPath, so --staleness's candidate count actually sees them) and returns the dir to
 // hand back via CLAUDE_DREAM_PROJECTS. Sessions timestamped after last-run count as unmined.
+// A null timestamp seeds a transcript that Phase A counts from metadata and that any
+// content-reading plan reports as no session at all — the fixture that tells the two apart.
 const seedStaleCorpus = (root, sessions) => {
   const dir = makeTempDir("dream-stale-proj-");
   const slug = join(dir, escapedSlug(root));
   mkdirSync(slug, { recursive: true });
-  for (const [id, ts] of sessions)
-    writeFileSync(join(slug, `${id}.jsonl`),
-      JSON.stringify({ timestamp: ts, type: "assistant", message: { content: [] } }) + "\n");
+  for (const [id, ts] of sessions) {
+    const record = { type: "assistant", message: { content: [] } };
+    if (ts) record.timestamp = ts;
+    writeFileSync(join(slug, `${id}.jsonl`), JSON.stringify(record) + "\n");
+  }
   return dir;
 };
 
@@ -2070,6 +2074,22 @@ test("--staleness reports stale via the session-count threshold with a recent la
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout);
   assert.equal(out.unminedSessions, 5);
+  assert.ok(out.daysSince < 14, "the days trigger must not fire, so the session count is what makes it stale");
+  assert.equal(out.stale, true);
+});
+
+test("--staleness counts candidates from metadata rather than running a full plan (L1)", () => {
+  const root = realpathSync(repo());
+  const recent = new Date(Date.now() - 2 * 86400000).toISOString(); // days threshold not crossed
+  writeLastRun(root, recent);
+  // Timestamp-free transcripts: the metadata count is 5, while the full plan this branch used to
+  // run reports 0 and would call a stale corpus fresh. The timestamped fixtures above return the
+  // same number either way, so only this one fails a revert to planCorpus.
+  const projects = seedStaleCorpus(root, ["s0", "s1", "s2", "s3", "s4"].map((id) => [id, null]));
+  const r = run(["--staleness", "--max-sessions", "5", "--max-days", "14"], root, { CLAUDE_DREAM_PROJECTS: projects });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.unminedSessions, 5, "a plan that content-reads these transcripts counts 0 of them");
   assert.ok(out.daysSince < 14, "the days trigger must not fire, so the session count is what makes it stale");
   assert.equal(out.stale, true);
 });
@@ -2277,6 +2297,51 @@ const seedMany = (count, { bytesPerSession = 200, timestamps = true } = {}) => {
 const sessionRange = (from, to) =>
   Array.from({ length: to - from + 1 }, (_, i) => `s${String(from + i).padStart(4, "0")}`);
 
+// Makes every transcript in a seeded corpus unreadable except through the returned reader: each
+// file is copied aside and then chmod-ed 0, so a content read the planner performs on its own —
+// a readFileSync/readRecords pass beside the streaming one, the three-passes-per-file defect —
+// raises EACCES instead of quietly happening. A call counter alone cannot see a pass that bypasses
+// the injected reader, and no stat counter can witness the absence of a read at all.
+function sealCorpus(projectsDir) {
+  const shadowDir = makeTempDir("dream-shadow-");
+  const shadow = new Map();
+  const seal = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) { seal(path); continue; }
+      const copy = join(shadowDir, `${shadow.size}-${entry.name}`);
+      copyFileSync(path, copy);
+      chmodSync(path, 0o000);
+      shadow.set(path, copy);
+    }
+  };
+  seal(projectsDir);
+  assert.ok(shadow.size, "sealing an empty corpus would make every assertion below vacuous");
+  // root reads a 0-mode file regardless, which would silently weaken the seal to the counter
+  // alone: assert it bites where it can, rather than claiming a guard that is not there.
+  if (process.getuid?.() !== 0)
+    assert.throws(() => readFileSync([...shadow.keys()][0]), /EACCES/,
+      "the seal must actually block a direct read, or a bypassing pass goes unnoticed");
+  const reads = [];
+  return {
+    reads,
+    reader: (file, visit, options) => {
+      reads.push(file);
+      return eachRecord(shadow.get(file) ?? file, visit, options);
+    },
+  };
+}
+
+// A read that bypasses the seal throws EACCES from inside the planner; report it as the defect it
+// stands for rather than as a bare filesystem error.
+const withoutStrayReads = (label, plan) => {
+  try {
+    return plan();
+  } catch (e) {
+    return assert.fail(`${label} read a transcript it must not read: ${e.message}`);
+  }
+};
+
 test("planCorpus content-reads at most cap + RANK_MARGIN sessions however large the corpus", () => {
   const { root, projectsDir } = seedMany(400);
   const statted = [];
@@ -2300,21 +2365,37 @@ test("the --staleness path counts candidates without reading any transcript", ()
   // planCandidates is the whole of what --staleness runs after this task; these transcripts carry
   // no `timestamp`, so the previous planCorpus-based count returns 0 where Phase A returns 7.
   const { root, projectsDir } = seedMany(7, { timestamps: false });
+  // Sealed, so "without reading" is a property the corpus enforces: a stat counter counts stats
+  // and stays silent about any content read happening beside them.
+  sealCorpus(projectsDir);
   const statted = [];
-  const out = planCandidates({
+  const out = withoutStrayReads("planCandidates", () => planCandidates({
     repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root),
     statFile: (f) => { statted.push(f); return statSync(f); },
-  });
+  }));
   assert.equal(out.candidates.length, 7, "every session is a candidate on metadata alone");
   assert.equal(statted.length, 7, "one stat per file, and no other filesystem work");
   assert.equal(out.corpusResolution, "primary",
     "the primary slug must hit — a fallback would read every transcript and the claim would be false");
 });
 
-test("planCorpus reads each surviving file exactly once", () => {
+test("planCorpus content-reads each surviving file exactly once", () => {
   const { root, projectsDir } = seedMany(10);
-  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
-  assert.equal(plan.readFiles, 10, "three read passes per file was the defect");
+  // The injected reader is the only readable route to the corpus, so every content read is counted
+  // here — including one taken outside the reader, which fails the seal instead of being missed.
+  // plan.readFiles counts candidate files rather than read passes and cannot make this assertion.
+  const { reads, reader } = sealCorpus(projectsDir);
+  const plan = withoutStrayReads("planCorpus (bypassing its injected reader)", () =>
+    planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), reader }));
+  assert.equal(plan.sessions.length, 10,
+    "the reader must actually supply the corpus, or the counts below are vacuous");
+  const perFile = new Map();
+  for (const f of reads) perFile.set(f, (perFile.get(f) ?? 0) + 1);
+  assert.equal(perFile.size, 10, "every surviving file must be read");
+  assert.deepEqual([...perFile.values()], Array(10).fill(1),
+    `three read passes per file was the defect; got ${JSON.stringify([...perFile.values()])}`);
+  assert.equal(plan.readFiles, reads.length,
+    "the manifest's own counter must agree with the reads that actually happened");
 });
 
 test("planCorpus skips an oversized session without reading it and reports it", () => {
@@ -2378,14 +2459,17 @@ test("planCorpus reports which path resolved the corpus", () => {
 
 test("planCandidates applies the since window on metadata alone, reading nothing", () => {
   const { root, projectsDir } = seedMany(50);
-  let reads = 0;
-  const out = planCandidates({
+  // "Reading nothing" is the claim, so the corpus is sealed against reads: counting stats can only
+  // ever show that stats happened.
+  sealCorpus(projectsDir);
+  let stats = 0;
+  const out = withoutStrayReads("planCandidates", () => planCandidates({
     repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root),
     since: new Date(Date.now() + 86400000).toISOString(),
-    statFile: (f) => { reads += 1; return statSync(f); },
-  });
+    statFile: (f) => { stats += 1; return statSync(f); },
+  }));
   assert.equal(out.candidates.length, 0, "a since bound in the future admits no candidate");
-  assert.equal(reads, 50, "the window is decided by stat, not by reading");
+  assert.equal(stats, 50, "the window is decided by stat, not by reading");
 });
 
 test("--plan persists the resolved corpus so --extract does not re-derive it", () => {
@@ -2437,12 +2521,24 @@ test("--extract falls through to a live resolve when the cache names a different
   const { root, projectsDir } = seedMany(2);
   planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), writeCache: true });
 
-  // A cache written against a different projects root must be ignored, not trusted.
+  // A cache written against a different projects root must be ignored, not trusted. It has to name
+  // a file the live resolve would never return — an existing one, so the path-vanished miss is not
+  // what rejects it — or a trusting read and a fall-through return the same text and no assertion
+  // can tell the two apart.
   const other = makeTempDir("dream-other-");
+  const decoy = join(other, "s0001.jsonl");
+  writeFileSync(decoy, JSON.stringify({
+    cwd: root, timestamp: "2026-09-01T00:00:00Z",
+    message: { role: "user", content: "text from the foreign cache" },
+  }) + "\n");
   const cachePath = join(root, ".devcycle", "dreaming", "corpus.json");
   const doc = JSON.parse(readFileSync(cachePath, "utf8"));
-  writeFileSync(cachePath, JSON.stringify({ ...doc, projectsDir: other }));
-  assert.match(extractSession({ repoRoot: root, projectsDir, sessionId: "s0001", gitRunner: fakeGit(root) }), /user:/);
+  writeFileSync(cachePath, JSON.stringify({ ...doc, projectsDir: other, sessions: { s0001: [decoy] } }));
+
+  const text = extractSession({ repoRoot: root, projectsDir, sessionId: "s0001", gitRunner: fakeGit(root) });
+  assert.doesNotMatch(text, /text from the foreign cache/,
+    "a cache naming another projects root must be ignored, not read");
+  assert.match(text, /x{200}/, "the fall-through must mine the session the live resolve finds");
 });
 
 // The two tests below run --plan and --extract as separate processes on purpose: that is how a
@@ -2571,6 +2667,31 @@ test("the playbook's documented --extract dispatch mines a session --plan admitt
   const extract = run(argv, root, { CLAUDE_DREAM_PROJECTS: projectsDir });
   assert.equal(extract.status, 0,
     `the playbook dispatches \`dream.mjs ${argv.join(" ")}\`, which the engine refused: ${extract.stderr.trim()}`);
+});
+
+// The playbook-derived test above only passes the override while the playbook's prose names it;
+// this one pins the argv plumbing itself, so dropping the flag from the --extract branch fails
+// here whatever the prose says.
+test("--extract carries --include-oversized from the command line into the read", () => {
+  const root = realpathSync(makeTempDir("dream-repo-"));
+  const projectsDir = makeTempDir("dream-projects-");
+  const slug = join(projectsDir, escapedSlug(root));
+  mkdirSync(slug, { recursive: true });
+  const big = join(slug, "huge.jsonl");
+  writeFileSync(big, JSON.stringify({
+    cwd: root, timestamp: "2026-09-01T00:00:00Z",
+    message: { role: "user", content: "over-ceiling transcript text" },
+  }) + "\n");
+  truncateSync(big, MAX_SESSION_BYTES + 1);
+
+  const refused = run(["--extract", "huge"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(refused.status, 1, "without the flag the ceiling must still refuse the session");
+  assert.match(refused.stderr, /--include-oversized/, "the error names the flag that overrides it");
+
+  const mined = run(["--extract", "huge", "--include-oversized"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(mined.status, 0, mined.stderr);
+  assert.match(mined.stdout, /over-ceiling transcript text/,
+    "the flag must reach extractSession, not merely be tolerated on the command line");
 });
 
 test("--plan honours an explicit --cap", () => {
