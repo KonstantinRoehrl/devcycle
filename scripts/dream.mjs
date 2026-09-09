@@ -16,7 +16,7 @@ import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId
 import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding, MATCH_CAP } from "./lessons.mjs";
 import { readMaintenanceFindings, matchMaintenanceFindings, renderMaintenanceMatches } from "./maintenance-findings.mjs";
 import { parseFileList } from "./task-files.mjs";
-import { parseFlags } from "./cli-flags.mjs";
+import { parseFlags, requireCount } from "./cli-flags.mjs";
 import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
 import { renderLearnReport } from "./learn-report.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
@@ -724,7 +724,7 @@ function main() {
         // not a subcommand, so it never trips the mutual-exclusivity guard above either.
         "--run-checks": "none",
       });
-      const cap = flags["--cap"] != null ? Number(flags["--cap"]) : CAP;
+      const cap = requireCount(flags, "--cap") ?? CAP;
       const plan = planCorpus({
         repoRoot: root,
         projectsDir: resolveProjectsRoot(),
@@ -1026,9 +1026,9 @@ function main() {
       const { flags } = parseFlags(argv, {
         "--staleness": "none", "--max-sessions": "value", "--max-days": "value", "--cap": "value",
       });
-      const cap = flags["--cap"] != null ? Number(flags["--cap"]) : CAP;
-      const maxSessions = flags["--max-sessions"] != null ? Number(flags["--max-sessions"]) : 5;
-      const maxDays = flags["--max-days"] != null ? Number(flags["--max-days"]) : 14;
+      const cap = requireCount(flags, "--cap") ?? CAP;
+      const maxSessions = requireCount(flags, "--max-sessions") ?? 5;
+      const maxDays = requireCount(flags, "--max-days") ?? 14;
       const dsPath = join(root, ".devcycle", "distilling-state.md");
       const lastRun = existsSync(dsPath) ? (fieldText(readFileSync(dsPath, "utf8"), "last-run") || null) : null;
       // `never` (or an empty/missing line) means the corpus was never mined — the strongest stale

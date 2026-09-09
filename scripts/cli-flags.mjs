@@ -94,3 +94,22 @@ export function requireValue(flags, name, noun = "a path argument") {
   if (v == null || v.trim() === "") throw new Error(`${name} requires ${noun}`);
   return v;
 }
+
+// A count flag's value must be a whole number of at least one. `Number()` on its own is not that
+// check: it turns an empty or unset value into `0` and any non-numeric one -- including the literal
+// `${user_config.NAME}` an unresolved knob leaves behind, which is exactly what a playbook's
+// substitution passes when the knob is unset -- into `NaN`. Both then flow into arithmetic that
+// yields a confident empty result and a zero exit rather than an error: `--cap ""` capped a session
+// corpus at nothing and printed a manifest indistinguishable from a fully mined corpus.
+//
+// Zero is refused along with the rest, because a count of zero asks for the same do-nothing run the
+// coercion bug produced silently, and an operator who means it can say so another way.
+//
+// Builds on requireValue so the empty and missing-value half keeps one owner and one message.
+export function requireCount(flags, name, noun = "a positive whole number") {
+  const raw = requireValue(flags, name, noun);
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${name} requires ${noun}, got ${JSON.stringify(raw)}`);
+  return n;
+}

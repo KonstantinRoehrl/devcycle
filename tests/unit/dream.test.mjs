@@ -2460,3 +2460,44 @@ test("--plan honours an explicit --cap", () => {
   assert.equal(plan.cap, 5);
   assert.equal(plan.capped, true);
 });
+
+// A numeric flag's value arrives from a shell substitution — the learn playbook writes
+// `--cap ${user_config.learnSessionCap}` — so an unset knob reaches the CLI as an empty token or
+// as the literal placeholder. Both used to pass a bare Number() as 0/NaN, empty the manifest, and
+// still exit 0, which reads exactly like a corpus with nothing left to mine.
+const BAD_NUMERIC = ["", "abc", "${user_config.learnSessionCap}", "0", "-1", "2.5"];
+
+test("--plan refuses a --cap that is not a positive integer instead of mining nothing", () => {
+  const root = realpathSync(repo());
+  for (const bad of BAD_NUMERIC) {
+    const r = run(["--plan", "--cap", bad], root);
+    assert.equal(r.status, 1,
+      `--cap ${JSON.stringify(bad)} must fail; got status ${r.status} and manifest ${r.stdout}`);
+    assert.match(r.stderr, /--cap/, "the message must name the flag the operator has to fix");
+  }
+});
+
+test("--staleness refuses a --cap, --max-sessions or --max-days that is not a positive integer", () => {
+  const root = realpathSync(repo());
+  writeLastRun(root, "2020-01-01T00:00:00Z");
+  for (const flag of ["--cap", "--max-sessions", "--max-days"]) {
+    for (const bad of BAD_NUMERIC) {
+      const r = run(["--staleness", flag, bad], root);
+      assert.equal(r.status, 1,
+        `${flag} ${JSON.stringify(bad)} must fail; got status ${r.status} and report ${r.stdout}`);
+      assert.match(r.stderr, new RegExp(flag), "the message must name the flag the operator has to fix");
+    }
+  }
+});
+
+test("a valid numeric flag value still reaches --plan and --staleness unchanged", () => {
+  const root = realpathSync(repo());
+  const plan = run(["--plan", "--cap", "5"], root);
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.equal(JSON.parse(plan.stdout).cap, 5);
+
+  writeLastRun(root, "2020-01-01T00:00:00Z");
+  const staleness = run(["--staleness", "--max-sessions", "5", "--max-days", "14", "--cap", "7"], root);
+  assert.equal(staleness.status, 0, staleness.stderr);
+  assert.deepEqual(JSON.parse(staleness.stdout).threshold, { maxSessions: 5, maxDays: 14 });
+});
