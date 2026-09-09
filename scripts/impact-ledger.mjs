@@ -57,10 +57,18 @@ function entryFor(culpritId, vocab) {
 export function periodLedger({ period, baseline, promotions, vocab, scoreboard, from, to, sessions,
   baselineFrom, baselineTo, baselineSessions }) {
   const held = new Set((scoreboard ?? []).filter((r) => r.verdict === "held").map((r) => r.culpritId));
-  const rows = [];
+  // One row per unique held win culprit-id, not per landing record: a win escalated across rungs
+  // writes one promotion record per landing, and pricing per record would double its occurrences and
+  // savings. `allTimeRollup` (scripts/learn-report.mjs) dedups the same list by culprit-id for the
+  // same reason; the two paths must agree.
+  const byId = new Set();
   for (const p of promotions ?? []) {
     if (p.lifecycle || !p.culpritId || !held.has(p.culpritId)) continue;
-    const { slug, entry } = entryFor(p.culpritId, vocab);
+    byId.add(p.culpritId);
+  }
+  const rows = [];
+  for (const culpritId of byId) {
+    const { slug, entry } = entryFor(culpritId, vocab);
     if (entry?.kind !== "win") continue;
     const observed = new Set([slug, `novel:${slug}`, ...(entry.observes ?? [])]);
     let occurrences = 0;
@@ -72,7 +80,7 @@ export function periodLedger({ period, baseline, promotions, vocab, scoreboard, 
     else if (prevents.length === 0) reason = "declares no prevents";
     else if (prices.some((c) => c === null)) reason = "a prevented key is unpriced";
     else savings = occurrences * (prices.reduce((a, b) => a + b, 0) / prices.length);
-    rows.push({ win: p.culpritId, occurrences, prevents, savings, reason });
+    rows.push({ win: culpritId, occurrences, prevents, savings, reason });
   }
 
   const winKeys = winKeySet(vocab);
@@ -87,7 +95,10 @@ export function periodLedger({ period, baseline, promotions, vocab, scoreboard, 
 
   const unpriced = rows.filter((r) => r.savings === null).length;
   const measuredSavings = rows.reduce((a, r) => a + (r.savings ?? 0), 0);
-  const savings = rows.length === 0 || unpriced > 0 ? null : measuredSavings;
+  // An empty held-win set is a true 0 (spec §136: Σ over the empty set), not an absence of
+  // measurement — so net = 0 − cost. savings stays null ONLY when a held win exists but cannot be
+  // priced (unpriced > 0), which is where "unmeasured is never $0" applies.
+  const savings = unpriced > 0 ? null : measuredSavings;
   const totalCost = costMeasurable ? cost : null;
   const net = savings === null || totalCost === null ? null : savings - totalCost;
 

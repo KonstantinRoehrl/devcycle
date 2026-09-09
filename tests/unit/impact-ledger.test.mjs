@@ -111,6 +111,36 @@ test("an unpriced non-win key poisons cost and net but leaves the measured parts
   assert.equal(l.measured.cost, 0);
 });
 
+test("a win with several landing records dedups to one row, savings not doubled", () => {
+  const period = aggregateKeys([summary([{ key: "first-round-accept:execution", frequency: 3, impact: 0 }])]);
+  const baseline = aggregateKeys([summary([{ key: "review-reject:execution", frequency: 4, impact: 10 }])]);
+  const l = periodLedger({ period, baseline, vocab: VOCAB, scoreboard: HELD,
+    promotions: [{ culpritId: "first-round-clean-accept", rung: "r2" }, { culpritId: "first-round-clean-accept", rung: "r3" }],
+    from: "2026-08-01", to: "2026-09-01", sessions: 5, baselineFrom: "2026-06-01", baselineTo: "2026-09-01", baselineSessions: 20 });
+  assert.equal(l.rows.length, 1);
+  assert.equal(l.rows[0].savings, 7.5);
+  assert.equal(l.savings, 7.5);
+});
+
+test("a period with zero held wins nets minus its measurable cost, not unmeasurable", () => {
+  const period = aggregateKeys([summary([{ key: "restated-instead-of-cited", frequency: 1, impact: 5 }])]);
+  const l = periodLedger({ period, baseline: new Map(), promotions: [], vocab: VOCAB, scoreboard: [],
+    from: "2026-08-01", to: "2026-09-01", sessions: 5, baselineFrom: "2026-06-01", baselineTo: "2026-09-01", baselineSessions: 20 });
+  assert.equal(l.rows.length, 0);
+  assert.equal(l.savings, 0);
+  assert.equal(l.cost, 5);
+  assert.equal(l.net, -5);
+});
+
+test("a held win that cannot be priced keeps savings and net null, never zero", () => {
+  const period = aggregateKeys([summary([{ key: "first-round-accept:execution", frequency: 3, impact: 0 }])]);
+  const l = periodLedger({ period, baseline: new Map(), promotions: [LANDED[0]], vocab: VOCAB, scoreboard: HELD,
+    from: "2026-08-01", to: "2026-09-01", sessions: 5, baselineFrom: "2026-06-01", baselineTo: "2026-09-01", baselineSessions: 20 });
+  assert.equal(l.rows[0].savings, null);
+  assert.equal(l.savings, null);
+  assert.equal(l.net, null);
+});
+
 test("a lesson that is not held, and one that is not win-kind, never enter the ledger", () => {
   const period = aggregateKeys([summary([{ key: "first-round-accept:execution", frequency: 1, impact: 0 }])]);
   const notHeld = periodLedger({ period, baseline: new Map(), promotions: [LANDED[0]], vocab: VOCAB,
