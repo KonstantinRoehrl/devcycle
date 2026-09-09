@@ -111,11 +111,15 @@ export function requireValue(flags, name, noun = "a path argument") {
 //
 // Builds on requireValue so the empty and missing-value half keeps one owner and one message, and
 // so a rejected value names its flag and its constraint at either floor.
-export function requireCount(
-  flags,
-  name,
-  { min = 1, noun = min === 1 ? "a positive whole number" : `a whole number of at least ${min}` } = {},
-) {
+export function requireCount(flags, name, options = {}) {
+  // The third parameter was a positional `noun` string before it became this options object, and a
+  // string destructures without complaint: a stale call would find neither `min` nor `noun`, fall
+  // back to both defaults, and hand the operator the generic message it was trying to replace --
+  // silently, at whatever floor the caller did not mean. The superseded shape fails here instead.
+  if (typeof options !== "object" || options === null || Array.isArray(options))
+    throw new TypeError(
+      `requireCount("${name}") takes an options object ({ min, noun }), got ${JSON.stringify(options)}`);
+  const { min = 1, noun = min === 1 ? "a positive whole number" : `a whole number of at least ${min}` } = options;
   const raw = requireValue(flags, name, noun);
   if (raw === undefined) return undefined;
   const n = Number(raw);

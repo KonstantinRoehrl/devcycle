@@ -116,6 +116,18 @@ test("a floor-zero flag still names itself and its constraint when the value is 
     /--max-sessions requires a whole number of at least 0$/);
 });
 
+// The third parameter used to be a positional `noun` string. A call left in that shape
+// destructures a string: it finds neither `min` nor `noun`, so the floor and the message silently
+// fall back to the defaults and a caller that meant to pass a custom noun gets the generic one with
+// no error. The superseded shape has to fail loudly rather than degrade.
+test("requireCount refuses the superseded positional third argument", () => {
+  assert.throws(
+    () => requireCount(parseFlags(["--cap=5"], COUNTS).flags, "--cap", "a date"),
+    /requireCount\("--cap"\) takes an options object \({ min, noun }\), got "a date"/,
+    "a stale positional noun must not be read as an options object and silently ignored",
+  );
+});
+
 // --- arity: a valueless flag must not eat the next token ---
 //
 // The whole point of the refusal above is defeated when a valueless flag swallows the bare token

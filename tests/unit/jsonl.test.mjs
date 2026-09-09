@@ -38,6 +38,11 @@ test("eachRecord reassembles a record split across a 64KB chunk boundary", () =>
   const filler = "x".repeat(70000);
   const text = `{"big":"${filler}"}\n{"a":2}\n`;
   const file = write("s.jsonl", text);
+  // The straddle measured on the bytes on disk rather than assumed from 70000 > 64KB: were CHUNK
+  // ever raised past this filler, the record would decode wholly inside the first chunk and nothing
+  // here would exercise reassembly. The reader must still have to carry across a chunk.
+  assert.ok(!readFileSync(file).subarray(0, CHUNK).includes(0x0a),
+    "the first chunk must contain no line terminator, or the record never spans a boundary");
   const seen = [];
   eachRecord(file, (r) => { seen.push(r.big ? r.big.length : r.a); });
   assert.deepEqual(seen, [70000, 2], "a record longer than one chunk must survive reassembly");
@@ -48,6 +53,12 @@ test("eachRecord reassembles a multi-byte character split across a chunk boundar
   // second chunk is decoded whole even by a per-chunk buf.toString("utf8"), which is the defect
   // this test exists to catch. So the padding runs to one byte short of a 64KB boundary, leaving
   // the 3-byte "€" split 1 + 2 across it.
+  //
+  // The two constants below are deliberately NOT one constant. The pad is built from the fixture's
+  // own pinned 64KB, and only the assertion consults the reader's CHUNK — so a change to CHUNK
+  // breaks this test loudly and a human re-derives the fixture. Deriving the pad from the import
+  // instead would make the fixture re-adapt to any new chunk size and assert nothing: that was the
+  // tautology removed here earlier. Do not "simplify" the duplication away.
   const FIXTURE_CHUNK = 64 * 1024;
   assert.equal(CHUNK, FIXTURE_CHUNK,
     "the reader's chunk size moved: this fixture pads to a 64KB boundary, so at any other size the € " +

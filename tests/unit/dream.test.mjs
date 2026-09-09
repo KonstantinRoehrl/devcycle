@@ -2433,27 +2433,41 @@ test("planCorpus content-reads each surviving file exactly once", () => {
     "the manifest's own counter must agree with the reads that actually happened");
 });
 
-// An over-ceiling transcript that a test which DOES read it can afford. Padding the file out with
-// truncateSync leaves one unbroken run of NUL bytes carrying no newline, so eachRecord accumulates
-// the whole 50 MiB in `carry` and re-flattens it on each of ~800 chunks — tens of GB of copying per
-// read, in tests whose subject is bounding exactly that cost. Newline-terminated filler keeps the
-// only property these fixtures need (a size over the ceiling) while letting the reader flush each
-// line. The filler is not JSON, so it is skipped as a malformed line and no record count moves.
+// An over-ceiling transcript that a test which DOES read it can afford — in CPU and in bytes on
+// disk, which pull against each other here.
+//
+// CPU: padding the file out with truncateSync leaves one unbroken run of NUL bytes carrying no
+// newline, so eachRecord accumulates the whole 50 MiB in `carry` and re-flattens it on each of ~800
+// chunks — tens of GB of copying per read, in tests whose subject is bounding exactly that cost.
+// Newline-terminated filler keeps the only property these fixtures need (a size over the ceiling)
+// while letting the reader flush each line. The filler is not JSON, so it is skipped as a malformed
+// line and no record count moves.
+//
+// Bytes: that filler is real where truncateSync's padding was sparse, so each fixture materialises
+// just over 50 MiB. Six of them coexisting until the process exits is ~300 MiB of live temp data on
+// a machine whose tmpdir has filled before, so each is removed the moment its own test ends —
+// `t.after` runs on a failing test too, which keeps the peak at one fixture whatever the outcome.
+// The temp-dir owner still removes the enclosing directory at exit; this only stops the bytes from
+// waiting that long.
+//
+// There is deliberately no size assertion here: the loop appends until it is past the ceiling and
+// then appends one more block, so `size > MAX_SESSION_BYTES` could only ever catch a short write,
+// which Node's synchronous write calls raise on their own. Each consuming test binds the property
+// instead, by observing the engine skip or refuse this session.
 const FILLER_BLOCK = `${"f".repeat(4095)}\n`.repeat(256); // 1 MiB
-function seedOversized(file, record) {
+function seedOversized(t, file, record) {
   const head = JSON.stringify(record) + "\n";
   writeFileSync(file, head);
   for (let size = Buffer.byteLength(head); size <= MAX_SESSION_BYTES; size += FILLER_BLOCK.length)
     appendFileSync(file, FILLER_BLOCK);
-  assert.ok(statSync(file).size > MAX_SESSION_BYTES,
-    "the fixture must be over the ceiling, or the tests below exercise the ordinary path");
+  t.after(() => rmSync(file, { force: true }));
 }
 
-test("planCorpus skips an oversized session without reading it and reports it", () => {
+test("planCorpus skips an oversized session without reading it and reports it", (t) => {
   const { root, projectsDir } = seedMany(2);
   const slug = join(projectsDir, root.replace(/[^A-Za-z0-9]/g, "-"));
   const big = join(slug, "huge.jsonl");
-  seedOversized(big, { cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } });
+  seedOversized(t, big, { cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } });
 
   const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
   assert.deepEqual(plan.oversized.map((o) => o.id), ["huge"]);
@@ -2464,11 +2478,18 @@ test("planCorpus skips an oversized session without reading it and reports it", 
 // The one path the override exists to enable. `oversized` is what the learn playbook's cost gate
 // names to the user as "skipped without being read", so a session the same run content-read and
 // mined cannot also be on it.
-test("planCorpus --include-oversized mines the session rather than listing it as skipped", () => {
+test("planCorpus --include-oversized mines the session rather than listing it as skipped", (t) => {
   const { root, projectsDir } = seedMany(1);
   const slug = join(projectsDir, escapedSlug(root));
   const big = join(slug, "huge.jsonl");
-  seedOversized(big, { cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } });
+  seedOversized(t, big, { cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } });
+
+  // The negative control, and the fixture's own binding: without the override the engine has to
+  // put this session on `oversized`, or it never reached the ceiling and the empty list below says
+  // nothing. Skipped sessions are not content-read, so this costs a stat, not a 50 MiB read.
+  const skipped = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
+  assert.deepEqual(skipped.oversized.map((o) => o.id), ["huge"],
+    "the fixture must actually be over the ceiling, or the assertions below are vacuous");
 
   const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), includeOversized: true });
   assert.ok(plan.sessions.some((s) => s.id === "huge"),
@@ -2480,11 +2501,11 @@ test("planCorpus --include-oversized mines the session rather than listing it as
 // The list is the cost gate's input, so it must name only sessions this run would mine if the
 // ceiling were lifted. An over-ceiling transcript older than the checkpoint is out of the window
 // on its own and would otherwise sit in the gate's question forever.
-test("planCandidates reports only the oversized sessions the ceiling actually kept out", () => {
+test("planCandidates reports only the oversized sessions the ceiling actually kept out", (t) => {
   const { root, projectsDir } = seedMany(1);
   const slug = join(projectsDir, escapedSlug(root));
   const big = join(slug, "huge.jsonl");
-  seedOversized(big, { cwd: root, timestamp: "2026-01-01T00:00:00Z", message: { role: "user", content: "y" } });
+  seedOversized(t, big, { cwd: root, timestamp: "2026-01-01T00:00:00Z", message: { role: "user", content: "y" } });
   const stale = Date.UTC(2026, 0, 1) / 1000;
   utimesSync(big, stale, stale);
 
@@ -2668,11 +2689,11 @@ test("--plan still accepts the --run-checks modifier now that the branch parses 
   assert.equal(JSON.parse(r.stdout).cap, 100, "--plan must still print its manifest");
 });
 
-test("extractSession refuses an oversized session unless told otherwise", () => {
+test("extractSession refuses an oversized session unless told otherwise", (t) => {
   const { root, projectsDir } = seedMany(1);
   const slug = join(projectsDir, root.replace(/[^A-Za-z0-9]/g, "-"));
   const big = join(slug, "huge.jsonl");
-  seedOversized(big, { cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } });
+  seedOversized(t, big, { cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } });
 
   assert.throws(
     () => extractSession({ repoRoot: root, projectsDir, sessionId: "huge", gitRunner: fakeGit(root) }),
@@ -2693,24 +2714,46 @@ function documentedExtractArgv(sessionId) {
   const mining = playbook.slice(start, playbook.indexOf("\n## ", start + 1));
   const sentences = mining.replace(/\s+/g, " ").split(/(?<=[.!?]) /);
   // Naming both flags in one sentence is not the same as telling a coordinator to combine them:
-  // "never pass `--include-oversized` to `--extract`" names both and means the opposite. A negated
-  // sentence is therefore not read as instruction to carry the flag. This can only under-read the
-  // prose — a sentence that does mandate the combination while using one of these words yields the
-  // bare argv, the engine refuses the session, and the test below fails loudly saying so, which is
-  // the direction this probe is allowed to be wrong in.
-  const FORBIDS = /\b(never|not|without|instead of|rather than|refuses?|forbids?)\b/i;
-  const carriesOverride = sentences.some((s) =>
-    s.includes("--extract") && s.includes("--include-oversized") && !FORBIDS.test(s));
+  // "never pass `--include-oversized` to `--extract`" names both and means the opposite, so a
+  // sentence carrying one of the negations below is not read as instruction to carry the flag.
+  //
+  // What this probe guarantees, stated as narrowly as it holds:
+  //  - exactly one sentence in the mining stage may name both flags. Prose that says it twice —
+  //    once affirmatively, once as a caveat — is ambiguous rather than documented, and fails here
+  //    instead of being decided by whichever sentence a `some()` reached first;
+  //  - under-reading is loud. A sentence that does mandate the combination while using one of
+  //    these words yields the bare argv, the engine refuses the session, and the assertion below
+  //    fails naming the argv it dispatched.
+  //
+  // What it does NOT guarantee, and no regex over free prose can: that the list covers every
+  // forbidding phrasing. A single sentence forbidding the combination in wording the list misses
+  // still reads as documentation and passes green. The list is best-effort — kept broad, and worth
+  // extending when a new phrasing appears — and no behaviour rests on it alone: the sibling test
+  // below pins the same argv plumbing without consulting the prose at all.
+  const FORBIDS =
+    /\b(never|not|cannot|without|instead of|rather than|refus\w*|forbid\w*|avoid\w*|prohibit\w*|omit\w*|exclud\w*)\b|n['’]t\b/i;
+  const naming = sentences.filter((s) => s.includes("--extract") && s.includes("--include-oversized"));
+  assert.ok(naming.length <= 1,
+    `the mining stage names --extract and --include-oversized together in ${naming.length} sentences, ` +
+    "so which one is the documented dispatch is undecidable here");
+  const carriesOverride = naming.length === 1 && !FORBIDS.test(naming[0]);
   return carriesOverride ? ["--extract", sessionId, "--include-oversized"] : ["--extract", sessionId];
 }
 
-test("the playbook's documented --extract dispatch mines a session --plan admitted as oversized", () => {
+test("the playbook's documented --extract dispatch mines a session --plan admitted as oversized", (t) => {
   const root = realpathSync(makeTempDir("dream-repo-"));
   const projectsDir = makeTempDir("dream-projects-");
   const slug = join(projectsDir, escapedSlug(root));
   mkdirSync(slug, { recursive: true });
   const big = join(slug, "huge.jsonl");
-  seedOversized(big, { cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } });
+  seedOversized(t, big, { cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "hi" } });
+
+  // A plain --plan first: the session has to land on `oversized` there, or the ceiling was never
+  // what kept it out and the dispatch below proves nothing about the override.
+  const skipped = run(["--plan"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(skipped.status, 0, skipped.stderr);
+  assert.deepEqual(JSON.parse(skipped.stdout).oversized.map((o) => o.id), ["huge"],
+    "the fixture must actually be over the ceiling, or this test passes without the override");
 
   const plan = run(["--plan", "--include-oversized"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
   assert.equal(plan.status, 0, plan.stderr);
@@ -2726,13 +2769,13 @@ test("the playbook's documented --extract dispatch mines a session --plan admitt
 // The playbook-derived test above only passes the override while the playbook's prose names it;
 // this one pins the argv plumbing itself, so dropping the flag from the --extract branch fails
 // here whatever the prose says.
-test("--extract carries --include-oversized from the command line into the read", () => {
+test("--extract carries --include-oversized from the command line into the read", (t) => {
   const root = realpathSync(makeTempDir("dream-repo-"));
   const projectsDir = makeTempDir("dream-projects-");
   const slug = join(projectsDir, escapedSlug(root));
   mkdirSync(slug, { recursive: true });
   const big = join(slug, "huge.jsonl");
-  seedOversized(big, {
+  seedOversized(t, big, {
     cwd: root, timestamp: "2026-09-01T00:00:00Z",
     message: { role: "user", content: "over-ceiling transcript text" },
   });
@@ -2803,7 +2846,37 @@ test("--staleness accepts 0 for --max-sessions and --max-days and nudges every c
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout);
   assert.deepEqual(out.threshold, { maxSessions: 0, maxDays: 0 }, "the zeros must reach the probe, not be swallowed by the defaults");
+  // Only that both zeros survive parsing and that the probe nudges: with maxSessions 0 the session
+  // clause is true for any corpus and short-circuits the `||`, so this case cannot bind either
+  // comparison on its own. The two below do that, one threshold each.
   assert.equal(out.stale, true, "a zero threshold means every cycle is stale enough to nudge");
+});
+
+// One threshold each, with the other clause held false and this one sitting exactly on the
+// boundary — the only place `>=` and `>` disagree, so a comparison flipped either way fails here.
+test("--staleness nudges on the days threshold alone when --max-days is 0", () => {
+  const root = realpathSync(repo());
+  writeLastRun(root, new Date().toISOString()); // mined just now → daysSince 0, on the threshold
+  const r = run(["--staleness", "--max-sessions", "5", "--max-days", "0"], root);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.unminedSessions, 0,
+    "the empty corpus must leave the session clause false, or the days comparison is not what decides this");
+  assert.equal(out.daysSince, 0, "days must sit on the threshold, or `>` and `>=` agree and nothing is bound");
+  assert.equal(out.stale, true, "at maxDays 0 a corpus mined today is already due for the next nudge");
+});
+
+test("--staleness nudges on the session threshold alone when --max-sessions is 0", () => {
+  const root = realpathSync(repo());
+  writeLastRun(root, new Date().toISOString()); // mined just now → the days clause cannot fire
+  const r = run(["--staleness", "--max-sessions", "0", "--max-days", "14"], root);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.daysSince, 0,
+    "the fresh checkpoint must leave the days clause false, or the session comparison is not what decides this");
+  assert.equal(out.unminedSessions, 0,
+    "the session count must sit on the threshold, or `>` and `>=` agree and nothing is bound");
+  assert.equal(out.stale, true, "at maxSessions 0 an empty corpus is already due for the next nudge");
 });
 
 test("a valid numeric flag value still reaches --plan and --staleness unchanged", () => {
