@@ -32,7 +32,7 @@ import { eachRecord } from "../../scripts/jsonl.mjs";
 // written against it while it lived in dream.mjs and still pin the same behaviour, so they
 // travel with the import rather than being dropped.
 import { readPromotions, recordPromotion } from "../../scripts/promotions.mjs";
-import { repoSlug } from "../../scripts/run-record.mjs";
+import { repoSlug, hashSession } from "../../scripts/run-record.mjs";
 
 const SCRIPT = new URL("../../scripts/dream.mjs", import.meta.url).pathname;
 // This repo itself, for the criteria that must run against its real promotion records.
@@ -2889,4 +2889,116 @@ test("a valid numeric flag value still reaches --plan and --staleness unchanged"
   const staleness = run(["--staleness", "--max-sessions", "5", "--max-days", "14", "--cap", "7"], root);
   assert.equal(staleness.status, 0, staleness.stderr);
   assert.deepEqual(JSON.parse(staleness.stdout).threshold, { maxSessions: 5, maxDays: 14 });
+});
+
+// The ledger, end to end through --render-report: the dollars in the report come from doctor's own
+// scorer over real transcripts and run records (QC2), never from a figure a fixture wrote out. Both
+// fixtures drive the culprit vocabulary themselves through CLAUDE_DREAM_CULPRITS — the CLI spawns
+// THIS repo's dream.mjs with only cwd redirected, so a run reading the shipped references/
+// culprits.json would prove the shipped file's contents rather than what the fixture set up.
+const LEDGER_PERIOD_DAY = "2026-08-10";   // inside writeCandidateFixture's corpus window
+const LEDGER_BASELINE_DAY = "2026-06-15"; // before it, so it prices the baseline and not the period
+
+// One session whose impact row is exactly `{ key, frequency, impact }`. doctor divides a stage's
+// transcript cost by the dispatches inside that stage's window, so the row's cost-per-occurrence is
+// set by giving the stage one dispatch and `impact / frequency` dollars of turn cost: claude-opus-5
+// input is $5 per million tokens, i.e. exactly $1 per 200_000 tokens.
+function writePricedSession({ projectSlug, journalDir, id, day, row }) {
+  const [event, stage] = row.key.split(":");
+  const perOccurrence = row.frequency ? row.impact / row.frequency : 0;
+  writeFileSync(
+    join(projectSlug, `${id}.jsonl`),
+    JSON.stringify({
+      type: "assistant",
+      timestamp: `${day}T10:00:00Z`,
+      message: {
+        role: "assistant",
+        model: "claude-opus-5",
+        usage: { input_tokens: perOccurrence * 200_000, output_tokens: 0 },
+        content: [],
+      },
+    }) + "\n",
+  );
+  const runId = hashSession(id).slice(0, 16);
+  const lines = [
+    { kind: "run", runId, schemaVersion: 1, pluginVersion: "0.13.0", profile: "thorough" },
+    { kind: "session", sessionHash: hashSession(id) },
+    { kind: "stage", stage, startedAt: `${day}T09:00:00Z`, endedAt: `${day}T11:00:00Z` },
+    { kind: "dispatch", taskId: "1", model: "claude-opus-5", retryIndex: 0,
+      startedAt: `${day}T09:30:00Z`, endedAt: `${day}T10:30:00Z` },
+    ...Array.from({ length: row.frequency }, () => ({ kind: "event", runId, event, stage, ts: `${day}T10:00:00Z` })),
+  ];
+  writeFileSync(join(journalDir, `${runId}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+}
+
+// A repo whose held win-kind lesson, corpus and vocabulary are all the caller's: `period` and
+// `baseline` become priced sessions on either side of the report's corpus window, and the win is
+// held because the journal reinforces it after it landed (verification.mjs's journal-reinforcement
+// verdict). `winPrevents: null` writes an entry with no `prevents` key at all.
+function ledgerFixtureRepo({ period = [], baseline = [], win, winObserves = [], winPrevents = null }) {
+  const { root, projects, runsDir } = corpusWithJournal({
+    promotions: [{ culpritId: win, rung: "r2", landed: "2026-01-01", verify: "journal-reinforcement" }],
+    events: [{ culprit: win, ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
+  });
+  const projectSlug = join(projects, root.replace(/[^A-Za-z0-9]/g, "-"));
+  const journalDir = join(runsDir, repoSlug(root));
+  period.forEach((row, i) =>
+    writePricedSession({ projectSlug, journalDir, id: `ledger-period-${i}`, day: LEDGER_PERIOD_DAY, row }));
+  baseline.forEach((row, i) =>
+    writePricedSession({ projectSlug, journalDir, id: `ledger-baseline-${i}`, day: LEDGER_BASELINE_DAY, row }));
+  const vocab = join(makeTempDir("dream-ledger-vocab-"), "culprits.json");
+  writeFileSync(vocab, JSON.stringify([{
+    slug: win,
+    kind: "win",
+    phase: ["execution"],
+    desc: `${win}, as this fixture declares it`,
+    since: "0.13.0",
+    observes: winObserves,
+    ...(winPrevents ? { prevents: winPrevents } : {}),
+  }]));
+  return { root, projects, runsDir, vocab };
+}
+
+function renderReport(fixture) {
+  const res = run(["--render-report", writeCandidateFixture()], fixture.root, {
+    CLAUDE_DREAM_PROJECTS: fixture.projects,
+    DEVCYCLE_RUNS_DIR: fixture.runsDir,
+    CLAUDE_DREAM_CULPRITS: fixture.vocab,
+  });
+  assert.equal(res.status, 0, res.stderr);
+  return res.stdout;
+}
+
+// Fixture (a): a held win with a priced prevents key. Baseline holds review-reject:execution at
+// 3 occurrences costing $9.00 total, so cost-per-occurrence is $3.00; the period holds 2 win
+// occurrences, so savings must be exactly 2 x 3.00 = $6.00.
+test("fixture (a): a held win with a priced culprit prints its exact savings", () => {
+  const fixture = ledgerFixtureRepo({
+    period: [{ key: "first-round-accept:execution", frequency: 2, impact: 0 }],
+    baseline: [{ key: "review-reject:execution", frequency: 3, impact: 9 }],
+    win: "first-round-clean-accept",
+    winObserves: ["first-round-accept:execution"],
+    winPrevents: ["review-reject:execution"],
+  });
+  const out = renderReport(fixture);
+  assert.match(out, /## Ledger/);
+  assert.match(out, /\$6\.00/);
+});
+
+// Fixture (b): a held win whose entry declares no prevents. There is no comparable culprit-id
+// cost on record, so the row must read unmeasurable — not $0.00, which would assert that the
+// win saved nothing.
+test("fixture (b): a held win with no comparable culprit prints unmeasurable, not zero", () => {
+  const fixture = ledgerFixtureRepo({
+    period: [{ key: "gate-pass-clean:execution", frequency: 2, impact: 0 }],
+    baseline: [],
+    win: "gate-caught-regression",
+    winObserves: ["gate-pass-clean:execution"],
+    winPrevents: null,
+  });
+  const out = renderReport(fixture);
+  const row = out.split("\n").find((l) => l.includes("gate-caught-regression"));
+  assert.match(row, /unmeasurable/);
+  assert.doesNotMatch(row, /\$0\.00/);
+  assert.doesNotMatch(out, /Win savings: \$0\.00/);
 });
