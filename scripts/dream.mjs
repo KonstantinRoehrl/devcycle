@@ -5,7 +5,7 @@
 // The stores each have one owner, and this file is the CLI over them rather than a second
 // copy: journal.mjs (run records), promotions.mjs (landed lessons), lessons.mjs (the three
 // capped stores), learn-report.mjs (the report).
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
@@ -25,6 +25,13 @@ import { gitToplevel, worktreeRoots } from "./git-identity.mjs";
 import { eachRecord } from "./jsonl.mjs";
 
 const CAP = 100;
+// Phase B reads at most cap + RANK_MARGIN sessions. mtime tracks a transcript's last append to
+// within write-flush latency, so the margin covers file copies and clock skew, not routine use.
+export const RANK_MARGIN = 25;
+// A per-session ceiling checked from statSync before any read. A backstop, not the main defence
+// — the streaming reader is what bounds the ordinary case — sized to exclude nothing in a real
+// multi-gigabyte corpus while capping one runaway transcript's parse.
+export const MAX_SESSION_BYTES = 50 * 1024 * 1024;
 const dreamDir = (root) => join(root, ".devcycle", "dreaming");
 const statePath = (root) => join(dreamDir(root), "state.md");
 
@@ -426,61 +433,107 @@ function resolveUncached(repoRoot, projectsDir, gitRunner) {
 export const sliceId = (sessionId, bytes, digest) => `${sessionId}@${bytes}-${digest}`;
 export const sliceSessionId = (id) => String(id).split("@")[0];
 
-export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false, gitRunner }) {
+// Phase A: rank candidates from filesystem metadata alone. Nothing here opens a transcript, so
+// the cost of deciding WHICH sessions to mine no longer scales with how many have ever existed.
+// Note this is only content-free when the primary slug lookup hits; on the fallback path
+// resolveProjectFiles must itself probe every transcript under the projects root.
+export function planCandidates({ repoRoot, projectsDir, since, cap = CAP, gitRunner, statFile = statSync }) {
+  const { files, corpusResolution } = resolveProjectFiles(repoRoot, projectsDir, gitRunner);
   const groups = new Map();
-  const { files: resolvedFiles } = resolveProjectFiles(repoRoot, projectsDir, gitRunner);
-  for (const file of resolvedFiles) {
+  for (const file of files) {
     const id = owningSession(file);
     if (!groups.has(id)) groups.set(id, []);
     groups.get(id).push(file);
   }
 
+  const sinceMs = since ? Date.parse(since) : null;
+  const candidates = [];
+  const oversized = [];
+  for (const [id, sessionFiles] of groups) {
+    let bytes = 0;
+    let mtimeMs = 0;
+    for (const f of sessionFiles) {
+      const st = statFile(f);
+      bytes += st.size;
+      if (st.mtimeMs > mtimeMs) mtimeMs = st.mtimeMs;
+    }
+    if (bytes > MAX_SESSION_BYTES) { oversized.push({ id, bytes }); continue; }
+    // Conservative in one direction only: a record's timestamp cannot postdate the write that
+    // stored it, so a session whose newest file predates the checkpoint holds no in-window
+    // record. This can over-keep (a copied file) and never under-keeps; Phase B's exact
+    // inWindow test is what actually decides membership.
+    if (sinceMs != null && Number.isFinite(sinceMs) && mtimeMs < sinceMs) continue;
+    candidates.push({ id, files: sessionFiles, mtimeMs, bytes });
+  }
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return { candidates, oversized, corpusResolution };
+}
+
+export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false, gitRunner, statFile = statSync }) {
+  const { candidates, oversized, corpusResolution } =
+    planCandidates({ repoRoot, projectsDir, since, cap, gitRunner, statFile });
+
   const sessions = [];
-  for (const [id, files] of groups) {
+  let readFiles = 0;
+  let readSessions = 0;
+  // Phase B: the only place a transcript's contents are read. One streaming pass per file
+  // replaces the previous readFileSync plus two readRecords calls.
+  for (const candidate of candidates.slice(0, cap + RANK_MARGIN)) {
+    readSessions += 1;
     const stamps = [];
     let records = 0;
     let self = false;
     let bytes = 0;
+    let extractBytes = 0;
     const hash = createHash("sha256");
-    for (const f of files) {
-      const raw = readFileSync(f, "utf8");
-      bytes += Buffer.byteLength(raw);
-      hash.update(raw);
-      for (const r of readRecords(f)) {
+    for (const f of candidate.files) {
+      readFiles += 1;
+      const { bytes: fileBytes } = eachRecord(f, (r) => {
         records += 1;
         if (r.timestamp) stamps.push(r.timestamp);
         if (!self && isSelfRecord(r)) self = true;
-      }
+        // F4: the model-visible size the same way `--extract` does, reused from messageText
+        // rather than a second extractor (QC2 of the original spec).
+        extractBytes += Buffer.byteLength(messageText(r));
+      }, { onChunk: (chunk) => hash.update(chunk) });
+      bytes += fileBytes;
     }
     if (!stamps.length) continue;
-    // `excludeSelf` drops devcycle's own sessions from the mining corpus outright. Freshness
-    // ignores them on every path — see artifactFresh — but by default they stay mineable here.
+    // Both this and the excludeSelf rejection below consume a candidate slot Phase A could not
+    // foresee — self-ness and timestamp presence are knowable only by reading — so a run can
+    // return fewer than `cap` sessions. RANK_MARGIN absorbs a small number of these. If
+    // excludeSelf ever becomes reachable (it is false at every present call site), Phase B must
+    // refill from the remaining candidates rather than returning short.
     if (excludeSelf && self) continue;
     stamps.sort();
     const lastTimestamp = stamps.at(-1);
     if (!inWindow(lastTimestamp, since, null)) continue;
-    // F4: the model-visible size the same way `--extract` does, reused from messageText rather
-    // than a second extractor (QC2).
-    let extractBytes = 0;
-    for (const f of files)
-      for (const r of readRecords(f)) extractBytes += Buffer.byteLength(messageText(r));
-    const slice = sliceId(id, bytes, hash.digest("hex").slice(0, 8));
     sessions.push({
-      id,
-      files,
+      id: candidate.id,
+      files: candidate.files,
       firstTimestamp: stamps[0],
       lastTimestamp,
       records,
       bytes,
       self,
-      slice,
+      slice: sliceId(candidate.id, bytes, hash.digest("hex").slice(0, 8)),
       extractBytes,
     });
   }
 
   sessions.sort((a, b) => b.lastTimestamp.localeCompare(a.lastTimestamp));
-  const capped = sessions.length > cap;
+  // Counted over Phase A's candidates, not Phase B's survivors, because Phase B only ever looks at
+  // cap + RANK_MARGIN of them. Phase A's mtime filter over-keeps by design, so in a skew case
+  // (a session whose newest file was touched inside the window but whose records all predate it)
+  // this reports `true` where an exact filter would have said `false`. The over-report is accepted:
+  // `capped: true` is read as "a bounded run", and claiming a bound that did not quite bite is the
+  // harmless direction, where missing one that did would hide a truncated corpus.
+  const capped = candidates.length > cap;
   const kept = sessions.slice(0, cap);
+  // artifactFresh now sees the survivor list rather than every in-window session. It reduces to a
+  // single max over non-self sessions, and mtime ranking keeps exactly the newest, so the result
+  // is preserved except in one case: if every survivor is a self-session while a non-self one
+  // sits below the margin, `fresh` flips from false to true.
   const { fresh, path } = artifactFresh(repoRoot, since, sessions);
 
   return {
@@ -488,6 +541,13 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     cap,
     capped,
     sessions: kept,
+    // Which lookup produced the corpus. A whole-root fallback used to be entirely silent.
+    corpusResolution,
+    // Sessions excluded by MAX_SESSION_BYTES, never content-read. Mine one with --include-oversized.
+    oversized,
+    // Read counters, so a test can assert the bound by counting rather than by timing.
+    readSessions,
+    readFiles,
     // `records` alone let a dispatch be handed an unreadable 22.6 MB slice with no warning,
     // and a run cannot be budgeted without a size. Totals cover the kept sessions only, so the
     // number describes what a run would actually mine rather than what the cap discarded.
@@ -904,8 +964,8 @@ function main() {
   // The staleness probe finishing-the-cycle.md runs at cycle end: reads the distilling
   // checkpoint's own `last-run:` (learning-from-sessions.md owns that file) and reports whether
   // enough unmined sessions or days have accrued to warrant another /devcycle:learn pass. It is a
-  // read-only nudge — it advances no checkpoint and mines nothing. Reuses planCorpus (QC2) for the
-  // unmined-session count rather than re-walking transcripts.
+  // read-only nudge — it advances no checkpoint and mines nothing. Reuses planCandidates (QC2)
+  // for the unmined-session count rather than re-walking transcripts.
   if (argv.includes("--staleness")) {
     try {
       const { flags } = parseFlags(argv, {
@@ -918,8 +978,11 @@ function main() {
       // `never` (or an empty/missing line) means the corpus was never mined — the strongest stale
       // signal, and never a real `since:` to filter the corpus against.
       const literal = lastRun && lastRun !== "never" ? lastRun : null;
-      const plan = planCorpus({ repoRoot: root, projectsDir: resolveProjectsRoot(), since: literal });
-      const unminedSessions = plan.sessions.length;
+      // Only the count is needed, so Phase A alone answers it — this used to run a full plan,
+      // reading every transcript in the corpus, to read one number. The mtime-approximate since
+      // boundary is adequate for a nudge that asks only whether enough sessions have accrued.
+      const { candidates } = planCandidates({ repoRoot: root, projectsDir: resolveProjectsRoot(), since: literal });
+      const unminedSessions = Math.min(candidates.length, CAP);
       // QC1: an unminable age is `null`, never `0` — a never-mined corpus has no elapsed days, and
       // reading that as zero days would falsely read as "just mined".
       const daysSince = literal ? Math.floor((Date.now() - Date.parse(literal)) / 86400000) : null;

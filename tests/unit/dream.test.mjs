@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync, symlinkSync, statSync, truncateSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -22,6 +22,9 @@ import {
   alwaysLoadedNetBytes,
   resolveProjectFiles,
   sessionRepoMatches,
+  planCandidates,
+  RANK_MARGIN,
+  MAX_SESSION_BYTES,
 } from "../../scripts/dream.mjs";
 import { eachRecord } from "../../scripts/jsonl.mjs";
 
@@ -2246,4 +2249,101 @@ test("resolveProjectFiles finds the corpus through a symlinked repo root", () =>
   const out = resolveProjectFiles(linkedRoot, projectsDir, fakeGit(linkedRoot));
   assert.equal(out.corpusResolution, "primary",
     "a symlinked root must resolve via the primary slug, not fall through to the whole-root scan");
+});
+
+// `timestamps: false` seeds records with no `timestamp` field: a corpus every content-reading
+// implementation reports as zero sessions, which is what makes the metadata-only assertions below
+// discriminating rather than merely satisfied.
+const seedMany = (count, { bytesPerSession = 200, timestamps = true } = {}) => {
+  const root = makeTempDir("dream-repo-");
+  const projectsDir = makeTempDir("dream-projects-");
+  const slug = join(projectsDir, root.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(slug, { recursive: true });
+  const baseSeconds = Date.UTC(2026, 0, 1) / 1000;
+  for (let i = 0; i < count; i += 1) {
+    const record = { cwd: root, message: { role: "user", content: "x".repeat(bytesPerSession) } };
+    if (timestamps) record.timestamp = new Date(Date.UTC(2026, 0, 1) + i * 60000).toISOString();
+    const file = join(slug, `s${String(i).padStart(4, "0")}.jsonl`);
+    writeFileSync(file, JSON.stringify(record) + "\n");
+    // Explicit, strictly increasing mtimes. Written in a tight loop these files can land on the
+    // same mtime, and Phase A's `sort((a, b) => b.mtimeMs - a.mtimeMs)` over a tied run is a
+    // stable no-op that keeps the OLDEST cap + RANK_MARGIN sessions — inverting the recency
+    // ranking while every count-shaped assertion still passes.
+    utimesSync(file, baseSeconds + i * 60, baseSeconds + i * 60);
+  }
+  return { root, projectsDir };
+};
+
+const sessionRange = (from, to) =>
+  Array.from({ length: to - from + 1 }, (_, i) => `s${String(from + i).padStart(4, "0")}`);
+
+test("planCorpus content-reads at most cap + RANK_MARGIN sessions however large the corpus", () => {
+  const { root, projectsDir } = seedMany(400);
+  const statted = [];
+  const plan = planCorpus({
+    repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root),
+    statFile: (f) => { statted.push(f); return statSync(f); },
+  });
+  assert.equal(plan.sessions.length, 100);
+  assert.equal(plan.capped, true);
+  assert.equal(statted.length, 400, "every candidate is statted");
+  assert.ok(plan.readSessions <= 100 + RANK_MARGIN,
+    `content-read ${plan.readSessions} sessions, expected at most ${100 + RANK_MARGIN}`);
+  // WHICH sessions survived, not only how many: the bound exists to protect recency ranking, and
+  // a bound that kept the 100 oldest sessions would satisfy every assertion above.
+  assert.equal(plan.sessions[0].id, "s0399", "the most recently touched session must rank first");
+  assert.deepEqual(plan.sessions.map((s) => s.id).sort(), sessionRange(300, 399),
+    "the cap must keep the 100 most recent sessions, never the 100 oldest");
+});
+
+test("the --staleness path counts candidates without reading any transcript", () => {
+  // planCandidates is the whole of what --staleness runs after this task; these transcripts carry
+  // no `timestamp`, so the previous planCorpus-based count returns 0 where Phase A returns 7.
+  const { root, projectsDir } = seedMany(7, { timestamps: false });
+  const statted = [];
+  const out = planCandidates({
+    repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root),
+    statFile: (f) => { statted.push(f); return statSync(f); },
+  });
+  assert.equal(out.candidates.length, 7, "every session is a candidate on metadata alone");
+  assert.equal(statted.length, 7, "one stat per file, and no other filesystem work");
+  assert.equal(out.corpusResolution, "primary",
+    "the primary slug must hit — a fallback would read every transcript and the claim would be false");
+});
+
+test("planCorpus reads each surviving file exactly once", () => {
+  const { root, projectsDir } = seedMany(10);
+  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
+  assert.equal(plan.readFiles, 10, "three read passes per file was the defect");
+});
+
+test("planCorpus skips an oversized session without reading it and reports it", () => {
+  const { root, projectsDir } = seedMany(2);
+  const slug = join(projectsDir, root.replace(/[^A-Za-z0-9]/g, "-"));
+  const big = join(slug, "huge.jsonl");
+  writeFileSync(big, JSON.stringify({ cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } }) + "\n");
+  truncateSync(big, MAX_SESSION_BYTES + 1);
+
+  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
+  assert.deepEqual(plan.oversized.map((o) => o.id), ["huge"]);
+  assert.ok(!plan.sessions.some((s) => s.id === "huge"), "an oversized session is not a candidate");
+  assert.equal(plan.readSessions, 2, "the oversized session must not be content-read");
+});
+
+test("planCorpus reports which path resolved the corpus", () => {
+  const { root, projectsDir } = seedMany(1);
+  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
+  assert.equal(plan.corpusResolution, "primary");
+});
+
+test("planCandidates applies the since window on metadata alone, reading nothing", () => {
+  const { root, projectsDir } = seedMany(50);
+  let reads = 0;
+  const out = planCandidates({
+    repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root),
+    since: new Date(Date.now() + 86400000).toISOString(),
+    statFile: (f) => { reads += 1; return statSync(f); },
+  });
+  assert.equal(out.candidates.length, 0, "a since bound in the future admits no candidate");
+  assert.equal(reads, 50, "the window is decided by stat, not by reading");
 });
