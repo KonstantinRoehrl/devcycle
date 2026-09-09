@@ -42,9 +42,10 @@ const statePath = (root) => join(dreamDir(root), "state.md");
 const corpusCachePath = (repoRoot, gitRunner) =>
   join(gitToplevel(repoRoot, gitRunner), ".devcycle", "dreaming", "corpus.json");
 
-// Every miss — absent file, unparseable, a different projects root, an unknown session — returns
-// null and lets the caller resolve live. That self-healing miss path is the whole invalidation
-// strategy, and it is what keeps --extract independent of --plan having run first.
+// Every miss — absent file, unparseable, a different projects root, an unknown session, a recorded
+// path that is no longer on disk — returns null and lets the caller resolve live. That self-healing
+// miss path is the whole invalidation strategy, and it is what keeps --extract independent of
+// --plan having run first.
 function cachedSessionFiles(repoRoot, projectsDir, sessionId, gitRunner) {
   let doc;
   try {
@@ -54,7 +55,11 @@ function cachedSessionFiles(repoRoot, projectsDir, sessionId, gitRunner) {
   }
   if (doc?.projectsDir !== projectsDir) return null;
   const files = doc?.sessions?.[sessionId];
-  return Array.isArray(files) && files.length ? files : null;
+  if (!Array.isArray(files) || !files.length) return null;
+  // A transcript rotated or deleted since --plan wrote the cache is the likeliest miss of all, and
+  // a list naming one no longer describes the session: re-resolve rather than stat a path that is
+  // gone (a raw ENOENT out of --extract) or read around it (a partial session mined as if whole).
+  return files.every((f) => existsSync(f)) ? files : null;
 }
 
 // The durable store the map stage writes and both the reduce stage and every later dream
@@ -483,15 +488,19 @@ export function planCandidates({ repoRoot, projectsDir, since, cap = CAP, gitRun
       bytes += st.size;
       if (st.mtimeMs > mtimeMs) mtimeMs = st.mtimeMs;
     }
-    if (bytes > MAX_SESSION_BYTES) {
-      oversized.push({ id, bytes });
-      if (!includeOversized) continue;
-    }
     // Conservative in one direction only: a record's timestamp cannot postdate the write that
     // stored it, so a session whose newest file predates the checkpoint holds no in-window
     // record. This can over-keep (a copied file) and never under-keeps; Phase B's exact
     // inWindow test is what actually decides membership.
     if (sinceMs != null && Number.isFinite(sinceMs) && mtimeMs < sinceMs) continue;
+    // Recorded only where the ceiling is what excluded the session, and so only after the window
+    // test: `oversized` is the list the learn playbook's cost gate reads out to the user as
+    // "skipped without being read", which an out-of-window session this run would never have mined
+    // is not, and neither is one --include-oversized then content-reads and mines.
+    if (bytes > MAX_SESSION_BYTES && !includeOversized) {
+      oversized.push({ id, bytes });
+      continue;
+    }
     candidates.push({ id, files: sessionFiles, mtimeMs, bytes });
   }
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -587,7 +596,8 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     sessions: kept,
     // Which lookup produced the corpus. A whole-root fallback used to be entirely silent.
     corpusResolution,
-    // Sessions excluded by MAX_SESSION_BYTES, never content-read. Mine one with --include-oversized.
+    // In-window sessions this run excluded by MAX_SESSION_BYTES, never content-read. Mine one with
+    // --include-oversized, under which nothing is skipped for size and this list is empty.
     oversized,
     // Read counters, so a test can assert the bound by counting rather than by timing.
     readSessions,

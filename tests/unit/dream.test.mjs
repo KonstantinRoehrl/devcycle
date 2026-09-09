@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync, symlinkSync, statSync, truncateSync, utimesSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, appendFileSync, realpathSync, readFileSync, rmSync, symlinkSync, statSync, truncateSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -2330,6 +2330,46 @@ test("planCorpus skips an oversized session without reading it and reports it", 
   assert.equal(plan.readSessions, 2, "the oversized session must not be content-read");
 });
 
+// The one path the override exists to enable. `oversized` is what the learn playbook's cost gate
+// names to the user as "skipped without being read", so a session the same run content-read and
+// mined cannot also be on it.
+test("planCorpus --include-oversized mines the session rather than listing it as skipped", () => {
+  const { root, projectsDir } = seedMany(1);
+  const slug = join(projectsDir, escapedSlug(root));
+  const big = join(slug, "huge.jsonl");
+  writeFileSync(big, JSON.stringify({ cwd: root, timestamp: "2026-06-01T00:00:00Z", message: { role: "user", content: "y" } }) + "\n");
+  truncateSync(big, MAX_SESSION_BYTES + 1);
+
+  const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root), includeOversized: true });
+  assert.ok(plan.sessions.some((s) => s.id === "huge"),
+    "the fixture must actually admit the oversized session, or the assertion below is vacuous");
+  assert.deepEqual(plan.oversized, [],
+    "a session this run content-read and mined was not skipped by the ceiling");
+});
+
+// The list is the cost gate's input, so it must name only sessions this run would mine if the
+// ceiling were lifted. An over-ceiling transcript older than the checkpoint is out of the window
+// on its own and would otherwise sit in the gate's question forever.
+test("planCandidates reports only the oversized sessions the ceiling actually kept out", () => {
+  const { root, projectsDir } = seedMany(1);
+  const slug = join(projectsDir, escapedSlug(root));
+  const big = join(slug, "huge.jsonl");
+  writeFileSync(big, JSON.stringify({ cwd: root, timestamp: "2026-01-01T00:00:00Z", message: { role: "user", content: "y" } }) + "\n");
+  truncateSync(big, MAX_SESSION_BYTES + 1);
+  const stale = Date.UTC(2026, 0, 1) / 1000;
+  utimesSync(big, stale, stale);
+
+  const whole = planCandidates({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
+  assert.deepEqual(whole.oversized.map((o) => o.id), ["huge"],
+    "with no checkpoint the ceiling is the only thing that kept it out");
+
+  const windowed = planCandidates({
+    repoRoot: root, projectsDir, cap: 100, since: "2026-06-01T00:00:00Z", gitRunner: fakeGit(root),
+  });
+  assert.deepEqual(windowed.oversized, [],
+    "a session outside the checkpoint window was never this run's to mine, ceiling or not");
+});
+
 test("planCorpus reports which path resolved the corpus", () => {
   const { root, projectsDir } = seedMany(1);
   const plan = planCorpus({ repoRoot: root, projectsDir, cap: 100, gitRunner: fakeGit(root) });
@@ -2403,6 +2443,53 @@ test("--extract falls through to a live resolve when the cache names a different
   const doc = JSON.parse(readFileSync(cachePath, "utf8"));
   writeFileSync(cachePath, JSON.stringify({ ...doc, projectsDir: other }));
   assert.match(extractSession({ repoRoot: root, projectsDir, sessionId: "s0001", gitRunner: fakeGit(root) }), /user:/);
+});
+
+// The two tests below run --plan and --extract as separate processes on purpose: that is how a
+// real run invokes them, and in-process the resolve memo would hand the fall-through the very file
+// list --plan resolved before the transcript moved, so neither could observe the self-heal.
+function planThroughCli() {
+  const root = realpathSync(makeTempDir("dream-repo-"));
+  const projectsDir = makeTempDir("dream-projects-");
+  const slug = join(projectsDir, escapedSlug(root));
+  mkdirSync(slug, { recursive: true });
+  for (const id of ["s0", "s1"])
+    writeFileSync(join(slug, `${id}.jsonl`),
+      JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: `text of ${id}` } }) + "\n");
+
+  const plan = run(["--plan"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(plan.status, 0, plan.stderr);
+  const cache = JSON.parse(readFileSync(join(root, ".devcycle", "dreaming", "corpus.json"), "utf8"));
+  assert.deepEqual(cache.sessions.s1, [join(slug, "s1.jsonl")],
+    "the fixture must actually persist the path the tests below then remove");
+  return { root, projectsDir, slug };
+}
+
+test("--extract reports a transcript that vanished after --plan, not the raw stat failure", () => {
+  const { root, projectsDir, slug } = planThroughCli();
+  rmSync(join(slug, "s1.jsonl"));
+
+  const extract = run(["--extract", "s1"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.match(extract.stderr, /no transcript for session: s1/,
+    "a rotated or deleted transcript is an empty corpus for that session, the pre-cache behaviour");
+  assert.doesNotMatch(extract.stderr, /ENOENT/, "no raw filesystem error reaches the caller");
+});
+
+test("--extract re-resolves the corpus when the cached path moved but the session did not", () => {
+  const { root, projectsDir, slug } = planThroughCli();
+  // Same session under the other layout owningSession recognizes
+  // (<slug>/<session>/subagents/*.jsonl), so the session is still on disk while every path the
+  // cache recorded is gone. Tolerating the missing path instead of re-resolving would mine
+  // nothing here and say so nowhere.
+  rmSync(join(slug, "s1.jsonl"));
+  mkdirSync(join(slug, "s1", "subagents"), { recursive: true });
+  writeFileSync(join(slug, "s1", "subagents", "agent-1.jsonl"),
+    JSON.stringify({ cwd: root, timestamp: "2026-09-01T00:00:00Z", message: { role: "user", content: "rotated text" } }) + "\n");
+
+  const extract = run(["--extract", "s1"], root, { CLAUDE_DREAM_PROJECTS: projectsDir });
+  assert.equal(extract.status, 0, extract.stderr);
+  assert.match(extract.stdout, /rotated text/,
+    "the miss must fall through to a live resolve rather than mine an empty session");
 });
 
 test("--plan then N --extract performs one whole-root discovery, not N + 1", () => {
