@@ -9,8 +9,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSyn
 import { dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
-import { pathToFileURL } from "node:url";
-import { findTranscriptFiles, owningSession, inWindow } from "./doctor.mjs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { findTranscriptFiles, owningSession, inWindow, summarizeSession, readRecords, readRunRecords } from "./doctor.mjs";
+import { aggregateKeys, periodLedger } from "./impact-ledger.mjs";
 import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
 import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding, MATCH_CAP } from "./lessons.mjs";
@@ -647,6 +648,87 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
 // CLAUDE_DOCTOR_PROJECTS; it exists so the CLI is testable without scanning ~/.claude.
 const resolveProjectsRoot = () => process.env.CLAUDE_DREAM_PROJECTS || join(homedir(), ".claude", "projects");
 
+// The culprit vocabulary the ledger prices wins against. Derived from this script's own location
+// like doctor.mjs's PLUGIN_ROOT — `CLAUDE_PLUGIN_ROOT` is substituted into command text but is not
+// in a script's environment, and this CLI runs from the target repo. CLAUDE_DREAM_CULPRITS
+// overrides the path on the CLAUDE_DREAM_PROJECTS pattern above, so a test that spawns this file
+// with only its cwd redirected can still decide what vocabulary the run reads. An unreadable file
+// reads as no vocabulary, the same degradation verification.mjs's own loader makes.
+const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const resolveCulpritsPath = () =>
+  process.env.CLAUDE_DREAM_CULPRITS || join(PLUGIN_ROOT, "references", "culprits.json");
+function loadVocab() {
+  try { return JSON.parse(readFileSync(resolveCulpritsPath(), "utf8")); }
+  catch { return []; }
+}
+
+// The ledger's two windows, from one bounded transcript pass. Dollars exist only in doctor's
+// summarizer, so the ledger has to reach transcripts; this is the one place in the report path
+// that does, and each session is read and summarized exactly once.
+//
+// The baseline is planned once and the period is read off it rather than planned again: the
+// baseline extends backwards past the period (a cost-per-occurrence measured inside the period
+// would drive a successful win's baseline to zero occurrences and the metric would punish
+// success), and planCorpus derives the period from the baseline by construction — its `since`
+// filters are `mtimeMs < sinceMs` on candidates already ranked newest-first and `inWindow` on the
+// same `lastTimestamp` tested here, so the in-window subset of the wider plan is what the
+// narrower plan returns. references/impact-scoring.md owns both formulas.
+// Pure window partition for the ledger. Given corpus-plan sessions (each carrying its newest
+// record's `lastTimestamp`) and the candidates file's window edges, split them into the two windows
+// the report prices. Both edges anchor to `until` (= candidates.corpus.to): a session postdating the
+// window (`lastTimestamp > until`) enters neither — it must not price or populate a span it falls
+// past, which is what made `--render-report` on a stale candidates file sum figures over sessions
+// past the printed period end. The baseline then ends at the period's end and extends backward as
+// far as the plan's cap reached; the period additionally starts at `since` (= corpus.from).
+// Membership is decided on `lastTimestamp` — the session's exact newest-record time — which is
+// stricter than Phase A's mtime-approximate `since` in planCorpus (a file's mtime can drift from
+// its newest record) and is the correct edge for a window the figures are read against.
+export function partitionLedgerSessions(sessions, { since, until }) {
+  const period = [], baseline = [];
+  for (const session of sessions) {
+    if (!inWindow(session.lastTimestamp, null, until)) continue;
+    baseline.push(session);
+    if (inWindow(session.lastTimestamp, since, until)) period.push(session);
+  }
+  return { period, baseline };
+}
+
+function ledgerWindows({ repoRoot, projectsDir, since, until }) {
+  const plan = planCorpus({ repoRoot, projectsDir, since: null });
+  const runRecords = readRunRecords();
+  // The period is a subset of the baseline (both bounded above by `until`), so read and summarize
+  // each session once: iterate the baseline and mark the period members. `partitionLedgerSessions`
+  // owns the window predicate so the report path and its unit test share one code path.
+  const parts = partitionLedgerSessions(plan.sessions, { since, until });
+  const inPeriod = new Set(parts.period);
+  const period = [], baseline = [];
+  const stamps = [];
+  for (const session of parts.baseline) {
+    const records = [];
+    // readRecords delegates to the streaming reader and treats a missing file as empty, so a
+    // transcript that vanished since the plan degrades this session out of the corpus rather
+    // than throwing.
+    for (const file of session.files) records.push(...readRecords(file));
+    if (!records.length) continue;
+    const summary = summarizeSession(session.id, records, runRecords);
+    baseline.push(summary);
+    stamps.push(session.lastTimestamp);
+    if (inPeriod.has(session)) period.push(summary);
+  }
+  // The baseline window's actual resolved span, which is what the report prints beside the
+  // figures: a savings number is always read against the window that produced it.
+  const sorted = stamps.filter(Boolean).sort();
+  return {
+    period: { summaries: period, sessions: period.length },
+    baseline: {
+      summaries: baseline,
+      sessions: baseline.length,
+      from: sorted[0]?.slice(0, 10) ?? null,
+      to: sorted.at(-1)?.slice(0, 10) ?? null,
+    },
+  };
+}
+
 // Spec §7's always-loaded byte budget gates LANDED output only (QC6): the r2 digest lines and any
 // r1 always-loaded prose this run lands, minus the bytes a same-run eviction reclaims. r0/r3 are
 // not always-loaded and never count. The pinned candidate schema (QC1) carries no landed-line
@@ -976,15 +1058,32 @@ function main() {
       // plumbed here on purpose — verification.mjs:110-117 skips every r3 row with a runnable
       // check before the escalation and retirement pushes, so a run check cannot change one
       // byte of this report.
+      const promotions = readPromotions(root);
       const verification = verify(
-        readPromotions(root),
+        promotions,
         journalEvents({ toplevel: root }).events,
         installedVersion(),
         { root },
       );
+      // The period is the corpus window the candidates already describe; the baseline is every
+      // session behind it, which is what prices a prevented culprit.
+      const windows = ledgerWindows({
+        repoRoot: root, projectsDir: resolveProjectsRoot(),
+        since: candidates.corpus.from, until: candidates.corpus.to,
+      });
+      const ledger = periodLedger({
+        period: aggregateKeys(windows.period.summaries),
+        baseline: aggregateKeys(windows.baseline.summaries),
+        promotions,
+        vocab: loadVocab(),
+        scoreboard: verification.scoreboard,
+        from: candidates.corpus.from, to: candidates.corpus.to, sessions: windows.period.sessions,
+        baselineFrom: windows.baseline.from, baselineTo: windows.baseline.to,
+        baselineSessions: windows.baseline.sessions,
+      });
       process.stdout.write(renderLearnReport({
-        candidates, promotions: readPromotions(root), outcome: argv.includes("--outcome"),
-        verification, budget,
+        candidates, promotions, outcome: argv.includes("--outcome"),
+        verification, budget, ledger,
       }));
     } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
     return;
