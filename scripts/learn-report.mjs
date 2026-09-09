@@ -84,7 +84,34 @@ function landedEntry(c) {
   ].join("\n");
 }
 
-export function renderLearnReport({ candidates, promotions, outcome = false, verification = null, budget = null }) {
+// The ledger is rendered, never computed: scripts/impact-ledger.mjs owns every figure here and
+// this file stays pure. `usd` already prints the literal "unmeasurable" for a non-number, which
+// is what keeps a null from ever reaching the page as $0.00.
+function ledgerSection(l) {
+  const rows = l.rows.length
+    ? l.rows.map((r) =>
+        `| \`${r.win}\` | ${r.occurrences} | ` +
+        `${r.prevents.length ? r.prevents.map((k) => `\`${k}\``).join(", ") : "(none declared)"} | ` +
+        `${usd(r.savings)}${r.reason ? ` — ${r.reason}` : ""} |`)
+    : ["| (no held win-kind lessons this period) | — | — | — |"];
+  return [
+    `Period: ${l.from} → ${l.to} · ${l.sessions} sessions · ` +
+      `baseline window: ${l.baseline.from} → ${l.baseline.to} (${l.baseline.sessions} sessions)`,
+    "",
+    "| Held win | Occurrences | Prevents | Savings |",
+    "|---|---:|---|---:|",
+    ...rows,
+    "",
+    `Win savings: ${usd(l.savings)}` +
+      `${l.unpriced ? ` (${l.unpriced} of ${l.rows.length} rows unpriced)` : ""} · ` +
+      `Culprit cost: ${usd(l.cost)} · Net: ${usd(l.net)}`,
+    `Excluded: ${l.excluded.events} events unattributable to a stage`,
+    "",
+    "*Net is avoided cost minus incurred cost within this period — not profit, and not a rate.*",
+  ].join("\n");
+}
+
+export function renderLearnReport({ candidates, promotions, outcome = false, verification = null, budget = null, ledger = null }) {
   const { corpus, checkpoint, attribution } = candidates;
   const cands = candidates.candidates ?? [];
   const roll = allTimeRollup(promotions ?? []);
@@ -128,6 +155,7 @@ export function renderLearnReport({ candidates, promotions, outcome = false, ver
          `(${budget.withinBudget ? "within budget" : "over budget — a same-run retirement is required"})`]
       : []),
     "",
+    ...(ledger ? ["## Ledger", "", ledgerSection(ledger), ""] : []),
     "## Landed",
     "",
     landed.length ? landed.map(landedEntry).join("\n\n") : "(none this run)",

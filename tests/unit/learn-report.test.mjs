@@ -2,6 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { renderLearnReport, allTimeRollup } from "../../scripts/learn-report.mjs";
 
+const baseArgs = () => ({
+  candidates: {
+    repo: "devcycle", generatedAt: "2026-09-09T00:00:00Z", profile: "thorough",
+    corpus: { sessions: 12, from: "2026-08-01", to: "2026-09-01", capped: false, journalEvents: 0, journalEmpty: true },
+    checkpoint: { before: null, after: "2026-09-01" },
+    attribution: { vocabulary: 0, novel: 0 },
+    candidates: [],
+  },
+  promotions: [],
+});
+
 const CANDIDATES = {
   repo: "devcycle",
   generatedAt: "2026-08-14T00:00:00Z",
@@ -171,4 +182,46 @@ test("renderLearnReport renders verify candidates and the always-loaded budget l
   assert.match(out, /`friction:a` \(r2\) — recurred 3×/);
   assert.match(out, /`friction:b` \(r2\) — held 6 runs since 2026-01-01/);
   assert.match(out, /^Always-loaded budget: 320 bytes/m);
+});
+
+const LEDGER = {
+  from: "2026-08-01", to: "2026-09-01", sessions: 12,
+  baseline: { from: "2026-06-01", to: "2026-09-01", sessions: 61 },
+  rows: [
+    { win: "first-round-clean-accept", occurrences: 14, prevents: ["review-reject:execution"], savings: 8.4, reason: null },
+    { win: "gate-caught-regression", occurrences: 14, prevents: [], savings: null, reason: "declares no prevents" },
+  ],
+  savings: null, cost: 14.2, net: null, unpriced: 1,
+  measured: { savings: 8.4, cost: 14.2 },
+  excluded: { events: 1, keys: ["re-dispatch:unattributed"] },
+};
+
+test("the ledger section prints savings, cost, net, and the baseline window", () => {
+  const md = renderLearnReport({ ...baseArgs(), ledger: LEDGER });
+  assert.match(md, /## Ledger/);
+  assert.match(md, /Period: 2026-08-01 → 2026-09-01 · 12 sessions/);
+  assert.match(md, /baseline window: 2026-06-01 → 2026-09-01 \(61 sessions\)/);
+  assert.match(md, /Win savings: unmeasurable \(1 of 2 rows unpriced\)/);
+  assert.match(md, /Culprit cost: \$14\.20/);
+  assert.match(md, /Net: unmeasurable/);
+  assert.match(md, /Excluded: 1 events unattributable to a stage/);
+});
+
+test("an unmeasurable win row renders the word, never a dollar zero", () => {
+  const md = renderLearnReport({ ...baseArgs(), ledger: LEDGER });
+  const row = md.split("\n").find((l) => l.includes("gate-caught-regression"));
+  assert.match(row, /unmeasurable/);
+  assert.doesNotMatch(row, /\$0\.00/);
+});
+
+test("a priced win row renders its exact dollar figure", () => {
+  const md = renderLearnReport({ ...baseArgs(), ledger: LEDGER });
+  const row = md.split("\n").find((l) => l.includes("first-round-clean-accept"));
+  assert.match(row, /\$8\.40/);
+  assert.match(row, /review-reject:execution/);
+});
+
+test("the ledger section is omitted when no ledger is supplied", () => {
+  const md = renderLearnReport(baseArgs());
+  assert.doesNotMatch(md, /## Ledger/);
 });
