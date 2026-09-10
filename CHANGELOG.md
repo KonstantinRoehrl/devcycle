@@ -26,6 +26,22 @@ cycle. Mining dispatches are capped at 8 in flight, and a plan whose extraction 
 What the change does and does not establish is in `docs/design/README.md` §18; the paths that
 stayed unbounded are in `docs/known-issues.md`.
 
+**Symmetric dollar ledger (#267).** The learn report now prints a per-period dollar ledger
+alongside its existing content: win-savings, culprit-cost, and a net score (savings minus cost)
+for the period. Pricing lives in a new pure module, `scripts/impact-ledger.mjs`; win entries in
+`references/culprits.json` declare which culprit-cost keys they `observe` (make them countable
+against) and `prevent` (price their savings), and `dream.mjs` feeds the ledger real per-session
+summaries. A win-kind lesson with no comparable culprit-id cost on record reports `unmeasurable`,
+never `$0` — an unpriced key is unmeasurable, not free.
+
+**Independent win grounding (#268).** A win-kind observation grounded only in the transcript of
+the work it praises — the implementer's own execution-stage turn — is now rejected at
+`dream.mjs`'s map stage, with a content-free reason (`winGroundingRejection`) and never the
+record's subject or quote. A win grounded in an independent stage (branch-review, task-review,
+on-device, the human, or any stage but `execution`) still passes through unchanged, and
+culprit-kind grounding is untouched. `readAllObservations` now returns the rejected partition
+alongside `total`/`unique`, and `--check-observations` reports it on the same surface.
+
 ## 0.20.1 — 2026-09-07
 
 - fix(temp-dir): give every temp directory a self-cleaning owner (#257)
