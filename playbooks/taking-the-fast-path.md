@@ -41,7 +41,8 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit" — read it
    there and follow it. Run `git add -N` on any file the change creates before committing, or
    the pathspec matches nothing for it and the commit aborts.
-5. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent with the diff and
+5. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model
+   `taskReviewerModel` resolves per `references/config.md`, with the diff and
    the two evidence-file paths from step 2; the reviewer reads the declared class and the exact
    command off `fast-before.txt`'s first line, since the fast path writes no implementer report
    to carry them. On reject: fix, re-verify the evidence, re-dispatch. No review panel, no

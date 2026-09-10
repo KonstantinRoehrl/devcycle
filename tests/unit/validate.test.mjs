@@ -189,7 +189,7 @@ test("devcycle: reference check: names resolving to an agent or a command all pa
   const dir = makePluginFixture();
   withStageEnum(dir);
   writeInto(dir, "agents/task-reviewer.md", "---\nname: task-reviewer\n---\n\nReviewer.\n");
-  playbook(dir, "Dispatch `devcycle:task-reviewer`, resume via `/devcycle:cycle`.\n");
+  playbook(dir, "Dispatch `devcycle:task-reviewer` with the `taskReviewerModel` per `references/config.md`, resume via `/devcycle:cycle`.\n");
   ok(runValidate(dir));
 });
 
@@ -1778,5 +1778,109 @@ test("check 14 accepts the shipped observes/prevents on win entries", () => {
     prevents: ["fixture-pattern"],
   });
   writeFileSync(vocabPath, JSON.stringify(vocab, null, 2));
+  ok(runValidate(dir));
+});
+
+// --- check 23: every dispatch instruction names its governing model-tier rule ---
+
+test("dispatch-governance check: an ungoverned devcycle:task-reviewer dispatch fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/task-reviewer.md", "---\nname: task-reviewer\n---\n\nReviewer.\n");
+  playbook(
+    dir,
+    "## The mini-cycle\n\n" +
+      "1. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent with the diff.\n"
+  );
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /demoing-things\.md:\d+: dispatch ".*devcycle:task-reviewer.*" names no governing model-tier rule/);
+});
+
+test("dispatch-governance check: a dispatch citing its *Model knob inline passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/task-reviewer.md", "---\nname: task-reviewer\n---\n\nReviewer.\n");
+  playbook(
+    dir,
+    "## The mini-cycle\n\n" +
+      "1. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model\n" +
+      "   `taskReviewerModel` resolves per `references/config.md`, with the diff.\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("dispatch-governance check: a dispatch stating its tier inline passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/history-inspector.md", "---\nname: history-inspector\n---\n\nHistorian.\n");
+  playbook(
+    dir,
+    "## History\n\n" +
+      "1. **History.** Dispatch `devcycle:history-inspector` at the **fast tier** within its window.\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("dispatch-governance check: a citation in one step does not govern an unrelated dispatch in another step", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/task-reviewer.md", "---\nname: task-reviewer\n---\n\nReviewer.\n");
+  playbook(
+    dir,
+    "## The sweep walk\n\n" +
+      "1. **Derive parameters.** Resolve `DEVCYCLE_SWEEP_MODEL` from the `implementerModel` knob.\n\n" +
+      "2. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent with the diff.\n"
+  );
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /demoing-things\.md:\d+: dispatch ".*devcycle:task-reviewer.*" names no governing model-tier rule/);
+});
+
+test("dispatch-governance check: a dispatch under a flowing (non-numbered) heading section is governed by an earlier citation in the same section", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/on-device-driver.md", "---\nname: on-device-driver\n---\n\nDriver.\n");
+  playbook(
+    dir,
+    "## The walkthrough\n\n" +
+      "Its model cannot be routed from inside it, so the recommendation travels producer-side,\n" +
+      "resolved from `walkthroughModel` per `references/config.md`.\n\n" +
+      "When the app renders as a page, dispatch `devcycle:on-device-driver` to observe an item.\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("dispatch-governance check: a reversed-phrasing dispatch (agent before dispatch) that is ungoverned fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/implementer.md", "---\nname: implementer\n---\n\nImplementer.\n");
+  playbook(
+    dir,
+    "## Findings loop\n\n" +
+      "1. **Round 1.** Log a review-round event.\n\n" +
+      "2. **Fix dispatch.** Send a fresh `devcycle:implementer` dispatch with the finding.\n"
+  );
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /demoing-things\.md:\d+: dispatch ".*devcycle:implementer.*" names no governing model-tier rule/);
+});
+
+test("dispatch-governance check: a reversed-phrasing dispatch (agent before dispatch) that cites a *Model knob passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/implementer.md", "---\nname: implementer\n---\n\nImplementer.\n");
+  playbook(
+    dir,
+    "## Findings loop\n\n" +
+      "1. **Round 1.** Log a review-round event.\n\n" +
+      "2. **Fix dispatch.** Send a fresh `devcycle:implementer` dispatch on the model\n" +
+      "   `branchReviewModel` per `references/config.md` with the finding.\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("dispatch-governance check: 'dispatched' and 'dispatching' do not trigger false positives", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/implementer.md", "---\nname: implementer\n---\n\nImplementer.\n");
+  playbook(
+    dir,
+    "## Findings loop\n\n" +
+      "1. **Round 1.** Once the findings are dispatched, log the event.\n\n" +
+      "2. **Fix.** When dispatching a task, ensure governance is cited.\n"
+  );
   ok(runValidate(dir));
 });
