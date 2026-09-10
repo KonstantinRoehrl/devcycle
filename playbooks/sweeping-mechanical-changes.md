@@ -86,7 +86,8 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    commit": `git commit -- <the confirmed target files>`. Then record the resulting sha on a `sweepCommit:`
    line in `.devcycle/state.md` IMMEDIATELY, before any other action — resume's commit-marker check keys off
    that line rather than guessing which `git log` entry is the sweep's.
-6. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent with the diff, the two evidence
+6. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model
+   `taskReviewerModel` resolves per `references/config.md`, with the diff, the two evidence
    files, and the sweep report (skips included). On reject: fix in-session, re-run the verifyCommand
    (rewriting `.devcycle/evidence/sweep-after.txt`), re-dispatch, then fold the accepted fix into the sweep
    commit. The fix must stay within the confirmed target files — a finding whose fix needs any other file
