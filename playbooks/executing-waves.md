@@ -85,7 +85,8 @@ file conflicts these invariants already preserve.)
    outcome (`complete|blocked|rejected`), its `modelSource` (`explicit` when the brief named the
    model, `inherited` otherwise), and the current round/retry index: every field this line needs is
    only known from here on. The coordinator neither produces nor reads the task diff; step 5 does both.
-5. **Dispatch devcycle:task-reviewer** (read-only apart from its own findings file) with the brief,
+5. **Dispatch devcycle:task-reviewer** (read-only apart from its own findings file), on the model
+   `references/config.md` resolves, with the brief,
    the report path, the task's file list, the two evidence-file paths the report names, and the
    task's constraints block, instructing it to produce the diff itself: `git add -N <new files>`
    first, or they are invisible to diff, then `git diff -U10 HEAD -- <files>`. It returns the
