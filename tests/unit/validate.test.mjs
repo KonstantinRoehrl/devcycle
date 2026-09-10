@@ -1872,3 +1872,15 @@ test("dispatch-governance check: a reversed-phrasing dispatch (agent before disp
   );
   ok(runValidate(dir));
 });
+
+test("dispatch-governance check: 'dispatched' and 'dispatching' do not trigger false positives", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/implementer.md", "---\nname: implementer\n---\n\nImplementer.\n");
+  playbook(
+    dir,
+    "## Findings loop\n\n" +
+      "1. **Round 1.** Once the findings are dispatched, log the event.\n\n" +
+      "2. **Fix.** When dispatching a task, ensure governance is cited.\n"
+  );
+  ok(runValidate(dir));
+});

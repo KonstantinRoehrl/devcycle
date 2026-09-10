@@ -93,8 +93,7 @@ green and diff tidy, and still fail its spec:
 2. **Only blocking findings re-open the loop.** **Blocking means `critical` or `high`** —
    `${CLAUDE_PLUGIN_ROOT}/references/findings.md` owns the severity vocabulary and derives
    blocking from it, and neither is restated here. Each blocking finding goes to a fresh
-   `devcycle:implementer` dispatch on the model `${user_config.branchReviewModel}` resolves per
-   `${CLAUDE_PLUGIN_ROOT}/references/config.md` — brief = the finding plus the spec path; never the review
+   `devcycle:implementer` dispatch on the model `references/config.md` resolves — brief = the finding plus the spec path; never the review
    conversation. It is an implementer dispatch bound by the same evidence contract every other
    one is, so the brief carries a minted task-id (`branch-fix-<round>-<n>`) and an
    `**Evidence:**` class line, and asks the implementer to check the fix against the repo

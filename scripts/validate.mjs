@@ -996,7 +996,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     same file (references/config.md § Model tiers owns the derivation this checks nothing
   //     about, only that a pointer to it, or an equivalent citation, exists).
   {
-    const DISPATCH_RE = /(?:Dispatch\s+(?:exactly ONE\s+)?`?devcycle:[a-z-]+`?|`?devcycle:[a-z-]+`?\s+dispatch)/gi;
+    const DISPATCH_RE = /(?:Dispatch\s+(?:exactly ONE\s+)?`?devcycle:[a-z-]+`?|`?devcycle:[a-z-]+`?\s+dispatch\b)/gi;
     const GOVERNANCE_RE =
       /implementerModel|taskReviewerModel|branchReviewModel|walkthroughModel|references\/config\.md|\bfast tier\b|\bsession tier\b/i;
     const STEP_RE = /^\d+\.\s/;
