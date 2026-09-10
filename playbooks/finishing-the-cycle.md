@@ -9,10 +9,11 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
 
 ## Learn staleness nudge
 
-Resolve `${user_config.learnStalenessSessions}` (default `5`) and
-`${user_config.learnStalenessDays}` (default `14`) per
+Resolve `${user_config.learnStalenessSessions}` (default `5`),
+`${user_config.learnStalenessDays}` (default `14`) and `${user_config.learnSessionCap}`
+(default `100`) per
 `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Learn staleness, then run
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --staleness --max-sessions <sessions> --max-days <days>`.
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --staleness --max-sessions <sessions> --max-days <days> --cap <cap>`.
 It reads the distilling checkpoint's `last-run:` and prints
 `{ stale, unminedSessions, daysSince, lastRun, threshold }`. When `stale` is `true`, surface
 **exactly one** line in this stage's report:

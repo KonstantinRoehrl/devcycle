@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.21.0 — 2026-09-10
+
+- feat(learn): add a symmetric dollar ledger, bound the corpus scan, and require independent win grounding (#266, #267, #268)
+
+**Bounded learn-corpus planning.** Planning a `/devcycle:learn` run used to read every transcript
+under `~/.claude/projects` in full before deciding which sessions to mine, so both memory and wall
+clock grew with every session ever created on the machine. Planning now runs in two phases: it
+ranks candidates from file metadata alone, then content-reads only the top of that ranking — the
+cap plus a small margin, never the whole corpus — streaming each transcript record by record
+instead of loading it whole. How many sessions a run mines is now a knob, `learnSessionCap`
+(default 100), with `dream.mjs --plan --cap <n>` as its flag. A single session larger than 50 MB is skipped rather than read, and named in `--plan`'s new
+`oversized` list; `--include-oversized` mines it anyway. `--plan` output also gains
+`corpusResolution`, which says whether the corpus came from the repo's own project slug or from
+the whole-root fallback scan, plus `readSessions` and `readFiles` counters for what the planning
+pass actually opened, and it persists the corpus it resolved to
+`<git-toplevel>/.devcycle/dreaming/corpus.json` so `--extract` can reach a session's files without
+repeating the resolve — an entry whose transcript has since disappeared is re-resolved live rather
+than trusted. `--cap`, `--max-sessions` and `--max-days` now refuse an empty, non-numeric or
+negative value by name instead of silently coercing it, and each carries its own floor: `--cap`
+refuses `0` as well, since a cap of nothing mines nothing, while `0` stays legal for
+`--max-sessions` and `--max-days` — it is how the staleness knobs ask to be nudged after every
+cycle. Mining dispatches are capped at 8 in flight, and a plan whose extraction would exceed
+10 MB stops for confirmation before dispatching.
+What the change does and does not establish is in `docs/design/README.md` §18; the paths that
+stayed unbounded are in `docs/known-issues.md`.
+
+**Symmetric dollar ledger (#267).** The learn report now prints a per-period dollar ledger
+alongside its existing content: win-savings, culprit-cost, and a net score (savings minus cost)
+for the period. Pricing lives in a new pure module, `scripts/impact-ledger.mjs`; win entries in
+`references/culprits.json` declare which culprit-cost keys they `observe` (make them countable
+against) and `prevent` (price their savings), and `dream.mjs` feeds the ledger real per-session
+summaries. A win-kind lesson with no comparable culprit-id cost on record reports `unmeasurable`,
+never `$0` — an unpriced key is unmeasurable, not free.
+
+**Independent win grounding (#268).** A win-kind observation grounded only in the transcript of
+the work it praises — the implementer's own execution-stage turn — is now rejected at
+`dream.mjs`'s map stage, with a content-free reason (`winGroundingRejection`) and never the
+record's subject or quote. A win grounded in an independent stage (branch-review, task-review,
+on-device, the human, or any stage but `execution`) still passes through unchanged, and
+culprit-kind grounding is untouched. `readAllObservations` now returns the rejected partition
+alongside `total`/`unique`, and `--check-observations` reports it on the same surface.
+
 ## 0.20.1 — 2026-09-07
 
 - fix(temp-dir): give every temp directory a self-cleaning owner (#257)

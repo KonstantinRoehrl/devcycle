@@ -589,6 +589,9 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     "friction", "correction", "rule-violation", "decision", "contradiction", "win",
   ]);
   const CULPRIT_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+){0,5}$/;
+  // An impact key as scripts/doctor.mjs's impactKey renders one: a bare culprit slug, or the
+  // <event>:<stage> form an event carrying no culprit takes.
+  const IMPACT_KEY_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*(?::[a-z0-9]+(?:-[a-z0-9]+)*)?$/;
   if (!existsSync(culpritsPath)) {
     fail("references/culprits.json: missing — the culprit vocabulary is part of the shipped surface");
   } else {
@@ -637,11 +640,28 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           else if (SEMVER_RE.test(e.since ?? "") && cmpSemver(e["resolved-in"], e.since) < 0)
             fail(`${at}: resolved-in ${e["resolved-in"]} precedes since ${e.since}`);
         }
+        for (const f of ["observes", "prevents"]) {
+          if (!(f in e)) continue;
+          if (e.kind !== "win") { fail(`${at}: "${f}" is only meaningful on a win-kind entry`); continue; }
+          if (!Array.isArray(e[f]) || e[f].length === 0) { fail(`${at}: ${f} must be a non-empty array`); continue; }
+          for (const k of e[f])
+            if (typeof k !== "string" || !IMPACT_KEY_RE.test(k))
+              fail(`${at}: ${f} key ${JSON.stringify(k)} is not a slug or <event>:<stage>`);
+        }
       }
       if (slugs.join("\n") !== [...slugs].sort().join("\n"))
         fail("references/culprits.json: entries must be sorted by slug");
       const dupes = [...new Set(slugs.filter((s, i) => slugs.indexOf(s) !== i))];
       if (dupes.length) fail(`references/culprits.json: duplicate slug(s) ${dupes.join(", ")}`);
+      // Second pass: a bare-slug key must name a real entry in this file. The <event>:<stage>
+      // form is checked for shape only — that vocabulary is derived at runtime by
+      // scripts/doctor.mjs's deriveEvents, not declared here, so this file cannot resolve it.
+      const slugSet = new Set(slugs);
+      for (const [i, e] of vocab.entries())
+        for (const f of ["observes", "prevents"])
+          for (const k of Array.isArray(e?.[f]) ? e[f] : [])
+            if (typeof k === "string" && !k.includes(":") && !slugSet.has(k))
+              fail(`references/culprits.json[${i}]: ${f} key "${k}" names no entry in this file`);
     }
   }
 

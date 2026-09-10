@@ -39,9 +39,10 @@ models and review depth and the on-device gate by their stages).
 
 Every knob devcycle ships, the surface that owns how it resolves — a playbook, or a section of
 this file — and what an unset value falls back to.
-This set is hand-kept in three places — this table, README's config table, and
-`.claude-plugin/plugin.json`'s `userConfig` — so `tests/unit/golden-path.test.mjs` asserts the
-three carry the same keys; without it the copies drift one release at a time.
+This set is hand-kept in four places — this table, `docs/configuration/README.md`'s option
+table, `.claude-plugin/plugin.json`'s `userConfig`, and `docs/design/README.md` §7's schema —
+so `tests/unit/golden-path.test.mjs` asserts the four carry the same keys; without it the
+copies drift one release at a time.
 
 | Knob | Owner | Falls back to |
 | --- | --- | --- |
@@ -57,6 +58,7 @@ three carry the same keys; without it the copies drift one release at a time.
 | `walkthroughModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` | `auto` — a fast model |
 | `learnStalenessSessions` | § Learn staleness | `5` |
 | `learnStalenessDays` | § Learn staleness | `14` |
+| `learnSessionCap` | § Learn staleness | `100` |
 
 An unset knob is a literal `${user_config...}` placeholder or `auto`; the resolution order above
 owns what "unset" then resolves to, and this column only names the endpoint.
@@ -164,9 +166,9 @@ reference implementation of that order.
 ## Learn staleness
 
 `learnStalenessSessions` (default `5`) and `learnStalenessDays` (default `14`) are two
-non-profile integer knobs. They sit outside the profile matrix — no profile column moves
-them — and gate the single staleness nudge
-`${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` surfaces at cycle end.
+non-profile integer knobs, each accepting `0` or more — **`0` nudges after every cycle**.
+They sit outside the profile matrix — no profile column moves them — and gate the single
+staleness nudge `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` surfaces at cycle end.
 
 That playbook runs `scripts/dream.mjs --staleness`, which reads the distilling checkpoint's
 `last-run:` (`.devcycle/distilling-state.md`, owned by
@@ -176,6 +178,12 @@ unmined sessions or elapsed days have accrued to warrant another `/devcycle:lear
 sessions since `last-run:`, or `learnStalenessDays` days since it — and a corpus that was
 never mined (`last-run:` unset or `never`) is always stale. The nudge is advisory: it never
 forces a mining run and advances no checkpoint.
+
+`learnSessionCap` reaches the engine the same way: `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`
+and `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` pass `--cap <n>` to
+`scripts/dream.mjs --plan` and `--staleness` respectively. **Its minimum is `1`**, unlike the two
+thresholds above: a cap of `0` is refused rather than mining nothing and printing a manifest
+indistinguishable from a corpus with nothing left to mine.
 
 ## Model tiers
 

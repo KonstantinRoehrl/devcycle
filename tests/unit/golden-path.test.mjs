@@ -2060,10 +2060,11 @@ test("C6: docs/known-issues.md records open defects only — no fixed entry surv
   );
 });
 
-// `CONTRIBUTING.md:108-111` concedes that the config knobs are hand-kept in three places and
-// that validate "checks only that the key exists". F13, F15 and F16 were three live instances
-// of that class. Set equality across the three is what stops the fourth. Each parse is scoped
-// to its own table's header row, never to prose: C10 moves 134 lines out of references/config.md,
+// `CONTRIBUTING.md:136-140` concedes that the config knobs are hand-kept in four copies and
+// that no check compares the description text. F13, F15 and F16 were three live instances of
+// that class; set equality across all four — the manifest, the configuration hub,
+// references/config.md's roster and DESIGN §7's schema — is what stops a fourth. Each parse is
+// scoped to its own table's header row, never to prose: C10 moves 134 lines out of references/config.md,
 // and an assertion coupled to wording would break on an innocent edit and be deleted rather
 // than fixed. A table header is a structure that move can carry intact.
 const firstCells = (text, header) => {

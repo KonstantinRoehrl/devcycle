@@ -25,11 +25,15 @@ advanced by `--commit-checkpoint` below; the other is this playbook's own
 
 ## Plan the corpus
 
-Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --plan`; never walk transcripts directly. The
+Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --plan --cap <n>`, where `<n>` is
+`${user_config.learnSessionCap}` (default `100`); never walk transcripts directly. The
 engine's corpus spans every live git worktree of the invoking repo — a worktree run mines the main
 checkout and its siblings too — landing all results in the invoking checkout. It
 prints the manifest as JSON. Every stage's work list is its own slice ids minus the manifest's
-`observations`, and `capped: true` is reported as a bounded run, never a failure.
+`observations`, and `capped: true` is reported as a bounded run, never a failure. It also writes
+the corpus it resolved to `<git-toplevel>/.devcycle/dreaming/corpus.json`, which every `--extract`
+below reads instead of resolving the corpus again — so plan before extracting, and expect that
+file to appear in the repo.
 
 **The journal is the first corpus and is never mined.** `journal.events` counts the run-record
 events since the checkpoint; read them with
@@ -53,13 +57,22 @@ memory; a default run carries that artifact straight to **Confirm**.
 
 ## Mine each slice
 
+**Before dispatching, gate on the estimate.** If the plan's `extractBytes` exceeds 10 MB, do not
+dispatch the full set: put the estimate to the user (`AskUserQuestion`) with the options of
+mining it as planned, narrowing the checkpoint window, or lowering `${user_config.learnSessionCap}`.
+A plan reporting a non-empty `oversized` list names those sessions in the same question — they are
+skipped by default, and `--include-oversized` is what mines them.
+
 One dispatch per unmined slice the profile admits, per
 `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`, **each pinned to the fast tier in the dispatch
-itself, never inheriting the caller's model**. A session-sourced slice reads its text through the
-engine (`--extract <session-id>`). Each dispatch writes its slice's records to
+itself, never inheriting the caller's model**. Run **at most 8 of those dispatches in flight at a
+time**; the ceiling bounds mining's own fan-out and is set here, for this stage alone. A
+session-sourced slice reads its text through the engine (`--extract <session-id>`, carrying
+`--include-oversized` too when the plan was made with it — the engine re-checks the ceiling on
+every extract). Each dispatch writes its slice's records to
 `.devcycle/dreaming/observations/<slice-id>.json` as an array of objects carrying
 `session`, `ts` (the message timestamp of the quoted utterance, when known, so the reduce stage can dedup one utterance mined from sibling transcripts), `kind` (`friction | correction | rule-violation | decision | contradiction-side | win`),
-`subject`, `target` (a repo-relative path or `null`), `quote` and `confidence`. `subject` is the
+`subject`, `target` (a repo-relative path or `null`), `quote`, `confidence`, and — for `win` records only — `groundingStage` (the independent source role; see below). `subject` is the
 normalized phrase the next stage clusters on across sessions; `quote` is a short verbatim excerpt
 and the grounding anchor — **an observation may state only what its quote shows**. A dispatch
 **returns a count, not content**, and a slice that already has an observation file is never re-mined —
@@ -69,9 +82,14 @@ Also mine `win` observations — the positive mirror of friction — under the *
 discipline: a verbatim `quote` is mandatory and a **stated reason** is required. A clean
 first-round review accept *with a transcript-stated cause*, an explicitly praised technique, or a
 pattern that measurably shortened a stage each qualifies; "went well" with no stated cause is **not
-minable**. A win clusters into a culprit-id and lands through the r0–r3 ladder exactly as a friction
-observation does, and is verified with `verify: journal-reinforcement` rather than
-`journal-recurrence` — a win that recurs after landing reads as `held` (the good practice is being
+minable**. A win must also be grounded **independently of the work it praises**: set `groundingStage` to the source role of the quoted
+turn, and never let that role be the implementer grading its own work. The implementer's self-report — including a short-path
+(`fast-path`/`sweep`) author's claim about its own edit — is `execution`; an independent re-run, review, or verdict takes its verifying
+role (`task-review`/`branch-review`/`on-device`); the human is `user`. A win whose grounding is `execution`, or carries no stage, is
+rejected at the map stage (`dream.mjs --check-observations`) and dropped from the candidate list — so "went well" narrated by the
+implementer about its own task is **not minable**; the same success seen by a reviewer or the green gate is. A win clusters into a
+culprit-id and lands through the r0–r3 ladder exactly as a friction observation does, and is verified with `verify:
+journal-reinforcement` rather than `journal-recurrence` — a win that recurs after landing reads as `held` (the good practice is being
 followed), not `recurred`.
 
 Each dispatch then verifies its own write with `--check-observations <slice-id>` rather than by
@@ -153,7 +171,9 @@ landed candidate: it is what makes ladder-first checkable rather than claimed.
 Then render the proposal:
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --render-report .devcycle/dreaming/<date>-candidates.json`,
 writing it to `.devcycle/dreaming/<YYYY-MM-DD>-dream.md`. `${CLAUDE_PLUGIN_ROOT}/references/impact-scoring.md`
-owns how each candidate's `impact` is computed; do not restate the formula here. Advance the corpus
+owns how each candidate's `impact` is computed; do not restate the formula here. That same
+reference owns the figures in the rendered report's `## Ledger` section, which nets each period's
+win savings against culprit cost. Advance the corpus
 checkpoint with `--commit-checkpoint <now, ISO-8601 UTC>`.
 
 **`--preview` stops here**, the loop's other exit: report the artifact path and stop, promoting

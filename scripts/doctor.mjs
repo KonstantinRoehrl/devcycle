@@ -21,6 +21,7 @@ import { atomicWrite } from "./atomic-write.mjs";
 // escalation/retirement candidates and the resolved-in lines, plus the installed plugin version.
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
+import { eachRecord } from "./jsonl.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // docs/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -1555,26 +1556,11 @@ export function owningSession(file) {
 }
 
 // Malformed JSON lines are skipped, not fatal — transcripts are appended live
-// and the last line may be partial.
+// and the last line may be partial. Delegates to the streaming reader so a whole transcript is
+// never held as one string: the tolerance and the ENOENT-is-empty contract live in eachRecord.
 export function readRecords(file) {
-  let text;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch (err) {
-    // A transcript deleted between listing and reading is normal; anything else
-    // (permissions, I/O) is a real fault and must not read as an empty session.
-    if (err.code !== "ENOENT") throw err;
-    return [];
-  }
   const records = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      records.push(JSON.parse(line));
-    } catch {
-      // skip partial/malformed line
-    }
-  }
+  eachRecord(file, (r) => { records.push(r); });
   return records;
 }
 

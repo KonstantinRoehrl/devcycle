@@ -34,6 +34,42 @@ version whose writers journal the culprit (`playbooks/executing-waves.md` steps 
 `references/ledger.md`'s `event` row) keys by culprit; an older run keys by `(event, stage)` and
 renders as unattributed. The formula is unchanged either way.
 
+## The win ledger
+
+The symmetric half of the formula, owned here and implemented in `scripts/impact-ledger.mjs`: one
+period carries a single net figure by pricing wins against the same per-occurrence cost the culprit
+side already computes. A win entry in `references/culprits.json` (`kind: "win"`) may declare two
+optional fields, both absent by default — an entry without them behaves exactly as before:
+
+- `observes` — the impact keys whose occurrences count as this win happening. It is what makes a
+  win countable at all: the journal names win *events* (`first-round-accept:execution`) while the
+  vocabulary names win *slugs* (`first-round-clean-accept`), and `observes` is the only thing that
+  joins the two namespaces. A win with no `observes` is counted only by its own slug and
+  `novel:<slug>`, which the journal does not emit, so it scores zero occurrences.
+- `prevents` — the culprit keys a held win avoids paying for. Its savings is `occurrences ×
+  mean(cost-per-occurrence over every prevented key)` — the **mean**, not the sum, so declaring
+  more prevented keys never inflates the figure.
+
+Cost-per-occurrence is measured over a **baseline window that ends at the period's end and extends
+backwards past the period's start** — so it contains the period as its most-recent slice and, as far
+as the corpus scan's cap reaches, the history before it. Pricing a win inside the period alone would
+drive a successful win's baseline toward zero occurrences and the metric would punish success; the
+cap bounds how far back the baseline reaches, so the report prints the baseline's resolved span
+beside the figures and a savings number is always read against the window that produced it. Both
+windows are anchored to the candidates file's period end, so a stale candidates file — or sessions
+that arrive after it was written — never leaks past the printed span into either total.
+
+A win whose savings cannot be priced — no occurrences in the period, no `prevents`, or any prevented
+key unpriced in the baseline — renders `unmeasurable`, never `$0`; one such unpriced win makes the
+whole period's win savings, and so its net, unmeasurable. A period with **no held wins at all** is a
+different case: its win savings is an empty sum, a true `0`, so the net is `−cost` rather than
+`unmeasurable` — the absence of wins is a measured zero, not missing data.
+
+A key on the `unattributed` sentinel is excluded from both the savings and cost totals **and from
+the poison set** — it counts only into `excluded.events`. Because such a key is unmeasurable by
+construction, letting it poison the total to null would render the net unmeasurable in most real
+periods, so it is dropped before the sticky-unmeasurable fold rather than folded into it.
+
 ## Signals that are derived, not written
 
 Four signals are reconstructed from records that already exist, rather than journaled a second

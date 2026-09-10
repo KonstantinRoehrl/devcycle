@@ -22,7 +22,17 @@ function world({ journal = true } = {}) {
     mkdirSync(dir, { recursive: true });
     cpSync(join(FIXTURES, "journal.jsonl"), join(dir, "1111111111111111.jsonl"));
   }
-  return { root, env: { DEVCYCLE_RUNS_DIR: runsDir, DEVCYCLE_LEARNINGS_DIR: learnings, DEVCYCLE_DOCTOR_DIR: join(root, ".devcycle", "doctor") } };
+  // CLAUDE_DREAM_PROJECTS gets its own empty temp dir so --render-report's ledger pass (which
+  // now reaches planCorpus) never scans this machine's real ~/.claude/projects — the same
+  // isolation dream.test.mjs's `run` helper already gives every CLI-level call.
+  return {
+    root,
+    env: {
+      DEVCYCLE_RUNS_DIR: runsDir, DEVCYCLE_LEARNINGS_DIR: learnings,
+      DEVCYCLE_DOCTOR_DIR: join(root, ".devcycle", "doctor"),
+      CLAUDE_DREAM_PROJECTS: makeTempDir("devcycle-accept-projects-"),
+    },
+  };
 }
 
 const cli = (root, env, args) =>

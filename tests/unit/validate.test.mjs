@@ -1730,3 +1730,53 @@ test("continue discovery guard: fails when continue.md references the script but
   writeInto(dir, "commands/continue.md", CONTINUE_FM + "Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/find-state-files.mjs`.\n");
   failsWith(runValidate(dir), /references scripts\/find-state-files\.mjs but that script is missing/);
 });
+
+// --- check 14: observes/prevents vocabulary fields ---
+
+test("check 14 rejects observes/prevents on a non-win entry", () => {
+  const dir = makePluginFixture();
+  const vocabPath = join(dir, "references", "culprits.json");
+  const vocab = JSON.parse(readFileSync(vocabPath, "utf8"));
+  const target = vocab.find((e) => e.kind !== "win");
+  target.prevents = ["review-reject:execution"];
+  writeFileSync(vocabPath, JSON.stringify(vocab, null, 2));
+  failsWith(runValidate(dir), /"prevents" is only meaningful on a win-kind entry/);
+});
+
+test("check 14 rejects a malformed impact key and an unresolvable bare slug", () => {
+  const dir = makePluginFixture();
+  const vocabPath = join(dir, "references", "culprits.json");
+  const vocab = JSON.parse(readFileSync(vocabPath, "utf8"));
+  vocab.push({
+    slug: "fixture-win-entry",
+    kind: "win",
+    phase: ["execution"],
+    desc: "Fixture win entry for vocab tests.",
+    since: "0.0.1",
+    observes: ["Not A Key"],
+    prevents: ["no-such-slug-here"],
+  });
+  writeFileSync(vocabPath, JSON.stringify(vocab, null, 2));
+  failsWith(
+    runValidate(dir),
+    /observes key "Not A Key" is not a slug or <event>:<stage>/,
+    /prevents key "no-such-slug-here" names no entry in this file/
+  );
+});
+
+test("check 14 accepts the shipped observes/prevents on win entries", () => {
+  const dir = makePluginFixture();
+  const vocabPath = join(dir, "references", "culprits.json");
+  const vocab = JSON.parse(readFileSync(vocabPath, "utf8"));
+  vocab.push({
+    slug: "fixture-win-entry",
+    kind: "win",
+    phase: ["execution"],
+    desc: "Fixture win entry for vocab tests.",
+    since: "0.0.1",
+    observes: ["fixture-event:execution"],
+    prevents: ["fixture-pattern"],
+  });
+  writeFileSync(vocabPath, JSON.stringify(vocab, null, 2));
+  ok(runValidate(dir));
+});

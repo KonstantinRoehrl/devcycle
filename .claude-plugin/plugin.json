@@ -1,6 +1,6 @@
 {
   "name": "devcycle",
-  "version": "0.20.1",
+  "version": "0.21.0",
   "description": "Opinionated pipeline from a feature, bug, or refactor description to a verified, publish-ready implementation: scoped interview, wave-based plan, parallelized subagent execution, cross-model branch review, on-device UI verification via claude-in-chrome, and GitHub reconcile — layered on the superpowers skill set, with a doctor/learn loop that benchmarks and improves the pipeline from session to session.",
   "author": {
     "name": "Konstantin Röhrl",
@@ -80,13 +80,19 @@
       "type": "number",
       "title": "Learn staleness — sessions",
       "default": 5,
-      "description": "How many sessions may accrue since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessDays crosses first triggers the nudge. Default: 5."
+      "description": "How many sessions may accrue since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessDays crosses first triggers the nudge. Minimum 0, and 0 nudges after every cycle. Default: 5."
     },
     "learnStalenessDays": {
       "type": "number",
       "title": "Learn staleness — days",
       "default": 14,
-      "description": "How many days may pass since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessSessions crosses first triggers the nudge. Default: 14."
+      "description": "How many days may pass since the last /devcycle:learn before the finish stage surfaces a (non-forcing) nudge to mine again. Whichever of this or learnStalenessSessions crosses first triggers the nudge. Minimum 0, and 0 nudges after every cycle. Default: 14."
+    },
+    "learnSessionCap": {
+      "type": "number",
+      "title": "Learn session cap",
+      "default": 100,
+      "description": "How many sessions a single /devcycle:learn run may mine. Planning ranks candidates by recency and reads only this many, so raising it raises the run's cost proportionally. Minimum 1 — a cap of 0 is refused rather than silently mining nothing. Default: 100."
     }
   }
 }

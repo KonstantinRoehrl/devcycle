@@ -5,27 +5,63 @@
 // The stores each have one owner, and this file is the CLI over them rather than a second
 // copy: journal.mjs (run records), promotions.mjs (landed lessons), lessons.mjs (the three
 // capped stores), learn-report.mjs (the report).
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
-import { pathToFileURL } from "node:url";
-import { findTranscriptFiles, owningSession, readRecords, inWindow } from "./doctor.mjs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { findTranscriptFiles, owningSession, inWindow, summarizeSession, readRecords, readRunRecords } from "./doctor.mjs";
+import { aggregateKeys, periodLedger } from "./impact-ledger.mjs";
 import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
 import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding, MATCH_CAP } from "./lessons.mjs";
 import { readMaintenanceFindings, matchMaintenanceFindings, renderMaintenanceMatches } from "./maintenance-findings.mjs";
 import { parseFileList } from "./task-files.mjs";
-import { parseFlags } from "./cli-flags.mjs";
+import { parseFlags, requireCount } from "./cli-flags.mjs";
 import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
 import { renderLearnReport } from "./learn-report.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { fieldText } from "./md-field.mjs";
 import { gitToplevel, worktreeRoots } from "./git-identity.mjs";
+import { eachRecord } from "./jsonl.mjs";
 
 const CAP = 100;
+// Phase B reads at most cap + RANK_MARGIN sessions. mtime tracks a transcript's last append to
+// within write-flush latency, so the margin covers file copies and clock skew, not routine use.
+export const RANK_MARGIN = 25;
+// A per-session ceiling checked from statSync before any read. A backstop, not the main defence
+// — the streaming reader is what bounds the ordinary case — sized to exclude nothing in a real
+// multi-gigabyte corpus while capping one runaway transcript's parse.
+export const MAX_SESSION_BYTES = 50 * 1024 * 1024;
 const dreamDir = (root) => join(root, ".devcycle", "dreaming");
 const statePath = (root) => join(dreamDir(root), "state.md");
+
+// Anchored at the git toplevel, not process.cwd(): --plan and --extract both derive their root
+// from cwd, so a dispatch invoked from a subdirectory would otherwise miss the cache silently —
+// the fix would quietly fail to apply exactly where mining runs. gitToplevel resolves a linked
+// worktree to its shared checkout, so one cache serves every worktree of the repo.
+const corpusCachePath = (repoRoot, gitRunner) =>
+  join(gitToplevel(repoRoot, gitRunner), ".devcycle", "dreaming", "corpus.json");
+
+// Every miss — absent file, unparseable, a different projects root, an unknown session, a recorded
+// path that is no longer on disk — returns null and lets the caller resolve live. That self-healing
+// miss path is the whole invalidation strategy, and it is what keeps --extract independent of
+// --plan having run first.
+function cachedSessionFiles(repoRoot, projectsDir, sessionId, gitRunner) {
+  let doc;
+  try {
+    doc = JSON.parse(readFileSync(corpusCachePath(repoRoot, gitRunner), "utf8"));
+  } catch {
+    return null;
+  }
+  if (doc?.projectsDir !== projectsDir) return null;
+  const files = doc?.sessions?.[sessionId];
+  if (!Array.isArray(files) || !files.length) return null;
+  // A transcript rotated or deleted since --plan wrote the cache is the likeliest miss of all, and
+  // a list naming one no longer describes the session: re-resolve rather than stat a path that is
+  // gone (a raw ENOENT out of --extract) or read around it (a partial session mined as if whole).
+  return files.every((f) => existsSync(f)) ? files : null;
+}
 
 // The durable store the map stage writes and both the reduce stage and every later dream
 // read (spec §5.4). Local-only under the already-gitignored .devcycle/, so nothing is added
@@ -68,6 +104,8 @@ function validateObservation(rec, index) {
   // with observation files already on disk that predate the field.
   if (rec.ts != null && typeof rec.ts !== "string")
     throw new Error(`record ${index}: ts must be an ISO-8601 string or absent`);
+  if (rec.groundingStage != null && typeof rec.groundingStage !== "string")
+    throw new Error(`record ${index}: groundingStage must be a string or absent`);
 }
 
 // The observation store's validating reader (spec §15's 2026-08-05 amendment). Without it,
@@ -121,17 +159,59 @@ export function dedupeObservations(records) {
   }
   return out;
 }
+// Win observations must be grounded in a stage independent of the work they praise. devcycle
+// refuses self-grading everywhere else (the green gate re-runs tests rather than trusting the
+// implementer's claim), and once win-savings become a number people act on, a self-reported win
+// is a number the reporting agent has an incentive to inflate. `groundingStage` names the source
+// role of the quoted turn; the one non-independent role is `execution` — the implementer
+// authoring a claim about its own work (a short-path fast-path/sweep author maps here too). Every
+// other role — an independent review, verdict, or the human — is independent. Fail-closed: a win
+// whose groundingStage is absent, unrecognized, or `execution` is rejected. Win-only, so
+// culprit-kind records are never touched. This is the single source of truth for the rule; the
+// miner guidance in playbooks/learning-from-sessions.md states it in prose.
+export const WIN_GROUNDING_STAGES = new Set([
+  "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
+  "branch-review", "task-review", "on-device", "receiving-review", "finish", "user",
+]);
+export const NON_INDEPENDENT_WIN_STAGES = new Set(["execution"]);
+// Returns null when the record may pass, or a content-free reason string (never the record's
+// subject or quote, so it is safe on the --check-observations surface) when a win is rejected.
+export function winGroundingRejection(rec) {
+  if (rec?.kind !== "win") return null;
+  const stage = rec.groundingStage;
+  if (stage == null || String(stage).trim() === "")
+    return "win record has no groundingStage; an independent grounding stage is required";
+  if (!WIN_GROUNDING_STAGES.has(stage))
+    return "win record's groundingStage is not a recognized grounding stage";
+  if (NON_INDEPENDENT_WIN_STAGES.has(stage))
+    return "win record is grounded in the execution stage whose own work it praises; an independent source is required";
+  return null;
+}
 // Every mined slice's observations, concatenated then deduped — the reduce stage's whole view of
 // the store. Returns the raw `total`, the post-dedup `unique` count, and the deduped `observations`
 // so a caller can report how much collapsing the dedup did. Skips slices whose file no longer
 // parses (same tolerance as isMined) rather than throwing the whole reduce away for one bad file.
 export function readAllObservations(repoRoot) {
   const all = [];
+  const sliceOfKey = new Map();
   for (const slice of listObservations(repoRoot)) {
-    try { all.push(...readObservations(repoRoot, slice)); } catch { /* unparseable slice skipped */ }
+    try {
+      for (const rec of readObservations(repoRoot, slice)) {
+        all.push(rec);
+        const key = observationKey(rec);
+        if (!sliceOfKey.has(key)) sliceOfKey.set(key, slice);
+      }
+    } catch { /* unparseable slice skipped */ }
   }
-  const observations = dedupeObservations(all);
-  return { total: all.length, unique: observations.length, observations };
+  const deduped = dedupeObservations(all);
+  const observations = [];
+  const rejected = [];
+  for (const rec of deduped) {
+    const reason = winGroundingRejection(rec);
+    if (reason) rejected.push({ sliceId: sliceOfKey.get(observationKey(rec)), subject: rec.subject, reason });
+    else observations.push(rec);
+  }
+  return { total: all.length, unique: deduped.length, observations, rejected };
 }
 
 export function readCheckpoint(repoRoot) {
@@ -310,10 +390,9 @@ export function messageText(record) {
 }
 
 function defaultReadText(session) {
-  return session.files
-    .flatMap((f) => readRecords(f))
-    .map(messageText)
-    .join("\n");
+  const parts = [];
+  for (const f of session.files) eachRecord(f, (r) => { parts.push(messageText(r)); });
+  return parts.join("\n");
 }
 
 // The one subcommand that emits message text, by definition (spec §3.1). It is called by a
@@ -321,11 +400,16 @@ function defaultReadText(session) {
 // keeps the manifest's redaction property intact. Deliberately not routed through planCorpus:
 // the 100-session cap and the checkpoint window bound *mining*, and a caller holding a session
 // id must be able to read that session's text regardless of either.
-export function extractSession({ repoRoot, projectsDir, sessionId, gitRunner }) {
-  const files = resolveProjectFiles(repoRoot, projectsDir, gitRunner).filter(
-    (f) => owningSession(f) === sessionId,
-  );
+export function extractSession({ repoRoot, projectsDir, sessionId, gitRunner, includeOversized = false }) {
+  const files = cachedSessionFiles(repoRoot, projectsDir, sessionId, gitRunner)
+    ?? resolveProjectFiles(repoRoot, projectsDir, gitRunner).files.filter((f) => owningSession(f) === sessionId);
   if (!files.length) throw new Error(`no transcript for session: ${sessionId}`);
+  const bytes = files.reduce((n, f) => n + statSync(f).size, 0);
+  if (!includeOversized && bytes > MAX_SESSION_BYTES)
+    throw new Error(
+      `session ${sessionId} is ${bytes} bytes, over the ${MAX_SESSION_BYTES}-byte ceiling; ` +
+        `re-run with --include-oversized to mine it anyway`,
+    );
   return defaultReadText({ files });
 }
 
@@ -348,6 +432,10 @@ function readTranscriptsOrFail(dir, label) {
   throw new Error(`${label} exists but could not be read: ${dir}`);
 }
 
+// A worktree path that no longer exists must degrade to its literal form, never throw: the
+// corpus of a deleted worktree is still worth resolving.
+const realpathOr = (p) => { try { return realpathSync(p); } catch { return p; } };
+
 // The learn corpus spans every live worktree of the invoking repo, not only the exact-cwd
 // checkout: each worktree is a distinct project slug, so the common path enumerates them
 // (`git worktree list`, one call — never a per-session git call, keeping the machine-wide scan
@@ -356,15 +444,47 @@ function readTranscriptsOrFail(dir, label) {
 // fallback filters on git-repo identity. Documented gaps: a deleted worktree (gone from
 // `git worktree list`) and a session launched from a subdir of a worktree (its slug is the
 // subdir, not the worktree root — a pre-existing gap for the main checkout too).
-function sessionRepoMatches(file, mineTop, topOf) {
-  return readRecords(file).some((r) => r.cwd && topOf(r.cwd) === mineTop);
+// The FIRST record carrying a `cwd` decides. This narrows the previous
+// `readRecords(file).some(...)`, which accepted a match from any record in the file: a session
+// that cd'd from another repo into this one used to match and no longer does. Deliberate — a
+// session's cwd is fixed in practice, and it is the only version that bounds the whole-root
+// fallback, which otherwise parses every transcript the user has ever produced in full.
+//
+// `read` is injected for the same reason `statFile` and `gitRunner` are: the early exit is a
+// resource bound, and a bound asserted any way other than by counting calls through a
+// collaborator is the shape issues #89 and #154 record (QC6).
+export function sessionRepoMatches(file, mineTop, topOf, read = eachRecord) {
+  let matched = false;
+  read(file, (r) => {
+    if (!r.cwd) return true;
+    matched = topOf(r.cwd) === mineTop;
+    return false;
+  });
+  return matched;
 }
 
-function resolveProjectFiles(repoRoot, projectsDir, gitRunner) {
-  const roots = worktreeRoots(repoRoot, gitRunner);
-  const primary = roots.flatMap((r) =>
-    readTranscriptsOrFail(join(projectsDir, escapeProjectPath(r)), "project directory") ?? []);
-  if (primary.length) return primary;
+// Per-process memo, keyed on (repoRoot, projectsDir): those two arguments are the entire input to
+// the resolve. `gitRunner` is a test seam over the same repo, never a second corpus, so it is
+// deliberately not part of the key. There is no invalidation, which is what "per-process" means:
+// dream.mjs runs as a short-lived CLI over a corpus that does not change under it, and a stale
+// entry cannot outlive the process that made it.
+const resolveCache = new Map();
+
+export function resolveProjectFiles(repoRoot, projectsDir, gitRunner) {
+  const key = `${repoRoot} ${projectsDir}`;
+  let hit = resolveCache.get(key);
+  if (hit === undefined) resolveCache.set(key, (hit = resolveUncached(repoRoot, projectsDir, gitRunner)));
+  return hit;
+}
+
+function resolveUncached(repoRoot, projectsDir, gitRunner) {
+  // Both the literal and the realpath-resolved slug, unioned: replacing the literal one would
+  // silently change the slug computed for any path reached through a symlink (macOS /tmp ->
+  // /private/tmp), while the union can only ever find more.
+  const roots = [...new Set(worktreeRoots(repoRoot, gitRunner).flatMap((r) => [r, realpathOr(r)]))];
+  const primary = [...new Set(roots.flatMap((r) =>
+    readTranscriptsOrFail(join(projectsDir, escapeProjectPath(r)), "project directory") ?? []))];
+  if (primary.length) return { files: primary, corpusResolution: "primary" };
 
   const all = readTranscriptsOrFail(projectsDir, "projects root");
   if (all === null) throw new Error(`projects root does not exist: ${projectsDir}`);
@@ -379,7 +499,7 @@ function resolveProjectFiles(repoRoot, projectsDir, gitRunner) {
     return top;
   };
   const mineTop = topOf(repoRoot);
-  return all.filter((f) => sessionRepoMatches(f, mineTop, topOf));
+  return { files: all.filter((f) => sessionRepoMatches(f, mineTop, topOf)), corpusResolution: "fallback" };
 }
 
 // F5: a slice id that is only the session id can never reopen when the session grows, so every
@@ -389,67 +509,148 @@ function resolveProjectFiles(repoRoot, projectsDir, gitRunner) {
 export const sliceId = (sessionId, bytes, digest) => `${sessionId}@${bytes}-${digest}`;
 export const sliceSessionId = (id) => String(id).split("@")[0];
 
-export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false, gitRunner }) {
+// Phase A: rank candidates from filesystem metadata alone. Nothing here opens a transcript, so
+// the cost of deciding WHICH sessions to mine no longer scales with how many have ever existed.
+// Note this is only content-free when the primary slug lookup hits; on the fallback path
+// resolveProjectFiles must itself probe every transcript under the projects root.
+export function planCandidates({ repoRoot, projectsDir, since, cap = CAP, gitRunner, statFile = statSync, includeOversized = false }) {
+  const { files, corpusResolution } = resolveProjectFiles(repoRoot, projectsDir, gitRunner);
   const groups = new Map();
-  for (const file of resolveProjectFiles(repoRoot, projectsDir, gitRunner)) {
+  for (const file of files) {
     const id = owningSession(file);
     if (!groups.has(id)) groups.set(id, []);
     groups.get(id).push(file);
   }
 
+  const sinceMs = since ? Date.parse(since) : null;
+  const candidates = [];
+  const oversized = [];
+  for (const [id, sessionFiles] of groups) {
+    let bytes = 0;
+    let mtimeMs = 0;
+    for (const f of sessionFiles) {
+      const st = statFile(f);
+      bytes += st.size;
+      if (st.mtimeMs > mtimeMs) mtimeMs = st.mtimeMs;
+    }
+    // Conservative in one direction only: a record's timestamp cannot postdate the write that
+    // stored it, so a session whose newest file predates the checkpoint holds no in-window
+    // record. This can over-keep (a copied file) and never under-keeps; Phase B's exact
+    // inWindow test is what actually decides membership.
+    if (sinceMs != null && Number.isFinite(sinceMs) && mtimeMs < sinceMs) continue;
+    // Recorded only where the ceiling is what excluded the session, and so only after the window
+    // test: `oversized` is the list the learn playbook's cost gate reads out to the user as
+    // "skipped without being read", which an out-of-window session this run would never have mined
+    // is not, and neither is one --include-oversized then content-reads and mines.
+    if (bytes > MAX_SESSION_BYTES && !includeOversized) {
+      oversized.push({ id, bytes });
+      continue;
+    }
+    candidates.push({ id, files: sessionFiles, mtimeMs, bytes });
+  }
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return { candidates, oversized, corpusResolution };
+}
+
+// `reader` is injected for the same reason `statFile` and `gitRunner` are, and is the pair the
+// spec's §C10 names: one content read per surviving file is a resource bound, and a bound asserted
+// any way other than by counting calls through a collaborator is the shape issues #89 and #154
+// record. Defaults to the real streaming reader, so no caller changes.
+export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSelf = false, gitRunner, statFile = statSync, reader = eachRecord, includeOversized = false, writeCache = false }) {
+  const { candidates, oversized, corpusResolution } =
+    planCandidates({ repoRoot, projectsDir, since, cap, gitRunner, statFile, includeOversized });
+
   const sessions = [];
-  for (const [id, files] of groups) {
+  let readFiles = 0;
+  let readSessions = 0;
+  // Phase B: the only place a transcript's contents are read. One streaming pass per file
+  // replaces the previous readFileSync plus two readRecords calls.
+  for (const candidate of candidates.slice(0, cap + RANK_MARGIN)) {
+    readSessions += 1;
     const stamps = [];
     let records = 0;
     let self = false;
     let bytes = 0;
+    let extractBytes = 0;
     const hash = createHash("sha256");
-    for (const f of files) {
-      const raw = readFileSync(f, "utf8");
-      bytes += Buffer.byteLength(raw);
-      hash.update(raw);
-      for (const r of readRecords(f)) {
+    for (const f of candidate.files) {
+      readFiles += 1;
+      const { bytes: fileBytes } = reader(f, (r) => {
         records += 1;
         if (r.timestamp) stamps.push(r.timestamp);
         if (!self && isSelfRecord(r)) self = true;
-      }
+        // F4: the model-visible size the same way `--extract` does, reused from messageText
+        // rather than a second extractor (QC2 of the original spec).
+        extractBytes += Buffer.byteLength(messageText(r));
+      }, { onChunk: (chunk) => hash.update(chunk) });
+      bytes += fileBytes;
     }
     if (!stamps.length) continue;
-    // `excludeSelf` drops devcycle's own sessions from the mining corpus outright. Freshness
-    // ignores them on every path — see artifactFresh — but by default they stay mineable here.
+    // Both this and the excludeSelf rejection below consume a candidate slot Phase A could not
+    // foresee — self-ness and timestamp presence are knowable only by reading — so a run can
+    // return fewer than `cap` sessions. RANK_MARGIN absorbs a small number of these. If
+    // excludeSelf ever becomes reachable (it is false at every present call site), Phase B must
+    // refill from the remaining candidates rather than returning short.
     if (excludeSelf && self) continue;
     stamps.sort();
     const lastTimestamp = stamps.at(-1);
     if (!inWindow(lastTimestamp, since, null)) continue;
-    // F4: the model-visible size the same way `--extract` does, reused from messageText rather
-    // than a second extractor (QC2).
-    let extractBytes = 0;
-    for (const f of files)
-      for (const r of readRecords(f)) extractBytes += Buffer.byteLength(messageText(r));
-    const slice = sliceId(id, bytes, hash.digest("hex").slice(0, 8));
     sessions.push({
-      id,
-      files,
+      id: candidate.id,
+      files: candidate.files,
       firstTimestamp: stamps[0],
       lastTimestamp,
       records,
       bytes,
       self,
-      slice,
+      slice: sliceId(candidate.id, bytes, hash.digest("hex").slice(0, 8)),
       extractBytes,
     });
   }
 
   sessions.sort((a, b) => b.lastTimestamp.localeCompare(a.lastTimestamp));
-  const capped = sessions.length > cap;
+  // Counted over Phase A's candidates, not Phase B's survivors, because Phase B only ever looks at
+  // cap + RANK_MARGIN of them. Phase A's mtime filter over-keeps by design, so in a skew case
+  // (a session whose newest file was touched inside the window but whose records all predate it)
+  // this reports `true` where an exact filter would have said `false`. The over-report is accepted:
+  // `capped: true` is read as "a bounded run", and claiming a bound that did not quite bite is the
+  // harmless direction, where missing one that did would hide a truncated corpus.
+  const capped = candidates.length > cap;
   const kept = sessions.slice(0, cap);
+  // artifactFresh now sees the survivor list rather than every in-window session. It reduces to a
+  // single max over non-self sessions, and mtime ranking keeps exactly the newest, so the result
+  // is preserved except in one case: if every survivor is a self-session while a non-self one
+  // sits below the margin, `fresh` flips from false to true.
   const { fresh, path } = artifactFresh(repoRoot, since, sessions);
+
+  if (writeCache) {
+    // atomicWrite does not create directories — writeCheckpoint does its own mkdirSync for the
+    // same reason. The directory must come from the cache path itself: dreamDir(repoRoot) is
+    // join(repoRoot, ".devcycle", "dreaming"), while the cache lives under the git TOPLEVEL, and
+    // those are different directories in exactly the subdirectory case the cache exists to serve
+    // — creating one and writing into the other throws ENOENT rather than degrading.
+    mkdirSync(dirname(corpusCachePath(repoRoot, gitRunner)), { recursive: true });
+    atomicWrite(corpusCachePath(repoRoot, gitRunner), JSON.stringify({
+      resolvedAt: new Date().toISOString(),
+      projectsDir,
+      corpusResolution,
+      sessions: Object.fromEntries(kept.map((s) => [s.id, s.files])),
+    }, null, 2) + "\n");
+  }
 
   return {
     since: since ?? null,
     cap,
     capped,
     sessions: kept,
+    // Which lookup produced the corpus. A whole-root fallback used to be entirely silent.
+    corpusResolution,
+    // In-window sessions this run excluded by MAX_SESSION_BYTES, never content-read. Mine one with
+    // --include-oversized, under which nothing is skipped for size and this list is empty.
+    oversized,
+    // Read counters, so a test can assert the bound by counting rather than by timing.
+    readSessions,
+    readFiles,
     // `records` alone let a dispatch be handed an unreadable 22.6 MB slice with no warning,
     // and a run cannot be budgeted without a size. Totals cover the kept sessions only, so the
     // number describes what a run would actually mine rather than what the cap discarded.
@@ -490,6 +691,87 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
 // CLAUDE_DREAM_PROJECTS overrides the transcript root, mirroring doctor.mjs's
 // CLAUDE_DOCTOR_PROJECTS; it exists so the CLI is testable without scanning ~/.claude.
 const resolveProjectsRoot = () => process.env.CLAUDE_DREAM_PROJECTS || join(homedir(), ".claude", "projects");
+
+// The culprit vocabulary the ledger prices wins against. Derived from this script's own location
+// like doctor.mjs's PLUGIN_ROOT — `CLAUDE_PLUGIN_ROOT` is substituted into command text but is not
+// in a script's environment, and this CLI runs from the target repo. CLAUDE_DREAM_CULPRITS
+// overrides the path on the CLAUDE_DREAM_PROJECTS pattern above, so a test that spawns this file
+// with only its cwd redirected can still decide what vocabulary the run reads. An unreadable file
+// reads as no vocabulary, the same degradation verification.mjs's own loader makes.
+const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const resolveCulpritsPath = () =>
+  process.env.CLAUDE_DREAM_CULPRITS || join(PLUGIN_ROOT, "references", "culprits.json");
+function loadVocab() {
+  try { return JSON.parse(readFileSync(resolveCulpritsPath(), "utf8")); }
+  catch { return []; }
+}
+
+// The ledger's two windows, from one bounded transcript pass. Dollars exist only in doctor's
+// summarizer, so the ledger has to reach transcripts; this is the one place in the report path
+// that does, and each session is read and summarized exactly once.
+//
+// The baseline is planned once and the period is read off it rather than planned again: the
+// baseline extends backwards past the period (a cost-per-occurrence measured inside the period
+// would drive a successful win's baseline to zero occurrences and the metric would punish
+// success), and planCorpus derives the period from the baseline by construction — its `since`
+// filters are `mtimeMs < sinceMs` on candidates already ranked newest-first and `inWindow` on the
+// same `lastTimestamp` tested here, so the in-window subset of the wider plan is what the
+// narrower plan returns. references/impact-scoring.md owns both formulas.
+// Pure window partition for the ledger. Given corpus-plan sessions (each carrying its newest
+// record's `lastTimestamp`) and the candidates file's window edges, split them into the two windows
+// the report prices. Both edges anchor to `until` (= candidates.corpus.to): a session postdating the
+// window (`lastTimestamp > until`) enters neither — it must not price or populate a span it falls
+// past, which is what made `--render-report` on a stale candidates file sum figures over sessions
+// past the printed period end. The baseline then ends at the period's end and extends backward as
+// far as the plan's cap reached; the period additionally starts at `since` (= corpus.from).
+// Membership is decided on `lastTimestamp` — the session's exact newest-record time — which is
+// stricter than Phase A's mtime-approximate `since` in planCorpus (a file's mtime can drift from
+// its newest record) and is the correct edge for a window the figures are read against.
+export function partitionLedgerSessions(sessions, { since, until }) {
+  const period = [], baseline = [];
+  for (const session of sessions) {
+    if (!inWindow(session.lastTimestamp, null, until)) continue;
+    baseline.push(session);
+    if (inWindow(session.lastTimestamp, since, until)) period.push(session);
+  }
+  return { period, baseline };
+}
+
+function ledgerWindows({ repoRoot, projectsDir, since, until }) {
+  const plan = planCorpus({ repoRoot, projectsDir, since: null });
+  const runRecords = readRunRecords();
+  // The period is a subset of the baseline (both bounded above by `until`), so read and summarize
+  // each session once: iterate the baseline and mark the period members. `partitionLedgerSessions`
+  // owns the window predicate so the report path and its unit test share one code path.
+  const parts = partitionLedgerSessions(plan.sessions, { since, until });
+  const inPeriod = new Set(parts.period);
+  const period = [], baseline = [];
+  const stamps = [];
+  for (const session of parts.baseline) {
+    const records = [];
+    // readRecords delegates to the streaming reader and treats a missing file as empty, so a
+    // transcript that vanished since the plan degrades this session out of the corpus rather
+    // than throwing.
+    for (const file of session.files) records.push(...readRecords(file));
+    if (!records.length) continue;
+    const summary = summarizeSession(session.id, records, runRecords);
+    baseline.push(summary);
+    stamps.push(session.lastTimestamp);
+    if (inPeriod.has(session)) period.push(summary);
+  }
+  // The baseline window's actual resolved span, which is what the report prints beside the
+  // figures: a savings number is always read against the window that produced it.
+  const sorted = stamps.filter(Boolean).sort();
+  return {
+    period: { summaries: period, sessions: period.length },
+    baseline: {
+      summaries: baseline,
+      sessions: baseline.length,
+      from: sorted[0]?.slice(0, 10) ?? null,
+      to: sorted.at(-1)?.slice(0, 10) ?? null,
+    },
+  };
+}
 
 // Spec §7's always-loaded byte budget gates LANDED output only (QC6): the r2 digest lines and any
 // r1 always-loaded prose this run lands, minus the bytes a same-run eviction reclaims. r0/r3 are
@@ -562,6 +844,9 @@ function main() {
           repoRoot: root,
           projectsDir: resolveProjectsRoot(),
           sessionId: argv[extractIdx + 1],
+          // The session id is positional and parseFlags refuses bare positionals, so presence is
+          // tested directly rather than by wrapping this branch in a flag parse.
+          includeOversized: argv.includes("--include-oversized"),
         }),
       );
     } catch (e) {
@@ -573,14 +858,22 @@ function main() {
 
   if (hasPlan) {
     try {
-      const { lastDreamedThrough } = readCheckpoint(root);
-      console.log(
-        JSON.stringify(
-          planCorpus({ repoRoot: root, projectsDir: resolveProjectsRoot(), since: lastDreamedThrough }),
-          null,
-          2,
-        ),
-      );
+      const { flags } = parseFlags(argv, {
+        "--plan": "none", "--cap": "value", "--include-oversized": "none",
+        // Tolerated before this branch parsed anything, and must stay tolerated: it is a modifier,
+        // not a subcommand, so it never trips the mutual-exclusivity guard above either.
+        "--run-checks": "none",
+      });
+      const cap = requireCount(flags, "--cap") ?? CAP;
+      const plan = planCorpus({
+        repoRoot: root,
+        projectsDir: resolveProjectsRoot(),
+        since: readCheckpoint(root).lastDreamedThrough,
+        cap,
+        includeOversized: flags["--include-oversized"] === true,
+        writeCache: true,
+      });
+      console.log(JSON.stringify(plan, null, 2));
     } catch (e) {
       console.error(`dream: ${e.message}`);
       process.exit(1);
@@ -632,7 +925,9 @@ function main() {
     try {
       const sliceId = argv[observationsIdx + 1];
       if (!sliceId) throw new Error("--check-observations requires a session id argument");
-      readObservations(root, sliceId);
+      const records = readObservations(root, sliceId);
+      const rejection = records.map(winGroundingRejection).find(Boolean);
+      if (rejection) throw new Error(rejection);
       console.log("observations: ok");
     } catch (e) {
       console.error(`dream: ${e.message}`);
@@ -809,15 +1104,32 @@ function main() {
       // plumbed here on purpose — verification.mjs:110-117 skips every r3 row with a runnable
       // check before the escalation and retirement pushes, so a run check cannot change one
       // byte of this report.
+      const promotions = readPromotions(root);
       const verification = verify(
-        readPromotions(root),
+        promotions,
         journalEvents({ toplevel: root }).events,
         installedVersion(),
         { root },
       );
+      // The period is the corpus window the candidates already describe; the baseline is every
+      // session behind it, which is what prices a prevented culprit.
+      const windows = ledgerWindows({
+        repoRoot: root, projectsDir: resolveProjectsRoot(),
+        since: candidates.corpus.from, until: candidates.corpus.to,
+      });
+      const ledger = periodLedger({
+        period: aggregateKeys(windows.period.summaries),
+        baseline: aggregateKeys(windows.baseline.summaries),
+        promotions,
+        vocab: loadVocab(),
+        scoreboard: verification.scoreboard,
+        from: candidates.corpus.from, to: candidates.corpus.to, sessions: windows.period.sessions,
+        baselineFrom: windows.baseline.from, baselineTo: windows.baseline.to,
+        baselineSessions: windows.baseline.sessions,
+      });
       process.stdout.write(renderLearnReport({
-        candidates, promotions: readPromotions(root), outcome: argv.includes("--outcome"),
-        verification, budget,
+        candidates, promotions, outcome: argv.includes("--outcome"),
+        verification, budget, ledger,
       }));
     } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
     return;
@@ -866,22 +1178,29 @@ function main() {
   // The staleness probe finishing-the-cycle.md runs at cycle end: reads the distilling
   // checkpoint's own `last-run:` (learning-from-sessions.md owns that file) and reports whether
   // enough unmined sessions or days have accrued to warrant another /devcycle:learn pass. It is a
-  // read-only nudge — it advances no checkpoint and mines nothing. Reuses planCorpus (QC2) for the
-  // unmined-session count rather than re-walking transcripts.
+  // read-only nudge — it advances no checkpoint and mines nothing. Reuses planCandidates (QC2)
+  // for the unmined-session count rather than re-walking transcripts.
   if (argv.includes("--staleness")) {
     try {
       const { flags } = parseFlags(argv, {
-        "--staleness": "none", "--max-sessions": "value", "--max-days": "value",
+        "--staleness": "none", "--max-sessions": "value", "--max-days": "value", "--cap": "value",
       });
-      const maxSessions = flags["--max-sessions"] != null ? Number(flags["--max-sessions"]) : 5;
-      const maxDays = flags["--max-days"] != null ? Number(flags["--max-days"]) : 14;
+      const cap = requireCount(flags, "--cap") ?? CAP;
+      // Floor 0, not 1: both flags carry a user-settable knob (learnStalenessSessions,
+      // learnStalenessDays) whose zero means "nudge me every cycle", and the finish stage that
+      // runs this probe has no tolerance for a non-zero exit.
+      const maxSessions = requireCount(flags, "--max-sessions", { min: 0 }) ?? 5;
+      const maxDays = requireCount(flags, "--max-days", { min: 0 }) ?? 14;
       const dsPath = join(root, ".devcycle", "distilling-state.md");
       const lastRun = existsSync(dsPath) ? (fieldText(readFileSync(dsPath, "utf8"), "last-run") || null) : null;
       // `never` (or an empty/missing line) means the corpus was never mined — the strongest stale
       // signal, and never a real `since:` to filter the corpus against.
       const literal = lastRun && lastRun !== "never" ? lastRun : null;
-      const plan = planCorpus({ repoRoot: root, projectsDir: resolveProjectsRoot(), since: literal });
-      const unminedSessions = plan.sessions.length;
+      // Only the count is needed, so Phase A alone answers it — this used to run a full plan,
+      // reading every transcript in the corpus, to read one number. The mtime-approximate since
+      // boundary is adequate for a nudge that asks only whether enough sessions have accrued.
+      const { candidates } = planCandidates({ repoRoot: root, projectsDir: resolveProjectsRoot(), since: literal, cap });
+      const unminedSessions = Math.min(candidates.length, cap);
       // QC1: an unminable age is `null`, never `0` — a never-mined corpus has no elapsed days, and
       // reading that as zero days would falsely read as "just mined".
       const daysSince = literal ? Math.floor((Date.now() - Date.parse(literal)) / 86400000) : null;
@@ -895,14 +1214,15 @@ function main() {
   }
 
   console.error(
-    "usage: dream.mjs --plan | --extract <session-id> | --commit-checkpoint <iso> | --record-promotion <json> | " +
+    "usage: dream.mjs --plan [--cap N] [--include-oversized] | --extract <session-id> [--include-oversized] | " +
+      "--commit-checkpoint <iso> | --record-promotion <json> | " +
       "--record-lifecycle <json> | " +
       "--check-recurrence [--run-checks] | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
       "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --observations-deduped | --lessons <stage> | " +
       "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
       "--render-report <candidates.json> [--outcome] | " +
       "--plan-landing --stage <stage> --line \"<lesson line>\" [--store repo|user-repo|user-global] | " +
-      "--staleness [--max-sessions N] [--max-days M]",
+      "--staleness [--max-sessions N] [--max-days M] [--cap N]",
   );
   process.exit(1);
 }

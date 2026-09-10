@@ -235,7 +235,8 @@ gated by `userConfig.crossModelReview`.
   "branchReviewModel": "auto | <model id>",
   "walkthroughModel": "auto | <model id>",
   "learnStalenessSessions": 5,
-  "learnStalenessDays": 14
+  "learnStalenessDays": 14,
+  "learnSessionCap": 100
 }
 ```
 
@@ -269,6 +270,14 @@ gated by `userConfig.crossModelReview`.
   against the distilling checkpoint's `last-run:` and, when either threshold is crossed,
   surfaces one advisory line suggesting another `/devcycle:learn` pass (resolution and
   ownership in `references/config.md` § Learn staleness).
+- `learnSessionCap` (100) bounds how many sessions one `/devcycle:learn` run mines.
+  `playbooks/learning-from-sessions.md` resolves it and passes it to the engine as
+  `dream.mjs --plan --cap <n>`; `--staleness` takes the same flag so the nudge counts against the
+  cap the user actually set. `--plan` reports `oversized` (sessions past the 50 MB per-session
+  ceiling, skipped without being read — `--extract --include-oversized` mines one anyway),
+  `corpusResolution` (`primary` when the project slug resolved the corpus, `fallback` when the
+  whole-root scan did), and the read counters `readSessions` / `readFiles` (resolution and
+  ownership, including this knob's floor, in `references/config.md` § Learn staleness).
 - Once encoded, corresponding personal memories (e.g. never-local-merge-to-dev) are deleted.
 
 ---
@@ -489,3 +498,32 @@ available to GitHub Actions. A new or materially-changed command's description i
 the intents in `routing.md` and checked by the reviewer of the change. The prose scenario harness that formerly held this as a
 `description-sufficiency` test type was retired 2026-08-06 — see `CONTRIBUTING.md` and the
 decision log.
+
+## 18. Learn-corpus planning cost (added 2026-09-09)
+
+`/devcycle:learn`'s corpus planning used to read every transcript under `~/.claude/projects`
+before deciding which sessions to mine, so its cost scaled with sessions ever created rather
+than sessions mined. The 2026-09-09 hardening split planning into a metadata-only ranking pass
+and a bounded read pass, streamed transcripts record by record, bounded the whole-root fallback
+scan, and capped the corpus with `learnSessionCap` (§7). What keeps those bounds from eroding is a
+seam, not a benchmark: `planCorpus` takes its `gitRunner`, `statFile` and `reader` as injected
+parameters, so a test counts the subprocesses a plan spawns, the stat calls its ranking pass makes,
+and the content reads of its read phase. The injected reader reaches no further: the whole-root
+fallback identifies a session's repo through `sessionRepoMatches`'s own default reader, so that
+scan's per-transcript read is off the count. A resource bound asserted any other way is not
+asserted at all.
+
+A run also reports its own cost: `readSessions` and `readFiles` count what the second,
+content-reading phase opened, and `corpusResolution` names whether the corpus came from the repo's
+own project slug or from the whole-root fallback scan. Neither counter covers the resolve scan that
+precedes the read phase, which is where the fallback path's remaining cost sits. `--plan` also
+persists the corpus it resolved to `<git-toplevel>/.devcycle/dreaming/corpus.json`, so `--extract`
+reaches a session's files without repeating the resolve; an entry naming a transcript that has
+since disappeared is re-resolved live rather than trusted. Per-run wall-clock, RSS and subprocess
+figures are not kept here — `CONTRIBUTING.md` § "What belongs in `docs/`" routes them.
+
+**What this does not prove.** No OOM was reproduced, before or after. The link between these
+mechanisms and the reporter's specific crash remains inferred, not established: the change
+removes an unbounded input to memory and I/O, which is a reason to expect the crash cannot
+recur for that cause, not a demonstration that this cause produced it. `docs/known-issues.md`
+records the paths that stayed unbounded.
