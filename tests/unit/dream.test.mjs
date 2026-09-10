@@ -17,6 +17,7 @@ import {
   readObservations,
   dedupeObservations,
   readAllObservations,
+  winGroundingRejection,
   extractSession,
   messageText,
   alwaysLoadedNetBytes,
@@ -3017,4 +3018,68 @@ test("fixture (b): a held win with no comparable culprit prints unmeasurable, no
   assert.match(row, /unmeasurable/);
   assert.doesNotMatch(row, /\$0\.00/);
   assert.doesNotMatch(out, /Win savings: \$0\.00/);
+});
+
+test("winGroundingRejection rejects an execution-grounded win with a content-free reason", () => {
+  const reason = winGroundingRejection({ kind: "win", subject: "green gate saved a false pass", quote: "the implementer claimed green", groundingStage: "execution" });
+  assert.equal(typeof reason, "string");
+  assert.ok(reason.length > 0);
+  assert.ok(!reason.includes("green gate saved a false pass") && !reason.includes("the implementer claimed green"));
+});
+
+test("winGroundingRejection passes a branch-review-grounded win unchanged", () => {
+  assert.equal(winGroundingRejection({ kind: "win", subject: "s", quote: "q", groundingStage: "branch-review" }), null);
+});
+
+test("winGroundingRejection fails closed on an absent or unrecognized groundingStage", () => {
+  assert.ok(winGroundingRejection({ kind: "win", subject: "s", quote: "q" }));
+  assert.ok(winGroundingRejection({ kind: "win", subject: "s", quote: "q", groundingStage: "" }));
+  assert.ok(winGroundingRejection({ kind: "win", subject: "s", quote: "q", groundingStage: "not-a-stage" }));
+});
+
+test("winGroundingRejection never touches culprit-kind records", () => {
+  assert.equal(winGroundingRejection({ kind: "friction", subject: "s", quote: "q" }), null);
+  assert.equal(winGroundingRejection({ kind: "correction", subject: "s", quote: "q", groundingStage: "execution" }), null);
+});
+
+test("readAllObservations partitions non-independent wins into rejected and keeps the rest", () => {
+  const root = realpathSync(repo());
+  writeObservationFile(root, "slice-exec", [
+    { kind: "win", subject: "self-praise", quote: "it worked", ts: "2026-09-01T00:00:00Z", target: null, groundingStage: "execution" },
+  ]);
+  writeObservationFile(root, "slice-review", [
+    { kind: "win", subject: "reviewer-praise", quote: "clean diff", ts: "2026-09-01T00:01:00Z", target: null, groundingStage: "branch-review" },
+  ]);
+  const { total, unique, observations, rejected } = readAllObservations(root);
+  assert.equal(total, 2);
+  assert.equal(unique, 2);
+  assert.equal(observations.length + rejected.length, unique);
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].sliceId, "slice-exec");
+  assert.ok(rejected[0].reason.length > 0);
+  assert.ok(observations.some((o) => o.subject === "reviewer-praise"));
+  assert.ok(!observations.some((o) => o.subject === "self-praise"));
+});
+
+test("cli: --check-observations rejects an execution-grounded win nonzero with a content-free reason", () => {
+  const root = realpathSync(repo());
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), "winexec.json"), JSON.stringify([
+    { kind: "win", subject: "secret subject", quote: "secret quote", ts: "2026-09-01T00:00:00Z", target: null, groundingStage: "execution" },
+  ]));
+  const r = run(["--check-observations", "winexec"], root);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.length > 0);
+  assert.ok(!r.stderr.includes("secret subject") && !r.stderr.includes("secret quote"));
+});
+
+test("cli: --check-observations accepts a branch-review-grounded win", () => {
+  const root = realpathSync(repo());
+  mkdirSync(observationsDir(root), { recursive: true });
+  writeFileSync(join(observationsDir(root), "winok.json"), JSON.stringify([
+    { kind: "win", subject: "s", quote: "q", ts: "2026-09-01T00:00:00Z", target: null, groundingStage: "branch-review" },
+  ]));
+  const r = run(["--check-observations", "winok"], root);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), "observations: ok");
 });

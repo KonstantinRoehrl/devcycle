@@ -104,6 +104,8 @@ function validateObservation(rec, index) {
   // with observation files already on disk that predate the field.
   if (rec.ts != null && typeof rec.ts !== "string")
     throw new Error(`record ${index}: ts must be an ISO-8601 string or absent`);
+  if (rec.groundingStage != null && typeof rec.groundingStage !== "string")
+    throw new Error(`record ${index}: groundingStage must be a string or absent`);
 }
 
 // The observation store's validating reader (spec §15's 2026-08-05 amendment). Without it,
@@ -157,17 +159,59 @@ export function dedupeObservations(records) {
   }
   return out;
 }
+// Win observations must be grounded in a stage independent of the work they praise. devcycle
+// refuses self-grading everywhere else (the green gate re-runs tests rather than trusting the
+// implementer's claim), and once win-savings become a number people act on, a self-reported win
+// is a number the reporting agent has an incentive to inflate. `groundingStage` names the source
+// role of the quoted turn; the one non-independent role is `execution` — the implementer
+// authoring a claim about its own work (a short-path fast-path/sweep author maps here too). Every
+// other role — an independent review, verdict, or the human — is independent. Fail-closed: a win
+// whose groundingStage is absent, unrecognized, or `execution` is rejected. Win-only, so
+// culprit-kind records are never touched. This is the single source of truth for the rule; the
+// miner guidance in playbooks/learning-from-sessions.md states it in prose.
+export const WIN_GROUNDING_STAGES = new Set([
+  "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
+  "branch-review", "task-review", "on-device", "receiving-review", "finish", "user",
+]);
+export const NON_INDEPENDENT_WIN_STAGES = new Set(["execution"]);
+// Returns null when the record may pass, or a content-free reason string (never the record's
+// subject or quote, so it is safe on the --check-observations surface) when a win is rejected.
+export function winGroundingRejection(rec) {
+  if (rec?.kind !== "win") return null;
+  const stage = rec.groundingStage;
+  if (stage == null || String(stage).trim() === "")
+    return "win record has no groundingStage; an independent grounding stage is required";
+  if (!WIN_GROUNDING_STAGES.has(stage))
+    return "win record's groundingStage is not a recognized grounding stage";
+  if (NON_INDEPENDENT_WIN_STAGES.has(stage))
+    return "win record is grounded in the execution stage whose own work it praises; an independent source is required";
+  return null;
+}
 // Every mined slice's observations, concatenated then deduped — the reduce stage's whole view of
 // the store. Returns the raw `total`, the post-dedup `unique` count, and the deduped `observations`
 // so a caller can report how much collapsing the dedup did. Skips slices whose file no longer
 // parses (same tolerance as isMined) rather than throwing the whole reduce away for one bad file.
 export function readAllObservations(repoRoot) {
   const all = [];
+  const sliceOfKey = new Map();
   for (const slice of listObservations(repoRoot)) {
-    try { all.push(...readObservations(repoRoot, slice)); } catch { /* unparseable slice skipped */ }
+    try {
+      for (const rec of readObservations(repoRoot, slice)) {
+        all.push(rec);
+        const key = observationKey(rec);
+        if (!sliceOfKey.has(key)) sliceOfKey.set(key, slice);
+      }
+    } catch { /* unparseable slice skipped */ }
   }
-  const observations = dedupeObservations(all);
-  return { total: all.length, unique: observations.length, observations };
+  const deduped = dedupeObservations(all);
+  const observations = [];
+  const rejected = [];
+  for (const rec of deduped) {
+    const reason = winGroundingRejection(rec);
+    if (reason) rejected.push({ sliceId: sliceOfKey.get(observationKey(rec)), subject: rec.subject, reason });
+    else observations.push(rec);
+  }
+  return { total: all.length, unique: deduped.length, observations, rejected };
 }
 
 export function readCheckpoint(repoRoot) {
@@ -881,7 +925,9 @@ function main() {
     try {
       const sliceId = argv[observationsIdx + 1];
       if (!sliceId) throw new Error("--check-observations requires a session id argument");
-      readObservations(root, sliceId);
+      const records = readObservations(root, sliceId);
+      const rejection = records.map(winGroundingRejection).find(Boolean);
+      if (rejection) throw new Error(rejection);
       console.log("observations: ok");
     } catch (e) {
       console.error(`dream: ${e.message}`);

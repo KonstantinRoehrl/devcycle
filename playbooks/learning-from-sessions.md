@@ -72,7 +72,7 @@ session-sourced slice reads its text through the engine (`--extract <session-id>
 every extract). Each dispatch writes its slice's records to
 `.devcycle/dreaming/observations/<slice-id>.json` as an array of objects carrying
 `session`, `ts` (the message timestamp of the quoted utterance, when known, so the reduce stage can dedup one utterance mined from sibling transcripts), `kind` (`friction | correction | rule-violation | decision | contradiction-side | win`),
-`subject`, `target` (a repo-relative path or `null`), `quote` and `confidence`. `subject` is the
+`subject`, `target` (a repo-relative path or `null`), `quote`, `confidence`, and — for `win` records only — `groundingStage` (the independent source role; see below). `subject` is the
 normalized phrase the next stage clusters on across sessions; `quote` is a short verbatim excerpt
 and the grounding anchor — **an observation may state only what its quote shows**. A dispatch
 **returns a count, not content**, and a slice that already has an observation file is never re-mined —
@@ -82,9 +82,14 @@ Also mine `win` observations — the positive mirror of friction — under the *
 discipline: a verbatim `quote` is mandatory and a **stated reason** is required. A clean
 first-round review accept *with a transcript-stated cause*, an explicitly praised technique, or a
 pattern that measurably shortened a stage each qualifies; "went well" with no stated cause is **not
-minable**. A win clusters into a culprit-id and lands through the r0–r3 ladder exactly as a friction
-observation does, and is verified with `verify: journal-reinforcement` rather than
-`journal-recurrence` — a win that recurs after landing reads as `held` (the good practice is being
+minable**. A win must also be grounded **independently of the work it praises**: set `groundingStage` to the source role of the quoted
+turn, and never let that role be the implementer grading its own work. The implementer's self-report — including a short-path
+(`fast-path`/`sweep`) author's claim about its own edit — is `execution`; an independent re-run, review, or verdict takes its verifying
+role (`task-review`/`branch-review`/`on-device`); the human is `user`. A win whose grounding is `execution`, or carries no stage, is
+rejected at the map stage (`dream.mjs --check-observations`) and dropped from the candidate list — so "went well" narrated by the
+implementer about its own task is **not minable**; the same success seen by a reviewer or the green gate is. A win clusters into a
+culprit-id and lands through the r0–r3 ladder exactly as a friction observation does, and is verified with `verify:
+journal-reinforcement` rather than `journal-recurrence` — a win that recurs after landing reads as `held` (the good practice is being
 followed), not `recurred`.
 
 Each dispatch then verifies its own write with `--check-observations <slice-id>` rather than by
