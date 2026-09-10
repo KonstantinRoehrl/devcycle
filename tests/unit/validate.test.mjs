@@ -1845,3 +1845,30 @@ test("dispatch-governance check: a dispatch under a flowing (non-numbered) headi
   );
   ok(runValidate(dir));
 });
+
+test("dispatch-governance check: a reversed-phrasing dispatch (agent before dispatch) that is ungoverned fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/implementer.md", "---\nname: implementer\n---\n\nImplementer.\n");
+  playbook(
+    dir,
+    "## Findings loop\n\n" +
+      "1. **Round 1.** Log a review-round event.\n\n" +
+      "2. **Fix dispatch.** Send a fresh `devcycle:implementer` dispatch with the finding.\n"
+  );
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /demoing-things\.md:\d+: dispatch ".*devcycle:implementer.*" names no governing model-tier rule/);
+});
+
+test("dispatch-governance check: a reversed-phrasing dispatch (agent before dispatch) that cites a *Model knob passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/implementer.md", "---\nname: implementer\n---\n\nImplementer.\n");
+  playbook(
+    dir,
+    "## Findings loop\n\n" +
+      "1. **Round 1.** Log a review-round event.\n\n" +
+      "2. **Fix dispatch.** Send a fresh `devcycle:implementer` dispatch on the model\n" +
+      "   `branchReviewModel` per `references/config.md` with the finding.\n"
+  );
+  ok(runValidate(dir));
+});
