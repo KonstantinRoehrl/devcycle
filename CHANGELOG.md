@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.21.0 — 2026-09-10
+
+- feat(learn): add a symmetric dollar ledger, bound the corpus scan, and require independent win grounding (#266, #267, #268)
+
 **Bounded learn-corpus planning.** Planning a `/devcycle:learn` run used to read every transcript
 under `~/.claude/projects` in full before deciding which sessions to mine, so both memory and wall
 clock grew with every session ever created on the machine. Planning now runs in two phases: it
