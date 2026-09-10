@@ -15,7 +15,10 @@ inside the 10 MB question when it fires, and `--include-oversized` is what mines
 slice the resolved profile admits — the memory store at every profile,
 archives/findings/ledgers and user-correction turns at `standard`/`thorough`, raw transcripts at
 `thorough` only — gets one fast-tier dispatch, at most 8 of them in flight at a time, that writes
-and self-verifies its own observation file, so an interrupted run resumes rather than re-mining. A
+and self-verifies its own observation file, so an interrupted run resumes rather than re-mining. A `win`
+observation additionally carries the independent source role it was grounded in; a win grounded
+only in the implementer's own (execution-stage) work is rejected at the map-stage self-verify and
+dropped from the candidate list, so a self-reported win cannot enter the ledger ungraded. A
 single dispatch then reads the full deduped observation store
 plus the journal's grouped events, assigns every candidate a stable culprit-id before clustering,
 screens for anything sensitive, partitions bulk from explicit candidates, and checks recurrence
