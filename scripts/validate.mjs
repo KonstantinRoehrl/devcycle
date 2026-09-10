@@ -986,6 +986,49 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       }
   }
 
+  // 23. Every dispatch instruction in playbooks/ and commands/ names its governing model-tier
+  //     rule -- a *Model knob, references/config.md, or an inline
+  //     "fast tier"/"session tier" -- so a dispatch is never silently undocumented (issue #171).
+  //     Checks presence of a citation, not that it is the correct one, the same posture check 11
+  //     takes for a reference's consumer. The window is the dispatch's own enclosing numbered
+  //     step (or heading section, when no numbered step wraps it) -- never the whole file, or a
+  //     citation for one dispatch would silently satisfy an unrelated dispatch elsewhere in the
+  //     same file (references/config.md § Model tiers owns the derivation this checks nothing
+  //     about, only that a pointer to it, or an equivalent citation, exists).
+  {
+    const DISPATCH_RE = /Dispatch\s+(?:exactly ONE\s+)?`?devcycle:[a-z-]+`?/gi;
+    const GOVERNANCE_RE =
+      /implementerModel|taskReviewerModel|branchReviewModel|walkthroughModel|references\/config\.md|\bfast tier\b|\bsession tier\b/i;
+    const STEP_RE = /^\d+\.\s/;
+    const HEADING_RE = /^#{1,6}\s/;
+    for (const dir of ["playbooks", "commands"]) {
+      for (const f of namesIn(dir)) {
+        const text = readFileSync(join(root, dir, f), "utf8");
+        const lines = text.split("\n");
+        for (const m of text.matchAll(DISPATCH_RE)) {
+          const lineNo = text.slice(0, m.index).split("\n").length; // 1-based
+          let unitStart = 1, startedAtStep = false;
+          for (let ln = lineNo; ln >= 1; ln--) {
+            if (STEP_RE.test(lines[ln - 1])) { unitStart = ln; startedAtStep = true; break; }
+            if (HEADING_RE.test(lines[ln - 1])) { unitStart = ln; break; }
+          }
+          let unitEnd = lines.length;
+          for (let ln = unitStart + 1; ln <= lines.length; ln++) {
+            if (startedAtStep && STEP_RE.test(lines[ln - 1])) { unitEnd = ln - 1; break; }
+            if (HEADING_RE.test(lines[ln - 1])) { unitEnd = ln - 1; break; }
+          }
+          const unitText = lines.slice(unitStart - 1, unitEnd).join("\n");
+          if (!GOVERNANCE_RE.test(unitText))
+            fail(
+              `${dir}/${f}:${lineNo}: dispatch "${m[0]}" names no governing model-tier rule (a ` +
+                `*Model knob, references/config.md, or "fast tier"/` +
+                `"session tier") in its enclosing step -- see references/config.md § Model tiers`
+            );
+        }
+      }
+    }
+  }
+
   lessonsTrackingErrors(process.cwd()).forEach(fail);
 
   if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
