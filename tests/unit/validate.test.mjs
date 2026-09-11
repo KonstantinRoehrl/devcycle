@@ -1884,3 +1884,40 @@ test("dispatch-governance check: 'dispatched' and 'dispatching' do not trigger f
   );
   ok(runValidate(dir));
 });
+
+// --- check 24: the shipped reinforcement policy parses and holds its invariants ---
+
+// A fixture whose reinforcement policy carries the machine block between its markers but breaks
+// the strict win>culprit asymmetry. The consumer line keeps this test pointed at check 24 (the
+// asymmetry) rather than tripping check 11 (a reference with no consumer) as well.
+const reinforcementPolicyFixture = (dir, policy) => {
+  writeInto(
+    dir,
+    "references/reinforcement-policy.md",
+    "# Reinforcement policy\n\nFixture policy file.\n\n" +
+      "<!-- reinforcement-policy:begin -->\n```json\n" +
+      JSON.stringify(policy, null, 2) +
+      "\n```\n<!-- reinforcement-policy:end -->\n"
+  );
+  writeInto(
+    dir,
+    "playbooks/demoing-things.md",
+    FIXTURE_PLAYBOOK_HEAD + "\nThe reinforcement bars live in references/reinforcement-policy.md.\n"
+  );
+};
+
+test("reinforcement-policy check: a policy whose win bar is not strictly above the culprit bar fails, naming the file", () => {
+  const dir = makePluginFixture();
+  reinforcementPolicyFixture(dir, {
+    severityPercentileByProfile: { lean: 70, standard: 60, thorough: 50 },
+    culpritRecurrenceBar: 3,
+    winRecurrenceBar: 3,
+    graduationRuns: 3,
+    minPricedKeysForPercentile: 3,
+  });
+  failsWith(runValidate(dir), /references\/reinforcement-policy\.md/, /strictly greater/);
+});
+
+test("reinforcement-policy check: the real repo's shipped policy parses and passes validate", () => {
+  ok(runValidate(REPO_ROOT));
+});
