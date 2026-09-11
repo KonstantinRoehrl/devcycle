@@ -1979,10 +1979,10 @@ test("--render-report renders the escalation candidates the engine computed", ()
   });
   const res = run(["--render-report", writeCandidateFixture()], root, { DEVCYCLE_RUNS_DIR: runsDir });
   assert.equal(res.status, 0);
-  const escalation = res.stdout.split("### Escalation")[1] ?? "";
-  assert.match(escalation, /friction:x/, "the computed candidate reaches the report");
+  const graduation = res.stdout.split("### Graduation")[1] ?? "";
+  assert.match(graduation, /friction:x/, "the computed candidate reaches the report");
   assert.doesNotMatch(
-    escalation.split("###")[0],
+    graduation.split("###")[0],
     /\(none this run\)/,
     "a computed candidate must never render as a confident zero",
   );
