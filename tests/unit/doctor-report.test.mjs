@@ -1789,6 +1789,34 @@ test("a corpus with nothing measured yet renders the section without throwing", 
   assert.match(section, /## Previously promoted — did it hold/);
 });
 
+// A win the engine flagged for reinforcement becomes its own Actionability entry — the positive
+// mirror of the escalation menu above, naming the held win, its reason, and the rung to reinforce.
+test("a reinforcement candidate reaches the Actionability menu as a reinforce entry point", () => {
+  const section = promotedSection(renderReport([sum()], ctx({
+    verification: {
+      scoreboard: [{ culpritId: "friction:held-win", rung: "r2", verdict: "held", runsObserved: 3, recurrences: 2, detail: null }],
+      candidates: { escalation: [], retirement: [], reinforcement: [{ culpritId: "friction:held-win", rung: "r2", reason: "held 2×" }] },
+      resolvedIn: [],
+    },
+  })));
+  assert.match(section, /Actionability — reinforce friction:held-win \(held 2×\) at r2/);
+});
+
+// The render path must never read undefined for verification.candidates.reinforcement: a null
+// verification falls back to a default literal carrying reinforcement: [], and a verification
+// predating the reinforcement key (with a measured scoreboard, so the Actionability loop runs)
+// renders without throwing.
+test("the reinforcement Actionability loop reads no undefined for null or pre-reinforcement verifications", () => {
+  assert.doesNotThrow(() => renderReport([sum()], ctx({ verification: null })));
+  assert.doesNotThrow(() => renderReport([sum()], ctx({
+    verification: {
+      scoreboard: [{ culpritId: "friction:legacy", rung: "r2", verdict: "held", runsObserved: 3, recurrences: 0, detail: null }],
+      candidates: { escalation: [], retirement: [] },
+      resolvedIn: [],
+    },
+  })));
+});
+
 // The engine annotates WHY a check produced its verdict. Dropping that annotation left a reader
 // of a bare "unmeasurable" with no way to learn that --run-checks exists, which made the opt-in
 // invisible in the one place it needed to be visible.
