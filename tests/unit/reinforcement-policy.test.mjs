@@ -84,24 +84,39 @@ test("classifyCandidate: over-threshold win reinforces", () => {
 });
 
 // The wiring inside verify(): percentile derivation from costByKey + per-promotion cost lookup
-// under the same bare/novel: normalization + routing to candidates[list]. "a" recurs once — below
-// culpritRecurrenceBar — so only its priced severity can escalate it, which proves the cost wiring;
-// the win recurs winRecurrenceBar times and lands in the new reinforcement list.
+// under the same bare/novel: normalization + routing to candidates[list]. friction:a is isolated so
+// that ONLY the derived severity cutoff can escalate it — its window holds just its own single
+// recurrence, so recurrences (1) < culpritRecurrenceBar and runsObserved (1) < graduationRuns, and
+// neither the recurrence-floor nor the stuck-runs safety-net disjunct can fire. The win lands
+// earlier, still sees its winRecurrenceBar grounding events, and reinforces on its own path. This
+// is the classifyCandidate severity fixture lifted to the verify() level, so the escalation
+// assertion can only pass because the costByKey → severityCutoff → per-promotion-lookup wiring works.
 test("verify(): a priced recurrence escalates on severity and a grounded win reinforces", () => {
   const ev = (culprit, ts, runId) => ({ event: "gate-fail", culprit, ts, runId });
+  // A single recurrence in a window of its own is below both non-severity disjuncts only when each
+  // bar exceeds 1; the shipped asymmetry (winRecurrenceBar > culpritRecurrenceBar >= 1) and
+  // graduationRuns guarantee it. Assert it so a policy edit that flattened a bar would fail here.
+  assert.ok(P.culpritRecurrenceBar > 1 && P.graduationRuns > 1);
   const promotions = [
+    // The win lands first, so its window captures the winRecurrenceBar grounding events below.
+    { verify: "journal-reinforcement", aliases: [], lifecycle: null, culpritId: "win:clean-round-one", rung: "r2", landed: "2026-07-01" },
+    // friction:a lands AFTER every win event, so its window holds only its own single recurrence.
     { verify: "journal-recurrence", aliases: [], lifecycle: null, culpritId: "friction:a", rung: "r2", landed: "2026-08-01" },
-    { verify: "journal-reinforcement", aliases: [], lifecycle: null, culpritId: "win:clean-round-one", rung: "r2", landed: "2026-08-01" },
   ];
   const winEvents = Array.from({ length: P.winRecurrenceBar }, (_, i) =>
-    ev("clean-round-one", `2026-08-${String(i + 10).padStart(2, "0")}T00:00:00Z`, `w${i}`));
-  const journal = [ev("a", "2026-08-05T00:00:00Z", "r1"), ...winEvents];
-  // A priced corpus at/above minPricedKeysForPercentile so a cutoff derives; "a" is the dear key.
-  const costByKey = { a: 10, "cheap-one": 0.1, "cheap-two": 0.2 };
+    ev("clean-round-one", `2026-07-${String(i + 2).padStart(2, "0")}T00:00:00Z`, `w${i}`));
+  const journal = [...winEvents, ev("a", "2026-08-02T00:00:00Z", "ra")];
+  // A culprit-only priced corpus at minPricedKeysForPercentile. standard's P=60 derives
+  // idx = floor(0.6 * 3) = 1 -> cutoff $7.07, which the dear key "a" clears on its single
+  // recurrence ($11.01) while the cheap keys sit below it — so severity is the sole escalation path.
+  const costByKey = { a: 11.01, "cheap-one": 2.57, "cheap-two": 7.07 };
   const out = verify(promotions, journal, "0.14.0",
-    { now: Date.parse("2026-08-20"), costByKey, profile: "standard" });
-  assert.ok(out.candidates.escalation.some((e) => e.culpritId === "friction:a"),
-    "the priced single recurrence escalates on severity");
+    { now: Date.parse("2026-08-05"), costByKey, profile: "standard" });
+  const escalated = out.candidates.escalation.find((e) => e.culpritId === "friction:a");
+  assert.ok(escalated,
+    "the priced single recurrence escalates — via the derived severity cutoff, not the floor or safety-net");
+  assert.match(escalated.reason, /^severity \$/,
+    "and it escalates on the severity disjunct specifically, not `recurred N×` or `stuck M runs`");
   assert.ok(out.candidates.reinforcement.some((r) => r.culpritId === "win:clean-round-one"),
     "the grounded win lands in the reinforcement list");
 });
