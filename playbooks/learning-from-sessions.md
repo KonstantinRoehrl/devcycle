@@ -138,7 +138,7 @@ proprietary snippet, and flag it for human attention. Then partition candidates 
 sensitive-flagged candidate and every `contradiction-resolution`). The partition is **written here,
 not chosen by the reader**: no candidate moves into the bulk to avoid a per-item decision.
 
-**Recurrence** is skipped at `lean`. At `standard` or `thorough`, run `--check-recurrence`: each
+**Recurrence** is skipped at `lean`. At `standard` or `thorough`, run `--check-recurrence --profile <resolved profile>`: each
 promotion carrying `verify: journal-recurrence` is checked by counting journal events with its
 culprit-id dated after it landed. Four verdicts, and the last two are load-bearing — `held` (N runs
 observed, no recurrence), `recurred`, `errored` (the check could not run to completion), and
@@ -169,7 +169,7 @@ whenever `fault` is `pipeline`, which never lands locally. `whyNotHigher` is **r
 landed candidate: it is what makes ladder-first checkable rather than claimed.
 
 Then render the proposal:
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --render-report .devcycle/dreaming/<date>-candidates.json`,
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --render-report .devcycle/dreaming/<date>-candidates.json --profile <resolved profile>`,
 writing it to `.devcycle/dreaming/<YYYY-MM-DD>-dream.md`. `${CLAUDE_PLUGIN_ROOT}/references/impact-scoring.md`
 owns how each candidate's `impact` is computed; do not restate the formula here. That same
 reference owns the figures in the rendered report's `## Ledger` section, which nets each period's
@@ -212,8 +212,12 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
    names the displaced line's culprit-id. Show it as "landing X evicts Y". **The edit cannot land
    unresolved**: either the user approves the eviction or the landing is deferred.
 6. **Surface any retirement or revert candidates** raised since the last run, proposed exactly like
-   fresh candidates — this runs live. A **retirement** candidate is a `held` r1/r2 lesson past 10
-   runs or 90 days; it proposes deleting the line and writing a **retirement** lifecycle record. A
+   fresh candidates — this runs live. The rendered report's `## Verification candidates` section
+   likewise surfaces this run's **graduation** (the `escalation` push) and **reinforcement**
+   candidates, gated by the severity thresholds
+   `${CLAUDE_PLUGIN_ROOT}/references/reinforcement-policy.md` owns. A **retirement** candidate is a
+   `held` r1/r2 lesson past 10 runs or 90 days; it proposes deleting the line and writing a
+   **retirement** lifecycle record. A
    **revert** candidate, read from "revert-candidates.json" in the fixed doctor directory (playbooks/profiling-sessions.md owns its resolution), proposes the undo
    *edit* and a **revert** lifecycle record — never `git revert`, since recorded `commit:` shas
    predate squash-merging and often do not resolve on the integration branch. Both carry the
