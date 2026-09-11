@@ -109,6 +109,11 @@ Gating is by profile, never by token budget or a signal heuristic — a budget g
 coverage nondeterministic and destroy the marginal-vs-first-run comparison the measurement gate
 depends on.
 
+The reinforcement severity percentile also keys on profile — a leaner profile sets a higher "severe"
+bar and reinforces less readily, a thorough one a lower bar — but its value is not a column here:
+`references/reinforcement-policy.md` owns `severityPercentileByProfile`, and the matrix above keeps no
+copy of it.
+
 The maintenance depth row governs `/devcycle:maintain`'s longitudinal lenses: **lean** runs the
 existing criteria only; **standard** adds the Abstraction criterion
 (`${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`), which degrades to

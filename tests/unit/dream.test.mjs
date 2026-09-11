@@ -35,6 +35,7 @@ import { eachRecord } from "../../scripts/jsonl.mjs";
 // travel with the import rather than being dropped.
 import { readPromotions, recordPromotion } from "../../scripts/promotions.mjs";
 import { repoSlug, hashSession } from "../../scripts/run-record.mjs";
+import { readPolicy } from "../../scripts/reinforcement-policy.mjs";
 
 const SCRIPT = new URL("../../scripts/dream.mjs", import.meta.url).pathname;
 // This repo itself, for the criteria that must run against its real promotion records.
@@ -1967,16 +1968,21 @@ test("cli: --check-recurrence does not execute a promotion verify: line without 
 // when the engine had candidates. An r2 promotion whose culprit reappears in the journal is
 // exactly the escalation case verification.mjs already scores.
 test("--render-report renders the escalation candidates the engine computed", () => {
+  // The culprit recurs enough times to clear the recurrence bar, so the engine escalates it; the
+  // count comes from the policy, never a hardcoded threshold, so it tracks the bar if it moves.
   const { root, runsDir } = corpusWithJournal({
     promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
-    events: [{ culprit: "x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
+    events: Array.from({ length: readPolicy().culpritRecurrenceBar }, (_, i) => ({
+      culprit: "x", ts: `2026-${String(2 + i).padStart(2, "0")}-01T00:00:00Z`,
+      runId: String.fromCharCode(97 + i).repeat(16),
+    })),
   });
   const res = run(["--render-report", writeCandidateFixture()], root, { DEVCYCLE_RUNS_DIR: runsDir });
   assert.equal(res.status, 0);
-  const escalation = res.stdout.split("### Escalation")[1] ?? "";
-  assert.match(escalation, /friction:x/, "the computed candidate reaches the report");
+  const graduation = res.stdout.split("### Graduation")[1] ?? "";
+  assert.match(graduation, /friction:x/, "the computed candidate reaches the report");
   assert.doesNotMatch(
-    escalation.split("###")[0],
+    graduation.split("###")[0],
     /\(none this run\)/,
     "a computed candidate must never render as a confident zero",
   );

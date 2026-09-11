@@ -4,6 +4,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { verify, defaultRunCheck, skipRunCheck, VERIFY_TIMEOUT_MS } from "../../scripts/verification.mjs";
+import { readPolicy } from "../../scripts/reinforcement-policy.mjs";
 
 const ev = (culprit, ts, runId) => ({ event: "gate-fail", culprit, ts, runId });
 const promo = (o) => ({ verify: "journal-recurrence", aliases: [], lifecycle: null, ...o });
@@ -14,17 +15,26 @@ test("r0-r2: zero runs after landed is unmeasurable, never held", () => {
   assert.equal(out.scoreboard[0].verdict, "unmeasurable");
 });
 
-test("r0-r2: a run with no recurrence is held; a recurrence is recurred + escalation", () => {
+test("r0-r2: a single recurrence at r2 is held back, not escalated; the recurrence floor escalates", () => {
   // The promotion's culprit-id is the <kind>:<slug> form; run-record.mjs only ever writes the
   // bare slug into a journal event's culprit field (never "friction:a"), so the recurrence must
   // be found through that shape or this test is vacuous.
+  const P = readPolicy();
   const runs = [ev("other-slug", "2026-08-05T00:00:00Z", "r1")];
-  const held = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
-  assert.equal(held.scoreboard[0].verdict, "held");
-  const recur = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })],
+  // With no cost/severity signal, one recurrence is now below the culprit bar: the verdict is
+  // still recurred, but it no longer routes to escalation (the raised bar).
+  const one = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })],
     [...runs, ev("a", "2026-08-06T00:00:00Z", "r2")], "0.14.0", { now: Date.parse("2026-08-20") });
-  assert.equal(recur.scoreboard[0].verdict, "recurred");
-  assert.equal(recur.candidates.escalation[0].culpritId, "friction:a");
+  assert.equal(one.scoreboard[0].verdict, "recurred");
+  assert.deepEqual(one.candidates.escalation, []);
+  // culpritRecurrenceBar recurrences clear the floor and escalate. Kept below graduationRuns
+  // distinct runs so the floor — not the stuck-too-long net — is what fires here.
+  const floorEvents = Array.from({ length: P.culpritRecurrenceBar }, (_, i) =>
+    ev("a", `2026-08-${String(i + 6).padStart(2, "0")}T00:00:00Z`, `r${i + 2}`));
+  const escalated = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })],
+    floorEvents, "0.14.0", { now: Date.parse("2026-08-20") });
+  assert.equal(escalated.scoreboard[0].verdict, "recurred");
+  assert.equal(escalated.candidates.escalation[0].culpritId, "friction:a");
 });
 
 test("r0-r2: the novel:<slug> form still matches after normalization (do not break it)", () => {

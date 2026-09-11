@@ -2953,7 +2953,7 @@ export function renderReport(summaries, ctx) {
   // entry (held / recurred / unmeasurable / broken / errored), then the
   // Actionability menu — each recurred lesson the engine flagged for escalation becomes a
   // `/devcycle:cycle` entry point the reader can run (playbooks/profiling-sessions.md).
-  const v = verification ?? { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] };
+  const v = verification ?? { scoreboard: [], candidates: { escalation: [], retirement: [], reinforcement: [] }, resolvedIn: [] };
   const overRuns = (n) => (n ? ` over ${n} run${n === 1 ? "" : "s"}` : "");
   if (!v.scoreboard.length) {
     L.push("_No promoted lesson has been measured against a run yet._");
@@ -2965,6 +2965,9 @@ export function renderReport(summaries, ctx) {
       L.push(`- ${s.culpritId} (${s.rung}): ${s.verdict}${overRuns(s.runsObserved)}${s.detail ? ` — ${s.detail}` : ""}`);
     for (const e of v.candidates.escalation)
       L.push(`- Actionability — \`/devcycle:cycle\` re-address ${e.culpritId} (${e.reason}; escalate from ${e.rung})`);
+    if (v.candidates.reinforcement)
+      for (const e of v.candidates.reinforcement)
+        L.push(`- Actionability — reinforce ${e.culpritId} (${e.reason}) at ${e.rung}`);
   }
 
   section("## Compiled knowledge (cumulative, by version)", "compiled-knowledge");
@@ -3086,7 +3089,7 @@ function promotionVerification(promotions, runChecks = false) {
     // over a freshly cloned repo cannot be made to run that repo's committed `- verify:` lines.
     return verify(promotions, events, installedVersion(), runChecks ? { runCheck: defaultRunCheck } : {});
   } catch {
-    return { scoreboard: [], candidates: { escalation: [], retirement: [] }, resolvedIn: [] };
+    return { scoreboard: [], candidates: { escalation: [], retirement: [], reinforcement: [] }, resolvedIn: [] };
   }
 }
 

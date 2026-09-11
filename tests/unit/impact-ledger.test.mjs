@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { aggregateKeys, costPerOccurrence, winKeySet, periodLedger } from "../../scripts/impact-ledger.mjs";
+import { aggregateKeys, costPerOccurrence, winKeySet, periodLedger, culpritCostByKey } from "../../scripts/impact-ledger.mjs";
 
 const VOCAB = [
   { slug: "first-round-clean-accept", kind: "win", observes: ["first-round-accept:execution"], prevents: ["review-reject:execution"] },
@@ -139,6 +139,19 @@ test("a held win that cannot be priced keeps savings and net null, never zero", 
   assert.equal(l.rows[0].savings, null);
   assert.equal(l.savings, null);
   assert.equal(l.net, null);
+});
+
+test("culpritCostByKey: keeps measurable culprits, drops wins and unattributed and unpriced", () => {
+  const baseline = aggregateKeys([{ impact: [
+    { key: "gate-fail:execution", impact: 22.02, frequency: 2 }, // culprit, priced -> 11.01
+    { key: "first-round-clean-accept", impact: 5, frequency: 1 }, // win -> dropped
+    { key: "unattributed", impact: 9, frequency: 3 },             // unattributed -> dropped
+    { key: "re-dispatch:execution", impact: null, frequency: 4 }, // unmeasurable -> dropped (never 0)
+  ] }]);
+  const vocab = [{ slug: "first-round-clean-accept", kind: "win" }];
+  const out = culpritCostByKey(baseline, vocab);
+  assert.deepEqual(Object.keys(out).sort(), ["gate-fail:execution"]);
+  assert.equal(out["gate-fail:execution"], 11.01);
 });
 
 test("a lesson that is not held, and one that is not win-kind, never enter the ledger", () => {

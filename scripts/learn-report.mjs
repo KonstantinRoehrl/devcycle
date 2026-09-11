@@ -118,6 +118,7 @@ export function renderLearnReport({ candidates, promotions, outcome = false, ver
   const vcands = {
     escalation: verification?.candidates?.escalation ?? [],
     retirement: verification?.candidates?.retirement ?? [],
+    reinforcement: verification?.candidates?.reinforcement ?? [],
   };
   const landed = cands.filter((c) => c.disposition === "landed");
   const rest = cands.filter((c) => c.disposition !== "landed");
@@ -183,10 +184,16 @@ export function renderLearnReport({ candidates, promotions, outcome = false, ver
     "",
     "## Verification candidates",
     "",
-    "### Escalation (r2 → r3)",
+    "### Graduation (r1/r2 → r3)",
     "",
     vcands.escalation.length
       ? vcands.escalation.map((c) => `- \`${c.culpritId}\` (${c.rung}) — ${c.reason}`).join("\n")
+      : "(none this run)",
+    "",
+    "### Reinforcement",
+    "",
+    vcands.reinforcement.length
+      ? vcands.reinforcement.map((c) => `- \`${c.culpritId}\` (${c.rung}) — ${c.reason}`).join("\n")
       : "(none this run)",
     "",
     "### Retirement",

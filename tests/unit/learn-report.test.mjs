@@ -184,6 +184,25 @@ test("renderLearnReport renders verify candidates and the always-loaded budget l
   assert.match(out, /^Always-loaded budget: 320 bytes/m);
 });
 
+// The propose gate's reinforcement outcome renders as its own ### Reinforcement section, and the
+// escalation candidates now render under the renamed ### Graduation (r1/r2 → r3) heading.
+test("renderLearnReport renders a reinforcement candidate and the renamed graduation heading", () => {
+  const verification = {
+    scoreboard: [],
+    candidates: {
+      escalation: [{ culpritId: "friction:c", rung: "r2", reason: "recurred 4×" }],
+      retirement: [],
+      reinforcement: [{ culpritId: "win:first-round-clean-accept", rung: "r1", reason: "held 5×" }],
+    },
+    resolvedIn: [],
+  };
+  const out = renderLearnReport({ candidates: CANDIDATES, promotions: PROMOTIONS, verification });
+  assert.match(out, /### Graduation \(r1\/r2 → r3\)/);
+  assert.match(out.split("### Graduation")[1] ?? "", /`friction:c` \(r2\) — recurred 4×/);
+  const reinforcement = out.split("### Reinforcement")[1] ?? "";
+  assert.match(reinforcement, /`win:first-round-clean-accept` \(r1\) — held 5×/);
+});
+
 const LEDGER = {
   from: "2026-08-01", to: "2026-09-01", sessions: 12,
   baseline: { from: "2026-06-01", to: "2026-09-01", sessions: 61 },

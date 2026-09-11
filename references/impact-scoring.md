@@ -70,6 +70,17 @@ the poison set** — it counts only into `excluded.events`. Because such a key i
 construction, letting it poison the total to null would render the net unmeasurable in most real
 periods, so it is dropped before the sticky-unmeasurable fold rather than folded into it.
 
+## The severity cutoff
+
+The reinforcement gate reads the same per-occurrence cost from one more consumer. `culpritCostByKey`
+(`scripts/impact-ledger.mjs`) folds the baseline into a culprit-only map — non-win, non-`unattributed`,
+measurable keys only — of each culprit's `costPerOccurrence`, so an unpriced key is simply absent, never
+`$0`. `scripts/verification.mjs`'s `verify()`/`classifyCandidate` then take a percentile over those
+values as the severity cutoff a culprit's `costPerOccurrence × recurrences` must clear before it
+escalates. The percentile itself keys on the pipeline profile and lives in
+`references/reinforcement-policy.md`, not restated here; below its `minPricedKeysForPercentile` priced
+keys the cutoff degrades to `null` (read downstream as the recurrence bar), never a `$0` fast-track.
+
 ## Signals that are derived, not written
 
 Four signals are reconstructed from records that already exist, rather than journaled a second

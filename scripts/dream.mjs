@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, inWindow, summarizeSession, readRecords, readRunRecords } from "./doctor.mjs";
-import { aggregateKeys, periodLedger } from "./impact-ledger.mjs";
+import { aggregateKeys, culpritCostByKey, periodLedger } from "./impact-ledger.mjs";
 import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
 import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding, MATCH_CAP } from "./lessons.mjs";
@@ -826,6 +826,12 @@ function main() {
   // A modifier, not a subcommand: deliberately outside SUBCOMMANDS so it does not trip the
   // mutual-exclusivity check above.
   const hasRunChecks = argv.includes("--run-checks");
+  // The severity percentile the propose gate reads is the profile's; an absent or malformed
+  // --profile degrades to "standard" (reinforcement-policy.mjs maps an unknown profile to it too).
+  const profileIdx = argv.indexOf("--profile");
+  const profile = profileIdx !== -1 && argv[profileIdx + 1] && !argv[profileIdx + 1].startsWith("--")
+    ? argv[profileIdx + 1]
+    : "standard";
   const commitIdx = argv.indexOf("--commit-checkpoint");
   const hasCommit = commitIdx !== -1;
   const suppressedIdx = argv.indexOf("--check-suppressed");
@@ -945,7 +951,7 @@ function main() {
       console.log(
         JSON.stringify(
           verify(readPromotions(root), journalEvents({ toplevel: root }).events, installedVersion(),
-            { root, ...(hasRunChecks ? { runCheck: defaultRunCheck } : {}) }),
+            { root, profile, ...(hasRunChecks ? { runCheck: defaultRunCheck } : {}) }),
           null,
           2,
         ),
@@ -1098,30 +1104,37 @@ function main() {
         );
         process.exit(1);
       }
-      // The verification engine's own candidates, not a default: without this argument
-      // learn-report.mjs falls back to empty arrays and both candidate sections render
-      // "(none this run)" for candidates the engine did compute. No --run-checks mode is
-      // plumbed here on purpose — verification.mjs:110-117 skips every r3 row with a runnable
-      // check before the escalation and retirement pushes, so a run check cannot change one
-      // byte of this report.
       const promotions = readPromotions(root);
-      const verification = verify(
-        promotions,
-        journalEvents({ toplevel: root }).events,
-        installedVersion(),
-        { root },
-      );
       // The period is the corpus window the candidates already describe; the baseline is every
-      // session behind it, which is what prices a prevented culprit.
+      // session behind it, which is what prices a prevented culprit. It is aggregated once here and
+      // shared by the severity cost map and the ledger below — the verify() call needs it first, so
+      // the whole window pass moved ahead of verify rather than running a second aggregateKeys.
       const windows = ledgerWindows({
         repoRoot: root, projectsDir: resolveProjectsRoot(),
         since: candidates.corpus.from, until: candidates.corpus.to,
       });
+      const baseline = aggregateKeys(windows.baseline.summaries);
+      const vocab = loadVocab();
+      // The severity gate prices each culprit off this same baseline; a key the baseline never
+      // priced is absent (never $0), so verify() degrades that culprit to the recurrence bar.
+      const costByKey = culpritCostByKey(baseline, vocab);
+      // The verification engine's own candidates, not a default: without this argument
+      // learn-report.mjs falls back to empty arrays and the candidate sections render
+      // "(none this run)" for candidates the engine did compute. No --run-checks mode is
+      // plumbed here on purpose — verification.mjs skips every r3 row with a runnable check before
+      // the escalation/reinforcement/retirement pushes, so a run check cannot change one byte of
+      // this report.
+      const verification = verify(
+        promotions,
+        journalEvents({ toplevel: root }).events,
+        installedVersion(),
+        { root, costByKey, profile },
+      );
       const ledger = periodLedger({
         period: aggregateKeys(windows.period.summaries),
-        baseline: aggregateKeys(windows.baseline.summaries),
+        baseline,
         promotions,
-        vocab: loadVocab(),
+        vocab,
         scoreboard: verification.scoreboard,
         from: candidates.corpus.from, to: candidates.corpus.to, sessions: windows.period.sessions,
         baselineFrom: windows.baseline.from, baselineTo: windows.baseline.to,
@@ -1220,7 +1233,7 @@ function main() {
       "--check-recurrence [--run-checks] | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
       "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --observations-deduped | --lessons <stage> | " +
       "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
-      "--render-report <candidates.json> [--outcome] | " +
+      "--render-report <candidates.json> [--outcome] [--profile <lean|standard|thorough>] | " +
       "--plan-landing --stage <stage> --line \"<lesson line>\" [--store repo|user-repo|user-global] | " +
       "--staleness [--max-sessions N] [--max-days M] [--cap N]",
   );

@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { SEMVER_RE, cmpSemver } from "./semver.mjs";
 import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run-record.mjs";
+import { readPolicy } from "./reinforcement-policy.mjs";
 
 
 // The learn loop's compiled memory must stay tracked: README/DECISIONS say lessons + promotion
@@ -1027,6 +1028,18 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         }
       }
     }
+  }
+
+  // 24. The shipped reinforcement policy parses and holds its invariants (mirrors the
+  //     observes/prevents gate): its machine block is present, each percentile sits inside
+  //     (0,100), and the win bar stays strictly above the culprit bar. Guarded by existsSync the
+  //     same way checks 12 and 13 guard their declarations — a fixture tree that ships no policy
+  //     file is not forced to, while the real plugin always ships one and the malformed-fixture
+  //     test writes its own to exercise this check.
+  const reinforcementPolicyPath = join(root, "references/reinforcement-policy.md");
+  if (existsSync(reinforcementPolicyPath)) {
+    try { readPolicy(reinforcementPolicyPath); }
+    catch (e) { fail(`references/reinforcement-policy.md: ${e.message}`); }
   }
 
   lessonsTrackingErrors(process.cwd()).forEach(fail);
