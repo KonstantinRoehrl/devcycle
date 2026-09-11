@@ -49,6 +49,19 @@ export function winKeySet(vocab) {
   return keys;
 }
 
+// Culprit-only per-occurrence cost map: non-win (winKeySet), non-`unattributed`, measurable only.
+// The severity gate reads exactly these values; an unpriced key is absent, never $0.
+export function culpritCostByKey(baseline, vocab) {
+  const wins = winKeySet(vocab);
+  const out = {};
+  for (const key of baseline?.keys() ?? []) {
+    if (wins.has(key) || key === "unattributed") continue;
+    const cost = costPerOccurrence(key, baseline);
+    if (cost != null) out[key] = cost;
+  }
+  return out;
+}
+
 function entryFor(culpritId, vocab) {
   const slug = String(culpritId).split(":").pop();
   return { slug, entry: (vocab ?? []).find((e) => e?.slug === slug) ?? null };
