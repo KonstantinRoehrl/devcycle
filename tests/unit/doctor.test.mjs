@@ -1188,10 +1188,11 @@ function installDoctor(changelog) {
   // → {journal → run-record → {stamp, git-identity}, semver}, plus pricing, promotions, cli-flags
   // and jsonl (readRecords' streaming reader). run-record.mjs re-exports gitToplevel from
   // git-identity.mjs, so that module is now part of the closure too. promotions.mjs imports
-  // fieldText from md-field.mjs, so md-field.mjs is in the closure too.
+  // fieldText from md-field.mjs, so md-field.mjs is in the closure too. verification.mjs reads the
+  // severity-weighting policy via reinforcement-policy.mjs, so that module is in the closure too.
   for (const name of [
     "doctor.mjs", "atomic-write.mjs", "pricing.mjs", "promotions.mjs", "cli-flags.mjs",
-    "jsonl.mjs", "verification.mjs", "journal.mjs", "semver.mjs", "run-record.mjs", "stamp.mjs",
+    "jsonl.mjs", "verification.mjs", "reinforcement-policy.mjs", "journal.mjs", "semver.mjs", "run-record.mjs", "stamp.mjs",
     "git-identity.mjs", "md-field.mjs",
   ])
     copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
