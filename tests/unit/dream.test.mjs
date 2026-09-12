@@ -1011,6 +1011,41 @@ test("cli: --check-suppressed rejects an argument split across several argv elem
   assert.equal(r.stdout.trim(), "", "no {\"suppressed\": ...} payload on the rejected path");
 });
 
+// Task 4: --consolidate transitions a win to consolidated (folded into a playbook/scaffold). A
+// win is the only lesson kind that consolidates — a culprit graduates to r3 instead — and it
+// consolidates exactly once.
+test("cli: --consolidate marks a win consolidated and exits 0", () => {
+  const root = realpathSync(repo());
+  recordPromotion(root, { ...REC, culpritId: "win:x", verify: "journal-reinforcement", landed: "2026-08-10" });
+  const r = run(["--consolidate", "win:x"], root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readPromotions(root)[0].consolidated, /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test("cli: --consolidate refuses a culprit-kind lesson", () => {
+  const root = realpathSync(repo());
+  recordPromotion(root, { ...REC, culpritId: "cul:x", verify: "journal-recurrence", landed: "2026-08-10" });
+  const r = run(["--consolidate", "cul:x"], root);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /only a win-kind lesson can be consolidated/);
+});
+
+test("cli: --consolidate refuses an already-consolidated win", () => {
+  const root = realpathSync(repo());
+  recordPromotion(root, { ...REC, culpritId: "win:x", verify: "journal-reinforcement", landed: "2026-08-10" });
+  assert.equal(run(["--consolidate", "win:x"], root).status, 0);
+  const r = run(["--consolidate", "win:x"], root);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /already consolidated/);
+});
+
+test("cli: --consolidate cannot be combined with another subcommand", () => {
+  const root = realpathSync(repo());
+  const r = run(["--consolidate", "win:x", "--novel-slugs"], root);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /cannot be combined/);
+});
+
 test("extractSession: returns decoded message text for one session", () => {
   const root = realpathSync(repo());
   const proj = projectsWith(root, [

@@ -23,9 +23,10 @@ single dispatch then reads the full deduped observation store
 plus the journal's grouped events, assigns every candidate a stable culprit-id before clustering,
 screens for anything sensitive, partitions bulk from explicit candidates, and checks recurrence
 (`standard`/`thorough`) against prior promotions. The result is written as one dated candidate
-JSON and rendered into a proposal document that surfaces the run's graduation and reinforcement
-candidates alongside retirement, advancing the corpus checkpoint — `--preview` stops
-here, landing nothing.
+JSON and rendered into a proposal document that surfaces the run's graduation, reinforcement, and
+consolidation candidates alongside retirement — now graduation-gated, so a culprit retires only
+once it is `held` at r3 and a win only once it is consolidated — advancing the corpus checkpoint;
+`--preview` stops here, landing nothing.
 
 A default run instead carries that proposal into **Confirm**: bulk candidates get one reviewed
 decision for the whole partition, explicit candidates (sensitive-flagged, and every

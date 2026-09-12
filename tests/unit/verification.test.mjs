@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { verify, defaultRunCheck, skipRunCheck, VERIFY_TIMEOUT_MS } from "../../scripts/verification.mjs";
+import { verify, defaultRunCheck, skipRunCheck, VERIFY_TIMEOUT_MS, retirementEligibility } from "../../scripts/verification.mjs";
 import { readPolicy } from "../../scripts/reinforcement-policy.mjs";
 
 const ev = (culprit, ts, runId) => ({ event: "gate-fail", culprit, ts, runId });
@@ -90,10 +90,53 @@ test("journal-reinforcement: zero runs is unmeasurable, never not-adopted", () =
   assert.equal(out.scoreboard[0].verdict, "unmeasurable");
 });
 
-test("retirement fires on held past 10 runs OR 90 days", () => {
+test("a held r1/r2 culprit is NOT retired (needs r3)", () => {
   const runs = Array.from({ length: 11 }, (_, i) => ev("other-slug", `2026-08-${String(i + 2).padStart(2, "0")}T00:00:00Z`, `r${i}`));
-  const out = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0", { now: Date.parse("2026-08-20") });
-  assert.equal(out.candidates.retirement[0].culpritId, "friction:a");
+  const out = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0");
+  assert.equal(out.scoreboard[0].verdict, "held");
+  assert.deepEqual(out.candidates.retirement, []);
+});
+
+test("a held r3 culprit (green check, --run-checks) IS retired", () => {
+  const root = makeTempDir("verif-retire-r3-");
+  writeFileSync(join(root, "pass.sh"), "exit 0\n");
+  const p = [promo({ culpritId: "friction:c", rung: "r3", verify: "pass.sh", landed: "2026-08-01" })];
+  const out = verify(p, [], "0.14.0", { root, runCheck: defaultRunCheck });
+  assert.equal(out.scoreboard[0].verdict, "held");
+  assert.deepEqual(out.candidates.retirement, [
+    { culpritId: "friction:c", rung: "r3", reason: "graduated to r3, held" },
+  ]);
+});
+
+test("retirementEligibility: four-row truth table", () => {
+  assert.deepEqual(retirementEligibility({ kind: "win", rung: "r2", consolidated: true, verdict: "held" }),
+    { eligible: true, reason: "consolidated win" });
+  assert.deepEqual(retirementEligibility({ kind: "win", rung: "r2", consolidated: false, verdict: "held" }),
+    { eligible: false, reason: "not consolidated" });
+  assert.deepEqual(retirementEligibility({ kind: "culprit", rung: "r3", consolidated: false, verdict: "held" }),
+    { eligible: true, reason: "graduated to r3, held" });
+  assert.deepEqual(retirementEligibility({ kind: "culprit", rung: "r2", consolidated: false, verdict: "held" }),
+    { eligible: false, reason: "held but not graduated to r3 (at r2)" });
+});
+
+test("retirementEligibility: a win's eligibility is verdict-independent; a culprit's is not", () => {
+  assert.equal(retirementEligibility({ kind: "win", rung: "r2", consolidated: true, verdict: "not-adopted" }).eligible, true);
+  assert.equal(retirementEligibility({ kind: "culprit", rung: "r3", consolidated: false, verdict: "broken" }).eligible, false);
+});
+
+test("verify(): a consolidated win retires (structural), a held r3 culprit retires (graduated)", () => {
+  // A consolidated win at r2 goes through the journal branch; a grounding event makes it read
+  // adopted. The r3 culprit's injected green check makes its verdict `held`. `consolidated` is a
+  // new promo() field threaded straight into the fixture record and read via isConsolidated.
+  const win = promo({ culpritId: "win:x", rung: "r2", verify: "journal-reinforcement",
+    consolidated: "2026-09-01", landed: "2026-08-01" });
+  const culprit = promo({ culpritId: "friction:c", rung: "r3", verify: "fixture.json", landed: "2026-08-01" });
+  const events = [ev("x", "2026-08-10T00:00:00Z", "r1")];
+  const out = verify([win, culprit], events, "0.14.0", { runCheck: () => ({ status: "ok", detail: null }) });
+  assert.deepEqual(out.candidates.retirement, [
+    { culpritId: "win:x", rung: "r2", reason: "consolidated win" },
+    { culpritId: "friction:c", rung: "r3", reason: "graduated to r3, held" },
+  ]);
 });
 
 test("r3: runCheck status unrunnable renders unmeasurable, never held", () => {

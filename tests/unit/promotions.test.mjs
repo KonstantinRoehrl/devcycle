@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   promoDir, readPromotions, recordPromotion, recordLifecycle, validatePromotion,
-  suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById,
+  suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById, consolidatePromotion,
 } from "../../scripts/promotions.mjs";
 import { verify } from "../../scripts/verification.mjs";
 
@@ -313,6 +313,60 @@ test("a bare culprit-id round-trips through record → read → verify and joins
   const row = scoreboard.find((s) => s.culpritId === "fix-misses-the-convention");
   assert.ok(row, "the bare-slug promotion must join its journal event, not be silently dropped");
   assert.equal(row.verdict, "recurred");
+});
+
+test("consolidatePromotion: sets the consolidated date and readPromotions reads it back", () => {
+  const root = repo();
+  recordPromotion(root, { title: "t", promotionType: "doc-edit", clusterSignature: "c",
+    filesTouched: ["a"], landed: "2026-09-01", culpritId: "win:x", rung: "r2",
+    verify: "journal-reinforcement" });
+  assert.equal(readPromotions(root)[0].consolidated, null);
+  const p = consolidatePromotion(root, "win:x", "2026-09-11");
+  assert.ok(p.endsWith(".md"));
+  assert.equal(readPromotions(root)[0].consolidated, "2026-09-11");
+  // Idempotent replace, not duplicate:
+  consolidatePromotion(root, "win:x", "2026-09-12");
+  assert.equal(readPromotions(root)[0].consolidated, "2026-09-12");
+});
+
+test("consolidatePromotion: rejects a bad date and an unknown culprit-id", () => {
+  const root = repo();
+  recordPromotion(root, { title: "t", promotionType: "doc-edit", clusterSignature: "c",
+    filesTouched: ["a"], landed: "2026-09-01", culpritId: "win:x", rung: "r2",
+    verify: "journal-reinforcement" });
+  assert.throws(() => consolidatePromotion(root, "win:x", "nope"), /invalid consolidated date/);
+  assert.throws(() => consolidatePromotion(root, "missing", "2026-09-11"), /no promotion record found/);
+});
+
+test("consolidatePromotion appends the consolidated line without altering any other byte (QC2, empty trailing field)", () => {
+  const root = repo();
+  // An empty aliases list makes the record's last field `- aliases: ` with a trailing space —
+  // exactly the shape a greedy trailing-whitespace strip would silently rewrite.
+  const path = recordPromotion(root, { title: "t", promotionType: "doc-edit", clusterSignature: "c",
+    filesTouched: ["a"], landed: "2026-09-01", culpritId: "win:x", rung: "r2",
+    verify: "journal-reinforcement", aliases: [] });
+  const before = readFileSync(path, "utf8");
+  assert.ok(before.endsWith("- aliases: \n"),
+    "precondition: an empty aliases list leaves `- aliases: ` (trailing space) as the last field");
+
+  consolidatePromotion(root, "win:x", "2026-09-11");
+  const after = readFileSync(path, "utf8");
+
+  const beforeLines = before.split("\n"); // trailing "" element, since the record ends with \n
+  const afterLines = after.split("\n");
+  // Exactly one line is added.
+  assert.equal(afterLines.length, beforeLines.length + 1, "consolidation must add exactly one line");
+  const tail = beforeLines.length - 1; // index of the trailing "" element in beforeLines
+  // Every pre-existing content line is byte-identical, trailing space and all.
+  for (let i = 0; i < tail; i++) {
+    assert.equal(afterLines[i], beforeLines[i], `pre-existing line ${i} must be byte-identical`);
+  }
+  // The only new line is the consolidated line, appended after the last field.
+  assert.equal(afterLines[tail], "- consolidated: 2026-09-11");
+  assert.equal(afterLines[tail + 1], "");
+  // Belt and braces: the previous field kept its trailing space.
+  assert.ok(after.includes("- aliases: \n"),
+    "the previous field's trailing space must survive consolidation");
 });
 
 test("findPromotionById resolves by culprit-id, then alias, then filename slug, and returns null when nothing matches", () => {

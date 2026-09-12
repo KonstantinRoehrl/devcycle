@@ -215,8 +215,13 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
    fresh candidates — this runs live. The rendered report's `## Verification candidates` section
    likewise surfaces this run's **graduation** (the `escalation` push) and **reinforcement**
    candidates, gated by the severity thresholds
-   `${CLAUDE_PLUGIN_ROOT}/references/reinforcement-policy.md` owns. A **retirement** candidate is a
-   `held` r1/r2 lesson past 10 runs or 90 days; it proposes deleting the line and writing a
+   `${CLAUDE_PLUGIN_ROOT}/references/reinforcement-policy.md` owns. Retirement is graduation-gated:
+   a **culprit** retirement candidate is a `held` **r3** lesson (a mechanical check now guards it),
+   a **win** retirement candidate is a **consolidated** win, and an ungraduated held lesson is
+   reported ineligible with the reason it has not graduated. A win folds into a playbook's default
+   flow or a scaffold once it has proven out; record that consolidation with
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --consolidate <culpritId>`, which is what makes
+   the win eligible to retire. A retirement candidate proposes deleting the line and writing a
    **retirement** lifecycle record. A
    **revert** candidate, read from "revert-candidates.json" in the fixed doctor directory (playbooks/profiling-sessions.md owns its resolution), proposes the undo
    *edit* and a **revert** lifecycle record — never `git revert`, since recorded `commit:` shas
