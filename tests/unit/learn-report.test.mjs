@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderLearnReport, allTimeRollup } from "../../scripts/learn-report.mjs";
+import { renderLearnReport, allTimeRollup, routingAdvisoriesSection } from "../../scripts/learn-report.mjs";
 
 const baseArgs = () => ({
   candidates: {
@@ -243,4 +243,104 @@ test("a priced win row renders its exact dollar figure", () => {
 test("the ledger section is omitted when no ledger is supplied", () => {
   const md = renderLearnReport(baseArgs());
   assert.doesNotMatch(md, /## Ledger/);
+});
+
+test("routingAdvisoriesSection: renders each state and never prints $0 for an unmeasurable figure", () => {
+  const cell = (model, dispatches, accepted, costPerAcceptedValue) => ({
+    requestKind: "feature", model, dispatches, accepted,
+    totalUSD: costPerAcceptedValue == null ? 0 : costPerAcceptedValue * accepted,
+    meanUSD: 1, costPerAccepted: costPerAcceptedValue,
+  });
+  const cheap = cell("claude-sonnet-5", 28, 22, 1.2);
+  const dear = cell("claude-opus-4-8", 41, 30, 4.46);
+  const text = routingAdvisoriesSection({
+    corpus: { joined: 396, withTask: 264, withKind: 279, withVerdict: 231, measuredUSD: 1046.8, unmeasurable: 1 },
+    exclusions: { unparseableTask: 132, unknownRequestKind: 117, missingTranscript: 1, noPricedTurns: 0, unpricedModel: 0, multiModel: 6, noVerdict: 33 },
+    cells: [cheap, dear],
+    classes: [{
+      requestKind: "feature", cheapest: "claude-sonnet-5",
+      comparisons: [
+        { model: "claude-sonnet-5", state: "no-comparator", interval: null, cell: cheap, comparator: null },
+        { model: "claude-opus-4-8", state: "premium-not-justified", cell: dear, comparator: cheap,
+          interval: { median: 3.72, low: 2.3, high: 5.74, draws: 20000 } },
+      ],
+    }],
+  });
+  assert.match(text, /premium-not-justified/);
+  assert.match(text, /3\.72/, "the ratio's median is cited");
+  assert.match(text, /2\.30.*5\.74/s, "the interval is cited alongside it");
+  assert.match(text, /41/, "the dispatch count behind the pricier cell is cited");
+  assert.match(text, /unparseable task attribution.*132/s, "every exclusion is counted");
+  assert.doesNotMatch(text, /\$0\.00\b/, "no figure in this fixture is zero");
+});
+
+// A transcript that exists but prices nothing is its own bucket (noPricedTurns), never folded
+// into missingTranscript, which states something untrue about the corpus (transcript-exists
+// dispatches are not missing-transcript dispatches).
+test("routingAdvisoriesSection: the no-priced-turns exclusion renders under its own label", () => {
+  const text = routingAdvisoriesSection({
+    corpus: { joined: 10, withTask: 10, withKind: 10, withVerdict: 10, measuredUSD: 5, unmeasurable: 0 },
+    exclusions: {
+      unparseableTask: 0, unknownRequestKind: 0, missingTranscript: 2, noPricedTurns: 4,
+      unpricedModel: 0, multiModel: 0, noVerdict: 0,
+    },
+    cells: [], classes: [],
+  });
+  assert.match(text, /^- no priced turns — 4$/m,
+    "transcript-exists-but-nothing-priceable gets its own labeled count");
+  assert.match(text, /^- missing transcript — 2$/m, "missingTranscript keeps its own distinct count");
+});
+
+test("routingAdvisoriesSection: an unresolved comparison names its interval, not an absence", () => {
+  const cheap = { requestKind: "refactor", model: "claude-sonnet-5", dispatches: 9, accepted: 7, totalUSD: 9, meanUSD: 1, costPerAccepted: 1.28 };
+  const dear = { requestKind: "refactor", model: "claude-opus-4-8", dispatches: 8, accepted: 4, totalUSD: 17, meanUSD: 2.1, costPerAccepted: 4.25 };
+  const text = routingAdvisoriesSection({
+    corpus: { joined: 17, withTask: 17, withKind: 17, withVerdict: 17, measuredUSD: 26, unmeasurable: 0 },
+    exclusions: { unparseableTask: 0, unknownRequestKind: 0, missingTranscript: 0, noPricedTurns: 0, unpricedModel: 0, multiModel: 0, noVerdict: 0 },
+    cells: [cheap, dear],
+    classes: [{ requestKind: "refactor", cheapest: "claude-sonnet-5", comparisons: [
+      { model: "claude-sonnet-5", state: "no-comparator", interval: null, cell: cheap, comparator: null },
+      { model: "claude-opus-4-8", state: "unresolved", cell: dear, comparator: cheap,
+        interval: { median: 1.66, low: 0.93, high: 2.91, draws: 20000 } },
+    ] }],
+  });
+  assert.match(text, /unresolved/);
+  assert.match(text, /0\.93.*2\.91/s, "an unresolved cell shows how far from a conclusion it sits");
+});
+
+test("routingAdvisoriesSection: a cell that accepted nothing reports unmeasurable, never $0", () => {
+  const cell = { requestKind: "docs", model: "claude-opus-5", dispatches: 3, accepted: 0, totalUSD: 7.5, meanUSD: 2.5, costPerAccepted: null };
+  const text = routingAdvisoriesSection({
+    corpus: { joined: 3, withTask: 3, withKind: 3, withVerdict: 3, measuredUSD: 7.5, unmeasurable: 0 },
+    exclusions: { unparseableTask: 0, unknownRequestKind: 0, missingTranscript: 0, noPricedTurns: 0, unpricedModel: 0, multiModel: 0, noVerdict: 0 },
+    cells: [cell],
+    classes: [{ requestKind: "docs", cheapest: "claude-opus-5", comparisons: [
+      { model: "claude-opus-5", state: "no-comparator", interval: null, cell, comparator: null },
+    ] }],
+  });
+  assert.match(text, /unmeasurable/, "no accepted task means no cost per accepted task");
+  assert.doesNotMatch(text, /\$0\.00/, "an unmeasurable cost per accepted task must not read as zero");
+});
+
+test("routingAdvisoriesSection: an empty corpus renders no zeros", () => {
+  const text = routingAdvisoriesSection({
+    corpus: { joined: 0, withTask: 0, withKind: 0, withVerdict: 0, measuredUSD: null, unmeasurable: 0 },
+    exclusions: { unparseableTask: 0, unknownRequestKind: 0, missingTranscript: 0, noPricedTurns: 0, unpricedModel: 0, multiModel: 0, noVerdict: 0 },
+    cells: [], classes: [],
+  });
+  assert.match(text, /no measurable dispatch/i);
+  assert.doesNotMatch(text, /\$0\.00/);
+});
+
+test("renderLearnReport: the section is spliced in only when advisories are supplied", () => {
+  assert.doesNotMatch(renderLearnReport(baseArgs()), /## Routing advisories/);
+  const withAdvisories = renderLearnReport({
+    ...baseArgs(),
+    routingAdvisories: {
+      corpus: { joined: 0, withTask: 0, withKind: 0, withVerdict: 0, measuredUSD: null, unmeasurable: 0 },
+      exclusions: { unparseableTask: 0, unknownRequestKind: 0, missingTranscript: 0, noPricedTurns: 0, unpricedModel: 0, multiModel: 0, noVerdict: 0 },
+      cells: [], classes: [],
+    },
+  });
+  assert.match(withAdvisories, /## Routing advisories/);
 });

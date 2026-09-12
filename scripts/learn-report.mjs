@@ -111,7 +111,70 @@ function ledgerSection(l) {
   ].join("\n");
 }
 
-export function renderLearnReport({ candidates, promotions, outcome = false, verification = null, budget = null, ledger = null }) {
+const times = (v) => `${v.toFixed(2)}x`;
+
+const EXCLUSION_LABELS = [
+  ["unparseableTask", "unparseable task attribution"],
+  ["unknownRequestKind", "unknown requestKind"],
+  ["missingTranscript", "missing transcript"],
+  ["noPricedTurns", "no priced turns"],
+  ["unpricedModel", "unpriceable turn model"],
+  ["multiModel", "multi-model subagent"],
+  ["noVerdict", "no round-1 verdict"],
+];
+
+// The routing advisory, as a report section and as the body of
+// docs/devcycle/routing-advisories.md. Advisory only: nothing dispatches on it. Routing changes
+// when a human reads this and sets a *Model knob, which references/config.md's resolution order
+// already treats as the one thing that beats the profile.
+export function routingAdvisoriesSection(a) {
+  const lines = [];
+  if (!a.cells.length) {
+    lines.push(
+      "No measurable dispatch reached a cell this run — every joined dispatch fell into an",
+      "exclusion below. No recommendation is made in either direction.",
+      "",
+    );
+  }
+  for (const klass of a.classes) {
+    lines.push(`### ${klass.requestKind}`, "");
+    lines.push(`Compared against the cheapest cell by measured mean cost per dispatch: \`${klass.cheapest}\`.`, "");
+    lines.push("| Model | Dispatches | Rework-free accepts | Cost / accepted task | Ratio vs. cheapest | Verdict |");
+    lines.push("| --- | --- | --- | --- | --- | --- |");
+    for (const c of klass.comparisons) {
+      const interval = c.interval
+        ? `${times(c.interval.median)} [${times(c.interval.low)}, ${times(c.interval.high)}]`
+        : "—";
+      lines.push(`| \`${c.model}\` | ${c.cell.dispatches} | ${c.cell.accepted} | ${usd(c.cell.costPerAccepted)} | ${interval} | ${c.state} |`);
+    }
+    lines.push("");
+  }
+
+  lines.push("### Corpus and exclusions", "");
+  lines.push(`Joined implementer dispatches: ${a.corpus.joined} · with a task number: ${a.corpus.withTask} · with a known requestKind: ${a.corpus.withKind} · with a round-1 verdict: ${a.corpus.withVerdict}.`);
+  lines.push(`Measured spend: ${usd(a.corpus.measuredUSD)}, of which ${a.corpus.unmeasurable} dispatch(es) could not be priced.`, "");
+  for (const [key, label] of EXCLUSION_LABELS) lines.push(`- ${label} — ${a.exclusions[key]}`);
+  lines.push("");
+
+  lines.push("### Confounds this advisory does not correct", "");
+  lines.push(
+    "- **Task selection.** The `auto` predicates in `references/config.md` § Model tiers chose each",
+    "  dispatch's model from task complexity, so pricier cells hold systematically harder and larger",
+    "  tasks. The measured ratio is not a causal efficiency claim about the models.",
+    "- **Multiplicity.** One comparison per cell against its class's cheapest, with the comparator",
+    "  chosen by cost after the data was seen. Each interval is per comparison, not family-wise.",
+    "- **Same-tier cells.** Two models that price identically differ here only in acceptance and",
+    "  token use. That comparison is reported, not suppressed.",
+    "- **Window.** The corpus is whatever the journal and transcripts hold, not a controlled trial;",
+    "  a cell's composition shifts as the repo's work shifts.",
+    "",
+    "Nothing reads this advisory. Routing changes only when a human sets a `*Model` knob via",
+    "`claude plugin install --config`.",
+  );
+  return lines.join("\n");
+}
+
+export function renderLearnReport({ candidates, promotions, outcome = false, verification = null, budget = null, ledger = null, routingAdvisories = null }) {
   const { corpus, checkpoint, attribution } = candidates;
   const cands = candidates.candidates ?? [];
   const roll = allTimeRollup(promotions ?? []);
@@ -157,6 +220,7 @@ export function renderLearnReport({ candidates, promotions, outcome = false, ver
       : []),
     "",
     ...(ledger ? ["## Ledger", "", ledgerSection(ledger), ""] : []),
+    ...(routingAdvisories ? ["## Routing advisories", "", routingAdvisoriesSection(routingAdvisories), ""] : []),
     "## Landed",
     "",
     landed.length ? landed.map(landedEntry).join("\n\n") : "(none this run)",
