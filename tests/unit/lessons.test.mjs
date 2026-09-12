@@ -9,6 +9,7 @@ import {
   readSection, renderLessons, planLanding,
   ALWAYS_LOADED_CEILING, budgetStatus,
   fileMatchesGlob, matchLessons, renderMatch, MATCH_CAP, lessonId,
+  WIN_VERIFY, lessonKind, isConsolidated, planConsolidation,
 } from "../../scripts/lessons.mjs";
 import { readFileSync } from "node:fs";
 
@@ -299,4 +300,27 @@ test("renderMatch([]) is the empty string (the Lessons: none fallback)", () => {
 test("renderMatch appends the pull hint verbatim", () => {
   const out = renderMatch([{ id: "novel:one", line: "- L1 [novel:one]", rank: 0 }]);
   assert.match(out, /- L1 \[novel:one\] → node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/dream\.mjs" --lesson novel:one/);
+});
+
+test("lessonKind: win iff verify is journal-reinforcement, else culprit", () => {
+  assert.equal(WIN_VERIFY, "journal-reinforcement");
+  assert.equal(lessonKind({ verify: "journal-reinforcement" }), "win");
+  assert.equal(lessonKind({ verify: "journal-recurrence" }), "culprit");
+  assert.equal(lessonKind({ verify: "scripts/x.test.mjs" }), "culprit");
+  assert.equal(lessonKind({}), "culprit");
+  assert.equal(lessonKind(null), "culprit");
+});
+
+test("isConsolidated: truthy consolidated field", () => {
+  assert.equal(isConsolidated({ consolidated: "2026-09-11" }), true);
+  assert.equal(isConsolidated({ consolidated: null }), false);
+  assert.equal(isConsolidated({}), false);
+});
+
+test("planConsolidation: only a not-yet-consolidated win may consolidate", () => {
+  assert.deepEqual(planConsolidation({ verify: "journal-reinforcement" }), { ok: true });
+  assert.deepEqual(planConsolidation({ verify: "journal-recurrence" }),
+    { ok: false, reason: "only a win-kind lesson can be consolidated" });
+  assert.deepEqual(planConsolidation({ verify: "journal-reinforcement", consolidated: "2026-09-11" }),
+    { ok: false, reason: "already consolidated" });
 });
