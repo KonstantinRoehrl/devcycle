@@ -3124,3 +3124,17 @@ test("cli: --check-observations accepts a branch-review-grounded win", () => {
   assert.equal(r.status, 0);
   assert.equal(r.stdout.trim(), "observations: ok");
 });
+
+// The artifact body is a standalone document, not a slice of the learn report: the coordinator
+// redirects this stdout straight into docs/devcycle/routing-advisories.md, so anything else the
+// report prints (the ledger, the candidates) would land in that file too.
+test("--routing-advisories: prints only the artifact body, from a fixture corpus", () => {
+  const { root, projects, runsDir } = corpusWithJournal({ events: [] });
+  const r = run(["--routing-advisories"], root, {
+    CLAUDE_DREAM_PROJECTS: projects,
+    DEVCYCLE_RUNS_DIR: runsDir,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^# Routing advisories/, "the artifact body starts with its own H1");
+  assert.doesNotMatch(r.stdout, /## Ledger/, "the artifact carries the section alone, not the report");
+});
