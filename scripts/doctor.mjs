@@ -136,7 +136,7 @@ export function extractPluginVersion(record) {
 
 // Records Claude Code writes for its own placeholders (session-limit notices and the like).
 // Every counter on them is zero, so they are skipped outright rather than reported unpriced.
-const SYNTHETIC_MODEL = "<synthetic>";
+export const SYNTHETIC_MODEL = "<synthetic>";
 
 // Tool calls that dispatch a subagent; a call with no explicit model inherits the caller's.
 const DISPATCH_TOOLS = new Set(["Task", "Agent"]);
