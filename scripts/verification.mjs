@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 import { runsObserved, isIso } from "./journal.mjs";
 import { cmpSemver, SEMVER_RE } from "./semver.mjs";
 import { readPolicy, severityPercentile, derivedSeverityThreshold } from "./reinforcement-policy.mjs";
+import { lessonKind, isConsolidated } from "./lessons.mjs";
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const RETIRE_RUNS = 10, RETIRE_DAYS = 90, DAY_MS = 86_400_000;
 const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
 
 export function installedVersion() {
@@ -127,8 +127,23 @@ export function classifyCandidate({ verify, verdict, rung, recurrences, runsObse
   return null;
 }
 
+// A win retires when it is consolidated (folded into a playbook's default flow / a scaffold) —
+// structural enforcement, verdict-independent. A culprit retires only when it is HELD and
+// graduated to r3 (a mechanical check now guards it; a red check must not retire). An ungraduated
+// lesson is ineligible with a stated reason. Sibling of classifyCandidate (QC5).
+export function retirementEligibility({ kind, rung, consolidated, verdict }) {
+  if (kind === "win")
+    return consolidated
+      ? { eligible: true, reason: "consolidated win" }
+      : { eligible: false, reason: "not consolidated" };
+  if (verdict !== "held") return { eligible: false, reason: `verdict is ${verdict}, not held` };
+  return rung === "r3"
+    ? { eligible: true, reason: "graduated to r3, held" }
+    : { eligible: false, reason: `held but not graduated to r3 (at ${rung})` };
+}
+
 export function verify(promotions, journalEvents, installed, opts = {}) {
-  const { now = Date.now(), runCheck = skipRunCheck, vocab = loadVocab(), root = process.cwd(),
+  const { runCheck = skipRunCheck, vocab = loadVocab(), root = process.cwd(),
     timeoutMs = VERIFY_TIMEOUT_MS, maxBuffer = VERIFY_MAX_BUFFER,
     releaseDates: relDates = loadReleaseDates(),
     policy = readPolicy(), costByKey = {}, profile = "standard" } = opts;
@@ -158,6 +173,8 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
       // in the report; a held/broken row carries the bare path. See #54 and audit F1/F48.
       const detail = reason ? `${p.verify} (${reason})` : p.verify;
       scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: 0, recurrences: 0, detail });
+      const elig = retirementEligibility({ kind: lessonKind(p), rung: p.rung, consolidated: isConsolidated(p), verdict });
+      if (elig.eligible) retirement.push({ culpritId: p.culpritId, rung: p.rung, reason: elig.reason });
       continue;
     }
     const after = eventsAfter(journalEvents, p.landed);
@@ -176,10 +193,8 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
       { verify: p.verify, verdict, rung: p.rung, recurrences, runsObserved: runs },
       policy, { costPerOccurrence, severityCutoff });
     if (decision) byList[decision.list].push({ culpritId: p.culpritId, rung: p.rung, reason: decision.reason });
-    if (verdict === "held" && (p.rung === "r1" || p.rung === "r2")
-        && (runs >= RETIRE_RUNS || now - Date.parse(p.landed) >= RETIRE_DAYS * DAY_MS)) {
-      retirement.push({ culpritId: p.culpritId, rung: p.rung, reason: `held ${runs} runs since ${p.landed}` });
-    }
+    const elig = retirementEligibility({ kind: lessonKind(p), rung: p.rung, consolidated: isConsolidated(p), verdict });
+    if (elig.eligible) retirement.push({ culpritId: p.culpritId, rung: p.rung, reason: elig.reason });
   }
   const resolvedIn = vocab.filter((e) => e && e["resolved-in"]).map((e) => {
     // The journal stores a culprit as a bare culprits.json slug or as novel:<slug>
