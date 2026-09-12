@@ -13,8 +13,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, inWindow, summarizeSession, readRecords, readRunRecords } from "./doctor.mjs";
 import { aggregateKeys, culpritCostByKey, periodLedger } from "./impact-ledger.mjs";
 import { journalEvents, eventsByCulprit } from "./journal.mjs";
-import { readPromotions, recordPromotion, recordLifecycle, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
-import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding, MATCH_CAP } from "./lessons.mjs";
+import { readPromotions, recordPromotion, recordLifecycle, consolidatePromotion, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
+import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding, planConsolidation, MATCH_CAP } from "./lessons.mjs";
 import { readMaintenanceFindings, matchMaintenanceFindings, renderMaintenanceMatches } from "./maintenance-findings.mjs";
 import { parseFileList } from "./task-files.mjs";
 import { parseFlags, requireCount } from "./cli-flags.mjs";
@@ -811,7 +811,7 @@ function main() {
   // than pairwise, which cost five lines per flag added.
   const SUBCOMMANDS = [
     "--plan", "--commit-checkpoint", "--check-suppressed", "--extract", "--check-observations",
-    "--record-promotion", "--record-lifecycle", "--check-recurrence", "--journal-events", "--legacy-similar",
+    "--record-promotion", "--record-lifecycle", "--consolidate", "--check-recurrence", "--journal-events", "--legacy-similar",
     "--novel-slugs", "--lessons", "--render-report", "--match", "--lesson",
     "--observations-deduped", "--plan-landing", "--staleness",
   ];
@@ -916,6 +916,27 @@ function main() {
       const arg = argv[lifecycleIdx + 1];
       if (!arg) throw new Error("--record-lifecycle requires a JSON record argument");
       console.log(recordLifecycle(root, JSON.parse(arg)));
+    } catch (e) {
+      console.error(`dream: ${e.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  // A win's graduation transition: folding it into a playbook's default flow or a scaffold marks
+  // its promotion record consolidated (a later human act, so it mutates the record on disk). Legal
+  // only for a not-yet-consolidated win; planConsolidation owns that rule. Mirrors
+  // --record-lifecycle's guard/parse/print shape.
+  const consolidateIdx = argv.indexOf("--consolidate");
+  if (consolidateIdx !== -1) {
+    try {
+      const culpritId = argv[consolidateIdx + 1];
+      if (!culpritId) throw new Error("--consolidate requires a culprit-id argument");
+      const rec = findPromotionById(readPromotions(root), culpritId);
+      if (!rec) throw new Error(`no promotion record found for culprit-id "${culpritId}"`);
+      const decision = planConsolidation(rec);
+      if (!decision.ok) throw new Error(decision.reason);
+      console.log(consolidatePromotion(root, culpritId, new Date().toISOString().slice(0, 10)));
     } catch (e) {
       console.error(`dream: ${e.message}`);
       process.exit(1);
@@ -1229,7 +1250,7 @@ function main() {
   console.error(
     "usage: dream.mjs --plan [--cap N] [--include-oversized] | --extract <session-id> [--include-oversized] | " +
       "--commit-checkpoint <iso> | --record-promotion <json> | " +
-      "--record-lifecycle <json> | " +
+      "--record-lifecycle <json> | --consolidate <culprit-id> | " +
       "--check-recurrence [--run-checks] | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
       "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --observations-deduped | --lessons <stage> | " +
       "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
