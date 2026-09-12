@@ -8,7 +8,8 @@ import { classifyCandidate, verify } from "../../scripts/verification.mjs";
 const GOOD = `<!-- reinforcement-policy:begin -->
 \`\`\`json
 { "severityPercentileByProfile": { "lean": 70, "standard": 60, "thorough": 50 },
-  "culpritRecurrenceBar": 2, "winRecurrenceBar": 3, "graduationRuns": 3, "minPricedKeysForPercentile": 3 }
+  "culpritRecurrenceBar": 2, "winRecurrenceBar": 3, "graduationRuns": 3, "minPricedKeysForPercentile": 3,
+  "routingAdvisoryConfidence": 0.95, "routingAdvisoryResamples": 20000 }
 \`\`\`
 <!-- reinforcement-policy:end -->`;
 
@@ -23,6 +24,27 @@ test("parsePolicy: throws on each invariant", () => {
   assert.throws(() => parsePolicy(GOOD.replace('"culpritRecurrenceBar": 2', '"culpritRecurrenceBar": 1.5')), /culpritRecurrenceBar/);
   assert.throws(() => parsePolicy(GOOD.replace('"lean": 70', '"lean": 100')), /\(0,100\)/);
   assert.throws(() => parsePolicy(GOOD.replace('"winRecurrenceBar": 3', '"winRecurrenceBar": 2')), /strictly greater/);
+});
+
+test("parsePolicy: routing advisory fields are read and range-checked", () => {
+  const block = (extra) => `<!-- reinforcement-policy:begin -->\n\`\`\`json\n${JSON.stringify({
+    severityPercentileByProfile: { lean: 70, standard: 60, thorough: 50 },
+    culpritRecurrenceBar: 2, winRecurrenceBar: 3, graduationRuns: 3, minPricedKeysForPercentile: 3,
+    routingAdvisoryConfidence: 0.95, routingAdvisoryResamples: 20000, ...extra,
+  }, null, 2)}\n\`\`\`\n<!-- reinforcement-policy:end -->\n`;
+
+  const ok = parsePolicy(block({}));
+  assert.equal(ok.routingAdvisoryConfidence, 0.95);
+  assert.equal(ok.routingAdvisoryResamples, 20000);
+
+  assert.throws(() => parsePolicy(block({ routingAdvisoryConfidence: 1 })),
+    /routingAdvisoryConfidence must be in \(0,1\)/);
+  assert.throws(() => parsePolicy(block({ routingAdvisoryConfidence: 0 })),
+    /routingAdvisoryConfidence must be in \(0,1\)/);
+  assert.throws(() => parsePolicy(block({ routingAdvisoryResamples: 0 })),
+    /routingAdvisoryResamples must be an integer >= 1/);
+  assert.throws(() => parsePolicy(block({ routingAdvisoryResamples: 1.5 })),
+    /routingAdvisoryResamples must be an integer >= 1/);
 });
 
 test("readPolicy: the shipped file parses and holds the asymmetry", () => {

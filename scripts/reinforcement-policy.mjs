@@ -33,6 +33,14 @@ export function parsePolicy(text) {
   }
   if (!(policy.winRecurrenceBar > policy.culpritRecurrenceBar))
     throw new Error(`reinforcement-policy: winRecurrenceBar (${policy.winRecurrenceBar}) must be strictly greater than culpritRecurrenceBar (${policy.culpritRecurrenceBar})`);
+  // Two conventional statistical settings, not sample-size thresholds: the confidence level the
+  // routing-advisory bootstrap reports its interval at, and the resample count that fixes that
+  // interval's own precision. Checked the way their neighbours are.
+  const conf = policy.routingAdvisoryConfidence;
+  if (!Number.isFinite(conf) || conf <= 0 || conf >= 1)
+    throw new Error(`reinforcement-policy: routingAdvisoryConfidence must be in (0,1), got ${JSON.stringify(conf)}`);
+  if (!Number.isInteger(policy.routingAdvisoryResamples) || policy.routingAdvisoryResamples < 1)
+    throw new Error(`reinforcement-policy: routingAdvisoryResamples must be an integer >= 1, got ${JSON.stringify(policy.routingAdvisoryResamples)}`);
   return policy;
 }
 
