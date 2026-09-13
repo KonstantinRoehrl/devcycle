@@ -3,11 +3,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makePluginFixture as makeBaseFixture, writeInto, runValidate, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
-import { lessonsTrackingErrors, docsSubdirTrackingErrors, briefPluginRootErrors } from "../../scripts/validate.mjs";
+import { lessonsTrackingErrors, docsSubdirTrackingErrors } from "../../scripts/validate.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
@@ -1304,79 +1304,83 @@ test("lessonsTrackingErrors still fires when the store is tracked AND re-ignored
   assert.ok(lessonsTrackingErrors(root).length >= 1);
 });
 
-// --- check 25: a re-included docs/ subdirectory must keep its reports trackable ---
+// --- check 25: a docs/ file this repo tracks must stay visible to its own ignore rules ---
 
-// A tree whose only content is the .gitignore the rule reads.
-const gitignoreTree = (body) => {
-  const root = makeTempDir("docs-subdir-");
+// Ignore rules in the shape references/config.md § Doc tracking asks for when an artifact's row
+// reads `local` in every column: the directory is re-included so it is visible, its contents are
+// re-ignored so no run's record is ever committed.
+const LOCAL_AUDITS_IGNORE = "docs/*\n!docs/*.md\n!docs/audits/\ndocs/audits/*\n";
+
+// A throwaway repo carrying `tracked` under the given .gitignore body. The files are staged
+// before the ignore rules are written, the way a tracked file predates the pattern that hides it.
+const trackedDocsRepo = (body, tracked = ["docs/audits/report.md"]) => {
+  const root = makeTempDir("docs-tracking-");
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  for (const p of tracked) {
+    mkdirSync(join(root, dirname(p)), { recursive: true });
+    writeFileSync(join(root, p), "# Report\n");
+    execFileSync("git", ["add", p], { cwd: root });
+  }
   writeFileSync(join(root, ".gitignore"), body);
   return root;
 };
 
-test("docsSubdirTrackingErrors flags a re-included docs subdirectory whose contents are re-ignored, and passes once *.md is allowlisted", () => {
-  const trapped = gitignoreTree("docs/*\n!docs/*.md\n!docs/x/\ndocs/x/*\n");
-  const errs = docsSubdirTrackingErrors(trapped);
+test("docsSubdirTrackingErrors flags a tracked docs file the ignore rules hide, and passes once it is allowlisted", () => {
+  const errs = docsSubdirTrackingErrors(trackedDocsRepo(LOCAL_AUDITS_IGNORE));
   assert.equal(errs.length, 1, `expected one error, got ${JSON.stringify(errs)}`);
-  assert.match(errs[0], /docs\/x/);
-  assert.match(errs[0], /docTrackingPolicy/);
+  assert.match(errs[0], /docs\/audits\/report\.md/);
+  assert.match(errs[0], /config\.md/);
 
-  const allowlisted = gitignoreTree("docs/*\n!docs/*.md\n!docs/x/\ndocs/x/*\n!docs/x/*.md\n");
+  const allowlisted = trackedDocsRepo(LOCAL_AUDITS_IGNORE + "!docs/audits/report.md\n");
   assert.deepEqual(docsSubdirTrackingErrors(allowlisted), []);
 });
 
-test("docsSubdirTrackingErrors ignores a subdirectory that is never re-ignored, and a tree with no .gitignore", () => {
-  assert.deepEqual(docsSubdirTrackingErrors(gitignoreTree("docs/*\n!docs/*.md\n!docs/x/\n")), []);
-  assert.deepEqual(docsSubdirTrackingErrors(makeTempDir("no-gitignore-")), []);
+// The local-at-every-depth surface itself is not a defect: with nothing tracked inside it, a
+// re-included-then-re-ignored directory is exactly what that table's `local` cells call for.
+test("docsSubdirTrackingErrors leaves a deliberately local docs surface alone", () => {
+  assert.deepEqual(docsSubdirTrackingErrors(trackedDocsRepo(LOCAL_AUDITS_IGNORE, [])), []);
 });
 
-test("docsSubdirTrackingErrors: the repo's own .gitignore keeps every re-included docs subdirectory trackable", () => {
+// Asking git which tracked paths it would ignore covers every way to hide one, including the
+// three a literal `docs/<sub>/*` match misses — and an excluded directory is the worse trap,
+// since no `!` line can re-open anything inside it.
+test("docsSubdirTrackingErrors catches every ignore shape that hides a tracked docs file", () => {
+  for (const shape of ["docs/audits/", "docs/audits", "docs/audits/**"]) {
+    const errs = docsSubdirTrackingErrors(trackedDocsRepo(`docs/*\n!docs/*.md\n!docs/audits/\n${shape}\n`));
+    assert.equal(errs.length, 1, `${shape}: expected one error, got ${JSON.stringify(errs)}`);
+  }
+});
+
+test("docsSubdirTrackingErrors ignores a tree git cannot answer for", () => {
+  assert.deepEqual(docsSubdirTrackingErrors(makeTempDir("no-repo-")), []);
+});
+
+test("docsSubdirTrackingErrors: every docs file this repo tracks stays un-ignored", () => {
   assert.deepEqual(docsSubdirTrackingErrors(REPO_ROOT), []);
 });
 
-test("check 25 is wired into validate: a trapped docs subdirectory fails the run", () => {
-  const dir = makePluginFixture();
-  writeInto(dir, ".gitignore", "docs/*\n!docs/*.md\n!docs/audits/\ndocs/audits/*\n");
-  failsWith(runValidate(dir), /docs\/audits/, /docTrackingPolicy/);
-});
-
-// --- check 26: a brief template reaches a plugin script through $(devcycle-root) ---
-
-// A playbook whose brief-template fence tells the implementer to run a plugin script.
-const briefTemplatePlaybook = (root) =>
-  "## Per-task cycle\n\n1. **Slice the brief**, carrying the task's files and its evidence class:\n\n" +
-  "```markdown\n# Brief — Task <n>\n\n**Files:**\n- Modify: `<path>`\n\n**Evidence:** red-green\n\n" +
-  `Run \`node "${root}/scripts/dream.mjs" --match\` first.\n` +
-  "```\n";
-
-test("briefPluginRootErrors flags a literal ${CLAUDE_PLUGIN_ROOT} in a brief template, and passes on $(devcycle-root)", () => {
-  const dir = makePluginFixture();
-  playbook(dir, briefTemplatePlaybook("${CLAUDE_PLUGIN_ROOT}"));
-  const errs = briefPluginRootErrors(dir);
-  assert.equal(errs.length, 1, `expected one error, got ${JSON.stringify(errs)}`);
-  assert.match(errs[0], /playbooks\/demoing-things\.md/);
-  assert.match(errs[0], /devcycle-root/);
-
-  playbook(dir, briefTemplatePlaybook("$(devcycle-root)"));
-  assert.deepEqual(briefPluginRootErrors(dir), []);
-});
-
-test("briefPluginRootErrors leaves ${CLAUDE_PLUGIN_ROOT} outside a brief template alone", () => {
-  const dir = makePluginFixture();
-  // The coordinator's own command, not a brief's: the token is substituted before it is read.
-  playbook(
-    dir,
-    '## Per-task cycle\n\n1. **Read the lessons.**\n\n```bash\nnode "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match\n```\n'
+// The other half of the same agreement, and the reason the check cannot demand a `*.md`
+// allowlist: the audit-report row reads `local` in every column, so a report written here must
+// stay ignored — only the disposition register docs/decisions/README.md cites is allowlisted.
+test("this repo's .gitignore keeps a new audit report local, as the doc-tracking table requires", () => {
+  const res = spawnSync("git", ["check-ignore", "--no-index", "-q", "docs/audits/2026-01-01-fixture.md"], {
+    cwd: REPO_ROOT,
+  });
+  assert.equal(
+    res.status,
+    0,
+    "a new docs/audits/ report must stay ignored — references/config.md § Doc tracking keeps audit reports local at every policy depth"
   );
-  assert.deepEqual(briefPluginRootErrors(dir), []);
 });
 
-test("check 26 is wired into validate: a brief template naming ${CLAUDE_PLUGIN_ROOT} fails the run", () => {
+test("check 25 is wired into validate: a tracked docs file the ignore rules hide fails the run", () => {
   const dir = makePluginFixture();
-  // The plugin-path check reads the same token, so the fixture ships the script the template
-  // names — the run then fails on check 26 alone.
-  writeInto(dir, "scripts/dream.mjs", "// Fixture script.\n");
-  playbook(dir, briefTemplatePlaybook("${CLAUDE_PLUGIN_ROOT}"));
-  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /devcycle-root/);
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  writeInto(dir, "docs/audits/report.md", "# Report\n");
+  execFileSync("git", ["add", "docs/audits/report.md"], { cwd: dir });
+  // `!docs/devcycle/` keeps the learn-store guard quiet, so check 25 is the one thing broken here.
+  writeInto(dir, ".gitignore", "docs/*\n!docs/*.md\n!docs/devcycle/\n!docs/audits/\ndocs/audits/*\n");
+  failsWith(runValidate(dir), /docs\/audits\/report\.md/, /config\.md/);
 });
 
 // --- check 20: a read-only-mandate agent must disclaim commit and push ---

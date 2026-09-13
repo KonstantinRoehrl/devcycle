@@ -10,10 +10,11 @@ graphify-out/
 # Everything under docs/ is ignored and each tracked surface is re-included by name, so a new
 # scaffolding directory is ignored by default and a new tracked doc is a deliberate line — the
 # inverse of naming each stale directory individually and missing the next one.
-# Audit reports stay trackable as markdown — re-including docs/audits/ and then ignoring everything
-# inside it made every report invisible to git status, so a run's own record could never be
-# committed. docs/audits/* keeps stray non-markdown artifacts out; !docs/audits/*.md carries the
-# reports themselves. scripts/validate.mjs check 25 enforces that pairing.
+# Audit reports are one-run records of this repo on one machine: written locally, never shipped to
+# installers — the `local` cell in every column of references/config.md § Doc tracking, which owns
+# that call. docs/audits/ is re-included so the directory is visible and docs/audits/* keeps its
+# contents out of every commit. The v0.12 disposition register is a closure ledger
+# docs/decisions/README.md cites, so it is the one exception.
 docs/*
 !docs/*.md
 !docs/comparisons/
@@ -26,7 +27,7 @@ docs/*
 !docs/pipeline/
 !docs/playbooks/
 docs/audits/*
-!docs/audits/*.md
+!docs/audits/2026-08-06-disposition-register.md
 # Routing advisories are one-run records of this repo's own dispatch costs: written locally, never
 # shipped to installers. Other repos do commit their copy — that is the `commit` cell in
 # references/config.md § Doc tracking, which already scopes every such cell to what the host repo's

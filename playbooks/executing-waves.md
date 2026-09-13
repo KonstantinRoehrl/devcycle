@@ -73,8 +73,8 @@ file conflicts these invariants already preserve.)
    - **Name plugin scripts through the shim:** a brief that names a plugin script must write it as
      `$(devcycle-root)/scripts/<name>.mjs`, never as a literal `${CLAUDE_PLUGIN_ROOT}` path, because
      that token is substituted when a playbook is rendered into a prompt and expands to the empty
-     string in the shell the implementer actually runs the command in. `scripts/validate.mjs` check 26
-     enforces this on a sliced brief's fenced fields.
+     string in the shell the implementer actually runs the command in. No check covers this: a sliced
+     brief is run scratch, written per dispatch, so the substitution is yours to make here.
 3. **Dispatch devcycle:implementer** with that brief only, never accumulated session history or other
    tasks' reports, on the model `references/config.md` resolves. The dispatch prompt must NEVER
    instruct the implementer to commit, stage, or push. Ledger `event=dispatched`. It returns the
