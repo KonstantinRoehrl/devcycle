@@ -1,0 +1,21 @@
+#!/bin/sh
+# Prints this plugin's installed root.
+#
+# Claude Code adds <plugin>/bin to PATH unconditionally — the entry is present even when the
+# directory is not — so shipping this file makes the root resolvable from ANY shell, including a
+# dispatched subagent's, with no environment plumbing. ${CLAUDE_PLUGIN_ROOT} cannot be used for
+# this: it is substituted when a playbook is rendered into a prompt and is empty in every shell,
+# so text carrying it verbatim into a command expands to /scripts/... and fails.
+set -eu
+
+self=$0
+# Resolve symlinks by hand: BSD readlink (macOS) has no -f.
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname "$self")/$link ;;
+  esac
+done
+
+cd "$(dirname "$self")/.." && pwd
