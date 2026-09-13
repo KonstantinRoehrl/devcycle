@@ -389,7 +389,7 @@ test("a session with no run record still attributes, labelled forward-filled", (
   assert.strictEqual(attributeFromRecord(turns, null), null);
 });
 
-// M3: dispatch.agentId is never populated by any writer, so a per-agentId turn can never
+// M3: attributeFromRecord matches by time window alone, so a per-agentId turn can never
 // resolve to a specific dispatch by that field — updated from this test's pre-M3 assertion
 // that overlapping concurrent dispatches were separated by agentId matching (they no longer
 // are; that branch was dead code, per Step 7 of task 46).

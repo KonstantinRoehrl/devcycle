@@ -12,7 +12,8 @@ verdict, not a script's.
 Beyond building the change, devcycle closes the loop around a pull request: it reads a PR's
 review comments and reconciles them into the right fixes and consented replies. And it
 benchmarks its own runs and learns from past sessions, its learning report carrying a per-period
-ledger that nets win savings against culprit cost — so the pipeline gets better the more you use
+ledger that nets win savings against culprit cost, and a routing advisory that measures what each
+model actually cost per accepted task — so the pipeline gets better the more you use
 it.
 
 Policy — what it may do with git, which models it runs, how deep reviews go — is

@@ -543,7 +543,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         }
 
         // Rule 2 (§10.5): the schema declares no field the writing instructions cannot produce —
-        // the same reason stage.path and dispatch.agentId were removed rather than half-wired.
+        // the same reason stage.path was removed rather than half-wired.
         // A field is "producible" when some counted-surface file's prose names it as a
         // run-record.mjs append/new argument. Most fields pass through run-record.mjs's generic
         // append loop unrenamed (camelCase flag === camelCase key), so `--<field>` is the right

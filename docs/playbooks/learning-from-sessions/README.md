@@ -39,6 +39,13 @@ rung — r3 mechanical check, r2 lessons-digest line, r1 always-loaded prose (on
 justification), or r0 memory — records the promotion, and offers to commit the freshly written
 output before re-rendering the report in outcome mode and rewriting the run's own checkpoint.
 
+The run also writes `docs/devcycle/routing-advisories.md`: for each `(requestKind, model)` cell it
+compares measured cost per rework-free accepted task against the class's cheapest cell, by
+resampling whole dispatches, and reports `premium-justified`, `premium-not-justified`,
+`unresolved`, or `no-comparator`. There is no sample-size floor — a thin cell produces an interval
+that spans 1.0, or none at all, and says so. The artifact is advisory: nothing in the pipeline
+reads it, and routing changes only when you set a `*Model` knob.
+
 ## How it fits
 - Up: [the pipeline](../../pipeline/README.md) — devcycle's guided cycle; `learn` sits outside it
   as a standalone entry point.

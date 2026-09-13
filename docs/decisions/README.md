@@ -414,6 +414,10 @@ unchanged — just not per field.
 **Supersedes:** Nothing reversed for the kind-level check (unchanged); this narrows Task 37's own
 rule 2 before it ever shipped un-scoped, and extends Task 36's dead-field-removal precedent to a
 fourth field pair found during Task 37's real-tree verification.
+**Amended 2026-09-13.** The `dispatch.agentId` half of this removal is reversed: the field is
+declared in `tests/fixtures/run-record.schema.json`, exercised by the golden fixture, and written
+by step 4 of `playbooks/executing-waves.md`, so a dispatch record now names the subagent transcript
+a cost join prices it from. `dispatch.toolCalls` and `stage.path` stay removed.
 
 ## 2026-08-08 — Surface accounting after cycle 2 (block E)
 
