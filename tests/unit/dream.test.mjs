@@ -3124,3 +3124,29 @@ test("cli: --check-observations accepts a branch-review-grounded win", () => {
   assert.equal(r.status, 0);
   assert.equal(r.stdout.trim(), "observations: ok");
 });
+
+// The artifact body is a standalone document, not a slice of the learn report: the coordinator
+// redirects this stdout straight into docs/devcycle/routing-advisories.md, so anything else the
+// report prints (the ledger, the candidates) would land in that file too.
+test("--routing-advisories: prints only the artifact body, from a fixture corpus", () => {
+  const { root, projects, runsDir } = corpusWithJournal({ events: [] });
+  const r = run(["--routing-advisories"], root, {
+    CLAUDE_DREAM_PROJECTS: projects,
+    DEVCYCLE_RUNS_DIR: runsDir,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^# Routing advisories/, "the artifact body starts with its own H1");
+  assert.doesNotMatch(r.stdout, /## Ledger/, "the artifact carries the section alone, not the report");
+});
+
+// main()'s if-chain resolves by program order, so a combined invocation would run whichever
+// handler is written first and drop the other's output entirely — read by a caller parsing for
+// that output's key, the omission reads as a confident wrong answer.
+test("--routing-advisories cannot be combined with another subcommand", () => {
+  const res = run(["--routing-advisories", "--staleness"]);
+  assert.equal(res.status, 1, "combining two subcommands must exit 1");
+  // The message enumerates the offending flags in SUBCOMMANDS order rather than argv order,
+  // which is the same reason the guard has to exist: the handler chain resolves by program
+  // order too, so the order they were typed in never decides which one runs.
+  assert.match(res.stderr, /--staleness and --routing-advisories cannot be combined/);
+});

@@ -543,7 +543,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         }
 
         // Rule 2 (§10.5): the schema declares no field the writing instructions cannot produce —
-        // the same reason stage.path and dispatch.agentId were removed rather than half-wired.
+        // the same reason stage.path was removed rather than half-wired.
         // A field is "producible" when some counted-surface file's prose names it as a
         // run-record.mjs append/new argument. Most fields pass through run-record.mjs's generic
         // append loop unrenamed (camelCase flag === camelCase key), so `--<field>` is the right
@@ -1032,7 +1032,10 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
 
   // 24. The shipped reinforcement policy parses and holds its invariants (mirrors the
   //     observes/prevents gate): its machine block is present, each percentile sits inside
-  //     (0,100), and the win bar stays strictly above the culprit bar. Guarded by existsSync the
+  //     (0,100), the win bar stays strictly above the culprit bar, and every count field —
+  //     including the routing advisory's confidence, resample count and comparator floor — holds
+  //     its range, so a floor of 0 or a missing field fails here rather than degrading a shipped
+  //     advisory into one a two-row cell decides. Guarded by existsSync the
   //     same way checks 12 and 13 guard their declarations — a fixture tree that ships no policy
   //     file is not forced to, while the real plugin always ships one and the malformed-fixture
   //     test writes its own to exercise this check.

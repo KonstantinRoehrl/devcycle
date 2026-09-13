@@ -25,3 +25,8 @@ docs/*
 !docs/playbooks/
 docs/audits/*
 !docs/audits/2026-08-06-disposition-register.md
+# Routing advisories are one-run records of this repo's own dispatch costs: written locally, never
+# shipped to installers. Other repos do commit their copy — that is the `commit` cell in
+# references/config.md § Doc tracking, which already scopes every such cell to what the host repo's
+# own ignore rules allow, and this repo's answer is no.
+docs/devcycle/routing-advisories.md

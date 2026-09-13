@@ -39,6 +39,23 @@ rung — r3 mechanical check, r2 lessons-digest line, r1 always-loaded prose (on
 justification), or r0 memory — records the promotion, and offers to commit the freshly written
 output before re-rendering the report in outcome mode and rewriting the run's own checkpoint.
 
+The run also writes `docs/devcycle/routing-advisories.md`: for each `(requestKind, model)` cell it
+compares measured cost per rework-free accepted task against the class's cheapest cell, by
+resampling whole dispatches, and reports `premium-justified`, `premium-not-justified`,
+`unresolved`, `no-accepts` (the cell spent money and accepted nothing, so no cost per accepted task
+exists), `baseline` (the cell the others are compared against), or `no-comparator`. A cell may only
+serve as the comparator once it holds `routingAdvisoryComparatorFloor` dispatches
+(`references/reinforcement-policy.md`); a thinner cell is still reported and still compared, just
+never as the denominator. Because the comparator is the cheapest *eligible* cell, a thin cell can
+be cheaper than it — no premium is paid there, so those rows report `costs-less-per-accepted` (the
+route-down hint: cheaper per dispatch and cheaper per accepted task) or `costs-more-per-accepted`
+(the cheaper price did not survive its acceptance rate) instead of a premium verdict. The premium
+words are reachable only from a cell that measurably costs more per dispatch than its
+comparator. The compared cell has no floor — a thin one produces an interval that
+spans 1.0, or none at all, and says so. Every transcript that joined to no run, every exclusion,
+and every resample the bootstrap discarded is counted in the artifact. It is advisory: nothing in
+the pipeline reads it, and routing changes only when you set a `*Model` knob.
+
 ## How it fits
 - Up: [the pipeline](../../pipeline/README.md) — devcycle's guided cycle; `learn` sits outside it
   as a standalone entry point.

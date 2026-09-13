@@ -19,7 +19,10 @@ import { readMaintenanceFindings, matchMaintenanceFindings, renderMaintenanceMat
 import { parseFileList } from "./task-files.mjs";
 import { parseFlags, requireCount } from "./cli-flags.mjs";
 import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
-import { renderLearnReport } from "./learn-report.mjs";
+import { renderLearnReport, routingAdvisoriesSection } from "./learn-report.mjs";
+import { pricedDispatches } from "./dispatch-cost.mjs";
+import { routingAdvisories } from "./routing-advisories.mjs";
+import { readPolicy } from "./reinforcement-policy.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { fieldText } from "./md-field.mjs";
 import { gitToplevel, worktreeRoots } from "./git-identity.mjs";
@@ -692,6 +695,22 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
 // CLAUDE_DOCTOR_PROJECTS; it exists so the CLI is testable without scanning ~/.claude.
 const resolveProjectsRoot = () => process.env.CLAUDE_DREAM_PROJECTS || join(homedir(), ".claude", "projects");
 
+// Every project slug directory this repo's sessions could have been written under — the literal
+// path and its realpath, per worktree — which is the same union resolveUncached builds for
+// transcripts. A subagent transcript lives at <slug>/<sessionId>/subagents/. Both the report
+// section and the standalone artifact come through here, so the two can never disagree.
+function advisoriesFor(repoRoot, projectsDir, policy) {
+  const roots = [...new Set(worktreeRoots(repoRoot).flatMap((r) => [r, realpathOr(r)]))];
+  const dispatches = roots.flatMap((r) => pricedDispatches(join(projectsDir, escapeProjectPath(r))));
+  return routingAdvisories({
+    dispatches,
+    runRecords: readRunRecords(),
+    confidence: policy.routingAdvisoryConfidence,
+    resamples: policy.routingAdvisoryResamples,
+    comparatorFloor: policy.routingAdvisoryComparatorFloor,
+  });
+}
+
 // The culprit vocabulary the ledger prices wins against. Derived from this script's own location
 // like doctor.mjs's PLUGIN_ROOT — `CLAUDE_PLUGIN_ROOT` is substituted into command text but is not
 // in a script's environment, and this CLI runs from the target repo. CLAUDE_DREAM_CULPRITS
@@ -813,7 +832,7 @@ function main() {
     "--plan", "--commit-checkpoint", "--check-suppressed", "--extract", "--check-observations",
     "--record-promotion", "--record-lifecycle", "--consolidate", "--check-recurrence", "--journal-events", "--legacy-similar",
     "--novel-slugs", "--lessons", "--render-report", "--match", "--lesson",
-    "--observations-deduped", "--plan-landing", "--staleness",
+    "--observations-deduped", "--plan-landing", "--staleness", "--routing-advisories",
   ];
   const present = SUBCOMMANDS.filter((f) => argv.includes(f));
   if (present.length > 1) {
@@ -1161,10 +1180,21 @@ function main() {
         baselineFrom: windows.baseline.from, baselineTo: windows.baseline.to,
         baselineSessions: windows.baseline.sessions,
       });
+      const advisories = advisoriesFor(root, resolveProjectsRoot(), readPolicy());
       process.stdout.write(renderLearnReport({
         candidates, promotions, outcome: argv.includes("--outcome"),
-        verification, budget, ledger,
+        verification, budget, ledger, routingAdvisories: advisories,
       }));
+    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
+    return;
+  }
+
+  if (argv.includes("--routing-advisories")) {
+    try {
+      const advisories = advisoriesFor(root, resolveProjectsRoot(), readPolicy());
+      // The artifact body only: playbooks/learning-from-sessions.md captures this stdout, writes
+      // docs/devcycle/routing-advisories.md, and owns the commit — so nothing here writes a file.
+      process.stdout.write(`# Routing advisories\n\n${routingAdvisoriesSection(advisories)}\n`);
     } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
     return;
   }
@@ -1255,6 +1285,7 @@ function main() {
       "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --observations-deduped | --lessons <stage> | " +
       "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
       "--render-report <candidates.json> [--outcome] [--profile <lean|standard|thorough>] | " +
+      "--routing-advisories | " +
       "--plan-landing --stage <stage> --line \"<lesson line>\" [--store repo|user-repo|user-global] | " +
       "--staleness [--max-sessions N] [--max-days M] [--cap N]",
   );

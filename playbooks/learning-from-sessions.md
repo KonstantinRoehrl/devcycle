@@ -281,15 +281,31 @@ Then, per adopted candidate:
    `audience`, `verify` and `aliases`) to a scratch file and pass it with the double-quoted
    `$(cat …)` form, never inline single quotes:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --record-promotion "$(cat <scratch-file>)"`.
+
+Once the report is rendered, also write the routing advisory artifact — rendered to the run
+scratch first, moved into place only once the render succeeded:
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --routing-advisories > .devcycle/dreaming/routing-advisories.md && mkdir -p docs/devcycle && mv .devcycle/dreaming/routing-advisories.md docs/devcycle/routing-advisories.md || { rm -f .devcycle/dreaming/routing-advisories.md; false; }`.
+A redirect at the real path truncates it before the render runs, so a failure leaves a zero-byte
+advisory reading "nothing to advise" that step 3 offers for commit; the scratch render leaves the
+previous advisory standing and no scratch behind, and `mkdir -p` covers a first run, before step 2
+creates `docs/devcycle/`. The trailing `false` makes failure visible — without it the `rm`'s exit
+status stands in for the render's — so read a non-zero exit as "no advisory this run": say so in
+the report and leave the artifact out of step 3's ask.
+It is advisory only — nothing in the pipeline reads it, and routing changes only when you read it
+and set a `*Model` knob, which `${CLAUDE_PLUGIN_ROOT}/references/config.md`'s resolution order
+already treats as the one thing that beats the profile. The file is per-repo and is never plugin
+content.
+
 3. **Offer to commit the freshly written output.** Resolve `${user_config.docTrackingPolicy}`
    (default `standard`). When it permits tracking — `standard` or `all-tracked`, never `all-local`
-   — **and** `git check-ignore <path>` vetoes none of the just-written paths, name the side effect
-   and **ask the user** (AskUserQuestion, mirroring **Confirm**'s per-item batching, 1–4 at a time)
-   whether to commit the freshly written `docs/devcycle/lessons.md` and its promotion records as one
+   — name the side effect and **ask the user** (AskUserQuestion, mirroring **Confirm**'s per-item
+   batching, 1–4 at a time) whether to commit `docs/devcycle/lessons.md`, the promotion records,
+   and, only if the advisory step above succeeded, `docs/devcycle/routing-advisories.md`, as one
    scoped Conventional commit: `git add <paths> && git commit -- <paths>` with a `docs(learn): …` or
    `chore(learn): …` subject, respecting `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s Committing
-   rule — the prompt is where the user declines on a protected branch. Never a silent `git add`: any
-   path the policy excludes, `git check-ignore` vetoes, or the user leaves declined stays written but
+   rule — the prompt is where the user declines on a protected branch. A `git check-ignore <path>`
+   veto narrows that path set and never cancels the ask; an empty set skips it. Never a silent
+   `git add`: any path the policy excludes, a veto drops, or the user declines stays written but
    uncommitted.
 4. **Delete the source memory once its promotion lands, and only if it has one.**
 

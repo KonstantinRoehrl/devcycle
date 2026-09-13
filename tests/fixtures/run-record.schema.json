@@ -62,6 +62,7 @@
         "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
         "taskId": { "type": "string" },
         "agentType": { "type": "string" },
+        "agentId": { "type": "string" },
         "model": { "type": "string" },
         "modelSource": { "enum": ["explicit", "inherited"] },
         "startedAt": { "type": "string", "format": "date-time" },

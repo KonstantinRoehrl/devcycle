@@ -144,6 +144,7 @@ of deciding for itself.
 | spec — `docs/superpowers/specs/` | local | local | commit |
 | plan — `docs/superpowers/plans/` | local | local | commit |
 | lessons — `docs/devcycle/lessons.md` | local | commit | commit |
+| routing advisories — `docs/devcycle/routing-advisories.md` | local | commit | commit |
 | promotion records — `docs/devcycle/promotions/` | local | commit | commit |
 | maintenance findings — `docs/devcycle/maintenance-findings/` | local | commit | commit |
 | audit report — `docs/audits/` | local | local | local |
@@ -163,8 +164,8 @@ to. Onboarding is exempt because
 gating the installer on the policy it installs is circular, and under `all-local` it would leave
 the ignore lines the policy depends on unwritten. And `.devcycle/` is run scratch that no policy ever tracks, so there is no cell to vary.
 
-A site that commits an artifact resolves the policy, checks this table permits tracking, checks
-`git check-ignore` vetoes nothing, names the side effect, asks the user, then commits with an
+A site that commits an artifact resolves the policy, checks this table permits tracking, drops
+any path `git check-ignore` vetoes, names the side effect, asks the user, then commits with an
 explicit pathspec. `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`'s step 3 is the
 reference implementation of that order.
 

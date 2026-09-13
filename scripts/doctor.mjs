@@ -136,7 +136,7 @@ export function extractPluginVersion(record) {
 
 // Records Claude Code writes for its own placeholders (session-limit notices and the like).
 // Every counter on them is zero, so they are skipped outright rather than reported unpriced.
-const SYNTHETIC_MODEL = "<synthetic>";
+export const SYNTHETIC_MODEL = "<synthetic>";
 
 // Tool calls that dispatch a subagent; a call with no explicit model inherits the caller's.
 const DISPATCH_TOOLS = new Set(["Task", "Agent"]);
@@ -977,10 +977,15 @@ export function attributeFromRecord(turns, record) {
   return turns.map((turn) => {
     const t = Date.parse(turn.timestamp);
     const stage = record.stages.find((s) => within(t, s.startedAt, s.endedAt));
-    // dispatch.agentId is never populated by any writer — a per-agentId turn can never resolve
-    // here and always falls through to the inferred label below. Kept as a window-only match,
-    // not removed, because a NON-agentId turn (the common case) still resolves exactly via
-    // timestamp windowing.
+    // Window-only by choice: this predicate never reads `d.agentId`, so it cannot tell two
+    // concurrent dispatches apart. An agentId-carrying turn is left to the inferred label below
+    // rather than attributed to an arbitrary overlapping dispatch; a NON-agentId turn (the common
+    // case) resolves exactly only while a run's dispatch windows stay disjoint, and falls back to
+    // first-match order where they overlap. `dispatch.agentId` — written by
+    // `playbooks/executing-waves.md` step 4 — is the same identifier these turns carry, but in
+    // its filename form (`agent-<hash>`, against the turn's bare `<hash>`), so an exact join needs
+    // that prefix reconciled first: compared raw it silently never matches, the mismatch class
+    // that already cost this file one dead agentId branch.
     const dispatch = record.dispatches.find((d) => within(t, d.startedAt, d.endedAt) && !turn.agentId);
     return {
       ...turn,
