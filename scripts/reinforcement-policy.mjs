@@ -41,6 +41,12 @@ export function parsePolicy(text) {
     throw new Error(`reinforcement-policy: routingAdvisoryConfidence must be in (0,1), got ${JSON.stringify(conf)}`);
   if (!Number.isInteger(policy.routingAdvisoryResamples) || policy.routingAdvisoryResamples < 1)
     throw new Error(`reinforcement-policy: routingAdvisoryResamples must be an integer >= 1, got ${JSON.stringify(policy.routingAdvisoryResamples)}`);
+  // The one sample-size bar of the three: how many dispatches a cell must hold before it may serve
+  // as its class's comparator. The comparator is picked by a point estimate and only the ratio is
+  // bootstrapped, so without this a two-row cell decides its whole class from a denominator no
+  // interval ever sees. Checked like its integer neighbours above.
+  if (!Number.isInteger(policy.routingAdvisoryComparatorFloor) || policy.routingAdvisoryComparatorFloor < 1)
+    throw new Error(`reinforcement-policy: routingAdvisoryComparatorFloor must be an integer >= 1, got ${JSON.stringify(policy.routingAdvisoryComparatorFloor)}`);
   return policy;
 }
 

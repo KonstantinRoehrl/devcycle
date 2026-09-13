@@ -1032,7 +1032,10 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
 
   // 24. The shipped reinforcement policy parses and holds its invariants (mirrors the
   //     observes/prevents gate): its machine block is present, each percentile sits inside
-  //     (0,100), and the win bar stays strictly above the culprit bar. Guarded by existsSync the
+  //     (0,100), the win bar stays strictly above the culprit bar, and every count field —
+  //     including the routing advisory's confidence, resample count and comparator floor — holds
+  //     its range, so a floor of 0 or a missing field fails here rather than degrading a shipped
+  //     advisory into one a two-row cell decides. Guarded by existsSync the
   //     same way checks 12 and 13 guard their declarations — a fixture tree that ships no policy
   //     file is not forced to, while the real plugin always ships one and the malformed-fixture
   //     test writes its own to exercise this check.

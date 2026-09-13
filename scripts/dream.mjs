@@ -707,6 +707,7 @@ function advisoriesFor(repoRoot, projectsDir, policy) {
     runRecords: readRunRecords(),
     confidence: policy.routingAdvisoryConfidence,
     resamples: policy.routingAdvisoryResamples,
+    comparatorFloor: policy.routingAdvisoryComparatorFloor,
   });
 }
 

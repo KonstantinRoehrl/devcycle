@@ -9,7 +9,8 @@ const GOOD = `<!-- reinforcement-policy:begin -->
 \`\`\`json
 { "severityPercentileByProfile": { "lean": 70, "standard": 60, "thorough": 50 },
   "culpritRecurrenceBar": 2, "winRecurrenceBar": 3, "graduationRuns": 3, "minPricedKeysForPercentile": 3,
-  "routingAdvisoryConfidence": 0.95, "routingAdvisoryResamples": 20000 }
+  "routingAdvisoryConfidence": 0.95, "routingAdvisoryResamples": 20000,
+  "routingAdvisoryComparatorFloor": 5 }
 \`\`\`
 <!-- reinforcement-policy:end -->`;
 
@@ -30,7 +31,8 @@ test("parsePolicy: routing advisory fields are read and range-checked", () => {
   const block = (extra) => `<!-- reinforcement-policy:begin -->\n\`\`\`json\n${JSON.stringify({
     severityPercentileByProfile: { lean: 70, standard: 60, thorough: 50 },
     culpritRecurrenceBar: 2, winRecurrenceBar: 3, graduationRuns: 3, minPricedKeysForPercentile: 3,
-    routingAdvisoryConfidence: 0.95, routingAdvisoryResamples: 20000, ...extra,
+    routingAdvisoryConfidence: 0.95, routingAdvisoryResamples: 20000,
+    routingAdvisoryComparatorFloor: 5, ...extra,
   }, null, 2)}\n\`\`\`\n<!-- reinforcement-policy:end -->\n`;
 
   const ok = parsePolicy(block({}));
@@ -45,6 +47,20 @@ test("parsePolicy: routing advisory fields are read and range-checked", () => {
     /routingAdvisoryResamples must be an integer >= 1/);
   assert.throws(() => parsePolicy(block({ routingAdvisoryResamples: 1.5 })),
     /routingAdvisoryResamples must be an integer >= 1/);
+
+  // The comparator floor IS a sample-size bar, unlike the two above: a cell holding fewer than
+  // this many dispatches may not serve as its class's comparator. Checked like its integer
+  // neighbours, so a floor of 0 -- which would restore the 2-row comparator the amendment
+  // retired -- fails the gate loudly rather than shipping.
+  assert.equal(ok.routingAdvisoryComparatorFloor, 5);
+  assert.throws(() => parsePolicy(block({ routingAdvisoryComparatorFloor: 0 })),
+    /routingAdvisoryComparatorFloor must be an integer >= 1/);
+  assert.throws(() => parsePolicy(block({ routingAdvisoryComparatorFloor: 2.5 })),
+    /routingAdvisoryComparatorFloor must be an integer >= 1/);
+});
+
+test("readPolicy: the shipped comparator floor is the value the advisory generator reads", () => {
+  assert.equal(readPolicy().routingAdvisoryComparatorFloor, 5);
 });
 
 test("readPolicy: the shipped file parses and holds the asymmetry", () => {
