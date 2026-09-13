@@ -304,8 +304,9 @@ content.
    scoped Conventional commit: `git add <paths> && git commit -- <paths>` with a `docs(learn): …` or
    `chore(learn): …` subject, respecting `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s Committing
    rule — the prompt is where the user declines on a protected branch. A `git check-ignore <path>`
-   veto narrows that path set and never cancels the ask. Never a silent `git add`: any path the
-   policy excludes, a veto drops, or the user leaves declined stays written but uncommitted.
+   veto narrows that path set and never cancels the ask; an empty set skips it. Never a silent
+   `git add`: any path the policy excludes, a veto drops, or the user declines stays written but
+   uncommitted.
 4. **Delete the source memory once its promotion lands, and only if it has one.**
 
 Finally re-render the report in outcome mode —

@@ -16,13 +16,17 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
   `reviewing-the-branch`, `scoping-the-request`, `sweeping-mechanical-changes`,
   `taking-the-fast-path` and `verifying-on-device`. None of them changed. `references/config.md`
   gained exactly one row in § Doc tracking — the `routing advisories` artifact line — and that
-  row is 91 bytes (verified: `git diff 6d15095..HEAD -- references/config.md`, one `+` line).
+  row is 91 bytes (verified: `git diff 6d15095 -- references/config.md`, whose `3 2` numstat is
+  that row plus this branch's later two-line reword of the same section's closing paragraph).
   Every playbook cites that file, so a one-row table edit moves eleven closure sizes at once.
 - **+369 bytes to `executing-waves`** — its dispatch step now records `--agentId` on the run
   record, which is what makes per-dispatch cost attribution exact going forward.
-- **+2917 bytes to `learning-from-sessions`** — the step that writes the advisory artifact, plus
-  its share of `references/reinforcement-policy.md` growing for the three new policy fields.
-  `playbookMax` moves 303 → 319 for that file alone.
+- **+2903 bytes of closure to `learning-from-sessions`** (121511 → 124414) — the step that writes
+  the advisory artifact, plus its share of `references/reinforcement-policy.md` growing for the
+  three new policy fields. The file's own growth is +1374 bytes and +16 lines, 22754 → 24128
+  (verified: `git show 6d15095:playbooks/learning-from-sessions.md | wc -c` against `wc -c`);
+  the rest of the closure figure is the cited references. `playbookMax` moves 303 → 319 for that
+  file alone, which is this file's own line count.
 
 `surfaceTotal` moves 5357 → 5395, and that delta balances exactly across the four surface files
 that changed — `learning-from-sessions.md` +16, `reinforcement-policy.md` +18,
@@ -36,7 +40,10 @@ figure means, since `validate` passes with it left alone.
 
 **Why:** `scripts/validate.mjs` only fails when a measurement *exceeds* its baseline, so an
 over-raised baseline passes silently and a budget stops measuring anything. Every figure above
-was proven tight by lowering it by 1 and confirming validate fails naming that exact entry.
+was proven tight by lowering it by 1 and confirming validate fails naming that exact entry —
+re-proven at the final commit, because an earlier fix in this same branch review shrank the
+playbook by a line and left all three baselines loose without any gate noticing, which is the
+failure mode this paragraph exists to catch.
 Recording the three causes separately is the point of the entry: the +91 row looks like eleven
 unrelated playbooks growing until you know it is one table row in a file they all cite, and the
 next contributor who trips `playbookMax` at 319 should find the measurement rather than a number.
