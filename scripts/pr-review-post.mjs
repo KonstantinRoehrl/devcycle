@@ -52,6 +52,7 @@ export function alreadyPostedPrLevel(existingComments, stampedBody) {
 export const defaultPostRunner = (exec = execFileSync) => {
   const api = (args) => exec("gh", args, { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] });
   return {
+    whoami: () => api(["api", "user", "--jq", ".login"]).trim(),
     listReplies: (repo, pr) =>
       JSON.parse(api(["api", `repos/${repo}/pulls/${pr}/comments`, "--paginate"]) || "[]"),
     listPrLevelComments: (repo, pr) =>
@@ -111,9 +112,13 @@ export const defaultPostRunner = (exec = execFileSync) => {
 };
 
 export function runReply({ repo, pr, commentId, body, login, prLevel = false, runner = defaultPostRunner() }) {
-  if (!login) throw new Error("refusing to post: no --login (gh api user returned no login)");
+  const derived = runner.whoami();
+  if (!derived) throw new Error("refusing to post: gh api user returned no login");
+  if (login && login !== derived)
+    throw new Error(`refusing to post: --login ${login} disagrees with the authenticated account ${derived}`);
+  const actor = derived;
   const id = Number(commentId);
-  const stamped = withFooter(body, login);
+  const stamped = withFooter(body, actor);
   if (prLevel) {
     const existing = runner.listPrLevelComments(repo, pr);
     if (alreadyPostedPrLevel(existing, stamped)) return { status: "skipped", reason: "already-posted" };
@@ -134,15 +139,19 @@ export function runResolve({ repo, threadId, runner = defaultPostRunner() }) {
 export function runReview({
   repo, pr, commitId, event, body, comments, login, mergeInto, runner = defaultPostRunner(),
 }) {
-  if (!login) throw new Error("refusing to post: no --login (gh api user returned no login)");
+  const derived = runner.whoami();
+  if (!derived) throw new Error("refusing to post: gh api user returned no login");
+  if (login && login !== derived)
+    throw new Error(`refusing to post: --login ${login} disagrees with the authenticated account ${derived}`);
+  const actor = derived;
   if (event !== "COMMENT") {
     const author = runner.getPrAuthor(repo, pr);
-    if (author === login) throw new Error(`refusing to ${event} your own PR (author @${login})`);
+    if (author === actor) throw new Error(`refusing to ${event} your own PR (author @${actor})`);
   }
-  const pendingReviewId = runner.findPendingReview(repo, pr, login);
+  const pendingReviewId = runner.findPendingReview(repo, pr, actor);
   if (pendingReviewId && !mergeInto) return { status: "pending-review-exists", pendingReviewId };
-  const stampedSummary = withFooter(body, login);
-  const stampedComments = (comments ?? []).map((c) => ({ ...c, body: withFooter(c.body, login) }));
+  const stampedSummary = withFooter(body, actor);
+  const stampedComments = (comments ?? []).map((c) => ({ ...c, body: withFooter(c.body, actor) }));
   if (mergeInto) {
     for (const c of stampedComments) runner.addReviewThread(mergeInto, c);
     runner.submitReview(mergeInto, event, stampedSummary);
@@ -179,7 +188,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const r = runReply({
         repo, pr: Number(must("--pr", "a number")),
         commentId: prLevel ? undefined : must("--comment-id", "a comment id"), body,
-        login: must("--login", "a github login"),
+        login: requireValue(flags, "--login", "a github login"),
         prLevel,
       });
       console.log(r.status === "posted" ? `posted ${r.replyHash}` : `skipped: ${r.reason}`);
@@ -194,7 +203,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         commitId: must("--commit-id", "a commit sha"),
         event: must("--event", "a review event"),
         body, comments,
-        login: must("--login", "a github login"),
+        login: requireValue(flags, "--login", "a github login"),
         mergeInto: requireValue(flags, "--merge-into", "a PRR_ node id"),
       });
       if (r.status === "pending-review-exists") {
