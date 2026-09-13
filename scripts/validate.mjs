@@ -24,6 +24,73 @@ export function lessonsTrackingErrors(repoRoot) {
   return errs;
 }
 
+// `docs/*` plus a `!docs/<sub>/` re-inclusion is how this repo opts a documentation surface back
+// in. A later `docs/<sub>/*` re-ignores everything inside it, and the pair reads like a tracked
+// directory while tracking nothing: a report written there never reaches `git status`, so whatever
+// `docTrackingPolicy` decides about it — and any deliberate `git add` — is silently void.
+// `!docs/<sub>/*.md` after the re-ignore is what makes the surface real while stray non-markdown
+// artifacts stay ignored.
+export function docsSubdirTrackingErrors(repoRoot) {
+  const gitignorePath = join(repoRoot, ".gitignore");
+  if (!existsSync(gitignorePath)) return [];
+  const lines = readFileSync(gitignorePath, "utf8").split("\n").map((l) => l.trim());
+  const errs = [];
+  lines.forEach((line, i) => {
+    const m = /^!docs\/([^/*]+)\/$/.exec(line);
+    if (!m) return;
+    const sub = m[1];
+    // Order is the whole semantics: only an ignore BELOW the re-inclusion overrides it, and only
+    // an allowlist below that ignore re-opens the surface.
+    const ignoredAt = lines.findIndex((l, j) => j > i && l === `docs/${sub}/*`);
+    if (ignoredAt === -1) return;
+    if (lines.some((l, j) => j > ignoredAt && l === `!docs/${sub}/*.md`)) return;
+    errs.push(
+      `.gitignore: \`!docs/${sub}/\` re-includes the directory and \`docs/${sub}/*\` ignores everything ` +
+        `in it — add \`!docs/${sub}/*.md\`, or every doc written there stays untracked whatever ` +
+        `docTrackingPolicy decides`
+    );
+  });
+  return errs;
+}
+
+// `${CLAUDE_PLUGIN_ROOT}` is substituted when a playbook is rendered into a prompt, never by the
+// shell an implementer runs its commands in: a brief that carries the literal hands its worker a
+// bare `/scripts/<name>.mjs` that cannot exist. `bin/devcycle-root` is the shim that survives the
+// trip, so a brief template names a plugin script as `$(devcycle-root)/scripts/<name>.mjs`. Scoped
+// to fenced blocks carrying the brief fields a sliced brief is made of, because those are the
+// blocks whose text is handed on verbatim rather than read where the token still resolves.
+export function briefPluginRootErrors(repoRoot) {
+  const playbooksDir = join(repoRoot, "playbooks");
+  if (!existsSync(playbooksDir)) return [];
+  const BRIEF_FIELD_RE = /\*\*(?:Files|Interfaces|Dependencies|Evidence|Evidence tail):\*\*/;
+  const errs = [];
+  for (const f of readdirSync(playbooksDir).filter((n) => n.endsWith(".md"))) {
+    const lines = readFileSync(join(playbooksDir, f), "utf8").split("\n");
+    let openedAt = 0;
+    let block = null;
+    for (let i = 0; i < lines.length; i++) {
+      if (!/^\s*(?:```|~~~)/.test(lines[i])) {
+        block?.push(lines[i]);
+        continue;
+      }
+      if (block === null) {
+        block = [];
+        openedAt = i + 1; // 1-based line of the opening fence
+        continue;
+      }
+      const text = block.join("\n");
+      if (BRIEF_FIELD_RE.test(text) && text.includes("${CLAUDE_PLUGIN_ROOT}"))
+        errs.push(
+          `playbooks/${f}:${openedAt}: the brief template fenced here names a plugin path as ` +
+            "${CLAUDE_PLUGIN_ROOT}/... — write it as $(devcycle-root)/scripts/<name>.mjs, the shim " +
+            "that resolves in the implementer's shell"
+        );
+      block = null;
+    }
+  }
+  return errs;
+}
+
 const DESCRIPTION_BUDGET_TOTAL = 6000; // chars; source: docs/platform-notes.md
 
 if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
@@ -1044,6 +1111,18 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     try { readPolicy(reinforcementPolicyPath); }
     catch (e) { fail(`references/reinforcement-policy.md: ${e.message}`); }
   }
+
+  // 25. A docs/ subdirectory that .gitignore re-includes and then re-ignores wholesale reads like
+  //     a tracked surface and tracks nothing: the reports a run writes there never reach
+  //     `git status`, so `docTrackingPolicy`'s promise that devcycle commits what a run produces
+  //     is void with no error anywhere. The pair is legal git, which is why only a check catches it.
+  docsSubdirTrackingErrors(root).forEach(fail);
+
+  // 26. A brief that names a plugin script through `${CLAUDE_PLUGIN_ROOT}` hands its implementer a
+  //     command that dies on a bare `/scripts/...`: the token is substituted when a playbook is
+  //     rendered into a prompt, not when the implementer's shell runs it. `bin/devcycle-root` is
+  //     the shim that survives the trip, and this check is what keeps the next template on it.
+  briefPluginRootErrors(root).forEach(fail);
 
   lessonsTrackingErrors(process.cwd()).forEach(fail);
 

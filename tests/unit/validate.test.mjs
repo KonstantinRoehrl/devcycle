@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makePluginFixture as makeBaseFixture, writeInto, runValidate, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
-import { lessonsTrackingErrors } from "../../scripts/validate.mjs";
+import { lessonsTrackingErrors, docsSubdirTrackingErrors, briefPluginRootErrors } from "../../scripts/validate.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
@@ -1302,6 +1302,81 @@ test("lessonsTrackingErrors still fires when the store is tracked AND re-ignored
   execFileSync("git", ["add", "docs/devcycle/lessons.md", "docs/devcycle/promotions/"], { cwd: root });
   writeFileSync(join(root, ".gitignore"), "docs/devcycle/lessons.md\ndocs/devcycle/promotions/\n");
   assert.ok(lessonsTrackingErrors(root).length >= 1);
+});
+
+// --- check 25: a re-included docs/ subdirectory must keep its reports trackable ---
+
+// A tree whose only content is the .gitignore the rule reads.
+const gitignoreTree = (body) => {
+  const root = makeTempDir("docs-subdir-");
+  writeFileSync(join(root, ".gitignore"), body);
+  return root;
+};
+
+test("docsSubdirTrackingErrors flags a re-included docs subdirectory whose contents are re-ignored, and passes once *.md is allowlisted", () => {
+  const trapped = gitignoreTree("docs/*\n!docs/*.md\n!docs/x/\ndocs/x/*\n");
+  const errs = docsSubdirTrackingErrors(trapped);
+  assert.equal(errs.length, 1, `expected one error, got ${JSON.stringify(errs)}`);
+  assert.match(errs[0], /docs\/x/);
+  assert.match(errs[0], /docTrackingPolicy/);
+
+  const allowlisted = gitignoreTree("docs/*\n!docs/*.md\n!docs/x/\ndocs/x/*\n!docs/x/*.md\n");
+  assert.deepEqual(docsSubdirTrackingErrors(allowlisted), []);
+});
+
+test("docsSubdirTrackingErrors ignores a subdirectory that is never re-ignored, and a tree with no .gitignore", () => {
+  assert.deepEqual(docsSubdirTrackingErrors(gitignoreTree("docs/*\n!docs/*.md\n!docs/x/\n")), []);
+  assert.deepEqual(docsSubdirTrackingErrors(makeTempDir("no-gitignore-")), []);
+});
+
+test("docsSubdirTrackingErrors: the repo's own .gitignore keeps every re-included docs subdirectory trackable", () => {
+  assert.deepEqual(docsSubdirTrackingErrors(REPO_ROOT), []);
+});
+
+test("check 25 is wired into validate: a trapped docs subdirectory fails the run", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, ".gitignore", "docs/*\n!docs/*.md\n!docs/audits/\ndocs/audits/*\n");
+  failsWith(runValidate(dir), /docs\/audits/, /docTrackingPolicy/);
+});
+
+// --- check 26: a brief template reaches a plugin script through $(devcycle-root) ---
+
+// A playbook whose brief-template fence tells the implementer to run a plugin script.
+const briefTemplatePlaybook = (root) =>
+  "## Per-task cycle\n\n1. **Slice the brief**, carrying the task's files and its evidence class:\n\n" +
+  "```markdown\n# Brief — Task <n>\n\n**Files:**\n- Modify: `<path>`\n\n**Evidence:** red-green\n\n" +
+  `Run \`node "${root}/scripts/dream.mjs" --match\` first.\n` +
+  "```\n";
+
+test("briefPluginRootErrors flags a literal ${CLAUDE_PLUGIN_ROOT} in a brief template, and passes on $(devcycle-root)", () => {
+  const dir = makePluginFixture();
+  playbook(dir, briefTemplatePlaybook("${CLAUDE_PLUGIN_ROOT}"));
+  const errs = briefPluginRootErrors(dir);
+  assert.equal(errs.length, 1, `expected one error, got ${JSON.stringify(errs)}`);
+  assert.match(errs[0], /playbooks\/demoing-things\.md/);
+  assert.match(errs[0], /devcycle-root/);
+
+  playbook(dir, briefTemplatePlaybook("$(devcycle-root)"));
+  assert.deepEqual(briefPluginRootErrors(dir), []);
+});
+
+test("briefPluginRootErrors leaves ${CLAUDE_PLUGIN_ROOT} outside a brief template alone", () => {
+  const dir = makePluginFixture();
+  // The coordinator's own command, not a brief's: the token is substituted before it is read.
+  playbook(
+    dir,
+    '## Per-task cycle\n\n1. **Read the lessons.**\n\n```bash\nnode "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match\n```\n'
+  );
+  assert.deepEqual(briefPluginRootErrors(dir), []);
+});
+
+test("check 26 is wired into validate: a brief template naming ${CLAUDE_PLUGIN_ROOT} fails the run", () => {
+  const dir = makePluginFixture();
+  // The plugin-path check reads the same token, so the fixture ships the script the template
+  // names — the run then fails on check 26 alone.
+  writeInto(dir, "scripts/dream.mjs", "// Fixture script.\n");
+  playbook(dir, briefTemplatePlaybook("${CLAUDE_PLUGIN_ROOT}"));
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /devcycle-root/);
 });
 
 // --- check 20: a read-only-mandate agent must disclaim commit and push ---
