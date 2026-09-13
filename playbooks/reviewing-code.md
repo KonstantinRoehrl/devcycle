@@ -21,9 +21,9 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
 
 ## Scope
 
-Exactly one scope argument, plus `criteria` — confirmed at step 1 on an audit run, the spec's
-requirements plus the default criteria for the branch-review stage — and `specPath` when a spec
-governs it.
+Exactly one scope argument, plus `criteria` — confirmed at step 1 on an audit run and on
+`/devcycle:maintain`, the spec's requirements plus the default criteria for the branch-review
+stage — and `specPath` when a spec governs it.
 
 | form | argument | what is reviewed |
 | --- | --- | --- |
@@ -75,19 +75,25 @@ assumed answers until the user replies.
 
 ## 2. Research and lens construction
 
-On an audit run, first run the repo-research procedure
+**On an audit run**, first run the repo-research procedure
 `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`), filtered by the
 confirmed criteria and scope rather than the request's wording. Source any criterion no local
 convention covers in `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`'s order; that precedence
 is binding and is cited per finding. Without web access the sweep still runs against repo conventions
-plus that file's seed index, recording the limit in the coverage statement.
+plus that file's seed index, recording the limit in the coverage statement. **`/devcycle:maintain`**
+has already oriented itself (its own playbook's step 3) and hands that result down as the digest
+below, so it does not run the procedure again; **the branch-review stage** runs none at all, having
+arrived with its criteria rather than sourcing them.
 
-On an audit run, match the stabilized scope to its lessons before the lenses are grouped: the coordinator runs
+**On an audit run and on `/devcycle:maintain`**, match the stabilized scope to its lessons before
+the lenses are grouped: the coordinator runs
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match --stage audit --files "<the stabilized audit scope files>"`
 and folds the printed lesson lines (only the lines, not the stage section they came from) into
 the lens charters as known risks the reviewers must weigh the scope against. The `--lesson
 <id>` tail on each line lets a reviewer pull that record when a lens needs it. Nothing is
-folded in when the match returns empty.
+folded in when the match returns empty. **The branch-review stage** does not run this call at all:
+it matches its own stage's lessons before invoking this engine, per
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md`.
 
 **Optional caller-supplied orientation (used by `/devcycle:maintain`, ignored otherwise).** A caller
 may hand this stage a pre-computed **orientation digest** and **hotspot file list** — the compact

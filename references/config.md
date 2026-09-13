@@ -221,12 +221,14 @@ model id written here, because ids in playbook prose rot as models change:
   free of a `model:` key. **Caveat:** that inheritance is what "no override"
   assumes, and it does NOT hold for a subagent when a default subagent model
   is configured — a dispatch with no override then resolves to that default,
-  not to the orchestrator's own model. An escalation that would otherwise land
-  on the session tier for such a caller instead resolves to the orchestrator's
-  own id as an explicit override, and the choice is logged like any other.
-  `resolveModel` in `scripts/model-pool.mjs` takes this as its
-  `sessionTierUnreachable` parameter, set from that script's
-  `--session-tier-unreachable` CLI flag.
+  not to the orchestrator's own model, and **nothing mitigates that today**:
+  with one configured, every dispatch that resolves to this tier runs at that
+  default instead. The escape hatch is implemented but unwired — `resolveModel`
+  in `scripts/model-pool.mjs` takes a `sessionTierUnreachable` parameter (its
+  `--session-tier-unreachable` CLI flag) under which an escalation that would
+  land on the session tier names the orchestrator's own id as an explicit
+  override instead. No caller passes it: not the invocation below, not any
+  other file in the surface.
 - **fast tier** — the newest fast/small Claude model available to this
   session (the current Sonnet-class generation). If no such id can be
   resolved with confidence, fall back to the session tier — a stronger
@@ -295,9 +297,14 @@ pick records `outcome=model <id> (pooled: rung <n>/<len>)`, gaining
 `, clamped from <requested-id>` when the ceiling moved it; a clamped pin records
 `outcome=model <id> (pinned, clamped from <requested-id>)`; a fall-through to no
 override records `outcome=model session (ceiling: <id> unranked)` or
-`outcome=model session (ceiling: no rung at or below <orchestrator-id>)`. When the session tier
-is unreachable for the caller, an escalation that lands there instead records
+`outcome=model session (ceiling: no rung at or below <orchestrator-id>)`. Two further forms are
+implemented but have no producer yet. With `--session-tier-unreachable` set, an escalation that
+lands on the session tier records, naming the orchestrator's own id,
 `outcome=model <id> (escalated, session unreachable: explicit override)`, or
-`outcome=model session (escalated, unreachable and unranked)` when the orchestrator's own id
-cannot be ranked. An escalation always names the signal that fired. Research dispatches that run
+`outcome=model session (escalated, unreachable and unranked)` when that id cannot be ranked. Only
+a pool whose ladder climbed past rung 1 escalates: a pin that falls through still records
+`outcome=model session (ceiling: <id> unranked)`, and the saturating `Infinity` that
+`walkthroughModel` and `branchReviewModel` pass is not a fired signal. No caller passes that flag —
+the session-tier caveat above has the detail — so neither form can appear in a ledger this version
+writes. An escalation always names the signal that fired. Research dispatches that run
 before any ledger exists log nothing; where a ledger exists, same shape.

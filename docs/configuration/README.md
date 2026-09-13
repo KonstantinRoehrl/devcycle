@@ -137,7 +137,9 @@ never second-guessed.
 
 One caveat bounds "the session's own model": devcycle gets it by dispatching with no
 model override, and a dispatch with no override resolves to Claude Code's *default
-subagent model* whenever you have configured one — not to your session's model. Where
-that applies, devcycle pins the coordinator's own model id explicitly instead and logs
-the choice like any other derivation; the rule is owned by
+subagent model* whenever you have configured one — not to your session's model. If you
+have set one, expect every role that would take the session tier to run at that default
+instead: the resolver can name the coordinator's own model id explicitly rather than
+inherit, but nothing in the pipeline asks it to yet, so the caveat stands. The rule and
+that unwired escape hatch are owned by
 [`references/config.md`](../../references/config.md) § Model tiers.

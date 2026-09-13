@@ -78,7 +78,7 @@ runs everything except `doctor.mjs` — that one is local-only, so it's the one 
 catch for you:
 
 ```
-node scripts/validate.mjs             # manifests, command frontmatter, description budget, routing table (incl. description/consequence parity), fences — CI
+node scripts/validate.mjs             # manifests, command frontmatter, description budget, routing table (incl. description/consequence parity), fences, tracked docs the ignore rules veto — CI
 node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-listed terms — CI
 node scripts/duplication-check.mjs    # duplicated prose across commands/playbooks/agents/references, and within a file — CI
 node scripts/temp-dir-check.mjs       # temp dirs created outside makeTempDir, which owns removing them — CI
