@@ -778,7 +778,7 @@ async function main() {
       ),
     };
   });
-  log(`stage 1: ${diffChunks.length} chunk(s) × ${args.lenses.length} lens(es) → ${lensJobs.length} job(s)`);
+  log(`stage 1: ${diffChunks.length} chunk(s) × ${args.lenses.length} lens(es) → ${lensJobs.length} job(s), cap ${LENS_CONCURRENCY}`);
   const lensResults = await mapLimit(lensJobs, LENS_CONCURRENCY, (job) => job.run());
 
   const rawFindings = lensResults.flatMap((r) => r.findings);
