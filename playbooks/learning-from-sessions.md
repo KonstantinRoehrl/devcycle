@@ -298,15 +298,14 @@ content.
 
 3. **Offer to commit the freshly written output.** Resolve `${user_config.docTrackingPolicy}`
    (default `standard`). When it permits tracking — `standard` or `all-tracked`, never `all-local`
-   — **and** `git check-ignore <path>` vetoes none of the just-written paths, name the side effect
-   and **ask the user** (AskUserQuestion, mirroring **Confirm**'s per-item batching, 1–4 at a time)
-   whether to commit the freshly written `docs/devcycle/lessons.md`, the promotion records, and
-   — only if the advisory step above succeeded — `docs/devcycle/routing-advisories.md`, as one
+   — name the side effect and **ask the user** (AskUserQuestion, mirroring **Confirm**'s per-item
+   batching, 1–4 at a time) whether to commit `docs/devcycle/lessons.md`, the promotion records,
+   and, only if the advisory step above succeeded, `docs/devcycle/routing-advisories.md`, as one
    scoped Conventional commit: `git add <paths> && git commit -- <paths>` with a `docs(learn): …` or
    `chore(learn): …` subject, respecting `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s Committing
-   rule — the prompt is where the user declines on a protected branch. Never a silent `git add`: any
-   path the policy excludes, `git check-ignore` vetoes, or the user leaves declined stays written but
-   uncommitted.
+   rule — the prompt is where the user declines on a protected branch. A `git check-ignore <path>`
+   veto narrows that path set and never cancels the ask. Never a silent `git add`: any path the
+   policy excludes, a veto drops, or the user leaves declined stays written but uncommitted.
 4. **Delete the source memory once its promotion lands, and only if it has one.**
 
 Finally re-render the report in outcome mode —

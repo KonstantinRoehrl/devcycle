@@ -5,6 +5,42 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-09-13 — budgets raised for the routing-advisories branch
+
+**Decision:** the routing-advisories branch raises `tests/fixtures/surface-budget.json`
+(`surfaceTotal` 5357 → 5395, `playbookMax` 303 → 319) and 13 of the 14 entries in
+`tests/fixtures/context-budget.json`. Three distinct causes, each traced rather than lumped:
+
+- **+91 bytes to eleven playbooks** — `finishing-the-cycle`, `maintaining-the-repo`,
+  `onboarding-a-repo`, `planning-waves`, `receiving-review`, `reviewing-code`,
+  `reviewing-the-branch`, `scoping-the-request`, `sweeping-mechanical-changes`,
+  `taking-the-fast-path` and `verifying-on-device`. None of them changed. `references/config.md`
+  gained exactly one row in § Doc tracking — the `routing advisories` artifact line — and that
+  row is 91 bytes (verified: `git diff 6d15095..HEAD -- references/config.md`, one `+` line).
+  Every playbook cites that file, so a one-row table edit moves eleven closure sizes at once.
+- **+369 bytes to `executing-waves`** — its dispatch step now records `--agentId` on the run
+  record, which is what makes per-dispatch cost attribution exact going forward.
+- **+2917 bytes to `learning-from-sessions`** — the step that writes the advisory artifact, plus
+  its share of `references/reinforcement-policy.md` growing for the three new policy fields.
+  `playbookMax` moves 303 → 319 for that file alone.
+
+`surfaceTotal` moves 5357 → 5395, and that delta balances exactly across the four surface files
+that changed — `learning-from-sessions.md` +16, `reinforcement-policy.md` +18,
+`executing-waves.md` +3, `config.md` +1
+(verified: `git diff --numstat 6d15095..HEAD`, net per file, summed over `validate.mjs`'s
+`SURFACE` set of `playbooks`, `commands`, `agents`, `references`).
+
+`playbooks/profiling-sessions.md` is the one entry that did not move. It was the only baseline
+carrying enough slack to absorb the shared +91 without a raise — which is what its unchanged
+figure means, since `validate` passes with it left alone.
+
+**Why:** `scripts/validate.mjs` only fails when a measurement *exceeds* its baseline, so an
+over-raised baseline passes silently and a budget stops measuring anything. Every figure above
+was proven tight by lowering it by 1 and confirming validate fails naming that exact entry.
+Recording the three causes separately is the point of the entry: the +91 row looks like eleven
+unrelated playbooks growing until you know it is one table row in a file they all cite, and the
+next contributor who trips `playbookMax` at 319 should find the measurement rather than a number.
+
 ## 2026-09-09 — a pending changelog entry carries no heading of its own
 
 **Decision:** work waiting for a release writes its `CHANGELOG.md` prose directly under

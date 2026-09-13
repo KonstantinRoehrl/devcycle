@@ -164,8 +164,8 @@ to. Onboarding is exempt because
 gating the installer on the policy it installs is circular, and under `all-local` it would leave
 the ignore lines the policy depends on unwritten. And `.devcycle/` is run scratch that no policy ever tracks, so there is no cell to vary.
 
-A site that commits an artifact resolves the policy, checks this table permits tracking, checks
-`git check-ignore` vetoes nothing, names the side effect, asks the user, then commits with an
+A site that commits an artifact resolves the policy, checks this table permits tracking, drops
+any path `git check-ignore` vetoes, names the side effect, asks the user, then commits with an
 explicit pathspec. `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`'s step 3 is the
 reference implementation of that order.
 
