@@ -283,14 +283,14 @@ Then, per adopted candidate:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --record-promotion "$(cat <scratch-file>)"`.
 
 Once the report is rendered, also write the routing advisory artifact — rendered to the run
-scratch first and moved into place only once the command has actually succeeded:
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --routing-advisories > .devcycle/dreaming/routing-advisories.md && mv .devcycle/dreaming/routing-advisories.md docs/devcycle/routing-advisories.md || { rm -f .devcycle/dreaming/routing-advisories.md; false; }`.
-A redirect aimed straight at the real path truncates it before the command runs, so a failed run
-would leave a zero-byte advisory that reads as "nothing to advise" while step 3 still offers it
-for commit; the scratch render leaves the previous advisory standing and keeps no scratch file
-behind. The trailing `false` is what makes a failed run visible — without it the removal's own
-exit status stands in for the render's — so read a non-zero exit as "no advisory this run": say
-so in the run's report, and leave the artifact out of step 3's ask below.
+scratch first, moved into place only once the render succeeded:
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --routing-advisories > .devcycle/dreaming/routing-advisories.md && mkdir -p docs/devcycle && mv .devcycle/dreaming/routing-advisories.md docs/devcycle/routing-advisories.md || { rm -f .devcycle/dreaming/routing-advisories.md; false; }`.
+A redirect at the real path truncates it before the render runs, so a failure leaves a zero-byte
+advisory reading "nothing to advise" that step 3 offers for commit; the scratch render leaves the
+previous advisory standing and no scratch behind, and `mkdir -p` covers a first run, before step 2
+creates `docs/devcycle/`. The trailing `false` makes failure visible — without it the `rm`'s exit
+status stands in for the render's — so read a non-zero exit as "no advisory this run": say so in
+the report and leave the artifact out of step 3's ask.
 It is advisory only — nothing in the pipeline reads it, and routing changes only when you read it
 and set a `*Model` knob, which `${CLAUDE_PLUGIN_ROOT}/references/config.md`'s resolution order
 already treats as the one thing that beats the profile. The file is per-repo and is never plugin
