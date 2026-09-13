@@ -831,7 +831,7 @@ function main() {
     "--plan", "--commit-checkpoint", "--check-suppressed", "--extract", "--check-observations",
     "--record-promotion", "--record-lifecycle", "--consolidate", "--check-recurrence", "--journal-events", "--legacy-similar",
     "--novel-slugs", "--lessons", "--render-report", "--match", "--lesson",
-    "--observations-deduped", "--plan-landing", "--staleness",
+    "--observations-deduped", "--plan-landing", "--staleness", "--routing-advisories",
   ];
   const present = SUBCOMMANDS.filter((f) => argv.includes(f));
   if (present.length > 1) {

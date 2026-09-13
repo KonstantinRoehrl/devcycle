@@ -3138,3 +3138,15 @@ test("--routing-advisories: prints only the artifact body, from a fixture corpus
   assert.match(r.stdout, /^# Routing advisories/, "the artifact body starts with its own H1");
   assert.doesNotMatch(r.stdout, /## Ledger/, "the artifact carries the section alone, not the report");
 });
+
+// main()'s if-chain resolves by program order, so a combined invocation would run whichever
+// handler is written first and drop the other's output entirely — read by a caller parsing for
+// that output's key, the omission reads as a confident wrong answer.
+test("--routing-advisories cannot be combined with another subcommand", () => {
+  const res = run(["--routing-advisories", "--staleness"]);
+  assert.equal(res.status, 1, "combining two subcommands must exit 1");
+  // The message enumerates the offending flags in SUBCOMMANDS order rather than argv order,
+  // which is the same reason the guard has to exist: the handler chain resolves by program
+  // order too, so the order they were typed in never decides which one runs.
+  assert.match(res.stderr, /--staleness and --routing-advisories cannot be combined/);
+});

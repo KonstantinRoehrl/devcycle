@@ -144,6 +144,7 @@ of deciding for itself.
 | spec — `docs/superpowers/specs/` | local | local | commit |
 | plan — `docs/superpowers/plans/` | local | local | commit |
 | lessons — `docs/devcycle/lessons.md` | local | commit | commit |
+| routing advisories — `docs/devcycle/routing-advisories.md` | local | commit | commit |
 | promotion records — `docs/devcycle/promotions/` | local | commit | commit |
 | maintenance findings — `docs/devcycle/maintenance-findings/` | local | commit | commit |
 | audit report — `docs/audits/` | local | local | local |
