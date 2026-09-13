@@ -670,3 +670,18 @@ test("the workload subcommand exits 1 with the git error on an unresolvable base
   assert.equal(r.status, 1);
   assert.match(r.stderr, /run-record: git diff --numstat no-such-ref\.\.\.HEAD failed/);
 });
+
+test("dispatch: agentId is accepted and optional", () => {
+  const schema = JSON.parse(readFileSync(new URL("../fixtures/run-record.schema.json", import.meta.url), "utf8"));
+  const sub = subSchemaFor(schema, "dispatch");
+  const base = {
+    kind: "dispatch", runId: "0".repeat(16), taskId: "1", agentType: "devcycle:implementer",
+    model: "claude-sonnet-5", modelSource: "explicit",
+    startedAt: "2026-09-12T10:00:00Z", endedAt: "2026-09-12T10:10:00Z",
+    outcome: "complete", reviewRound: 1, retryIndex: 0,
+  };
+  assert.deepEqual(validate(base, sub), [], "a historical record without agentId still validates");
+  assert.deepEqual(validate({ ...base, agentId: "agent-a12394549e76f104a" }, sub), [],
+    "a record naming its subagent transcript validates");
+  assert.ok(!(sub.required ?? []).includes("agentId"), "agentId must stay optional");
+});

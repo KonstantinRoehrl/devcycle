@@ -83,8 +83,11 @@ file conflicts these invariants already preserve.)
    reviewer dispatch. Otherwise write the `dispatch` line now — `run-record.mjs append --kind
    dispatch` — using step 3's own `startedAt`, this step's time as `endedAt`, the envelope's
    outcome (`complete|blocked|rejected`), its `modelSource` (`explicit` when the brief named the
-   model, `inherited` otherwise), and the current round/retry index: every field this line needs is
-   only known from here on. The coordinator neither produces nor reads the task diff; step 5 does both.
+   model, `inherited` otherwise), the current round/retry index, and `--agentId <the dispatched
+   subagent's transcript id — the id the task notification carries, e.g. agent-a12394549e76f104a>`:
+   every field this line needs is only known from here on. That id is the subagent transcript's own
+   name, which is what lets a later run price this dispatch exactly rather than parsing its
+   description. The coordinator neither produces nor reads the task diff; step 5 does both.
 5. **Dispatch devcycle:task-reviewer** (read-only apart from its own findings file), on the model
    `references/config.md` resolves, with the brief,
    the report path, the task's file list, the two evidence-file paths the report names, and the
