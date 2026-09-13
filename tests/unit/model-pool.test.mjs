@@ -122,6 +122,111 @@ test("an unset knob resolves to no override and says so, leaving auto's own deri
   assert.deepEqual(resolve({ value: "auto" }), { model: null, outcome: "model session (auto)" });
 });
 
+// F-escalation: `sessionTierUnreachable` lets a caller that knows the session tier cannot be
+// reached (e.g. a subagent with a configured default model) ask for an explicit override instead
+// of the silent no-op the session tier otherwise means. The flag only matters when an escalation
+// actually happened — signalCount > 0 — so an unescalated run is untouched.
+test("without the flag, an escalation to the session tier is byte-identical to today", () => {
+  const table = [{ family: "sonnet", rank: 2, match: "sonnet" }, { family: "opus", rank: 3, match: "opus" }];
+  const args = { value: "claude-sonnet-5,claude-opus-5", signalCount: 9, orchestratorId: "claude-opus-5", table };
+  assert.deepEqual(resolveModel(args), resolveModel({ ...args, sessionTierUnreachable: false }));
+});
+
+test("an unreachable session tier resolves to the orchestrator's own id as an explicit override", () => {
+  const table = [{ family: "sonnet", rank: 2, match: "sonnet" }, { family: "opus", rank: 3, match: "opus" }];
+  const r = resolveModel({
+    value: "", signalCount: 9, orchestratorId: "claude-opus-5", table, sessionTierUnreachable: true,
+  });
+  assert.equal(r.model, "claude-opus-5");
+  assert.equal(r.outcome, "model claude-opus-5 (escalated, session unreachable: explicit override)");
+});
+
+// The original form of this test passed `value: ""`, which resolves to the `unset` branch before
+// any pool entry is ever considered — "claude-sonnet-5" appears nowhere in the computation, so
+// `assert.notEqual(r.model, "claude-sonnet-5")` was true by construction and could not have caught
+// a real demotion. This version puts two weaker, individually-admissible families right next to the
+// unranked rung that triggers escalation, so a bug that fell back to "the next admissible pool
+// entry" instead of the orchestrator's own id would produce exactly one of them.
+test("an unreachable session tier names the orchestrator itself, not a weaker family sitting in the same pool", () => {
+  const table = [
+    { family: "haiku", rank: 1, match: "haiku" },
+    { family: "sonnet", rank: 2, match: "sonnet" },
+    { family: "opus", rank: 3, match: "opus" },
+  ];
+  const r = resolveModel({
+    value: "claude-haiku-4-5,claude-sonnet-5,unknown-model",
+    signalCount: 9,
+    orchestratorId: "claude-opus-5",
+    table,
+    sessionTierUnreachable: true,
+  });
+  assert.equal(r.model, "claude-opus-5");
+  assert.notEqual(r.model, "claude-sonnet-5");
+  assert.notEqual(r.model, "claude-haiku-4-5");
+});
+
+test("an unrankable orchestrator keeps null and says so", () => {
+  const r = resolveModel({
+    value: "", signalCount: 9, orchestratorId: "who-knows", table: [{ family: "opus", rank: 3, match: "opus" }],
+    sessionTierUnreachable: true,
+  });
+  assert.equal(r.model, null);
+  assert.equal(r.outcome, "model session (escalated, unreachable and unranked)");
+});
+
+// The four tests below each pin one of the other session-tier return sites (ceiling-unranked,
+// pin-unranked, pool-rung-unranked, no-admissible-rung) under an actual escalation. Each uses a
+// `value` that is not empty/`auto`, so `parsePool` never takes the `unset` branch above — unlike
+// the `unset`-only coverage the three tests above give, these reach ceiling/pin/pool logic first.
+
+test("an unrankable orchestrator escalates from the ceiling check too, not just the unset path", () => {
+  const table = [{ family: "sonnet", rank: 2, match: "sonnet" }];
+  const r = resolveModel({
+    value: "claude-sonnet-5", signalCount: 9, orchestratorId: "who-knows", table, sessionTierUnreachable: true,
+  });
+  assert.equal(r.model, null);
+  assert.equal(r.outcome, "model session (escalated, unreachable and unranked)");
+});
+
+test("an unrankable pin escalates via explicit override, not a silent no-op", () => {
+  const table = [{ family: "opus", rank: 3, match: "opus" }];
+  const r = resolveModel({
+    value: "unknown-model", signalCount: 9, orchestratorId: "claude-opus-5", table, sessionTierUnreachable: true,
+  });
+  assert.equal(r.model, "claude-opus-5");
+  assert.equal(r.outcome, "model claude-opus-5 (escalated, session unreachable: explicit override)");
+});
+
+test("an unrankable pool rung escalates via explicit override, not a silent no-op", () => {
+  const table = [{ family: "sonnet", rank: 2, match: "sonnet" }, { family: "opus", rank: 3, match: "opus" }];
+  const r = resolveModel({
+    value: "claude-opus-5,unknown-model",
+    signalCount: 9,
+    orchestratorId: "claude-opus-5",
+    table,
+    sessionTierUnreachable: true,
+  });
+  assert.equal(r.model, "claude-opus-5");
+  assert.equal(r.outcome, "model claude-opus-5 (escalated, session unreachable: explicit override)");
+});
+
+test("a pool with no rung at or below the orchestrator still escalates via explicit override", () => {
+  const table = [
+    { family: "haiku", rank: 1, match: "haiku" },
+    { family: "sonnet", rank: 2, match: "sonnet" },
+    { family: "opus", rank: 3, match: "opus" },
+  ];
+  const r = resolveModel({
+    value: "claude-sonnet-5,claude-opus-5",
+    signalCount: 9,
+    orchestratorId: "claude-haiku-4-5",
+    table,
+    sessionTierUnreachable: true,
+  });
+  assert.equal(r.model, "claude-haiku-4-5");
+  assert.equal(r.outcome, "model claude-haiku-4-5 (escalated, session unreachable: explicit override)");
+});
+
 test("the shipped table loads and ranks the families the ceiling rule names", () => {
   const shipped = loadTable();
   assert.deepEqual(
