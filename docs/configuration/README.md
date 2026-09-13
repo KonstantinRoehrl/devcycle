@@ -134,3 +134,10 @@ keep the session's model. Deriving by tier rather than by
 model ids written into the plugin means new model generations are picked up without a
 plugin update. Set an explicit model id to pin a role; an explicit id is binding and
 never second-guessed.
+
+One caveat bounds "the session's own model": devcycle gets it by dispatching with no
+model override, and a dispatch with no override resolves to Claude Code's *default
+subagent model* whenever you have configured one — not to your session's model. Where
+that applies, devcycle pins the coordinator's own model id explicitly instead and logs
+the choice like any other derivation; the rule is owned by
+[`references/config.md`](../../references/config.md) § Model tiers.
