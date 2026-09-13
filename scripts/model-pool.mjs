@@ -7,8 +7,9 @@
 // orchestrator's own model and therefore cannot exceed it. Every unresolvable case converges on
 // that one form by default, because it is the only dispatch that cannot break the ceiling
 // invariant — unless `sessionTierUnreachable` says that inherit is unreliable for this caller, in
-// which case an actual escalation (signalCount > 0) names the orchestrator's own id explicitly
-// instead of silently landing on a tier that, for that caller, is not the orchestrator's model.
+// which case an escalation that lands there — a pool whose ladder climbed off rung 1 — names the
+// orchestrator's own id explicitly instead of silently landing on a tier that, for that caller, is
+// not the orchestrator's model.
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
@@ -39,6 +40,17 @@ export function rungFor(signalCount, len) {
   return Math.min(1 + fired, len);
 }
 
+// An escalation is the ladder climbing, and only a pool has rungs to climb: a pin and an unset knob
+// resolve to the same model at every signal count, so a non-zero count beside either is the task's
+// ambient complexity, not an escalation. Infinity is not a signal either — it is the saturation
+// sentinel above, passed by callers that have no complexity predicate at all — so it reaches the top
+// rung with nothing having fired, which is why this predicate tests finiteness where rungFor
+// deliberately does not.
+function ladderClimbed(parsed, signalCount) {
+  if (parsed.kind !== "pool" || !Number.isFinite(signalCount)) return false;
+  return rungFor(signalCount, parsed.entries.length) > 1;
+}
+
 // Rank by family, never by version inside a family: a newer Sonnet does not outrank an older Opus.
 export function rank(id, table) {
   for (const entry of table) if (new RegExp(entry.match, "i").test(id)) return entry.rank;
@@ -62,10 +74,10 @@ function unreachableSessionTier(orchestratorId, table) {
 
 export function resolveModel({ value, signalCount = 0, orchestratorId, table, sessionTierUnreachable = false }) {
   const parsed = parsePool(value);
-  // An escalation only means something once a signal actually fired; with none, sessionTier(...)
-  // degrades to the plain { model: null, outcome } every existing caller already gets, so a run
-  // that never escalated is untouched regardless of the flag.
-  const escalated = sessionTierUnreachable && signalCount > 0;
+  // The rewrite is scoped to an escalation that resolved to the session tier. Every other route to
+  // that tier — an unset knob, an id the table cannot rank, a pool still on rung 1 — degrades to
+  // the plain { model: null, outcome } every existing caller already gets, whatever the flag says.
+  const escalated = sessionTierUnreachable && ladderClimbed(parsed, signalCount);
   const sessionTier = (outcome) =>
     escalated ? unreachableSessionTier(orchestratorId, table) : { model: null, outcome };
 
