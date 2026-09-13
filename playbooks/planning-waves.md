@@ -183,4 +183,7 @@ Committing the saved plan is gated the way the spec's commit is: resolve
 tracking, then `git check-ignore` the plan's path, and commit with an explicit pathspec only when
 both permit it — otherwise the plan stays written and uncommitted. This paragraph is outside the
 Plan mechanics section, so it binds at `thorough` too, where the upstream skill has no
-plan-commit step of its own and `all-tracked` would otherwise never track a plan.
+plan-commit step of its own and `all-tracked` would otherwise never track a plan. A new
+`docs/<subdir>/` re-included by name in `.gitignore` must also carry a `!docs/<subdir>/*.md`
+allowlist below its re-ignore, or its contents stay ignored and `docTrackingPolicy` is silently
+defeated — `scripts/validate.mjs` check 25 enforces this.

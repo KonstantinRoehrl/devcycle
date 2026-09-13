@@ -218,7 +218,15 @@ model id written here, because ids in playbook prose rot as models change:
   the agent definition's own frontmatter model when it has one, and only
   falls through to the caller's model when the definition names none. The
   session tier therefore requires every agent definition it dispatches to be
-  free of a `model:` key.
+  free of a `model:` key. **Caveat:** that inheritance is what "no override"
+  assumes, and it does NOT hold for a subagent when a default subagent model
+  is configured — a dispatch with no override then resolves to that default,
+  not to the orchestrator's own model. An escalation that would otherwise land
+  on the session tier for such a caller instead resolves to the orchestrator's
+  own id as an explicit override, and the choice is logged like any other.
+  `resolveModel` in `scripts/model-pool.mjs` takes this as its
+  `sessionTierUnreachable` parameter, set from that script's
+  `--session-tier-unreachable` CLI flag.
 - **fast tier** — the newest fast/small Claude model available to this
   session (the current Sonnet-class generation). If no such id can be
   resolved with confidence, fall back to the session tier — a stronger
@@ -287,6 +295,9 @@ pick records `outcome=model <id> (pooled: rung <n>/<len>)`, gaining
 `, clamped from <requested-id>` when the ceiling moved it; a clamped pin records
 `outcome=model <id> (pinned, clamped from <requested-id>)`; a fall-through to no
 override records `outcome=model session (ceiling: <id> unranked)` or
-`outcome=model session (ceiling: no rung at or below <orchestrator-id>)`. An
-escalation always names the signal that fired. Research dispatches that run
+`outcome=model session (ceiling: no rung at or below <orchestrator-id>)`. When the session tier
+is unreachable for the caller, an escalation that lands there instead records
+`outcome=model <id> (escalated, session unreachable: explicit override)`, or
+`outcome=model session (escalated, unreachable and unranked)` when the orchestrator's own id
+cannot be ranked. An escalation always names the signal that fired. Research dispatches that run
 before any ledger exists log nothing; where a ledger exists, same shape.
