@@ -7,7 +7,11 @@ defects and never softens, delays, or substitutes for a defect finding the same 
 otherwise produce.
 **Which caller invoked it decides more than the scope does.** An **audit run** — `/devcycle:review`
 standalone, or `/devcycle:cycle`'s audit stage, at any scope below — runs the criteria interview
-(step 1) and ends in the ranked findings document (step 5). **The branch-review stage**
+(step 1) and ends in the ranked findings document (step 5). **`/devcycle:maintain`**
+(`${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md`) is a third class: it brings its own
+longitudinal criteria — depth-gated, not discovered — into that same step-1 interview (its own
+scoping gate mandates the hard STOP) rather than skipping it, and it owes step 5's ranked findings
+document exactly as an audit run does. **The branch-review stage**
 (`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md`) skips both, inheriting the cycle spec's
 criteria and taking its findings back inline. Resolve `profile` first per
 `${CLAUDE_PLUGIN_ROOT}/references/config.md` (`audit depth` sets how far an audit sweeps) and report
@@ -44,7 +48,7 @@ where contents are read from per "Deriving a branch's file set" in
   chunks and discloses the deferred set in its `COVERAGE WARNING`, rather than leaving the cutoff
   to the reviewer's judgment.
 
-## 1. Discovery and the criteria interview — audit runs only
+## 1. Discovery and the criteria interview — audit runs and `/devcycle:maintain` (maintain skips discovery, not the interview)
 
 **What separates an audit from a code review is where the criteria come from: the user** — criteria
 you picked yourself measure the code against your taste. Discovery is shallow, enough to propose
@@ -198,9 +202,9 @@ dependency in the finding itself; step 5 carries it into the document's ordering
 user-run code-review`, `panel`, `panel [+ cross-model lens]` when the cross-model lens ran, or
 `panel→single (panel unavailable: <reason>)` — recorded verbatim, no variants. The rounds-and-cap
 loop, spec-requirement enumeration, the ledger cross-check and every state-file and handoff duty
-belong to that stage. An audit run continues below, at every scope.
+belong to that stage. An audit run or a `/devcycle:maintain` pass continues below, at every scope.
 
-## 5. The findings document — audit runs only
+## 5. The findings document — audit runs and `/devcycle:maintain`
 
 Every finding also carries the **document tier** `references/findings.md` lists — detailed enough to
 start work from that one finding alone: what, where, why, how. The document adds a **coverage
