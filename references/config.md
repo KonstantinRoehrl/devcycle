@@ -227,12 +227,19 @@ model id written here, because ids in playbook prose rot as models change:
   this caveat** — `resolveModel` in `scripts/model-pool.mjs` takes a
   `sessionTierUnreachable` parameter (its `--session-tier-unreachable` CLI flag)
   under which an escalation that would land on the session tier names the
-  orchestrator's own id as an explicit override instead, and only a **pool** whose
-  ladder climbed is an escalation there. An `auto` or unset knob — every knob's
-  shipped default — lands on this tier identically with the flag and without it, so
-  the implementer default below stays uncovered and closing that case needs a
-  different fix; what the hatch does cover is a configured pool that climbed and
-  then found no rung it could dispatch. No caller passes it: not the invocation
+  orchestrator's own id as an explicit override instead, and an escalation there is
+  only a **pool** whose ladder climbed on a **counted** signal. Each half of that
+  excludes a shape that lands on this tier identically with the flag and without it.
+  An `auto` or unset knob — every knob's shipped default — is no pool, so the
+  implementer default below stays uncovered and closing that case needs a different
+  fix. A pool on `walkthroughModel` or `branchReviewModel` never climbs, because the
+  saturating `Infinity` the invocation below has them pass is a sentinel rather than
+  a counted signal — leaving `implementerModel` and `taskReviewerModel` the only
+  knobs that can reach the hatch at all. What it does cover is a pool on one of
+  those two that climbed and then fell through to this tier for any reason: the
+  climb is the whole test, so an unrankable rung fires it even when a dispatchable
+  lower rung sits in the pool, and the orchestrator's own id must itself be rankable,
+  since that id is what the override names. No caller passes it: not the invocation
   below, not any other file in the surface.
 - **fast tier** — the newest fast/small Claude model available to this
   session (the current Sonnet-class generation). If no such id can be

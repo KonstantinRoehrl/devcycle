@@ -141,7 +141,10 @@ subagent model* whenever you have configured one — not to your session's model
 have set one, expect every role that would take the session tier to run at that default
 instead: the resolver can name the coordinator's own model id explicitly rather than
 inherit, but nothing in the pipeline asks it to yet, so the caveat stands. That escape
-hatch is also narrower than the caveat — it reaches only a role you set to a pool, never one
-left at `auto` — so a role on the default stays uncovered even once something asks for it.
-The rule, that bound and the unwired escape hatch are owned by
+hatch is also narrower than the caveat: it reaches only a role you set to a pool, never one
+left at `auto`, and among the four roles only the implementer and the task reviewer even
+then — the branch review and the walkthrough have no complexity predicate, so a pool on
+either jumps straight to its top rung without a signal firing, and it is the firing the hatch
+keys on. So a role on the default stays uncovered even once something asks for it.
+The rule, those bounds and the unwired escape hatch are owned by
 [`references/config.md`](../../references/config.md) § Model tiers.
