@@ -4,6 +4,45 @@
 
 - feat(learn): add reinforcement thresholds, win consolidation, and routing advisories; harden devcycle's tier-1 pipeline (#171, #237, #280, #279, #201, #234, #89, #154, #202, #265)
 
+**Dispatch model governance (#171).** `validate.mjs` gains check 23: every `Dispatch ...
+devcycle:<agent>` instruction in `playbooks/*.md` and `commands/*.md` must have its enclosing
+step or section name a governing model-tier rule (a `*Model` knob, `references/config.md`, or
+an inline fast-tier/session-tier reference) — a dispatch site with no model directive used to
+silently inherit the caller's model with nothing catching drift. Fixed 3 real ungoverned sites:
+`executing-waves.md`, `taking-the-fast-path.md`, `sweeping-mechanical-changes.md`.
+
+**Severity-weighted reinforcement thresholds.** Replaces the learn loop's uniform
+confirmation-batching with asymmetric propose thresholds: culprit escalation is weighted by
+cost × recurrence (expensive, repeatedly-detected culprits clear the gate sooner), while win
+reinforcement must clear a strictly higher recurrence bar than culprits. Thresholds live in one
+new `references/reinforcement-policy.md`, read by both the propose stage and its test; doctor's
+actionability menu renders the candidates, and the cost path is profile-aware (`--profile`).
+
+**Win consolidation lifecycle.** Win-kind lessons gain a consolidation lifecycle symmetric to
+culprits' existing r3 graduation path, and lesson retirement now ties to graduation for both
+kinds: a culprit retires only when held and at r3, a win retires only when consolidated (folded
+into a playbook's default flow or a scaffold) — replacing the prior kind-blind r1/r2 +
+10-run/90-day rule.
+
+**Cost/savings routing advisories.** Feeds a measured cost/savings signal into dispatch routing
+recommendations: per-task-class advisories in `references/routing-advisories.md`, gated by a
+minimum-sample-size floor, advisory-only behind the existing model-tier human confirmation
+point.
+
+**Tier-1 pipeline guarantees (#237, #280, #279, #201, #234, #89, #154, #202, #265).** Fixes nine
+self-guarantees that did not hold: `self-dev-check.mjs` (#237) tells the repo source tree apart
+from the installed plugin cache and gates `finishing-the-cycle.md`'s finish step on it; a
+`bin/devcycle-root` shim (#280) resolves `CLAUDE_PLUGIN_ROOT` at brief-dispatch time so
+plugin-script paths expand correctly in dispatched shells; `model-pool.mjs`'s escalation
+predicate (#279) is reachable instead of silently clamping to the fast tier; `validate.mjs`
+(#201, #234) un-ignores audit reports so `.gitignore` can no longer silently veto one, and
+`planning-waves.md` now requires an explicit allowlist line for a new `docs/<subdir>/`; the
+review-panel fan-out cap test (#89, #154) asserts the limit actually handed to the limiter
+instead of inferring concurrency from wall-clock timing; `reviewing-code.md`'s caller taxonomy
+(#202) names `/devcycle:maintain` so its gates resolve; `pr-review-post.mjs` (#265) derives the
+posting identity itself instead of trusting a caller-supplied `--login`, closing a
+comment-attribution spoof.
+
 ## 0.21.0 — 2026-09-10
 
 - feat(learn): add a symmetric dollar ledger, bound the corpus scan, and require independent win grounding (#266, #267, #268)
