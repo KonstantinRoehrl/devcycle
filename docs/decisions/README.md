@@ -12,9 +12,9 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 14 entries in `tests/fixtures/context-budget.json`. Two shared causes and five per-file ones, each
 traced rather than lumped:
 
-- **+2523 bytes to all fourteen playbooks** — `references/config.md` grew 18697 → 21220 across six
+- **+2523 bytes to all fourteen playbooks** — `references/config.md` grew 18697 → 21220 across five
   commits on this branch, and every playbook cites it, so one file's growth moves all fourteen
-  closure sizes. The growth is concentrated in § Model tiers, which acquired the session-tier
+  closure sizes. All of the growth is in § Model tiers, which acquired the session-tier
   reachability caveat (`c5a0596`), then three successive corrections to it — the unwired-override
   restatement (`1e5da20`), the pools-only bound (`3066c2e`), and the finite-signal and
   orchestrator-rankability bounds (`baeae08`) — before `d61d928` gave the `Infinity`-sentinel bound
@@ -34,9 +34,10 @@ traced rather than lumped:
   during wave 3 and absorbed here rather than left in place. That is the one entry whose new figure
   is smaller than its shared cause, and the reason is a pre-existing over-raise, not a measurement.
 
-`surfaceTotal` moves 5395 → 5479, and the +84 balances exactly across the seven surface files that
-changed — `config.md` +30, `reviewing-code` +23, `finishing-the-cycle` +11, `cycle.md` +8,
-`executing-waves` +7, `planning-waves` +3, `review-comments.md` +2 (verified:
+`surfaceTotal` moves 5395 → 5479, and the +84 balances exactly across the seven surface files whose
+line count moved — `config.md` +30, `reviewing-code` +23, `finishing-the-cycle` +11, `cycle.md` +8,
+`executing-waves` +7, `planning-waves` +3, `review-comments.md` +2. An eighth surface file changed
+without moving the total: `playbooks/receiving-review.md` is +3 −3, net zero lines (verified:
 `git diff --numstat 23712c6..HEAD -- playbooks commands agents references`, net per file, summed
 over `validate.mjs`'s `SURFACE` set). `playbookMax` stays 319: `learning-from-sessions.md` is
 untouched and still the longest, with `reviewing-code.md` second at 314.
@@ -44,7 +45,7 @@ untouched and still the longest, with `reviewing-code.md` second at 314.
 **Why:** `scripts/validate.mjs` only fails when a measurement *exceeds* its baseline, so an
 over-raised baseline passes silently and the budget stops measuring anything. Every figure above
 was proven tight by lowering it by 1 and confirming validate fails naming that exact entry — all 17
-numbers, re-proven at each of the three branch-review fix commits rather than once at the end.
+numbers, re-proven at every fix commit that moved them rather than once at the end.
 `d61d928` is why that matters here: it *shrank* `config.md`, the direction no gate can catch, and
 a baseline left at the old value would have gone loose with the suite still green. The
 `profiling-sessions` entry is the same failure caught from the other side — 631 bytes of slack that
