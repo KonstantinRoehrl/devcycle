@@ -180,3 +180,24 @@ export function renderMatch(matches) {
     .map((m) => `${m.line} → node "\${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lesson ${m.id}`)
     .join("\n");
 }
+
+// A win is a grounded success (verify: journal-reinforcement); every other landed lesson is a
+// culprit corrective. The single source of truth for the win/culprit distinction — imported by
+// verification.mjs and dream.mjs rather than re-derived, so the rule lives in one place (QC1).
+export const WIN_VERIFY = "journal-reinforcement";
+export const lessonKind = (p) => (p?.verify === WIN_VERIFY ? "win" : "culprit");
+
+// A win's graduation state: consolidated once it is folded into a playbook's default flow or a
+// scaffold. Stored as a date on the promotion record (promotions.mjs); read here as a boolean.
+export const isConsolidated = (p) => Boolean(p?.consolidated);
+
+// The consolidation transition, pure and validating. A win consolidates once and only once; a
+// culprit never consolidates (it graduates to r3 instead). Returns { ok: true } when legal, or
+// { ok: false, reason } — a content-free reason safe to print — when not.
+export function planConsolidation(promotion) {
+  if (lessonKind(promotion) !== "win")
+    return { ok: false, reason: "only a win-kind lesson can be consolidated" };
+  if (isConsolidated(promotion))
+    return { ok: false, reason: "already consolidated" };
+  return { ok: true };
+}

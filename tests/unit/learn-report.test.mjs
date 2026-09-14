@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderLearnReport, allTimeRollup } from "../../scripts/learn-report.mjs";
+import { renderLearnReport, allTimeRollup, routingAdvisoriesSection } from "../../scripts/learn-report.mjs";
 
 const baseArgs = () => ({
   candidates: {
@@ -184,6 +184,25 @@ test("renderLearnReport renders verify candidates and the always-loaded budget l
   assert.match(out, /^Always-loaded budget: 320 bytes/m);
 });
 
+// The propose gate's reinforcement outcome renders as its own ### Reinforcement section, and the
+// escalation candidates now render under the renamed ### Graduation (r1/r2 → r3) heading.
+test("renderLearnReport renders a reinforcement candidate and the renamed graduation heading", () => {
+  const verification = {
+    scoreboard: [],
+    candidates: {
+      escalation: [{ culpritId: "friction:c", rung: "r2", reason: "recurred 4×" }],
+      retirement: [],
+      reinforcement: [{ culpritId: "win:first-round-clean-accept", rung: "r1", reason: "held 5×" }],
+    },
+    resolvedIn: [],
+  };
+  const out = renderLearnReport({ candidates: CANDIDATES, promotions: PROMOTIONS, verification });
+  assert.match(out, /### Graduation \(r1\/r2 → r3\)/);
+  assert.match(out.split("### Graduation")[1] ?? "", /`friction:c` \(r2\) — recurred 4×/);
+  const reinforcement = out.split("### Reinforcement")[1] ?? "";
+  assert.match(reinforcement, /`win:first-round-clean-accept` \(r1\) — held 5×/);
+});
+
 const LEDGER = {
   from: "2026-08-01", to: "2026-09-01", sessions: 12,
   baseline: { from: "2026-06-01", to: "2026-09-01", sessions: 61 },
@@ -224,4 +243,199 @@ test("a priced win row renders its exact dollar figure", () => {
 test("the ledger section is omitted when no ledger is supplied", () => {
   const md = renderLearnReport(baseArgs());
   assert.doesNotMatch(md, /## Ledger/);
+});
+
+// The advisory shape routingAdvisoriesSection is handed, with every counted field present. The
+// renderer states a count or says it is unmeasurable, so a fixture that silently omitted one would
+// assert against a shape the generator never produces.
+const advisory = ({ corpus = {}, exclusions = {}, cells = [], classes = [] }) => ({
+  corpus: {
+    transcripts: 0, joined: 0, withTask: 0, withKind: 0, withVerdict: 0,
+    taskFromRecord: 0, taskFromDescription: 0, measuredUSD: null, unmeasurable: 0, ...corpus,
+  },
+  exclusions: {
+    unjoinedSession: 0, unparseableTask: 0, unknownRequestKind: 0, missingTranscript: 0,
+    noPricedTurns: 0, unpricedModel: 0, multiModel: 0, noVerdict: 0, ...exclusions,
+  },
+  cells, classes,
+});
+
+test("routingAdvisoriesSection: renders each state and never prints $0 for an unmeasurable figure", () => {
+  const cell = (model, dispatches, accepted, costPerAcceptedValue) => ({
+    requestKind: "feature", model, dispatches, accepted,
+    totalUSD: costPerAcceptedValue == null ? 0 : costPerAcceptedValue * accepted,
+    meanUSD: 1, costPerAccepted: costPerAcceptedValue,
+  });
+  const cheap = cell("claude-sonnet-5", 28, 22, 1.2);
+  const dear = cell("claude-opus-4-8", 41, 30, 4.46);
+  const text = routingAdvisoriesSection(advisory({
+    corpus: {
+      transcripts: 779, joined: 396, withTask: 264, withKind: 279, withVerdict: 231,
+      taskFromRecord: 12, taskFromDescription: 252, measuredUSD: 1046.8, unmeasurable: 1,
+    },
+    exclusions: {
+      unjoinedSession: 383, unparseableTask: 132, unknownRequestKind: 117,
+      missingTranscript: 1, multiModel: 6, noVerdict: 33,
+    },
+    cells: [cheap, dear],
+    classes: [{
+      requestKind: "feature", cheapest: "claude-sonnet-5", comparatorFloor: 5,
+      comparisons: [
+        { model: "claude-sonnet-5", state: "baseline", interval: null, cell: cheap,
+          comparator: null, comparatorEligible: true },
+        { model: "claude-opus-4-8", state: "premium-not-justified", direction: "premium", cell: dear, comparator: cheap,
+          comparatorEligible: true,
+          interval: { median: 3.72, low: 2.3, high: 5.74, draws: 20000, discarded: 0, resamples: 20000 } },
+      ],
+    }],
+  }));
+  assert.match(text, /premium-not-justified/);
+  assert.match(text, /3\.72/, "the ratio's median is cited");
+  assert.match(text, /2\.30.*5\.74/s, "the interval is cited alongside it");
+  assert.match(text, /41/, "the dispatch count behind the pricier cell is cited");
+  assert.match(text, /unparseable task attribution.*132/s, "every exclusion is counted");
+  assert.match(text, /\| baseline \|/, "the comparator's own row says it IS the baseline");
+  assert.match(text, /0 of 20000 draws discarded/, "the bootstrap's own discards ride with the interval");
+  assert.doesNotMatch(text, /\$0\.00\b/, "no figure in this fixture is zero");
+});
+
+// "Joined" counted every implementer transcript found, including the 351 that matched no session
+// line in the journal, which were then billed to unknown requestKind.
+test("routingAdvisoriesSection: transcripts found and dispatches joined are separate counts", () => {
+  const text = routingAdvisoriesSection(advisory({
+    corpus: {
+      transcripts: 779, joined: 428, withTask: 264, withKind: 279, withVerdict: 231,
+      taskFromRecord: 12, taskFromDescription: 252, measuredUSD: 1046.8, unmeasurable: 1,
+    },
+    exclusions: { unjoinedSession: 351 },
+  }));
+  assert.match(text, /transcripts found: 779/, "every transcript the reader walked is counted");
+  assert.match(text, /joined to a run: 428/, "joined means joined to a run");
+  assert.match(text, /^- session absent from the run journal — 351$/m,
+    "the rows that joined to nothing are named as their own class");
+  assert.match(text, /12 from the dispatch record/, "how each task number was attributed is stated");
+});
+
+// A transcript that exists but prices nothing is its own bucket (noPricedTurns), never folded
+// into missingTranscript, which states something untrue about the corpus (transcript-exists
+// dispatches are not missing-transcript dispatches).
+test("routingAdvisoriesSection: the no-priced-turns exclusion renders under its own label", () => {
+  const text = routingAdvisoriesSection(advisory({
+    corpus: { transcripts: 10, joined: 10, withTask: 10, withKind: 10, withVerdict: 10, measuredUSD: 5 },
+    exclusions: { missingTranscript: 2, noPricedTurns: 4 },
+  }));
+  assert.match(text, /^- no priced turns — 4$/m,
+    "transcript-exists-but-nothing-priceable gets its own labeled count");
+  assert.match(text, /^- missing transcript — 2$/m, "missingTranscript keeps its own distinct count");
+});
+
+test("routingAdvisoriesSection: an unresolved comparison names its interval and its discarded draws", () => {
+  const cheap = { requestKind: "refactor", model: "claude-sonnet-5", dispatches: 9, accepted: 7, totalUSD: 9, meanUSD: 1, costPerAccepted: 1.28 };
+  const dear = { requestKind: "refactor", model: "claude-opus-4-8", dispatches: 8, accepted: 4, totalUSD: 17, meanUSD: 2.1, costPerAccepted: 4.25 };
+  const text = routingAdvisoriesSection(advisory({
+    corpus: { transcripts: 17, joined: 17, withTask: 17, withKind: 17, withVerdict: 17, taskFromDescription: 17, measuredUSD: 26 },
+    cells: [cheap, dear],
+    classes: [{ requestKind: "refactor", cheapest: "claude-sonnet-5", comparatorFloor: 5, comparisons: [
+      { model: "claude-sonnet-5", state: "baseline", interval: null, cell: cheap, comparator: null, comparatorEligible: true },
+      { model: "claude-opus-4-8", state: "unresolved", cell: dear, comparator: cheap, comparatorEligible: true,
+        interval: { median: 1.66, low: 0.93, high: 2.91, draws: 12843, discarded: 7157, resamples: 20000 } },
+    ] }],
+  }));
+  assert.match(text, /unresolved/);
+  assert.match(text, /0\.93.*2\.91/s, "an unresolved cell shows how far from a conclusion it sits");
+  assert.match(text, /7157 of 20000 draws discarded/,
+    "an interval conditional on both cells accepting says how many draws it dropped to get there");
+});
+
+// A cell that spent $60 over 20 dispatches and accepted nothing is the strongest possible
+// premium-not-justified signal; rendering it as an absence reads as no data.
+test("routingAdvisoriesSection: a cell that accepted nothing reports what it is, not an absence", () => {
+  const cheap = { requestKind: "docs", model: "claude-sonnet-5", dispatches: 9, accepted: 6, totalUSD: 9, meanUSD: 1, costPerAccepted: 1.5 };
+  const none = { requestKind: "docs", model: "claude-opus-5", dispatches: 20, accepted: 0, totalUSD: 60, meanUSD: 3, costPerAccepted: null };
+  const text = routingAdvisoriesSection(advisory({
+    corpus: { transcripts: 29, joined: 29, withTask: 29, withKind: 29, withVerdict: 29, taskFromDescription: 29, measuredUSD: 69 },
+    cells: [cheap, none],
+    classes: [{ requestKind: "docs", cheapest: "claude-sonnet-5", comparatorFloor: 5, comparisons: [
+      { model: "claude-sonnet-5", state: "baseline", interval: null, cell: cheap, comparator: null, comparatorEligible: true },
+      { model: "claude-opus-5", state: "no-accepts", noAccepts: "compared", interval: null,
+        cell: none, comparator: cheap, comparatorEligible: true },
+    ] }],
+  }));
+  assert.match(text, /\| no-accepts \|/, "the verdict column names the state rather than leaving a dash");
+  assert.match(text, /\$60\.00/, "the dollars it did spend are named");
+  assert.match(text, /unmeasurable/, "no accepted task means no cost per accepted task");
+  assert.doesNotMatch(text, /\$0\.00/, "an unmeasurable cost per accepted task must not read as zero");
+});
+
+// § 4.1: a below-floor cell is reported and named, never silently dropped and never the baseline.
+test("routingAdvisoriesSection: a below-floor cell is marked, and the floor it failed is named", () => {
+  const thin = { requestKind: "bug", model: "claude-haiku-4-5", dispatches: 2, accepted: 2, totalUSD: 1, meanUSD: 0.5, costPerAccepted: 0.5 };
+  const cheap = { requestKind: "bug", model: "claude-sonnet-5", dispatches: 26, accepted: 18, totalUSD: 26, meanUSD: 1, costPerAccepted: 1.44 };
+  const text = routingAdvisoriesSection(advisory({
+    corpus: { transcripts: 28, joined: 28, withTask: 28, withKind: 28, withVerdict: 28, taskFromDescription: 28, measuredUSD: 27 },
+    cells: [thin, cheap],
+    classes: [{ requestKind: "bug", cheapest: "claude-sonnet-5", comparatorFloor: 5, comparisons: [
+      { model: "claude-haiku-4-5", state: "unresolved", cell: thin, comparator: cheap, comparatorEligible: false,
+        interval: { median: 0.35, low: 0.1, high: 1.4, draws: 20000, discarded: 0, resamples: 20000 } },
+      { model: "claude-sonnet-5", state: "baseline", interval: null, cell: cheap, comparator: null, comparatorEligible: true },
+    ] }],
+  }));
+  assert.match(text, /claude-haiku-4-5.*‡/s, "the below-floor row is marked where it is read");
+  assert.match(text, /‡ below the comparator floor of 5 dispatches/,
+    "and the mark is explained: reported, never the baseline");
+  assert.match(text, /0\.35/, "its own comparison is still reported");
+});
+
+// A below-floor cell can be cheaper than the comparator, since the comparator is the cheapest
+// ELIGIBLE cell. Rendering that row in premium words tells the reader a premium was paid.
+test("routingAdvisoriesSection: a cheaper-than-baseline row reads as a route-down hint, not a premium", () => {
+  const thin = { requestKind: "bug", model: "claude-haiku-4-5", dispatches: 2, accepted: 2, totalUSD: 0.58, meanUSD: 0.29, costPerAccepted: 0.29 };
+  const cheap = { requestKind: "bug", model: "claude-sonnet-5", dispatches: 26, accepted: 19, totalUSD: 43.7, meanUSD: 1.68, costPerAccepted: 2.3 };
+  const text = routingAdvisoriesSection(advisory({
+    corpus: { transcripts: 28, joined: 28, withTask: 28, withKind: 28, withVerdict: 28, taskFromDescription: 28, measuredUSD: 44.28 },
+    cells: [thin, cheap],
+    classes: [{ requestKind: "bug", cheapest: "claude-sonnet-5", comparatorFloor: 5, comparisons: [
+      { model: "claude-haiku-4-5", state: "costs-less-per-accepted", direction: "discount",
+        cell: thin, comparator: cheap, comparatorEligible: false,
+        interval: { median: 0.12, low: 0.09, high: 0.17, draws: 20000, discarded: 0, resamples: 20000 } },
+      { model: "claude-sonnet-5", state: "baseline", direction: null, interval: null, cell: cheap, comparator: null, comparatorEligible: true },
+    ] }],
+  }));
+  // The table row itself, not the whole section: the note under the table is allowed to say what
+  // the row is NOT ("not a justified premium"), while the verdict a reader scans must not.
+  const row = text.split("\n").find((l) => l.includes("`claude-haiku-4-5`"));
+  assert.match(row, /\| costs-less-per-accepted \|/, "the verdict column states the direction it measured");
+  assert.doesNotMatch(row, /premium/, "no premium was paid on this row, so its verdict may not use a premium word");
+  assert.match(text, /route-down candidate/, "the cheap cell winning is the artifact's strongest route-down hint");
+});
+
+test("routingAdvisoriesSection: a class with no cell above the floor says so instead of naming a baseline", () => {
+  const a = { requestKind: "chore", model: "claude-sonnet-5", dispatches: 3, accepted: 2, totalUSD: 3, meanUSD: 1, costPerAccepted: 1.5 };
+  const b = { requestKind: "chore", model: "claude-opus-5", dispatches: 2, accepted: 1, totalUSD: 8, meanUSD: 4, costPerAccepted: 8 };
+  const text = routingAdvisoriesSection(advisory({
+    corpus: { transcripts: 5, joined: 5, withTask: 5, withKind: 5, withVerdict: 5, taskFromDescription: 5, measuredUSD: 11 },
+    cells: [a, b],
+    classes: [{ requestKind: "chore", cheapest: null, comparatorFloor: 5, comparisons: [
+      { model: "claude-sonnet-5", state: "no-comparator", reason: "no-cell-meets-floor", interval: null, cell: a, comparator: null, comparatorEligible: false },
+      { model: "claude-opus-5", state: "no-comparator", reason: "no-cell-meets-floor", interval: null, cell: b, comparator: null, comparatorEligible: false },
+    ] }],
+  }));
+  assert.match(text, /no cell in this class holds the 5 dispatches/i,
+    "the class says why every row reports no-comparator");
+  assert.doesNotMatch(text, /Compared against/, "there is no comparator to compare against");
+});
+
+test("routingAdvisoriesSection: an empty corpus renders no zeros", () => {
+  const text = routingAdvisoriesSection(advisory({}));
+  assert.match(text, /no measurable dispatch/i);
+  assert.doesNotMatch(text, /\$0\.00/);
+});
+
+test("renderLearnReport: the section is spliced in only when advisories are supplied", () => {
+  assert.doesNotMatch(renderLearnReport(baseArgs()), /## Routing advisories/);
+  const withAdvisories = renderLearnReport({
+    ...baseArgs(),
+    routingAdvisories: advisory({}),
+  });
+  assert.match(withAdvisories, /## Routing advisories/);
 });

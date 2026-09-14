@@ -109,6 +109,11 @@ Gating is by profile, never by token budget or a signal heuristic — a budget g
 coverage nondeterministic and destroy the marginal-vs-first-run comparison the measurement gate
 depends on.
 
+The reinforcement severity percentile also keys on profile — a leaner profile sets a higher "severe"
+bar and reinforces less readily, a thorough one a lower bar — but its value is not a column here:
+`references/reinforcement-policy.md` owns `severityPercentileByProfile`, and the matrix above keeps no
+copy of it.
+
 The maintenance depth row governs `/devcycle:maintain`'s longitudinal lenses: **lean** runs the
 existing criteria only; **standard** adds the Abstraction criterion
 (`${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`), which degrades to
@@ -139,6 +144,7 @@ of deciding for itself.
 | spec — `docs/superpowers/specs/` | local | local | commit |
 | plan — `docs/superpowers/plans/` | local | local | commit |
 | lessons — `docs/devcycle/lessons.md` | local | commit | commit |
+| routing advisories — `docs/devcycle/routing-advisories.md` | local | commit | commit |
 | promotion records — `docs/devcycle/promotions/` | local | commit | commit |
 | maintenance findings — `docs/devcycle/maintenance-findings/` | local | commit | commit |
 | audit report — `docs/audits/` | local | local | local |
@@ -158,8 +164,8 @@ to. Onboarding is exempt because
 gating the installer on the policy it installs is circular, and under `all-local` it would leave
 the ignore lines the policy depends on unwritten. And `.devcycle/` is run scratch that no policy ever tracks, so there is no cell to vary.
 
-A site that commits an artifact resolves the policy, checks this table permits tracking, checks
-`git check-ignore` vetoes nothing, names the side effect, asks the user, then commits with an
+A site that commits an artifact resolves the policy, checks this table permits tracking, drops
+any path `git check-ignore` vetoes, names the side effect, asks the user, then commits with an
 explicit pathspec. `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`'s step 3 is the
 reference implementation of that order.
 
@@ -212,7 +218,30 @@ model id written here, because ids in playbook prose rot as models change:
   the agent definition's own frontmatter model when it has one, and only
   falls through to the caller's model when the definition names none. The
   session tier therefore requires every agent definition it dispatches to be
-  free of a `model:` key.
+  free of a `model:` key. **Caveat:** that inheritance is what "no override"
+  assumes, and it does NOT hold for a subagent when a default subagent model
+  is configured — a dispatch with no override then resolves to that default,
+  not to the orchestrator's own model, and **nothing mitigates that today**:
+  with one configured, every dispatch that resolves to this tier runs at that
+  default instead. The escape hatch is implemented, unwired, and **narrower than
+  this caveat** — `resolveModel` in `scripts/model-pool.mjs` takes a
+  `sessionTierUnreachable` parameter (its `--session-tier-unreachable` CLI flag)
+  under which an escalation that would land on the session tier names the
+  orchestrator's own id as an explicit override instead, and an escalation there is
+  only a **pool** whose ladder climbed on a **counted** signal. Each half of that
+  excludes a shape that lands on this tier identically with the flag and without it.
+  An `auto` or unset knob — every knob's shipped default — is no pool, so the
+  implementer default below stays uncovered and closing that case needs a different
+  fix. A pool on `walkthroughModel` or `branchReviewModel` saturates the ladder with
+  no signal having fired, because the saturating `Infinity` the invocation below has
+  them pass is a sentinel rather than a counted signal — its top rung, but no climb.
+  That leaves `implementerModel` and `taskReviewerModel` the only knobs that can reach
+  the hatch at all. What it does cover is a pool on one of those two that climbed and
+  then fell through to this tier for any reason: the climb is the whole test, so an
+  unrankable rung fires it even when a dispatchable lower rung sits in the pool, and
+  the orchestrator's own id must itself be rankable, since that id is what the
+  override names. No caller passes it: not the invocation below, not any other file
+  in the surface.
 - **fast tier** — the newest fast/small Claude model available to this
   session (the current Sonnet-class generation). If no such id can be
   resolved with confidence, fall back to the session tier — a stronger
@@ -281,6 +310,13 @@ pick records `outcome=model <id> (pooled: rung <n>/<len>)`, gaining
 `, clamped from <requested-id>` when the ceiling moved it; a clamped pin records
 `outcome=model <id> (pinned, clamped from <requested-id>)`; a fall-through to no
 override records `outcome=model session (ceiling: <id> unranked)` or
-`outcome=model session (ceiling: no rung at or below <orchestrator-id>)`. An
-escalation always names the signal that fired. Research dispatches that run
-before any ledger exists log nothing; where a ledger exists, same shape.
+`outcome=model session (ceiling: no rung at or below <orchestrator-id>)`. Two further forms are
+implemented but have no producer yet. With `--session-tier-unreachable` set, an escalation that
+lands on the session tier records, naming the orchestrator's own id,
+`outcome=model <id> (escalated, session unreachable: explicit override)`, or
+`outcome=model session (escalated, unreachable and unranked)` when that id cannot be ranked. Both
+forms need an escalation: a pin that falls through instead records
+`outcome=model session (ceiling: <id> unranked)`. What counts as an escalation is the session-tier
+caveat above, which also records that no caller passes that flag — so neither form can appear in a
+ledger this version writes. An escalation always names the signal that fired. Research dispatches
+that run before any ledger exists log nothing; where a ledger exists, same shape.

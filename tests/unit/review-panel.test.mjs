@@ -613,11 +613,15 @@ test("a finding with no integer line round-trips as line: null, and no line reac
   assert.equal(report.findings[0].verification, "no line reached the verifier");
 });
 
-// F49: stage 2's per-finding verification has been capped at VERIFY_CONCURRENCY
-// since it was written, while stage 1 passed `lensJobs.length` as its own limit
-// — so a large branch review, the case chunking was added to serve, spawned the
-// most processes. Eight lens jobs each dwelling 150 ms make an uncapped fan-out
-// record eight concurrent processes; a capped one cannot exceed the cap.
+// F49/#89: stage 2's per-finding verification has been capped at VERIFY_CONCURRENCY since it was
+// written, while stage 1 passed `lensJobs.length` as its own limit — so a large branch review, the
+// case chunking was added to serve, spawned the most processes. The two stage-1 concurrency tests
+// split the work. The structural one below carries the verdict, because it observes the limit
+// stage 1 hands its limiter. This one covers the failure that assertion cannot see — a correct
+// limit that is not honoured — by watching the processes themselves: each fake lens blocks until
+// one more than the cap has started, so an uncapped run releases all eight at once. Its barrier is
+// still bounded by wall clock, so a badly staggered uncapped run can outlast it; that residual is
+// why this test is the second one and not the verdict.
 test("stage 1 caps concurrent lens subprocesses instead of spawning one per job", () => {
   const repo = makeRepo();
   mkdirSync(join(repo, "src"), { recursive: true });
@@ -634,7 +638,15 @@ const prompt = process.argv[process.argv.length - 1];
 if (prompt.includes("You are one lens")) {
   // Small O_APPEND writes are atomic, so the file's line order IS the event order.
   fs.appendFileSync(${JSON.stringify(eventLog)}, "S\\n");
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+  // Block until one more than the cap has started, or a bounded deadline passes. Uncapped, the
+  // fifth start appears and every process releases at once, recording a peak of 8. Capped, no
+  // process can ever observe a fifth. The deadline bounds only the passing path's duration.
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    const started = fs.readFileSync(${JSON.stringify(eventLog)}, "utf8").split("S").length - 1;
+    if (started >= 5) break;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+  }
   fs.appendFileSync(${JSON.stringify(eventLog)}, "E\\n");
   process.stdout.write(JSON.stringify({ is_error: false, structured_output: { findings: [] } }));
 } else {
@@ -658,6 +670,38 @@ if (prompt.includes("You are one lens")) {
   }
   assert.ok(peak <= 4, `stage 1 peaked at ${peak} concurrent lens processes; the cap is 4`);
   assert.equal(panel.LENS_CONCURRENCY, 4, "the cap is the VERIFY_CONCURRENCY value it follows");
+});
+
+// #89 — the barrier test above infers concurrency from process timing, so an uncapped fan-out that
+// happens to serialize under CI contention can false-pass it. This test is the deterministic
+// verdict, and it observes the limit rather than a report of it: `mapLimit` logs the limit argument
+// it was handed, so the number scraped here is the one stage 1 actually passed its limiter, not one
+// the call site prints beside it. Both job counts are read before either is asserted, so a limit
+// that tracks the job count — #89's regression — shows up as two rows that differ from each other
+// as well as from LENS_CONCURRENCY. No timing is involved anywhere.
+test("stage 1 hands its limiter LENS_CONCURRENCY, independent of the job count (F49)", () => {
+  const limitFor = (lensCount) => {
+    const repo = makeRepo();
+    mkdirSync(join(repo, "src"), { recursive: true });
+    writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+    commitAll(repo, "base");
+    writeFileSync(join(repo, "src", "a.js"), "module.exports = 3;\n");
+    const bin = makeFakeBin("claude", `
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: { findings: [], summary: "none" } }));
+`);
+    const lenses = Array.from({ length: lensCount }, (_, i) => ({ key: `l${i}`, charter: `Charter ${i}.` }));
+    const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses }, { cwd: repo, binDirs: [bin] });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    const m = res.stderr.match(/stage 1: .*job\(s\), cap (\d+)/);
+    assert.ok(m, `stage 1's limiter did not report its limit; stderr: ${res.stderr}`);
+    return Number(m[1]);
+  };
+  const observed = [8, 3].map((jobCount) => [jobCount, limitFor(jobCount)]);
+  assert.deepEqual(
+    observed,
+    [[8, panel.LENS_CONCURRENCY], [3, panel.LENS_CONCURRENCY]],
+    "each [job count, limit] row must carry LENS_CONCURRENCY; the limit must not track the job count",
+  );
 });
 
 // ---------- §4 engine fixes ----------

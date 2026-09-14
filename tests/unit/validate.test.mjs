@@ -3,11 +3,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makePluginFixture as makeBaseFixture, writeInto, runValidate, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
-import { lessonsTrackingErrors } from "../../scripts/validate.mjs";
+import { lessonsTrackingErrors, docsSubdirTrackingErrors } from "../../scripts/validate.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
@@ -1304,6 +1304,85 @@ test("lessonsTrackingErrors still fires when the store is tracked AND re-ignored
   assert.ok(lessonsTrackingErrors(root).length >= 1);
 });
 
+// --- check 25: a docs/ file this repo tracks must stay visible to its own ignore rules ---
+
+// Ignore rules in the shape references/config.md § Doc tracking asks for when an artifact's row
+// reads `local` in every column: the directory is re-included so it is visible, its contents are
+// re-ignored so no run's record is ever committed.
+const LOCAL_AUDITS_IGNORE = "docs/*\n!docs/*.md\n!docs/audits/\ndocs/audits/*\n";
+
+// A throwaway repo carrying `tracked` under the given .gitignore body. The files are staged
+// before the ignore rules are written, the way a tracked file predates the pattern that hides it.
+const trackedDocsRepo = (body, tracked = ["docs/audits/report.md"]) => {
+  const root = makeTempDir("docs-tracking-");
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  for (const p of tracked) {
+    mkdirSync(join(root, dirname(p)), { recursive: true });
+    writeFileSync(join(root, p), "# Report\n");
+    execFileSync("git", ["add", p], { cwd: root });
+  }
+  writeFileSync(join(root, ".gitignore"), body);
+  return root;
+};
+
+test("docsSubdirTrackingErrors flags a tracked docs file the ignore rules hide, and passes once it is allowlisted", () => {
+  const errs = docsSubdirTrackingErrors(trackedDocsRepo(LOCAL_AUDITS_IGNORE));
+  assert.equal(errs.length, 1, `expected one error, got ${JSON.stringify(errs)}`);
+  assert.match(errs[0], /docs\/audits\/report\.md/);
+  assert.match(errs[0], /config\.md/);
+
+  const allowlisted = trackedDocsRepo(LOCAL_AUDITS_IGNORE + "!docs/audits/report.md\n");
+  assert.deepEqual(docsSubdirTrackingErrors(allowlisted), []);
+});
+
+// The local-at-every-depth surface itself is not a defect: with nothing tracked inside it, a
+// re-included-then-re-ignored directory is exactly what that table's `local` cells call for.
+test("docsSubdirTrackingErrors leaves a deliberately local docs surface alone", () => {
+  assert.deepEqual(docsSubdirTrackingErrors(trackedDocsRepo(LOCAL_AUDITS_IGNORE, [])), []);
+});
+
+// Asking git which tracked paths it would ignore covers every way to hide one, including the
+// three a literal `docs/<sub>/*` match misses — and an excluded directory is the worse trap,
+// since no `!` line can re-open anything inside it.
+test("docsSubdirTrackingErrors catches every ignore shape that hides a tracked docs file", () => {
+  for (const shape of ["docs/audits/", "docs/audits", "docs/audits/**"]) {
+    const errs = docsSubdirTrackingErrors(trackedDocsRepo(`docs/*\n!docs/*.md\n!docs/audits/\n${shape}\n`));
+    assert.equal(errs.length, 1, `${shape}: expected one error, got ${JSON.stringify(errs)}`);
+  }
+});
+
+test("docsSubdirTrackingErrors ignores a tree git cannot answer for", () => {
+  assert.deepEqual(docsSubdirTrackingErrors(makeTempDir("no-repo-")), []);
+});
+
+test("docsSubdirTrackingErrors: every docs file this repo tracks stays un-ignored", () => {
+  assert.deepEqual(docsSubdirTrackingErrors(REPO_ROOT), []);
+});
+
+// The other half of the same agreement, and the reason the check cannot demand a `*.md`
+// allowlist: the audit-report row reads `local` in every column, so a report written here must
+// stay ignored — only the disposition register docs/decisions/README.md cites is allowlisted.
+test("this repo's .gitignore keeps a new audit report local, as the doc-tracking table requires", () => {
+  const res = spawnSync("git", ["check-ignore", "--no-index", "-q", "docs/audits/2026-01-01-fixture.md"], {
+    cwd: REPO_ROOT,
+  });
+  assert.equal(
+    res.status,
+    0,
+    "a new docs/audits/ report must stay ignored — references/config.md § Doc tracking keeps audit reports local at every policy depth"
+  );
+});
+
+test("check 25 is wired into validate: a tracked docs file the ignore rules hide fails the run", () => {
+  const dir = makePluginFixture();
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  writeInto(dir, "docs/audits/report.md", "# Report\n");
+  execFileSync("git", ["add", "docs/audits/report.md"], { cwd: dir });
+  // `!docs/devcycle/` keeps the learn-store guard quiet, so check 25 is the one thing broken here.
+  writeInto(dir, ".gitignore", "docs/*\n!docs/*.md\n!docs/devcycle/\n!docs/audits/\ndocs/audits/*\n");
+  failsWith(runValidate(dir), /docs\/audits\/report\.md/, /config\.md/);
+});
+
 // --- check 20: a read-only-mandate agent must disclaim commit and push ---
 // An agent whose frontmatter grants Bash and whose body claims read-only access must name
 // both "commit" and "push" among the git operations it disallows — Bash itself is not
@@ -1883,4 +1962,41 @@ test("dispatch-governance check: 'dispatched' and 'dispatching' do not trigger f
       "2. **Fix.** When dispatching a task, ensure governance is cited.\n"
   );
   ok(runValidate(dir));
+});
+
+// --- check 24: the shipped reinforcement policy parses and holds its invariants ---
+
+// A fixture whose reinforcement policy carries the machine block between its markers but breaks
+// the strict win>culprit asymmetry. The consumer line keeps this test pointed at check 24 (the
+// asymmetry) rather than tripping check 11 (a reference with no consumer) as well.
+const reinforcementPolicyFixture = (dir, policy) => {
+  writeInto(
+    dir,
+    "references/reinforcement-policy.md",
+    "# Reinforcement policy\n\nFixture policy file.\n\n" +
+      "<!-- reinforcement-policy:begin -->\n```json\n" +
+      JSON.stringify(policy, null, 2) +
+      "\n```\n<!-- reinforcement-policy:end -->\n"
+  );
+  writeInto(
+    dir,
+    "playbooks/demoing-things.md",
+    FIXTURE_PLAYBOOK_HEAD + "\nThe reinforcement bars live in references/reinforcement-policy.md.\n"
+  );
+};
+
+test("reinforcement-policy check: a policy whose win bar is not strictly above the culprit bar fails, naming the file", () => {
+  const dir = makePluginFixture();
+  reinforcementPolicyFixture(dir, {
+    severityPercentileByProfile: { lean: 70, standard: 60, thorough: 50 },
+    culpritRecurrenceBar: 3,
+    winRecurrenceBar: 3,
+    graduationRuns: 3,
+    minPricedKeysForPercentile: 3,
+  });
+  failsWith(runValidate(dir), /references\/reinforcement-policy\.md/, /strictly greater/);
+});
+
+test("reinforcement-policy check: the real repo's shipped policy parses and passes validate", () => {
+  ok(runValidate(REPO_ROOT));
 });

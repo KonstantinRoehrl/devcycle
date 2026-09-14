@@ -4,9 +4,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runsObserved, isIso } from "./journal.mjs";
 import { cmpSemver, SEMVER_RE } from "./semver.mjs";
+import { readPolicy, severityPercentile, derivedSeverityThreshold } from "./reinforcement-policy.mjs";
+import { lessonKind, isConsolidated } from "./lessons.mjs";
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const RETIRE_RUNS = 10, RETIRE_DAYS = 90, DAY_MS = 86_400_000;
 const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
 
 export function installedVersion() {
@@ -104,12 +105,55 @@ function measureWindow(after) {
   return { runs, reason };
 }
 
+// Pure propose-gate decision. Culprit (journal-recurrence/recurred at r1|r2) escalates on ANY of
+// severity, the recurrence floor, or the stuck-too-long safety net; a win (journal-reinforcement/held
+// at r1|r2) reinforces only at/above the strictly-higher win bar. Missing cost is never read as $0.
+export function classifyCandidate({ verify, verdict, rung, recurrences, runsObserved }, policy, { costPerOccurrence, severityCutoff }) {
+  const atR1R2 = rung === "r1" || rung === "r2";
+  if (verify === "journal-recurrence" && verdict === "recurred" && atR1R2) {
+    if (severityCutoff != null && costPerOccurrence != null && costPerOccurrence * recurrences >= severityCutoff)
+      return { list: "escalation", reason: `severity $${(costPerOccurrence * recurrences).toFixed(2)}` };
+    if (recurrences >= policy.culpritRecurrenceBar)
+      return { list: "escalation", reason: `recurred ${recurrences}×` };
+    if (runsObserved >= policy.graduationRuns)
+      return { list: "escalation", reason: `stuck ${runsObserved} runs at ${rung}` };
+    return null;
+  }
+  if (verify === "journal-reinforcement" && verdict === "held" && atR1R2) {
+    if (recurrences >= policy.winRecurrenceBar)
+      return { list: "reinforcement", reason: `held ${recurrences}×` };
+    return null;
+  }
+  return null;
+}
+
+// A win retires when it is consolidated (folded into a playbook's default flow / a scaffold) —
+// structural enforcement, verdict-independent. A culprit retires only when it is HELD and
+// graduated to r3 (a mechanical check now guards it; a red check must not retire). An ungraduated
+// lesson is ineligible with a stated reason. Sibling of classifyCandidate (QC5).
+export function retirementEligibility({ kind, rung, consolidated, verdict }) {
+  if (kind === "win")
+    return consolidated
+      ? { eligible: true, reason: "consolidated win" }
+      : { eligible: false, reason: "not consolidated" };
+  if (verdict !== "held") return { eligible: false, reason: `verdict is ${verdict}, not held` };
+  return rung === "r3"
+    ? { eligible: true, reason: "graduated to r3, held" }
+    : { eligible: false, reason: `held but not graduated to r3 (at ${rung})` };
+}
+
 export function verify(promotions, journalEvents, installed, opts = {}) {
-  const { now = Date.now(), runCheck = skipRunCheck, vocab = loadVocab(), root = process.cwd(),
+  const { runCheck = skipRunCheck, vocab = loadVocab(), root = process.cwd(),
     timeoutMs = VERIFY_TIMEOUT_MS, maxBuffer = VERIFY_MAX_BUFFER,
-    releaseDates: relDates = loadReleaseDates() } = opts;
+    releaseDates: relDates = loadReleaseDates(),
+    policy = readPolicy(), costByKey = {}, profile = "standard" } = opts;
+  // One cutoff per call: the profile's severity percentile of the priced corpus, or null when the
+  // corpus is below minPricedKeysForPercentile (read downstream as the recurrence bar, never $0).
+  const severityCutoff = derivedSeverityThreshold(
+    Object.values(costByKey), severityPercentile(policy, profile), policy.minPricedKeysForPercentile);
   const scored = promotions.filter((p) => !p.lifecycle && p.culpritId);
-  const scoreboard = [], escalation = [], retirement = [];
+  const scoreboard = [], escalation = [], retirement = [], reinforcement = [];
+  const byList = { escalation, reinforcement };
   for (const p of scored) {
     // A promotion's culprit-id/aliases may hold a bare slug, novel:<slug>, or <kind>:<slug>
     // (promotions.mjs CULPRIT_ID_RE), but run-record.mjs's validateCulprit only ever writes a
@@ -129,6 +173,8 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
       // in the report; a held/broken row carries the bare path. See #54 and audit F1/F48.
       const detail = reason ? `${p.verify} (${reason})` : p.verify;
       scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: 0, recurrences: 0, detail });
+      const elig = retirementEligibility({ kind: lessonKind(p), rung: p.rung, consolidated: isConsolidated(p), verdict });
+      if (elig.eligible) retirement.push({ culpritId: p.culpritId, rung: p.rung, reason: elig.reason });
       continue;
     }
     const after = eventsAfter(journalEvents, p.landed);
@@ -139,11 +185,16 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
       : reinforcement ? (recurrences > 0 ? "held" : "not-adopted")
       : (recurrences > 0 ? "recurred" : "held");
     scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: runs, recurrences, detail });
-    if (verdict === "recurred" && p.rung === "r2") escalation.push({ culpritId: p.culpritId, rung: p.rung, reason: `recurred ${recurrences}×` });
-    if (verdict === "held" && (p.rung === "r1" || p.rung === "r2")
-        && (runs >= RETIRE_RUNS || now - Date.parse(p.landed) >= RETIRE_DAYS * DAY_MS)) {
-      retirement.push({ culpritId: p.culpritId, rung: p.rung, reason: `held ${runs} runs since ${p.landed}` });
-    }
+    // Per-promotion cost under the same bare/novel: normalization the ids Set already applies;
+    // a key the corpus never priced stays null (never coerced to $0) and falls back to the bar.
+    let costPerOccurrence = null;
+    for (const id of ids) if (costByKey[id] != null) { costPerOccurrence = costByKey[id]; break; }
+    const decision = classifyCandidate(
+      { verify: p.verify, verdict, rung: p.rung, recurrences, runsObserved: runs },
+      policy, { costPerOccurrence, severityCutoff });
+    if (decision) byList[decision.list].push({ culpritId: p.culpritId, rung: p.rung, reason: decision.reason });
+    const elig = retirementEligibility({ kind: lessonKind(p), rung: p.rung, consolidated: isConsolidated(p), verdict });
+    if (elig.eligible) retirement.push({ culpritId: p.culpritId, rung: p.rung, reason: elig.reason });
   }
   const resolvedIn = vocab.filter((e) => e && e["resolved-in"]).map((e) => {
     // The journal stores a culprit as a bare culprits.json slug or as novel:<slug>
@@ -166,7 +217,7 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
     const verdict = detail !== null ? "unmeasurable" : recurrences > 0 ? "recurred" : "held";
     return { culpritId: id, resolvedIn: rv, verdict, runsObserved: runs, detail };
   });
-  return { scoreboard, candidates: { escalation, retirement }, resolvedIn };
+  return { scoreboard, candidates: { escalation, retirement, reinforcement }, resolvedIn };
 }
 
 function loadVocab() {

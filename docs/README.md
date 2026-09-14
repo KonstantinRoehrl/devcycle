@@ -28,7 +28,7 @@ machinery a command loads by path.
 | [`/devcycle:continue`](../commands/continue.md) | Resumes an interrupted cycle: lists every in-flight cycle in this repo with its branch, stage, and age, and asks which one. |
 | [`/devcycle:review`](../commands/review.md) | Reviews a branch, the whole repository, or a named file set against criteria you confirm, and writes a ranked findings document; on a branch with an open PR, can opt in to filing those findings back onto it. Standalone. |
 | [`/devcycle:verify`](../commands/verify.md) | Walks an on-device checklist derived from a branch's diff — verification for code this session did not write. Standalone. |
-| [`/devcycle:learn`](../commands/learn.md) | Mines this repo's sessions and memory for recurring patterns and proposes doc and skill edits for confirmation; its report carries a per-period ledger netting recorded win savings against culprit cost. Standalone. |
+| [`/devcycle:learn`](../commands/learn.md) | Mines this repo's sessions and memory for recurring patterns and proposes doc and skill edits for confirmation; its report carries a per-period ledger netting recorded win savings against culprit cost, and a routing advisory comparing measured cost per accepted task against the cheapest cell that clears its minimum-dispatch floor, across the models this repo dispatched to. Standalone. |
 | [`/devcycle:doctor`](../commands/doctor.md) | Profiles token cost, context depth, model routing, and agent startup cost across devcycle sessions. Standalone. |
 | [`/devcycle:onboard`](../commands/onboard.md) | Bootstraps tier-2 setup: detects real build/test/lint commands, scaffolds `CLAUDE.md`, and proposes a permission allowlist. Standalone. |
 | [`/devcycle:maintain`](../commands/maintain.md) | Assesses a repository's longitudinal health — how its abstractions and history trend over time — and writes a ranked findings document. Read-only, standalone. |
@@ -58,13 +58,18 @@ directly.
 
 ## Machinery
 
-The Node workflows the playbooks drive by path.
+The engines, guards, and shims a command or playbook drives by path. The rest of `scripts/` is
+this repo's own checkers and libraries; [`CONTRIBUTING.md`](../CONTRIBUTING.md) lists the ones you
+run locally.
 
 | Component | What it does |
 | --- | --- |
 | [`workflows/review-panel.js`](../workflows/review-panel.js) | Multi-lens read-only review engine for `reviewDepth: panel`. |
 | [`workflows/mechanical-sweep.js`](../workflows/mechanical-sweep.js) | Pilot-first bulk edit engine behind the sweep path. |
 | [`workflows/lib/agent-cli.js`](../workflows/lib/agent-cli.js) | The subprocess layer both workflow engines share to drive `claude` in print mode. |
+| [`scripts/self-dev-check.mjs`](../scripts/self-dev-check.mjs) | The self-development landing guard, inert unless the repo under work is this plugin's own source: `--preflight` records what the installed copy holds when a run starts and reports how far it has drifted from the repo, `--assert` fails the finish stage when an expected deliverable is absent from the branch or the installed copy was written to during the run, and `--plugin-digest` mints the run record's content-based plugin identifier. |
+| [`scripts/tree-hash.mjs`](../scripts/tree-hash.mjs) | Content identity for a directory tree — the per-file hashes and rolling digest both the landing guard and the run record's plugin identifier read, independent of any version string or VCS state. |
+| [`bin/devcycle-root`](../bin/devcycle-root) | Prints this plugin's installed root. Claude Code puts `<plugin>/bin` on PATH, so plugin scripts named `"$(devcycle-root)/scripts/<name>.mjs"` resolve from any shell — including a dispatched subagent's, where `${CLAUDE_PLUGIN_ROOT}` is empty. Quote the substitution as shown, or a plugin root containing a space is word-split. |
 
 ## Hooks
 

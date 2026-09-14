@@ -181,6 +181,12 @@ see `docs/design/`.
    reports, evidence, findings, sweep arguments). It shows the list and the total before
    asking, removes nothing without an explicit yes, and never touches the audit trail —
    state file, ledger, scope, spec, plan, checklist — or any file your repo tracks in git.
+   Ahead of that archiving and cleanup, two checks gate the stage's green report: this cycle's
+   own `.devcycle/` artifacts are screened for privacy, and the landing guard
+   `scripts/self-dev-check.mjs` asserts that the deliverable reached the repo and that the
+   installed plugin copy was not written to during the run. Either finding stops the finish
+   instead of being reported over. The guard is inert outside devcycle's own source, the one
+   repo where the pipeline and its deliverable live in two different trees.
 
 Triage judges size, too. A request at typo, rename, or few-line-fix scale — measured against a
 strict checklist, where any doubt on any criterion means not trivial — gets called out before

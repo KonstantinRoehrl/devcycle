@@ -138,7 +138,7 @@ proprietary snippet, and flag it for human attention. Then partition candidates 
 sensitive-flagged candidate and every `contradiction-resolution`). The partition is **written here,
 not chosen by the reader**: no candidate moves into the bulk to avoid a per-item decision.
 
-**Recurrence** is skipped at `lean`. At `standard` or `thorough`, run `--check-recurrence`: each
+**Recurrence** is skipped at `lean`. At `standard` or `thorough`, run `--check-recurrence --profile <resolved profile>`: each
 promotion carrying `verify: journal-recurrence` is checked by counting journal events with its
 culprit-id dated after it landed. Four verdicts, and the last two are load-bearing — `held` (N runs
 observed, no recurrence), `recurred`, `errored` (the check could not run to completion), and
@@ -169,7 +169,7 @@ whenever `fault` is `pipeline`, which never lands locally. `whyNotHigher` is **r
 landed candidate: it is what makes ladder-first checkable rather than claimed.
 
 Then render the proposal:
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --render-report .devcycle/dreaming/<date>-candidates.json`,
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --render-report .devcycle/dreaming/<date>-candidates.json --profile <resolved profile>`,
 writing it to `.devcycle/dreaming/<YYYY-MM-DD>-dream.md`. `${CLAUDE_PLUGIN_ROOT}/references/impact-scoring.md`
 owns how each candidate's `impact` is computed; do not restate the formula here. That same
 reference owns the figures in the rendered report's `## Ledger` section, which nets each period's
@@ -212,8 +212,17 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
    names the displaced line's culprit-id. Show it as "landing X evicts Y". **The edit cannot land
    unresolved**: either the user approves the eviction or the landing is deferred.
 6. **Surface any retirement or revert candidates** raised since the last run, proposed exactly like
-   fresh candidates — this runs live. A **retirement** candidate is a `held` r1/r2 lesson past 10
-   runs or 90 days; it proposes deleting the line and writing a **retirement** lifecycle record. A
+   fresh candidates — this runs live. The rendered report's `## Verification candidates` section
+   likewise surfaces this run's **graduation** (the `escalation` push) and **reinforcement**
+   candidates, gated by the severity thresholds
+   `${CLAUDE_PLUGIN_ROOT}/references/reinforcement-policy.md` owns. Retirement is graduation-gated:
+   a **culprit** retirement candidate is a `held` **r3** lesson (a mechanical check now guards it),
+   a **win** retirement candidate is a **consolidated** win, and an ungraduated held lesson is
+   reported ineligible with the reason it has not graduated. A win folds into a playbook's default
+   flow or a scaffold once it has proven out; record that consolidation with
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --consolidate <culpritId>`, which is what makes
+   the win eligible to retire. A retirement candidate proposes deleting the line and writing a
+   **retirement** lifecycle record. A
    **revert** candidate, read from "revert-candidates.json" in the fixed doctor directory (playbooks/profiling-sessions.md owns its resolution), proposes the undo
    *edit* and a **revert** lifecycle record — never `git revert`, since recorded `commit:` shas
    predate squash-merging and often do not resolve on the integration branch. Both carry the
@@ -272,15 +281,31 @@ Then, per adopted candidate:
    `audience`, `verify` and `aliases`) to a scratch file and pass it with the double-quoted
    `$(cat …)` form, never inline single quotes:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --record-promotion "$(cat <scratch-file>)"`.
+
+Once the report is rendered, also write the routing advisory artifact — rendered to the run
+scratch first, moved into place only once the render succeeded:
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --routing-advisories > .devcycle/dreaming/routing-advisories.md && mkdir -p docs/devcycle && mv .devcycle/dreaming/routing-advisories.md docs/devcycle/routing-advisories.md || { rm -f .devcycle/dreaming/routing-advisories.md; false; }`.
+A redirect at the real path truncates it before the render runs, so a failure leaves a zero-byte
+advisory reading "nothing to advise" that step 3 offers for commit; the scratch render leaves the
+previous advisory standing and no scratch behind, and `mkdir -p` covers a first run, before step 2
+creates `docs/devcycle/`. The trailing `false` makes failure visible — without it the `rm`'s exit
+status stands in for the render's — so read a non-zero exit as "no advisory this run": say so in
+the report and leave the artifact out of step 3's ask.
+It is advisory only — nothing in the pipeline reads it, and routing changes only when you read it
+and set a `*Model` knob, which `${CLAUDE_PLUGIN_ROOT}/references/config.md`'s resolution order
+already treats as the one thing that beats the profile. The file is per-repo and is never plugin
+content.
+
 3. **Offer to commit the freshly written output.** Resolve `${user_config.docTrackingPolicy}`
    (default `standard`). When it permits tracking — `standard` or `all-tracked`, never `all-local`
-   — **and** `git check-ignore <path>` vetoes none of the just-written paths, name the side effect
-   and **ask the user** (AskUserQuestion, mirroring **Confirm**'s per-item batching, 1–4 at a time)
-   whether to commit the freshly written `docs/devcycle/lessons.md` and its promotion records as one
+   — name the side effect and **ask the user** (AskUserQuestion, mirroring **Confirm**'s per-item
+   batching, 1–4 at a time) whether to commit `docs/devcycle/lessons.md`, the promotion records,
+   and, only if the advisory step above succeeded, `docs/devcycle/routing-advisories.md`, as one
    scoped Conventional commit: `git add <paths> && git commit -- <paths>` with a `docs(learn): …` or
    `chore(learn): …` subject, respecting `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s Committing
-   rule — the prompt is where the user declines on a protected branch. Never a silent `git add`: any
-   path the policy excludes, `git check-ignore` vetoes, or the user leaves declined stays written but
+   rule — the prompt is where the user declines on a protected branch. A `git check-ignore <path>`
+   veto narrows that path set and never cancels the ask; an empty set skips it. Never a silent
+   `git add`: any path the policy excludes, a veto drops, or the user declines stays written but
    uncommitted.
 4. **Delete the source memory once its promotion lands, and only if it has one.**
 

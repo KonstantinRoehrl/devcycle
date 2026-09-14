@@ -117,9 +117,9 @@ built here:
   (`node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`), then posts it
   through the content and post gates via the `pr-review-post.mjs reply` route §6.5b defines —
   whose exact flags and attribution footer `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`'s
-  reply contract owns. `<login>` is resolved once per run via `gh api user --jq .login`. A fixed
-  item whose comment carries no `thread_id` (a `pr-level` / `review-summary` comment) posts with
-  `--pr-level` and is not resolvable. Residue replies keep carrying their deferred status (below).
+  reply contract owns. A fixed item whose comment carries no `thread_id` (a `pr-level` /
+  `review-summary` comment) posts with `--pr-level` and is not resolvable. Residue replies keep
+  carrying their deferred status (below).
 - The round cap is the profile's branch-review round cap from
   `${CLAUDE_PLUGIN_ROOT}/references/config.md` — no new knob.
 - Loop statuses are `${CLAUDE_PLUGIN_ROOT}/references/loops.md`'s, including

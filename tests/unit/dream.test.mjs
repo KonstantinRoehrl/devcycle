@@ -35,6 +35,7 @@ import { eachRecord } from "../../scripts/jsonl.mjs";
 // travel with the import rather than being dropped.
 import { readPromotions, recordPromotion } from "../../scripts/promotions.mjs";
 import { repoSlug, hashSession } from "../../scripts/run-record.mjs";
+import { readPolicy } from "../../scripts/reinforcement-policy.mjs";
 
 const SCRIPT = new URL("../../scripts/dream.mjs", import.meta.url).pathname;
 // This repo itself, for the criteria that must run against its real promotion records.
@@ -1010,6 +1011,41 @@ test("cli: --check-suppressed rejects an argument split across several argv elem
   assert.equal(r.stdout.trim(), "", "no {\"suppressed\": ...} payload on the rejected path");
 });
 
+// Task 4: --consolidate transitions a win to consolidated (folded into a playbook/scaffold). A
+// win is the only lesson kind that consolidates — a culprit graduates to r3 instead — and it
+// consolidates exactly once.
+test("cli: --consolidate marks a win consolidated and exits 0", () => {
+  const root = realpathSync(repo());
+  recordPromotion(root, { ...REC, culpritId: "win:x", verify: "journal-reinforcement", landed: "2026-08-10" });
+  const r = run(["--consolidate", "win:x"], root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readPromotions(root)[0].consolidated, /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test("cli: --consolidate refuses a culprit-kind lesson", () => {
+  const root = realpathSync(repo());
+  recordPromotion(root, { ...REC, culpritId: "cul:x", verify: "journal-recurrence", landed: "2026-08-10" });
+  const r = run(["--consolidate", "cul:x"], root);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /only a win-kind lesson can be consolidated/);
+});
+
+test("cli: --consolidate refuses an already-consolidated win", () => {
+  const root = realpathSync(repo());
+  recordPromotion(root, { ...REC, culpritId: "win:x", verify: "journal-reinforcement", landed: "2026-08-10" });
+  assert.equal(run(["--consolidate", "win:x"], root).status, 0);
+  const r = run(["--consolidate", "win:x"], root);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /already consolidated/);
+});
+
+test("cli: --consolidate cannot be combined with another subcommand", () => {
+  const root = realpathSync(repo());
+  const r = run(["--consolidate", "win:x", "--novel-slugs"], root);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /cannot be combined/);
+});
+
 test("extractSession: returns decoded message text for one session", () => {
   const root = realpathSync(repo());
   const proj = projectsWith(root, [
@@ -1967,16 +2003,21 @@ test("cli: --check-recurrence does not execute a promotion verify: line without 
 // when the engine had candidates. An r2 promotion whose culprit reappears in the journal is
 // exactly the escalation case verification.mjs already scores.
 test("--render-report renders the escalation candidates the engine computed", () => {
+  // The culprit recurs enough times to clear the recurrence bar, so the engine escalates it; the
+  // count comes from the policy, never a hardcoded threshold, so it tracks the bar if it moves.
   const { root, runsDir } = corpusWithJournal({
     promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
-    events: [{ culprit: "x", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
+    events: Array.from({ length: readPolicy().culpritRecurrenceBar }, (_, i) => ({
+      culprit: "x", ts: `2026-${String(2 + i).padStart(2, "0")}-01T00:00:00Z`,
+      runId: String.fromCharCode(97 + i).repeat(16),
+    })),
   });
   const res = run(["--render-report", writeCandidateFixture()], root, { DEVCYCLE_RUNS_DIR: runsDir });
   assert.equal(res.status, 0);
-  const escalation = res.stdout.split("### Escalation")[1] ?? "";
-  assert.match(escalation, /friction:x/, "the computed candidate reaches the report");
+  const graduation = res.stdout.split("### Graduation")[1] ?? "";
+  assert.match(graduation, /friction:x/, "the computed candidate reaches the report");
   assert.doesNotMatch(
-    escalation.split("###")[0],
+    graduation.split("###")[0],
     /\(none this run\)/,
     "a computed candidate must never render as a confident zero",
   );
@@ -3082,4 +3123,30 @@ test("cli: --check-observations accepts a branch-review-grounded win", () => {
   const r = run(["--check-observations", "winok"], root);
   assert.equal(r.status, 0);
   assert.equal(r.stdout.trim(), "observations: ok");
+});
+
+// The artifact body is a standalone document, not a slice of the learn report: the coordinator
+// redirects this stdout straight into docs/devcycle/routing-advisories.md, so anything else the
+// report prints (the ledger, the candidates) would land in that file too.
+test("--routing-advisories: prints only the artifact body, from a fixture corpus", () => {
+  const { root, projects, runsDir } = corpusWithJournal({ events: [] });
+  const r = run(["--routing-advisories"], root, {
+    CLAUDE_DREAM_PROJECTS: projects,
+    DEVCYCLE_RUNS_DIR: runsDir,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^# Routing advisories/, "the artifact body starts with its own H1");
+  assert.doesNotMatch(r.stdout, /## Ledger/, "the artifact carries the section alone, not the report");
+});
+
+// main()'s if-chain resolves by program order, so a combined invocation would run whichever
+// handler is written first and drop the other's output entirely — read by a caller parsing for
+// that output's key, the omission reads as a confident wrong answer.
+test("--routing-advisories cannot be combined with another subcommand", () => {
+  const res = run(["--routing-advisories", "--staleness"]);
+  assert.equal(res.status, 1, "combining two subcommands must exit 1");
+  // The message enumerates the offending flags in SUBCOMMANDS order rather than argv order,
+  // which is the same reason the guard has to exist: the handler chain resolves by program
+  // order too, so the order they were typed in never decides which one runs.
+  assert.match(res.stderr, /--staleness and --routing-advisories cannot be combined/);
 });

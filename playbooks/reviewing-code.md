@@ -7,7 +7,11 @@ defects and never softens, delays, or substitutes for a defect finding the same 
 otherwise produce.
 **Which caller invoked it decides more than the scope does.** An **audit run** — `/devcycle:review`
 standalone, or `/devcycle:cycle`'s audit stage, at any scope below — runs the criteria interview
-(step 1) and ends in the ranked findings document (step 5). **The branch-review stage**
+(step 1) and ends in the ranked findings document (step 5). **`/devcycle:maintain`**
+(`${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md`) is a third class: it brings its own
+longitudinal criteria — depth-gated, not discovered — into that same step-1 interview (its own
+scoping gate mandates the hard STOP) rather than skipping it, and it owes step 5's ranked findings
+document exactly as an audit run does. **The branch-review stage**
 (`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md`) skips both, inheriting the cycle spec's
 criteria and taking its findings back inline. Resolve `profile` first per
 `${CLAUDE_PLUGIN_ROOT}/references/config.md` (`audit depth` sets how far an audit sweeps) and report
@@ -17,9 +21,9 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
 
 ## Scope
 
-Exactly one scope argument, plus `criteria` — confirmed at step 1 on an audit run, the spec's
-requirements plus the default criteria for the branch-review stage — and `specPath` when a spec
-governs it.
+Exactly one scope argument, plus `criteria` — confirmed at step 1 on an audit run and on
+`/devcycle:maintain`, the spec's requirements plus the default criteria for the branch-review
+stage — and `specPath` when a spec governs it.
 
 | form | argument | what is reviewed |
 | --- | --- | --- |
@@ -44,7 +48,7 @@ where contents are read from per "Deriving a branch's file set" in
   chunks and discloses the deferred set in its `COVERAGE WARNING`, rather than leaving the cutoff
   to the reviewer's judgment.
 
-## 1. Discovery and the criteria interview — audit runs only
+## 1. Discovery and the criteria interview — audit runs and `/devcycle:maintain` (maintain skips discovery, not the interview)
 
 **What separates an audit from a code review is where the criteria come from: the user** — criteria
 you picked yourself measure the code against your taste. Discovery is shallow, enough to propose
@@ -71,19 +75,25 @@ assumed answers until the user replies.
 
 ## 2. Research and lens construction
 
-On an audit run, first run the repo-research procedure
+**On an audit run**, first run the repo-research procedure
 `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`), filtered by the
 confirmed criteria and scope rather than the request's wording. Source any criterion no local
 convention covers in `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`'s order; that precedence
 is binding and is cited per finding. Without web access the sweep still runs against repo conventions
-plus that file's seed index, recording the limit in the coverage statement.
+plus that file's seed index, recording the limit in the coverage statement. **`/devcycle:maintain`**
+has already oriented itself (its own playbook's step 3) and hands that result down as the digest
+below, so it does not run the procedure again; **the branch-review stage** runs none at all, having
+arrived with its criteria rather than sourcing them.
 
-On an audit run, match the stabilized scope to its lessons before the lenses are grouped: the coordinator runs
+**On an audit run and on `/devcycle:maintain`**, match the stabilized scope to its lessons before
+the lenses are grouped: the coordinator runs
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match --stage audit --files "<the stabilized audit scope files>"`
 and folds the printed lesson lines (only the lines, not the stage section they came from) into
 the lens charters as known risks the reviewers must weigh the scope against. The `--lesson
 <id>` tail on each line lets a reviewer pull that record when a lens needs it. Nothing is
-folded in when the match returns empty.
+folded in when the match returns empty. **The branch-review stage** does not run this call at all:
+it matches its own stage's lessons before invoking this engine, per
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md`.
 
 **Optional caller-supplied orientation (used by `/devcycle:maintain`, ignored otherwise).** A caller
 may hand this stage a pre-computed **orientation digest** and **hotspot file list** — the compact
@@ -198,9 +208,9 @@ dependency in the finding itself; step 5 carries it into the document's ordering
 user-run code-review`, `panel`, `panel [+ cross-model lens]` when the cross-model lens ran, or
 `panel→single (panel unavailable: <reason>)` — recorded verbatim, no variants. The rounds-and-cap
 loop, spec-requirement enumeration, the ledger cross-check and every state-file and handoff duty
-belong to that stage. An audit run continues below, at every scope.
+belong to that stage. An audit run or a `/devcycle:maintain` pass continues below, at every scope.
 
-## 5. The findings document — audit runs only
+## 5. The findings document — audit runs and `/devcycle:maintain`
 
 Every finding also carries the **document tier** `references/findings.md` lists — detailed enough to
 start work from that one finding alone: what, where, why, how. The document adds a **coverage
@@ -222,14 +232,27 @@ per-run snapshot at every policy depth (`${CLAUDE_PLUGIN_ROOT}/references/config
 audit-report row = local across `all-local`/`standard`/`all-tracked`). Writing the file is the whole
 of this step; the committed durable artifact is the maintenance-findings store, not this snapshot.
 
-Branch discipline follows `${CLAUDE_PLUGIN_ROOT}/references/branch.md`. **In-cycle** (a
-`.devcycle/state.md` exists and this cycle owns it): follow it in full including the `branch:`-line
-write, keep `stage: audit` while that is the stage to resume at, record the document on the `audit:`
-line, and emit the handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` with
-`Stage completed: audit`. **Standalone** (`/devcycle:review`): that baseline forces a topic branch only
-off a default or integration branch, so a run during another cycle would land this document in that
-cycle's history and review. It therefore always gets its own topic branch, cut from current HEAD and
-named in the report, and must NOT create, read-modify, or write `.devcycle/state.md`.
+Branch discipline follows `${CLAUDE_PLUGIN_ROOT}/references/branch.md`, resolved by caller class and
+never by which state file happens to exist beside the run. The branch-review stage returned its
+findings back at step 4 and never arrives here, so the classes that resolve are the audit run's two
+entries and `/devcycle:maintain`:
+
+- **The cycle's own audit stage** — the run owns the `.devcycle/state.md` it reads: follow that
+  reference in full including the `branch:`-line write, keep `stage: audit` while that is the stage to
+  resume at, record the document on the `audit:` line, and emit the handoff block per
+  `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` with `Stage completed: audit`.
+- **Standalone `/devcycle:review`** — owns no state file: that baseline forces a topic branch only
+  off a default or integration branch, so a run during another cycle would land this document in that
+  cycle's history and review. It therefore always gets its own topic branch, cut from current HEAD and
+  named in the report, and must NOT create, read-modify, or write `.devcycle/state.md`.
+- **`/devcycle:maintain`** — owns no state file either, and never resolves to the first arm however
+  much a concurrent cycle's state file looks like a match:
+  `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md` § Boundaries forbids it to create, read or
+  write one and forbids a handoff block, so it writes no `branch:` line, holds no stage and records no
+  `audit:` line. It writes this document uncommitted as above; its one commit is the
+  maintenance-findings store that playbook's § Run requires, and that commit takes the reference's
+  Committing rule for a standalone playbook — a topic branch only off a default or integration branch,
+  minus the `branch:`-line write — so a pass already on a topic branch commits the store there.
 
 **Then stop.** Present the ranked list; the user picks, and each pick starts its own
 `/devcycle:cycle` naming that finding — never auto-chain. This playbook is **read-only**: it fixes

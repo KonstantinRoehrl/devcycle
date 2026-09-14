@@ -105,20 +105,22 @@ closed-from-our-side items, and — like Gates 1 and 2 — is confirm-first and 
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs" reply --repo <owner/name> --pr <pr> \
-  --comment-id <comment_id> --body-file <file> --login <login>
+  --comment-id <comment_id> --body-file <file>
 ```
 
 **Posting a top-level PR comment** (a reply with no single inline anchor):
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs" reply --repo <owner/name> --pr <pr> \
-  --body-file <draft> --login <login> --pr-level
+  --body-file <draft> --pr-level
 ```
 
 Both invocations apply the attribution footer structurally (see "Attribution footer" under
 "Pinned constants" below) and skip a reply already posted under that footer's marker — never a
-hand-built `gh api …/replies` or `gh pr comment` call. The same `--repo <owner/name>` resolution
-rule above carries from the intake call's own `--repo` argument.
+hand-built `gh api …/replies` or `gh pr comment` call. Neither passes a posting identity:
+`pr-review-post.mjs` derives it from the authenticated account, and `--login` is accepted only as
+an optional assertion that aborts the post when it disagrees with that account. The same
+`--repo <owner/name>` resolution rule above carries from the intake call's own `--repo` argument.
 
 **The `.devcycle/reopen-request.md` shape** (written for a contested `conflicts-with-spec`
 item, consumed at §6.4 / §6.6 to recommend a rewind to `stage: brainstorm`):
@@ -156,9 +158,9 @@ human reviewer's own comments are never stamped with it.
 - **Attribution footer.** Every posted reply/comment ends with the exact literal
   `\n\n---\n🤖 Posted by Claude Code on behalf of @<login>`; the stable, login-independent
   marker `🤖 Posted by Claude Code on behalf of` is what `pr-review-post.mjs` matches on to skip
-  a reply already posted. `<login>` comes from `gh api user --jq .login`, resolved once per run,
-  never hardcoded. This file **declares** the literal and marker as the contract; the exported
-  constant's body lives in and is owned by `pr-review-post.mjs` — never hand-typed into a draft.
+  a reply already posted. `<login>` is the derived posting identity above, never hardcoded. This
+  file **declares** the literal and marker as the contract; the exported constant's body lives in
+  and is owned by `pr-review-post.mjs` — never hand-typed into a draft.
 - **Frontier = 25.** At most 25 classified items are shown at the confirmation gate; beyond
   that, remaining items are **named and deferred**, never silently truncated. This is this
   file's own literal — `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` carries no numeric

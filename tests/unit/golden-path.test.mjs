@@ -2162,3 +2162,28 @@ test("finishing-the-cycle frames the workload write as a refresh, not the sole c
   assert.match(t, /final refresh|belt-and-suspenders|already written progressively/,
     "finish playbook does not reframe its own workload write as a refresh");
 });
+
+// The learn commit-ask is per path: `git check-ignore` picks which just-written artifacts go into
+// the commit, never whether the user is asked at all. A repo that ignores one of them — this one
+// ignores `docs/devcycle/routing-advisories.md` — would otherwise lose the ask for
+// `docs/devcycle/lessons.md` and the promotion records with no prompt at all. Whitespace is
+// normalized first so the assertions survive a reflow of the paragraph.
+test("learn step 3 gates its commit ask on the doc-tracking policy alone, never on a check-ignore veto", () => {
+  const step3 = read("playbooks/learning-from-sessions.md")
+    .match(/^3\. \*\*Offer to commit[\s\S]*?(?=^4\. )/m)?.[0]
+    .replace(/\s+/g, " ");
+  assert.ok(step3, "learning-from-sessions.md has no step 3 commit-ask to check");
+  const askAt = step3.indexOf("ask the user");
+  assert.ok(askAt > -1, "step 3 no longer asks the user before committing");
+  const precondition = step3.slice(0, askAt);
+  const rest = step3.slice(askAt);
+
+  assert.match(precondition, /permits tracking/, "the ask lost its doc-tracking policy gate");
+  assert.doesNotMatch(precondition, /check-ignore|ignored|veto/,
+    "step 3 makes the ignore check a precondition of asking at all, so in a repo that ignores any " +
+      "one just-written artifact the whole commit ask disappears with no prompt");
+  assert.match(rest, /check-ignore/,
+    "step 3 dropped the ignore check — it must still keep a vetoed path out of the commit");
+  assert.match(rest, /\bnever (?:cancels|gates|suppresses|skips)\b/,
+    "step 3 never says a veto leaves the ask standing, so the conjunction can silently come back");
+});

@@ -5,6 +5,95 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-09-14 — budgets raised for the tier-1 pipeline-guarantees branch
+
+**Decision:** the tier-1 pipeline-guarantees branch raises
+`tests/fixtures/surface-budget.json` (`surfaceTotal` 5395 → 5479, `commandMax` 124 → 132) and all
+14 entries in `tests/fixtures/context-budget.json`. Two shared causes and five per-file ones, each
+traced rather than lumped:
+
+- **+2523 bytes to all fourteen playbooks** — `references/config.md` grew 18697 → 21220 across five
+  commits on this branch, and every playbook cites it, so one file's growth moves all fourteen
+  closure sizes. All of the growth is in § Model tiers, which acquired the session-tier
+  reachability caveat (`c5a0596`), then three successive corrections to it — the unwired-override
+  restatement (`1e5da20`), the pools-only bound (`3066c2e`), and the finite-signal and
+  orchestrator-rankability bounds (`baeae08`) — before `d61d928` gave the `Infinity`-sentinel bound
+  a single owner and gave 21 bytes back.
+- **+159 bytes to `reviewing-code` and `receiving-review` only** — `references/review-comments.md`
+  grew 11477 → 11636 in `2b957cf`, and those two playbooks are the only ones that cite it. This is
+  why their figures do not match the other twelve: not per-file growth, a second shared reference.
+- **Own growth**, on top of the shared components: `reviewing-code` +2080 bytes / +23 lines (the
+  three-class caller taxonomy, #202), `finishing-the-cycle` +958 / +11 (the landing guard, #237),
+  `executing-waves` +688 / +7 (the `devcycle-root` shim convention, #280), `planning-waves`
+  +295 / +3 (the docs-subdir allowlist note, #201), and `commands/cycle.md` +8 lines — which is
+  `commandMax` 124 → 132, that file being the longest command.
+- **`receiving-review` shrank 66 bytes** and still rose +2616, because the two shared components
+  (+2523, +159) outweigh its own reduction. Recorded so the figure does not read as growth.
+- **`profiling-sessions` rose only +1892 against the shared +2523**, its own size unchanged at
+  13239 bytes. The difference is 631 bytes of slack its baseline carried before this branch, found
+  during wave 3 and absorbed here rather than left in place. That is the one entry whose new figure
+  is smaller than its shared cause, and the reason is a pre-existing over-raise, not a measurement.
+
+`surfaceTotal` moves 5395 → 5479, and the +84 balances exactly across the seven surface files whose
+line count moved — `config.md` +30, `reviewing-code` +23, `finishing-the-cycle` +11, `cycle.md` +8,
+`executing-waves` +7, `planning-waves` +3, `review-comments.md` +2. An eighth surface file changed
+without moving the total: `playbooks/receiving-review.md` is +3 −3, net zero lines (verified:
+`git diff --numstat 23712c6..HEAD -- playbooks commands agents references`, net per file, summed
+over `validate.mjs`'s `SURFACE` set). `playbookMax` stays 319: `learning-from-sessions.md` is
+untouched and still the longest, with `reviewing-code.md` second at 314.
+
+**Why:** `scripts/validate.mjs` only fails when a measurement *exceeds* its baseline, so an
+over-raised baseline passes silently and the budget stops measuring anything. Every figure above
+was proven tight by lowering it by 1 and confirming validate fails naming that exact entry — all 17
+numbers, re-proven at every fix commit that moved them rather than once at the end.
+`d61d928` is why that matters here: it *shrank* `config.md`, the direction no gate can catch, and
+a baseline left at the old value would have gone loose with the suite still green. The
+`profiling-sessions` entry is the same failure caught from the other side — 631 bytes of slack that
+had already stopped measuring, invisible until something re-measured it.
+
+## 2026-09-13 — budgets raised for the routing-advisories branch
+
+**Decision:** the routing-advisories branch raises `tests/fixtures/surface-budget.json`
+(`surfaceTotal` 5357 → 5395, `playbookMax` 303 → 319) and 13 of the 14 entries in
+`tests/fixtures/context-budget.json`. Three distinct causes, each traced rather than lumped:
+
+- **+91 bytes to eleven playbooks** — `finishing-the-cycle`, `maintaining-the-repo`,
+  `onboarding-a-repo`, `planning-waves`, `receiving-review`, `reviewing-code`,
+  `reviewing-the-branch`, `scoping-the-request`, `sweeping-mechanical-changes`,
+  `taking-the-fast-path` and `verifying-on-device`. None of them changed. `references/config.md`
+  gained exactly one row in § Doc tracking — the `routing advisories` artifact line — and that
+  row is 91 bytes (verified: `git diff 6d15095 -- references/config.md`, whose `3 2` numstat is
+  that row plus this branch's later two-line reword of the same section's closing paragraph).
+  Every playbook cites that file, so a one-row table edit moves eleven closure sizes at once.
+- **+369 bytes to `executing-waves`** — its dispatch step now records `--agentId` on the run
+  record, which is what makes per-dispatch cost attribution exact going forward.
+- **+2903 bytes of closure to `learning-from-sessions`** (121511 → 124414) — the step that writes
+  the advisory artifact, plus its share of `references/reinforcement-policy.md` growing for the
+  three new policy fields. The file's own growth is +1374 bytes and +16 lines, 22754 → 24128
+  (verified: `git show 6d15095:playbooks/learning-from-sessions.md | wc -c` against `wc -c`);
+  the rest of the closure figure is the cited references. `playbookMax` moves 303 → 319 for that
+  file alone, which is this file's own line count.
+
+`surfaceTotal` moves 5357 → 5395, and that delta balances exactly across the four surface files
+that changed — `learning-from-sessions.md` +16, `reinforcement-policy.md` +18,
+`executing-waves.md` +3, `config.md` +1
+(verified: `git diff --numstat 6d15095..HEAD`, net per file, summed over `validate.mjs`'s
+`SURFACE` set of `playbooks`, `commands`, `agents`, `references`).
+
+`playbooks/profiling-sessions.md` is the one entry that did not move. It was the only baseline
+carrying enough slack to absorb the shared +91 without a raise — which is what its unchanged
+figure means, since `validate` passes with it left alone.
+
+**Why:** `scripts/validate.mjs` only fails when a measurement *exceeds* its baseline, so an
+over-raised baseline passes silently and a budget stops measuring anything. Every figure above
+was proven tight by lowering it by 1 and confirming validate fails naming that exact entry —
+re-proven at the final commit, because an earlier fix in this same branch review shrank the
+playbook by a line and left all three baselines loose without any gate noticing, which is the
+failure mode this paragraph exists to catch.
+Recording the three causes separately is the point of the entry: the +91 row looks like eleven
+unrelated playbooks growing until you know it is one table row in a file they all cite, and the
+next contributor who trips `playbookMax` at 319 should find the measurement rather than a number.
+
 ## 2026-09-09 — a pending changelog entry carries no heading of its own
 
 **Decision:** work waiting for a release writes its `CHANGELOG.md` prose directly under
@@ -414,6 +503,10 @@ unchanged — just not per field.
 **Supersedes:** Nothing reversed for the kind-level check (unchanged); this narrows Task 37's own
 rule 2 before it ever shipped un-scoped, and extends Task 36's dead-field-removal precedent to a
 fourth field pair found during Task 37's real-tree verification.
+**Amended 2026-09-13.** The `dispatch.agentId` half of this removal is reversed: the field is
+declared in `tests/fixtures/run-record.schema.json`, exercised by the golden fixture, and written
+by step 4 of `playbooks/executing-waves.md`, so a dispatch record now names the subagent transcript
+a cost join prices it from. `dispatch.toolCalls` and `stage.path` stay removed.
 
 ## 2026-08-08 — Surface accounting after cycle 2 (block E)
 

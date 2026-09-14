@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { SEMVER_RE, cmpSemver } from "./semver.mjs";
 import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run-record.mjs";
+import { readPolicy } from "./reinforcement-policy.mjs";
 
 
 // The learn loop's compiled memory must stay tracked: README/DECISIONS say lessons + promotion
@@ -21,6 +22,42 @@ export function lessonsTrackingErrors(repoRoot) {
     if (res.status === 0) errs.push(`.gitignore must not ignore ${p} — the learn loop's records must stay tracked`);
   }
   return errs;
+}
+
+// `references/config.md` § Doc tracking owns what each policy does with each artifact devcycle
+// writes, and a row reading `local` in every column — audit reports — asks for exactly the
+// `!docs/<sub>/` + `docs/<sub>/*` pair: the directory stays visible, nothing written inside it is
+// ever committed. That shape is a decision, not a defect. What is always a defect is a file this
+// repo already tracks under `docs/` that its own ignore rules also veto, because every commit
+// site drops the paths `git check-ignore` vetoes — devcycle stops updating a doc it still ships,
+// and nothing says so. Asking git which tracked paths it would ignore covers every way to hide
+// one, including the `docs/<sub>/` and `docs/<sub>` shapes a match on `docs/<sub>/*` misses, and
+// those are the worse traps: nothing can be re-included out of an excluded directory.
+// `--no-index` is what makes the question answerable at all — without it check-ignore calls every
+// tracked path "not ignored", which is the whole set being asked about.
+export function docsSubdirTrackingErrors(repoRoot) {
+  const listed = spawnSync("git", ["ls-files", "-z", "--", "docs"], { cwd: repoRoot, encoding: "utf8" });
+  if (listed.status !== 0) return []; // no repo to ask, so nothing here is tracked
+  const tracked = listed.stdout.split("\0").filter(Boolean);
+  if (!tracked.length) return [];
+  // Status 1 is "none of these are ignored"; anything else means git could not answer, and a
+  // guess either way would be worse than the silence.
+  const vetoed = spawnSync("git", ["check-ignore", "--no-index", "--stdin", "-z"], {
+    cwd: repoRoot,
+    input: tracked.join("\0"),
+    encoding: "utf8",
+  });
+  if (vetoed.status !== 0) return [];
+  return vetoed.stdout
+    .split("\0")
+    .filter(Boolean)
+    .map(
+      (p) =>
+        `.gitignore: ${p} is tracked and ignored — every commit site drops a path ` +
+        "`git check-ignore` vetoes, so devcycle can no longer update it. Allowlist it below the " +
+        "pattern that hides it, or untrack it if references/config.md § Doc tracking keeps that " +
+        "artifact local."
+    );
 }
 
 const DESCRIPTION_BUDGET_TOTAL = 6000; // chars; source: docs/platform-notes.md
@@ -542,7 +579,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         }
 
         // Rule 2 (§10.5): the schema declares no field the writing instructions cannot produce —
-        // the same reason stage.path and dispatch.agentId were removed rather than half-wired.
+        // the same reason stage.path was removed rather than half-wired.
         // A field is "producible" when some counted-surface file's prose names it as a
         // run-record.mjs append/new argument. Most fields pass through run-record.mjs's generic
         // append loop unrenamed (camelCase flag === camelCase key), so `--<field>` is the right
@@ -1028,6 +1065,27 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       }
     }
   }
+
+  // 24. The shipped reinforcement policy parses and holds its invariants (mirrors the
+  //     observes/prevents gate): its machine block is present, each percentile sits inside
+  //     (0,100), the win bar stays strictly above the culprit bar, and every count field —
+  //     including the routing advisory's confidence, resample count and comparator floor — holds
+  //     its range, so a floor of 0 or a missing field fails here rather than degrading a shipped
+  //     advisory into one a two-row cell decides. Guarded by existsSync the
+  //     same way checks 12 and 13 guard their declarations — a fixture tree that ships no policy
+  //     file is not forced to, while the real plugin always ships one and the malformed-fixture
+  //     test writes its own to exercise this check.
+  const reinforcementPolicyPath = join(root, "references/reinforcement-policy.md");
+  if (existsSync(reinforcementPolicyPath)) {
+    try { readPolicy(reinforcementPolicyPath); }
+    catch (e) { fail(`references/reinforcement-policy.md: ${e.message}`); }
+  }
+
+  // 25. A docs/ file this repo tracks that its own ignore rules also veto. references/config.md
+  //     § Doc tracking decides which artifacts a policy tracks at all; this only holds the tree to
+  //     that decision, because a tracked-and-ignored file is one every commit site drops without
+  //     saying so. Legal git, which is why only a check catches it.
+  docsSubdirTrackingErrors(root).forEach(fail);
 
   lessonsTrackingErrors(process.cwd()).forEach(fail);
 

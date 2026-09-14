@@ -137,6 +137,29 @@ export function recordLifecycle(repoRoot, rec) {
   return file;
 }
 
+// The single mutator of an existing promotion record: a win transitions to consolidated after it
+// has landed (a later human act — folding it into a playbook/scaffold), so unlike recordPromotion
+// this edits a record already on disk. It sets or replaces the `- consolidated: <at>` line and
+// leaves every other field byte-identical (QC2). Throws on an invalid date or an unknown id.
+export function consolidatePromotion(repoRoot, culpritId, at) {
+  if (!isValidCalendarDate(at))
+    throw new Error(`invalid consolidated date "${at}" — must be a real YYYY-MM-DD calendar date`);
+  const rec = findPromotionById(readPromotions(repoRoot), culpritId);
+  if (!rec) throw new Error(`no promotion record found for culprit-id "${culpritId}"`);
+  const abs = join(repoRoot, rec.path);
+  const text = readFileSync(abs, "utf8");
+  const line = `- consolidated: ${at}`;
+  const next = /^- consolidated:.*$/m.test(text)
+    // Anchor the append to the trailing newline only. A record from recordPromotion always ends
+    // with "\n", and its last field's value is commonly empty (`- aliases: ` with a trailing
+    // space) — a greedy `\s*$` strip here would eat that space back into the previous field's
+    // line and rewrite it, violating QC2's byte-identity of every other field.
+    ? text.replace(/^- consolidated:.*$/m, line)
+    : (text.endsWith("\n") ? text : text + "\n") + `${line}\n`;
+  writeFileSync(abs, next);
+  return rec.path;
+}
+
 export function readPromotions(repoRoot) {
   const dir = promoDir(repoRoot);
   if (!existsSync(dir)) return [];
@@ -166,6 +189,7 @@ export function readPromotions(repoRoot) {
         lifecycle: orNull("lifecycle"),
         at: orNull("at"),
         revertsCommit: orNull("reverts-commit"),
+        consolidated: orNull("consolidated"),
       };
     });
 }

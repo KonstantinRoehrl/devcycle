@@ -21,6 +21,7 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 | `model-tiers.json` | The model-tier table — each model family with its escalation rank and name-match pattern. |
 | `output.md` | How every devcycle agent and playbook reports. |
 | `quality-criteria.md` | What any devcycle review or plan measures against — the criteria catalog, sourcing precedence, seed best-practice index, and how the catalog reaches planning and execution. |
+| `reinforcement-policy.md` | The numeric thresholds devcycle's learn loop reads when it decides to escalate a culprit or reinforce a win. |
 | `resume.md` | How any stage re-enters itself after an interruption (`/devcycle:continue`), and the state file's shape. |
 | `review-comments.md` | How PR review comments are triaged — the six-bucket taxonomy, the comment-to-finding mapping, and the reply-posting contract for the `reconcile` command. |
 | `sweep-execution.md` | How a plan task marked `**Execution:** sweep` runs inside the execution stage. |
