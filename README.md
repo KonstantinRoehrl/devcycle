@@ -143,9 +143,11 @@ run at once. The full configuration surface is in
 - **A command fails on a path that starts with `/scripts/`** — a plugin script was named
   with `${CLAUDE_PLUGIN_ROOT}` in text that reached a shell, where that token is empty: it is
   substituted when a playbook is rendered into a prompt, not by the shell. devcycle names plugin
-  scripts `$(devcycle-root)/scripts/<name>.mjs` instead — `bin/devcycle-root` prints the installed
-  plugin root, and Claude Code puts `<plugin>/bin` on PATH, so it resolves from any shell, a
-  dispatched subagent's included.
+  scripts `"$(devcycle-root)/scripts/<name>.mjs"` instead, quotes included — `bin/devcycle-root`
+  prints the installed plugin root, and Claude Code puts `<plugin>/bin` on PATH, so it resolves from
+  any shell, a dispatched subagent's included. The quotes are load-bearing: command substitution is
+  word-split, so an unquoted form tears a plugin root containing a space and fails as a
+  module-not-found on the truncated path.
 - **Source edits don't show up after reinstalling** — the plugin cache is keyed by
   version, and reinstalling the same version does not refresh it. Bump the version or
   uninstall and reinstall.

@@ -70,11 +70,13 @@ file conflicts these invariants already preserve.)
    - **Preload what the evidence class needs:** splice exactly what
      `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Preloading a class into a brief names.
    - **Resolve lessons:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match --stage execution --files "<this task's **Files:** list>"` and splice its output verbatim into the brief's `**Lessons:**` block — only the matched lines this task's files name, **never a whole stage section**. Empty output → `**Lessons:** none`. Each line ends with a `--lesson <id>` pull hint; the block header tells the worker to pull the full record **only if about to work in the area the lesson names**.
-   - **Name plugin scripts through the shim:** a brief that names a plugin script must write it as
-     `$(devcycle-root)/scripts/<name>.mjs`, never as a literal `${CLAUDE_PLUGIN_ROOT}` path, because
+   - **Name plugin scripts through the shim, quoted:** a brief that names a plugin script must write
+     it as `"$(devcycle-root)/scripts/<name>.mjs"` — quotes included, because command substitution is
+     word-split and an unquoted form tears a plugin root containing a space, failing as a
+     module-not-found on the truncated path — never as a literal `${CLAUDE_PLUGIN_ROOT}` path, because
      that token is substituted when a playbook is rendered into a prompt and expands to the empty
-     string in the shell the implementer actually runs the command in. No check covers this: a sliced
-     brief is run scratch, written per dispatch, so the substitution is yours to make here.
+     string in the shell the implementer actually runs the command in. No check covers either: a
+     sliced brief is run scratch, written per dispatch, so both are yours to get right here.
 3. **Dispatch devcycle:implementer** with that brief only, never accumulated session history or other
    tasks' reports, on the model `references/config.md` resolves. The dispatch prompt must NEVER
    instruct the implementer to commit, stage, or push. Ledger `event=dispatched`. It returns the

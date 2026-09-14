@@ -223,12 +223,17 @@ model id written here, because ids in playbook prose rot as models change:
   is configured — a dispatch with no override then resolves to that default,
   not to the orchestrator's own model, and **nothing mitigates that today**:
   with one configured, every dispatch that resolves to this tier runs at that
-  default instead. The escape hatch is implemented but unwired — `resolveModel`
-  in `scripts/model-pool.mjs` takes a `sessionTierUnreachable` parameter (its
-  `--session-tier-unreachable` CLI flag) under which an escalation that would
-  land on the session tier names the orchestrator's own id as an explicit
-  override instead. No caller passes it: not the invocation below, not any
-  other file in the surface.
+  default instead. The escape hatch is implemented, unwired, and **narrower than
+  this caveat** — `resolveModel` in `scripts/model-pool.mjs` takes a
+  `sessionTierUnreachable` parameter (its `--session-tier-unreachable` CLI flag)
+  under which an escalation that would land on the session tier names the
+  orchestrator's own id as an explicit override instead, and only a **pool** whose
+  ladder climbed is an escalation there. An `auto` or unset knob — every knob's
+  shipped default — lands on this tier identically with the flag and without it, so
+  the implementer default below stays uncovered and closing that case needs a
+  different fix; what the hatch does cover is a configured pool that climbed and
+  then found no rung it could dispatch. No caller passes it: not the invocation
+  below, not any other file in the surface.
 - **fast tier** — the newest fast/small Claude model available to this
   session (the current Sonnet-class generation). If no such id can be
   resolved with confidence, fall back to the session tier — a stronger

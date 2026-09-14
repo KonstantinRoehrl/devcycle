@@ -140,6 +140,8 @@ model override, and a dispatch with no override resolves to Claude Code's *defau
 subagent model* whenever you have configured one — not to your session's model. If you
 have set one, expect every role that would take the session tier to run at that default
 instead: the resolver can name the coordinator's own model id explicitly rather than
-inherit, but nothing in the pipeline asks it to yet, so the caveat stands. The rule and
-that unwired escape hatch are owned by
+inherit, but nothing in the pipeline asks it to yet, so the caveat stands. That escape
+hatch is also narrower than the caveat — it reaches only a role you set to a pool, never one
+left at `auto` — so a role on the default stays uncovered even once something asks for it.
+The rule, that bound and the unwired escape hatch are owned by
 [`references/config.md`](../../references/config.md) § Model tiers.

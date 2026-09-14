@@ -232,14 +232,27 @@ per-run snapshot at every policy depth (`${CLAUDE_PLUGIN_ROOT}/references/config
 audit-report row = local across `all-local`/`standard`/`all-tracked`). Writing the file is the whole
 of this step; the committed durable artifact is the maintenance-findings store, not this snapshot.
 
-Branch discipline follows `${CLAUDE_PLUGIN_ROOT}/references/branch.md`. **In-cycle** (a
-`.devcycle/state.md` exists and this cycle owns it): follow it in full including the `branch:`-line
-write, keep `stage: audit` while that is the stage to resume at, record the document on the `audit:`
-line, and emit the handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` with
-`Stage completed: audit`. **Standalone** (`/devcycle:review`): that baseline forces a topic branch only
-off a default or integration branch, so a run during another cycle would land this document in that
-cycle's history and review. It therefore always gets its own topic branch, cut from current HEAD and
-named in the report, and must NOT create, read-modify, or write `.devcycle/state.md`.
+Branch discipline follows `${CLAUDE_PLUGIN_ROOT}/references/branch.md`, resolved by caller class and
+never by which state file happens to exist beside the run. The branch-review stage returned its
+findings back at step 4 and never arrives here, so the classes that resolve are the audit run's two
+entries and `/devcycle:maintain`:
+
+- **The cycle's own audit stage** — the run owns the `.devcycle/state.md` it reads: follow that
+  reference in full including the `branch:`-line write, keep `stage: audit` while that is the stage to
+  resume at, record the document on the `audit:` line, and emit the handoff block per
+  `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` with `Stage completed: audit`.
+- **Standalone `/devcycle:review`** — owns no state file: that baseline forces a topic branch only
+  off a default or integration branch, so a run during another cycle would land this document in that
+  cycle's history and review. It therefore always gets its own topic branch, cut from current HEAD and
+  named in the report, and must NOT create, read-modify, or write `.devcycle/state.md`.
+- **`/devcycle:maintain`** — owns no state file either, and never resolves to the first arm however
+  much a concurrent cycle's state file looks like a match:
+  `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md` § Boundaries forbids it to create, read or
+  write one and forbids a handoff block, so it writes no `branch:` line, holds no stage and records no
+  `audit:` line. It writes this document uncommitted as above; its one commit is the
+  maintenance-findings store that playbook's § Run requires, and that commit takes the reference's
+  Committing rule for a standalone playbook — a topic branch only off a default or integration branch,
+  minus the `branch:`-line write — so a pass already on a topic branch commits the store there.
 
 **Then stop.** Present the ranked list; the user picks, and each pick starts its own
 `/devcycle:cycle` naming that finding — never auto-chain. This playbook is **read-only**: it fixes
