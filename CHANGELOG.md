@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.0 — 2026-09-14
+
+- feat(learn): add reinforcement thresholds, win consolidation, and routing advisories; harden devcycle's tier-1 pipeline (#171, #237, #280, #279, #201, #234, #89, #154, #202, #265)
+
 ## 0.21.0 — 2026-09-10
 
 - feat(learn): add a symmetric dollar ledger, bound the corpus scan, and require independent win grounding (#266, #267, #268)
