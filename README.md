@@ -140,6 +140,14 @@ run at once. The full configuration surface is in
   unset; this is expected. What the pipeline uses instead follows the resolution order in
   [`docs/configuration/`](docs/configuration/README.md). Set the option to make the value
   substitute.
+- **A command fails on a path that starts with `/scripts/`** — a plugin script was named
+  with `${CLAUDE_PLUGIN_ROOT}` in text that reached a shell, where that token is empty: it is
+  substituted when a playbook is rendered into a prompt, not by the shell. devcycle names plugin
+  scripts `"$(devcycle-root)/scripts/<name>.mjs"` instead, quotes included — `bin/devcycle-root`
+  prints the installed plugin root, and Claude Code puts `<plugin>/bin` on PATH, so it resolves from
+  any shell, a dispatched subagent's included. The quotes are load-bearing: command substitution is
+  word-split, so an unquoted form tears a plugin root containing a space and fails as a
+  module-not-found on the truncated path.
 - **Source edits don't show up after reinstalling** — the plugin cache is keyed by
   version, and reinstalling the same version does not refresh it. Bump the version or
   uninstall and reinstall.
@@ -161,6 +169,12 @@ plugin ships. Start there.
   profile from a local Claude Code session corpus, which is how the cost claims are kept honest
   rather than assumed; it reads each run's workload from records the `hooks/workload-sensor.mjs`
   commit-sensor writes on every commit, not from a single finish-stage step.
+- Developing devcycle itself: `scripts/self-dev-check.mjs` guards the case where the repo under
+  work *is* this plugin's own source, so the pipeline runs from the installed copy while the
+  deliverable belongs in the repo. `/devcycle:cycle` records what the installed copy holds when the
+  run starts — by content hash, via `scripts/tree-hash.mjs` — and the finish stage fails when an
+  expected deliverable is absent from the branch or the installed copy was written to during the
+  run. It is inert in every other repo.
 - The evidence-and-verification contract's gates: planning runs `scripts/budget-fixture-check.mjs`
   and `scripts/authored-claims-check.mjs` in its self-review, and `/devcycle:cycle` runs
   `scripts/contract-staleness-check.mjs` as an advisory preflight that warns when a cached plugin's

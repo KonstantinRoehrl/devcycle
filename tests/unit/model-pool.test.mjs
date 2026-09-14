@@ -122,6 +122,129 @@ test("an unset knob resolves to no override and says so, leaving auto's own deri
   assert.deepEqual(resolve({ value: "auto" }), { model: null, outcome: "model session (auto)" });
 });
 
+// F-escalation: `sessionTierUnreachable` lets a caller that knows the session tier cannot be
+// reached (e.g. a subagent with a configured default model) ask for an explicit override instead
+// of the silent no-op the session tier otherwise means. It rewrites one thing only — an escalation
+// that resolved to the session tier — so every other route to that tier keeps today's model and
+// today's outcome string no matter what the flag says.
+
+// Each row is one session-tier return site, reached with the flag absent and a fired signal: the
+// exact combination the rewrite reads. The expected pairs are written out literally because they
+// are the contract. Asserting instead that `resolveModel(args)` deep-equals
+// `resolveModel({ ...args, sessionTierUnreachable: false })` runs the same path twice and passes
+// however the flag behaves, which is no assertion about the flag at all.
+for (const [site, over, expected] of [
+  ["an unset knob", { value: "auto" }, { model: null, outcome: "model session (auto)" }],
+  [
+    "an unrankable orchestrator",
+    { value: "claude-sonnet-5,claude-opus-5", orchestratorId: "who-knows" },
+    { model: null, outcome: "model session (ceiling: who-knows unranked)" },
+  ],
+  [
+    "an unrankable pin",
+    { value: "made-up-model" },
+    { model: null, outcome: "model session (ceiling: made-up-model unranked)" },
+  ],
+  [
+    "an unrankable pool rung",
+    { value: "claude-sonnet-5,made-up-model" },
+    { model: null, outcome: "model session (ceiling: made-up-model unranked)" },
+  ],
+  [
+    "a pool with no rung at or below the orchestrator",
+    { value: "claude-sonnet-5,claude-opus-5", orchestratorId: "claude-haiku-4-5" },
+    { model: null, outcome: "model session (ceiling: no rung at or below claude-haiku-4-5)" },
+  ],
+]) {
+  test(`absent the flag, ${site} resolves exactly as it did before the flag existed`, () => {
+    assert.deepEqual(
+      resolveModel({ signalCount: 9, orchestratorId: "claude-opus-5", table: TABLE, ...over }),
+      expected
+    );
+  });
+}
+
+// Every case below sets the flag and fires a signal; each test writes out only what it is about.
+const escalate = (over = {}) =>
+  resolveModel({
+    value: POOL, signalCount: 9, orchestratorId: "claude-opus-5", table: TABLE,
+    sessionTierUnreachable: true, ...over,
+  });
+
+test("an escalation to an unreachable session tier names the orchestrator's own id as an override", () => {
+  assert.deepEqual(escalate({ value: "claude-sonnet-5,made-up-model" }), {
+    model: "claude-opus-5",
+    outcome: "model claude-opus-5 (escalated, session unreachable: explicit override)",
+  });
+});
+
+test("an escalated pool with no rung at or below the orchestrator names it the same way", () => {
+  assert.deepEqual(escalate({ value: "claude-sonnet-5,claude-opus-5", orchestratorId: "claude-haiku-4-5" }), {
+    model: "claude-haiku-4-5",
+    outcome: "model claude-haiku-4-5 (escalated, session unreachable: explicit override)",
+  });
+});
+
+test("an unrankable orchestrator keeps null and says so — no id is safe to name", () => {
+  assert.deepEqual(escalate({ value: "claude-sonnet-5,claude-opus-5", orchestratorId: "who-knows" }), {
+    model: null,
+    outcome: "model session (escalated, unreachable and unranked)",
+  });
+});
+
+// The original form of this test passed `value: ""`, which resolves to the `unset` branch before
+// any pool entry is ever considered — "claude-sonnet-5" appears nowhere in the computation, so
+// `assert.notEqual(r.model, "claude-sonnet-5")` was true by construction and could not have caught
+// a real demotion. This version puts two weaker, individually-admissible families right next to the
+// unranked rung that triggers escalation, so a bug that fell back to "the next admissible pool
+// entry" instead of the orchestrator's own id would produce exactly one of them.
+test("an unreachable session tier names the orchestrator itself, not a weaker family in the same pool", () => {
+  const r = escalate({ value: "claude-haiku-4-5,claude-sonnet-5,unknown-model" });
+  assert.equal(r.model, "claude-opus-5");
+  assert.notEqual(r.model, "claude-sonnet-5");
+  assert.notEqual(r.model, "claude-haiku-4-5");
+});
+
+// Only a pool has rungs, so only a pool can escalate. An unset knob and a pin resolve to the same
+// model at every signal count — a non-zero count beside either is the task's ambient complexity,
+// not an escalation — so rewriting them would ledger an escalation that never happened and drop
+// the `(auto)` / `(ceiling: <id> unranked)` outcomes references/config.md documents for them.
+test("an unset knob is not an escalation, however many signals fired", () => {
+  assert.deepEqual(escalate({ value: "auto" }), { model: null, outcome: "model session (auto)" });
+});
+
+test("an unrankable pin is not an escalation — a pin has no ladder to climb", () => {
+  assert.deepEqual(escalate({ value: "made-up-model", signalCount: 5 }), {
+    model: null,
+    outcome: "model session (ceiling: made-up-model unranked)",
+  });
+});
+
+test("an unrankable orchestrator under a pin is not an escalation either", () => {
+  assert.deepEqual(escalate({ value: "claude-sonnet-5", orchestratorId: "who-knows" }), {
+    model: null,
+    outcome: "model session (ceiling: who-knows unranked)",
+  });
+});
+
+// rungFor's contract above: a caller with no complexity predicate at all — walkthroughModel,
+// branchReviewModel, both judging roles — passes Infinity to saturate the ladder rather than
+// inventing a count. It reaches the top rung with no signal having fired, so counting it as one
+// would pin a walkthrough dispatch to an override and record an escalation with nothing behind it.
+test("Infinity saturates the ladder but is not an escalation signal", () => {
+  assert.deepEqual(escalate({ value: "claude-sonnet-5,made-up-model", signalCount: Infinity }), {
+    model: null,
+    outcome: "model session (ceiling: made-up-model unranked)",
+  });
+});
+
+test("a pool still on rung 1 has not escalated, so the flag leaves it alone", () => {
+  assert.deepEqual(escalate({ value: "made-up-model,claude-opus-5", signalCount: 0 }), {
+    model: null,
+    outcome: "model session (ceiling: made-up-model unranked)",
+  });
+});
+
 test("the shipped table loads and ranks the families the ceiling rule names", () => {
   const shipped = loadTable();
   assert.deepEqual(

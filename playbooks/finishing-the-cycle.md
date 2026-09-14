@@ -88,6 +88,17 @@ identity, `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --auto-redac
 dir>` rewrites the flagged spans in place (it requires an explicit `--dir`/`--file`); re-run the
 screen after.
 
+**Assert this cycle's deliverable landed in the repo.** Before this stage may report green, run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/self-dev-check.mjs" --assert --expect <the plan's deliverable
+paths, comma-separated and repo-relative>` from the repo root. `scripts/self-dev-check.mjs` owns
+what it checks and how it says so; three properties of it are this stage's to know. It is inert in
+every repo but this plugin's own source, so elsewhere this costs one exit-0 call. It takes no base
+flag: the branch base comes from `.devcycle/state.md`'s `(cut from <base> at <sha>)` annotation
+(`${CLAUDE_PLUGIN_ROOT}/references/branch.md` owns that shape), and a missing annotation is a loud
+failure rather than a skipped check — as is a missing `--preflight` baseline, which `/devcycle:cycle`
+writes at the start of the run. And a non-zero exit stops the finish exactly as the screen above
+does: surface the finding rather than reporting a green cycle over it.
+
 **Refresh the run's workload signature (before closing the state file).** The
 `hooks/workload-sensor.mjs` commit-sensor owns collection: it re-derives the run's `workload` record
 on every HEAD-advancing commit, so by now the record is already written progressively. In a repo with

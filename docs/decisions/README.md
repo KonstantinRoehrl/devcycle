@@ -5,6 +5,52 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-09-14 — budgets raised for the tier-1 pipeline-guarantees branch
+
+**Decision:** the tier-1 pipeline-guarantees branch raises
+`tests/fixtures/surface-budget.json` (`surfaceTotal` 5395 → 5479, `commandMax` 124 → 132) and all
+14 entries in `tests/fixtures/context-budget.json`. Two shared causes and five per-file ones, each
+traced rather than lumped:
+
+- **+2523 bytes to all fourteen playbooks** — `references/config.md` grew 18697 → 21220 across five
+  commits on this branch, and every playbook cites it, so one file's growth moves all fourteen
+  closure sizes. All of the growth is in § Model tiers, which acquired the session-tier
+  reachability caveat (`c5a0596`), then three successive corrections to it — the unwired-override
+  restatement (`1e5da20`), the pools-only bound (`3066c2e`), and the finite-signal and
+  orchestrator-rankability bounds (`baeae08`) — before `d61d928` gave the `Infinity`-sentinel bound
+  a single owner and gave 21 bytes back.
+- **+159 bytes to `reviewing-code` and `receiving-review` only** — `references/review-comments.md`
+  grew 11477 → 11636 in `2b957cf`, and those two playbooks are the only ones that cite it. This is
+  why their figures do not match the other twelve: not per-file growth, a second shared reference.
+- **Own growth**, on top of the shared components: `reviewing-code` +2080 bytes / +23 lines (the
+  three-class caller taxonomy, #202), `finishing-the-cycle` +958 / +11 (the landing guard, #237),
+  `executing-waves` +688 / +7 (the `devcycle-root` shim convention, #280), `planning-waves`
+  +295 / +3 (the docs-subdir allowlist note, #201), and `commands/cycle.md` +8 lines — which is
+  `commandMax` 124 → 132, that file being the longest command.
+- **`receiving-review` shrank 66 bytes** and still rose +2616, because the two shared components
+  (+2523, +159) outweigh its own reduction. Recorded so the figure does not read as growth.
+- **`profiling-sessions` rose only +1892 against the shared +2523**, its own size unchanged at
+  13239 bytes. The difference is 631 bytes of slack its baseline carried before this branch, found
+  during wave 3 and absorbed here rather than left in place. That is the one entry whose new figure
+  is smaller than its shared cause, and the reason is a pre-existing over-raise, not a measurement.
+
+`surfaceTotal` moves 5395 → 5479, and the +84 balances exactly across the seven surface files whose
+line count moved — `config.md` +30, `reviewing-code` +23, `finishing-the-cycle` +11, `cycle.md` +8,
+`executing-waves` +7, `planning-waves` +3, `review-comments.md` +2. An eighth surface file changed
+without moving the total: `playbooks/receiving-review.md` is +3 −3, net zero lines (verified:
+`git diff --numstat 23712c6..HEAD -- playbooks commands agents references`, net per file, summed
+over `validate.mjs`'s `SURFACE` set). `playbookMax` stays 319: `learning-from-sessions.md` is
+untouched and still the longest, with `reviewing-code.md` second at 314.
+
+**Why:** `scripts/validate.mjs` only fails when a measurement *exceeds* its baseline, so an
+over-raised baseline passes silently and the budget stops measuring anything. Every figure above
+was proven tight by lowering it by 1 and confirming validate fails naming that exact entry — all 17
+numbers, re-proven at every fix commit that moved them rather than once at the end.
+`d61d928` is why that matters here: it *shrank* `config.md`, the direction no gate can catch, and
+a baseline left at the old value would have gone loose with the suite still green. The
+`profiling-sessions` entry is the same failure caught from the other side — 631 bytes of slack that
+had already stopped measuring, invisible until something re-measured it.
+
 ## 2026-09-13 — budgets raised for the routing-advisories branch
 
 **Decision:** the routing-advisories branch raises `tests/fixtures/surface-budget.json`

@@ -81,7 +81,12 @@ const { log, fatal } = makeLogger("review-panel");
 
 // ---------- bounded-concurrency helper ----------
 
-async function mapLimit(items, limit, fn) {
+// `label`, when given, is logged with the limit this call actually received — the cap in the log
+// is the argument, not a number the call site states beside it. #89 regressed stage 1 to
+// `lensJobs.length` while its log line still printed the constant, so a test reading that line
+// could not see the regression; reading it from here, it can.
+async function mapLimit(items, limit, fn, label) {
+  if (label) log(`${label}, cap ${limit}`);
   const results = new Array(items.length);
   let next = 0;
   async function worker() {
@@ -778,8 +783,12 @@ async function main() {
       ),
     };
   });
-  log(`stage 1: ${diffChunks.length} chunk(s) × ${args.lenses.length} lens(es) → ${lensJobs.length} job(s)`);
-  const lensResults = await mapLimit(lensJobs, LENS_CONCURRENCY, (job) => job.run());
+  const lensResults = await mapLimit(
+    lensJobs,
+    LENS_CONCURRENCY,
+    (job) => job.run(),
+    `stage 1: ${diffChunks.length} chunk(s) × ${args.lenses.length} lens(es) → ${lensJobs.length} job(s)`,
+  );
 
   const rawFindings = lensResults.flatMap((r) => r.findings);
   const rawStrengths = lensResults.flatMap((r) => r.strengths ?? []);

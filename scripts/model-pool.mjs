@@ -5,7 +5,11 @@
 //
 // `model: null` means "dispatch with no model override" — the session tier, which inherits the
 // orchestrator's own model and therefore cannot exceed it. Every unresolvable case converges on
-// that one form, because it is the only dispatch that cannot break the ceiling invariant.
+// that one form by default, because it is the only dispatch that cannot break the ceiling
+// invariant — unless `sessionTierUnreachable` says that inherit is unreliable for this caller, in
+// which case an escalation that lands there — a pool whose ladder climbed off rung 1 — names the
+// orchestrator's own id explicitly instead of silently landing on a tier that, for that caller, is
+// not the orchestrator's model.
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
@@ -36,25 +40,56 @@ export function rungFor(signalCount, len) {
   return Math.min(1 + fired, len);
 }
 
+// An escalation is the ladder climbing, and only a pool has rungs to climb: a pin and an unset knob
+// resolve to the same model at every signal count, so a non-zero count beside either is the task's
+// ambient complexity, not an escalation. Infinity is not a signal either — it is the saturation
+// sentinel above, passed by callers that have no complexity predicate at all — so it reaches the top
+// rung with nothing having fired, which is why this predicate tests finiteness where rungFor
+// deliberately does not.
+function ladderClimbed(parsed, signalCount) {
+  if (parsed.kind !== "pool" || !Number.isFinite(signalCount)) return false;
+  return rungFor(signalCount, parsed.entries.length) > 1;
+}
+
 // Rank by family, never by version inside a family: a newer Sonnet does not outrank an older Opus.
 export function rank(id, table) {
   for (const entry of table) if (new RegExp(entry.match, "i").test(id)) return entry.rank;
   return null;
 }
 
-export function resolveModel({ value, signalCount = 0, orchestratorId, table }) {
+// The session tier means "dispatch with no model override", which assumes no-override resolves to
+// the orchestrator's own model. For a subagent that is false when a default subagent model is
+// configured, so an escalation that lands here silently runs weaker than intended. What is
+// unreliable is the implicit inherit, not the model: naming the orchestrator's own id explicitly
+// preserves the escalation. This mirrors the clamped-pin rule this file already implements, where
+// a pin above the ceiling falls back to `orchestratorId` as an explicit override.
+function unreachableSessionTier(orchestratorId, table) {
+  if (rank(orchestratorId, table) === null)
+    return { model: null, outcome: "model session (escalated, unreachable and unranked)" };
+  return {
+    model: orchestratorId,
+    outcome: `model ${orchestratorId} (escalated, session unreachable: explicit override)`,
+  };
+}
+
+export function resolveModel({ value, signalCount = 0, orchestratorId, table, sessionTierUnreachable = false }) {
   const parsed = parsePool(value);
-  if (parsed.kind === "unset") return { model: null, outcome: "model session (auto)" };
+  // The rewrite is scoped to an escalation that resolved to the session tier. Every other route to
+  // that tier — an unset knob, an id the table cannot rank, a pool still on rung 1 — degrades to
+  // the plain { model: null, outcome } every existing caller already gets, whatever the flag says.
+  const escalated = sessionTierUnreachable && ladderClimbed(parsed, signalCount);
+  const sessionTier = (outcome) =>
+    escalated ? unreachableSessionTier(orchestratorId, table) : { model: null, outcome };
+
+  if (parsed.kind === "unset") return sessionTier("model session (auto)");
 
   const ceiling = rank(orchestratorId, table);
-  if (ceiling === null)
-    return { model: null, outcome: `model session (ceiling: ${orchestratorId} unranked)` };
+  if (ceiling === null) return sessionTier(`model session (ceiling: ${orchestratorId} unranked)`);
 
   if (parsed.kind === "pin") {
     const [pinned] = parsed.entries;
     const pinnedRank = rank(pinned, table);
-    if (pinnedRank === null)
-      return { model: null, outcome: `model session (ceiling: ${pinned} unranked)` };
+    if (pinnedRank === null) return sessionTier(`model session (ceiling: ${pinned} unranked)`);
     if (pinnedRank <= ceiling) return { model: pinned, outcome: `model ${pinned} (pinned)` };
     // Clamp a pin exactly as a pool entry is clamped: the ceiling applies to every path.
     const below = parsed.entries.filter((id) => (rank(id, table) ?? Infinity) <= ceiling);
@@ -66,8 +101,7 @@ export function resolveModel({ value, signalCount = 0, orchestratorId, table }) 
   const rungIndex = rungFor(signalCount, len);
   const requested = parsed.entries[rungIndex - 1];
   const requestedRank = rank(requested, table);
-  if (requestedRank === null)
-    return { model: null, outcome: `model session (ceiling: ${requested} unranked)` };
+  if (requestedRank === null) return sessionTier(`model session (ceiling: ${requested} unranked)`);
   if (requestedRank <= ceiling)
     return { model: requested, outcome: `model ${requested} (pooled: rung ${rungIndex}/${len})` };
 
@@ -76,7 +110,7 @@ export function resolveModel({ value, signalCount = 0, orchestratorId, table }) 
   // ceiling and D11's refusal to error out on a misconfigured pool.
   const admissible = parsed.entries.filter((id) => (rank(id, table) ?? Infinity) <= ceiling);
   if (!admissible.length)
-    return { model: null, outcome: `model session (ceiling: no rung at or below ${orchestratorId})` };
+    return sessionTier(`model session (ceiling: no rung at or below ${orchestratorId})`);
   const clamped = admissible.at(-1);
   return {
     model: clamped,
@@ -89,6 +123,7 @@ export function resolveModel({ value, signalCount = 0, orchestratorId, table }) 
 // the caller asked for.
 const KNOWN_FLAGS = {
   "--value": "value", "--orchestrator": "value", "--signals": "value", "--table": "value",
+  "--session-tier-unreachable": "none",
 };
 
 // CLI only, so the pure helpers above stay importable by tests — the guard scripts/bump-version.mjs
@@ -111,7 +146,8 @@ function cliResolve(argv) {
     throw new Error(`--signals must be a number or Infinity, got ${rawSignals}`);
   const tablePath = requireValue(flags, "--table");
   const table = tablePath === undefined ? loadTable() : loadTable(tablePath);
-  return resolveModel({ value, signalCount, orchestratorId, table });
+  const sessionTierUnreachable = "--session-tier-unreachable" in flags;
+  return resolveModel({ value, signalCount, orchestratorId, table, sessionTierUnreachable });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

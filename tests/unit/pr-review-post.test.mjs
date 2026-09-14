@@ -48,9 +48,44 @@ test("alreadyPosted matches marker on the same comment only", () => {
   assert.equal(alreadyPosted([{ in_reply_to_id: 5, body: "plain human reply" }], 5), false);
 });
 
-test("runReply refuses an empty login", () => {
-  assert.throws(() => runReply({ repo: "o/n", pr: 7, commentId: 5, body: "x", login: "", runner: {} }),
+test("runReply refuses when the derived login is empty", () => {
+  assert.throws(
+    () => runReply({ repo: "o/n", pr: 7, commentId: 5, body: "x", runner: { whoami: () => "" } }),
     /refusing to post/);
+});
+
+test("the posting login is derived, not taken from the caller", () => {
+  const bodies = [];
+  const runner = {
+    listReplies: () => [],
+    postReply: (repo, pr, commentId, body) => bodies.push(body),
+    whoami: () => "real-account",
+  };
+  runReply({ repo: "o/n", pr: 7, commentId: 5, body: "Fixed in abc.", runner });
+  assert.match(bodies[0], /@real-account/);
+});
+
+test("a --login that disagrees with the derived login aborts", () => {
+  const runner = {
+    listReplies: () => [],
+    postReply: () => { throw new Error("must not post"); },
+    whoami: () => "real-account",
+  };
+  assert.throws(
+    () => runReply({ repo: "o/n", pr: 7, commentId: 5, body: "Fixed in abc.", login: "someone-else", runner }),
+    /someone-else[\s\S]*real-account|real-account[\s\S]*someone-else/
+  );
+});
+
+test("a --login that agrees is accepted", () => {
+  const runner = {
+    listReplies: () => [],
+    postReply: () => {},
+    whoami: () => "real-account",
+  };
+  assert.doesNotThrow(() =>
+    runReply({ repo: "o/n", pr: 7, commentId: 5, body: "Fixed in abc.", login: "real-account", runner })
+  );
 });
 
 test("runReply posts a footer-stamped body to the replies endpoint", () => {
@@ -58,6 +93,7 @@ test("runReply posts a footer-stamped body to the replies endpoint", () => {
   const runner = {
     listReplies: () => [],
     postReply: (repo, pr, commentId, body) => calls.push(["postReply", repo, pr, commentId, body]),
+    whoami: () => "octocat",
   };
   const r = runReply({ repo: "o/n", pr: 7, commentId: 5, body: "Fixed in abc.", login: "octocat", runner });
   assert.equal(r.status, "posted");
@@ -71,6 +107,7 @@ test("runReply skips when an identical-marker reply already exists", () => {
   const runner = {
     listReplies: () => [{ in_reply_to_id: 5, body: `x\n\n---\n${FOOTER_MARKER} @octocat` }],
     postReply: () => { throw new Error("must not post"); },
+    whoami: () => "octocat",
   };
   const r = runReply({ repo: "o/n", pr: 7, commentId: 5, body: "Fixed in abc.", login: "octocat", runner });
   assert.deepEqual(r, { status: "skipped", reason: "already-posted" });
@@ -86,7 +123,7 @@ test("runResolve issues the resolveReviewThread mutation for the node id", () =>
 
 test("CLI reply --pr-level posts without a --comment-id", () => {
   const res = runCli([
-    "reply", "--repo", "o/n", "--pr", "7", "--body-file", "@body", "--login", "octocat", "--pr-level",
+    "reply", "--repo", "o/n", "--pr", "7", "--body-file", "@body", "--pr-level",
   ]);
   assert.doesNotMatch(res.stderr ?? "", /--comment-id is required/, res.stderr);
   assert.equal(res.status, 0, res.stderr);
@@ -114,9 +151,10 @@ test("defaultPostRunner builds the documented argv shapes", async () => {
   assert.ok(seen[1].join(" ").includes("PRRT_z"));
 });
 
-test("runReview refuses an empty login", () => {
+test("runReview refuses when the derived login is empty", () => {
   assert.throws(() => runReview({
-    repo: "o/n", pr: 7, commitId: "abc", event: "COMMENT", body: "x", comments: [], login: "", runner: {},
+    repo: "o/n", pr: 7, commitId: "abc", event: "COMMENT", body: "x", comments: [],
+    runner: { whoami: () => "" },
   }), /refusing to post/);
 });
 
@@ -125,6 +163,7 @@ test("runReview posts a fresh batched review when no pending review exists", () 
   const runner = {
     findPendingReview: () => null,
     createReview: (repo, pr, payload) => calls.push(["createReview", repo, pr, payload]),
+    whoami: () => "octocat",
   };
   const comments = [
     { path: "a.js", line: 3, side: "RIGHT", body: "fix this" },
@@ -152,6 +191,7 @@ test("runReview reports a pending review without --merge-into and writes nothing
     findPendingReview: () => "PRR_z",
     createReview: () => { throw new Error("must not create"); },
     addReviewThread: () => { throw new Error("must not add"); },
+    whoami: () => "octocat",
   };
   const r = runReview({
     repo: "o/n", pr: 7, commitId: "abc123", event: "COMMENT", body: "Summary.",
@@ -167,6 +207,7 @@ test("runReview merges into a pending review when --merge-into is given", () => 
     findPendingReview: () => "PRR_z",
     addReviewThread: (reviewId, c) => addCalls.push([reviewId, c]),
     submitReview: (reviewId, event, body) => submitCalls.push([reviewId, event, body]),
+    whoami: () => "octocat",
   };
   const comments = [
     { path: "a.js", line: 3, side: "RIGHT", body: "fix this" },
@@ -191,6 +232,7 @@ test("runReview refuses a self-PR verdict for a non-COMMENT event", () => {
   const runner = {
     getPrAuthor: () => "octocat",
     findPendingReview: () => { throw new Error("must not be consulted"); },
+    whoami: () => "octocat",
   };
   assert.throws(() => runReview({
     repo: "o/n", pr: 7, commitId: "abc123", event: "REQUEST_CHANGES", body: "Summary.",
@@ -204,6 +246,7 @@ test("runReview allows a self-PR COMMENT and reaches the fresh path", () => {
     getPrAuthor: () => "octocat",
     findPendingReview: () => null,
     createReview: (repo, pr, payload) => calls.push(["createReview", repo, pr, payload]),
+    whoami: () => "octocat",
   };
   const r = runReview({
     repo: "o/n", pr: 7, commitId: "abc123", event: "COMMENT", body: "Summary.",
@@ -216,7 +259,7 @@ test("runReview allows a self-PR COMMENT and reaches the fresh path", () => {
 test("CLI review posts a batched review and reports the comment count", () => {
   const res = runCli([
     "review", "--repo", "o/n", "--pr", "7", "--commit-id", "abc", "--event", "COMMENT",
-    "--body-file", "@body", "--comments-file", "@comments", "--login", "octocat",
+    "--body-file", "@body", "--comments-file", "@comments",
   ]);
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stdout, /^reviewed /);
@@ -226,6 +269,7 @@ test("runReply (pr-level) skips when an identical-marker top-level comment alrea
   const runner = {
     listPrLevelComments: () => [{ body: withFooter("Fixed in abc.", "octocat") }],
     postPrLevel: () => { throw new Error("must not post"); },
+    whoami: () => "octocat",
   };
   const r = runReply({ repo: "o/n", pr: 7, body: "Fixed in abc.", login: "octocat", prLevel: true, runner });
   assert.deepEqual(r, { status: "skipped", reason: "already-posted" });
@@ -236,6 +280,7 @@ test("runReply (pr-level) posts when no matching top-level comment exists", () =
   const runner = {
     listPrLevelComments: () => [],
     postPrLevel: (repo, pr, body) => calls.push(["postPrLevel", repo, pr, body]),
+    whoami: () => "octocat",
   };
   const r = runReply({ repo: "o/n", pr: 7, body: "Fixed in abc.", login: "octocat", prLevel: true, runner });
   assert.equal(r.status, "posted");
@@ -245,7 +290,7 @@ test("runReply (pr-level) posts when no matching top-level comment exists", () =
 
 test("runReply's replyHash is the shared djb2(normalizeBody(...)) hash from pr-review-intake.mjs", async () => {
   const { djb2, normalizeBody } = await import("../../scripts/pr-review-intake.mjs");
-  const runner = { listReplies: () => [], postReply: () => {} };
+  const runner = { listReplies: () => [], postReply: () => {}, whoami: () => "octocat" };
   const r = runReply({ repo: "o/n", pr: 7, commentId: 5, body: "Fixed in abc.", login: "octocat", runner });
   assert.equal(r.replyHash, djb2(normalizeBody(withFooter("Fixed in abc.", "octocat"))));
 });
@@ -292,6 +337,7 @@ test("runReview's returned commentCount does not throw when comments is nullish 
   const runner = {
     findPendingReview: () => null,
     createReview: () => {},
+    whoami: () => "octocat",
   };
   const r = runReview({
     repo: "o/n", pr: 7, commitId: "abc", event: "COMMENT", body: "Summary.",
@@ -306,6 +352,7 @@ test("runReview's returned commentCount does not throw when comments is nullish 
     findPendingReview: () => "PRR_z",
     addReviewThread: () => {},
     submitReview: () => {},
+    whoami: () => "octocat",
   };
   const r = runReview({
     repo: "o/n", pr: 7, commitId: "abc", event: "COMMENT", body: "Summary.",
