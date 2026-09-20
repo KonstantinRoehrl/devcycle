@@ -1,0 +1,14 @@
+# The review panel's verification stage spawns one subprocess per finding with no cap; it was 74% of panel spend on the 2026-09-20 pass
+- finding-kind: maintenance-finding
+- finding-id: unbounded-fanout:fda4ed47
+- culprit-kind: unbounded-fanout
+- severity: high
+- confidence: verified
+- affected-files: workflows/review-panel.js, workflows/lib/agent-cli.js
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

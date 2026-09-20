@@ -1,0 +1,14 @@
+# A report following the documented tail template fails authored-claims-check
+- finding-kind: github-issue
+- finding-id: github-issue:281
+- issue: 281
+- severity: medium
+- confidence: verified
+- affected-files: scripts/authored-claims-check.mjs, references/evidence.md
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: github-issue #281
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

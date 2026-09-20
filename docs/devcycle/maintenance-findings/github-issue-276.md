@@ -1,0 +1,14 @@
+# The guarded-dispatch git hook denies read-only git whenever a substitution appears anywhere in the command
+- finding-kind: github-issue
+- finding-id: github-issue:276
+- issue: 276
+- severity: low
+- confidence: verified
+- affected-files: hooks/block-destructive-git.mjs
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: github-issue #276
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

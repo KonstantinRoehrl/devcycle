@@ -1,0 +1,14 @@
+# The model-tier escape hatch ships as code, flag, tests and runtime spec with zero callers
+- finding-kind: maintenance-finding
+- finding-id: dead-machinery:d2bd6b3c
+- culprit-kind: dead-machinery
+- severity: low
+- confidence: verified
+- affected-files: scripts/model-pool.mjs, references/config.md, docs/configuration/README.md
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

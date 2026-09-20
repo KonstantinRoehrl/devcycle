@@ -1,0 +1,14 @@
+# The --depth probe reads the live transcript whole to keep its last usage record, bypassing jsonl.mjs
+- finding-kind: maintenance-finding
+- finding-id: hot-path-cost:10db8192
+- culprit-kind: hot-path-cost
+- severity: medium
+- confidence: verified
+- affected-files: scripts/doctor.mjs, scripts/jsonl.mjs
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

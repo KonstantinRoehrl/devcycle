@@ -1,0 +1,14 @@
+# The plugin-load CI gate validates against a hand-pinned CLI version that no schedule, test or updater tracks
+- finding-kind: maintenance-finding
+- finding-id: untracked-pin:50aab420
+- culprit-kind: untracked-pin
+- severity: medium
+- confidence: verified
+- affected-files: .github/workflows/validate.yml, .github/dependabot.yml
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

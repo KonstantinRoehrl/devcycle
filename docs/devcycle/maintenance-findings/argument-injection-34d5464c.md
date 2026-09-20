@@ -1,0 +1,14 @@
+# The prompt is a trailing positional with no -- separator while git calls in the same engine are guarded twice (latent)
+- finding-kind: maintenance-finding
+- finding-id: argument-injection:34d5464c
+- culprit-kind: argument-injection
+- severity: low
+- confidence: verified
+- affected-files: workflows/lib/agent-cli.js
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

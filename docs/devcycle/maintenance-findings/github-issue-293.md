@@ -1,0 +1,14 @@
+# No check stops $(devcycle-root) being taught unquoted again
+- finding-kind: github-issue
+- finding-id: github-issue:293
+- issue: 293
+- severity: low
+- confidence: verified
+- affected-files: scripts/validate.mjs, playbooks/executing-waves.md
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: github-issue #293
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

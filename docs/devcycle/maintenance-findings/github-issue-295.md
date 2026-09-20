@@ -1,0 +1,14 @@
+# Two wording defects in references/config.md § Model tiers
+- finding-kind: github-issue
+- finding-id: github-issue:295
+- issue: 295
+- severity: low
+- confidence: verified
+- affected-files: references/config.md
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: github-issue #295
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

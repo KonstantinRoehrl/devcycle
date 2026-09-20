@@ -1,0 +1,14 @@
+# A held recurrence verdict means nothing was journaled but feeds retirement as the pattern stopped
+- finding-kind: github-issue
+- finding-id: github-issue:277
+- issue: 277
+- severity: medium
+- confidence: verified
+- affected-files: scripts/verification.mjs
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: github-issue #277
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

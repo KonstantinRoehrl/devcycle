@@ -1,0 +1,14 @@
+# The record stores write tracked artifacts with bare writeFileSync beside the repo's own atomic-write owner
+- finding-kind: maintenance-finding
+- finding-id: failure-to-reuse:53b2269a
+- culprit-kind: failure-to-reuse
+- severity: medium
+- confidence: verified
+- affected-files: scripts/promotions.mjs, scripts/maintenance-findings.mjs, scripts/atomic-write.mjs
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

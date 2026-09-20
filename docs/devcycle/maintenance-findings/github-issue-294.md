@@ -1,0 +1,14 @@
+# The branch-review concern splice promises a --lesson pull hint that resolves to no record
+- finding-kind: github-issue
+- finding-id: github-issue:294
+- issue: 294
+- severity: medium
+- confidence: verified
+- affected-files: playbooks/reviewing-the-branch.md, scripts/maintenance-findings.mjs, scripts/dream.mjs
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: github-issue #294
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

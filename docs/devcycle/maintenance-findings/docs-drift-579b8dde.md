@@ -1,0 +1,14 @@
+# ledger.md cites an evidence.md section for why the two logs never merge; that section says nothing about it
+- finding-kind: maintenance-finding
+- finding-id: docs-drift:579b8dde
+- culprit-kind: docs-drift
+- severity: medium
+- confidence: verified
+- affected-files: references/ledger.md, references/evidence.md
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

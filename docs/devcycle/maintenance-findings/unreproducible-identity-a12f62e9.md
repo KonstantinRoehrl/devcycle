@@ -1,0 +1,14 @@
+# A finding id cannot be recomputed (canonical location is never stored) and the playbook deletes whatever a pass did not re-detect
+- finding-kind: maintenance-finding
+- finding-id: unreproducible-identity:a12f62e9
+- culprit-kind: unreproducible-identity
+- severity: high
+- confidence: verified
+- affected-files: scripts/maintenance-findings.mjs, scripts/verification.mjs, playbooks/maintaining-the-repo.md
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

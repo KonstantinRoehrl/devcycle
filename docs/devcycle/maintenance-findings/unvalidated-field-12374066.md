@@ -1,0 +1,14 @@
+# 36 of 63 maintenance-finding records have an empty title: the validator never checks title and the persisting write path drops it
+- finding-kind: maintenance-finding
+- finding-id: unvalidated-field:12374066
+- culprit-kind: unvalidated-field
+- severity: high
+- confidence: verified
+- affected-files: scripts/maintenance-findings.mjs, scripts/verification.mjs, playbooks/maintaining-the-repo.md
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

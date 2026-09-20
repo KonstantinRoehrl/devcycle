@@ -1,0 +1,14 @@
+# Maintain's dispatches have no file-write return envelope, so results arrive inline and drive the coordinator to the context hard stop
+- finding-kind: maintenance-finding
+- finding-id: missing-mechanism:c58f9c67
+- culprit-kind: missing-mechanism
+- severity: low
+- confidence: verified
+- affected-files: playbooks/maintaining-the-repo.md, references/delegation.md
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

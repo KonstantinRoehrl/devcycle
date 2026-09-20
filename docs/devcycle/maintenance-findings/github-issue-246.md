@@ -1,0 +1,14 @@
+# The learn report prints [object Object] in the Contradictions table
+- finding-kind: github-issue
+- finding-id: github-issue:246
+- issue: 246
+- severity: medium
+- confidence: verified
+- affected-files: scripts/learn-report.mjs, playbooks/learning-from-sessions.md
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: github-issue #246
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

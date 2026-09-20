@@ -1,0 +1,14 @@
+# doctor report mode writes revert-candidates.json unconditionally with no dry mode
+- finding-kind: maintenance-finding
+- finding-id: undisclosed-write:3a7b5f8d
+- culprit-kind: undisclosed-write
+- severity: low
+- confidence: suspected
+- affected-files: scripts/doctor.mjs
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: lens
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

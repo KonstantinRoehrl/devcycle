@@ -1,0 +1,14 @@
+# --render-report prints to stdout; the playbook says it writes the dated report file
+- finding-kind: github-issue
+- finding-id: github-issue:245
+- issue: 245
+- severity: low
+- confidence: verified
+- affected-files: playbooks/learning-from-sessions.md, scripts/dream.mjs
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- origin: github-issue #245
+- verify: 
+- lifecycle: 
+- dismissed-reason: 

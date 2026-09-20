@@ -1,13 +1,13 @@
-# 
+# plugin.json describes walkthroughModel/branchReviewModel pools as complexity-routed; they saturate to the top rung
 - finding-kind: maintenance-finding
 - finding-id: docs-drift:13439026
 - culprit-kind: docs-drift
-- severity: low
+- severity: high
 - confidence: verified
 - affected-files: .claude-plugin/plugin.json, references/config.md, scripts/model-pool.mjs
 - first-seen: 2026-09-04
-- last-seen: 2026-09-04
-- passes: 1
+- last-seen: 2026-09-20
+- passes: 2
 - origin: lens
 - verify: 
 - lifecycle: 
