@@ -25,20 +25,20 @@ maintain has no branch scope: longitudinal health is a whole-repo property.
 Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons audit`. Reuses the audit store.
 
 This playbook is **read-only**: it starts no cycle, writes no `.devcycle/state.md`, mutates no code
-and no GitHub issue, and writes the findings store only through step 8, where § Boundaries names.
+and no GitHub issue, and writes the findings store only through step 8.
 
 **Pass start — before anything is dispatched.** Resolve `$base_branch` — the integration branch when
 one exists, else the default branch — per `${CLAUDE_PLUGIN_ROOT}/references/branch.md` § Committing,
 by its bare name. Store PRs merge on GitHub, so the local branch usually lags them: run
-`git fetch origin "$base_branch"` and bind `$base` to `origin/<name>` when that resolves, else to
-the bare name. When the fetch fails (offline, or no `origin` remote), `$base` is the local branch
-and the report says the comparison may miss store records landed since it was last updated.
-`$base` is what the stranded check, the store comparison and the worktree cut read; only
-`gh pr create --base` takes `$base_branch`, since GitHub rejects an `origin/` name. Run
+`git fetch origin "$base_branch"`, then bind `$base` to `origin/<name>` whenever it resolves, fetched
+now or earlier, else per `${CLAUDE_PLUGIN_ROOT}/references/branch.md` § "Names first". When the
+fetch fails (offline, no `origin`) or `origin/<name>` still does not resolve (a `--single-branch`
+clone fetches only `FETCH_HEAD`), report that the comparison may miss store records landed since
+`$base` was last updated. `$base` feeds the stranded check, the store comparison and the worktree
+cut; only `gh pr create --base` takes `$base_branch`, as GitHub rejects an `origin/` name. Run
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/maintenance-findings.mjs" stranded --base "$base"`. A
 `stranded <ref>` line is an earlier pass's store writes that never landed: stop and ask whether to
-land or delete that branch first, or to proceed knowingly. `skipped` lines are reported, not
-blocking.
+land or delete that branch first, or to proceed knowingly. `skipped` lines are reported, not blocking.
 
 1. **Resolve maintenance depth.** Resolve `profile` per
    `${CLAUDE_PLUGIN_ROOT}/references/config.md` and read its **maintenance depth** row:

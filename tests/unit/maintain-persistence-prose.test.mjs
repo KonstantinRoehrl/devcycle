@@ -89,3 +89,17 @@ test("a pass fetches its base first, and gh pr create takes the bare branch name
   assert.match(step8, /gh pr create --base "\$base_branch"/);
   assert.doesNotMatch(playbook, /gh pr create --base "\$base"/);
 });
+
+test("the base binds to origin/<name> whenever it resolves, fetched now or earlier, with one rule", () => {
+  assert.match(passStart, /`origin\/<name>` whenever it resolves/);
+  assert.match(passStart, /references\/branch\.md` § "Names first"/);
+  assert.doesNotMatch(passStart, /else to the bare name/);
+  assert.doesNotMatch(passStart, /`\$base` is the local branch/);
+});
+
+test("the staleness warning fires whenever the base is not a freshly fetched remote-tracking ref", () => {
+  assert.match(
+    passStart,
+    /fetch fails[^.]*or `origin\/<name>` [^.]*does not resolve[^.]*may miss store records/,
+  );
+});
