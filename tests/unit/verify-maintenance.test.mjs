@@ -34,18 +34,8 @@ test("undetected active → resolved and emitted to gaps (uncorroborated)", () =
   assert.match(out.gaps[0].note, /uncorroborated|rename|move/);
 });
 
-test("resolved-then-detected → regressed", () => {
-  const out = verifyMaintenance([rec({ lifecycle: "resolved" })], { detectedIds: new Set(["dead-code:aaaa1111"]) });
-  assert.equal(out.sections.regressed.length, 1);
-});
-
 test("dismissed is excluded from scoring entirely", () => {
   const out = verifyMaintenance([rec({ lifecycle: "dismissed" })], { detectedIds: new Set(["dead-code:aaaa1111"]) });
-  assert.equal(out.scoreboard.length, 0);
-});
-
-test("resolved-stable (locked resolved, still undetected) is not re-scored", () => {
-  const out = verifyMaintenance([rec({ lifecycle: "resolved" })], { detectedIds: new Set() });
   assert.equal(out.scoreboard.length, 0);
 });
 
@@ -85,4 +75,13 @@ test("a passing mechanical verify: corroborates a resolve — no gap", () => {
   assert.equal(out.sections.resolved.length, 1);
   assert.equal(out.sections.resolved[0].verdict, "held");
   assert.equal(out.gaps.length, 0);
+});
+
+test("a legacy resolved record is scored like an active one", () => {
+  const detected = verifyMaintenance([rec({ lifecycle: "resolved" })], { detectedIds: new Set(["dead-code:aaaa1111"]) });
+  assert.equal(detected.sections.persisting.length, 1);
+  assert.equal("regressed" in detected.sections, false);
+  const undetected = verifyMaintenance([rec({ lifecycle: "resolved" })], { detectedIds: new Set() });
+  assert.equal(undetected.sections.resolved.length, 1);
+  assert.equal(undetected.gaps.length, 1);
 });

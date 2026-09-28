@@ -239,22 +239,15 @@ export function verifyMaintenance(records, passComparison, opts = {}) {
     ? passComparison.detectedIds
     : new Set(passComparison?.detectedIds ?? []);
   const scoreboard = [];
-  const sections = { persisting: [], resolved: [], regressed: [] };
+  const sections = { persisting: [], resolved: [] };
   const gaps = [];
   const known = new Set();
   for (const r of records) {
-    known.add(r.findingId);                         // dismissed/resolved records still count as "known"
+    known.add(r.findingId);                         // dismissed records still count as "known"
     if (r.lifecycle === "dismissed") continue;      // a settled fate is not re-scored (verify()'s !p.lifecycle)
-    const isDetected = detected.has(r.findingId);
-    let lifecycle;
-    if (r.lifecycle === "resolved") {
-      if (!isDetected) continue;                    // resolved-stable, still locked
-      lifecycle = "regressed";
-    } else if (isDetected) {
-      lifecycle = "persisting";                     // every stored record has passes>=1, so a re-detect is persisting
-    } else {
-      lifecycle = "resolved";
-    }
+    // Any other lifecycle — a legacy "resolved" left on disk — is scored as active: a resolved
+    // finding is deleted rather than marked, so there is no locked resolved state to regress from.
+    const lifecycle = detected.has(r.findingId) ? "persisting" : "resolved";
     // Optional mechanical corroboration: only a finding carrying a verify:, only when the caller opts
     // in (runCheck !== skipRunCheck). Reuses VERDICT_BY_STATUS verbatim (held/broken/errored/unmeasurable).
     let verdict = null, detail = null;

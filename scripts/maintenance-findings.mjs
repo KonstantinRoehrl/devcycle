@@ -1,29 +1,29 @@
 // The single reader/writer of devcycle's maintenance-finding records — one file per finding under
-// docs/devcycle/maintenance-findings/, mirroring promotions.mjs's per-file store. Holds two record
-// kinds (maintenance-finding, github-issue) distinguished by a finding-kind field, so verifyMaintenance
-// and the --match extension read one store, not two. Reuses promotions.mjs's helpers rather than
-// re-declaring them (QC1).
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+// docs/devcycle/maintenance-findings/, mirroring promotions.mjs's per-file store. Every record is a
+// maintenance-finding: GitHub owns issue state, so the store keeps no issue record (CONTRIBUTING.md
+// owns that split). Reuses promotions.mjs's and md-field.mjs's helpers rather than re-declaring
+// them (QC1).
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
 import { field, slugify, oneLine, isValidCalendarDate, CULPRIT_ID_RE } from "./promotions.mjs";
+import { readRecordDir, recordTitle } from "./md-field.mjs";
 import { fileMatchesGlob } from "./lessons.mjs";
 
 export const maintDir = (root) => join(root, "docs", "devcycle", "maintenance-findings");
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 const KIND_RE = /^[a-z0-9][a-z0-9-]*$/;
-const FINDING_KINDS = new Set(["maintenance-finding", "github-issue"]);
+const FINDING_KIND = "maintenance-finding";
 const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 const SEVERITIES = new Set(["critical", "high", "medium", "low"]);
 const CONFIDENCES = new Set(["verified", "suspected"]);
-// "resolved" stays a valid enum value for a record already on disk (backward compat with anything
-// written before removeMaintenanceFinding existed, or a manual edit) but nothing writes it anymore:
-// a newly-resolved finding is deleted outright (see removeMaintenanceFinding) rather than persisted,
-// so the store never accumulates settled history. "dismissed" is the one true locked fate — it must
-// persist, since deleting it would let the finding resurface as "new" and defeat the point of a
-// dismissal (never auto-re-evaluated).
-const LIFECYCLE = ["resolved", "dismissed"];
+// "dismissed" is the one lifecycle a record carries — the locked fate that must persist, since
+// deleting it would let the finding resurface as new and defeat the dismissal (never
+// auto-re-evaluated). A resolved finding is deleted outright, never marked. A record written before
+// this rule may still carry "resolved": it is read as-is, so --match keeps skipping it, and is
+// rejected only if something tries to write it back.
+const LIFECYCLE = ["dismissed"];
 
 // Repo-local finding identity (M4): <culprit-kind>:<location-hash>, mirroring run-record.mjs's repoSlug
 // canonicalization (sha256 sliced to 8 hex). The caller (the playbook) builds canonicalLocation WITHOUT
@@ -37,10 +37,12 @@ export function findingId(culpritKind, canonicalLocation) {
 
 export function validateMaintenanceFinding(rec, { repoRoot } = {}) {
   void repoRoot;
-  if (!FINDING_KINDS.has(rec.findingKind))
-    throw new Error(`invalid finding-kind "${rec.findingKind}" — must be one of: ${[...FINDING_KINDS].join(", ")}`);
+  if (rec.findingKind !== FINDING_KIND)
+    throw new Error(`invalid finding-kind "${rec.findingKind}" — must be ${FINDING_KIND}`);
+  if (!oneLine(rec.title))
+    throw new Error(`finding "${rec.findingId}" has a blank title`);
   if (rec.lifecycle != null && rec.lifecycle !== "" && !LIFECYCLE.includes(rec.lifecycle))
-    throw new Error(`invalid lifecycle "${rec.lifecycle}" — must be one of: ${LIFECYCLE.join(", ")}`);
+    throw new Error(`invalid lifecycle "${rec.lifecycle}" — must be empty or one of: ${LIFECYCLE.join(", ")}`);
   if (rec.lifecycle === "dismissed" && !String(rec.dismissedReason ?? "").trim())
     throw new Error("a dismissed finding requires a load-bearing dismissed-reason");
   if (!SEVERITIES.has(rec.severity))
@@ -55,14 +57,8 @@ export function validateMaintenanceFinding(rec, { repoRoot } = {}) {
     throw new Error(`invalid passes "${rec.passes}" — must be an integer >= 1`);
   if (!CULPRIT_ID_RE.test(rec.findingId ?? ""))
     throw new Error(`invalid finding-id "${rec.findingId}"`);
-  if (rec.findingKind === "github-issue") {
-    if (!Number.isInteger(rec.issue) || rec.issue < 1)
-      throw new Error(`a github-issue record requires an integer issue number, got "${rec.issue}"`);
-    if (rec.findingId !== `github-issue:${rec.issue}`)
-      throw new Error(`github-issue finding-id must be "github-issue:${rec.issue}", got "${rec.findingId}"`);
-  } else if (!KIND_RE.test(rec.culpritKind ?? "")) {
+  if (!KIND_RE.test(rec.culpritKind ?? ""))
     throw new Error(`invalid culprit-kind "${rec.culpritKind}"`);
-  }
 }
 
 export function recordMaintenanceFinding(root, rec) {
@@ -72,23 +68,21 @@ export function recordMaintenanceFinding(root, rec) {
   const affected = Array.isArray(rec.affectedFiles)
     ? rec.affectedFiles.map((f) => oneLine(f)).join(", ")
     : oneLine(rec.affectedFiles);
-  const origin = oneLine(rec.origin) || (rec.findingKind === "github-issue" ? `github-issue #${rec.issue}` : "lens");
   const lines = [
     `# ${oneLine(rec.title)}`,
     `- finding-kind: ${rec.findingKind}`,
     `- finding-id: ${oneLine(rec.findingId)}`,
-    rec.findingKind === "github-issue" ? `- issue: ${rec.issue}` : `- culprit-kind: ${oneLine(rec.culpritKind)}`,
+    `- culprit-kind: ${oneLine(rec.culpritKind)}`,
     `- severity: ${rec.severity}`,
     `- confidence: ${rec.confidence}`,
     `- affected-files: ${affected}`,
     `- first-seen: ${oneLine(rec.firstSeen)}`,
     `- last-seen: ${oneLine(rec.lastSeen)}`,
     `- passes: ${rec.passes}`,
-    `- origin: ${origin}`,
     `- verify: ${oneLine(rec.verify)}`,
-    `- lifecycle: ${oneLine(rec.lifecycle)}`,
-    `- dismissed-reason: ${oneLine(rec.dismissedReason)}`,
   ];
+  if (rec.lifecycle === "dismissed")
+    lines.push("- lifecycle: dismissed", `- dismissed-reason: ${oneLine(rec.dismissedReason)}`);
   writeFileSync(path, lines.join("\n") + "\n");
   return path;
 }
@@ -105,43 +99,36 @@ export function removeMaintenanceFinding(root, findingId) {
   return path;
 }
 
-export function readMaintenanceFindings(root) {
-  const dir = maintDir(root);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".md") && f !== "README.md")
-    .sort()
-    .map((f) => {
-      const text = readFileSync(join(dir, f), "utf8");
-      const orNull = (key) => field(text, key) || null;
-      const issue = field(text, "issue");
-      return {
-        path: relative(root, join(dir, f)),
-        title: (text.match(/^# (.*)$/m) ?? [, ""])[1].trim(),
-        findingKind: field(text, "finding-kind"),
-        findingId: field(text, "finding-id"),
-        culpritKind: orNull("culprit-kind"),
-        issue: issue ? Number(issue) : null,
-        severity: field(text, "severity"),
-        confidence: field(text, "confidence"),
-        affectedFiles: field(text, "affected-files").split(",").map((s) => s.trim()).filter(Boolean),
-        firstSeen: field(text, "first-seen"),
-        lastSeen: field(text, "last-seen"),
-        passes: Number(field(text, "passes")) || 0,
-        origin: orNull("origin"),
-        verify: orNull("verify"),
-        lifecycle: orNull("lifecycle"),
-        dismissedReason: orNull("dismissed-reason"),
-      };
-    });
+export function parseMaintenanceFinding(text, path) {
+  const orNull = (key) => field(text, key) || null;
+  return {
+    path,
+    title: recordTitle(text),
+    findingKind: field(text, "finding-kind"),
+    findingId: field(text, "finding-id"),
+    culpritKind: orNull("culprit-kind"),
+    severity: field(text, "severity"),
+    confidence: field(text, "confidence"),
+    affectedFiles: field(text, "affected-files").split(",").map((s) => s.trim()).filter(Boolean),
+    firstSeen: field(text, "first-seen"),
+    lastSeen: field(text, "last-seen"),
+    passes: Number(field(text, "passes")) || 0,
+    verify: orNull("verify"),
+    lifecycle: orNull("lifecycle"),
+    dismissedReason: orNull("dismissed-reason"),
+  };
 }
 
-// Three-tier, mirroring findPromotionById: exact finding-id → github-issue:<n> synonym → filename slug.
+export function readMaintenanceFindings(root) {
+  const dir = maintDir(root);
+  return readRecordDir(dir).map(({ file, text }) => parseMaintenanceFinding(text, relative(root, join(dir, file))));
+}
+
+// Two-tier, mirroring findPromotionById minus its synonym tier: exact finding-id → filename slug.
 export function findMaintenanceFindingById(records, id) {
   const want = String(id ?? "").trim();
   if (!want) return null;
   for (const r of records) if (r.findingId === want) return r;
-  for (const r of records) if (r.findingKind === "github-issue" && `github-issue:${r.issue}` === want) return r;
   for (const r of records) {
     const b = r.path.split("/").pop().replace(/\.md$/, "");
     if (b === want || b === slugify(want)) return r;
@@ -165,12 +152,13 @@ export function rankByTrending(findings) {
 }
 
 // §M9: a file's persisting findings (held across >=2 passes), matched by affected-files, silent when
-// absent. Reuses lessons.mjs's fileMatchesGlob rather than a second glob engine (QC1). A resolved or
-// dismissed finding is settled and not surfaced; a new (one-pass) finding is not yet "known context".
+// absent. Reuses lessons.mjs's fileMatchesGlob rather than a second glob engine (QC1). A dismissed
+// finding — or a legacy resolved one still on disk — is settled and not surfaced; a new (one-pass)
+// finding is not yet "known context".
 export function matchMaintenanceFindings({ records, files, cap = 5 }) {
   const out = [];
   for (const r of records) {
-    if (r.lifecycle) continue;      // resolved/dismissed are settled
+    if (r.lifecycle) continue;      // dismissed, or a legacy resolved record: settled
     if (r.passes < 2) continue;     // persisting only
     const hit = (r.affectedFiles ?? []).some((g) => files.some((f) => g === f || fileMatchesGlob(f, g)));
     if (hit) out.push(r);
@@ -180,6 +168,6 @@ export function matchMaintenanceFindings({ records, files, cap = 5 }) {
 
 export function renderMaintenanceMatches(matches) {
   return matches
-    .map((m) => `- known ${m.culpritKind ?? m.findingKind} concern, persisting since ${m.firstSeen} (${m.passes} passes): ${m.title} [${m.findingId}]`)
+    .map((m) => `- known ${m.culpritKind} concern, persisting since ${m.firstSeen} (${m.passes} passes): ${m.title} [${m.findingId}]`)
     .join("\n");
 }

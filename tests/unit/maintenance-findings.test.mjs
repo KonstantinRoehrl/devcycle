@@ -1,11 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   maintDir, findingId, validateMaintenanceFinding, recordMaintenanceFinding,
   readMaintenanceFindings, findMaintenanceFindingById, rankByTrending,
-  removeMaintenanceFinding,
+  removeMaintenanceFinding, parseMaintenanceFinding, matchMaintenanceFindings,
 } from "../../scripts/maintenance-findings.mjs";
 
 const root = () => makeTempDir("maint-");
@@ -57,31 +60,9 @@ test("removeMaintenanceFinding is idempotent — a missing file is a no-op, not 
   assert.equal(removeMaintenanceFinding(r, "dead-code:doesnotexist"), null);
 });
 
-test("round-trips a github-issue record keyed by issue number", () => {
-  const r = root();
-  recordMaintenanceFinding(r, {
-    findingKind: "github-issue", findingId: "github-issue:44", issue: 44,
-    title: "version sort is lexicographic", severity: "high", confidence: "verified",
-    affectedFiles: ["scripts/doctor.mjs"], firstSeen: "2026-08-22", lastSeen: "2026-08-22", passes: 1,
-    origin: "github-issue #44",
-  });
-  const [rec] = readMaintenanceFindings(r);
-  assert.equal(rec.findingKind, "github-issue");
-  assert.equal(rec.issue, 44);
-  assert.equal(findMaintenanceFindingById(readMaintenanceFindings(r), "github-issue:44").issue, 44);
-});
-
 test("dismissed requires a load-bearing reason", () => {
   assert.throws(() => validateMaintenanceFinding({ ...base, lifecycle: "dismissed" }), /load-bearing/);
   assert.doesNotThrow(() => validateMaintenanceFinding({ ...base, lifecycle: "dismissed", dismissedReason: "volatility boundary for payments" }));
-});
-
-test("github-issue finding-id must match its issue number", () => {
-  assert.throws(() => validateMaintenanceFinding({
-    findingKind: "github-issue", findingId: "github-issue:9", issue: 44,
-    title: "x", severity: "low", confidence: "suspected",
-    affectedFiles: [], firstSeen: "2026-08-22", lastSeen: "2026-08-22", passes: 1,
-  }), /github-issue finding-id/);
 });
 
 test("findMaintenanceFindingById resolves via filename-slug fallback", () => {
@@ -99,4 +80,73 @@ test("rankByTrending: severity primary, tie-break confidence→passes→first-se
     f({ findingId: "d", severity: "medium", confidence: "verified", passes: 2 }),
   ]);
   assert.deepEqual(ranked.map((x) => x.findingId), ["b", "d", "c", "a"]);
+});
+
+const ACTIVE =
+  "# Unreachable helper\n- finding-kind: maintenance-finding\n- finding-id: dead-code:a1b2c3d4\n" +
+  "- culprit-kind: dead-code\n- severity: medium\n- confidence: verified\n- affected-files: scripts/x.mjs\n" +
+  "- first-seen: 2026-08-22\n- last-seen: 2026-08-22\n- passes: 1\n- verify: \n";
+const DISMISSED = ACTIVE + "- lifecycle: dismissed\n- dismissed-reason: volatility boundary for payments\n";
+const LEGACY_RESOLVED =
+  "# Old helper\n- finding-kind: maintenance-finding\n- finding-id: dead-code:a1b2c3d4\n" +
+  "- culprit-kind: dead-code\n- severity: medium\n- confidence: verified\n- affected-files: scripts/x.mjs\n" +
+  "- first-seen: 2026-08-01\n- last-seen: 2026-08-10\n- passes: 3\n- origin: lens\n- verify: \n" +
+  "- lifecycle: resolved\n- dismissed-reason: \n";
+const put = (r, name, text) => {
+  mkdirSync(maintDir(r), { recursive: true });
+  writeFileSync(join(maintDir(r), name), text);
+};
+
+test("the validator rejects a blank or whitespace-only title", () => {
+  assert.throws(() => validateMaintenanceFinding({ ...base, title: "" }), /blank title/);
+  assert.throws(() => validateMaintenanceFinding({ ...base, title: "   " }), /blank title/);
+});
+
+test("the validator accepts no lifecycle but dismissed", () => {
+  assert.throws(() => validateMaintenanceFinding({ ...base, lifecycle: "resolved" }), /invalid lifecycle/);
+});
+
+test("the validator rejects the retired github-issue kind", () => {
+  assert.throws(() => validateMaintenanceFinding({ ...base, findingKind: "github-issue" }), /finding-kind/);
+});
+
+test("an active record is written with no lifecycle, dismissed-reason, or origin line", () => {
+  const r = root();
+  assert.equal(readFileSync(recordMaintenanceFinding(r, base), "utf8"), ACTIVE);
+});
+
+test("a read → write round-trip is byte-identical for an active and a dismissed record", () => {
+  for (const text of [ACTIVE, DISMISSED]) {
+    const r = root();
+    put(r, "fixture.md", text);
+    const [rec] = readMaintenanceFindings(r);
+    assert.equal(readFileSync(recordMaintenanceFinding(r, rec), "utf8"), text);
+  }
+});
+
+test("the reader maps no origin or issue field", () => {
+  const r = root();
+  put(r, "legacy.md", LEGACY_RESOLVED);
+  const [rec] = readMaintenanceFindings(r);
+  assert.equal("origin" in rec, false);
+  assert.equal("issue" in rec, false);
+  assert.equal(rec.lifecycle, "resolved", "a legacy lifecycle is read as-is");
+});
+
+test("--match still skips a legacy resolved record", () => {
+  const r = root();
+  put(r, "legacy.md", LEGACY_RESOLVED);
+  assert.deepEqual(matchMaintenanceFindings({ records: readMaintenanceFindings(r), files: ["scripts/x.mjs"] }), []);
+});
+
+test("every tracked record in this repo's store validates", () => {
+  // Validate-only: a pass run by an older installed plugin that writes an issue shell or a blank
+  // title fails here, which is the intended signal.
+  const repo = fileURLToPath(new URL("../..", import.meta.url));
+  const tracked = execFileSync("git", ["ls-files", "-z", "docs/devcycle/maintenance-findings"], { cwd: repo, encoding: "utf8" })
+    .split("\0")
+    .filter((p) => p.endsWith(".md") && !p.endsWith("/README.md"));
+  assert.ok(tracked.length > 0, "the store has no tracked records, so this test would pass vacuously");
+  for (const rel of tracked)
+    assert.doesNotThrow(() => validateMaintenanceFinding(parseMaintenanceFinding(readFileSync(join(repo, rel), "utf8"), rel)), rel);
 });
