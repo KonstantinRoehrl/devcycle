@@ -59,10 +59,11 @@ what sets it apart from `review` (single-shot, the code as it stands now), from 
 cost, depth and model routing — not the code), and from `learn` (distilling sessions into landed
 rules — not assessing the repo). Its cross-pass memory — the per-finding
 `docs/devcycle/maintenance-findings/` store — is a devcycle-owned record of the kind the
-`read-only` definition above admits, not a write outside one: a pass writes it only after a commit
-gate the user answers, on its own `chore/maintenance-findings-<date>` branch in a worktree, pushed
-as a PR only on confirmation. Whether that store is committed at all is the doc-tracking policy's
-call, never this class's (`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, whose
+`read-only` definition above admits, not a write outside one: a pass writes it only through the
+playbook's step 8 — after a commit gate the user answers, on its own
+`chore/maintenance-findings-<date>` branch in a worktree, pushed as a PR only on confirmation; or,
+when doc tracking vetoes committing it, uncommitted in the checkout with no gate asked. Whether
+that store is committed at all is the doc-tracking policy's call, never this class's (`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, whose
 `commit` cells `git check-ignore` can still veto).
 
 **Naming.** Commands are verbs, playbooks are gerunds, agents are role nouns. `doctor` is the

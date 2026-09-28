@@ -9,7 +9,7 @@ rather than adding a second one: it orients the pass graph-first, gathers determ
 runs depth-gated longitudinal lenses through that engine. It adds no control plane of its own — the
 one engine touch is the optional orientation/hotspot input the engine already documents — and
 stays **read-only**: beyond its report, its one write is the findings store, and only through
-step 8's commit gate.
+step 8.
 
 ## Scope
 
@@ -25,12 +25,17 @@ maintain has no branch scope: longitudinal health is a whole-repo property.
 Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons audit`. Reuses the audit store.
 
 This playbook is **read-only**: it starts no cycle, writes no `.devcycle/state.md`, mutates no code
-and no GitHub issue, and writes the findings store only after the user answers step 8's commit
-gate — in a worktree, never in the session's checkout.
+and no GitHub issue, and writes the findings store only through step 8, where § Boundaries names.
 
-**Pass start — before anything is dispatched.** Resolve `<base>` — the integration branch when one
-exists, else the default branch — per `${CLAUDE_PLUGIN_ROOT}/references/branch.md` § Committing, and
-run `node "${CLAUDE_PLUGIN_ROOT}/scripts/maintenance-findings.mjs" stranded --base "$base"`. A
+**Pass start — before anything is dispatched.** Resolve `$base_branch` — the integration branch when
+one exists, else the default branch — per `${CLAUDE_PLUGIN_ROOT}/references/branch.md` § Committing,
+by its bare name. Store PRs merge on GitHub, so the local branch usually lags them: run
+`git fetch origin "$base_branch"` and bind `$base` to `origin/<name>` when that resolves, else to
+the bare name. When the fetch fails (offline, or no `origin` remote), `$base` is the local branch
+and the report says the comparison may miss store records landed since it was last updated.
+`$base` is what the stranded check, the store comparison and the worktree cut read; only
+`gh pr create --base` takes `$base_branch`, since GitHub rejects an `origin/` name. Run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/maintenance-findings.mjs" stranded --base "$base"`. A
 `stranded <ref>` line is an earlier pass's store writes that never landed: stop and ask whether to
 land or delete that branch first, or to proceed knowingly. `skipped` lines are reported, not
 blocking.
@@ -115,15 +120,21 @@ blocking.
    `Origin:` line in the pass document.
    - **Write the pass file.** Write `.devcycle/maintain/pass-<date>.json`, `<date>` the pass
      document's own: a JSON array with one `{ culpritKind, canonicalLocation, title, severity,
-     confidence, affectedFiles, verify? }` entry per ranked finding, every field but `verify`
-     mandatory. `canonicalLocation` is built WITHOUT a line number (a symbol/heading anchor) so a
-     finding survives cosmetic line moves; `apply-pass` derives each `<culprit-kind>:<hash>` id from
+     confidence, affectedFiles, verify? }` entry per ranked finding except an `Origin: github-issue`
+     one, which the store does not hold (above), every field but `verify` mandatory.
+     `canonicalLocation` is built WITHOUT a line number (a symbol/heading anchor) so a finding
+     survives cosmetic line moves; `apply-pass` derives each `<culprit-kind>:<hash>` id from
      it, and ids are never written to `references/culprits.json`. Two entries deriving one id reject
      the pass: merge them (highest severity, union of affected files, the clearer title) and re-run.
-   - **Compare against the store.** Run `apply-pass --pass <file> --date <date> --dry-run --ref
-     "$base"`, so the comparison reads the store the write below starts from, whatever the session
-     has checked out. Its buckets are this pass's lifecycle: `new`, `persisting` (report "persistent
-     since <first-seen>"), and `dismissed` (kept out of the ranked list).
+   - **Decide the doc-tracking veto — before comparing.** Resolve `${user_config.docTrackingPolicy}`
+     against `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, then `git check-ignore`
+     the store path; either one vetoing committing the store is a veto. It picks the store every
+     dry run below reads: under a veto, the checkout's (`--root <checkout>`, no `--ref`), which
+     holds earlier uncommitted passes; otherwise the one committed at `"$base"` (`--ref "$base"`),
+     which the write's worktree is cut from — so the preview and the write read the same store.
+   - **Compare against the store.** Run `apply-pass --pass <file> --date <date> --dry-run` on the
+     store the veto picked. Its buckets are this pass's lifecycle: `new`, `persisting` (report
+     "persistent since <first-seen>"), and `dismissed` (kept out of the ranked list).
    - **Resolution — confirmed, never automatic.** When a `<concern>` narrowed the pass, any lens
      failed, a hard stop fired, or the coverage statement names an unswept remainder, resolution is
      refused and **Resolved since last pass** renders "not assessed: partial pass". Otherwise re-run
@@ -144,11 +155,10 @@ blocking.
      document: **Previously known (persisting)**, **Resolved since last pass**, **Trending**. Every
      lifecycle transition rendered is backed by this pass's live re-detection (verify-before-stating,
      `planning-waves.md` item 4), never a prior pass's wording.
-   - **Commit gate.** Resolve `${user_config.docTrackingPolicy}` against
-     `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, then `git check-ignore` the store
-     path. When either vetoes committing it, cut no branch: run `apply-pass` (and each accepted
-     `dismiss`) in the checkout and leave the store uncommitted. Otherwise ask one question: *commit
-     the store on `chore/maintenance-findings-<date>` and open a PR* · *commit only* · *don't commit*.
+   - **Commit gate.** Under a veto, ask nothing and cut no branch: run `apply-pass --root <checkout>`,
+     with `--resolve` exactly when the user confirmed it, and each accepted `dismiss` in the
+     checkout, and leave the store uncommitted. Otherwise ask one question: *commit the store on
+     `chore/maintenance-findings-<date>` and open a PR* · *commit only* · *don't commit*.
    - **Write and land.** On either commit answer, cut the branch per
      `${CLAUDE_PLUGIN_ROOT}/references/branch.md` § Committing's standalone-worktree rule:
      `git worktree add -b chore/maintenance-findings-<date> .devcycle/maintain/wt-<date> "$base"` (a
@@ -156,7 +166,7 @@ blocking.
      `dismiss --root <worktree>`, then commit the `written` paths with `git add` and the `deleted`
      paths with `git rm` — two pathspec commits, `docs(maintenance): record the <date> pass's
      findings` and `docs(maintenance): remove findings resolved since the last pass`. On *open a PR*,
-     `git push -u origin <branch>` and `gh pr create --base "$base"` under a Conventional Commit
+     `git push -u origin <branch>` and `gh pr create --base "$base_branch"` under a Conventional Commit
      title; on *commit only*, report the pass as **not landed**, naming the branch. Offer `git
      worktree remove`. On *don't commit*, write nothing.
    - **Per-lens cost rollup (§M7).** Read the panel's emitted `costByLens` array — one

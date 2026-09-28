@@ -53,3 +53,39 @@ test("store writes land from a worktree branch through a confirmed PR", () => {
   assert.match(playbook, /not landed/);
   assert.match(playbook, /references\/branch\.md` § Committing/);
 });
+
+const between = (text, start, end) => {
+  const from = text.indexOf(start);
+  assert.notEqual(from, -1, `missing section start: ${start}`);
+  const to = text.indexOf(end, from + start.length);
+  return text.slice(from, to === -1 ? undefined : to);
+};
+const passStart = between(playbook, "**Pass start", "1. **Resolve maintenance depth");
+const step8 = between(playbook, "8. **Persistence", "## Fan-out ceiling");
+
+test("the doc-tracking veto is decided before the comparison, so a veto previews the store it writes", () => {
+  const compare = step8.indexOf("**Compare against the store");
+  assert.notEqual(compare, -1);
+  for (const veto of ["docTrackingPolicy", "git check-ignore"]) {
+    const at = step8.indexOf(veto);
+    assert.ok(at !== -1 && at < compare, `${veto} must be resolved before the store comparison`);
+  }
+  assert.match(step8, /--ref "\$base"/);
+  assert.match(step8, /--root <checkout>`?,? no `--ref`/);
+  assert.match(step8, /preview and the write read the same store/);
+  assert.match(step8, /--root <checkout>[^.]*--resolve[^.]*confirmed/);
+});
+
+test("folded GitHub issues are ranked in the pass document but never written to the pass file", () => {
+  assert.match(between(step8, "**Write the pass file.**", "   - **"), /Origin: github-issue/);
+});
+
+test("a pass fetches its base first, and gh pr create takes the bare branch name", () => {
+  assert.match(passStart, /git fetch origin/);
+  assert.match(passStart, /origin\/<name>/);
+  assert.match(passStart, /offline|no `origin` remote/);
+  assert.match(passStart, /stranded --base "\$base"/);
+  assert.match(step8, /git worktree add -b [^\n]* "\$base"/);
+  assert.match(step8, /gh pr create --base "\$base_branch"/);
+  assert.doesNotMatch(playbook, /gh pr create --base "\$base"/);
+});

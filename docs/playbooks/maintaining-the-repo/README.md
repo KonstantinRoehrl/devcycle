@@ -27,7 +27,8 @@ and, only on the user's confirmation after a complete pass, a finding no longer 
 resolved out of the store. Before any lens runs, a pass checks for an earlier pass's store writes
 that never landed. The store is written through one command, in a worktree on its own
 `chore/maintenance-findings-<date>` branch, committed and opened as a PR only on the user's say —
-never in the session's checkout — which is the only write this otherwise read-only playbook makes.
+or, when doc tracking vetoes committing it, left uncommitted in the session's checkout (the
+playbook's step 8) — which is the only write this otherwise read-only playbook makes.
 
 A fan-out ceiling bounds the whole pass: at most 5 concurrent panel lenses and 8 total LLM
 dispatches, with a hard stop at the ≥20% context-depth band. The playbook mutates no code and no
