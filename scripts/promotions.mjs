@@ -1,9 +1,9 @@
 // The single reader and writer of devcycle's promotion records — one file per landed lesson under
 // docs/devcycle/promotions/. Lives here rather than in dream.mjs because doctor.mjs reads these
 // records too, and importing them from dream.mjs made the two scripts a cycle.
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
-import { fieldText } from "./md-field.mjs";
+import { fieldText, readRecordDir } from "./md-field.mjs";
 
 export const promoDir = (root) => join(root, "docs", "devcycle", "promotions");
 
@@ -162,36 +162,31 @@ export function consolidatePromotion(repoRoot, culpritId, at) {
 
 export function readPromotions(repoRoot) {
   const dir = promoDir(repoRoot);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".md") && f !== "README.md")
-    .sort()
-    .map((f) => {
-      const text = readFileSync(join(dir, f), "utf8");
-      const orNull = (key) => field(text, key) || null;
-      return {
-        path: relative(repoRoot, join(dir, f)),
-        title: (text.match(/^# (.*)$/m) ?? [, ""])[1].trim(),
-        promotionType: field(text, "promotion-type"),
-        clusterSignature: field(text, "cluster-signature"),
-        filesTouched: field(text, "files-touched").split(",").map((s) => s.trim()).filter(Boolean),
-        affectedFiles: field(text, "affected-files").split(",").map((s) => s.trim()).filter(Boolean),
-        landed: field(text, "landed"),
-        commit: field(text, "commit"),
-        pluginVersion: orNull("plugin-version"),
-        culpritId: orNull("culprit-id"),
-        rung: orNull("rung"),
-        audience: orNull("audience"),
-        verify: orNull("verify"),
-        aliases: field(text, "aliases").split(",").map((s) => s.trim()).filter(Boolean),
-        sourcedFromMemory:
-          field(text, "sourced-from-memory") === "" ? null : field(text, "sourced-from-memory") === "true",
-        lifecycle: orNull("lifecycle"),
-        at: orNull("at"),
-        revertsCommit: orNull("reverts-commit"),
-        consolidated: orNull("consolidated"),
-      };
-    });
+  return readRecordDir(dir).map(({ file, text, title }) => {
+    const orNull = (key) => field(text, key) || null;
+    return {
+      path: relative(repoRoot, join(dir, file)),
+      title,
+      promotionType: field(text, "promotion-type"),
+      clusterSignature: field(text, "cluster-signature"),
+      filesTouched: field(text, "files-touched").split(",").map((s) => s.trim()).filter(Boolean),
+      affectedFiles: field(text, "affected-files").split(",").map((s) => s.trim()).filter(Boolean),
+      landed: field(text, "landed"),
+      commit: field(text, "commit"),
+      pluginVersion: orNull("plugin-version"),
+      culpritId: orNull("culprit-id"),
+      rung: orNull("rung"),
+      audience: orNull("audience"),
+      verify: orNull("verify"),
+      aliases: field(text, "aliases").split(",").map((s) => s.trim()).filter(Boolean),
+      sourcedFromMemory:
+        field(text, "sourced-from-memory") === "" ? null : field(text, "sourced-from-memory") === "true",
+      lifecycle: orNull("lifecycle"),
+      at: orNull("at"),
+      revertsCommit: orNull("reverts-commit"),
+      consolidated: orNull("consolidated"),
+    };
+  });
 }
 
 // Identity, not similarity. An id is either the same id or it is not, so this can never produce
