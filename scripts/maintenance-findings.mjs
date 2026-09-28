@@ -1,16 +1,23 @@
+#!/usr/bin/env node
 // The single reader/writer of devcycle's maintenance-finding records — one file per finding under
 // docs/devcycle/maintenance-findings/, mirroring promotions.mjs's per-file store. Every record is a
 // maintenance-finding: GitHub owns issue state, so the store keeps no issue record (CONTRIBUTING.md
 // owns that split). Reuses promotions.mjs's and md-field.mjs's helpers rather than re-declaring
 // them (QC1).
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+// Also the store's only CLI — apply-pass, dismiss, stranded — which /devcycle:maintain's step 8 runs.
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { execFileSync, spawnSync } from "node:child_process";
 import { join, relative } from "node:path";
+import { pathToFileURL } from "node:url";
 import { field, slugify, oneLine, isValidCalendarDate, CULPRIT_ID_RE } from "./promotions.mjs";
 import { readRecordDir, recordTitle } from "./md-field.mjs";
 import { fileMatchesGlob } from "./lessons.mjs";
+import { parseFlags, requireValue } from "./cli-flags.mjs";
+import { verifyMaintenance } from "./verification.mjs";
 
-export const maintDir = (root) => join(root, "docs", "devcycle", "maintenance-findings");
+const STORE_PATH = "docs/devcycle/maintenance-findings";
+export const maintDir = (root) => join(root, STORE_PATH);
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 const KIND_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -171,3 +178,144 @@ export function renderMaintenanceMatches(matches) {
     .map((m) => `- known ${m.culpritKind} concern, persisting since ${m.firstSeen} (${m.passes} passes): ${m.title} [${m.findingId}]`)
     .join("\n");
 }
+
+const git = (root, args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+
+// references/branch.md § "Names first": git's own ref grammar, then the characters git accepts in a
+// ref name but a shell would expand; then the name spelled the way this clone resolves it.
+const SHELL_UNSAFE = /[$`'";&|<>\n]/;
+function resolveRefName(root, name) {
+  const n = String(name ?? "");
+  if (spawnSync("git", ["check-ref-format", "--allow-onelevel", n]).status !== 0 || SHELL_UNSAFE.test(n))
+    throw new Error(`invalid ref name "${n}"`);
+  for (const candidate of [n, `origin/${n}`])
+    if (spawnSync("git", ["rev-parse", "--verify", "--quiet", `${candidate}^{commit}`], { cwd: root }).status === 0)
+      return candidate;
+  throw new Error(`ref "${n}" resolves neither as ${n} nor as origin/${n}`);
+}
+
+// The store as committed at a ref, so a pass can compare against its base without a worktree.
+function readMaintenanceFindingsAtRef(root, ref) {
+  const at = resolveRefName(root, ref);
+  return git(root, ["ls-tree", "-z", "--name-only", at, "--", `${STORE_PATH}/`])
+    .split("\0")
+    .filter((p) => p.endsWith(".md") && !p.endsWith("/README.md"))
+    .sort()
+    .map((p) => parseMaintenanceFinding(git(root, ["show", `${at}:${p}`]), p));
+}
+
+const ENTRY_FIELDS = ["culpritKind", "canonicalLocation", "title", "severity", "confidence", "affectedFiles"];
+const higherSeverity = (a, b) => ((SEVERITY_ORDER[a] ?? 9) <= (SEVERITY_ORDER[b] ?? 9) ? a : b);
+const passRow = (r) => ({
+  id: r.findingId, title: r.title, severity: r.severity, confidence: r.confidence,
+  passes: r.passes, firstSeen: r.firstSeen, lastSeen: r.lastSeen,
+});
+
+// One pass's store update, computed and validated whole before anything is written, so a bad
+// entry anywhere leaves the store exactly as it was.
+export function applyPass({ root, ref = null, entries, date, resolve = false, dryRun = false }) {
+  if (!isValidCalendarDate(date ?? "")) throw new Error(`--date must be a real YYYY-MM-DD date, got "${date}"`);
+  if (!Array.isArray(entries)) throw new Error("the pass file must hold a JSON array of findings");
+  const incoming = new Map();
+  entries.forEach((e, i) => {
+    const missing = ENTRY_FIELDS.find((k) => e?.[k] == null || e[k] === "" || (Array.isArray(e[k]) && !e[k].length));
+    if (missing) throw new Error(`entry ${i}: missing mandatory field ${missing}`);
+    if (!Array.isArray(e.affectedFiles)) throw new Error(`entry ${i}: affectedFiles must be an array of paths`);
+    const id = findingId(e.culpritKind, e.canonicalLocation);
+    if (incoming.has(id)) throw new Error(`entry ${i}: duplicate finding-id ${id} — merge it with the entry that derives the same id`);
+    incoming.set(id, e);
+  });
+  const stored = ref ? readMaintenanceFindingsAtRef(root, ref) : readMaintenanceFindings(root);
+  const late = stored.find((r) => r.lastSeen > date);
+  if (late) throw new Error(`${late.findingId} was last seen ${late.lastSeen}, after --date ${date} — dates never move backwards`);
+  const byId = new Map(stored.map((r) => [r.findingId, r]));
+  const summary = { new: [], persisting: [], dismissed: [], resolved: [], gaps: [], written: [], deleted: [] };
+  const toWrite = [];
+  for (const [id, e] of incoming) {
+    const prior = byId.get(id);
+    if (prior?.lifecycle === "dismissed") {
+      summary.dismissed.push(passRow(prior));
+      continue;
+    }
+    const fields = { culpritKind: e.culpritKind, title: e.title, confidence: e.confidence, affectedFiles: e.affectedFiles };
+    // A stored record first seen today was created by an earlier run of this same pass.
+    const isNew = !prior || prior.firstSeen === date;
+    const rec = isNew
+      ? { findingKind: FINDING_KIND, findingId: id, ...fields, severity: e.severity, verify: e.verify ?? null,
+          firstSeen: date, lastSeen: date, passes: 1 }
+      : { ...prior, ...fields, severity: higherSeverity(prior.severity, e.severity), verify: e.verify ?? prior.verify,
+          lifecycle: null, dismissedReason: null, lastSeen: date,
+          passes: prior.lastSeen === date ? prior.passes : prior.passes + 1 };
+    try {
+      validateMaintenanceFinding(rec);
+    } catch (err) {
+      throw new Error(`${id}: ${err.message}`);
+    }
+    toWrite.push(rec);
+    summary[isNew ? "new" : "persisting"].push(passRow(rec));
+  }
+  const resolved = [];
+  if (resolve) {
+    // verifyMaintenance owns which undetected records resolve; it runs no verify: here, so every
+    // resolution comes back uncorroborated in gaps.
+    const { sections, gaps } = verifyMaintenance(stored, { detectedIds: new Set(incoming.keys()) });
+    const ids = new Set(sections.resolved.map((row) => row.id));
+    resolved.push(...stored.filter((r) => ids.has(r.findingId)));
+    summary.resolved = resolved.map(passRow);
+    summary.gaps = gaps;
+  }
+  if (!dryRun) {
+    for (const rec of toWrite) summary.written.push(relative(root, recordMaintenanceFinding(root, rec)));
+    for (const r of resolved) {
+      const removed = removeMaintenanceFinding(root, r.findingId);
+      if (removed) summary.deleted.push(relative(root, removed));
+    }
+  }
+  return summary;
+}
+
+function toplevel(cwd) {
+  const r = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
+  if (r.status !== 0) throw new Error("not inside a git repository — pass --root <dir>");
+  return r.stdout.trim();
+}
+
+const VERBS = {
+  "apply-pass": {
+    flags: { "--pass": "value", "--date": "value", "--resolve": "none", "--dry-run": "none", "--root": "value", "--ref": "value" },
+    run: (root, flags) => {
+      const passPath = requireValue(flags, "--pass");
+      if (!passPath) throw new Error("--pass <file.json> is required");
+      const date = requireValue(flags, "--date", "a YYYY-MM-DD date");
+      if (!date) throw new Error("--date YYYY-MM-DD is required");
+      const ref = requireValue(flags, "--ref", "a ref name") ?? null;
+      if (ref && !flags["--dry-run"]) throw new Error("--ref reads a committed store, so it requires --dry-run");
+      let entries;
+      try {
+        entries = JSON.parse(readFileSync(passPath, "utf8"));
+      } catch (e) {
+        throw new Error(`cannot read the pass file ${passPath}: ${e.message}`);
+      }
+      return JSON.stringify(applyPass({
+        root, ref, entries, date, resolve: Boolean(flags["--resolve"]), dryRun: Boolean(flags["--dry-run"]),
+      }));
+    },
+  },
+};
+
+function main() {
+  const [verb, ...rest] = process.argv.slice(2);
+  try {
+    if (!Object.hasOwn(VERBS, verb ?? ""))
+      throw new Error(`unknown verb "${verb ?? ""}" — expected one of: ${Object.keys(VERBS).join(", ")}`);
+    const { flags } = parseFlags(rest, VERBS[verb].flags);
+    const root = requireValue(flags, "--root") ?? toplevel(process.cwd());
+    const out = VERBS[verb].run(root, flags);
+    if (out) process.stdout.write(`${out}\n`);
+  } catch (e) {
+    process.stderr.write(`maintenance-findings ${verb ?? ""}: ${e.message}\n`);
+    process.exit(1);
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
