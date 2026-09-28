@@ -28,8 +28,15 @@ docs/*
 !docs/playbooks/
 docs/audits/*
 !docs/audits/2026-08-06-disposition-register.md
+# docs/devcycle/ tracks only devcycle's own record stores, each re-included by name, so per-run
+# output written beside them (reports/, advisories) stays local — the same shape as docs/audits/
+# above: the directory is re-included so its named children can be, and docs/devcycle/* re-ignores
+# everything else in it.
 # Routing advisories are one-run records of this repo's own dispatch costs: written locally, never
 # shipped to installers. Other repos do commit their copy — that is the `commit` cell in
 # references/config.md § Doc tracking, which already scopes every such cell to what the host repo's
 # own ignore rules allow, and this repo's answer is no.
-docs/devcycle/routing-advisories.md
+docs/devcycle/*
+!docs/devcycle/promotions/
+!docs/devcycle/maintenance-findings/
+!docs/devcycle/lessons.md
