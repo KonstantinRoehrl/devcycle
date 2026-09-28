@@ -7,8 +7,9 @@ playbook to assess the repository."
 This playbook wraps the shared review engine (`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`)
 rather than adding a second one: it orients the pass graph-first, gathers deterministic facts, then
 runs depth-gated longitudinal lenses through that engine. It adds no control plane of its own — the
-one engine touch is the optional orientation/hotspot input the engine already documents — and stays
-**read-only** throughout.
+one engine touch is the optional orientation/hotspot input the engine already documents — and
+stays **read-only**: beyond its report, its one write is the findings store, and only through
+step 8's commit gate.
 
 ## Scope
 
@@ -24,7 +25,15 @@ maintain has no branch scope: longitudinal health is a whole-repo property.
 Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons audit`. Reuses the audit store.
 
 This playbook is **read-only**: it starts no cycle, writes no `.devcycle/state.md`, mutates no code
-and no GitHub issue.
+and no GitHub issue, and writes the findings store only after the user answers step 8's commit
+gate — in a worktree, never in the session's checkout.
+
+**Pass start — before anything is dispatched.** Resolve `<base>` — the integration branch when one
+exists, else the default branch — per `${CLAUDE_PLUGIN_ROOT}/references/branch.md` § Committing, and
+run `node "${CLAUDE_PLUGIN_ROOT}/scripts/maintenance-findings.mjs" stranded --base "$base"`. A
+`stranded <ref>` line is an earlier pass's store writes that never landed: stop and ask whether to
+land or delete that branch first, or to proceed knowingly. `skipped` lines are reported, not
+blocking.
 
 1. **Resolve maintenance depth.** Resolve `profile` per
    `${CLAUDE_PLUGIN_ROOT}/references/config.md` and read its **maintenance depth** row:
@@ -98,44 +107,58 @@ and no GitHub issue.
      touches the issue on GitHub.
 
 8. **Persistence across passes (§M5) — after the ranked findings exist.** The engine (step 6) and
-   issue-folding (step 7) produce the ranked findings; this step gives them cross-pass memory. It is
-   the only new write, still read-only toward code and issues.
-   - **Assign a repo-local id (Screen).** Each finding gets a `findingId` = `<culprit-kind>:<hash>`
-     via `scripts/maintenance-findings.mjs` `findingId(kind, canonicalLocation)`, where
-     `canonicalLocation` is built WITHOUT a line number (a symbol/heading anchor) so a finding survives
-     cosmetic line moves. An issue-sourced finding uses `github-issue:<n>`. Ids are screened for shape
-     before any write and never written to `references/culprits.json`.
-   - **Compare against the store.** Read prior records with `readMaintenanceFindings(<targetRoot>)`,
-     build `detectedIds` from this pass, and call `verifyMaintenance(records, { detectedIds })` for the
-     lifecycle transitions of records that already exist: `persisting` (report "persistent since
-     <first-seen>") / `resolved` / `regressed`. A detected id with no prior record comes back in
-     `newIds` and is a **new** finding (written with `passes: 1`). Its `gaps` list names
-     undetected-active ids whose resolution is uncorroborated (the M4 rename/move limit) — render them
-     so a moved-not-fixed finding stays visible.
-   - **Offer dismissal.** A finding may be `dismissed` only with a **load-bearing** reason captured on
-     the record (`dismissed-reason:`) — a bare skip is not a dismissal. A dismissed finding is excluded
-     from the next pass's ranked list and is **never auto-re-evaluated**; it stays dismissed until a
-     human asks maintenance to reconsider it.
+   issue-folding (step 7) produce the ranked findings; this step gives them cross-pass memory
+   through one command, `node "${CLAUDE_PLUGIN_ROOT}/scripts/maintenance-findings.mjs" <verb>`, whose
+   `apply-pass`, `dismiss` and `stranded` verbs are the store's only write path — never edit a
+   record by hand. The store holds no issue records — `${CLAUDE_PLUGIN_ROOT}/CONTRIBUTING.md`
+   § What belongs in `docs/` owns the defect-state split — so a folded issue's number stays on its
+   `Origin:` line in the pass document.
+   - **Write the pass file.** Write `.devcycle/maintain/pass-<date>.json`, `<date>` the pass
+     document's own: a JSON array with one `{ culpritKind, canonicalLocation, title, severity,
+     confidence, affectedFiles, verify? }` entry per ranked finding, every field but `verify`
+     mandatory. `canonicalLocation` is built WITHOUT a line number (a symbol/heading anchor) so a
+     finding survives cosmetic line moves; `apply-pass` derives each `<culprit-kind>:<hash>` id from
+     it, and ids are never written to `references/culprits.json`. Two entries deriving one id reject
+     the pass: merge them (highest severity, union of affected files, the clearer title) and re-run.
+   - **Compare against the store.** Run `apply-pass --pass <file> --date <date> --dry-run --ref
+     "$base"`, so the comparison reads the store the write below starts from, whatever the session
+     has checked out. Its buckets are this pass's lifecycle: `new`, `persisting` (report "persistent
+     since <first-seen>"), and `dismissed` (kept out of the ranked list).
+   - **Resolution — confirmed, never automatic.** When a `<concern>` narrowed the pass, any lens
+     failed, a hard stop fired, or the coverage statement names an unswept remainder, resolution is
+     refused and **Resolved since last pass** renders "not assessed: partial pass". Otherwise re-run
+     the dry run with `--resolve`, show its `resolved` rows, and ask the user to confirm; declined, it
+     renders "not assessed: declined". A resolved record is deleted, not written — a closed loop is
+     not a longitudinal artifact, so the store never accumulates settled history, and a recurrence
+     re-enters as new. `apply-pass` never runs a record's `verify:`, so every resolution is also in
+     `gaps`: render them, so a moved-not-fixed finding stays visible.
+   - **Offer dismissal.** A finding is `dismissed` only with a **load-bearing** reason — `dismiss --id
+     <id> --reason "<text>"`, plus `--title` when the stored title is blank; a bare skip is not a
+     dismissal. A dismissed finding is excluded from the next pass's ranked list and is
+     **never auto-re-evaluated**; it stays dismissed until a human asks to reconsider it
+     (`dismiss --id <id> --revoke`).
    - **Rank + report.** Keep the engine's severity-first order as primary (never lowered); within a
      severity tier sort by the trending signal, tie-broken confidence → passes → first-seen — the
      rule `scripts/maintenance-findings.mjs`'s `rankByTrending` implements and singly owns, named
-     here rather than silently re-specified. Add
-     three longitudinal sections to the findings document: **Previously known (persisting)**,
-     **Resolved since last pass**, **Trending**. Every lifecycle transition rendered is backed by
-     this pass's live re-detection (verify-before-stating, `planning-waves.md` item 4), never a
-     prior pass's wording.
-   - **Write the store.** Persist a `persisting`, `regressed`, or new finding with
-     `recordMaintenanceFinding(<targetRoot>, rec)` (idempotent by id; issue-sourced findings write a
-     `github-issue` record the same way). A finding `verifyMaintenance` classifies `resolved` this
-     pass is **deleted, not written** — `removeMaintenanceFinding(<targetRoot>, id)` — a closed loop
-     is not a longitudinal artifact worth keeping tracked forever, unlike a `dismissed` record (which
-     must persist so it is never re-flagged). This trades away regression detection for that one
-     finding: a later recurrence re-enters as brand-new (`passes: 1`), not `regressed` — accepted so
-     the store never accumulates settled history. Commit the store by resolving
-     `${user_config.docTrackingPolicy}` against `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc
-     tracking, then `git check-ignore`, then an explicit pathspec — the order
-     `learning-from-sessions.md` step 3 uses. Per-file, never one log — a deletion is its own `git rm`
-     commit, distinct from a written finding's `git add`.
+     here rather than silently re-specified. Add three longitudinal sections to the findings
+     document: **Previously known (persisting)**, **Resolved since last pass**, **Trending**. Every
+     lifecycle transition rendered is backed by this pass's live re-detection (verify-before-stating,
+     `planning-waves.md` item 4), never a prior pass's wording.
+   - **Commit gate.** Resolve `${user_config.docTrackingPolicy}` against
+     `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, then `git check-ignore` the store
+     path. When either vetoes committing it, cut no branch: run `apply-pass` (and each accepted
+     `dismiss`) in the checkout and leave the store uncommitted. Otherwise ask one question: *commit
+     the store on `chore/maintenance-findings-<date>` and open a PR* · *commit only* · *don't commit*.
+   - **Write and land.** On either commit answer, cut the branch per
+     `${CLAUDE_PLUGIN_ROOT}/references/branch.md` § Committing's standalone-worktree rule:
+     `git worktree add -b chore/maintenance-findings-<date> .devcycle/maintain/wt-<date> "$base"` (a
+     taken name gets `-2`, `-3`, …). Run `apply-pass [--resolve] --root <worktree>`, then each accepted
+     `dismiss --root <worktree>`, then commit the `written` paths with `git add` and the `deleted`
+     paths with `git rm` — two pathspec commits, `docs(maintenance): record the <date> pass's
+     findings` and `docs(maintenance): remove findings resolved since the last pass`. On *open a PR*,
+     `git push -u origin <branch>` and `gh pr create --base "$base"` under a Conventional Commit
+     title; on *commit only*, report the pass as **not landed**, naming the branch. Offer `git
+     worktree remove`. On *don't commit*, write nothing.
    - **Per-lens cost rollup (§M7).** Read the panel's emitted `costByLens` array — one
      `{ lens, cost }` entry per lens plus a trailing `panel-overhead` row (the codex cross-model lens
      contributes an unpriced `0` row) — and append one `lens-cost` run record per entry:
@@ -169,7 +192,9 @@ A repo-wide multi-lens pass is the unbounded fan-out shape that has historically
 - Ends at the ranked findings document, a **local** per-run report (`references/config.md` § Doc
   tracking, audit-report row = local at all depths) exactly as
   `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` writes it.
-- Writes one new artifact — the per-finding `docs/devcycle/maintenance-findings/` store — committed per
-  `${user_config.docTrackingPolicy}` (`references/config.md` § Doc tracking); still no code or issue mutation.
+- Writes the per-finding `docs/devcycle/maintenance-findings/` store only through step 8's CLI and
+  only after its commit gate: on its own `chore/maintenance-findings-<date>` branch in a worktree,
+  pushed as a PR only on the user's say — in the checkout only when doc tracking vetoes committing
+  it; still no code or issue mutation.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

@@ -31,6 +31,12 @@ scaffold write) and `learning-from-sessions` (promotion edits) among them. A sta
 the branch, create a topic branch off the default or an integration branch when needed,
 and commit there.
 
+**Standalone worktree commits.** A standalone playbook that commits its own artifact without
+switching the session's checkout cuts its topic branch in a worktree — `git worktree add -b
+<branch> <path> "$base"` — where `$base` is the integration branch when one exists, else the
+default branch, each resolved as above and spelled per § "Names first" below. The session's
+checkout, and whichever branch it sits on, is never touched.
+
 **Per-commit re-check.** Within a stage that commits more than once — `executing-waves`'
 per-task commits, the sweep path's per-file commits — re-run the branch check
 immediately before *every individual commit*, not only once at stage entry: one `git
