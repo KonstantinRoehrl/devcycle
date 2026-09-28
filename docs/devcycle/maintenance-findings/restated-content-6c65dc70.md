@@ -1,4 +1,4 @@
-# 
+# The artifact-commit gate order is restated across five consumers that config.md § Doc tracking owns
 - finding-kind: maintenance-finding
 - finding-id: restated-content:6c65dc70
 - culprit-kind: restated-content

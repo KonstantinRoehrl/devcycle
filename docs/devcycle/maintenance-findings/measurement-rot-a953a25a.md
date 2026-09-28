@@ -1,4 +1,4 @@
-# 
+# Sonnet pricing is past its introductory window with a stale asOf; reported Sonnet dollar figures may be understated
 - finding-kind: maintenance-finding
 - finding-id: measurement-rot:a953a25a
 - culprit-kind: measurement-rot

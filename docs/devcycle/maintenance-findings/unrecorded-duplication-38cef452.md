@@ -1,4 +1,4 @@
-# 
+# run-record.mjs's gitToplevel re-export is a test-only forward
 - finding-kind: maintenance-finding
 - finding-id: unrecorded-duplication:38cef452
 - culprit-kind: unrecorded-duplication

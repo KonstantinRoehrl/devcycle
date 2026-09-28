@@ -1,4 +1,4 @@
-# 
+# Config-parity prose says "three places" but the guard now enforces four, and misnames the file
 - finding-kind: maintenance-finding
 - finding-id: docs-drift:11f06878
 - culprit-kind: docs-drift

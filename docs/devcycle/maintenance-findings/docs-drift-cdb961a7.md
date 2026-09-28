@@ -1,4 +1,4 @@
-# 
+# The docs hub index omits two committed docs/ subdirectories
 - finding-kind: maintenance-finding
 - finding-id: docs-drift:cdb961a7
 - culprit-kind: docs-drift

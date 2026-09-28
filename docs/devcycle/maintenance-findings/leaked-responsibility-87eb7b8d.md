@@ -1,4 +1,4 @@
-# 
+# The reviewer git-revert ban is split and enumerated inconsistently across the two reviewer agents
 - finding-kind: maintenance-finding
 - finding-id: leaked-responsibility:87eb7b8d
 - culprit-kind: leaked-responsibility

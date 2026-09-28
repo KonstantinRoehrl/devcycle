@@ -1,4 +1,4 @@
-# 
+# commands/maintain.md states the issue-folding policy its own playbook owns
 - finding-kind: maintenance-finding
 - finding-id: leaked-responsibility:141a4183
 - culprit-kind: leaked-responsibility

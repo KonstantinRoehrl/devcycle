@@ -1,4 +1,4 @@
-# 
+# pricing.mjs's model-key shape is inconsistent, risking real models silently counting as "unpriced"
 - finding-kind: maintenance-finding
 - finding-id: runtime-defect:b2c5a841
 - culprit-kind: runtime-defect

@@ -1,4 +1,4 @@
-# 
+# rankByTrending implements the ranking rule the playbook restates in prose, but nothing in production calls it
 - finding-kind: maintenance-finding
 - finding-id: unrecorded-duplication:c7c49da9
 - culprit-kind: unrecorded-duplication

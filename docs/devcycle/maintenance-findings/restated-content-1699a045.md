@@ -1,4 +1,4 @@
-# 
+# The override-reason grammar is specified in three places owned by none
 - finding-kind: maintenance-finding
 - finding-id: restated-content:1699a045
 - culprit-kind: restated-content

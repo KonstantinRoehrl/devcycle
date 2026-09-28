@@ -1,4 +1,4 @@
-# 
+# commands/maintain.md restates review.md's owned $ARGUMENTS grammar rule instead of only pointing to it
 - finding-kind: maintenance-finding
 - finding-id: restated-content:53a3dbe3
 - culprit-kind: restated-content
