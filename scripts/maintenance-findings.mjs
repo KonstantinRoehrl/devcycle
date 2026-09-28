@@ -221,6 +221,12 @@ export function applyPass({ root, ref = null, entries, date, resolve = false, dr
     const missing = ENTRY_FIELDS.find((k) => e?.[k] == null || e[k] === "" || (Array.isArray(e[k]) && !e[k].length));
     if (missing) throw new Error(`entry ${i}: missing mandatory field ${missing}`);
     if (!Array.isArray(e.affectedFiles)) throw new Error(`entry ${i}: affectedFiles must be an array of paths`);
+    const blank = e.affectedFiles.findIndex((f) => typeof f !== "string" || !f.trim());
+    if (blank !== -1) throw new Error(`entry ${i}: affectedFiles item ${blank} is blank — every item must be a path`);
+    // Checked here, not only by the record validator: a persisting build keeps the higher of stored
+    // and incoming severity, which would silently drop an unknown incoming value.
+    if (!SEVERITIES.has(e.severity))
+      throw new Error(`entry ${i}: invalid severity "${e.severity}" — must be one of: ${[...SEVERITIES].join(", ")}`);
     const id = findingId(e.culpritKind, e.canonicalLocation);
     if (incoming.has(id)) throw new Error(`entry ${i}: duplicate finding-id ${id} — merge it with the entry that derives the same id`);
     incoming.set(id, e);

@@ -230,6 +230,31 @@ test("apply-pass: a missing mandatory field rejects the pass and leaves the stor
   assert.deepEqual(snapshot(r), before);
 });
 
+test("apply-pass: an unknown severity on a persisting entry rejects the pass instead of keeping the stored one", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-01");
+  const before = snapshot(r);
+  rejects(r, ["--pass", passFile([entry({ severity: "Critical" })]), "--date", "2026-09-08"], /entry 0: invalid severity "Critical"/);
+  assert.deepEqual(snapshot(r), before);
+});
+
+test("apply-pass: a blank affected file on a persisting entry rejects the pass", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-01");
+  const before = snapshot(r);
+  rejects(r, ["--pass", passFile([entry({ affectedFiles: [""] })]), "--date", "2026-09-08"], /entry 0: affectedFiles item 0 is blank/);
+  assert.deepEqual(snapshot(r), before);
+});
+
+test("apply-pass: a whitespace-only affected file on a new entry rejects the whole pass", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-01");
+  const before = snapshot(r);
+  const fresh = entry({ canonicalLocation: "scripts/y.mjs#other", affectedFiles: ["scripts/y.mjs", "  "] });
+  rejects(r, ["--pass", passFile([entry(), fresh]), "--date", "2026-09-08"], /entry 1: affectedFiles item 1 is blank/);
+  assert.deepEqual(snapshot(r), before);
+});
+
 test("apply-pass: without --resolve an undetected record is untouched, in no bucket, with no gaps", () => {
   const r = root();
   apply(r, [entry()], "2026-09-01");
