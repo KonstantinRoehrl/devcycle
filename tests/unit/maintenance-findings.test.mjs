@@ -313,3 +313,130 @@ test("apply-pass: malformed JSON, a missing --date, an unknown flag, or an unkno
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /unknown verb "frobnicate"/);
 });
+
+const dismiss = (r, args) => cli(["dismiss", "--root", r, ...args]);
+
+test("dismiss: --reason sets dismissed with its reason; --revoke clears both", () => {
+  const r = root();
+  recordMaintenanceFinding(r, base);
+  assert.equal(dismiss(r, ["--id", base.findingId, "--reason", "volatility boundary for payments"]).status, 0);
+  assert.equal(readFileSync(join(maintDir(r), "dead-code-a1b2c3d4.md"), "utf8"), DISMISSED);
+  assert.equal(dismiss(r, ["--id", base.findingId, "--revoke"]).status, 0);
+  assert.equal(readFileSync(join(maintDir(r), "dead-code-a1b2c3d4.md"), "utf8"), ACTIVE);
+});
+
+test("dismiss: refuses neither or both flags, an empty reason, and an unknown id", () => {
+  const r = root();
+  recordMaintenanceFinding(r, base);
+  const before = snapshot(r);
+  for (const [args, pattern] of [
+    [["--id", base.findingId], /exactly one of --reason or --revoke/],
+    [["--id", base.findingId, "--reason", "x", "--revoke"], /exactly one of --reason or --revoke/],
+    [["--id", base.findingId, "--reason", "  "], /--reason requires/],
+    [["--id", "dead-code:ffffffff", "--reason", "x"], /no maintenance finding/],
+  ]) {
+    const res = dismiss(r, args);
+    assert.notEqual(res.status, 0, args.join(" "));
+    assert.match(res.stderr, pattern);
+  }
+  assert.deepEqual(snapshot(r), before);
+});
+
+test("dismiss: a blank stored title needs --title, which fills it", () => {
+  const r = root();
+  put(r, "dead-code-a1b2c3d4.md", ACTIVE.replace("# Unreachable helper", "# "));
+  const bare = dismiss(r, ["--id", base.findingId, "--reason", "kept on purpose"]);
+  assert.notEqual(bare.status, 0);
+  assert.match(bare.stderr, /blank title.*--title/);
+  assert.equal(dismiss(r, ["--id", base.findingId, "--reason", "kept on purpose", "--title", "Kept helper"]).status, 0);
+  assert.equal(readMaintenanceFindings(r)[0].title, "Kept helper");
+});
+
+test("dismiss: a legacy github-issue record is refused, left for --resolve", () => {
+  const r = root();
+  put(r, "github-issue-44.md", "# old issue\n- finding-kind: github-issue\n- finding-id: github-issue:44\n- issue: 44\n" +
+    "- severity: low\n- confidence: verified\n- affected-files: x\n- first-seen: 2026-08-01\n" +
+    "- last-seen: 2026-08-01\n- passes: 1\n- verify: \n");
+  const res = dismiss(r, ["--id", "github-issue:44", "--reason", "x"]);
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /legacy github-issue record/);
+});
+
+// stranded runs on real temp repos; gh is stubbed so no test reaches the network.
+const ghStub = (script) => {
+  const bin = makeTempDir("gh-stub-");
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  return { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+};
+const GH_DOWN = "exit 1";
+const storeRepo = () => {
+  const r = root();
+  const g = (...args) => execFileSync("git", args, { cwd: r, encoding: "utf8" }).trim();
+  g("init", "-q", "-b", "dev");
+  g("config", "user.email", "t@example.com");
+  g("config", "user.name", "t");
+  g("config", "commit.gpgsign", "false");
+  writeFileSync(join(r, "README.md"), "x\n");
+  g("add", ".");
+  g("commit", "-q", "-m", "init");
+  const commitRecord = (text, message) => {
+    put(r, "dead-code-a1b2c3d4.md", text);
+    g("add", ".");
+    g("commit", "-q", "-m", message);
+  };
+  return { r, g, commitRecord };
+};
+const stranded = (r, env, base = "dev") => cli(["stranded", "--base", base, "--root", r], { env });
+
+test("stranded: an unlanded store branch is listed; a non-store branch is ignored", () => {
+  const { r, g, commitRecord } = storeRepo();
+  g("switch", "-q", "-c", "chore/maintenance-findings-2026-09-20");
+  commitRecord(ACTIVE, "store");
+  g("switch", "-q", "dev");
+  g("switch", "-q", "-c", "feature/other");
+  commitRecord(ACTIVE, "unrelated store edit");
+  g("switch", "-q", "dev");
+  const res = stranded(r, ghStub(GH_DOWN));
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout, "stranded chore/maintenance-findings-2026-09-20\n");
+});
+
+test("stranded: a squash-landed branch whose content later changed on base is not listed (offline)", () => {
+  const { r, g, commitRecord } = storeRepo();
+  g("switch", "-q", "-c", "chore/maintenance-findings-2026-09-20");
+  commitRecord(ACTIVE, "store");
+  g("switch", "-q", "dev");
+  commitRecord(ACTIVE, "squash of the store PR");
+  commitRecord(DISMISSED, "a later pass changed it");
+  const res = stranded(r, ghStub(GH_DOWN));
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout, "");
+});
+
+test("stranded: a merged PR reported by gh counts as landed", () => {
+  const { r, g, commitRecord } = storeRepo();
+  g("switch", "-q", "-c", "chore/maintenance-findings-2026-09-20");
+  commitRecord(ACTIVE, "store");
+  g("switch", "-q", "dev");
+  const res = stranded(r, ghStub(`echo '[{"number":7}]'`));
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout, "");
+});
+
+test("stranded: a ref with no merge-base is skipped", () => {
+  const { r, g } = storeRepo();
+  const orphan = g("commit-tree", g("mktree"), "-m", "orphan");
+  g("branch", "chore/maintenance-findings-2026-01-01", orphan);
+  const res = stranded(r, ghStub(GH_DOWN));
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout, "skipped chore/maintenance-findings-2026-01-01 (no merge-base)\n");
+});
+
+test("stranded: a bad or unresolvable --base exits non-zero", () => {
+  const { r } = storeRepo();
+  for (const [bad, pattern] of [["-x", /invalid ref name/], ["dev;rm", /invalid ref name/], ["nosuch", /resolves neither/]]) {
+    const res = stranded(r, ghStub(GH_DOWN), bad);
+    assert.notEqual(res.status, 0, bad);
+    assert.match(res.stderr, pattern);
+  }
+});

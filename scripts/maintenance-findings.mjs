@@ -274,6 +274,75 @@ export function applyPass({ root, ref = null, entries, date, resolve = false, dr
   return summary;
 }
 
+// The reconsider path as well as the dismissal, so nobody hand-edits the store.
+export function dismissFinding(root, { id, reason = null, revoke = false, title = null }) {
+  if (!id) throw new Error("--id <finding-id> is required");
+  if ((reason != null) === Boolean(revoke)) throw new Error("pass exactly one of --reason or --revoke");
+  const rec = findMaintenanceFindingById(readMaintenanceFindings(root), id);
+  if (!rec) throw new Error(`no maintenance finding with id "${id}"`);
+  if (rec.findingKind !== FINDING_KIND)
+    throw new Error(`${rec.findingId} is a legacy ${rec.findingKind} record — it cannot be dismissed; a confirmed --resolve pass retires it`);
+  if (!rec.title && !oneLine(title))
+    throw new Error(`${rec.findingId} has a blank title — pass --title so the rewritten record validates`);
+  const next = {
+    ...rec,
+    title: oneLine(title) || rec.title,
+    lifecycle: revoke ? null : "dismissed",
+    dismissedReason: revoke ? null : oneLine(reason),
+  };
+  return relative(root, recordMaintenanceFinding(root, next));
+}
+
+const STORE_BRANCHES = ["refs/heads/chore/maintenance-findings-*", "refs/remotes/origin/chore/maintenance-findings-*"];
+
+// null when gh cannot answer (missing, unauthenticated, offline), so the caller falls back to history.
+function mergedPr(root, head) {
+  const r = spawnSync("gh", ["pr", "list", "--state", "merged", "--head", head, "--json", "number", "--limit", "1"],
+    { cwd: root, encoding: "utf8", timeout: 30_000 });
+  if (r.error || r.status !== 0) return null;
+  try {
+    return JSON.parse(r.stdout).length > 0;
+  } catch {
+    return null;
+  }
+}
+
+// Offline: a squash merge leaves no ancestry link, so a ref has landed when every store path it
+// changed since the merge-base has its blob — or its deletion — somewhere in base's history for
+// that path since the merge-base. A later change on base does not un-land it.
+function contentReachedBase(root, mergeBase, base, ref) {
+  const blobAt = (rev, path) => {
+    const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${rev}:${path}`], { cwd: root, encoding: "utf8" });
+    return r.status === 0 ? r.stdout.trim() : null;
+  };
+  const changed = git(root, ["diff", "--no-renames", "--name-only", "-z", mergeBase, ref, "--", `${STORE_PATH}/`])
+    .split("\0").filter(Boolean);
+  return changed.every((path) => {
+    const want = blobAt(ref, path);
+    return git(root, ["rev-list", `${mergeBase}..${base}`, "--", path])
+      .split("\n").filter(Boolean)
+      .some((commit) => blobAt(commit, path) === want);
+  });
+}
+
+// An earlier pass's store branch that never landed on base (#243).
+export function findStranded(root, base) {
+  const at = resolveRefName(root, base);
+  const refs = git(root, ["for-each-ref", "--format=%(refname:short)", ...STORE_BRANCHES]).split("\n").filter(Boolean);
+  const out = [];
+  for (const ref of refs) {
+    const mb = spawnSync("git", ["merge-base", at, ref], { cwd: root, encoding: "utf8" });
+    if (mb.status === 1 && !mb.stdout.trim()) {
+      out.push({ ref, status: "skipped" });
+      continue;
+    }
+    if (mb.status !== 0) throw new Error(`git merge-base ${at} ${ref} failed: ${mb.stderr.trim()}`);
+    const landed = mergedPr(root, ref.replace(/^origin\//, "")) ?? contentReachedBase(root, mb.stdout.trim(), at, ref);
+    if (!landed) out.push({ ref, status: "stranded" });
+  }
+  return out;
+}
+
 function toplevel(cwd) {
   const r = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
   if (r.status !== 0) throw new Error("not inside a git repository — pass --root <dir>");
@@ -299,6 +368,25 @@ const VERBS = {
       return JSON.stringify(applyPass({
         root, ref, entries, date, resolve: Boolean(flags["--resolve"]), dryRun: Boolean(flags["--dry-run"]),
       }));
+    },
+  },
+  dismiss: {
+    flags: { "--id": "value", "--reason": "value", "--revoke": "none", "--title": "value", "--root": "value" },
+    run: (root, flags) => dismissFinding(root, {
+      id: requireValue(flags, "--id", "a finding id"),
+      reason: requireValue(flags, "--reason", "a non-empty, load-bearing reason") ?? null,
+      revoke: Boolean(flags["--revoke"]),
+      title: requireValue(flags, "--title", "a non-empty title") ?? null,
+    }),
+  },
+  stranded: {
+    flags: { "--base": "value", "--root": "value" },
+    run: (root, flags) => {
+      const base = requireValue(flags, "--base", "a branch name");
+      if (!base) throw new Error("--base <branch> is required");
+      return findStranded(root, base)
+        .map(({ ref, status }) => (status === "skipped" ? `skipped ${ref} (no merge-base)` : `stranded ${ref}`))
+        .join("\n");
     },
   },
 };
