@@ -8,7 +8,4 @@
 - first-seen: 2026-09-04
 - last-seen: 2026-09-20
 - passes: 2
-- origin: lens
 - verify: 
-- lifecycle: 
-- dismissed-reason: 
