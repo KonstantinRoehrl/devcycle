@@ -64,8 +64,8 @@ package directory its own `CLAUDE.md` stub, in addition to the root file.
 
 5. **`.gitignore` doc-tracking setup.** Into the host repo's `.gitignore` (creating it if
    absent) goes `.devcycle/` unconditionally — run scratch no policy tracks. For the rest,
-   resolve `${user_config.docTrackingPolicy}` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`
-   § Doc tracking and read down that table's column for the resolved policy, taking **only rows
+   read `docTrackingPolicy` from the `knobs:` line and find it in
+   `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking and read down that table's column for the resolved policy, taking **only rows
    whose cell in it reads `local` or `commit`**: a cell in any other vocabulary states a
    boundary, not a policy, and contributes no line under any policy. Each `local` cell
    contributes its row's path verbatim, never widened to the tree around it — that path is what

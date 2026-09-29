@@ -12,7 +12,8 @@ Announce the mode and the scope this run covers; report per `${CLAUDE_PLUGIN_ROO
 
 ## Profile, instructions, checkpoints
 
-Resolve `profile` per `${CLAUDE_PLUGIN_ROOT}/references/config.md` (learn depth row); the slice
+Read `profile` from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references/config.md`
+§ Knob channel (learn depth row); the slice
 table below carries which slices each profile admits, `lean` — the memory store alone — included, so
 the checkpoint always advances. A free-text `instructions` argument steers *what the run looks for*:
 a synthesis pass, not an editor, so a line-targeted imperative is a no-op.
@@ -26,7 +27,7 @@ advanced by `--commit-checkpoint` below; the other is this playbook's own
 ## Plan the corpus
 
 Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --plan --cap <n>`, where `<n>` is
-`${user_config.learnSessionCap}` (default `100`); never walk transcripts directly. The
+the `knobs:` line's `learnSessionCap`; never walk transcripts directly. The
 engine's corpus spans every live git worktree of the invoking repo — a worktree run mines the main
 checkout and its siblings too — landing all results in the invoking checkout. It
 prints the manifest as JSON. Every stage's work list is its own slice ids minus the manifest's
@@ -59,7 +60,7 @@ memory; a default run carries that artifact straight to **Confirm**.
 
 **Before dispatching, gate on the estimate.** If the plan's `extractBytes` exceeds 10 MB, do not
 dispatch the full set: put the estimate to the user (`AskUserQuestion`) with the options of
-mining it as planned, narrowing the checkpoint window, or lowering `${user_config.learnSessionCap}`.
+mining it as planned, narrowing the checkpoint window, or lowering `learnSessionCap` in `/plugin configure`.
 A plan reporting a non-empty `oversized` list names those sessions in the same question — they are
 skipped by default, and `--include-oversized` is what mines them.
 
@@ -200,7 +201,7 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
      candidate never lands locally: render it as a D4 issue draft and file it only on per-item
      consent.
    - **scope**, for repo-fault candidates only — `repo-devs` (written to `docs/devcycle/lessons.md`,
-     committed per `${user_config.docTrackingPolicy}` (default `standard`) and subject to the host
+     committed per the `knobs:` line's `docTrackingPolicy` and subject to the host
      repo's `.gitignore`) or `just-me` (the user's own store). Decide by the skill-placement
      test: if the lesson still reads correctly with every repo-specific noun replaced by "the
      project", it is also mirrored to the user's global store.
@@ -272,7 +273,7 @@ Then, per adopted candidate:
    `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit" — any playbook file
    touched here is checked first against `tests/unit/golden-path.test.mjs`, `scripts/validate.mjs`,
    `scripts/redaction-check.mjs`, and `scripts/duplication-check.mjs`. An r2 edit lands in
-   `docs/devcycle/lessons.md`, committed per `${user_config.docTrackingPolicy}` (default `standard`)
+   `docs/devcycle/lessons.md`, committed per the `knobs:` line's `docTrackingPolicy`
    and subject to the host repo's `.gitignore` by the commit-prompt step below; its promotion record
    is written before that commit and so carries no `commit` sha.
 2. **Record the promotion**, for an r1/r3 edit once that commit lands, for an r2 edit once the write
@@ -296,8 +297,8 @@ and set a `*Model` knob, which `${CLAUDE_PLUGIN_ROOT}/references/config.md`'s re
 already treats as the one thing that beats the profile. The file is per-repo and is never plugin
 content.
 
-3. **Offer to commit the freshly written output.** Resolve `${user_config.docTrackingPolicy}`
-   (default `standard`). When it permits tracking — `standard` or `all-tracked`, never `all-local`
+3. **Offer to commit the freshly written output.** Read `docTrackingPolicy` from the
+   `knobs:` line. When it permits tracking — `standard` or `all-tracked`, never `all-local`
    — name the side effect and **ask the user** (AskUserQuestion, mirroring **Confirm**'s per-item
    batching, 1–4 at a time) whether to commit `docs/devcycle/lessons.md`, the promotion records,
    and, only if the advisory step above succeeded, `docs/devcycle/routing-advisories.md`, as one
