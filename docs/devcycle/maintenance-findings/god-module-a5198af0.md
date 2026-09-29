@@ -1,0 +1,11 @@
+# doctor.mjs is several modules behind one CLI file; other scripts import the 3451-line CLI for 10-line helpers
+- finding-kind: maintenance-finding
+- finding-id: god-module:a5198af0
+- culprit-kind: god-module
+- severity: medium
+- confidence: verified
+- affected-files: scripts/doctor.mjs, scripts/learn-report.mjs, scripts/dispatch-cost.mjs, CONTRIBUTING.md
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- verify: 

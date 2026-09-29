@@ -1,4 +1,4 @@
-# 
+# A third of playbooks/reviewing-code.md is prose the branch-review stage -- its most frequent caller -- can never reach
 - finding-kind: maintenance-finding
 - finding-id: wholesale-context-load:f596cf9e
 - culprit-kind: wholesale-context-load
@@ -6,9 +6,6 @@
 - confidence: verified
 - affected-files: playbooks/reviewing-code.md, playbooks/reviewing-the-branch.md
 - first-seen: 2026-08-30
-- last-seen: 2026-09-04
-- passes: 2
-- origin: lens
+- last-seen: 2026-09-20
+- passes: 3
 - verify: 
-- lifecycle: 
-- dismissed-reason: 

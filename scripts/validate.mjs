@@ -10,16 +10,24 @@ import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run
 import { readPolicy } from "./reinforcement-policy.mjs";
 
 
-// The learn loop's compiled memory must stay tracked: README/DECISIONS say lessons + promotion
-// records survive a clone (the flywheel's suppress/verify/retire need them). A .gitignore that
-// re-ignores them silently half-opens the loop. --no-index makes check-ignore consult the ignore
-// rules regardless of index state: without it git reports "not ignored" for any already-tracked
-// path, so the guard would go permanently dead the moment the store is staged or committed.
-export function lessonsTrackingErrors(repoRoot) {
+// devcycle's own record stores must stay tracked: README/DECISIONS say lessons + promotion
+// records survive a clone (the flywheel's suppress/verify/retire need them), and maintain's findings
+// store is its cross-pass memory. A .gitignore that re-ignores one silently half-opens its loop.
+// --no-index makes check-ignore consult the ignore rules regardless of index state: without it git
+// reports "not ignored" for any already-tracked path, so the guard would go permanently dead the
+// moment a store is staged or committed. A store directory is probed through a file path inside
+// it: under the `docs/devcycle/*` allowlist a bare directory path reads as ignored once nothing
+// sits in it, while the re-included directory's files stay visible — the question that matters.
+const RECORD_STORES = [
+  ["docs/devcycle/lessons.md", "docs/devcycle/lessons.md"],
+  ["docs/devcycle/promotions/", "docs/devcycle/promotions/x.md"],
+  ["docs/devcycle/maintenance-findings/", "docs/devcycle/maintenance-findings/x.md"],
+];
+export function recordStoreTrackingErrors(repoRoot) {
   const errs = [];
-  for (const p of ["docs/devcycle/lessons.md", "docs/devcycle/promotions"]) {
-    const res = spawnSync("git", ["check-ignore", "-q", "--no-index", p], { cwd: repoRoot });
-    if (res.status === 0) errs.push(`.gitignore must not ignore ${p} — the learn loop's records must stay tracked`);
+  for (const [store, probe] of RECORD_STORES) {
+    const res = spawnSync("git", ["check-ignore", "-q", "--no-index", probe], { cwd: repoRoot });
+    if (res.status === 0) errs.push(`.gitignore must not ignore ${store} — devcycle's own records must stay tracked`);
   }
   return errs;
 }
@@ -1087,7 +1095,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     saying so. Legal git, which is why only a check catches it.
   docsSubdirTrackingErrors(root).forEach(fail);
 
-  lessonsTrackingErrors(process.cwd()).forEach(fail);
+  recordStoreTrackingErrors(process.cwd()).forEach(fail);
 
   if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
   console.log("validate: ok");

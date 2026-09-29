@@ -1,4 +1,4 @@
-# 
+# matchMaintenanceFindings can drop a critical finding in favor of low ones when more than 5 match
 - finding-kind: maintenance-finding
 - finding-id: runtime-defect:c1ec60a5
 - culprit-kind: runtime-defect
@@ -8,7 +8,4 @@
 - first-seen: 2026-08-30
 - last-seen: 2026-09-04
 - passes: 2
-- origin: lens
 - verify: 
-- lifecycle: 
-- dismissed-reason: 

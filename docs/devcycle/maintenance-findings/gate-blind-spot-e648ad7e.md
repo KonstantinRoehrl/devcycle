@@ -1,0 +1,11 @@
+# No automation checks links anywhere in docs/: xref-check excludes it, exits 0 on findings, and is not a CI step
+- finding-kind: maintenance-finding
+- finding-id: gate-blind-spot:e648ad7e
+- culprit-kind: gate-blind-spot
+- severity: medium
+- confidence: verified
+- affected-files: scripts/xref-check.mjs, .github/workflows/validate.yml
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- verify: 

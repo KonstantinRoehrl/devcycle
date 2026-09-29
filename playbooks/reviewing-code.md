@@ -249,10 +249,8 @@ entries and `/devcycle:maintain`:
   much a concurrent cycle's state file looks like a match:
   `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md` § Boundaries forbids it to create, read or
   write one and forbids a handoff block, so it writes no `branch:` line, holds no stage and records no
-  `audit:` line. It writes this document uncommitted as above; its one commit is the
-  maintenance-findings store that playbook's § Run requires, and that commit takes the reference's
-  Committing rule for a standalone playbook — a topic branch only off a default or integration branch,
-  minus the `branch:`-line write — so a pass already on a topic branch commits the store there.
+  `audit:` line. It writes this document uncommitted as above; its store commit is that playbook's
+  step 8, which never commits on the checked-out branch.
 
 **Then stop.** Present the ranked list; the user picks, and each pick starts its own
 `/devcycle:cycle` naming that finding — never auto-chain. This playbook is **read-only**: it fixes

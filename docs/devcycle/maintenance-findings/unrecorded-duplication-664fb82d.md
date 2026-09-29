@@ -1,0 +1,11 @@
+# normalizePath re-implements task-files.mjs's token-stripping grammar as a fallback
+- finding-kind: maintenance-finding
+- finding-id: unrecorded-duplication:664fb82d
+- culprit-kind: unrecorded-duplication
+- severity: low
+- confidence: verified
+- affected-files: scripts/foreign-change-check.mjs, scripts/task-files.mjs
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- verify: 

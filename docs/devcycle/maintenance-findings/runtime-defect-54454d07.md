@@ -1,4 +1,4 @@
-# 
+# scripts/issue-intake.mjs's scratch-directory write is unguarded, contradicting its own "safety net, not a gate" comment
 - finding-kind: maintenance-finding
 - finding-id: runtime-defect:54454d07
 - culprit-kind: runtime-defect
@@ -6,9 +6,6 @@
 - confidence: verified
 - affected-files: scripts/issue-intake.mjs
 - first-seen: 2026-08-30
-- last-seen: 2026-09-04
-- passes: 2
-- origin: lens
+- last-seen: 2026-09-20
+- passes: 3
 - verify: 
-- lifecycle: 
-- dismissed-reason: 

@@ -164,12 +164,15 @@ results, plans, and specs out of the repository — they are records of one run 
 they date immediately, and nobody installing the plugin has a use for them. `.devcycle/` is
 gitignored and is where those belong.
 
+Three places hold defect state, each for one kind, and this paragraph owns the split.
 `docs/known-issues.md` is the hand-curated store of confirmed defects in devcycle's own engines;
-fixing one means deleting its entry in the same commit. The same rule holds for the second store,
-`docs/devcycle/maintenance-findings/`: a resolved finding's record is deleted outright — here,
-where that store is tracked, in its own `git rm` commit — rather than kept with a resolved marker.
-A *dismissed* finding is the one record that stays: deleting it would let the finding resurface as
-new on the next pass. `docs/known-issues.md` owns how the two stores split.
+fixing one means deleting its entry in the same commit. `docs/devcycle/maintenance-findings/` holds
+what `/devcycle:maintain` passes detect, written only through `scripts/maintenance-findings.mjs`: a
+resolved finding's record is deleted outright — here, where that store is tracked, in its own
+`git rm` commit — rather than kept with a resolved marker, and a *dismissed* finding is the one
+record that stays, since deleting it would let the finding resurface as new on the next pass.
+GitHub holds issue state: the store keeps no copy of an issue, and a pass cites a folded issue in
+its report only.
 
 ## Releasing
 

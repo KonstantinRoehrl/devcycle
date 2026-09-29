@@ -1,0 +1,11 @@
+# workload-sensor runs deriveBase and two rev-parse spawns before its cheap cursor short-circuit, on every Bash call
+- finding-kind: maintenance-finding
+- finding-id: hot-path-cost:561c5bcd
+- culprit-kind: hot-path-cost
+- severity: medium
+- confidence: verified
+- affected-files: hooks/workload-sensor.mjs
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- verify: 

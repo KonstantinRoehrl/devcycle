@@ -1,11 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   maintDir, findingId, validateMaintenanceFinding, recordMaintenanceFinding,
   readMaintenanceFindings, findMaintenanceFindingById, rankByTrending,
-  removeMaintenanceFinding,
+  removeMaintenanceFinding, parseMaintenanceFinding, matchMaintenanceFindings,
 } from "../../scripts/maintenance-findings.mjs";
 
 const root = () => makeTempDir("maint-");
@@ -57,31 +60,9 @@ test("removeMaintenanceFinding is idempotent — a missing file is a no-op, not 
   assert.equal(removeMaintenanceFinding(r, "dead-code:doesnotexist"), null);
 });
 
-test("round-trips a github-issue record keyed by issue number", () => {
-  const r = root();
-  recordMaintenanceFinding(r, {
-    findingKind: "github-issue", findingId: "github-issue:44", issue: 44,
-    title: "version sort is lexicographic", severity: "high", confidence: "verified",
-    affectedFiles: ["scripts/doctor.mjs"], firstSeen: "2026-08-22", lastSeen: "2026-08-22", passes: 1,
-    origin: "github-issue #44",
-  });
-  const [rec] = readMaintenanceFindings(r);
-  assert.equal(rec.findingKind, "github-issue");
-  assert.equal(rec.issue, 44);
-  assert.equal(findMaintenanceFindingById(readMaintenanceFindings(r), "github-issue:44").issue, 44);
-});
-
 test("dismissed requires a load-bearing reason", () => {
   assert.throws(() => validateMaintenanceFinding({ ...base, lifecycle: "dismissed" }), /load-bearing/);
   assert.doesNotThrow(() => validateMaintenanceFinding({ ...base, lifecycle: "dismissed", dismissedReason: "volatility boundary for payments" }));
-});
-
-test("github-issue finding-id must match its issue number", () => {
-  assert.throws(() => validateMaintenanceFinding({
-    findingKind: "github-issue", findingId: "github-issue:9", issue: 44,
-    title: "x", severity: "low", confidence: "suspected",
-    affectedFiles: [], firstSeen: "2026-08-22", lastSeen: "2026-08-22", passes: 1,
-  }), /github-issue finding-id/);
 });
 
 test("findMaintenanceFindingById resolves via filename-slug fallback", () => {
@@ -99,4 +80,388 @@ test("rankByTrending: severity primary, tie-break confidence→passes→first-se
     f({ findingId: "d", severity: "medium", confidence: "verified", passes: 2 }),
   ]);
   assert.deepEqual(ranked.map((x) => x.findingId), ["b", "d", "c", "a"]);
+});
+
+const ACTIVE =
+  "# Unreachable helper\n- finding-kind: maintenance-finding\n- finding-id: dead-code:a1b2c3d4\n" +
+  "- culprit-kind: dead-code\n- severity: medium\n- confidence: verified\n- affected-files: scripts/x.mjs\n" +
+  "- first-seen: 2026-08-22\n- last-seen: 2026-08-22\n- passes: 1\n- verify: \n";
+const DISMISSED = ACTIVE + "- lifecycle: dismissed\n- dismissed-reason: volatility boundary for payments\n";
+const LEGACY_RESOLVED =
+  "# Old helper\n- finding-kind: maintenance-finding\n- finding-id: dead-code:a1b2c3d4\n" +
+  "- culprit-kind: dead-code\n- severity: medium\n- confidence: verified\n- affected-files: scripts/x.mjs\n" +
+  "- first-seen: 2026-08-01\n- last-seen: 2026-08-10\n- passes: 3\n- origin: lens\n- verify: \n" +
+  "- lifecycle: resolved\n- dismissed-reason: \n";
+const put = (r, name, text) => {
+  mkdirSync(maintDir(r), { recursive: true });
+  writeFileSync(join(maintDir(r), name), text);
+};
+
+test("the validator rejects a blank or whitespace-only title", () => {
+  assert.throws(() => validateMaintenanceFinding({ ...base, title: "" }), /blank title/);
+  assert.throws(() => validateMaintenanceFinding({ ...base, title: "   " }), /blank title/);
+});
+
+test("the validator accepts no lifecycle but dismissed", () => {
+  assert.throws(() => validateMaintenanceFinding({ ...base, lifecycle: "resolved" }), /invalid lifecycle/);
+});
+
+test("the validator rejects the retired github-issue kind", () => {
+  assert.throws(() => validateMaintenanceFinding({ ...base, findingKind: "github-issue" }), /finding-kind/);
+});
+
+test("an active record is written with no lifecycle, dismissed-reason, or origin line", () => {
+  const r = root();
+  assert.equal(readFileSync(recordMaintenanceFinding(r, base), "utf8"), ACTIVE);
+});
+
+test("a read → write round-trip is byte-identical for an active and a dismissed record", () => {
+  for (const text of [ACTIVE, DISMISSED]) {
+    const r = root();
+    put(r, "fixture.md", text);
+    const [rec] = readMaintenanceFindings(r);
+    assert.equal(readFileSync(recordMaintenanceFinding(r, rec), "utf8"), text);
+  }
+});
+
+test("the reader maps no origin or issue field", () => {
+  const r = root();
+  put(r, "legacy.md", LEGACY_RESOLVED);
+  const [rec] = readMaintenanceFindings(r);
+  assert.equal("origin" in rec, false);
+  assert.equal("issue" in rec, false);
+  assert.equal(rec.lifecycle, "resolved", "a legacy lifecycle is read as-is");
+});
+
+test("--match still skips a legacy resolved record", () => {
+  const r = root();
+  put(r, "legacy.md", LEGACY_RESOLVED);
+  assert.deepEqual(matchMaintenanceFindings({ records: readMaintenanceFindings(r), files: ["scripts/x.mjs"] }), []);
+});
+
+test("every tracked record in this repo's store validates", () => {
+  // Validate-only: a pass run by an older installed plugin that writes an issue shell or a blank
+  // title fails here, which is the intended signal.
+  const repo = fileURLToPath(new URL("../..", import.meta.url));
+  const tracked = execFileSync("git", ["ls-files", "-z", "docs/devcycle/maintenance-findings"], { cwd: repo, encoding: "utf8" })
+    .split("\0")
+    .filter((p) => p.endsWith(".md") && !p.endsWith("/README.md"));
+  assert.ok(tracked.length > 0, "the store has no tracked records, so this test would pass vacuously");
+  for (const rel of tracked)
+    assert.doesNotThrow(() => validateMaintenanceFinding(parseMaintenanceFinding(readFileSync(join(repo, rel), "utf8"), rel)), rel);
+});
+
+const CLI = fileURLToPath(new URL("../../scripts/maintenance-findings.mjs", import.meta.url));
+const cli = (args, opts = {}) => spawnSync("node", [CLI, ...args], { encoding: "utf8", ...opts });
+const entry = (over = {}) => ({
+  culpritKind: "dead-code", canonicalLocation: "scripts/x.mjs#helper", title: "Unreachable helper",
+  severity: "medium", confidence: "verified", affectedFiles: ["scripts/x.mjs"], ...over,
+});
+const passFile = (entries) => {
+  const p = join(makeTempDir("pass-"), "pass.json");
+  writeFileSync(p, typeof entries === "string" ? entries : JSON.stringify(entries));
+  return p;
+};
+const apply = (r, entries, date, extra = []) => {
+  const res = cli(["apply-pass", "--pass", passFile(entries), "--date", date, "--root", r, ...extra]);
+  assert.equal(res.status, 0, res.stderr);
+  return JSON.parse(res.stdout);
+};
+const rejects = (r, args, pattern) => {
+  const res = cli(["apply-pass", ...args, "--root", r]);
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, pattern);
+};
+const snapshot = (r) => existsSync(maintDir(r))
+  ? readdirSync(maintDir(r)).sort().map((f) => [f, readFileSync(join(maintDir(r), f), "utf8")])
+  : [];
+const ID = findingId("dead-code", "scripts/x.mjs#helper");
+
+test("apply-pass: a first sighting is new, written with passes 1", () => {
+  const r = root();
+  const out = apply(r, [entry()], "2026-09-01");
+  assert.deepEqual(out.new.map((x) => [x.id, x.passes, x.firstSeen, x.lastSeen]), [[ID, 1, "2026-09-01", "2026-09-01"]]);
+  assert.deepEqual(out.written, [`docs/devcycle/maintenance-findings/${ID.replace(":", "-")}.md`]);
+  assert.equal(readMaintenanceFindings(r)[0].title, "Unreachable helper");
+});
+
+test("apply-pass: a same-day re-run stays new with no double increment", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-01");
+  const out = apply(r, [entry()], "2026-09-01");
+  assert.equal(out.new.length, 1);
+  assert.equal(out.new[0].passes, 1);
+});
+
+test("apply-pass: persisting keeps first-seen, increments once per date, never lowers severity", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-01");
+  const out = apply(r, [entry({ severity: "low", title: "Unreachable helper, renamed" })], "2026-09-08");
+  assert.deepEqual(out.persisting.map((x) => [x.passes, x.firstSeen, x.lastSeen, x.severity, x.title]),
+    [[2, "2026-09-01", "2026-09-08", "medium", "Unreachable helper, renamed"]]);
+  assert.equal(apply(r, [entry()], "2026-09-08").persisting[0].passes, 2, "a same-date re-run is idempotent");
+});
+
+test("apply-pass: a persisting build clears a legacy resolved lifecycle", () => {
+  const r = root();
+  put(r, `${ID.replace(":", "-")}.md`, LEGACY_RESOLVED.replace("dead-code:a1b2c3d4", ID));
+  const out = apply(r, [entry()], "2026-09-01");
+  assert.deepEqual(out.persisting.map((x) => x.passes), [4]);
+  assert.doesNotMatch(readFileSync(join(maintDir(r), `${ID.replace(":", "-")}.md`), "utf8"), /lifecycle|origin/);
+});
+
+test("apply-pass: a --date before a stored last-seen rejects the pass", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-08");
+  rejects(r, ["--pass", passFile([entry()]), "--date", "2026-09-01"], /never move backwards/);
+});
+
+test("apply-pass: two entries deriving one id reject the pass", () => {
+  rejects(root(), ["--pass", passFile([entry(), entry({ title: "dup" })]), "--date", "2026-09-01"], /duplicate finding-id/);
+});
+
+test("apply-pass: a missing mandatory field rejects the pass and leaves the store byte-identical", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-01");
+  const before = snapshot(r);
+  const { title, ...untitled } = entry({ canonicalLocation: "scripts/y.mjs#other" });
+  void title;
+  rejects(r, ["--pass", passFile([entry(), untitled]), "--date", "2026-09-08"], /entry 1: missing mandatory field title/);
+  assert.deepEqual(snapshot(r), before);
+});
+
+test("apply-pass: an unknown severity on a persisting entry rejects the pass instead of keeping the stored one", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-01");
+  const before = snapshot(r);
+  rejects(r, ["--pass", passFile([entry({ severity: "Critical" })]), "--date", "2026-09-08"], /entry 0: invalid severity "Critical"/);
+  assert.deepEqual(snapshot(r), before);
+});
+
+test("apply-pass: a blank affected file on a persisting entry rejects the pass", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-01");
+  const before = snapshot(r);
+  rejects(r, ["--pass", passFile([entry({ affectedFiles: [""] })]), "--date", "2026-09-08"], /entry 0: affectedFiles item 0 is blank/);
+  assert.deepEqual(snapshot(r), before);
+});
+
+test("apply-pass: a whitespace-only affected file on a new entry rejects the whole pass", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-01");
+  const before = snapshot(r);
+  const fresh = entry({ canonicalLocation: "scripts/y.mjs#other", affectedFiles: ["scripts/y.mjs", "  "] });
+  rejects(r, ["--pass", passFile([entry(), fresh]), "--date", "2026-09-08"], /entry 1: affectedFiles item 1 is blank/);
+  assert.deepEqual(snapshot(r), before);
+});
+
+test("apply-pass: without --resolve an undetected record is untouched, in no bucket, with no gaps", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-01");
+  const out = apply(r, [entry({ canonicalLocation: "scripts/y.mjs#other" })], "2026-09-08");
+  assert.ok(existsSync(join(maintDir(r), `${ID.replace(":", "-")}.md`)));
+  assert.deepEqual([out.persisting, out.resolved, out.gaps, out.deleted], [[], [], [], []]);
+});
+
+test("apply-pass: with --resolve an undetected record is deleted and listed in gaps", () => {
+  const r = root();
+  apply(r, [entry()], "2026-09-01");
+  const out = apply(r, [entry({ canonicalLocation: "scripts/y.mjs#other" })], "2026-09-08", ["--resolve"]);
+  assert.deepEqual(out.resolved.map((x) => x.id), [ID]);
+  assert.deepEqual(out.gaps.map((g) => g.id), [ID]);
+  assert.deepEqual(out.deleted, [`docs/devcycle/maintenance-findings/${ID.replace(":", "-")}.md`]);
+  assert.equal(existsSync(join(maintDir(r), `${ID.replace(":", "-")}.md`)), false);
+});
+
+test("apply-pass: --resolve retires a legacy github-issue shell, which is otherwise left alone", () => {
+  const r = root();
+  const shell = "# old issue\n- finding-kind: github-issue\n- finding-id: github-issue:44\n- issue: 44\n" +
+    "- severity: low\n- confidence: verified\n- affected-files: x\n- first-seen: 2026-08-01\n" +
+    "- last-seen: 2026-08-01\n- passes: 1\n- origin: github-issue #44\n- verify: \n- lifecycle: \n- dismissed-reason: \n";
+  put(r, "github-issue-44.md", shell);
+  assert.deepEqual(apply(r, [entry()], "2026-09-01").deleted, []);
+  assert.ok(existsSync(join(maintDir(r), "github-issue-44.md")));
+  const out = apply(r, [entry()], "2026-09-01", ["--resolve"]);
+  assert.deepEqual(out.gaps.map((g) => g.id), ["github-issue:44"]);
+  assert.equal(existsSync(join(maintDir(r), "github-issue-44.md")), false);
+});
+
+test("apply-pass: a dismissed record lands in dismissed and is not rewritten", () => {
+  const r = root();
+  const name = `${ID.replace(":", "-")}.md`;
+  const text = DISMISSED.replace("dead-code:a1b2c3d4", ID);
+  put(r, name, text);
+  const out = apply(r, [entry()], "2026-09-01", ["--resolve"]);
+  assert.deepEqual([out.dismissed.map((x) => x.id), out.written, out.resolved], [[ID], [], []]);
+  assert.equal(readFileSync(join(maintDir(r), name), "utf8"), text);
+});
+
+test("apply-pass: --dry-run writes and deletes nothing", () => {
+  const r = root();
+  const out = apply(r, [entry()], "2026-09-01", ["--dry-run"]);
+  assert.equal(out.new.length, 1);
+  assert.deepEqual([out.written, snapshot(r)], [[], []]);
+});
+
+test("apply-pass: --root targets that tree, not the cwd", () => {
+  const r = root();
+  const res = cli(["apply-pass", "--pass", passFile([entry()]), "--date", "2026-09-01", "--root", r], { cwd: makeTempDir("elsewhere-") });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(readMaintenanceFindings(r).length, 1);
+});
+
+test("apply-pass: --dry-run --ref reads the store as committed at that ref", () => {
+  const r = root();
+  const git = (...args) => execFileSync("git", args, { cwd: r, encoding: "utf8" });
+  git("init", "-q");
+  apply(r, [entry()], "2026-09-01");
+  assert.equal(readMaintenanceFindings(r).length, 1, "the pass wrote the record the commit captures");
+  git("add", ".");
+  git("-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "store");
+  const atWorktree = apply(r, [entry()], "2026-09-08", ["--dry-run"]);
+  rmSync(maintDir(r), { recursive: true, force: true });
+  const atRef = apply(r, [entry()], "2026-09-08", ["--dry-run", "--ref", "HEAD"]);
+  assert.deepEqual(atRef, atWorktree);
+  assert.equal(atRef.persisting[0].passes, 2);
+});
+
+test("apply-pass: --ref without --dry-run is refused", () => {
+  rejects(root(), ["--pass", passFile([entry()]), "--date", "2026-09-01", "--ref", "HEAD"], /--ref .*--dry-run/);
+});
+
+test("apply-pass: malformed JSON, a missing --date, an unknown flag, or an unknown verb exit non-zero", () => {
+  const r = root();
+  rejects(r, ["--pass", passFile("[{"), "--date", "2026-09-01"], /pass file/);
+  rejects(r, ["--pass", passFile([entry()])], /--date/);
+  rejects(r, ["--pass", passFile([entry()]), "--date", "2026-09-01", "--bogus"], /unrecognised flag --bogus/);
+  const res = cli(["frobnicate"]);
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /unknown verb "frobnicate"/);
+});
+
+const dismiss = (r, args) => cli(["dismiss", "--root", r, ...args]);
+
+test("dismiss: --reason sets dismissed with its reason; --revoke clears both", () => {
+  const r = root();
+  recordMaintenanceFinding(r, base);
+  assert.equal(dismiss(r, ["--id", base.findingId, "--reason", "volatility boundary for payments"]).status, 0);
+  assert.equal(readFileSync(join(maintDir(r), "dead-code-a1b2c3d4.md"), "utf8"), DISMISSED);
+  assert.equal(dismiss(r, ["--id", base.findingId, "--revoke"]).status, 0);
+  assert.equal(readFileSync(join(maintDir(r), "dead-code-a1b2c3d4.md"), "utf8"), ACTIVE);
+});
+
+test("dismiss: refuses neither or both flags, an empty reason, and an unknown id", () => {
+  const r = root();
+  recordMaintenanceFinding(r, base);
+  const before = snapshot(r);
+  for (const [args, pattern] of [
+    [["--id", base.findingId], /exactly one of --reason or --revoke/],
+    [["--id", base.findingId, "--reason", "x", "--revoke"], /exactly one of --reason or --revoke/],
+    [["--id", base.findingId, "--reason", "  "], /--reason requires/],
+    [["--id", "dead-code:ffffffff", "--reason", "x"], /no maintenance finding/],
+  ]) {
+    const res = dismiss(r, args);
+    assert.notEqual(res.status, 0, args.join(" "));
+    assert.match(res.stderr, pattern);
+  }
+  assert.deepEqual(snapshot(r), before);
+});
+
+test("dismiss: a blank stored title needs --title, which fills it", () => {
+  const r = root();
+  put(r, "dead-code-a1b2c3d4.md", ACTIVE.replace("# Unreachable helper", "# "));
+  const bare = dismiss(r, ["--id", base.findingId, "--reason", "kept on purpose"]);
+  assert.notEqual(bare.status, 0);
+  assert.match(bare.stderr, /blank title.*--title/);
+  assert.equal(dismiss(r, ["--id", base.findingId, "--reason", "kept on purpose", "--title", "Kept helper"]).status, 0);
+  assert.equal(readMaintenanceFindings(r)[0].title, "Kept helper");
+});
+
+test("dismiss: a legacy github-issue record is refused, left for --resolve", () => {
+  const r = root();
+  put(r, "github-issue-44.md", "# old issue\n- finding-kind: github-issue\n- finding-id: github-issue:44\n- issue: 44\n" +
+    "- severity: low\n- confidence: verified\n- affected-files: x\n- first-seen: 2026-08-01\n" +
+    "- last-seen: 2026-08-01\n- passes: 1\n- verify: \n");
+  const res = dismiss(r, ["--id", "github-issue:44", "--reason", "x"]);
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /legacy github-issue record/);
+});
+
+// stranded runs on real temp repos; gh is stubbed so no test reaches the network.
+const ghStub = (script) => {
+  const bin = makeTempDir("gh-stub-");
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  return { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+};
+const GH_DOWN = "exit 1";
+const storeRepo = () => {
+  const r = root();
+  const g = (...args) => execFileSync("git", args, { cwd: r, encoding: "utf8" }).trim();
+  g("init", "-q", "-b", "dev");
+  g("config", "user.email", "t@example.com");
+  g("config", "user.name", "t");
+  g("config", "commit.gpgsign", "false");
+  writeFileSync(join(r, "README.md"), "x\n");
+  g("add", ".");
+  g("commit", "-q", "-m", "init");
+  const commitRecord = (text, message) => {
+    put(r, "dead-code-a1b2c3d4.md", text);
+    g("add", ".");
+    g("commit", "-q", "-m", message);
+  };
+  return { r, g, commitRecord };
+};
+const stranded = (r, env, base = "dev") => cli(["stranded", "--base", base, "--root", r], { env });
+
+test("stranded: an unlanded store branch is listed; a non-store branch is ignored", () => {
+  const { r, g, commitRecord } = storeRepo();
+  g("switch", "-q", "-c", "chore/maintenance-findings-2026-09-20");
+  commitRecord(ACTIVE, "store");
+  g("switch", "-q", "dev");
+  g("switch", "-q", "-c", "feature/other");
+  commitRecord(ACTIVE, "unrelated store edit");
+  g("switch", "-q", "dev");
+  const res = stranded(r, ghStub(GH_DOWN));
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout, "stranded chore/maintenance-findings-2026-09-20\n");
+});
+
+test("stranded: a squash-landed branch whose content later changed on base is not listed (offline)", () => {
+  const { r, g, commitRecord } = storeRepo();
+  g("switch", "-q", "-c", "chore/maintenance-findings-2026-09-20");
+  commitRecord(ACTIVE, "store");
+  g("switch", "-q", "dev");
+  commitRecord(ACTIVE, "squash of the store PR");
+  commitRecord(DISMISSED, "a later pass changed it");
+  const res = stranded(r, ghStub(GH_DOWN));
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout, "");
+});
+
+test("stranded: a merged PR reported by gh counts as landed", () => {
+  const { r, g, commitRecord } = storeRepo();
+  g("switch", "-q", "-c", "chore/maintenance-findings-2026-09-20");
+  commitRecord(ACTIVE, "store");
+  g("switch", "-q", "dev");
+  const res = stranded(r, ghStub(`echo '[{"number":7}]'`));
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout, "");
+});
+
+test("stranded: a ref with no merge-base is skipped", () => {
+  const { r, g } = storeRepo();
+  const orphan = g("commit-tree", g("mktree"), "-m", "orphan");
+  g("branch", "chore/maintenance-findings-2026-01-01", orphan);
+  const res = stranded(r, ghStub(GH_DOWN));
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout, "skipped chore/maintenance-findings-2026-01-01 (no merge-base)\n");
+});
+
+test("stranded: a bad or unresolvable --base exits non-zero", () => {
+  const { r } = storeRepo();
+  for (const [bad, pattern] of [["-x", /invalid ref name/], ["dev;rm", /invalid ref name/], ["nosuch", /resolves neither/]]) {
+    const res = stranded(r, ghStub(GH_DOWN), bad);
+    assert.notEqual(res.status, 0, bad);
+    assert.match(res.stderr, pattern);
+  }
 });

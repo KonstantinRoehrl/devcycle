@@ -1,0 +1,11 @@
+# The shared signal handler re-raises before engine cleanup runs, leaving a registered git worktree and temp tree after an interrupted sweep
+- finding-kind: maintenance-finding
+- finding-id: resource-leak:20d60845
+- culprit-kind: resource-leak
+- severity: medium
+- confidence: verified
+- affected-files: workflows/lib/agent-cli.js, workflows/mechanical-sweep.js, scripts/temp-dir-check.mjs
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- verify: 

@@ -1,4 +1,4 @@
-# 
+# readMaintenanceFindings and promotions.mjs's readPromotions repeat the same 12-line record-directory scan verbatim
 - finding-kind: maintenance-finding
 - finding-id: unrecorded-duplication:29a98a10
 - culprit-kind: unrecorded-duplication
@@ -6,9 +6,6 @@
 - confidence: verified
 - affected-files: scripts/maintenance-findings.mjs, scripts/promotions.mjs, scripts/md-field.mjs
 - first-seen: 2026-08-30
-- last-seen: 2026-09-04
-- passes: 2
-- origin: lens
+- last-seen: 2026-09-20
+- passes: 3
 - verify: 
-- lifecycle: 
-- dismissed-reason: 

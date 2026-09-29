@@ -1,5 +1,5 @@
 ---
-description: "Assess a repository's longitudinal health — how its abstractions and history trend over time — and write a ranked findings document. A bare argument narrows the concern; the whole repo otherwise. Read-only, starts no cycle."
+description: "Assess a repository's longitudinal health — how its abstractions and history trend over time — and write a ranked findings document. A bare argument narrows the concern; the whole repo otherwise. Read-only, starts no cycle; it commits its findings store only on a branch you confirm."
 ---
 
 # /devcycle:maintain
@@ -23,7 +23,7 @@ is a whole-repo property, not a diff's.
 A pass also folds in the target repo's own **open GitHub issues** as a read-only second input
 source. `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md` step 7 owns that pipeline.
 
-Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md`. It starts no cycle and writes
-no state file.
+Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md`. It starts no cycle, writes no state
+file, and writes its findings store only through that playbook's step 8.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

@@ -1,4 +1,4 @@
-# 
+# run-record.mjs --json KEY=VALUE parse can throw a raw SyntaxError instead of a clean die()
 - finding-kind: maintenance-finding
 - finding-id: runtime-defect:8d98bbb4
 - culprit-kind: runtime-defect
@@ -8,7 +8,4 @@
 - first-seen: 2026-09-04
 - last-seen: 2026-09-04
 - passes: 1
-- origin: lens
 - verify: 
-- lifecycle: 
-- dismissed-reason: 
