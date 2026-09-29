@@ -805,7 +805,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
 
   // 18. The model-tier table (references/model-tiers.json) is well-formed: every entry names a
   //     family, an integer rank and a compilable match, ranks ascend strictly, and no family
-  //     repeats. The ceiling rule in references/config.md is only as trustworthy as this ordering,
+  //     repeats. The ceiling rule in references/model-routing.md is only as trustworthy as this ordering,
   //     and scripts/model-pool.mjs reads it verbatim.
   const TIERS_PATH_REL = "references/model-tiers.json";
   const tiersFile = join(root, TIERS_PATH_REL);
@@ -1032,18 +1032,18 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   }
 
   // 23. Every dispatch instruction in playbooks/ and commands/ names its governing model-tier
-  //     rule -- a *Model knob, references/config.md, or an inline
+  //     rule -- a *Model knob, references/model-routing.md (or references/config.md), or an inline
   //     "fast tier"/"session tier" -- so a dispatch is never silently undocumented (issue #171).
   //     Checks presence of a citation, not that it is the correct one, the same posture check 11
   //     takes for a reference's consumer. The window is the dispatch's own enclosing numbered
   //     step (or heading section, when no numbered step wraps it) -- never the whole file, or a
   //     citation for one dispatch would silently satisfy an unrelated dispatch elsewhere in the
-  //     same file (references/config.md § Model tiers owns the derivation this checks nothing
+  //     same file (references/model-routing.md § Model tiers owns the derivation this checks nothing
   //     about, only that a pointer to it, or an equivalent citation, exists).
   {
     const DISPATCH_RE = /(?:Dispatch\s+(?:exactly ONE\s+)?`?devcycle:[a-z-]+`?|`?devcycle:[a-z-]+`?\s+dispatch\b)/gi;
     const GOVERNANCE_RE =
-      /implementerModel|taskReviewerModel|branchReviewModel|walkthroughModel|references\/config\.md|\bfast tier\b|\bsession tier\b/i;
+      /implementerModel|taskReviewerModel|branchReviewModel|walkthroughModel|references\/model-routing\.md|references\/config\.md|\bfast tier\b|\bsession tier\b/i;
     const STEP_RE = /^\d+\.\s/;
     const HEADING_RE = /^#{1,6}\s/;
     for (const dir of ["playbooks", "commands"]) {
@@ -1066,8 +1066,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           if (!GOVERNANCE_RE.test(unitText))
             fail(
               `${dir}/${f}:${lineNo}: dispatch "${m[0]}" names no governing model-tier rule (a ` +
-                `*Model knob, references/config.md, or "fast tier"/` +
-                `"session tier") in its enclosing step -- see references/config.md § Model tiers`
+                `*Model knob, references/model-routing.md, references/config.md, or "fast tier"/` +
+                `"session tier") in its enclosing step -- see references/model-routing.md § Model tiers`
             );
         }
       }

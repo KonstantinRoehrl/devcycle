@@ -1902,6 +1902,7 @@ test("dispatch-governance check: an ungoverned devcycle:task-reviewer dispatch f
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
   assert.match(stderr, /demoing-things\.md:\d+: dispatch ".*devcycle:task-reviewer.*" names no governing model-tier rule/);
+  assert.match(stderr, /see references\/model-routing\.md § Model tiers/);
 });
 
 test("dispatch-governance check: a dispatch citing its *Model knob inline passes", () => {
@@ -1912,6 +1913,17 @@ test("dispatch-governance check: a dispatch citing its *Model knob inline passes
     "## The mini-cycle\n\n" +
       "1. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model\n" +
       "   `taskReviewerModel` resolves per `references/config.md`, with the diff.\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("dispatch-governance check: a dispatch citing references/model-routing.md passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/implementer.md", "---\nname: implementer\n---\n\nImplementer.\n");
+  playbook(
+    dir,
+    "## The mini-cycle\n\n" +
+      "1. **Fix.** Dispatch `devcycle:implementer` on the model `references/model-routing.md` resolves.\n"
   );
   ok(runValidate(dir));
 });
