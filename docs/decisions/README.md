@@ -22,6 +22,71 @@ them; the upgrade offer and its `· profile-asked` marker (retired — unreachab
 and per-repo configuration, which existed only as the accidental `configured:` shadow of resolution
 step 4 and is dropped: values are global, and a repo's old values surface as a drift notice.
 
+## 2026-09-29 — budgets re-baselined for the config-channel branch
+
+**Decision:** the config-channel branch re-baselines both budget fixtures to their exact measured
+values. `tests/fixtures/surface-budget.json`: `surfaceTotal` 5518 → 5659, `commandMax` 132 → 166,
+`playbookMax` 319 → 320. `tests/fixtures/context-budget.json`, all 14 entries — eight fall:
+
+| Playbook | Before | After | Change |
+|---|---|---|---|
+| `executing-waves` | 114897 | 117844 | +2947 |
+| `finishing-the-cycle` | 103719 | 97408 | −6311 |
+| `learning-from-sessions` | 127374 | 121094 | −6280 |
+| `maintaining-the-repo` | 107164 | 100995 | −6169 |
+| `onboarding-a-repo` | 94805 | 88559 | −6246 |
+| `planning-waves` | 99120 | 92909 | −6211 |
+| `profiling-sessions` | 112251 | 64924 | −47327 |
+| `receiving-review` | 125118 | 127972 | +2854 |
+| `reviewing-code` | 134130 | 137001 | +2871 |
+| `reviewing-the-branch` | 105211 | 108064 | +2853 |
+| `scoping-the-request` | 90845 | 57586 | −33259 |
+| `sweeping-mechanical-changes` | 105187 | 108066 | +2879 |
+| `taking-the-fast-path` | 98299 | 65047 | −33252 |
+| `verifying-on-device` | 100712 | 103602 | +2890 |
+
+"Before" is `dev` at the branch cut (`075ed92`), whose figures were exact. Each change traces to
+these causes:
+
+- **−7238 bytes to the eleven playbooks that still reach `references/config.md`** — it shrank
+  21220 → 13982 in `61b447b`: § Model tiers moved to the new `references/model-routing.md` and
+  § The state file's `configured:` line moved to `references/resume.md`, each leaving a pointer,
+  offset in part by the new § Knob channel.
+- **+937 bytes to every playbook but `profiling-sessions`** — `references/resume.md` grew
+  10471 → 11408 (`61b447b`, `3fc8a91`) by the `- knobs:` row and the `configured:` section.
+- **+36 bytes to all fourteen** — `references/delegation.md` grew 10115 → 10151 (`61b447b`).
+- **+9112 bytes to the six dispatching playbooks** — `executing-waves`, `receiving-review`,
+  `reviewing-code`, `reviewing-the-branch`, `sweeping-mechanical-changes` and
+  `verifying-on-device` newly reach `references/model-routing.md`, new in `61b447b`.
+- **+7 bytes to `executing-waves` only** — `references/sweep-execution.md`, which only it reaches,
+  grew 3538 → 3545 in `3fc8a91` by pointing its audit shape at `model-routing.md`.
+- **`scoping-the-request`, `taking-the-fast-path` and `profiling-sessions` no longer reach
+  `config.md` at all.** They reached it only through `delegation.md`'s
+  `${CLAUDE_PLUGIN_ROOT}/references/config.md` citation, which `61b447b` replaced with a bare
+  `references/model-routing.md` (only dispatching surfaces cite model routing in the followed
+  form). So they lose config.md's full 21220 bytes and what only it reached:
+  `references/quality-criteria.md` (13012) for the first two, and for `profiling-sessions`,
+  instead, `resume.md` (10471), `handoff.md` (7948), `ledger.md` (4484) and
+  `commit-convention.md` (3240).
+- **Own changes**, at most ±96 bytes each: the playbooks' switch from placeholders to the
+  `knobs:` line (`5ec8fe6`, `3fc8a91`) and this branch's line rewraps.
+
+`references/first-run-config.md` shrank 8561 → 3283 bytes (`bcc87ee`) but moves no context
+entry: no playbook or reference cites it in the followed `${CLAUDE_PLUGIN_ROOT}/references/…` form.
+
+`surfaceTotal`'s +141 balances across the surface: commands +178 (`cycle.md` +34, `continue.md`
++30, and +19 in each of the six standalone commands — the resolver invocation, its blank lines and
+its lead-in line), references −42 (`config.md` −113, `first-run-config.md` −84,
+`model-routing.md` +136, `resume.md` +17, `README.md` +1, `delegation.md` +1), playbooks +5.
+`commandMax` follows `commands/cycle.md`, still the longest command; `playbookMax` follows
+`learning-from-sessions.md`, still the longest playbook at +1 line.
+
+**Why:** a baseline only fails when a measurement exceeds it, so a fall — eight of fourteen entries
+here — leaves slack no gate catches. The branch's early commits set provisional headroom in both
+fixtures so its parallel tasks could land independently; that headroom never reached a release.
+Every figure above was proven tight by lowering it by 1 and confirming `scripts/validate.mjs`
+fails naming that exact entry — all 17 numbers.
+
 ## 2026-09-14 — budgets raised for the tier-1 pipeline-guarantees branch
 
 **Decision:** the tier-1 pipeline-guarantees branch raises

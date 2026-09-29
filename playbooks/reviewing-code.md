@@ -14,8 +14,8 @@ scoping gate mandates the hard STOP) rather than skipping it, and it owes step 5
 document exactly as an audit run does. **The branch-review stage**
 (`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md`) skips both, inheriting the cycle spec's
 criteria and taking its findings back inline. Read `profile` first from the `knobs:` line
-per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel (`audit depth` sets how far an audit sweeps) and report
-per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
+per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel (`audit depth` sets how far
+an audit sweeps) and report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
 Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons audit`. No store, no output.
 
@@ -125,7 +125,8 @@ One JSON argv: `scope` carries exactly one of `ref` or `paths`, `specPath` is om
 governs the scope, `lenses` mixes built-in keys and `{key, charter}` objects, and `crossModel`
 mirrors `crossModelReview`. The JSON report is stdout ONLY — progress goes to stderr. When
 `branchReviewModel` resolves to an explicit id per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`,
-export it (`DEVCYCLE_PANEL_MODEL=<id> node ...`) or the CLI's default silently replaces the user's binding choice; on the session tier omit it.
+export it (`DEVCYCLE_PANEL_MODEL=<id> node ...`) or
+the CLI's default silently replaces the user's binding choice; on the session tier omit it.
 
 `maxChunks` is the profile's Frontier ceiling on how many diff chunks the panel reviews; past it
 the panel reviews the highest-churn chunks and names the deferred files in its `COVERAGE WARNING`.

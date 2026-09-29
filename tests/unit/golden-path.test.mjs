@@ -2127,6 +2127,22 @@ test("C6: plugin.json, the configuration hub, references/config.md, DESIGN §7 a
   assert.deepEqual(resolver, config, "scripts/resolve-knobs.mjs prints knobs: in references/config.md's roster order");
 });
 
+test("every entry command except doctor resolves knobs through the identical full-roster invocation", () => {
+  const INVOCATION =
+    "```\n" +
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \\\n' +
+    ROSTER.map(({ key }) => `  --${key} '\${user_config.${key}}'`).join(" \\\n") +
+    "\n```";
+  for (const f of readdirSync(join(root, "commands")).filter((n) => n.endsWith(".md"))) {
+    const text = read(`commands/${f}`);
+    if (f === "doctor.md") {
+      assert.ok(!text.includes("user_config."), "commands/doctor.md consumes no knob and must carry no placeholder");
+      continue;
+    }
+    assert.ok(text.includes(`\n\n${INVOCATION}\n\n`), `commands/${f} must carry the resolver invocation verbatim, as its own paragraph (references/config.md § Knob channel)`);
+  }
+});
+
 test("C6: the workload sensor's integration-branch list matches the prose that owns it", () => {
   // references/branch.md § Committing owns that list; hooks/workload-sensor.mjs carries its only
   // runtime spelling, because prose cannot be handed to a hook. Parsed and compared the way C3

@@ -91,10 +91,40 @@ test("stage check: a backticked stage outside the enum fails, naming file and to
 
 // --- check 2: ${user_config.X} against plugin.json's userConfig ---
 
-test("user_config check: a declared knob passes, and the literal ${user_config.KEY} placeholder is exempt", () => {
+test("user_config check: a declared knob inside a command's resolver invocation passes, and the literal ${user_config.KEY} placeholder is exempt", () => {
   const dir = makePluginFixture();
-  playbook(dir, "Resolve `${user_config.profile}`. The convention is `${user_config.KEY}`.\n");
+  playbook(dir, "The convention is `${user_config.KEY}`.\n");
+  // The invocation's ${CLAUDE_PLUGIN_ROOT}/scripts/... path must name a file (check 4).
+  writeInto(dir, "scripts/resolve-knobs.mjs", "");
+  writeInto(
+    dir,
+    "commands/cycle.md",
+    readFileSync(join(dir, "commands/cycle.md"), "utf8") +
+      "\n```\nnode \"${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs\" \\\n  --profile '${user_config.profile}'\n```\n"
+  );
   ok(runValidate(dir));
+});
+
+for (const [where, rel, body] of [
+  ["a playbook", "playbooks/demoing-things.md", null],
+  ["an agent", "agents/demo.md", "---\nname: demo\n---\n\nResolve `${user_config.profile}`.\n"],
+  ["command prose outside the invocation", "commands/cycle.md", null],
+]) {
+  test(`user_config check: a declared knob in ${where} fails, naming the file`, () => {
+    const dir = makePluginFixture();
+    if (rel === "playbooks/demoing-things.md") playbook(dir, "Resolve `${user_config.profile}` first.\n");
+    else if (rel === "commands/cycle.md")
+      writeInto(dir, rel, readFileSync(join(dir, rel), "utf8") + "\nResolve `${user_config.profile}` first.\n");
+    else writeInto(dir, rel, body);
+    failsWith(runValidate(dir), new RegExp(rel.replace(/[./]/g, "\\$&")), /outside the resolve-knobs\.mjs invocation/);
+  });
+}
+
+test("user_config check: a resolver invocation copied into a playbook still fails — only command text is templated", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "scripts/resolve-knobs.mjs", "");
+  playbook(dir, "```\nnode \"${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs\" \\\n  --profile '${user_config.profile}'\n```\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /outside the resolve-knobs\.mjs invocation/);
 });
 
 test("user_config check: an undeclared knob fails, naming file and token", () => {

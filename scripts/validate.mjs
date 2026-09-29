@@ -177,10 +177,23 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
 
     // 2. Every ${user_config.X} must name a key in plugin.json's userConfig.
     //    ${user_config.KEY} is the literal placeholder documenting the convention.
+    //    It must also sit inside a command's resolve-knobs.mjs invocation — nowhere else is templated.
     for (const [, key] of text.matchAll(/\$\{user_config\.([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
       if (key === "KEY") continue;
       if (!knobs) once(`knob:${key}`, `${rel(p)}: \${user_config.${key}} unverifiable — no userConfig object in plugin.json`);
       else if (!knobs.has(key)) once(`knob:${key}`, `${rel(p)}: unknown knob \${user_config.${key}} (not in plugin.json userConfig)`);
+    }
+    // Only command text is templated (references/config.md § Knob channel): a placeholder
+    // anywhere but a command's resolve-knobs.mjs invocation renders literally and resolves as
+    // unset, so it is a defect even when the knob exists.
+    const RESOLVER_BLOCK_RE = /^```[^\n]*\nnode "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/resolve-knobs\.mjs"[\s\S]*?^```$/gm;
+    const outsideInvocation = rel(p).startsWith("commands/") ? text.replace(RESOLVER_BLOCK_RE, "") : text;
+    for (const [, key] of outsideInvocation.matchAll(/\$\{user_config\.([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+      if (key === "KEY") continue;
+      once(
+        `channel:${key}`,
+        `${rel(p)}: \${user_config.${key}} outside the resolve-knobs.mjs invocation — only a command's resolver invocation may carry a knob placeholder (references/config.md § Knob channel)`
+      );
     }
 
     // 3. Every devcycle:<name> must resolve to an agent or a command. Playbooks are addressed

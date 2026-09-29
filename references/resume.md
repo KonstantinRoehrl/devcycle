@@ -39,8 +39,9 @@ transition, in this shape:
 cycle appends to the same record rather than starting a second one.
 `knobs:` is the persisted copy of the resolved knob values —
 `references/config.md` § Knob channel owns who reads it. Only
-`/devcycle:cycle` and `/devcycle:continue`'s drift question write it; every other stage rewrite
-carries it forward unchanged, like `kind:` and `plan-counts:`. `configured:` is carried forward the
+`/devcycle:cycle`, `/devcycle:continue`'s drift question, and `/devcycle:continue` on a state
+file that has no `knobs:` line yet write it; every other stage rewrite carries it forward
+unchanged, like `kind:` and `plan-counts:`. `configured:` is carried forward the
 same way; the next section owns its forms.
 `updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`
 taken when the field is written — never a narrated or estimated time.

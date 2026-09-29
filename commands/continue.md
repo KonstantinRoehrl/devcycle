@@ -80,8 +80,9 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
 
 The asks above are gates — which cycle to resume, whether to apply changed
 knobs, and whether to switch branches — and a resume already carries a run
-record, so an Other answer at any of them appends `user-correction-at-gate` to the run the chosen state file names,
-whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
+record, so an Other answer at any of them appends `user-correction-at-gate`
+to the run the chosen state file names, whose rule
+`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
 
 ## Announce the derived position
 
