@@ -29,16 +29,19 @@ transition, in this shape:
 - ledger: .devcycle/ledger.md
 - checklist: <path or none>
 - run: <run id from scripts/run-record.mjs, or none>
-- configured: <no | defaults | date + KEY=VALUE list (possibly empty)>[ · profile-asked]
+- configured: <no | defaults | date + KEY=VALUE list>
+- knobs: <the resolver's knobs: line, verbatim after "knobs: ">
 - updated: <ISO-8601 UTC>
 ```
 
 `stage:` names the stage the NEXT session resumes at, never the one just completed.
 `run:` is the run record's id, minted once per cycle and carried across `/clear` so a resumed
 cycle appends to the same record rather than starting a second one.
-`configured:` records what configuration was written for this repo and is carried
-forward unchanged when a new cycle reuses the file; `references/config.md` owns what
-its values mean.
+`knobs:` is the persisted copy of the resolved knob values —
+`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel owns who reads it. Only
+`/devcycle:cycle` and `/devcycle:continue`'s drift question write it; every other stage rewrite
+carries it forward unchanged, like `kind:` and `plan-counts:`. `configured:` is carried forward the
+same way; the next section owns its forms.
 `updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`
 taken when the field is written — never a narrated or estimated time.
 `kind:` records the confirmed triage request kind and `plan-counts:` the plan's Dispatch-Map
@@ -64,6 +67,19 @@ give, and an Other answer to it appends `user-correction-at-gate` to the run rec
 resume already carries; `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that rule. A
 file with no `root:` line predates this format and is not foreign: adopt it by writing
 `root:` and `request:` at the next rewrite.
+
+## The state file's `configured:` line
+
+One line records the first-run configuration offer, one form per outcome:
+
+- `no` — the offer was never made.
+- `defaults` — the offer ran and wrote nothing, every answer matching its recommended default.
+- `<date>` plus a KEY=VALUE list — the offer ran and wrote those.
+
+Two older forms are legacy — accepted on read, never written: `<date>` with an empty list, and
+any form carrying a trailing `· profile-asked` marker. Neither changes what a reader does. The
+line is a record of the offer, never a source of knob values; its only other reader is the drift
+notice in `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel.
 
 ## Settle the branch first, before reading anything else
 

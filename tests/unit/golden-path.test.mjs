@@ -521,15 +521,15 @@ test("harvested: commands/profile-resolution — an explicit knob beats the prof
   assert.ok(t.includes("| branch review engine (`reviewDepth`) | `single` | `single` | `panel` |"), "engine row changed");
   assert.ok(t.includes("| branch-review round cap | 2 | 3 | 5 |"), "round-cap row changed");
   assert.match(t, /`profile` ∈ `lean \| standard \| thorough`, default `standard`/);
-  assert.match(t, /· profile-asked/);
+  assert.match(read("references/resume.md"), /· profile-asked/, "the legacy profile-asked marker must stay documented as accepted on read");
 });
 
 test("harvested: commands/state-file-resume — the state file's shape and ownership check are pinned", () => {
   const t = read("references/resume.md");
   const template = t.match(/```markdown\n# devcycle state\n([\s\S]*?)```/)?.[1] ?? "";
   const lines = template.trim().split("\n");
-  assert.equal(lines.length, 16, "the state template is no longer 16 lines");
-  for (const field of ["stage", "root", "branch", "request", "kind", "scope", "audit", "diagnosis", "spec", "plan", "plan-counts", "ledger", "checklist", "run", "configured", "updated"])
+  assert.equal(lines.length, 17, "the state template is no longer 17 lines");
+  for (const field of ["stage", "root", "branch", "request", "kind", "scope", "audit", "diagnosis", "spec", "plan", "plan-counts", "ledger", "checklist", "run", "configured", "knobs", "updated"])
     assert.ok(lines.some((l) => l.startsWith(`- ${field}:`)), `state field missing: ${field}`);
   assert.ok(template.includes("- ledger: .devcycle/ledger.md"), "the ledger path is not pinned");
   assert.match(t, /The ownership check, run before trusting anything else in the file/);
@@ -730,7 +730,7 @@ test("harvested: executing-waves/handoff-block-shape — seven fields, and only 
 });
 
 test("harvested: executing-waves/model-routing — every escalation trigger and the ledger's audit shape are pinned", () => {
-  const t = read("references/config.md");
+  const t = read("references/model-routing.md");
   assert.match(t, /\*\*Files:\*\*` block lists\s+more than 5 files/);
   assert.match(t, /`\*\*Dependencies:\*\*` is anything other than `none`/);
   assert.match(t, /any step fails to name its file and expected behavior/);
