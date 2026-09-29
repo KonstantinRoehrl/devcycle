@@ -60,6 +60,9 @@ string, even when the manifest declares a `default`. `${CLAUDE_PLUGIN_ROOT}` sub
 content (for a local-path marketplace install it resolves to the marketplace source directory,
 not the cache copy). Uninstalling the plugin clears its stored options.
 
+2026-09-29: playbook-resident placeholders never substituted after the 2026-08-06
+skills-into-playbooks decision — see `docs/decisions/README.md` 2026-09-29.
+
 **Consequence for the plan.**
 
 - `.claude-plugin/plugin.json` was corrected in this task (Task 2 owns the schema fix):

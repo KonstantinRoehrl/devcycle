@@ -61,8 +61,8 @@
     "reviewDepth": {
       "type": "string",
       "title": "Review depth",
-      "default": "single",
-      "description": "Branch review engine. Unset → the profile's branch-review row (single at lean and standard, panel at thorough); set → this value, verbatim, and the profile never moves it. One of: single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass), panel (multi-lens review panel workflow), auto (identical to unset). Default: single."
+      "default": "auto",
+      "description": "Branch review engine. auto (default) defers to the profile's branch-review row (single at lean and standard, panel at thorough); set → this value, verbatim, and the profile never moves it. One of: auto, single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass), panel (multi-lens review panel workflow). Default: auto."
     },
     "crossModelReview": {
       "type": "boolean",
@@ -73,8 +73,8 @@
     "onDeviceGate": {
       "type": "string",
       "title": "On-device gate",
-      "default": "human-required",
-      "description": "Whether the on-device checklist closes only via a human walkthrough. Unset → the profile's on-device row (auto-ok at lean, human-required at standard and thorough); set → this value, verbatim, and the profile never moves it. One of: human-required, auto-ok, auto (identical to unset). Default: human-required."
+      "default": "auto",
+      "description": "Whether the on-device checklist closes only via a human walkthrough. auto (default) defers to the profile's on-device row (auto-ok at lean, human-required at standard and thorough); set → this value, verbatim, and the profile never moves it. One of: auto, human-required, auto-ok. Default: auto."
     },
     "learnStalenessSessions": {
       "type": "number",

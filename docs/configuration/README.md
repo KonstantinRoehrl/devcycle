@@ -54,14 +54,19 @@ claude plugin install devcycle@devcycle --config reviewDepth=auto --config onDev
 already does for the four model options — so the option stays visible in
 `/plugin configure` and you can pin it again later.
 
-You don't have to spot this yourself: the first `/devcycle:cycle` after upgrading recognizes
-the combination (a profile you have never set, next to options you have) and asks once,
-before it starts any work — adopt a profile and let it govern, keep your current options as
-they are, or customize. It records the answer, so it asks once and not every cycle, and it
-never rewrites an option without asking. One wrinkle if you decline: adopting a profile
-writes one, which settles the question everywhere, but *keep* and *customize* write no
-profile, so the only record is the `.devcycle/state.md` of the repo you were in — expect the
-question once more the first time you run a cycle in a different repo.
+To spot a shadowing option, read the `explicit:` line the entry command prints next to
+`knobs:` — it names every option that won because you configured it.
+
+## How a knob reaches a stage
+
+Only a command's own text has `${user_config.KEY}` substituted, so every entry command except
+`/devcycle:doctor` runs `scripts/resolve-knobs.mjs` with every rendered placeholder as its first
+configuration step (`/devcycle:continue` only once its ownership check and `resume-check` have
+passed) and prints one `knobs:` line; each stage reads its values from that line. Inside a
+cycle the state file keeps a `- knobs:` copy, and `/devcycle:continue` asks before applying a
+value you changed mid-cycle. Values are global, as `/plugin configure` stores them: a repo's old
+`configured:` values are shown once as a drift notice, never applied.
+[`references/config.md`](../../references/config.md) § Knob channel owns the details.
 
 ## All options
 
@@ -70,9 +75,9 @@ question once more the first time you run a cycle in a different repo.
 | `profile` | Cost against rigor, across every stage at once | `lean` / `standard` / `thorough` | `standard` |
 | `gitPolicy` | What the finish stage may do with git | `local-commits-only` / `push-allowed` / `open-pr` | `local-commits-only` |
 | `docTrackingPolicy` | What devcycle attempts to commit (the repo's `.gitignore` still decides what lands) | `standard` / `all-local` / `all-tracked` | `standard` |
-| `reviewDepth` | How the branch review runs | `single` / `panel` / `auto` | `single` |
+| `reviewDepth` | How the branch review runs | `single` / `panel` / `auto` | `auto` (the profile's row) |
 | `crossModelReview` | Adds a second-model lens to the panel | `true` / `false` | `false` |
-| `onDeviceGate` | Whether a human must finish the on-device checklist | `human-required` / `auto-ok` / `auto` | `human-required` |
+| `onDeviceGate` | Whether a human must finish the on-device checklist | `human-required` / `auto-ok` / `auto` | `auto` (the profile's row) |
 | `implementerModel` | Model for implementer subagents | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
 | `taskReviewerModel` | Model for per-task reviewers | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
 | `branchReviewModel` | Model for the whole-branch review | `auto` / model id / comma-separated pool | `auto` (inherits your session's model; set a model id to pin) |
@@ -147,4 +152,4 @@ then — the branch review and the walkthrough have no complexity predicate, so 
 either jumps straight to its top rung without a signal firing, and it is the firing the hatch
 keys on. So a role on the default stays uncovered even once something asks for it.
 The rule, those bounds and the unwired escape hatch are owned by
-[`references/config.md`](../../references/config.md) § Model tiers.
+[`references/model-routing.md`](../../references/model-routing.md) § Model tiers.

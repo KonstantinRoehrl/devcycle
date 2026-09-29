@@ -58,7 +58,7 @@ From **superpowers:subagent-driven-development**:
   including its warning that "An omitted model inherits your session's model —
   often the most capable and most expensive — which silently defeats this
   section", and turn-count-beats-token-price. The actual choice is made by
-  `references/config.md`'s predicates (see (c)5).
+  `references/model-routing.md`'s predicates (see (c)5).
 - Pre-Flight Plan Review for internal contradictions, and continuous execution
   without between-task check-ins.
 
@@ -108,7 +108,7 @@ compaction is the point, not a reduction in what the stage does.
    the run until the user acts. Upstream has no context-lifecycle contract.
 5. **Model routing from configuration.** This stage's two knobs —
    `implementerModel` and `taskReviewerModel` — resolve through
-   `references/config.md`: an explicit id binds verbatim, otherwise the file's
+   `references/model-routing.md`: an explicit id binds verbatim, otherwise the file's
    dispatch-time predicates pick the session or fast tier, and every dispatch
    logs the decision and its inputs to the ledger. Upstream's complexity tiering
    is background (a); the decision procedure and its auditability are ours.

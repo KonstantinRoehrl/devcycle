@@ -104,6 +104,16 @@ marker with the version the change lands in, since only the release computes tha
   change: added
   key: learnStalenessDays
   note: "accepted values pinned, not a new key: an integer 0 or more. A bad value is now refused by name instead of coercing. Coercion did not fail one way: an empty or negative value became 0 or a negative number, which every count clears, so the day leg fired on every cycle; only a non-numeric value became NaN, whose comparison is always false, so that leg never fired at all"
+- version: "unreleased"
+  change: added
+  key: reviewDepth
+  default: auto
+  note: "declared default changed single → auto, not a new key: the harness never injects a declared default, so resolution is unchanged — unset still takes the profile's branch-review row — and the /plugin configure form stops presenting single as the default"
+- version: "unreleased"
+  change: added
+  key: onDeviceGate
+  default: auto
+  note: "declared default changed human-required → auto, not a new key: the harness never injects a declared default, so resolution is unchanged — unset still takes the profile's on-device row — and the /plugin configure form stops presenting human-required as the default"
 ```
 
 ## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)

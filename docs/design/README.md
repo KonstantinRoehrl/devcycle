@@ -255,8 +255,12 @@ gated by `userConfig.crossModelReview`.
   back to the profile's column, the same route an unset knob takes — the escape hatch for a
   user upgrading from an older config whose explicit value would otherwise shadow the profile
   forever (resolution order in `references/config.md`).
-- Shipped defaults: `gitPolicy: local-commits-only` (most conservative), `reviewDepth: single`,
-  `crossModelReview: false`, `onDeviceGate: human-required`, all four model options `auto`.
+- Shipped defaults: `gitPolicy: local-commits-only` (most conservative), `reviewDepth: auto`
+  and `onDeviceGate: auto` (each the profile's row), `crossModelReview: false`, all four model
+  options `auto`.
+- Values reach stages through one channel (added 2026-09-29): every entry command except
+  `/devcycle:doctor` runs `scripts/resolve-knobs.mjs` with the rendered placeholders and stages
+  read the `knobs:` line it prints (`references/config.md` § Knob channel).
 - The finishing stage branches on `gitPolicy`: local-commits-only ends with the branch handed back (the author's
   mode); `open-pr` automates push + PR for users who want it.
 - Before acting on `push-allowed`/`open-pr`, the finishing stage resolves an **effective**

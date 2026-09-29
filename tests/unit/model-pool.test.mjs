@@ -208,7 +208,7 @@ test("an unreachable session tier names the orchestrator itself, not a weaker fa
 // Only a pool has rungs, so only a pool can escalate. An unset knob and a pin resolve to the same
 // model at every signal count — a non-zero count beside either is the task's ambient complexity,
 // not an escalation — so rewriting them would ledger an escalation that never happened and drop
-// the `(auto)` / `(ceiling: <id> unranked)` outcomes references/config.md documents for them.
+// the `(auto)` / `(ceiling: <id> unranked)` outcomes references/model-routing.md documents for them.
 test("an unset knob is not an escalation, however many signals fired", () => {
   assert.deepEqual(escalate({ value: "auto" }), { model: null, outcome: "model session (auto)" });
 });

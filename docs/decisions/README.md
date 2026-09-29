@@ -5,6 +5,23 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-09-29 — commands resolve knobs; playbooks read the `knobs:` line
+
+**Decision:** every entry command except `/devcycle:doctor` runs `scripts/resolve-knobs.mjs` with
+all thirteen rendered `${user_config.<key>}` placeholders and prints a `knobs:` line; playbooks,
+references and agents carry no placeholder and read that line (or the state file's `- knobs:`
+copy inside a cycle). `scripts/validate.mjs` check 2 fails a placeholder anywhere else.
+
+**Why:** only command text is templated. Since 2026-08-06 (skills dissolved into playbooks),
+playbooks and references are files a stage opens with Read, so every playbook-resident placeholder
+rendered literally and resolved as unset — a configured `gitPolicy`, `reviewDepth` or model pin
+never reached its stage except through the state file's `configured:` line (audit finding H2).
+
+**Supersedes:** the 2026-07-27 assumption that placeholders substitute wherever a stage reads
+them; the upgrade offer and its `· profile-asked` marker (retired — unreachable by construction);
+and per-repo configuration, which existed only as the accidental `configured:` shadow of resolution
+step 4 and is dropped: values are global, and a repo's old values surface as a drift notice.
+
 ## 2026-09-14 — budgets raised for the tier-1 pipeline-guarantees branch
 
 **Decision:** the tier-1 pipeline-guarantees branch raises
