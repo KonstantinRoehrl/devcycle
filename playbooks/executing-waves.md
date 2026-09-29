@@ -2,10 +2,11 @@
 
 ## Engine
 
-Resolve `profile` first — read `${CLAUDE_PLUGIN_ROOT}/references/config.md` and follow it; it also
-owns model routing for this stage's two knobs, `${user_config.implementerModel}` and
-`${user_config.taskReviewerModel}` (`walkthroughModel` and `branchReviewModel` belong to later
-stages). Every agent this playbook dispatches reports per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
+Read `profile` first from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references/config.md`
+§ Knob channel, and follow § The profile; this stage's two model knobs, `implementerModel` and
+`taskReviewerModel`, come off the same line and route per
+`${CLAUDE_PLUGIN_ROOT}/references/model-routing.md` (`walkthroughModel` and `branchReviewModel`
+belong to later stages). Every agent this playbook dispatches reports per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 What the coordinator does itself and what it delegates — including the stage budget, which binds this
 playbook hardest — is owned by `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`: read it and follow it.
 
@@ -78,7 +79,7 @@ file conflicts these invariants already preserve.)
      string in the shell the implementer actually runs the command in. No check covers either: a
      sliced brief is run scratch, written per dispatch, so both are yours to get right here.
 3. **Dispatch devcycle:implementer** with that brief only, never accumulated session history or other
-   tasks' reports, on the model `references/config.md` resolves. The dispatch prompt must NEVER
+   tasks' reports, on the model `references/model-routing.md` resolves. The dispatch prompt must NEVER
    instruct the implementer to commit, stage, or push. Ledger `event=dispatched`. It returns the
    implementer envelope `references/delegation.md` defines — never the report body — and that
    envelope's on-device count is what triggers the checklist below.
@@ -96,7 +97,7 @@ file conflicts these invariants already preserve.)
    name, which is what lets a later run price this dispatch exactly rather than parsing its
    description. The coordinator neither produces nor reads the task diff; step 5 does both.
 5. **Dispatch devcycle:task-reviewer** (read-only apart from its own findings file), on the model
-   `references/config.md` resolves, with the brief,
+   `references/model-routing.md` resolves, with the brief,
    the report path, the task's file list, the two evidence-file paths the report names, and the
    task's constraints block, instructing it to produce the diff itself: `git add -N <new files>`
    first, or they are invisible to diff, then `git diff -U10 HEAD -- <files>`. It returns the

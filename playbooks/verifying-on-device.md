@@ -57,7 +57,7 @@ Runs in a **fresh session** — it needs only the checklist path and the branch,
 the implementation conversation. Its model cannot be routed from inside it, so the
 recommendation travels producer-side: the branch-review handoff carries a `Start the fresh
 session on <model>` line, resolved from `walkthroughModel` per
-`${CLAUDE_PLUGIN_ROOT}/references/config.md`. Where that knob derives rather than pins, the
+`${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`. Where that knob derives rather than pins, the
 walkthrough takes the fast tier per `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`.
 
 Interview rule: **ONE question per checklist item, never batched** — a deliberate exception to
@@ -81,8 +81,8 @@ language, symptom first:
 
 ## The gate
 
-Resolve `onDeviceGate` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`. What each resolved
-value means here:
+Read `onDeviceGate` from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references/config.md`
+§ Knob channel. What each resolved value means here:
 
 - `human-required`: the stage is complete ONLY when every non-`(auto)` item has a human
   verdict from the walkthrough.

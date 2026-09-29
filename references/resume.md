@@ -38,7 +38,7 @@ transition, in this shape:
 `run:` is the run record's id, minted once per cycle and carried across `/clear` so a resumed
 cycle appends to the same record rather than starting a second one.
 `knobs:` is the persisted copy of the resolved knob values —
-`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel owns who reads it. Only
+`references/config.md` § Knob channel owns who reads it. Only
 `/devcycle:cycle` and `/devcycle:continue`'s drift question write it; every other stage rewrite
 carries it forward unchanged, like `kind:` and `plan-counts:`. `configured:` is carried forward the
 same way; the next section owns its forms.
@@ -79,7 +79,7 @@ One line records the first-run configuration offer, one form per outcome:
 Two older forms are legacy — accepted on read, never written: `<date>` with an empty list, and
 any form carrying a trailing `· profile-asked` marker. Neither changes what a reader does. The
 line is a record of the offer, never a source of knob values; its only other reader is the drift
-notice in `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel.
+notice in `references/config.md` § Knob channel.
 
 ## Settle the branch first, before reading anything else
 
