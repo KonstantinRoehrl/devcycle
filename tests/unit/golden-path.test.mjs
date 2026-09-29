@@ -13,6 +13,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DESIGN_DOC } from "../../scripts/doc-paths.mjs";
 import { PLAYBOOK_STAGE } from "../../scripts/doctor.mjs";
+import { ROSTER } from "../../scripts/resolve-knobs.mjs";
 
 const root = process.cwd();
 const read = (p) => readFileSync(join(root, p), "utf8");
@@ -2060,10 +2061,11 @@ test("C6: docs/known-issues.md records open defects only — no fixed entry surv
   );
 });
 
-// `CONTRIBUTING.md:136-140` concedes that the config knobs are hand-kept in four copies and
+// `CONTRIBUTING.md:136-140` concedes that the config knobs are hand-kept in five copies and
 // that no check compares the description text. F13, F15 and F16 were three live instances of
-// that class; set equality across all four — the manifest, the configuration hub,
-// references/config.md's roster and DESIGN §7's schema — is what stops a fourth. Each parse is
+// that class; set equality across all five — the manifest, the configuration hub,
+// references/config.md's roster, DESIGN §7's schema and scripts/resolve-knobs.mjs's ROSTER —
+// is what stops a fourth instance. Each parse is
 // scoped to its own table's header row, never to prose: C10 moves 134 lines out of references/config.md,
 // and an assertion coupled to wording would break on an innocent edit and be deleted rather
 // than fixed. A table header is a structure that move can carry intact.
@@ -2091,7 +2093,7 @@ const designKnobs = () => {
   return Object.keys(JSON.parse(json));
 };
 
-test("C6: plugin.json, the configuration hub, references/config.md and DESIGN §7 agree on the knob set", () => {
+test("C6: plugin.json, the configuration hub, references/config.md, DESIGN §7 and the resolver's ROSTER agree on the knob set", () => {
   const manifest = Object.keys(JSON.parse(read(".claude-plugin/plugin.json")).userConfig);
   const options = firstCells(read("docs/configuration/README.md"), "| Option | What it controls | Values | Default |");
   const config = firstCells(read("references/config.md"), "| Knob | Owner | Falls back to |");
@@ -2116,6 +2118,13 @@ test("C6: plugin.json, the configuration hub, references/config.md and DESIGN §
     "docs/design/README.md §7's userConfig schema must enumerate exactly the manifest's keys — " +
       "#10 config parity; a schema section that lags the manifest is how docTrackingPolicy drifted"
   );
+  const resolver = ROSTER.map(({ key }) => key);
+  assert.deepEqual(
+    sorted(resolver),
+    sorted(manifest),
+    "scripts/resolve-knobs.mjs's ROSTER is what every command resolves through — a key it lacks never reaches a stage"
+  );
+  assert.deepEqual(resolver, config, "scripts/resolve-knobs.mjs prints knobs: in references/config.md's roster order");
 });
 
 test("C6: the workload sensor's integration-branch list matches the prose that owns it", () => {
