@@ -102,6 +102,41 @@ test("a *Model knob takes a single id or a pool, normalized; auto stays unset", 
   assert.deepEqual(bad.warnings, ["walkthroughModel=, , is not one of auto, a model id, or a comma-separated pool of ids; using auto"]);
 });
 
+test("a *Model value with whitespace inside an id is out of set: it warns and falls back", () => {
+  for (const value of ["claude-sonnet-4-5 claude-opus-4-1", "claude-a,claude-b claude-c", "claude-a\tclaude-b"]) {
+    const { knobs, explicit, warnings } = resolveKnobs(with_({ implementerModel: value }));
+    assert.equal(knobs.implementerModel, "auto", value);
+    assert.deepEqual(explicit, [], value);
+    assert.deepEqual(warnings, [`implementerModel=${value} is not one of auto, a model id, or a comma-separated pool of ids; using auto`]);
+  }
+});
+
+// Every value a resolution can print must survive its own knobs: line, or `--compare` reports a
+// change on every resume.
+test("a printed knobs: line round-trips to no change over the out-of-set and edge-case corpus", () => {
+  const corpus = [
+    UNSET,
+    with_(Object.fromEntries(ROSTER.map(({ key }) => [key, ""]))),
+    with_(Object.fromEntries(ROSTER.map(({ key }) => [key, "auto"]))),
+    with_({ profile: "lean" }),
+    with_({ profile: "thorough", reviewDepth: "single", gitPolicy: "open-pr" }),
+    with_({ profile: "thorough", reviewDepth: "deep" }),
+    with_({ profile: "extreme", gitPolicy: "yolo", crossModelReview: "yes" }),
+    with_({ learnStalenessSessions: "0", learnStalenessDays: "007" }),
+    with_({ learnSessionCap: "0", learnStalenessDays: "2.5" }),
+    with_({ implementerModel: "claude-a, claude-b ,", taskReviewerModel: "claude-x", branchReviewModel: "auto" }),
+    with_({ walkthroughModel: " , ," }),
+    with_({ implementerModel: "claude-sonnet-4-5 claude-opus-4-1" }),
+    with_({ taskReviewerModel: "claude-a,claude-b claude-c", branchReviewModel: "claude-a\tclaude-b" }),
+  ];
+  for (const raw of corpus) {
+    const { knobs } = resolveKnobs(raw);
+    const line = formatKnobsLine(knobs);
+    assert.equal(Object.keys(parseRecordedLine(line)).length, ROSTER.length, line);
+    assert.deepEqual(compareKnobs(parseRecordedLine(line), knobs), [], line);
+  }
+});
+
 test("the explicit line is bare when nothing is explicit", () => {
   assert.equal(formatExplicitLine([]), "explicit:");
   assert.equal(formatExplicitLine(["gitPolicy", "reviewDepth"]), "explicit: gitPolicy reviewDepth");
@@ -169,6 +204,14 @@ test("cli: --compare prints only the differing keys, and nothing on agreement", 
   assert.equal(differ.stdout, "gitPolicy: local-commits-only → open-pr\n");
   const agree = cli([...argv(raw), "--compare", "knobs: gitPolicy=open-pr"]);
   assert.equal(agree.stdout, "");
+});
+
+test("cli: --compare against the resolver's own printed line reports nothing", () => {
+  const raw = with_({ implementerModel: "claude-sonnet-4-5 claude-opus-4-1" });
+  const [line] = cli(argv(raw)).stdout.split("\n");
+  const r = cli([...argv(raw), "--compare", `- ${line}`]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
 });
 
 test("cli: --json prints knobs, explicit and warnings", () => {

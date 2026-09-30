@@ -47,8 +47,10 @@ function inSet(entry, value) {
     case "count":
       return /^\d+$/.test(v) && Number(v) >= entry.min ? String(Number(v)) : null;
     case "model": {
+      // An id with whitespace inside it would print unquoted on the knobs: line and split apart
+      // when parseRecordedLine reads that line back, so it is refused rather than normalized.
       const pool = parsePool(v);
-      return pool.kind === "unset" ? null : pool.entries.join(",");
+      return pool.kind === "unset" || pool.entries.some((id) => /\s/.test(id)) ? null : pool.entries.join(",");
     }
     default:
       throw new Error(`unknown knob kind ${entry.kind}`);
