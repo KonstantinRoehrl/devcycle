@@ -64,8 +64,9 @@ Only a command's own text has `${user_config.KEY}` substituted, so every entry c
 configuration step (`/devcycle:continue` only once its ownership check and `resume-check` have
 passed) and prints one `knobs:` line; each stage reads its values from that line. Inside a
 cycle the state file keeps a `- knobs:` copy, and `/devcycle:continue` asks before applying a
-value you changed mid-cycle. Values are global, as `/plugin configure` stores them: a repo's old
-`configured:` values are shown once as a drift notice, never applied.
+value you changed mid-cycle; a "keep" holds until you change the value again. Values are
+global, as `/plugin configure` stores them: a repo's old `configured:` values are shown once as a
+drift notice, never applied, then dropped from the state file.
 [`references/config.md`](../../references/config.md) § Knob channel owns the details.
 
 ## All options

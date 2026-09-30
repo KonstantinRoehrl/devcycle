@@ -328,7 +328,7 @@ gated by `userConfig.crossModelReview`.
 
 ### 15.1 The reference layer: one owner per convention
 
-`references/` holds eighteen plain markdown files, each the sole owner of one cross-cutting
+`references/` holds plain markdown files, each the sole owner of one cross-cutting
 convention; each file and what it owns is enumerated, one line apiece, in the
 [references index](../../references/README.md).
 

@@ -193,7 +193,8 @@ A repo-wide multi-lens pass is the unbounded fan-out shape that has historically
 - a **hard stop at the ≥20% context-depth band** `delegation.md` already defines
   (`node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth`); on a hard stop the coverage statement
   names the unswept remainder;
-- every dispatch resolves its model per `references/model-routing.md`; the history inspector routes to the fast tier.
+- every dispatch resolves its model per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`; the
+  history inspector routes to the fast tier.
 
 ## Boundaries
 

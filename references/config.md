@@ -50,18 +50,20 @@ loads, never in a file a stage opens with Read — so knobs reach stages through
 - **Stages read.** A stage reads its knobs from the `knobs:` line its session's entry command
   printed — in-cycle and standalone alike, including a playbook both share. Inside a cycle the
   state file's `- knobs:` line is the persisted copy: a stage reads it when the printed line is
-  no longer in context, and in place of the printed line when `/devcycle:continue`'s drift
-  question kept this cycle's values. A stage that finds neither stops and asks for its entry
+  no longer in context, and in place of the printed line whenever `/devcycle:continue` kept this
+  cycle's values over changed global ones. A stage that finds neither stops and asks for its entry
   command to be re-run (`/devcycle:continue` inside a cycle); it never falls back to defaults on
   its own. Profile-row values — round cap, evidence tail, engine, audit, learn and maintenance
   depth — are looked up in § The profile under the `knobs:` line's `profile`.
 - **Drift notice.** Values are global, as `/plugin configure` stores them — there is no per-repo
   value. Where the state file's `configured:` line records a KEY=VALUE list, `/devcycle:cycle`
-  and `/devcycle:continue` rerun the resolver with `--compare '<that configured: line>'`
-  appended, and for each key it prints show once: the repo's recorded value, the global value
-  now in effect, and the `claude plugin install devcycle@devcycle --config KEY=VALUE` that
-  restores it — noting that it applies to every repo. Informational: nothing is applied, and
-  nothing is asked.
+  and `/devcycle:continue` rerun their final resolver invocation with
+  `--compare '<that configured: line>'` appended, and for each key it prints show the repo's
+  recorded value, the global value now in effect, and the
+  `claude plugin install devcycle@devcycle --config KEY=VALUE` that restores it — noting that it
+  applies to every repo. Informational: nothing is applied, and nothing is asked. Then rewrite
+  `configured:` to its date alone, keeping any `· profile-asked` marker: the list is retired, so
+  the notice is shown once, never again.
 
 ## The knob roster
 
@@ -205,5 +207,4 @@ indistinguishable from a corpus with nothing left to mine.
 ## Model tiers
 
 `references/model-routing.md` owns how a `*Model` knob's value becomes a dispatch model — read it
-where a stage dispatches. It is named here without the plugin-root prefix so the context-budget
-closure of every playbook citing this file does not pull it in.
+where a stage dispatches.

@@ -29,7 +29,7 @@ transition, in this shape:
 - ledger: .devcycle/ledger.md
 - checklist: <path or none>
 - run: <run id from scripts/run-record.mjs, or none>
-- configured: <no | defaults | date + KEY=VALUE list>
+- configured: <no | defaults | date [+ KEY=VALUE list]>
 - knobs: <the resolver's knobs: line, verbatim after "knobs: ">
 - updated: <ISO-8601 UTC>
 ```
@@ -43,6 +43,13 @@ cycle appends to the same record rather than starting a second one.
 file that has no `knobs:` line yet write it; every other stage rewrite carries it forward
 unchanged, like `kind:` and `plan-counts:`. `configured:` is carried forward the
 same way; the next section owns its forms.
+Two optional rows sit outside the template. Only that drift question writes them; every other
+rewrite carries them forward, until a `stage: done` reuse resets them with the rest.
+`- knobs-declined: <a fresh knobs: line's values>` records global values the user chose not to
+apply: the question stays unasked while a fresh resolution still equals the row, and is asked
+again, the row dropped or replaced, once it differs. `- knobs-changed: <stamp> <changes>` records
+the first mid-cycle apply made before `.devcycle/ledger.md` exists, so the run record's minted
+knobs are known superseded from that stamp; once the ledger exists, an apply is recorded there.
 `updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`
 taken when the field is written — never a narrated or estimated time.
 `kind:` records the confirmed triage request kind and `plan-counts:` the plan's Dispatch-Map
@@ -75,12 +82,13 @@ One line records the first-run configuration offer, one form per outcome:
 
 - `no` — the offer was never made.
 - `defaults` — the offer ran and wrote nothing, every answer matching its recommended default.
-- `<date>` plus a KEY=VALUE list — the offer ran and wrote those.
+- `<date>` plus a KEY=VALUE list — the offer ran and wrote those; the drift notice has not run yet.
+- `<date>` alone — the drift notice in `references/config.md` § Knob channel ran against the list
+  and retired it.
 
-Two older forms are legacy — accepted on read, never written: `<date>` with an empty list, and
-any form carrying a trailing `· profile-asked` marker. Neither changes what a reader does. The
-line is a record of the offer, never a source of knob values; its only other reader is the drift
-notice in `references/config.md` § Knob channel.
+A trailing `· profile-asked` marker is legacy — accepted on read and kept through the drift
+notice's rewrite, never newly written — and changes nothing a reader does. The line is a record of
+the offer, never a source of knob values; its only other reader is that drift notice.
 
 ## Settle the branch first, before reading anything else
 

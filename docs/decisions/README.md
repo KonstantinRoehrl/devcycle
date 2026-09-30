@@ -25,63 +25,74 @@ step 4 and is dropped: values are global, and a repo's old values surface as a d
 ## 2026-09-29 — budgets re-baselined for the config-channel branch
 
 **Decision:** the config-channel branch re-baselines both budget fixtures to their exact measured
-values. `tests/fixtures/surface-budget.json`: `surfaceTotal` 5518 → 5659, `commandMax` 132 → 166,
-`playbookMax` 319 → 320. `tests/fixtures/context-budget.json`, all 14 entries — eight fall:
+values. `tests/fixtures/surface-budget.json`: `surfaceTotal` 5518 → 5676, `commandMax` 132 → 168,
+`playbookMax` 319 → 320. `tests/fixtures/context-budget.json`, all 14 entries — six fall:
 
 | Playbook | Before | After | Change |
 |---|---|---|---|
-| `executing-waves` | 114897 | 117844 | +2947 |
-| `finishing-the-cycle` | 103719 | 97408 | −6311 |
-| `learning-from-sessions` | 127374 | 121094 | −6280 |
-| `maintaining-the-repo` | 107164 | 100995 | −6169 |
-| `onboarding-a-repo` | 94805 | 88559 | −6246 |
-| `planning-waves` | 99120 | 92909 | −6211 |
+| `executing-waves` | 114897 | 118641 | +3744 |
+| `finishing-the-cycle` | 103719 | 98205 | −5514 |
+| `learning-from-sessions` | 127374 | 121891 | −5483 |
+| `maintaining-the-repo` | 107164 | 110928 | +3764 |
+| `onboarding-a-repo` | 94805 | 89356 | −5449 |
+| `planning-waves` | 99120 | 93706 | −5414 |
 | `profiling-sessions` | 112251 | 64924 | −47327 |
-| `receiving-review` | 125118 | 127972 | +2854 |
-| `reviewing-code` | 134130 | 137001 | +2871 |
-| `reviewing-the-branch` | 105211 | 108064 | +2853 |
-| `scoping-the-request` | 90845 | 57586 | −33259 |
-| `sweeping-mechanical-changes` | 105187 | 108066 | +2879 |
-| `taking-the-fast-path` | 98299 | 65047 | −33252 |
-| `verifying-on-device` | 100712 | 103602 | +2890 |
+| `receiving-review` | 125118 | 128769 | +3651 |
+| `reviewing-code` | 134130 | 137798 | +3668 |
+| `reviewing-the-branch` | 105211 | 108861 | +3650 |
+| `scoping-the-request` | 90845 | 58340 | −32505 |
+| `sweeping-mechanical-changes` | 105187 | 108863 | +3676 |
+| `taking-the-fast-path` | 98299 | 101972 | +3673 |
+| `verifying-on-device` | 100712 | 104399 | +3687 |
 
 "Before" is `dev` at the branch cut (`075ed92`), whose figures were exact. Each change traces to
 these causes:
 
-- **−7238 bytes to the eleven playbooks that still reach `references/config.md`** — it shrank
-  21220 → 13982 in `61b447b`: § Model tiers moved to the new `references/model-routing.md` and
-  § The state file's `configured:` line moved to `references/resume.md`, each leaving a pointer,
-  offset in part by the new § Knob channel.
-- **+937 bytes to every playbook but `profiling-sessions`** — `references/resume.md` grew
-  10471 → 11408 (`61b447b`, `3fc8a91`) by the `- knobs:` row and the `configured:` section.
+- **−7195 bytes to the twelve playbooks that still reach `references/config.md`** — it shrank
+  21220 → 14025: § Model tiers moved to the new `references/model-routing.md` and
+  § The state file's `configured:` line moved to `references/resume.md` (`61b447b`), each leaving
+  a pointer, offset in part by the new § Knob channel.
+- **+1691 bytes to every playbook but `profiling-sessions`** — `references/resume.md` grew
+  10471 → 12162: the `- knobs:` row and the `configured:` section (`61b447b`, `3fc8a91`), then
+  the optional `knobs-declined:`/`knobs-changed:` rows and the retired-list `configured:` form
+  (branch review round 1).
 - **+36 bytes to all fourteen** — `references/delegation.md` grew 10115 → 10151 (`61b447b`).
-- **+9112 bytes to the six dispatching playbooks** — `executing-waves`, `receiving-review`,
-  `reviewing-code`, `reviewing-the-branch`, `sweeping-mechanical-changes` and
-  `verifying-on-device` newly reach `references/model-routing.md`, new in `61b447b`.
+- **+9112 bytes to the eight dispatching playbooks** — `executing-waves`, `maintaining-the-repo`,
+  `receiving-review`, `reviewing-code`, `reviewing-the-branch`, `sweeping-mechanical-changes`,
+  `taking-the-fast-path` and `verifying-on-device` newly reach `references/model-routing.md`, new
+  in `61b447b`. `maintaining-the-repo` and `taking-the-fast-path` first cited it bare, which
+  check 15 does not follow, so the gate undercounted both until branch review round 1 moved them
+  to the followed form.
 - **+7 bytes to `executing-waves` only** — `references/sweep-execution.md`, which only it reaches,
   grew 3538 → 3545 in `3fc8a91` by pointing its audit shape at `model-routing.md`.
-- **`scoping-the-request`, `taking-the-fast-path` and `profiling-sessions` no longer reach
-  `config.md` at all.** They reached it only through `delegation.md`'s
-  `${CLAUDE_PLUGIN_ROOT}/references/config.md` citation, which `61b447b` replaced with a bare
-  `references/model-routing.md` (only dispatching surfaces cite model routing in the followed
-  form). So they lose config.md's full 21220 bytes and what only it reached:
-  `references/quality-criteria.md` (13012) for the first two, and for `profiling-sessions`,
-  instead, `resume.md` (10471), `handoff.md` (7948), `ledger.md` (4484) and
-  `commit-convention.md` (3240).
-- **Own changes**, at most ±96 bytes each: the playbooks' switch from placeholders to the
-  `knobs:` line (`5ec8fe6`, `3fc8a91`) and this branch's line rewraps.
+- **`scoping-the-request` and `profiling-sessions` no longer reach `config.md` at all.** They
+  reached it only through `delegation.md`'s `${CLAUDE_PLUGIN_ROOT}/references/config.md` citation,
+  which `61b447b` replaced with a bare `references/model-routing.md`. So they lose config.md's
+  full 21220 bytes and what only it reached: `references/quality-criteria.md` (13012) for
+  `scoping-the-request`, and for `profiling-sessions`, instead, `resume.md` (10471), `handoff.md`
+  (7948), `ledger.md` (4484) and `commit-convention.md` (3240). `taking-the-fast-path` lost the
+  same citation but reaches `config.md` again through `model-routing.md`'s followed citation.
+- **Own changes**, at most ±120 bytes each: the playbooks' switch from placeholders to the
+  `knobs:` line (`5ec8fe6`, `3fc8a91`), the two model-routing citations above, and this branch's
+  line rewraps.
+
+`references/config.md` and `references/delegation.md` name `model-routing.md` in bare backticks
+because check 15 follows only the `${CLAUDE_PLUGIN_ROOT}/references/…` form, and every playbook
+reaches both files: a followed citation there would pull `model-routing.md` into every playbook's
+budget, dispatching or not. A surface that dispatches cites it in the followed form itself, so its
+budget carries the file exactly where a stage reads it.
 
 `references/first-run-config.md` shrank 8561 → 3283 bytes (`bcc87ee`) but moves no context
 entry: no playbook or reference cites it in the followed `${CLAUDE_PLUGIN_ROOT}/references/…` form.
 
-`surfaceTotal`'s +141 balances across the surface: commands +178 (`cycle.md` +34, `continue.md`
-+30, and +19 in each of the six standalone commands — the resolver invocation, its blank lines and
-its lead-in line), references −42 (`config.md` −113, `first-run-config.md` −84,
-`model-routing.md` +136, `resume.md` +17, `README.md` +1, `delegation.md` +1), playbooks +5.
+`surfaceTotal`'s +158 balances across the surface: commands +185 (`cycle.md` +36, `continue.md`
++35, and +19 in each of the six standalone commands — the resolver invocation, its blank lines and
+its lead-in line), references −33 (`config.md` −112, `first-run-config.md` −84,
+`model-routing.md` +136, `resume.md` +25, `README.md` +1, `delegation.md` +1), playbooks +6.
 `commandMax` follows `commands/cycle.md`, still the longest command; `playbookMax` follows
 `learning-from-sessions.md`, still the longest playbook at +1 line.
 
-**Why:** a baseline only fails when a measurement exceeds it, so a fall — eight of fourteen entries
+**Why:** a baseline only fails when a measurement exceeds it, so a fall — six of fourteen entries
 here — leaves slack no gate catches. The branch's early commits set provisional headroom in both
 fixtures so its parallel tasks could land independently; that headroom never reached a release.
 Every figure above was proven tight by lowering it by 1 and confirming `scripts/validate.mjs`
@@ -918,6 +929,9 @@ in `references/delegation.md`, and scoping-interview — with planning and audit
 at it rather than carrying a copy.
 
 ## 2026-07-27 — `auto` releases a knob back to the profile; the upgrade trap is asked about, not fixed silently
+
+*(Partly superseded 2026-09-29, above: the upgrade offer and its `· profile-asked` marker are
+retired; `auto` as "let the profile govern" still holds.)*
 
 **Decision:** `auto` becomes a sanctioned value on the two profile-covered behavioral knobs
 (`reviewDepth`, `onDeviceGate`), meaning "let the profile govern this" — the same convention

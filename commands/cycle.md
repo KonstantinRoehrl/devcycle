@@ -55,7 +55,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
    rerun step 1's command with each value whose `claude plugin install --config` exited 0 in place
    of that knob's placeholder — install writes reach only later sessions' rendered text. A failed
    install is reported and its knob stays unset.
-3. **Drift notice**, when `configured:` records a KEY=VALUE list — per config.md § Knob channel.
+3. **Drift notice**, when `configured:` records a KEY=VALUE list — per config.md § Knob channel,
+   on the final command: step 2's rerun after a first-run install, otherwise step 1's.
 4. **Persist** the final `knobs:` line onto the state file as `- knobs: <its values>`.
 5. **Mint**: `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs new --plugin-version <this plugin's
    plugin.json version> --plugin-sha <node "${CLAUDE_PLUGIN_ROOT}/scripts/self-dev-check.mjs"
@@ -163,4 +164,5 @@ stage enum's single source of truth — `scripts/validate.mjs` reads its literal
 9. **finish** — closing the state file with `stage: done`.
 
 Whether planning and execution run devcycle-native or overlay their upstream counterparts is the
-`profile`'s call, resolved by each playbook per `${CLAUDE_PLUGIN_ROOT}/references/config.md`.
+`profile`'s call, read by each playbook from the `knobs:` line against the profile table in
+`${CLAUDE_PLUGIN_ROOT}/references/config.md`.
