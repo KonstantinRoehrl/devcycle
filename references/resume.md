@@ -39,17 +39,28 @@ transition, in this shape:
 cycle appends to the same record rather than starting a second one.
 `knobs:` is the persisted copy of the resolved knob values —
 `references/config.md` § Knob channel owns who reads it. Only
-`/devcycle:cycle`, `/devcycle:continue`'s drift question, and `/devcycle:continue` on a state
-file that has no `knobs:` line yet write it; every other stage rewrite carries it forward
+`/devcycle:cycle`, `/devcycle:continue`'s knob-change question, and `/devcycle:continue` on a
+state file that has no `knobs:` line yet write it; every other stage rewrite carries it forward
 unchanged, like `kind:` and `plan-counts:`. `configured:` is carried forward the
 same way; the next section owns its forms.
-Two optional rows sit outside the template. Only that drift question writes them; every other
-rewrite carries them forward, until a `stage: done` reuse resets them with the rest.
-`- knobs-declined: <a fresh knobs: line's values>` records global values the user chose not to
-apply: the question stays unasked while a fresh resolution still equals the row, and is asked
-again, the row dropped or replaced, once it differs. `- knobs-changed: <stamp> <changes>` records
-the first mid-cycle apply made before `.devcycle/ledger.md` exists, so the run record's minted
-knobs are known superseded from that stamp; once the ledger exists, an apply is recorded there.
+Two optional rows sit outside the template. Only `/devcycle:continue`'s knob comparison and the
+knob-change question it gates write or drop them; every other rewrite carries them forward, and
+`/devcycle:cycle`'s `stage: done` reuse resets them with the rest.
+
+- `- knobs-declined: <a fresh knobs: line's values>` — global values the user chose not to apply.
+  **Keep this cycle's values** writes it, replacing any earlier row. While a comparison's fresh
+  line still equals the row, the question is skipped and this cycle's values are kept. **Apply**
+  drops it, and so does a comparison that prints nothing — the global values match the cycle's
+  own `knobs:` line again, though they now differ from the row — so a later change asks afresh.
+- `- knobs-changed: <stamp> <the compare lines joined by "; ">` — the first **apply** made before
+  this cycle's ledger exists, so the run record's minted knobs are known superseded from that
+  stamp; a second such apply leaves that row alone. This cycle's ledger exists once
+  `.devcycle/ledger.md`'s `Plan:` header names the state file's `plan:` path. A ledger file whose
+  header names another plan is a previous cycle's slot, and a `plan: none` cycle (fast path,
+  sweep) never has one: neither is appended to. Once it exists, an apply appends a `task=config
+  event=user-decision` line per `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` instead, outcome
+  `knobs changed mid-cycle: <the compare lines joined by "; ">`, ref `.devcycle/state.md`.
+
 `updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`
 taken when the field is written — never a narrated or estimated time.
 `kind:` records the confirmed triage request kind and `plan-counts:` the plan's Dispatch-Map

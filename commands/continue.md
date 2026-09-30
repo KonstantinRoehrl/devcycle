@@ -60,19 +60,14 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
 ```
 
    When the state file carries a `- knobs:` line, rerun that command with `--compare '<that
-   line>'` appended. No output → drop any `- knobs-declined:` row and proceed. Any output
-   (`key: old → new` lines) → when a `- knobs-declined:` row equals the fresh line's values, keep
-   this cycle's values without asking; otherwise show it and ask ONE question:
-   **apply for the rest of this cycle** — rewrite `- knobs:` from the fresh line, drop any
-   `- knobs-declined:` row, and record the change: once `.devcycle/ledger.md` exists, a
-   `task=config event=user-decision` line per `${CLAUDE_PLUGIN_ROOT}/references/ledger.md`, outcome
-   `knobs changed mid-cycle: <the compare lines joined by "; ">`, ref `.devcycle/state.md`; before
-   then, a `- knobs-changed:` row unless one exists (`references/resume.md` owns both optional
-   rows) — or **keep this cycle's values**, writing
-   `- knobs-declined: <the fresh line's values>` so no later resume asks again until the global
-   values change. While this cycle's values are kept, every stage reads the state file's
-   `- knobs:` line, not the printed one. A state file with no `- knobs:` line gets one written from
-   the fresh line without asking. Then the drift notice, per § Knob channel.
+   line>'` appended. No output → proceed. Any output (`key: old → new` lines) → show it and ask
+   ONE question, the knob-change question, unless a `- knobs-declined:` row skips it:
+   **apply for the rest of this cycle**, rewriting `- knobs:` from the fresh line, or **keep this
+   cycle's values**, leaving `- knobs:` as it is. Whatever the comparison printed, update the
+   `knobs-declined:`/`knobs-changed:` rows and record an apply per
+   `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file, which owns both rows. A state
+   file with no `- knobs:` line gets one written from the fresh line without asking. Then the
+   drift notice, per § Knob channel.
 3. Read the ledger it names (`.devcycle/ledger.md`) and the plan/spec/
    checklist paths it records, where present.
 4. Settle the branch and derive position from git evidence per

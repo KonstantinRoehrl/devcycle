@@ -25,25 +25,25 @@ step 4 and is dropped: values are global, and a repo's old values surface as a d
 ## 2026-09-29 — budgets re-baselined for the config-channel branch
 
 **Decision:** the config-channel branch re-baselines both budget fixtures to their exact measured
-values. `tests/fixtures/surface-budget.json`: `surfaceTotal` 5518 → 5676, `commandMax` 132 → 168,
+values. `tests/fixtures/surface-budget.json`: `surfaceTotal` 5518 → 5682, `commandMax` 132 → 168,
 `playbookMax` 319 → 320. `tests/fixtures/context-budget.json`, all 14 entries — six fall:
 
 | Playbook | Before | After | Change |
 |---|---|---|---|
-| `executing-waves` | 114897 | 118641 | +3744 |
-| `finishing-the-cycle` | 103719 | 98205 | −5514 |
-| `learning-from-sessions` | 127374 | 121891 | −5483 |
-| `maintaining-the-repo` | 107164 | 110928 | +3764 |
-| `onboarding-a-repo` | 94805 | 89356 | −5449 |
-| `planning-waves` | 99120 | 93706 | −5414 |
+| `executing-waves` | 114897 | 119489 | +4592 |
+| `finishing-the-cycle` | 103719 | 99053 | −4666 |
+| `learning-from-sessions` | 127374 | 122739 | −4635 |
+| `maintaining-the-repo` | 107164 | 111776 | +4612 |
+| `onboarding-a-repo` | 94805 | 90204 | −4601 |
+| `planning-waves` | 99120 | 94554 | −4566 |
 | `profiling-sessions` | 112251 | 64924 | −47327 |
-| `receiving-review` | 125118 | 128769 | +3651 |
-| `reviewing-code` | 134130 | 137798 | +3668 |
-| `reviewing-the-branch` | 105211 | 108861 | +3650 |
-| `scoping-the-request` | 90845 | 58340 | −32505 |
-| `sweeping-mechanical-changes` | 105187 | 108863 | +3676 |
-| `taking-the-fast-path` | 98299 | 101972 | +3673 |
-| `verifying-on-device` | 100712 | 104399 | +3687 |
+| `receiving-review` | 125118 | 129617 | +4499 |
+| `reviewing-code` | 134130 | 138646 | +4516 |
+| `reviewing-the-branch` | 105211 | 109709 | +4498 |
+| `scoping-the-request` | 90845 | 59188 | −31657 |
+| `sweeping-mechanical-changes` | 105187 | 109711 | +4524 |
+| `taking-the-fast-path` | 98299 | 102820 | +4521 |
+| `verifying-on-device` | 100712 | 105247 | +4535 |
 
 "Before" is `dev` at the branch cut (`075ed92`), whose figures were exact. Each change traces to
 these causes:
@@ -52,10 +52,10 @@ these causes:
   21220 → 14025: § Model tiers moved to the new `references/model-routing.md` and
   § The state file's `configured:` line moved to `references/resume.md` (`61b447b`), each leaving
   a pointer, offset in part by the new § Knob channel.
-- **+1691 bytes to every playbook but `profiling-sessions`** — `references/resume.md` grew
-  10471 → 12162: the `- knobs:` row and the `configured:` section (`61b447b`, `3fc8a91`), then
+- **+2539 bytes to every playbook but `profiling-sessions`** — `references/resume.md` grew
+  10471 → 13010: the `- knobs:` row and the `configured:` section (`61b447b`, `3fc8a91`), then
   the optional `knobs-declined:`/`knobs-changed:` rows and the retired-list `configured:` form
-  (branch review round 1).
+  (branch review round 1), then those rows' complete write-and-drop rule (branch review round 2).
 - **+36 bytes to all fourteen** — `references/delegation.md` grew 10115 → 10151 (`61b447b`).
 - **+9112 bytes to the eight dispatching playbooks** — `executing-waves`, `maintaining-the-repo`,
   `receiving-review`, `reviewing-code`, `reviewing-the-branch`, `sweeping-mechanical-changes`,
