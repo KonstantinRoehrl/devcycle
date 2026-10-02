@@ -90,7 +90,7 @@ devcycle depends on the [superpowers] plugin. Installing devcycle installs it
 automatically from the official Claude Code plugin directory; afterwards
 `claude plugin list` shows both `devcycle` and `superpowers` as enabled.
 
-Requires a recent Claude Code CLI — verified on 2.1.217 and later.
+Requires Claude Code 2.1.271 or later — earlier releases reject the manifest's `userConfig` pick-lists.
 
 For the on-device verification stage's automatic checks, also install the claude-in-chrome
 plugin — Claude Code's integration with your own Chrome (without it, every checklist item

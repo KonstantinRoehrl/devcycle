@@ -350,6 +350,12 @@ required to be one of them. Each other shape fails:
 Declaring `options` is what makes `/plugin configure` show a pick-list with the default
 preselected; without it, an unset string option shows as a blank text field.
 
+**Minimum version.** Bisecting published releases with `claude plugin validate . --strict`
+against the shipped manifest: 2.1.270 and every release before it fail with
+`userConfig.<knob>: Unrecognized key: "options"`, and 2.1.271 is the first that passes. That is
+the plugin's minimum Claude Code version and the version CI pins. Only the validator was
+bisected, not how each release renders the pick-list.
+
 **Consequence.** `profile`, `gitPolicy`, `docTrackingPolicy`, `reviewDepth` and `onDeviceGate`
 declare `options`. `scripts/validate.mjs` fails a malformed list the same way the loader would,
 and holds each of the five to `scripts/resolve-knobs.mjs`'s `ROSTER` values, with `auto` first
