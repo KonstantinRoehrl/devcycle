@@ -252,6 +252,10 @@ export function excludedRequestsOf(summary) {
   );
 }
 
+// How a request that names no model is tallied among the unpriced. It stays excluded from every
+// figure, but is not a gap in the price table, so the unpriced-model draft leaves it out.
+const NO_MODEL_ID = "(none)";
+
 export const excludedNote = (n) =>
   n > 0 ? `${n} request${n === 1 ? "" : "s"} on a model with no exact price excluded` : null;
 
@@ -718,6 +722,7 @@ export function emitCandidates(summaries) {
   for (let i = 0; i + 1 < versions.length; i++) {
     const from = versions[i];
     const to = versions[i + 1];
+    const pairExcludedNote = excludedNote(cohortMap.get(from).excluded + cohortMap.get(to).excluded);
     const fromSkills = byVersion.get(from);
     const toSkills = byVersion.get(to);
     for (const [skill, fromDollars] of fromSkills) {
@@ -740,9 +745,7 @@ export function emitCandidates(summaries) {
           dollars: toMedian,
           delta_dollars,
           sessions_sampled: toDollars.length,
-          ...(excludedNote(cohortMap.get(from).excluded + cohortMap.get(to).excluded)
-            ? { inferred: excludedNote(cohortMap.get(from).excluded + cohortMap.get(to).excluded) }
-            : {}),
+          ...(pairExcludedNote ? { inferred: pairExcludedNote } : {}),
         });
       }
     }
@@ -1217,7 +1220,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
         entry.requests += 1;
         entry.dollars += estimate.dollars;
       } else {
-        bump(unpriced, model ?? "(none)", 1);
+        bump(unpriced, model ?? NO_MODEL_ID, 1);
       }
     } else {
       totalCost += dollars;
@@ -1683,7 +1686,6 @@ function mergeCounts(target, source) {
 export function buildJsonReport(summaries, ctx = {}) {
   return {
     pricesAsOf: PRICING.asOf,
-    provisional: aggregate(summaries).provisional,
     sessions: summaries.map((s) => ({
       ...s,
       inferred: s.attributionSource === "forward-filled" ? "forward-filled" : null,
@@ -1718,6 +1720,7 @@ export function buildJsonReport(summaries, ctx = {}) {
     verification: ctx.verification ?? null,
     compiled_knowledge: ctx.compiledKnowledge ?? null,
     cycles: cycleGroups(summaries),
+    revert_skipped: ctx.revertSkipped ?? [],
   };
 }
 
@@ -1780,6 +1783,8 @@ function run(args) {
     mergeCounts(totals.models, s.models);
   }
   totals.costUSD = Math.round(totals.costUSD * 1e4) / 1e4;
+  // Beside costUSD, never in it: the estimate for models the price table lacks.
+  totals.provisional = aggregate(sessions).provisional;
 
   return { ok: true, window: { since: args.since, until: args.until }, sessions, previousSessions, totals };
 }
@@ -1889,9 +1894,6 @@ function main() {
     return;
   }
   const ctx = reportContext(args, result);
-  // The cost-driven revert sidecar is a by-product of every report run, written for the playbook
-  // to read; its own write is fail-safe, so it never blocks rendering.
-  revertCandidates(result.sessions, ctx.promotions);
   if (args.json) {
     console.log(
       JSON.stringify(
@@ -2441,6 +2443,7 @@ export function winTable(summaries, vocab, candidates = []) {
       impact: Math.abs(c.delta_dollars),
       occurrences: c.sessions_sampled,
       trend: "down",
+      ...(c.inferred ? { inferred: c.inferred } : {}),
     });
   return rows.sort(byImpactDesc);
 }
@@ -2561,8 +2564,8 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride 
   try { dates = releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8")); } catch { dates = new Map(); }
 
   // Every issue this author opened on the upstream comes back now that the query filters by no
-  // label; the ones this report produced are the ones whose title carries the `[culprit:<slug>]`
-  // prefix issueBody writes.
+  // label; the ones this report produced are the ones whose title carries the `[culprit:<slug>]`,
+  // `[compliance:<type>]` or `[doctor:<slug>]` prefix its drafts write.
   const filed = issues.filter((i) => titleSlug(i.title) !== null);
 
   const turnarounds = [];
@@ -2804,7 +2807,7 @@ function sessionDetailLines(summaries) {
 export function renderReport(summaries, ctx) {
   const {
     repo, today, scope,
-    previousSummaries = null, vocab = [], promotions = [],
+    previousSummaries = null, vocab = [], promotions = [], revertSkipped = [],
     compiledKnowledge: compiled = null, verification = null,
   } = ctx ?? {};
   const L = [];
@@ -3010,7 +3013,8 @@ export function renderReport(summaries, ctx) {
   L.push(...markdownTable(
     ["Win", "Value", "Occurrences", "Trend"],
     winTable(summaries, vocab, candidates).map((r) => [
-      r.win, impactText(r.impact), r.occurrences, r.trend,
+      r.inferred ? `${r.win} (inferred: ${r.inferred})` : r.win,
+      impactText(r.impact), r.occurrences, r.trend,
     ]),
     "no win events recorded in this corpus",
   ));
@@ -3022,7 +3026,8 @@ export function renderReport(summaries, ctx) {
   for (const w of winCandidates(candidates, promotions))
     L.push(`- Actionability — \`/devcycle:learn\` investigate & generalize the ${w.skill} ` +
       `${w.version_from}→${w.version_to} improvement ` +
-      (w.cause ? `(shipped: ${w.cause.join(", ")})` : "(unattributed — investigate manually)"));
+      (w.cause ? `(shipped: ${w.cause.join(", ")})` : "(unattributed — investigate manually)") +
+      (w.inferred ? ` (inferred: ${w.inferred})` : ""));
 
   section("## Cost anomalies", "anomalies");
   // version-improvement belongs to Your wins above; everything else emitCandidates found is a
@@ -3057,6 +3062,11 @@ export function renderReport(summaries, ctx) {
   L.push(...(anomalyLines.length
     ? anomalyLines
     : ["_No rows: no cost anomalies in this corpus._"]));
+  // A promotion's before/after pair a missing price made incomparable: said here, beside the other
+  // cost-comparison findings, so its absence from the revert candidates is not read as "held".
+  for (const k of revertSkipped)
+    L.push(`- Revert check skipped for ${k.culpritId} ${k.from}→${k.to} (${k.profile} profile): ` +
+      `${k.reason} — those versions cannot be compared on dollars.`);
 
   section("## Previously promoted — did it hold", "promoted");
   // The verification engine computes every verdict; this only renders it. One line per scoreboard
@@ -3180,6 +3190,10 @@ function safePromotions() {
 function reportContext(args, result) {
   const vocab = readVocab();
   const promotions = safePromotions();
+  // The cost-driven revert sidecar is a by-product of every report run, written for the playbook
+  // to read; its own write is fail-safe, so it never blocks rendering. The pairs it skipped are
+  // kept so the report can say so.
+  const { skipped: revertSkipped } = revertCandidates(result.sessions, promotions);
   return {
     // The repo's name, never its path — QC8: no emitted artifact carries machine identity.
     repo: basename(process.cwd()),
@@ -3188,6 +3202,7 @@ function reportContext(args, result) {
     previousSummaries: result.previousSessions,
     vocab,
     promotions,
+    revertSkipped,
     outerLoop: args.json ? outerLoop(doctorDir()) : null, // the funnel is --json only: nothing in the markdown reads it, so a markdown run makes no gh call
     compiledKnowledge: compiledKnowledge(promotions),
     verification: promotionVerification(promotions, args.runChecks),
@@ -3555,7 +3570,7 @@ export function unpricedModelIssueBody(summaries, shape) {
       if (version) entry.versions.push(version);
       byModel.set(model, entry);
     };
-    for (const [model, n] of Object.entries(s.unpriced ?? {})) add(model, n, null);
+    for (const [model, n] of Object.entries(s.unpriced ?? {})) if (model !== NO_MODEL_ID) add(model, n, null);
     for (const [model, p] of Object.entries(s.provisional ?? {})) add(model, p.requests, p.basedOn);
   }
   if (!byModel.size) throw new NoUnpricedModelError();

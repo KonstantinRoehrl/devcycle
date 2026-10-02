@@ -2537,7 +2537,7 @@ test("summarizeSession: provisional dollars are tallied on their own and enter n
   const s = summarizeSession("sess-abcdef123456", recs);
   near(s.costUSD, 5);
   assert.deepEqual(Object.keys(s.costByModel), ["claude-opus-5"]);
-  assert.ok(Object.values(s.costByStage).every((d) => d <= 5), "no stage may carry the provisional dollars");
+  near(Object.values(s.costByStage).reduce((n, d) => n + d, 0), 5);  // the measured turn alone, not $9
   assert.equal(s.provisional["claude-opus-5-6"].requests, 1);
   assert.equal(s.provisional["claude-opus-5-6"].basedOn, "claude-opus-5-5");
   near(s.provisional["claude-opus-5-6"].dollars, 4);

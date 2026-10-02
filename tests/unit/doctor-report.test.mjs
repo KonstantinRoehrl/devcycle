@@ -974,6 +974,27 @@ test("a detected win with no explaining promotion still surfaces, marked unattri
   assert.match(wins, /unattributed — investigate manually/);
 });
 
+// A win produced by a model's absence from the price table is not a win: the cheaper median may be
+// the missing requests. The mark reaches both places the report names the win.
+const improvementWithExcluded = () => IMPROVEMENT_CORPUS.map((s) =>
+  s.id === "n1" ? { ...s, unpriced: { "claude-mythos-9": 2 } } : s);
+const winsSection = (text) => text.slice(text.indexOf("## Your wins"), text.indexOf("## Cost anomalies"));
+
+test("an improvement whose cohorts exclude requests is marked inferred in the wins table and the Actionability line", () => {
+  const wins = winsSection(renderReport(improvementWithExcluded(), ctx()));
+  const mark = "\\(inferred: 2 requests on a model with no exact price excluded\\)";
+  assert.match(wins, new RegExp(`\\| execution 0\\.11\\.0→0\\.12\\.0 ${mark} \\|`));
+  assert.match(wins, new RegExp(`Actionability — .*0\\.12\\.0 improvement .*${mark}`));
+  assert.equal(winTable(improvementWithExcluded(), [], emitCandidates(improvementWithExcluded()))[0].inferred,
+    "2 requests on a model with no exact price excluded");
+});
+
+test("a clean improvement is shown without any inferred mark", () => {
+  const wins = winsSection(renderReport(IMPROVEMENT_CORPUS, ctx()));
+  assert.match(wins, /execution 0\.11\.0→0\.12\.0/);
+  assert.doesNotMatch(wins, /inferred/);
+});
+
 test("the report renders observed workload and outcome families, each metric tagged observed", () => {
   const workload = {
     requestKind: "feature", filesChanged: 4, insertions: 80, deletions: 20,
@@ -1182,7 +1203,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "- CANDIDATE: inherited-model inherited=2/5 sessions=1 versions=[0.12.0..0.12.0]",
     // Your wins: a win event, and a version-over-version improvement
     "| first-round-clean-accept | $9.00 | 3 |",
-    "| execution 0.11.0→0.12.0 | $5.00 | 4 | down |",
+    "| execution 0.11.0→0.12.0 (inferred: 3 requests on a model with no exact price excluded) | $5.00 | 4 | down |",
     // Cost anomalies, one line per candidate type the report can raise (the global-median
     // cost-outlier is retired — issue #114 — and its role is the matched-cohort EXCESS-COST residual,
     // which this run-less corpus produces no rows for).
@@ -1965,6 +1986,109 @@ test("revertCandidates: with no excluded requests the same pair still produces i
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+const REVERT_PROMOTIONS = [
+  { culpritId: "friction:regressor", rung: "r2", pluginVersion: "0.12.0", commit: "abc1234", lifecycle: null },
+];
+const revertCorpus = (newUnpriced = {}) => [
+  sum({ id: "o1", pluginVersion: "0.11.0", profile: "thorough", costByStage: { execution: 5 } }),
+  sum({ id: "n1", pluginVersion: "0.12.0", profile: "thorough", costByStage: { execution: 20 }, unpriced: newUnpriced }),
+];
+const costAnomalies = (text) => text.slice(text.indexOf("## Cost anomalies"), text.indexOf("## Previously promoted"));
+
+test("renderReport: a revert comparison skipped for excluded requests is named in Cost anomalies with its reason", () => {
+  const root = makeTempDir("doctor-revert-render-");
+  try {
+    const summaries = revertCorpus({ "claude-mythos-9": 4 });
+    const { skipped } = revertCandidates(summaries, REVERT_PROMOTIONS, { dir: root });
+    assert.equal(skipped.length, 1, "guard: the pair must really be skipped for the assertion below to mean anything");
+    const text = renderReport(summaries, ctx({ promotions: REVERT_PROMOTIONS, revertSkipped: skipped }));
+    assert.match(
+      costAnomalies(text),
+      /- Revert check skipped for friction:regressor 0\.11\.0→0\.12\.0 \(thorough profile\): 4 requests on a model with no exact price excluded in the compared cohorts — those versions cannot be compared on dollars\./,
+    );
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("renderReport: a revert pair with no excluded requests renders no skip line", () => {
+  const root = makeTempDir("doctor-revert-render-clean-");
+  try {
+    const summaries = revertCorpus();
+    const { skipped } = revertCandidates(summaries, REVERT_PROMOTIONS, { dir: root });
+    assert.deepEqual(skipped, []);
+    const text = renderReport(summaries, ctx({ promotions: REVERT_PROMOTIONS, revertSkipped: skipped }));
+    assert.doesNotMatch(text, /Revert check skipped/);
+    assert.doesNotMatch(renderReport(summaries, ctx()), /Revert check skipped/, "a context with no revertSkipped renders none either");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("buildJsonReport: skipped revert comparisons are carried beside the other report sections", () => {
+  const skipped = [{ culpritId: "friction:regressor", profile: "thorough", from: "0.11.0", to: "0.12.0", reason: "r" }];
+  assert.deepEqual(buildJsonReport([sum()], ctx({ revertSkipped: skipped })).revert_skipped, skipped);
+  assert.deepEqual(buildJsonReport([sum()]).revert_skipped, []);
+});
+
+test("--json totals carry the provisional figure; costUSD stays measured-only and no top-level provisional key remains", () => {
+  const dir = makeTempDir("doctor-json-provisional-");
+  const slug = join(dir, "-Users-x-proj");
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(
+    join(slug, "sess-pppp.jsonl"),
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle", message: { model: "claude-opus-5", usage: usage(1_000_000, 0, 0, 0) } })) + "\n" +
+      JSON.stringify(turn({ message: { model: "claude-opus-5-6", usage: usage(1_000_000, 0, 0, 0) } })) + "\n",
+  );
+  try {
+    const out = spawnSync(process.execPath, [SCRIPT, "--dir", dir, "--json"],
+      { encoding: "utf8", env: { ...process.env, PATH: "", CLAUDE_CODE_SESSION_ID: "" } });
+    assert.equal(out.status, 0, out.stderr);
+    const parsed = JSON.parse(out.stdout);
+    assert.deepEqual(parsed.totals.provisional, { "claude-opus-5-6": { requests: 1, dollars: 4, basedOn: "claude-opus-5-5" } });
+    assert.equal(parsed.totals.costUSD, 5, "provisional dollars must not enter the measured total");
+    assert.equal("provisional" in parsed, false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The report path writes the revert sidecar and must also show what it skipped: the two are one
+// result, so a run whose pair was skipped says so in the report it prints, not only in the sidecar.
+test("a report run prints the revert comparison it skipped, and why", () => {
+  const dir = makeTempDir("doctor-revert-cli-");
+  try {
+    const proj = join(dir, "projects", "-some-project");
+    mkdirSync(proj, { recursive: true });
+    const runs = join(dir, "runs", "some-repo");
+    mkdirSync(runs, { recursive: true });
+    const promos = join(dir, "repo", "docs", "devcycle", "promotions");
+    mkdirSync(promos, { recursive: true });
+    writeFileSync(join(promos, "2026-07-21-regressor.md"), [
+      "# A lesson that landed on 0.12.0",
+      "- promotion-type: enforcement-gap", "- cluster-signature: x", "- files-touched: references/evidence.md",
+      "- landed: 2026-07-21", "- commit: abc1234", "- plugin-version: 0.12.0",
+      "- culprit-id: friction:regressor", "- rung: r2", "- audience: repo-devs", "- verify: journal-recurrence", "- aliases:", "",
+    ].join("\n"));
+    for (const [id, version, model, runId] of [
+      ["sess-aaaaaaaaaaaa", "0.11.0", "claude-opus-5", "0123456789abcdef"],
+      ["sess-bbbbbbbbbbbb", "0.12.0", "claude-mythos-9", "fedcba9876543210"],
+    ]) {
+      writeFileSync(join(proj, `${id}.jsonl`), [
+        turn({ sessionId: id, attributionSkill: "devcycle:cycle" }),
+        turn({ sessionId: id, message: { model, usage: usage(1_000_000, 0, 0, 0) } }),
+      ].map((l) => JSON.stringify(l)).join("\n") + "\n");
+      writeFileSync(join(runs, `${runId}.jsonl`), [
+        { kind: "run", schemaVersion: 1, runId, pluginVersion: version, profile: "thorough", knobs: {} },
+        { kind: "session", sessionHash: sha256(id) },
+        { kind: "stage", stage: "execution", startedAt: "2026-07-20T09:00:00.000Z", endedAt: "2026-07-20T11:00:00.000Z", outcome: "complete" },
+      ].map((l) => JSON.stringify(l)).join("\n") + "\n");
+    }
+    const res = spawnSync(process.execPath, [SCRIPT, "--dir", join(dir, "projects")], {
+      cwd: join(dir, "repo"), encoding: "utf8",
+      env: { ...process.env, PATH: "", CLAUDE_CODE_SESSION_ID: "", DEVCYCLE_RUNS_DIR: join(dir, "runs"), DEVCYCLE_DOCTOR_DIR: join(dir, "doctor") },
+    });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /- Revert check skipped for friction:regressor 0\.11\.0→0\.12\.0 \(thorough profile\): 1 request on a model with no exact price excluded in the compared cohorts/);
+    const sidecar = JSON.parse(readFileSync(join(dir, "doctor", "revert-candidates.json"), "utf8"));
+    assert.equal(sidecar.skipped.length, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("renderReport: the Cost by version table marks a version whose cost excludes requests", () => {
   const text = renderReport([
     sum({ id: "a1", pluginVersion: "0.22.0", profile: "standard", costByStage: { execution: 1 },
@@ -2011,12 +2135,13 @@ test("formatReport: the plain-text report carries the provisional caveat and the
   assert.match(text, /PROVISIONAL PRICE: claude-opus-5-6 \(12 requests, ≈\$3\.50\) priced as claude-opus-5-5/);
 });
 
-test("buildJsonReport: the provisional figure is a top-level key, never merged into a measured one", () => {
+test("buildJsonReport: a session's provisional figure stays beside, never inside, its measured cost", () => {
   const json = buildJsonReport([
     sum({ id: "a1", pluginVersion: "0.22.0", costUSD: 10, costByStage: { execution: 10 }, provisional: PROVISIONAL }),
   ]);
-  assert.deepEqual(json.provisional, PROVISIONAL);
+  assert.deepEqual(json.sessions[0].provisional, PROVISIONAL);
   assert.equal(json.sessions[0].costUSD, 10);
+  assert.equal("provisional" in json, false, "the aggregate lives under totals, which the CLI owns");
 });
 
 test("cacheBandLine: an inferred band is labelled as cache-write cost, not as the total", () => {
@@ -2042,6 +2167,15 @@ test("unpricedModelIssueBody drafts one issue covering every affected model, as 
   assert.match(draft.body, /claude-opus-5-6: 12 requests across 1 session versions=\[0\.22\.0\.\.0\.22\.0\] — priced provisionally as claude-opus-5-5/);
   assert.match(draft.body, /add a row for each model to scripts\/pricing\.mjs/);
   assert.doesNotMatch(draft.body, /\$\d/, "no dollar figure belongs in a public draft");
+});
+
+test("unpricedModelIssueBody: a request with no model id is not a table gap and is left out of the draft", () => {
+  assert.throws(() => unpricedModelIssueBody([sum({ id: "a1", unpriced: { "(none)": 3 } })], {}), NoUnpricedModelError);
+  const draft = unpricedModelIssueBody([
+    sum({ id: "a1", pluginVersion: "0.22.0", unpriced: { "(none)": 3, "claude-mythos-9": 2 } }),
+  ], {});
+  assert.equal(draft.title, "[doctor:unpriced-model] claude-mythos-9 not in scripts/pricing.mjs");
+  assert.doesNotMatch(draft.body, /\(none\)/);
 });
 
 test("unpricedModelIssueBody: a corpus with nothing unpriced throws the typed error", () => {
@@ -2086,8 +2220,53 @@ test("--issue-body unpriced-model: a corpus with nothing unpriced exits non-zero
   assert.doesNotMatch(out.stderr, /no culprit or compliance candidate/);
 });
 
-test("the unpriced-model slug is not a compliance type and cannot be shadowed by a culprit", () => {
+test("the unpriced-model slug is not a compliance type", () => {
   assert.equal(COMPLIANCE_TYPES.includes(UNPRICED_MODEL_SLUG), false);
+});
+
+// A run record can name any slug as a culprit, so a culprit called `unpriced-model` is reachable.
+// The route check has to win over the culprit lookup or this corpus would draft a culprit issue.
+test("--issue-body unpriced-model takes the unpriced route even when a culprit carries that slug", () => {
+  const dir = makeTempDir("doctor-issue-shadow-");
+  const slug = join(dir, "projects", "-Users-x-proj");
+  mkdirSync(slug, { recursive: true });
+  const records = [
+    turn({ attributionSkill: "devcycle:cycle" }),
+    turn({ message: { model: "claude-mythos-9", usage: usage(1_000_000, 0, 0, 0) } }),
+  ];
+  writeFileSync(join(slug, "sess-abcdef123456.jsonl"), records.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  const runs = join(dir, "runs", "some-repo");
+  mkdirSync(runs, { recursive: true });
+  const runLines = [
+    { kind: "run", schemaVersion: 1, runId: "0123456789abcdef", pluginVersion: DRAFT_VERSION, profile: "thorough", knobs: {} },
+    { kind: "session", sessionHash: sha256("sess-abcdef123456") },
+    { kind: "stage", stage: "execution", startedAt: "2026-07-20T09:00:00.000Z", endedAt: "2026-07-20T11:00:00.000Z", outcome: "complete" },
+    { kind: "event", event: "gate-fail", stage: "execution", task: "1", culprit: UNPRICED_MODEL_SLUG, ts: "2026-07-20T10:00:00.000Z" },
+  ];
+  writeFileSync(join(runs, "run.jsonl"), runLines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  try {
+    const summaries = [withRecord(record({ events: [runLines[3]] }), "sess-abcdef123456", records)];
+    assert.ok(culpritTable(summaries, []).some((r) => r.culprit === UNPRICED_MODEL_SLUG),
+      "guard: the corpus must really offer a culprit with this slug, or the route check is never exercised");
+    const res = spawnSync(process.execPath, [SCRIPT, "--dir", join(dir, "projects"), "--issue-body", UNPRICED_MODEL_SLUG],
+      { encoding: "utf8", env: { ...process.env, PATH: "", CLAUDE_CODE_SESSION_ID: "", DEVCYCLE_RUNS_DIR: join(dir, "runs") } });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /title: \[doctor:unpriced-model\] claude-mythos-9 not in scripts\/pricing\.mjs/);
+    assert.doesNotMatch(res.stdout, /Culprit: /);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("outerLoop counts a filed [doctor:unpriced-model] issue as Filed", () => {
+  const dir = reportsFixture({});
+  try {
+    const filed = JSON.stringify([
+      { number: 11, title: "[doctor:unpriced-model] claude-mythos-9 not in scripts/pricing.mjs", labels: [],
+        createdAt: "2026-08-05T00:00:00Z", closedAt: null, state: "OPEN" },
+      { number: 12, title: "unpriced-model: something the author typed by hand", labels: [],
+        createdAt: "2026-08-05T00:00:00Z", closedAt: null, state: "OPEN" },
+    ]);
+    assert.equal(outerLoop(dir, () => filed, TURNAROUND_VOCAB).filed, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("parseDraftedMarkers: the doctor kind round-trips, so a filed [doctor:…] issue is counted", () => {
