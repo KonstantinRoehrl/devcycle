@@ -2115,12 +2115,12 @@ test("parseArgs rejects a bare path instead of profiling the real home corpus", 
 });
 
 // The message an operator reads has to name what the flag actually wants. `--since` and `--until`
-// are dates and `--issue-body` is a culprit name, so telling any of them to supply "a path"
+// are dates and `--issue-body` is a draft slug, so telling any of them to supply "a path"
 // sends the operator looking for a file that was never involved.
 test("a valueless --since asks for a date, not a path", () => {
   assert.throws(() => parseArgs(["--since"]), /--since requires a date$/);
   assert.throws(() => parseArgs(["--until"]), /--until requires a date$/);
-  assert.throws(() => parseArgs(["--issue-body"]), /--issue-body requires a culprit name$/);
+  assert.throws(() => parseArgs(["--issue-body"]), /--issue-body requires a culprit, compliance or unpriced-model slug$/);
   // --drift does take a path, so its wording is right as it stands.
   assert.throws(() => parseArgs(["--drift"]), /--drift requires a path argument$/);
 });

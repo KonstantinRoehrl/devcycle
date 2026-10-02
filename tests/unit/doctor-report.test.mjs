@@ -17,6 +17,7 @@ import {
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
   changelogEntry, regressionAttribution, excludedNote, formatReport,
+  COMPLIANCE_TYPES, UNPRICED_MODEL_SLUG, NoUnpricedModelError, unpricedModelIssueBody,
 } from "../../scripts/doctor.mjs";
 import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
 import { readPolicy } from "../../scripts/reinforcement-policy.mjs";
@@ -2024,4 +2025,82 @@ test("cacheBandLine: an inferred band is labelled as cache-write cost, not as th
       cacheBand: { point: 1, low: 0.8, high: 1.2, fallbackShare: 0.5, collapsed: false } },
   ]);
   assert.match(text, /Cache-write cost \$1\.00 \(inferred: cache-write TTL, range \$0\.80–\$1\.20; 50\.0% of cache-write tokens lack a TTL split\)/);
+});
+
+const unpricedCorpus = () => [
+  sum({ id: "a1", pluginVersion: "0.21.0", unpriced: { "claude-mythos-9": 4 } }),
+  sum({ id: "a2", pluginVersion: "0.22.0", unpriced: { "claude-mythos-9": 3 },
+        provisional: { "claude-opus-5-6": { requests: 12, dollars: 3.5, basedOn: "claude-opus-5-5" } } }),
+];
+
+test("unpricedModelIssueBody drafts one issue covering every affected model, as enums and counts", () => {
+  const draft = unpricedModelIssueBody(unpricedCorpus(), { monorepo: false, language: "javascript", testRunner: "node" });
+  assert.equal(draft.repo, DEVCYCLE_UPSTREAM);
+  assert.equal(draft.title, "[doctor:unpriced-model] claude-mythos-9, claude-opus-5-6 not in scripts/pricing.mjs");
+  assert.deepEqual(draft.labels, ["unpriced-model", "from-doctor"]);
+  assert.match(draft.body, /claude-mythos-9: 7 requests across 2 sessions versions=\[0\.21\.0\.\.0\.22\.0\] — excluded from every dollar figure/);
+  assert.match(draft.body, /claude-opus-5-6: 12 requests across 1 session versions=\[0\.22\.0\.\.0\.22\.0\] — priced provisionally as claude-opus-5-5/);
+  assert.match(draft.body, /add a row for each model to scripts\/pricing\.mjs/);
+  assert.doesNotMatch(draft.body, /\$\d/, "no dollar figure belongs in a public draft");
+});
+
+test("unpricedModelIssueBody: a corpus with nothing unpriced throws the typed error", () => {
+  assert.throws(() => unpricedModelIssueBody([sum({ id: "a1", pluginVersion: "0.22.0" })], {}), NoUnpricedModelError);
+  assert.throws(() => unpricedModelIssueBody([], {}), /no unpriced or provisionally priced model in this corpus/);
+});
+
+test("emitCandidates: a provisionally priced model is a candidate too, carrying its basis", () => {
+  const candidates = emitCandidates(unpricedCorpus());
+  const provisional = candidates.find((c) => c.type === "unpriced-model" && c.model === "claude-opus-5-6");
+  assert.ok(provisional, "expected a candidate for the provisional model");
+  assert.equal(provisional.basedOn, "claude-opus-5-5");
+  assert.match(formatCandidate(provisional), /provisional-as=claude-opus-5-5/);
+  const plain = candidates.find((c) => c.model === "claude-mythos-9");
+  assert.doesNotMatch(formatCandidate(plain), /provisional-as/);
+});
+
+test("--issue-body unpriced-model: prints the draft on a corpus that has an unpriced model", () => {
+  const dir = makeTempDir("doctor-issue-unpriced-");
+  const slug = join(dir, "-Users-x-proj");
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(
+    join(slug, "sess-uuuu.jsonl"),
+    JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) + "\n" +
+      JSON.stringify({ type: "assistant",
+        message: { model: "claude-mythos-9", usage: usage(1_000_000, 0, 0, 0), content: [] } }) + "\n",
+  );
+  const out = spawnSync(process.execPath, [SCRIPT, "--dir", dir, "--issue-body", "unpriced-model"], { encoding: "utf8" });
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /title: \[doctor:unpriced-model\] claude-mythos-9 not in scripts\/pricing\.mjs/);
+  assert.match(out.stdout, /labels: unpriced-model, from-doctor/);
+});
+
+test("--issue-body unpriced-model: a corpus with nothing unpriced exits non-zero and says so", () => {
+  const dir = makeTempDir("doctor-issue-clean-");
+  const slug = join(dir, "-Users-x-proj");
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(join(slug, "sess-cccc.jsonl"), JSON.stringify(turn({ attributionSkill: "devcycle:cycle" })) + "\n");
+  const out = spawnSync(process.execPath, [SCRIPT, "--dir", dir, "--issue-body", "unpriced-model"], { encoding: "utf8" });
+  assert.notEqual(out.status, 0);
+  assert.match(out.stderr, /no unpriced or provisionally priced model in this corpus/);
+  assert.doesNotMatch(out.stderr, /no culprit or compliance candidate/);
+});
+
+test("the unpriced-model slug is not a compliance type and cannot be shadowed by a culprit", () => {
+  assert.equal(COMPLIANCE_TYPES.includes(UNPRICED_MODEL_SLUG), false);
+});
+
+test("parseDraftedMarkers: the doctor kind round-trips, so a filed [doctor:…] issue is counted", () => {
+  assert.deepEqual(
+    parseDraftedMarkers("Drafted: [doctor:unpriced-model] claude-mythos-9 not in scripts/pricing.mjs"),
+    [{ slug: "unpriced-model", title: "claude-mythos-9 not in scripts/pricing.mjs" }],
+  );
+});
+
+test("the playbook states the doctor Drafted: marker form, and it parses", () => {
+  const playbook = readFileSync(join(process.cwd(), "playbooks/profiling-sessions.md"), "utf8");
+  const literal = playbook.split("\n").find((l) => l.trim().startsWith("Drafted: [doctor:"));
+  assert.ok(literal, "playbooks/profiling-sessions.md no longer states the doctor Drafted: marker form");
+  const filled = literal.replace("<slug>", "unpriced-model").replace("<title>", "A model is not priced");
+  assert.deepEqual(parseDraftedMarkers(filled), [{ slug: "unpriced-model", title: "A model is not priced" }]);
 });

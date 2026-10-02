@@ -5,6 +5,20 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-02 — budgets re-baselined for the unpriced-model draft route
+
+**Decision:** the unpriced-model branch re-baselines two budget keys to their exact measured values,
+both read from `node scripts/validate.mjs`'s failure output. `tests/fixtures/surface-budget.json`:
+`surfaceTotal` 5683 → 5693. `tests/fixtures/context-budget.json`: `playbooks/profiling-sessions.md`
+64924 → 65407 (+483 bytes, playbook plus its cited references). `commandMax` and `playbookMax` and the
+other thirteen context entries did not move.
+
+**Why:** `playbooks/profiling-sessions.md` gained the minimum text the new behaviour needs: the
+`PROVISIONAL PRICE` sentence beside the `UNPRICED MODEL` one, the `unpriced-model` slug in the drafting
+step, and the `Drafted: [doctor:<slug>] <title>` marker form that `DRAFTED_MARKER_RE` now accepts.
+`scripts/validate.mjs` only fails when a measurement *exceeds* its baseline, so the baselines are set
+to the measured values rather than rounded up, or the budget stops measuring anything.
+
 ## 2026-10-02 — fixed-set knobs declare `options`, held to the resolver's values
 
 **Decision:** `profile`, `gitPolicy`, `docTrackingPolicy`, `reviewDepth` and `onDeviceGate`

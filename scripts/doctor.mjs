@@ -160,7 +160,7 @@ const KNOWN_FLAGS = {
 // report about the operator's real home corpus.
 export function parseArgs(argv) {
   const { flags } = parseFlags(argv, KNOWN_FLAGS);
-  // Each flag says what it wants: --since/--until are dates and --issue-body is a culprit name,
+  // Each flag says what it wants: --since/--until are dates and --issue-body is a draft slug,
   // so only --dir and --drift take the parser's default "a path argument" wording.
   const valued = (name, noun) => requireValue(flags, name, noun) ?? null;
   return {
@@ -172,7 +172,7 @@ export function parseArgs(argv) {
     depth: "--depth" in flags,
     runChecks: "--run-checks" in flags,
     drift: valued("--drift"),
-    issueBody: valued("--issue-body", "a culprit name"),
+    issueBody: valued("--issue-body", "a culprit, compliance or unpriced-model slug"),
   };
 }
 
@@ -688,6 +688,20 @@ export function emitCandidates(summaries) {
         sessions_sampled: 1,
         model,
         count,
+      });
+    }
+    for (const [model, p] of Object.entries(s.provisional ?? {})) {
+      candidates.push({
+        type: "unpriced-model",
+        skill: null,
+        version_from: null,
+        version_to: null,
+        delta_pct: null,
+        dollars: null,
+        sessions_sampled: 1,
+        model,
+        count: p.requests,
+        basedOn: p.basedOn,
       });
     }
   }
@@ -1347,6 +1361,7 @@ export function formatCandidate(c) {
   else if (c.delta_pct != null) parts.push(`delta=${c.delta_pct.toFixed(1)}%`);
   if (c.dollars != null) parts.push(`dollars=${usd(c.dollars)}`);
   if (c.count != null) parts.push(`count=${c.count}`);
+  if (c.basedOn) parts.push(`provisional-as=${c.basedOn}`);
   parts.push(`sessions=${c.sessions_sampled}`);
   // A candidate that already prints a `from->to` line (a version-regression/improvement) carries
   // the same span twice if versions=[..] is also emitted, so the canonical from->to line wins and
@@ -1849,7 +1864,9 @@ function main() {
     const isCulprit = tables.culprits.some((r) => r.culprit === slug);
     let draft;
     try {
-      if (isCulprit) {
+      if (slug === UNPRICED_MODEL_SLUG) {
+        draft = unpricedModelIssueBody(result.sessions, repoShape(process.cwd()));
+      } else if (isCulprit) {
         draft = issueBody(slug, result.sessions, tables, repoShape(process.cwd()));
       } else if (COMPLIANCE_TYPES.includes(slug)) {
         draft = complianceIssueBody(slug, result.sessions, repoShape(process.cwd()));
@@ -1861,7 +1878,7 @@ function main() {
       // A culprit last seen outside the recency band (StaleCulpritError), or a compliance type
       // with no cohort in this corpus (NoComplianceCandidateError): print why and exit non-zero
       // without emitting a body.
-      if (e instanceof StaleCulpritError || e instanceof NoComplianceCandidateError) {
+      if (e instanceof StaleCulpritError || e instanceof NoComplianceCandidateError || e instanceof NoUnpricedModelError) {
         console.error(`doctor: ${e.message}`);
         process.exitCode = 1;
         return;
@@ -2446,14 +2463,15 @@ export function winCandidates(candidates, promotions) {
 // The marker playbooks/profiling-sessions.md writes when the Actionability step drafts an
 // issue. That playbook is the contract's one written source; this parses what it states, and a
 // round-trip test (tests/unit/doctor-report.test.mjs) feeds this parser the literal extracted
-// from that file so neither side can drift.
+// from that file so neither side can drift. `doctor` is the kind `--issue-body unpriced-model` writes
+// (a table gap, neither a culprit nor a compliance cohort).
 // The slug is colon-separated because the flow offers a draft for every culprit, not only
 // vocabulary members: issueBody names an unclassified one by its bare `event:stage` key and a
 // new one as `novel:<slug>`. Each segment is still a slug, so the group cannot reach the
 // closing bracket or run into the title. Leading whitespace is tolerated because the playbook
 // states the marker inside an indented block, and a marker copied from there carries its indent.
 const DRAFTED_MARKER_RE =
-  /^[ \t]*Drafted: \[(?:culprit|compliance):([a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)*)\] (.+)$/gm;
+  /^[ \t]*Drafted: \[(?:culprit|compliance|doctor):([a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)*)\] (.+)$/gm;
 
 export function parseDraftedMarkers(text) {
   const out = [];
@@ -3510,6 +3528,62 @@ const complianceTitle = (slug) => COMPLIANCE_TITLES[slug] ?? slug;
     throw new Error(
       `COMPLIANCE_TITLES keys [${titleKeys.join(", ")}] must equal COMPLIANCE_TYPES [${types.join(", ")}]`,
     );
+}
+
+// `doctor --issue-body unpriced-model`: a table gap, not a process misbehaviour, so it is a third
+// draft route beside culprits and COMPLIANCE_TYPES rather than a member of either (COMPLIANCE_TITLES
+// must keep equalling COMPLIANCE_TYPES).
+export const UNPRICED_MODEL_SLUG = "unpriced-model";
+
+export class NoUnpricedModelError extends Error {
+  constructor() {
+    super("no unpriced or provisionally priced model in this corpus");
+  }
+}
+
+// One issue covering every model the corpus ran that scripts/pricing.mjs has no exact row for:
+// per model its id, request and session counts, version span, and whether it was excluded or
+// priced provisionally (and as what). Ids and integers only — no dollar figure, path or session id.
+export function unpricedModelIssueBody(summaries, shape) {
+  const byModel = new Map();
+  for (const s of summaries ?? []) {
+    const version = s.pluginVersion && s.pluginVersion !== "unknown" ? s.pluginVersion : null;
+    const add = (model, requests, basedOn) => {
+      const entry = byModel.get(model) ?? { requests: 0, sessions: new Set(), versions: [], basedOn };
+      entry.requests += requests;
+      entry.sessions.add(s.id);
+      if (version) entry.versions.push(version);
+      byModel.set(model, entry);
+    };
+    for (const [model, n] of Object.entries(s.unpriced ?? {})) add(model, n, null);
+    for (const [model, p] of Object.entries(s.provisional ?? {})) add(model, p.requests, p.basedOn);
+  }
+  if (!byModel.size) throw new NoUnpricedModelError();
+  const models = [...byModel.keys()].sort(byName);
+  const line = (model) => {
+    const e = byModel.get(model);
+    const versions = [...e.versions].sort(compareVersions);
+    const span = versions.length ? ` versions=[${versions[0]}..${versions.at(-1)}]` : "";
+    const sessions = e.sessions.size;
+    const status = e.basedOn ? `priced provisionally as ${e.basedOn}` : "excluded from every dollar figure";
+    return `- ${model}: ${e.requests} requests across ${sessions} session${sessions === 1 ? "" : "s"}${span} — ${status}`;
+  };
+  const body = [
+    `Repo shape: monorepo=${shape?.monorepo ?? "unknown"} · language=${shape?.language ?? "unknown"} ` +
+      `· test-runner=${shape?.testRunner ?? "unknown"}`,
+    "",
+    ...models.map(line),
+    "",
+    "Fix: add a row for each model to scripts/pricing.mjs, with its list price from the claude-api reference.",
+    "",
+    "<!-- add anything you want to say here -->",
+  ];
+  return {
+    repo: DEVCYCLE_UPSTREAM,
+    title: `[doctor:${UNPRICED_MODEL_SLUG}] ${models.join(", ")} not in scripts/pricing.mjs`,
+    labels: [UNPRICED_MODEL_SLUG, "from-doctor"],
+    body: body.join("\n"),
+  };
 }
 
 // A ready-to-paste GitHub issue for one COMPLIANCE candidate, the sibling of issueBody for the
