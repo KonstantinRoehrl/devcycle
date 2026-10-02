@@ -16,7 +16,7 @@ import {
   renderReport, buildJsonReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates, winCandidates,
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
-  changelogEntry, regressionAttribution, excludedNote,
+  changelogEntry, regressionAttribution, excludedNote, formatReport,
 } from "../../scripts/doctor.mjs";
 import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
 import { readPolicy } from "../../scripts/reinforcement-policy.mjs";
@@ -1165,7 +1165,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "· Total cost: $180.00 ·",
     // Read this first
     "- UNPRICED MODEL: some-unpriced-model (3 requests)",
-    "- Cost $4.00 (inferred: cache-write TTL, range $3.00–$6.00; 50.0% of cache-write tokens lack a TTL split).",
+    "- Cache-write cost $4.00 (inferred: cache-write TTL, range $3.00–$6.00; 50.0% of cache-write tokens lack a TTL split).",
     "- 1 session(s) have inferred stage costs — predates run records",
     "- 1 session(s) still in flight (newest record < 30 min old) — in-flight sessions have only part of their cost recorded",
     // Cost by version — the whole row, out to its last cell: a needle that stopped at the depth
@@ -1362,7 +1362,7 @@ test("the empty corpus renders a report rather than throwing", () => {
 // The cache-band caveat lines, pinned as whole strings rather than by shape. They are shipped
 // prose a reader acts on, and until now neither was asserted anywhere — which is exactly how the
 // affirmation came to be dropped from this report while formatReport still emitted it.
-const EXACT_LINE = "- Cost is exact: every cache write in this corpus carries its TTL split.";
+const EXACT_LINE = "- Cache-write cost is exact: every cache write in this corpus carries its TTL split.";
 const NO_CAVEATS_LINE = "- No caveats apply to this corpus.";
 // sum() carries pluginVersion "0.12.0", which predates the run record, so its forward-filled
 // caveat is the "predates run records" one of the three splitReason buckets.
@@ -1394,7 +1394,7 @@ test("an uncollapsed cache band renders its range and claims no exactness", () =
   );
   assert.ok(
     out.includes(
-      "- Cost $4.00 (inferred: cache-write TTL, range $3.00–$6.00; 50.0% of cache-write tokens lack a TTL split).",
+      "- Cache-write cost $4.00 (inferred: cache-write TTL, range $3.00–$6.00; 50.0% of cache-write tokens lack a TTL split).",
     ),
     "the inferred cache-band range is missing",
   );
@@ -1970,4 +1970,58 @@ test("renderReport: the Cost by version table marks a version whose cost exclude
           unpriced: { "claude-mythos-9": 4 } }),
   ], ctx());
   assert.match(text, /0\.22\.0 \(inferred: 4 requests on a model with no exact price excluded\)/);
+});
+
+const PROVISIONAL = { "claude-opus-5-6": { requests: 12, dollars: 3.5, basedOn: "claude-opus-5-5" } };
+
+test("renderReport: a provisional model gets its own caveat and the headline shows it apart from measured cost", () => {
+  const text = renderReport([
+    sum({ id: "a1", pluginVersion: "0.22.0", profile: "standard", costUSD: 10, costByStage: { execution: 10 },
+          provisional: PROVISIONAL }),
+  ], ctx());
+  assert.match(text, /- PROVISIONAL PRICE: claude-opus-5-6 \(12 requests, ≈\$3\.50\) priced as claude-opus-5-5 — not in scripts\/pricing\.mjs; add a row/);
+  assert.match(text, /Total cost: \$10\.00 measured \+ ≈\$3\.50 provisional/);
+  assert.doesNotMatch(text, /No caveats apply to this corpus/);
+});
+
+test("renderReport: the appendix Cost by model block lists provisional spend apart from the ranked models", () => {
+  const text = renderReport([
+    sum({ id: "a1", pluginVersion: "0.22.0", profile: "standard", costUSD: 10, costByStage: { execution: 10 },
+          costByModel: { "claude-opus-5": 10 }, provisional: PROVISIONAL }),
+  ], ctx());
+  const block = text.slice(text.indexOf("### Cost by model"), text.indexOf("### Cost by agent type"));
+  assert.match(block, /claude-opus-5 \$10\.00/);
+  assert.match(block, /provisional \(estimated, not in the ranking above\): claude-opus-5-6 ≈\$3\.50 as claude-opus-5-5/);
+});
+
+test("renderReport: with no provisional usage the headline and caveats read as before", () => {
+  const text = renderReport([
+    sum({ id: "a1", pluginVersion: "0.22.0", profile: "standard", costUSD: 10, costByStage: { execution: 10 } }),
+  ], ctx());
+  assert.match(text, /Total cost: \$10\.00 ·/);
+  assert.doesNotMatch(text, /PROVISIONAL|provisional/);
+});
+
+test("formatReport: the plain-text report carries the provisional caveat and the split total", () => {
+  const text = formatReport([
+    { pluginVersion: "0.22.0", costUSD: 10, costByStage: { a: 10 }, medianDepth: 10, provisional: PROVISIONAL },
+  ]);
+  assert.match(text, /total cost \$10\.00 measured \+ ≈\$3\.50 provisional over 1 session/);
+  assert.match(text, /PROVISIONAL PRICE: claude-opus-5-6 \(12 requests, ≈\$3\.50\) priced as claude-opus-5-5/);
+});
+
+test("buildJsonReport: the provisional figure is a top-level key, never merged into a measured one", () => {
+  const json = buildJsonReport([
+    sum({ id: "a1", pluginVersion: "0.22.0", costUSD: 10, costByStage: { execution: 10 }, provisional: PROVISIONAL }),
+  ]);
+  assert.deepEqual(json.provisional, PROVISIONAL);
+  assert.equal(json.sessions[0].costUSD, 10);
+});
+
+test("cacheBandLine: an inferred band is labelled as cache-write cost, not as the total", () => {
+  const text = formatReport([
+    { pluginVersion: "0.22.0", costByStage: { a: 1 }, medianDepth: 10,
+      cacheBand: { point: 1, low: 0.8, high: 1.2, fallbackShare: 0.5, collapsed: false } },
+  ]);
+  assert.match(text, /Cache-write cost \$1\.00 \(inferred: cache-write TTL, range \$0\.80–\$1\.20; 50\.0% of cache-write tokens lack a TTL split\)/);
 });

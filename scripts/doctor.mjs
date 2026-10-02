@@ -1480,6 +1480,7 @@ function aggregate(summaries) {
     carryWeighted: {},
     dispatches: { total: 0, withoutModel: 0 },
     unpriced: {},
+    provisional: {},
   };
   for (const s of summaries) {
     agg.costUSD += s.costUSD;
@@ -1487,6 +1488,11 @@ function aggregate(summaries) {
       for (const [k, v] of Object.entries(s[key] ?? {})) bump(agg[key], k, v);
     for (const [k, v] of Object.entries(s.bandCounts ?? {})) bump(agg.bandCounts, k, v);
     for (const [k, v] of Object.entries(s.startupFloor ?? {})) (agg.startupFloor[k] ??= []).push(...v);
+    for (const [model, p] of Object.entries(s.provisional ?? {})) {
+      const into = (agg.provisional[model] ??= { requests: 0, dollars: 0, basedOn: p.basedOn });
+      into.requests += p.requests;
+      into.dollars += p.dollars;
+    }
     agg.dispatches.total += s.dispatches?.total ?? 0;
     agg.dispatches.withoutModel += s.dispatches?.withoutModel ?? 0;
   }
@@ -1494,13 +1500,25 @@ function aggregate(summaries) {
   return agg;
 }
 
+const provisionalTotal = (agg) => Object.values(agg.provisional ?? {}).reduce((n, p) => n + p.dollars, 0);
+
+// The measured total, with any provisional estimate beside it rather than inside it.
+const totalCostText = (agg) => {
+  const extra = provisionalTotal(agg);
+  return extra > 0 ? `${usd(agg.costUSD)} measured + ≈${usd(extra)} provisional` : usd(agg.costUSD);
+};
+
+const provisionalLine = (model, p) =>
+  `PROVISIONAL PRICE: ${model} (${p.requests} requests, ≈${usd(p.dollars)}) priced as ${p.basedOn} — ` +
+  "not in scripts/pricing.mjs; add a row";
+
 // The cache-TTL disclosure, in both its forms. Assembled once because formatReport and caveatLines
 // rendered identical text differing only by a leading bullet, and a reader must be able to tell a
 // band that was checked and found exact from one that was never checked.
 function cacheBandLine(band) {
   return band.collapsed
-    ? "Cost is exact: every cache write in this corpus carries its TTL split."
-    : `Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
+    ? "Cache-write cost is exact: every cache write in this corpus carries its TTL split."
+    : `Cache-write cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
         `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
         `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`;
 }
@@ -1510,7 +1528,7 @@ export function formatReport(summaries) {
   if (!summaries.length) return `no sessions matched.\n\n${vintage}\n`;
   const agg = aggregate(summaries);
   const lines = [
-    `total cost ${usd(agg.costUSD)} over ${summaries.length} session(s)`,
+    `total cost ${totalCostText(agg)} over ${summaries.length} session(s)`,
     `by model: ${ranked(agg.costByModel, usd) || "none"}`,
     `by stage: ${ranked(agg.costByStage, usd) || "none"}`,
     `by agent type: ${ranked(agg.costByAgentType, usd) || "none"}`,
@@ -1526,6 +1544,8 @@ export function formatReport(summaries) {
   ];
   for (const [model, count] of Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]))
     lines.push(`UNPRICED MODEL: ${model} (${count} requests)`);
+  for (const [model, p] of Object.entries(agg.provisional).sort((a, b) => b[1].requests - a[1].requests))
+    lines.push(provisionalLine(model, p));
   // QC5: any value that remains inferred is labelled inferred at every render site (text and
   // --json alike), never left to read as exact. Classes rendered here: cache-write TTL pricing
   // (costBand, above) and forward-filled stage attribution (no run record for the session). A
@@ -1648,6 +1668,7 @@ function mergeCounts(target, source) {
 export function buildJsonReport(summaries, ctx = {}) {
   return {
     pricesAsOf: PRICING.asOf,
+    provisional: aggregate(summaries).provisional,
     sessions: summaries.map((s) => ({
       ...s,
       inferred: s.attributionSource === "forward-filled" ? "forward-filled" : null,
@@ -2712,6 +2733,8 @@ function caveatLines(summaries, agg) {
   const band = agg.cacheBand;
   for (const [model, count] of unpriced)
     out.push(`- UNPRICED MODEL: ${model} (${count} requests)`);
+  const provisional = Object.entries(agg.provisional ?? {}).sort((a, b) => b[1].requests - a[1].requests);
+  for (const [model, p] of provisional) out.push(`- ${provisionalLine(model, p)}`);
   out.push(`- ${cacheBandLine(band)}`);
   // Split by why the record is absent rather than counted as one undifferentiated class: a
   // standalone command mints no record by design, and reading that as a gap in the telemetry
@@ -2729,7 +2752,7 @@ function caveatLines(summaries, agg) {
       );
   if (inFlight > 0)
     out.push(`- ${inFlight} session(s) still in flight (newest record < 30 min old) — ${IN_FLIGHT_NOTE}`);
-  if (band.collapsed && !unpriced.length && filled.length === 0 && inFlight === 0)
+  if (band.collapsed && !unpriced.length && !provisional.length && filled.length === 0 && inFlight === 0)
     out.push("- No caveats apply to this corpus.");
   return out;
 }
@@ -2793,7 +2816,7 @@ export function renderReport(summaries, ctx) {
     `# Doctor Report — ${repo} — ${today}`,
     "",
     `Scope: ${scope} · Sessions: ${summaries.length} · Cycles: ${cycleGroups(summaries).length} · ` +
-      `Total cost: ${usd(agg.costUSD)} · Prices as of ${PRICING.asOf}`,
+      `Total cost: ${totalCostText(agg)} · Prices as of ${PRICING.asOf}`,
   );
 
   section("## Read this first", "read-this-first");
@@ -3054,6 +3077,13 @@ export function renderReport(summaries, ctx) {
 
   section("### Cost by model", "appendix-cost-by-model");
   L.push(ranked(agg.costByModel, usd) || "_No rows: no priced turns in this corpus._");
+  const provisionalModels = Object.entries(agg.provisional ?? {});
+  if (provisionalModels.length)
+    L.push(
+      "",
+      "provisional (estimated, not in the ranking above): " +
+        provisionalModels.map(([m, p]) => `${m} ≈${usd(p.dollars)} as ${p.basedOn}`).join(", "),
+    );
 
   section("### Cost by agent type", "appendix-cost-by-agent-type");
   L.push(ranked(agg.costByAgentType, usd) || "_No rows: no priced turns in this corpus._");
