@@ -5,6 +5,21 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-02 — fixed-set knobs declare `options`, held to the resolver's values
+
+**Decision:** `profile`, `gitPolicy`, `docTrackingPolicy`, `reviewDepth` and `onDeviceGate`
+declare `options` in `.claude-plugin/plugin.json`: `scripts/resolve-knobs.mjs`'s `ROSTER`
+values, with `auto` first on the two knobs whose fallback is a profile row. `scripts/validate.mjs`
+fails a list the plugin loader would reject and any list that differs from `ROSTER`.
+
+**Why:** without `options`, `/plugin configure` shows an unset string option as a blank text
+field, so the config channel's on-device walkthrough failed both `auto` defaults. The schema
+takes `options` (`docs/platform-notes.md` § (g)); a hand-kept list would drift from the
+resolver, and a malformed one stops the plugin loading, as `integer` did in 0.17.0.
+
+**Supersedes:** `docs/platform-notes.md` § (a)'s reading that allowed values can live only in
+description text.
+
 ## 2026-09-29 — commands resolve knobs; playbooks read the `knobs:` line
 
 **Decision:** every entry command except `/devcycle:doctor` runs `scripts/resolve-knobs.mjs` with
@@ -25,7 +40,7 @@ step 4 and is dropped: values are global, and a repo's old values surface as a d
 ## 2026-09-29 — budgets re-baselined for the config-channel branch
 
 **Decision:** the config-channel branch re-baselines both budget fixtures to their exact measured
-values. `tests/fixtures/surface-budget.json`: `surfaceTotal` 5518 → 5682, `commandMax` 132 → 168,
+values. `tests/fixtures/surface-budget.json`: `surfaceTotal` 5518 → 5683, `commandMax` 132 → 168,
 `playbookMax` 319 → 320. `tests/fixtures/context-budget.json`, all 14 entries — six fall:
 
 | Playbook | Before | After | Change |
@@ -82,13 +97,14 @@ reaches both files: a followed citation there would pull `model-routing.md` into
 budget, dispatching or not. A surface that dispatches cites it in the followed form itself, so its
 budget carries the file exactly where a stage reads it.
 
-`references/first-run-config.md` shrank 8561 → 3283 bytes (`bcc87ee`) but moves no context
+`references/first-run-config.md` shrank 8561 → 3283 bytes (`bcc87ee`), then grew to 3349 when
+the on-device fix round offered `auto` for `reviewDepth` and `onDeviceGate`, but moves no context
 entry: no playbook or reference cites it in the followed `${CLAUDE_PLUGIN_ROOT}/references/…` form.
 
-`surfaceTotal`'s +158 balances across the surface: commands +185 (`cycle.md` +36, `continue.md`
-+35, and +19 in each of the six standalone commands — the resolver invocation, its blank lines and
-its lead-in line), references −33 (`config.md` −112, `first-run-config.md` −84,
-`model-routing.md` +136, `resume.md` +25, `README.md` +1, `delegation.md` +1), playbooks +6.
+`surfaceTotal`'s +165 balances across the surface: commands +180 (`cycle.md` +36, `continue.md`
++30, and +19 in each of the six standalone commands — the resolver invocation, its blank lines and
+its lead-in line), references −21 (`config.md` −112, `first-run-config.md` −83,
+`model-routing.md` +136, `resume.md` +36, `README.md` +1, `delegation.md` +1), playbooks +6.
 `commandMax` follows `commands/cycle.md`, still the longest command; `playbookMax` follows
 `learning-from-sessions.md`, still the longest playbook at +1 line.
 

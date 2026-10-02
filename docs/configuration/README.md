@@ -1,10 +1,12 @@
 # Configuration
 
 Set options with `/plugin configure devcycle@devcycle` (or
-`claude plugin install devcycle@devcycle --config KEY=VALUE`). Everything has a working
-default; configure nothing and the pipeline still runs. The first time `/devcycle:cycle`
-runs with nothing configured, it asks one question — which `profile` to run — and never asks
-again; answer *customize* instead and it asks the five behavioral options in one batch.
+`claude plugin install devcycle@devcycle --config KEY=VALUE`). In `/plugin configure`, `profile`,
+`gitPolicy`, `docTrackingPolicy`, `reviewDepth` and `onDeviceGate` are pick-lists with their
+default preselected. Everything has a working default; configure nothing and the pipeline still
+runs. The first time `/devcycle:cycle` runs with nothing configured, it asks one question — which
+`profile` to run — and never asks again; answer *customize* instead and it asks the five
+behavioral options in one batch.
 
 The knob history — every `userConfig` addition, rename, and deprecation and the version each
 landed in — is [`config-changelog.md`](config-changelog.md), read by `doctor`'s config-drift mode
@@ -68,6 +70,10 @@ value you changed mid-cycle; a "keep" holds until you change the value again. Va
 global, as `/plugin configure` stores them: a repo's old `configured:` values are shown once as a
 drift notice, never applied, then dropped from the state file.
 [`references/config.md`](../../references/config.md) § Knob channel owns the details.
+
+Developing devcycle itself: a checkout loaded with `claude --plugin-dir` sees none of these values
+and silently runs every knob at its fallback. [`docs/platform-notes.md`](../platform-notes.md)
+§ (h) records why, and how to try a branch with your real settings.
 
 ## All options
 

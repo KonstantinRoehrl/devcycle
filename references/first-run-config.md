@@ -41,11 +41,12 @@ answer matches its default, nothing is written. The five:
 - `docTrackingPolicy` — what devcycle attempts to commit in a host repo (`standard`
   recommended · `all-local` · `all-tracked`); the repo's own `.gitignore` always wins.
   Outside the profile matrix, like `gitPolicy`.
-- `reviewDepth` — branch review engine (`single` recommended · `panel`).
+- `reviewDepth` — branch review engine (`auto` recommended — the profile picks · `single` ·
+  `panel`).
 - `crossModelReview` — add a cross-model lens to the review panel (`false` recommended ·
   `true`).
 - `onDeviceGate` — whether the on-device checklist closes only via a human walkthrough
-  (`human-required` recommended · `auto-ok`).
+  (`auto` recommended — the profile picks · `human-required` · `auto-ok`).
 
 Model knobs are excluded either way: models are chosen automatically per task unless you pin
 one in `/plugin configure`.

@@ -139,7 +139,9 @@ run at once. The full configuration surface is in
 - **A literal `${user_config.KEY}` string appears in output** — you are looking at the
   resolver invocation of an entry command with that option unset; this is expected, and
   `scripts/resolve-knobs.mjs` resolves it per [`docs/configuration/`](docs/configuration/README.md).
-  Set the option in `/plugin configure` to make the value substitute.
+  Set the option in `/plugin configure` to make the value substitute. Configured and still
+  literal under `claude --plugin-dir`? That load never sees configured values —
+  [`docs/platform-notes.md`](docs/platform-notes.md) § (h).
 - **A command fails on a path that starts with `/scripts/`** — a plugin script was named
   with `${CLAUDE_PLUGIN_ROOT}` in text that reached a shell, where that token is empty: it is
   substituted when a playbook is rendered into a prompt, not by the shell. devcycle names plugin

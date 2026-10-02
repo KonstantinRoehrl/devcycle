@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { SEMVER_RE, cmpSemver } from "./semver.mjs";
 import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run-record.mjs";
 import { readPolicy } from "./reinforcement-policy.mjs";
+import { ROSTER } from "./resolve-knobs.mjs";
 
 
 // devcycle's own record stores must stay tracked: README/DECISIONS say lessons + promotion
@@ -86,12 +87,35 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     // Every userConfig entry's type must be one the plugin loader accepts, or the whole
     // manifest is rejected on install (0.17.0 shipped type "integer" and failed to load).
     const CONFIG_TYPES = new Set(["string", "number", "boolean", "directory", "file"]);
-    if (plugin.userConfig && typeof plugin.userConfig === "object" && !Array.isArray(plugin.userConfig))
+    if (plugin.userConfig && typeof plugin.userConfig === "object" && !Array.isArray(plugin.userConfig)) {
       for (const [knob, spec] of Object.entries(plugin.userConfig)) {
         const t = spec?.type;
         if (!CONFIG_TYPES.has(t))
           fail(`plugin.json: userConfig.${knob}.type "${t}" invalid — must be one of ${[...CONFIG_TYPES].join(", ")}`);
+        // `options` is what turns the knob into a pick-list in /plugin configure. The loader takes
+        // only a non-empty array of strings that contains the default, and rejects the rest.
+        if (spec && "options" in spec) {
+          const opts = spec.options;
+          if (!Array.isArray(opts) || opts.some((o) => typeof o !== "string"))
+            fail(`plugin.json: userConfig.${knob}.options must be an array of strings`);
+          else if (!opts.length) fail(`plugin.json: userConfig.${knob}.options needs at least one value`);
+          else if (!opts.includes(spec.default))
+            fail(`plugin.json: userConfig.${knob}.options: default ${JSON.stringify(spec.default)} is not one of ${opts.join(", ")}`);
+        }
       }
+      // A fixed-set knob's pick-list is exactly the resolver's value set, with `auto` first when
+      // the profile supplies the fallback — the resolver owns the set, the manifest mirrors it.
+      for (const { key, kind, values, fallback } of ROSTER) {
+        const spec = plugin.userConfig[key];
+        if (kind !== "enum" || !spec) continue;
+        const expected = typeof fallback === "object" ? ["auto", ...values] : values;
+        if (JSON.stringify(spec.options) !== JSON.stringify(expected))
+          fail(
+            `plugin.json: userConfig.${key}.options must be [${expected.join(", ")}] to match ` +
+              `scripts/resolve-knobs.mjs's ROSTER, got ${spec.options === undefined ? "none" : JSON.stringify(spec.options)}`
+          );
+      }
+    }
   } catch (e) { fail(`plugin.json: ${e.message}`); }
   try {
     const m = JSON.parse(readFileSync(join(root, ".claude-plugin/marketplace.json"), "utf8"));

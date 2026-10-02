@@ -4,6 +4,7 @@
 // value -- so every entry command passes all thirteen rendered placeholders here and stages read the
 // printed `knobs:` line. references/config.md states the resolution order; this file is its
 // executable form, and ROSTER is the roster's fifth hand-kept copy that golden-path holds in parity.
+// Its enum `values` own each fixed set: validate.mjs holds plugin.json's `options` lists to them.
 import { pathToFileURL } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { parsePool } from "./model-pool.mjs";

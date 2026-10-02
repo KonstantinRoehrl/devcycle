@@ -71,6 +71,10 @@ skills-into-playbooks decision — see `docs/decisions/README.md` 2026-09-29.
   documented default); **P9's `modelLineup` object is not expressible and became four flat
   string options: `implementerModel`, `taskReviewerModel`, `walkthroughModel`,
   `branchReviewModel`** (same defaults as P9). Wave-3 tasks must use these flat keys.
+
+  [Amended 2026-10-02: `enum` is still rejected, but the schema does take a value list —
+  `options`, an array of strings — so allowed values no longer live only in description text.
+  The five fixed-set knobs declare it; see § (g) and `docs/decisions/README.md` 2026-10-02.]
 - Skills/commands must never treat `${user_config.KEY}` inline text as always-resolved. Required
   authoring pattern: quote the placeholder and instruct the model — "if this still reads as a
   literal `${user_config...}` placeholder, the option is unset; use the documented default
@@ -323,3 +327,47 @@ retry a tool call, every unrecognized or partial shape it sees must resolve to "
 matching the canonical no-op `hooks/block-main-thread-browser.mjs`'s deny path already models for
 `PreToolUse`. No new probe was required; the existing `agent_type` reading and the `${CLAUDE_PLUGIN_ROOT}`
 substitution both transfer unchanged to this hook.
+
+## (g) `userConfig` value lists: `options`
+
+**What was tried.** `claude plugin validate --strict` (Claude Code 2.1.287, macOS arm64,
+2026-10-02) against scratch copies of `.claude-plugin/plugin.json`, one `userConfig` entry
+varied per run.
+
+**Exact result.** A string option takes `options`: a non-empty array of strings, with `default`
+required to be one of them. Each other shape fails:
+
+```
+❯ userConfig.gitPolicy: Unrecognized key: "enum"
+❯ userConfig.gitPolicy: Unrecognized key: "choices"
+❯ userConfig.gitPolicy.options: options needs at least one value
+❯ userConfig.gitPolicy.options: Invalid input: expected array, received string
+❯ userConfig.gitPolicy.options.0: Invalid input: expected string, received object
+❯ userConfig.gitPolicy.options.1: Invalid input: expected string, received number
+❯ userConfig.reviewDepth.default: default must be one of the options: auto, single, panel
+```
+
+Declaring `options` is what makes `/plugin configure` show a pick-list with the default
+preselected; without it, an unset string option shows as a blank text field.
+
+**Consequence.** `profile`, `gitPolicy`, `docTrackingPolicy`, `reviewDepth` and `onDeviceGate`
+declare `options`. `scripts/validate.mjs` fails a malformed list the same way the loader would,
+and holds each of the five to `scripts/resolve-knobs.mjs`'s `ROSTER` values, with `auto` first
+on the two knobs whose fallback is a profile row.
+
+## (h) A `--plugin-dir` load sees no configured values
+
+**What was tried.** The config channel's on-device walkthrough (2026-10-02, build `dff6501`),
+with `gitPolicy` configured for `devcycle@devcycle`: `claude --plugin-dir <repo-root>`, then
+`/devcycle:review` printing and running only its resolver invocation — with the installed
+`devcycle@devcycle` enabled, and again with it disabled.
+
+**Exact result.** The checkout loads as `devcycle@inline`, and every `${user_config.*}`
+placeholder renders literally either way, including the configured `gitPolicy`: values stored
+under `pluginConfigs["devcycle@devcycle"]` are not shared with the inline id. A directory-source
+marketplace install — `claude plugin marketplace add <repo-root>`, then `claude plugin install
+devcycle@devcycle`, § (d) — loads in place from the checkout and does render the configured
+values.
+
+**Consequence.** Under `--plugin-dir` every knob resolves to its fallback, silently. To try a
+branch with real settings, install the checkout through a directory-source marketplace instead.

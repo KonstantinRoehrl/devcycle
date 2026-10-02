@@ -20,18 +20,21 @@
       "type": "string",
       "title": "Pipeline profile",
       "default": "standard",
+      "options": ["lean", "standard", "thorough"],
       "description": "Cost/rigor preset. One of: lean, standard, thorough. Individual knobs override it when explicitly configured. Default: standard."
     },
     "gitPolicy": {
       "type": "string",
       "title": "Git policy",
       "default": "local-commits-only",
+      "options": ["local-commits-only", "push-allowed", "open-pr"],
       "description": "What the finish stage may do with the branch. One of: local-commits-only, push-allowed, open-pr. Default: local-commits-only."
     },
     "docTrackingPolicy": {
       "type": "string",
       "title": "Doc-tracking policy",
       "default": "standard",
+      "options": ["all-local", "standard", "all-tracked"],
       "description": "What devcycle attempts to commit of the specs, plans, lessons, promotion records and audit reports it writes (the repo's own .gitignore always wins, and a few artifacts sit outside the policy). One of: all-local (commit none of them), standard (commit lessons and promotion records; keep specs, plans and audit reports local), all-tracked (also commit specs + plans). Default: standard."
     },
     "implementerModel": {
@@ -62,6 +65,7 @@
       "type": "string",
       "title": "Review depth",
       "default": "auto",
+      "options": ["auto", "single", "panel"],
       "description": "Branch review engine. auto (default) defers to the profile's branch-review row (single at lean and standard, panel at thorough); set → this value, verbatim, and the profile never moves it. One of: auto, single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass), panel (multi-lens review panel workflow). Default: auto."
     },
     "crossModelReview": {
@@ -74,6 +78,7 @@
       "type": "string",
       "title": "On-device gate",
       "default": "auto",
+      "options": ["auto", "human-required", "auto-ok"],
       "description": "Whether the on-device checklist closes only via a human walkthrough. auto (default) defers to the profile's on-device row (auto-ok at lean, human-required at standard and thorough); set → this value, verbatim, and the profile never moves it. One of: auto, human-required, auto-ok. Default: auto."
     },
     "learnStalenessSessions": {

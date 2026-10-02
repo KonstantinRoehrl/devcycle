@@ -114,6 +114,31 @@ marker with the version the change lands in, since only the release computes tha
   key: onDeviceGate
   default: auto
   note: "declared default changed human-required → auto, not a new key: the harness never injects a declared default, so resolution is unchanged — unset still takes the profile's on-device row — and the /plugin configure form stops presenting human-required as the default"
+- version: "unreleased"
+  change: added
+  key: profile
+  values: [lean, standard, thorough]
+  note: "manifest declares options, not a new key and no new value: /plugin configure offers the existing set as a pick-list with the default preselected instead of a blank text field"
+- version: "unreleased"
+  change: added
+  key: gitPolicy
+  values: [local-commits-only, push-allowed, open-pr]
+  note: "manifest declares options, not a new key and no new value: /plugin configure offers the existing set as a pick-list with the default preselected instead of a blank text field"
+- version: "unreleased"
+  change: added
+  key: docTrackingPolicy
+  values: [all-local, standard, all-tracked]
+  note: "manifest declares options, not a new key and no new value: /plugin configure offers the existing set as a pick-list with the default preselected instead of a blank text field"
+- version: "unreleased"
+  change: added
+  key: reviewDepth
+  values: [auto, single, panel]
+  note: "manifest declares options, not a new key and no new value: /plugin configure offers the existing set as a pick-list with auto preselected instead of a blank text field"
+- version: "unreleased"
+  change: added
+  key: onDeviceGate
+  values: [auto, human-required, auto-ok]
+  note: "manifest declares options, not a new key and no new value: /plugin configure offers the existing set as a pick-list with auto preselected instead of a blank text field"
 ```
 
 ## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)
