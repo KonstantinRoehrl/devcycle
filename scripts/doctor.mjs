@@ -252,6 +252,9 @@ export function excludedRequestsOf(summary) {
   );
 }
 
+export const excludedNote = (n) =>
+  n > 0 ? `${n} request${n === 1 ? "" : "s"} on a model with no exact price excluded` : null;
+
 // Cache-write pricing is the one genuinely unrecoverable number. A record carrying the 1h/5m split
 // is priced exactly; one carrying only the flat counter is priced at the 5m rate and is understated
 // by up to 60%. The band is bounded below by pricing every fallback-priced write at 5m and above by
@@ -492,6 +495,7 @@ export function runAggregates(summaries) {
       filesChanged: wl?.filesChanged ?? null,
       waveCount: wl?.waveCount ?? null,
       costUSD: members.reduce((n, m) => n + (m.costUSD ?? 0), 0),
+      excludedRequests: members.reduce((n, m) => n + excludedRequestsOf(m), 0),
       mainTurns: members.reduce((n, m) => n + (m.mainTurns ?? 0), 0),
       subagentTurns: members.reduce((n, m) => n + (m.subagentTurns ?? 0), 0),
       medianDepth: median(members.map((m) => m.medianDepth ?? 0)),
@@ -518,9 +522,10 @@ export function versionCohorts(summaries) {
   for (const s of summaries) {
     const key = s.pluginVersion ?? "unknown";
     if (!cohorts.has(key))
-      cohorts.set(key, { sessions: 0, dollars: [], depths: [], byStage: new Map(), qualities: [] });
+      cohorts.set(key, { sessions: 0, dollars: [], depths: [], byStage: new Map(), qualities: [], excluded: 0 });
     const c = cohorts.get(key);
     c.sessions++;
+    c.excluded += excludedRequestsOf(s);
     let sessionTotal = 0;
     for (const [skill, d] of Object.entries(s.costByStage ?? {})) {
       if (!c.byStage.has(skill)) c.byStage.set(skill, []);
@@ -572,7 +577,8 @@ export function cohortTable(summaries) {
       medianPerSession: median(c.dollars),
       medianDepth: c.depths.length ? median(c.depths) : null,
       quality: aggregateQuality(c.qualities),
-      inferred: version === "unknown" ? "no version detectable" : null,
+      inferred: [version === "unknown" ? "no version detectable" : null, excludedNote(c.excluded)]
+        .filter(Boolean).join("; ") || null,
     };
   });
 }
@@ -622,12 +628,15 @@ const DIRECTION_MIN_COHORT = 3; // below this the confidence column flags a vers
 export function corpusDirectionOfTravel(runs) {
   const scored = (runs ?? []).filter((r) => r.requestKind != null && r.workloadBand != null);
   const byKey = new Map();
+  const excludedBy = new Map();
   for (const r of scored) {
     const perVersion = byKey.get(matchKeyOf(r)) ?? new Map();
     const arr = perVersion.get(r.version) ?? [];
     arr.push(r.costUSD);
     perVersion.set(r.version, arr);
     byKey.set(matchKeyOf(r), perVersion);
+    const exKey = `${matchKeyOf(r)}\n${r.version}`;
+    excludedBy.set(exKey, (excludedBy.get(exKey) ?? 0) + (r.excludedRequests ?? 0));
   }
   let best = null;
   for (const [key, perVersion] of byKey) {
@@ -647,8 +656,10 @@ export function corpusDirectionOfTravel(runs) {
   if (deltaPct == null)
     return { direction: "insufficient-data", deltaPct: null,
       reason: "the oldest reliable cohort has a zero median" };
+  const from = best.reliable[0], to = best.reliable[best.reliable.length - 1];
+  const excluded = (excludedBy.get(`${best.key}\n${from}`) ?? 0) + (excludedBy.get(`${best.key}\n${to}`) ?? 0);
   return { direction: deltaPct > 1 ? "up" : deltaPct < -1 ? "down" : "flat", deltaPct,
-    matchKey: best.key, from: best.reliable[0], to: best.reliable[best.reliable.length - 1] };
+    matchKey: best.key, from, to, ...(excluded > 0 ? { inferred: excludedNote(excluded) } : {}) };
 }
 
 // A cohort of one is a sample, not a trend. Marked at every render site rather than left for
@@ -686,7 +697,8 @@ export function emitCandidates(summaries) {
   // ordering, so it is excluded here — but versionCohorts() above still buckets it, and the
   // cohort table (Task 16) still renders it, rather than dropping those sessions.
   const byVersion = new Map(); // version -> { skill -> [dollars] }
-  for (const [version, c] of versionCohorts(settled)) byVersion.set(version, c.byStage);
+  const cohortMap = versionCohorts(settled);
+  for (const [version, c] of cohortMap) byVersion.set(version, c.byStage);
   const versions = [...byVersion.keys()].filter((v) => v !== "unknown").sort(compareVersions);
   const versionCandidates = [];
   for (let i = 0; i + 1 < versions.length; i++) {
@@ -714,6 +726,9 @@ export function emitCandidates(summaries) {
           dollars: toMedian,
           delta_dollars,
           sessions_sampled: toDollars.length,
+          ...(excludedNote(cohortMap.get(from).excluded + cohortMap.get(to).excluded)
+            ? { inferred: excludedNote(cohortMap.get(from).excluded + cohortMap.get(to).excluded) }
+            : {}),
         });
       }
     }
@@ -1337,6 +1352,7 @@ export function formatCandidate(c) {
   // the same span twice if versions=[..] is also emitted, so the canonical from->to line wins and
   // the redundant range is suppressed; types with no from->to line still render versions=[..].
   if (c.versions && !c.version_from) parts.push(`versions=[${c.versions[0]}..${c.versions[1]}]`);
+  if (c.inferred) parts.push(`(inferred: ${c.inferred})`);
   if (isLowConfidence(c)) parts.push("low confidence: n=1");
   return `CANDIDATE: ${parts.join(" ")}`;
 }
@@ -1533,7 +1549,8 @@ export function formatReport(summaries) {
     direction.direction === "insufficient-data"
       ? `direction of travel: insufficient data (${direction.reason})`
       : `direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})`
+        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})` +
+        `${direction.inferred ? ` (inferred: ${direction.inferred})` : ""}`
   );
   for (const r of cohortTable(summaries))
     lines.push(
@@ -1541,7 +1558,7 @@ export function formatReport(summaries) {
       `total=$${r.total.toFixed(2).padStart(9)}  median/session=$${r.medianPerSession.toFixed(2).padStart(7)}  ` +
       `median depth=${r.medianDepth === null ? "n/a" : r.medianDepth}  ` +
       `quality: ${qualityText(r.quality)}` +
-      (r.version === "unknown" ? "   (inferred: no version detectable)" : "")
+      (r.inferred ? `   (inferred: ${r.inferred})` : "")
     );
   lines.push("", "Per-reviewDepth cohorts:");
   for (const r of reviewDepthCohortTable(summaries))
@@ -2182,6 +2199,7 @@ export function versionProfileTable(summaries, promotions = []) {
       medianDepth: depths.length ? median(depths) : null,
       quality: aggregateQuality(g.members.map((s) => s.quality ?? null)),
       lowConfidence: g.members.length < MIN_COHORT,
+      inferred: excludedNote(g.members.reduce((n, s) => n + excludedRequestsOf(s), 0)),
       // A promotion that named no culprit contributes nothing rather than a blank entry — which
       // is every record on disk until Phase 3 teaches recordPromotion to write the field.
       shipped: [...new Set(promotions
@@ -2227,7 +2245,7 @@ export function stageByVersionTable(summaries) {
   });
   const rendered = (r) => Object.values(r.byVersion).reduce((n, d) => n + (d?.median ?? 0), 0);
   rows.sort((a, b) => rendered(b) - rendered(a) || byName(a.stage, b.stage));
-  return { versions, rows };
+  return { versions, rows, excludedVersions: versions.filter((v) => cohorts.get(v).excluded > 0) };
 }
 
 // Where this window's money went, stage by stage, and how each stage moved against the window
@@ -2843,7 +2861,7 @@ export function renderReport(summaries, ctx) {
       "$/main-turn (derived)", "$/sub-turn (derived)", "Turns/task (derived)", "Δ vs previous (derived)",
       "Priciest stage (derived)", "Median depth (derived)", "Quality (derived)", "Shipped (observed)"],
     versionProfileTable(summaries, promotions).map((r) => [
-      r.version,
+      r.inferred ? `${r.version} (inferred: ${r.inferred})` : r.version,
       r.profile,
       cohortSessionsText(r),
       r.cycles,
@@ -2877,6 +2895,12 @@ export function renderReport(summaries, ctx) {
   L.push("", "_Dollar cells are derived per-version medians; Trend is derived. Forward-filled is " +
     "the share of the stage's settled dollars whose stage was inferred from the transcript rather " +
     "than read off a run record._");
+  if (stageTrend.excludedVersions.length)
+    L.push(
+      "",
+      `_Medians for ${stageTrend.excludedVersions.join(", ")} leave out requests on a model with no ` +
+        "exact price (inferred) — compare across them with care._",
+    );
   // stageByVersionTable drops the undetectable-version cohort from every column and every trend,
   // because "unknown" cannot sit on a version axis — right, but silent, and an omission nobody
   // names reads as a clean bill of health. cohortTable is the sibling that keeps that bucket,
@@ -3076,7 +3100,8 @@ export function renderReport(summaries, ctx) {
     direction.direction === "insufficient-data"
       ? `Direction of travel: insufficient data (${direction.reason})`
       : `Direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})`,
+        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})` +
+        `${direction.inferred ? ` (inferred: ${direction.inferred})` : ""}`,
   );
 
   section("### Per-session detail", "appendix-per-session-detail");
@@ -3179,6 +3204,7 @@ export function revertCandidates(summaries, promotions, { dir = doctorDir() } = 
   const settled = (summaries ?? []).filter((s) => !s.inFlight);
   const profiles = [...new Set(settled.map((s) => s.profile ?? "unknown"))];
   const candidates = [];
+  const skipped = [];
   for (const p of promotions ?? []) {
     if (p.lifecycle || !p.culpritId || !p.pluginVersion) continue;
     for (const profile of profiles) {
@@ -3188,6 +3214,14 @@ export function revertCandidates(summaries, promotions, { dir = doctorDir() } = 
       if (idx < 1) continue;                         // no same-profile predecessor to compare against
       const before = cohorts.get(known[idx - 1]);
       const after = cohorts.get(known[idx]);
+      const excluded = before.excluded + after.excluded;
+      if (excluded > 0) {
+        skipped.push({
+          culpritId: p.culpritId, profile, from: known[idx - 1], to: p.pluginVersion,
+          reason: `${excludedNote(excluded)} in the compared cohorts`,
+        });
+        continue;
+      }
       for (const stage of new Set([...before.byStage.keys(), ...after.byStage.keys()])) {
         const b = median(before.byStage.get(stage) ?? []);
         const a = median(after.byStage.get(stage) ?? []);
@@ -3203,7 +3237,7 @@ export function revertCandidates(summaries, promotions, { dir = doctorDir() } = 
       }
     }
   }
-  const out = { generatedAt: new Date().toISOString(), installedVersion: installedVersion(), candidates };
+  const out = { generatedAt: new Date().toISOString(), installedVersion: installedVersion(), candidates, skipped };
   try {
     mkdirSync(dir, { recursive: true });
     atomicWrite(join(dir, "revert-candidates.json"), JSON.stringify(out, null, 2) + "\n");

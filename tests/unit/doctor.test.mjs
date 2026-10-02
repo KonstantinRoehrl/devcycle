@@ -19,7 +19,7 @@ import {
   bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
   renderReport, complianceIssueBody, COMPLIANCE_TYPES, NoComplianceCandidateError,
   formatComplianceCandidate, parseDraftedMarkers, complianceType, COMPLIANCE_TITLES,
-  ENTRY_TAGS, PLAYBOOK_STAGE, stageSignal, splitReason, provisionalCostUSD, excludedRequestsOf,
+  ENTRY_TAGS, PLAYBOOK_STAGE, stageSignal, splitReason, provisionalCostUSD, excludedRequestsOf, excludedNote, stageByVersionTable,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -2587,4 +2587,94 @@ test("cli: --depth names the family a provisional window was assumed from", () =
   });
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /window assumed from claude-opus-5-5/);
+});
+
+const withExcluded = (over, unpriced) => ({
+  costByStage: { execution: 10 }, medianDepth: 10, profile: "standard", ...over, unpriced,
+});
+
+test("excludedNote: a count becomes the reason, zero becomes null, one is singular", () => {
+  assert.equal(excludedNote(0), null);
+  assert.equal(excludedNote(1), "1 request on a model with no exact price excluded");
+  assert.equal(excludedNote(36902), "36902 requests on a model with no exact price excluded");
+});
+
+test("versionCohorts: counts excluded requests per cohort", () => {
+  const cohorts = versionCohorts([
+    withExcluded({ pluginVersion: "0.22.0" }, { "claude-mythos-9": 3 }),
+    withExcluded({ pluginVersion: "0.22.0" }, { "claude-mythos-9": 2 }),
+    withExcluded({ pluginVersion: "0.21.0" }, {}),
+  ]);
+  assert.equal(cohorts.get("0.22.0").excluded, 5);
+  assert.equal(cohorts.get("0.21.0").excluded, 0);
+});
+
+test("cohortTable: a cohort with excluded requests says so, and joins the no-version reason", () => {
+  const rows = cohortTable([
+    withExcluded({ pluginVersion: "0.22.0" }, { "claude-mythos-9": 4 }),
+    withExcluded({ pluginVersion: "0.21.0" }, {}),
+    withExcluded({ pluginVersion: "unknown" }, { "claude-mythos-9": 1 }),
+  ]);
+  const by = Object.fromEntries(rows.map((r) => [r.version, r.inferred]));
+  assert.equal(by["0.22.0"], "4 requests on a model with no exact price excluded");
+  assert.equal(by["0.21.0"], null);
+  assert.equal(by.unknown, "no version detectable; 1 request on a model with no exact price excluded");
+});
+
+test("formatReport: the per-version line prints the cohort's inferred reason", () => {
+  const text = formatReport([withExcluded({ pluginVersion: "0.22.0", id: "a1" }, { "claude-mythos-9": 4 })]);
+  assert.match(text, /0\.22\.0 .*\(inferred: 4 requests on a model with no exact price excluded\)/);
+});
+
+test("emitCandidates: a version delta that spans a cohort with excluded requests is marked inferred", () => {
+  const mk = (id, version, dollars, unpriced) => withExcluded(
+    { id, pluginVersion: version, costByStage: { execution: dollars } }, unpriced);
+  const marked = emitCandidates([
+    mk("a", "0.21.0", 10, {}), mk("b", "0.22.0", 1, { "claude-mythos-9": 5 }),
+  ]).find((c) => c.type === "version-improvement");
+  assert.equal(marked.inferred, "5 requests on a model with no exact price excluded");
+  assert.match(formatCandidate(marked), /\(inferred: 5 requests on a model with no exact price excluded\)/);
+  const clean = emitCandidates([mk("a", "0.21.0", 10, {}), mk("b", "0.22.0", 1, {})])
+    .find((c) => c.type === "version-improvement");
+  assert.equal("inferred" in clean, false);
+});
+
+test("corpusDirectionOfTravel: a direction measured across excluded requests says so", () => {
+  const run = (version, costUSD, excludedRequests) => ({
+    profile: "standard", requestKind: "feature", workloadBand: "S", version, costUSD, excludedRequests,
+  });
+  const runs = [
+    run("0.21.0", 10, 0), run("0.21.0", 10, 0), run("0.21.0", 10, 0),
+    run("0.22.0", 1, 7), run("0.22.0", 1, 0), run("0.22.0", 1, 0),
+  ];
+  const got = corpusDirectionOfTravel(runs);
+  assert.equal(got.direction, "down");
+  assert.equal(got.inferred, "7 requests on a model with no exact price excluded");
+  const clean = corpusDirectionOfTravel(runs.map((r) => ({ ...r, excludedRequests: 0 })));
+  assert.equal("inferred" in clean, false);
+});
+
+test("runAggregates: a run carries the excluded requests of its sessions", () => {
+  const [run] = runAggregates([
+    { id: "a1", runId: "r1", pluginVersion: "0.22.0", profile: "standard", costUSD: 1, unpriced: { x: 2 }, provisional: { y: { requests: 3, dollars: 1, basedOn: "z" } } },
+  ]);
+  assert.equal(run.excludedRequests, 5);
+});
+
+test("versionProfileTable: a group with excluded requests is marked inferred", () => {
+  const rows = versionProfileTable([
+    withExcluded({ id: "a1", pluginVersion: "0.22.0", costUSD: 1 }, { "claude-mythos-9": 2 }),
+    withExcluded({ id: "a2", pluginVersion: "0.21.0", costUSD: 1 }, {}),
+  ]);
+  const by = Object.fromEntries(rows.map((r) => [r.version, r.inferred]));
+  assert.equal(by["0.22.0"], "2 requests on a model with no exact price excluded");
+  assert.equal(by["0.21.0"], null);
+});
+
+test("stageByVersionTable: names the versions whose medians leave out excluded requests", () => {
+  const t = stageByVersionTable([
+    withExcluded({ id: "a1", pluginVersion: "0.21.0" }, {}),
+    withExcluded({ id: "a2", pluginVersion: "0.22.0" }, { "claude-mythos-9": 3 }),
+  ]);
+  assert.deepEqual(t.excludedVersions, ["0.22.0"]);
 });

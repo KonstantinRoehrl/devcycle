@@ -16,7 +16,7 @@ import {
   renderReport, buildJsonReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates, winCandidates,
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
-  changelogEntry, regressionAttribution,
+  changelogEntry, regressionAttribution, excludedNote,
 } from "../../scripts/doctor.mjs";
 import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
 import { readPolicy } from "../../scripts/reinforcement-policy.mjs";
@@ -1170,7 +1170,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "- 1 session(s) still in flight (newest record < 30 min old) — in-flight sessions have only part of their cost recorded",
     // Cost by version — the whole row, out to its last cell: a needle that stopped at the depth
     // column still matched after the Quality and Shipped columns were deleted.
-    `| 0.12.0 | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | +36.4% | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
+    `| 0.12.0 (inferred: 3 requests on a model with no exact price excluded) | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | +36.4% | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
     // Cost by stage, across versions and within this window
     "| execution | $10.00 (n=3) | $5.00 (n=4) | down | 3% |",
     "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
@@ -1197,7 +1197,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "Read 900, Bash 400",
     "5 dispatched, 2 without an explicit model",
     `| panel | 7 | $178.00 | $15.00 | ${COVERAGE_QUALITY_TEXT} |`,
-    `| 0.12.0 | 4 | $145.00 | $15.00 | 40000 | ${COVERAGE_QUALITY_TEXT} |`,
+    `| 0.12.0 (inferred: 3 requests on a model with no exact price excluded) | 4 | $145.00 | $15.00 | 40000 | ${COVERAGE_QUALITY_TEXT} |`,
     // No session in this fixture carries a runId, so no run projection exists to score (#127).
     "Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)",
     "session 22222221 — turns 20 (main 15, subagent 5), depth median 40000 max 60000, cost $15.00, " +
@@ -1923,4 +1923,51 @@ test("doctorDir falls back to ~/.claude/devcycle/doctor when unset", () => {
   } finally {
     if (prior !== undefined) process.env.DEVCYCLE_DOCTOR_DIR = prior;
   }
+});
+
+test("revertCandidates skips a pair whose cohorts exclude requests, and records why", () => {
+  const root = makeTempDir("doctor-revert-excluded-");
+  try {
+    const summaries = [
+      sum({ id: "o1", pluginVersion: "0.11.0", profile: "thorough", costByStage: { execution: 5 } }),
+      sum({ id: "n1", pluginVersion: "0.12.0", profile: "thorough", costByStage: { execution: 20 },
+            unpriced: { "claude-mythos-9": 4 } }),
+    ];
+    const promotions = [
+      { culpritId: "friction:regressor", rung: "r2", pluginVersion: "0.12.0", commit: "abc1234", lifecycle: null },
+    ];
+    const result = revertCandidates(summaries, promotions, { dir: root });
+    assert.deepEqual(result.candidates, [], "a figure a missing model distorted must not propose a revert");
+    assert.equal(result.skipped.length, 1);
+    assert.equal(result.skipped[0].culpritId, "friction:regressor");
+    assert.equal(result.skipped[0].from, "0.11.0");
+    assert.equal(result.skipped[0].to, "0.12.0");
+    assert.match(result.skipped[0].reason, /4 requests on a model with no exact price excluded/);
+    const written = JSON.parse(readFileSync(join(root, "revert-candidates.json"), "utf8"));
+    assert.equal(written.skipped.length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("revertCandidates: with no excluded requests the same pair still produces its candidate", () => {
+  const root = makeTempDir("doctor-revert-clean-");
+  try {
+    const summaries = [
+      sum({ id: "o1", pluginVersion: "0.11.0", profile: "thorough", costByStage: { execution: 5 } }),
+      sum({ id: "n1", pluginVersion: "0.12.0", profile: "thorough", costByStage: { execution: 20 } }),
+    ];
+    const promotions = [
+      { culpritId: "friction:regressor", rung: "r2", pluginVersion: "0.12.0", commit: "abc1234", lifecycle: null },
+    ];
+    const result = revertCandidates(summaries, promotions, { dir: root });
+    assert.equal(result.candidates.length, 1);
+    assert.deepEqual(result.skipped, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("renderReport: the Cost by version table marks a version whose cost excludes requests", () => {
+  const text = renderReport([
+    sum({ id: "a1", pluginVersion: "0.22.0", profile: "standard", costByStage: { execution: 1 },
+          unpriced: { "claude-mythos-9": 4 } }),
+  ], ctx());
+  assert.match(text, /0\.22\.0 \(inferred: 4 requests on a model with no exact price excluded\)/);
 });
