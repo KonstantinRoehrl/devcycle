@@ -408,3 +408,34 @@ test("a stale branch and a missing artifact are both reported in one exit-1 run"
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+const runWithEnv = (statePath, env) =>
+  spawnSync("node", [SCRIPT, "--state", statePath], { encoding: "utf8", env: { ...process.env, ...env } });
+
+test("on success it prints the stage's entry and note lines from references/stages.json", () => {
+  const dir = makeTempDir("resume-check-");
+  try {
+    const state = makeState(dir, ["- stage: planning", `- root: ${dir}`]);
+    const r = run(state);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.match(r.stdout, /^entry: .*playbooks\/planning-waves\.md$/m);
+    assert.match(r.stdout, /^note: none$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a broken stages table prints no entry line, says why, and leaves the verdict at ok", () => {
+  const dir = makeTempDir("resume-check-");
+  try {
+    const state = makeState(dir, ["- stage: planning", `- root: ${dir}`]);
+    const broken = join(dir, "stages.json");
+    writeFileSync(broken, "{ nope");
+    const r = runWithEnv(state, { DEVCYCLE_STAGES_PATH: broken });
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.doesNotMatch(r.stdout, /^entry:/m);
+    assert.match(r.stdout, /resume-check: no entry line — .*is not valid JSON.*fall back to references\/resume\.md § Resuming at the recorded stage/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

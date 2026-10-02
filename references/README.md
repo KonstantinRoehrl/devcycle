@@ -25,4 +25,5 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 | `reinforcement-policy.md` | The numeric thresholds devcycle's learn loop reads when it decides to escalate a culprit or reinforce a win. |
 | `resume.md` | How any stage re-enters itself after an interruption (`/devcycle:continue`), and the state file's shape. |
 | `review-comments.md` | How PR review comments are triaged — the six-bucket taxonomy, the comment-to-finding mapping, and the reply-posting contract for the `reconcile` command. |
+| `stages.json` | The stage dispatch — each stage's entry playbook or skill and its re-entry note, printed by `scripts/stage-entry.mjs`. |
 | `sweep-execution.md` | How a plan task marked `**Execution:** sweep` runs inside the execution stage. |

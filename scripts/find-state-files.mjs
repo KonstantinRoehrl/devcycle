@@ -10,6 +10,7 @@ import { basename, dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
+import { stageEntry, entryLines } from "./stage-entry.mjs";
 
 // Reuses scripts/validate.mjs's walk-prune convention: .git holds no state file and node_modules
 // would be slow noise. .devcycle is NEVER pruned — it is exactly what this walk looks for.
@@ -91,6 +92,17 @@ function fmtAge(s) {
   return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
 }
 
+// The same lines resume-check prints, so the candidate list already says where each cycle would
+// resume; a stage with no entry says why instead of printing a guess.
+function entryFor(stage) {
+  try {
+    const e = stageEntry(stage);
+    return { entry: e.entry, note: e.note, lines: entryLines(e) };
+  } catch (err) {
+    return { entry: null, note: null, entryError: err.message, lines: [`(no entry — ${err.message})`] };
+  }
+}
+
 function main(argv) {
   let flags, root;
   try {
@@ -114,7 +126,11 @@ function main(argv) {
 
   const records = findStateFiles(root).map(describe);
   if (flags["--json"]) {
-    process.stdout.write(JSON.stringify(records) + "\n");
+    const withEntries = records.map((r) => {
+      const { lines, ...e } = entryFor(r.stage);
+      return { ...r, ...e };
+    });
+    process.stdout.write(JSON.stringify(withEntries) + "\n");
     return;
   }
   if (!records.length) {
@@ -126,7 +142,9 @@ function main(argv) {
     console.log(`${i + 1}. ${r.path}`);
     console.log(`   request: ${r.request ?? "(none)"}`);
     console.log(`   branch:  ${r.branch ?? "(none)"}   stage: ${r.stage ?? "(none)"}   age: ${fmtAge(r.ageSeconds)}`);
-    console.log(`   last event: ${r.lastEvent ?? "(no ledger events)"}\n`);
+    console.log(`   last event: ${r.lastEvent ?? "(no ledger events)"}`);
+    for (const line of entryFor(r.stage).lines) console.log(`   ${line}`);
+    console.log("");
   });
 }
 
