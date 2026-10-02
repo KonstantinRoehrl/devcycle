@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { PRICING, priceFor } from "../../scripts/pricing.mjs";
+import { PRICING, priceFor, provisionalPriceFor, cacheReadDollars } from "../../scripts/pricing.mjs";
 import { collectModelIds, formatFixture, readFixture, unpricedIds } from "../../scripts/refresh-observed-models.mjs";
 
 const FIXTURE = fileURLToPath(new URL("../fixtures/observed-model-ids.json", import.meta.url));
@@ -311,4 +311,73 @@ test("PRICING: the table is frozen so no caller can mutate prices at runtime", (
   assert.throws(() => {
     PRICING.models["claude-opus-5"] = { in: 0, out: 0, window: 1 };
   }, TypeError);
+});
+
+const closeTo = (actual, expected) =>
+  assert.ok(Math.abs(actual - expected) < 1e-9, `expected ${expected}, got ${actual}`);
+
+test("PRICING: Opus 5.5 and Sonnet 5.5 carry the listed prices and cache-read rates", () => {
+  assert.deepEqual(priceFor("claude-opus-5-5"), { in: 4, out: 20, cacheRead: 0.2, window: 1_000_000 });
+  assert.deepEqual(priceFor("claude-sonnet-5-5"), { in: 2, out: 10, cacheRead: 0.2, window: 1_000_000 });
+});
+
+test("PRICING: Fable 5.1 lists its cache-read rate; Fable 5 is unlisted and assumed", () => {
+  assert.equal(priceFor("claude-fable-5-1").cacheRead, 0.25);
+  assert.equal(priceFor("claude-fable-5").cacheRead, undefined);
+});
+
+test("PRICING: asOf is the date the claude-api reference was cached", () => {
+  assert.equal(PRICING.asOf, "2026-09-25");
+});
+
+test("cacheReadDollars: a listed rate wins, an unlisted row falls back to 0.1x input", () => {
+  closeTo(cacheReadDollars(1_000_000, priceFor("claude-opus-5-5")), 200_000); // $0.20/M, not $0.40/M
+  closeTo(cacheReadDollars(1_000_000, priceFor("claude-fable-5-1")), 250_000);
+  closeTo(cacheReadDollars(1_000_000, priceFor("claude-fable-5")), 1_000_000); // 0.1 x $10
+  closeTo(cacheReadDollars(1_000_000, priceFor("claude-opus-5")), 500_000);
+});
+
+test("provisionalPriceFor: a model newer than anything priced in its family takes the newest priced row", () => {
+  const next = provisionalPriceFor("claude-opus-5-6");
+  assert.equal(next.basedOn, "claude-opus-5-5");
+  assert.deepEqual(next.price, priceFor("claude-opus-5-5"));
+  assert.equal(provisionalPriceFor("claude-opus-6").basedOn, "claude-opus-5-5");
+  assert.equal(provisionalPriceFor("claude-sonnet-5-6").basedOn, "claude-sonnet-5-5");
+  assert.equal(provisionalPriceFor("claude-haiku-4-6").basedOn, "claude-haiku-4-5-20251001");
+  assert.equal(provisionalPriceFor("claude-haiku-4-5-20260101").basedOn, "claude-haiku-4-5-20251001");
+});
+
+test("provisionalPriceFor: an exact id needs no provisional price", () => {
+  assert.equal(provisionalPriceFor("claude-opus-5-5"), null);
+  assert.equal(provisionalPriceFor("claude-haiku-4-5-20251001"), null);
+});
+
+test("provisionalPriceFor: an older or differently-priced model is never guessed at", () => {
+  for (const id of [
+    "claude-sonnet-4-6",          // $3/$15 in the reference — a Sonnet 5.5 price would be 33% low
+    "claude-opus-4-6",
+    "claude-opus-4-7",
+    "claude-opus-4-1-20250805",
+    "claude-sonnet-4-5-20250929",
+    "claude-opus-4-8-20260101",   // older than the newest priced Opus even with a date stamp
+  ]) assert.equal(provisionalPriceFor(id), null, id);
+});
+
+test("provisionalPriceFor: unparseable ids, unpriced families and bad input return null without throwing", () => {
+  for (const id of [
+    "claude-3-5-sonnet-20241022", // family after the version
+    "claude-mythos-5-1",          // no priced Mythos row
+    "claude-opus-5-5-preview",    // non-numeric suffix
+    "claude-opus-5-5[1m]",
+    "claude-opus-20260101",       // a date stamp is not a version
+    "gpt-4",
+    "",
+    undefined,
+    null,
+    42,
+  ]) assert.equal(provisionalPriceFor(id), null, String(id));
+});
+
+test("provisionalPriceFor: priceFor stays strict for the same ids", () => {
+  assert.equal(priceFor("claude-opus-5-6"), null);
 });

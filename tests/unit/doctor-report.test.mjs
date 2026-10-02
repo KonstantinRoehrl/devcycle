@@ -20,6 +20,7 @@ import {
 } from "../../scripts/doctor.mjs";
 import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
 import { readPolicy } from "../../scripts/reinforcement-policy.mjs";
+import { PRICING } from "../../scripts/pricing.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
@@ -1204,7 +1205,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
       "[stage costs inferred — forward-filled, no run record]",
     // The vintage itself, not the label: a report rendering "prices as of undefined" passed the
     // label-only needle, which is the failure the whole appendix footer exists to prevent.
-    "prices as of 2026-09-05", // appendix footer
+    `prices as of ${PRICING.asOf}`, // appendix footer
     "forward-filled within each transcript", // the attribution disclosure
     "fraction of the model's context window", // the depth disclosure
   ]) assert.ok(out.includes(needle), `the rendered report dropped "${needle}"`);
