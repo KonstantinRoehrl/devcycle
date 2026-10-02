@@ -3,6 +3,9 @@
 How any stage re-enters itself after an interruption. Skills name this file; none of
 them restate it.
 
+Every ask this file names sits on the run record a resume already carries: an Other answer at one
+appends `user-correction-at-gate` to that run, whose rule `references/ledger.md` owns.
+
 ## The state file
 
 A cycle's file lives at `<repo root>/.devcycle/state.md`, where repo root is
@@ -82,9 +85,7 @@ checkout or leaked from another project: never resume it and never silently rese
 report what its `root:` and `request:` say versus where you are,
 and let the user choose between adopting it (the repo genuinely moved: rewrite `root:`,
 keep everything else) and leaving it alone. The adopt-or-leave answer is the user's to
-give, and an Other answer to it appends `user-correction-at-gate` to the run record a
-resume already carries; `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that rule. A
-file with no `root:` line predates this format and is not foreign: adopt it by writing
+give. A file with no `root:` line predates this format and is not foreign: adopt it by writing
 `root:` and `request:` at the next rewrite.
 
 ## The state file's `configured:` line
@@ -110,9 +111,7 @@ checkout and may have switched it back to the integration branch):
 
 - If the state file records a topic branch, resume means getting the checkout onto
   that branch — `commands/continue.md`'s recorded-vs-current mismatch rule already
-  covers asking the user before switching, and an Other answer at that ask appends
-  `user-correction-at-gate` to the run record the resume carries, whose rule
-  `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns; never switch silently. Never
+  covers asking the user before switching; never switch silently. Never
   create a fresh topic branch when one is recorded: the recorded branch is where
   any committed work lives.
 - Only if the recorded branch is still the default or an integration branch does
@@ -138,36 +137,21 @@ never weaken the two rows above.
 
 ## Resuming at the recorded stage
 
-The single owner of which playbook each stage resumes through. `commands/cycle.md` walks the
-stages in order and states each one's conditions; this table says where each one is re-entered,
-so neither command carries a second copy.
+`references/stages.json` owns which entry each stage resumes through — a playbook path or an
+upstream skill — and its re-entry `note:`. `scripts/stage-entry.mjs <stage>` prints both;
+`scripts/resume-check.mjs` prints them on success and `scripts/find-state-files.mjs` per listed
+state file, so neither command opens this file to find an entry. `commands/cycle.md` walks the
+stages in order and states each one's conditions.
 
-| stage | resume via |
-| --- | --- |
-| `scoping` | `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` |
-| `audit` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` — re-reads the confirmed criteria from the state file's `audit:` artifact if one was written, otherwise re-runs the criteria interview; never assumes criteria a previous session did not record |
-| `diagnosis` | `superpowers:systematic-debugging`, bugs only — with the devcycle notes in `${CLAUDE_PLUGIN_ROOT}/commands/cycle.md` § Stage walk, which owns them; read that entry, since this session may never have loaded it |
-| `brainstorm` | `superpowers:brainstorming` — likewise with the notes in `${CLAUDE_PLUGIN_ROOT}/commands/cycle.md` § Stage walk |
-| `planning` | `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` |
-| `execution` | `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`, which follows the per-task table below — each task's last ledger event maps to its resume action |
-| `branch-review` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` |
-| `on-device` | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` |
-| `fast-path` | `${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md` (its Resume section) |
-| `sweep` | `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md` (its Resume section) |
-| `receiving-review` | `${CLAUDE_PLUGIN_ROOT}/playbooks/receiving-review.md` — a standalone `reconcile` stage, re-entered per §6.6 of its own flow; not part of the pipeline walk |
-| `finish` | `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` — it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the `Git policy:` handoff line, and the `stage: done` close |
-
-`done` has no row: a closed cycle resumes at nothing, and `/devcycle:cycle` reuses its state file
+`done` has no entry: a closed cycle resumes at nothing, and `/devcycle:cycle` reuses its state file
 rather than resuming it.
 
-On resume the stage keeps the `startedAt` it was entered with (the `updated:` timestamp recorded
-at entry from `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`, never a narrated estimate), so
-a resumed session's cost attributes to the resumed stage per
-`${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, not to `devcycle:continue`.
+On resume the stage keeps the `startedAt` it was entered with; `references/handoff.md` owns how it
+is recorded and why.
 
 ## Resuming a wave's per-task position
 
-`${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` re-enters by reading
+`playbooks/executing-waves.md` re-enters by reading
 `.devcycle/state.md`, the plan's Dispatch Map, and the ledger, then resuming each task
 from its last ledger event, most specific row winning. Sweep rows key on the event's
 logged `outcome=` (a `sweep` token in it), never on the task's `**Execution:** sweep`

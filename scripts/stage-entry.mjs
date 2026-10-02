@@ -1,10 +1,12 @@
+#!/usr/bin/env node
 // Which playbook or skill each stage is entered through, and its re-entry note, read from
 // references/stages.json — the stage dispatch's single owner. resume-check.mjs and
 // find-state-files.mjs print the same two lines, so neither command opens references/resume.md
-// to find an entry.
+// to find an entry. Run it as `stage-entry.mjs <stage>` at a stage transition.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseFlags } from "./cli-flags.mjs";
 
 export const PLUGIN_ROOT = fileURLToPath(new URL("..", import.meta.url));
 // DEVCYCLE_STAGES_PATH lets a test point the loader at a broken table; nothing else sets it.
@@ -50,3 +52,25 @@ export function stageEntry(stage, { path = stagesPath(), root = PLUGIN_ROOT } = 
 }
 
 export const entryLines = ({ entry, note }) => [`entry: ${entry}`, `note: ${note || "none"}`];
+
+function main(argv) {
+  let positionals;
+  try {
+    ({ positionals } = parseFlags(argv, {}, { allowPositionals: true }));
+  } catch (err) {
+    console.error(`stage-entry: ${err.message}`);
+    process.exit(1);
+  }
+  if (positionals.length !== 1) {
+    console.error("stage-entry: usage: stage-entry.mjs <stage>");
+    process.exit(1);
+  }
+  try {
+    for (const line of entryLines(stageEntry(positionals[0]))) console.log(line);
+  } catch (err) {
+    console.error(`stage-entry: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));

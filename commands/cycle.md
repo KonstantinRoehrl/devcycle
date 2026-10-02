@@ -10,14 +10,14 @@ is a cache: every artifact is on disk, so the pipeline survives `/clear` and res
 
 ## Conventions this command does not restate
 
-- Knobs, the knob channel, and the `profile`: `${CLAUDE_PLUGIN_ROOT}/references/config.md`; model
-  tiers: `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`.
+- Knobs, the knob channel, and the `profile`: `references/config.md`; model
+  tiers: `references/model-routing.md`.
 - The first-run configuration this command runs only when its first-run test passes — after
-  resolving knobs, before minting: `${CLAUDE_PLUGIN_ROOT}/references/first-run-config.md`.
-- The state file's shape, lifecycle, ownership check: `${CLAUDE_PLUGIN_ROOT}/references/resume.md`.
-- Stage boundaries — handoff shape, context actions, await gate: `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`.
-- Branch discipline before any stage that commits: `${CLAUDE_PLUGIN_ROOT}/references/branch.md`.
-- How this command and its agents report: `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
+  resolving knobs, before minting: `references/first-run-config.md`.
+- The state file's shape, lifecycle, ownership check: `references/resume.md`.
+- Stage boundaries — handoff shape, context actions, await gate: `references/handoff.md`.
+- Branch discipline before any stage that commits: `references/branch.md`.
+- How this command and its agents report: `references/output.md`.
 
 ## Before the first confirmation
 
@@ -82,7 +82,7 @@ finish stage's landing gate reads. Surface any line it prints alongside the stal
 ## Triage the input
 
 Judge `$ARGUMENTS` on three axes, then confirm every verdict with the user in ONE
-AskUserQuestion **before any stage runs**. Nothing here is profile-conditional. The run record is minted by now, so an Other answer at this gate or any later one appends `user-correction-at-gate`, whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
+AskUserQuestion **before any stage runs**. Nothing here is profile-conditional. The run record is minted by now, so an Other answer at this gate or any later one appends `user-correction-at-gate`, whose rule `references/ledger.md` owns.
 
 **Maturity** picks the entry stage: a rough idea, vague ticket, or one-liner starts at
 **scoping**; a detailed ticket or spec skips it for **brainstorm** as a validation pass, or
@@ -124,12 +124,12 @@ playbook owns and runs before any agent edits.
 ## Stage walk
 
 Run these in order, rewriting the state file at every transition; two short paths bypass the walk on
-confirmation (`fast-path`, `sweep`). One further stage, `receiving-review`, is off-walk in a different
-sense: it is a standalone `reconcile` stage entered directly, never reached by this pipeline
-walk, so it carries a resume row but no numbered entry below. Each stage's playbook and its re-entry
-conditions live in
-`${CLAUDE_PLUGIN_ROOT}/references/resume.md` § Resuming at the recorded stage. The line below is the
-stage enum's single source of truth — `scripts/validate.mjs` reads its literal form:
+confirmation (`fast-path`, `sweep`), and `receiving-review`, a standalone `reconcile` stage entered
+directly, has a `references/stages.json` entry but no numbered one below. At each transition, run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/stage-entry.mjs" <stage>` and follow what it prints: open the
+`entry:` playbook or invoke the `entry:` skill, and apply its `note:`. On a non-zero exit, report its
+reason, then read `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § Resuming at the recorded stage. The
+enum below is the stages' single source of truth — `scripts/validate.mjs` reads its literal form:
 
 - stage: <scoping|audit|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|receiving-review|finish|done>
 
@@ -165,4 +165,4 @@ stage enum's single source of truth — `scripts/validate.mjs` reads its literal
 
 Whether planning and execution run devcycle-native or overlay their upstream counterparts is the
 `profile`'s call, read by each playbook from the `knobs:` line against the profile table in
-`${CLAUDE_PLUGIN_ROOT}/references/config.md`.
+`references/config.md`.

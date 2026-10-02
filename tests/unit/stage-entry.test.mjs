@@ -1,8 +1,10 @@
 // scripts/stage-entry.mjs: each stage's entry and re-entry note, read from references/stages.json.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { writeInto } from "./helpers.mjs";
 import { PLUGIN_ROOT, loadStages, stageEntry, entryLines } from "../../scripts/stage-entry.mjs";
@@ -48,4 +50,18 @@ test("a missing, malformed, or mis-shaped table throws with its reason", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+const CLI = fileURLToPath(new URL("../../scripts/stage-entry.mjs", import.meta.url));
+
+test("CLI: prints the entry and note for a stage, and exits 1 with the reason otherwise", () => {
+  const ok = spawnSync(process.execPath, [CLI, "execution"], { encoding: "utf8" });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /^entry: .*playbooks\/executing-waves\.md\nnote: resume each task/m);
+  const unknown = spawnSync(process.execPath, [CLI, "nope"], { encoding: "utf8" });
+  assert.equal(unknown.status, 1);
+  assert.match(unknown.stderr, /stage-entry: no entry for stage "nope"/);
+  const none = spawnSync(process.execPath, [CLI], { encoding: "utf8" });
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /usage: stage-entry\.mjs <stage>/);
 });

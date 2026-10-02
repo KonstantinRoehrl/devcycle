@@ -20,7 +20,7 @@
   "branch-review": { "entry": "playbooks/reviewing-the-branch.md", "note": "" },
   "on-device": {
     "entry": "playbooks/verifying-on-device.md",
-    "note": "re-walk its human-required checklist walkthrough; a stale state file never counts as having cleared it"
+    "note": "its checklist walkthrough is a human-required step when onDeviceGate is human-required"
   },
   "fast-path": { "entry": "playbooks/taking-the-fast-path.md", "note": "re-enter through its Resume section" },
   "sweep": { "entry": "playbooks/sweeping-mechanical-changes.md", "note": "re-enter through its Resume section" },

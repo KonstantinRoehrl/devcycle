@@ -20,9 +20,12 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 
 const stages = (read("commands/cycle.md").match(/stage:\s*<([a-z|-]+)>/)?.[1] ?? "").split("|").filter(Boolean);
 
-// `references/resume.md` § Resuming at the recorded stage now owns every stage's playbook
-// path; both run-bearing commands cite it instead of restating a route inline.
-const RESUME_REF = "${CLAUDE_PLUGIN_ROOT}/references/resume.md";
+// `references/stages.json` owns every stage's entry. commands/cycle.md runs scripts/stage-entry.mjs at
+// each transition; commands/continue.md follows the same lines resume-check.mjs prints.
+const STAGE_ENTRY_REF = "${CLAUDE_PLUGIN_ROOT}/scripts/stage-entry.mjs";
+const RESUME_CHECK_REF = "${CLAUDE_PLUGIN_ROOT}/scripts/resume-check.mjs";
+const stageEntries = () =>
+  new Map(Object.entries(JSON.parse(read("references/stages.json"))).map(([stage, spec]) => [stage, spec.entry]));
 
 // --- deriving a matcher from a documented template -------------------------------------
 // Several formats in this surface are pinned as one literal template line in the reference
@@ -59,20 +62,16 @@ test("the stage enum is non-empty and every stage is lowercase-kebab", () => {
 // it. Every other stage in the enum must route somewhere real from both entry points.
 const TERMINAL = "done";
 
-// Where a stage's text says the run goes next: a playbook file that exists on disk, or an
-// upstream skill devcycle delegates the stage to wholesale.
-const routesSomewhere = (text) => {
-  const paths = [...text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(playbooks\/[A-Za-z0-9._-]+\.md)/g)].map((m) => m[1]);
-  return {
-    ok: paths.some((p) => existsSync(join(root, p))) || /superpowers:[a-z-]+/.test(text),
-    paths,
-  };
-};
+// Where a stage's entry sends the run: a playbook file that exists on disk, or an upstream skill
+// devcycle delegates the stage to wholesale.
+const routesSomewhere = (entry) => ({
+  ok: (entry.startsWith("playbooks/") && existsSync(join(root, entry))) || /^superpowers:[a-z-]+$/.test(entry),
+  paths: entry.startsWith("playbooks/") ? [entry] : [],
+});
 
 // Each stage, as `/devcycle:cycle` itself resolves it: an entry in the numbered stage walk.
 // The two short paths (`fast-path`, `sweep`) bypass the walk on confirmation and carry no
-// numbered entry of their own; every stage's actual playbook now comes from the shared table
-// in `references/resume.md`, which both commands cite instead of restating.
+// numbered entry of their own; every stage's actual playbook comes from `references/stages.json`.
 const cycleRoutes = () => {
   const text = read("commands/cycle.md");
   const routes = new Map();
@@ -84,52 +83,42 @@ const cycleRoutes = () => {
   return routes;
 };
 
-// `references/resume.md` § Resuming at the recorded stage, parsed into stage -> "resume via" cell —
-// the one place a stage's playbook path now lives.
-const resumeRoutes = () => {
-  const resume = read("references/resume.md");
-  const section = resume.split("## Resuming at the recorded stage")[1]?.split(/\n## /)[0] ?? "";
-  const routes = new Map();
-  for (const [, stage, via] of section.matchAll(/^\|\s*`([a-z-]+)`\s*\|\s*(.+?)\s*\|$/gm)) routes.set(stage, via);
-  return routes;
-};
-
 test("cycle.md itself routes every stage in its enum to a playbook that exists", () => {
   const cycle = read("commands/cycle.md");
   assert.ok(cycle.includes("`stage: done`"), "cycle.md no longer names the terminal stage");
   assert.ok(
-    cycle.includes(RESUME_REF),
-    "commands/cycle.md no longer cites references/resume.md, which owns the stage → playbook routing"
+    cycle.includes(STAGE_ENTRY_REF),
+    "commands/cycle.md no longer runs scripts/stage-entry.mjs, which prints each stage's entry from references/stages.json"
   );
   const walked = cycleRoutes();
-  const resumeVia = resumeRoutes();
+  const entries = stageEntries();
   for (const s of stages) {
     if (s === TERMINAL) continue;
     if (s !== "fast-path" && s !== "sweep" && s !== "receiving-review")
       assert.ok(walked.get(s), `commands/cycle.md names stage "${s}" in its enum but has no numbered walk entry for it`);
-    const cell = resumeVia.get(s);
-    assert.ok(cell, `references/resume.md's stage table has no row for "${s}" for commands/cycle.md's walk to resume through`);
-    const { ok, paths } = routesSomewhere(cell);
-    assert.ok(ok, `references/resume.md routes stage "${s}" to no playbook that exists (found: ${paths.join(", ") || "none"})`);
+    const entry = entries.get(s);
+    assert.ok(entry, `references/stages.json has no entry for "${s}" for commands/cycle.md's walk to enter through`);
+    const { ok, paths } = routesSomewhere(entry);
+    assert.ok(ok, `references/stages.json routes stage "${s}" to no playbook that exists (found: ${paths.join(", ") || entry})`);
   }
 });
 
-test("continue's resume table routes every resumable stage to a playbook that exists", () => {
+test("continue routes every resumable stage to a playbook that exists, through the lines resume-check prints", () => {
   const continueText = read("commands/continue.md");
   assert.ok(
-    continueText.includes(RESUME_REF),
-    "commands/continue.md no longer cites references/resume.md, which owns the stage → playbook routing"
+    continueText.includes(RESUME_CHECK_REF) && continueText.includes("`entry:`") && continueText.includes("`note:`"),
+    "commands/continue.md no longer follows the `entry:` and `note:` lines resume-check.mjs prints"
   );
-  const resumeVia = resumeRoutes();
+  const entries = stageEntries();
   for (const s of stages) {
     if (s === TERMINAL) {
-      assert.ok(!resumeVia.has(s), `references/resume.md offers to resume the terminal stage "${s}"`);
+      assert.ok(!entries.has(s), `references/stages.json offers to resume the terminal stage "${s}"`);
       continue;
     }
-    const cell = resumeVia.get(s);
-    assert.ok(cell, `references/resume.md's stage table has no row for stage "${s}"`);
-    const { ok, paths } = routesSomewhere(cell);
-    assert.ok(ok, `references/resume.md resumes stage "${s}" into no playbook that exists (found: ${paths.join(", ") || "none"})`);
+    const entry = entries.get(s);
+    assert.ok(entry, `references/stages.json has no entry for stage "${s}"`);
+    const { ok, paths } = routesSomewhere(entry);
+    assert.ok(ok, `references/stages.json resumes stage "${s}" into no playbook that exists (found: ${paths.join(", ") || entry})`);
   }
 });
 
@@ -975,7 +964,10 @@ test("every rejecting writer journals a culprit, and the boundary sentences name
 const OWNER = "references/ledger.md";
 const RUN_RECORD = "run-record.mjs";
 const TOKEN = "user-correction-at-gate";
-const OWNER_REF = `\${CLAUDE_PLUGIN_ROOT}/${OWNER}`;
+// The citation is the bare owner path: under the citation grammar (references/README.md) naming where
+// a rule lives is not an instruction to read it. The bare path is a substring of the prefixed form,
+// so a surface not yet demoted still matches.
+const OWNER_REF = OWNER;
 
 // Every runtime surface file, the same four directories `scripts/validate.mjs` counts.
 const surfaceFiles = () =>
@@ -985,13 +977,9 @@ const surfaceFiles = () =>
       .map((f) => `${dir}/${f}`)
   );
 
-// `references/resume.md` § Resuming at the recorded stage is the single owner of the
-// stage → playbook mapping; a command that cites it reaches every playbook that table
-// routes to, exactly as if it named the path inline.
-const resumePlaybooks = () =>
-  [...read("references/resume.md").matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(playbooks\/[A-Za-z0-9._-]+\.md)/g)].map(
-    (m) => m[1]
-  );
+// `references/stages.json` is the single owner of the stage → playbook mapping; a command that
+// follows it reaches every playbook it routes to, exactly as if it named the path inline.
+const resumePlaybooks = () => [...stageEntries().values()].filter((entry) => entry.startsWith("playbooks/"));
 
 // The playbooks a command hands its run to, partitioned by whether that command has a run
 // record behind it — `cycle.md` mints one, `continue.md` resumes one, everything else has none.
@@ -1002,7 +990,7 @@ const playbooksReachedFrom = (runBearing) => {
     if (text.includes(RUN_RECORD) !== runBearing) continue;
     for (const [, target] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(playbooks\/[A-Za-z0-9._-]+\.md)/g))
       reached.add(target);
-    if (text.includes(RESUME_REF)) for (const target of resumePlaybooks()) reached.add(target);
+    if (text.includes(STAGE_ENTRY_REF) || text.includes(RESUME_CHECK_REF)) for (const target of resumePlaybooks()) reached.add(target);
   }
   return reached;
 };
@@ -1376,36 +1364,20 @@ test("every in-cycle surface that gates the user cites the write site with the p
   );
 });
 
-test("harvested: resume/stage-table — one table maps every stage to its playbook, and both commands cite it", () => {
-  const resume = read("references/resume.md");
+test("harvested: resume/stage-table — one JSON file maps every stage to its entry, and nothing restates it", () => {
   const cycle = read("commands/cycle.md");
   const enumMatch = cycle.match(/stage:\s*<([a-z|-]+)>/);
   assert.ok(enumMatch, "commands/cycle.md no longer declares the stage enum this table is checked against");
   const stages = enumMatch[1].split("|");
   assert.ok(stages.length > 5, `the stage enum parsed to ${stages.length} entries — the split changed shape`);
+  const keys = Object.keys(JSON.parse(read("references/stages.json"))).sort();
+  assert.deepEqual(keys, stages.filter((s) => s !== "done").sort(), "references/stages.json's keys must be the stage enum minus done");
 
-  assert.match(resume, /^## Resuming at the recorded stage$/m);
-  for (const stage of stages) {
-    if (stage === "done") continue; // a closed cycle resumes at nothing
-    assert.match(
-      resume,
-      new RegExp(`^\\|\\s*\`${stage}\`\\s*\\|`, "m"),
-      `references/resume.md's stage table has no row for \`${stage}\` — a stage was added to the enum without a resume route`
-    );
-  }
-
-  // The duplication this table exists to remove: neither command may carry a second copy.
-  for (const [path, text] of [["commands/continue.md", read("commands/continue.md")], ["commands/cycle.md", cycle]]) {
+  // The duplication the JSON exists to remove: no command, and not resume.md, may carry a second copy.
+  for (const path of ["commands/continue.md", "commands/cycle.md", "references/resume.md"]) {
+    const text = read(path);
     const rows = stages.filter((s) => new RegExp(`^\\|\\s*\`?${s}\`?\\s*\\|`, "m").test(text));
-    assert.deepEqual(
-      rows,
-      [],
-      `${path} restates the stage table (rows: ${rows.join(", ")}) — it must cite references/resume.md instead`
-    );
-    assert.ok(
-      text.includes("${CLAUDE_PLUGIN_ROOT}/references/resume.md"),
-      `${path} no longer cites references/resume.md, which now owns the stage table`
-    );
+    assert.deepEqual(rows, [], `${path} restates the stage table (rows: ${rows.join(", ")}) — references/stages.json owns it`);
   }
 });
 

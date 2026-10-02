@@ -23,8 +23,8 @@ failures — is a dispatch.
 
 **Exempt from delegation**, read directly however deep the session has run: files whose exact
 path is already known and whose contents the coordinator must reason about itself —
-`.devcycle/state.md`, `.devcycle/ledger.md`, the run record, the plan's dispatch map, and a spec
-under approval. Small and bounded; a subagent would cost more than it saves.
+`.devcycle/state.md`, `.devcycle/ledger.md`, the run record, the plan's dispatch map, a spec or plan under approval, and the on-device
+checklist. Small and bounded; a subagent would cost more than it saves.
 
 ## The stage budget
 
