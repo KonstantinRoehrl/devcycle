@@ -90,6 +90,10 @@ node scripts/doctor.mjs               # token/context profile; --depth is the co
 Pass the test files as a glob, exactly as above and as CI does: a bare `tests/unit/` directory
 argument fails spuriously.
 
+When a playbook or command edit trips a line budget, `validate.mjs` reports the measured value:
+set `tests/fixtures/surface-budget.json` or `tests/fixtures/context-budget.json` to exactly that
+number and record the change in `docs/decisions/README.md`.
+
 The two scanners divide the work and neither subsumes the other. gitleaks owns credentials and
 tokens: it is rule-maintained, and it reads **history**, so a secret that was committed and
 removed one commit later still fails the build. `redaction-check.mjs` owns the privacy classes
@@ -109,8 +113,12 @@ runs from the installed plugin, not this repo.
 
 `scripts/doctor.mjs` prices what it measures against `scripts/pricing.mjs`, the data module
 that holds per-model dollar rates and context windows with no CLI of its own — update that
-file when prices change. What says the table is complete is
-`tests/fixtures/observed-model-ids.json`, the model ids real corpora recorded;
+file when prices change. A row may carry `cacheRead`, the model's cache-read rate; omit it and
+doctor assumes 0.1× the input price. A model with no row is excluded from every dollar figure; one
+newer than its family's newest priced row is shown provisionally at that row's price, but that
+estimate does not satisfy the coverage test below (`priceFor` stays strict) — add a real row. What
+says the table is complete is `tests/fixtures/observed-model-ids.json`, the model ids real corpora
+recorded;
 `node scripts/refresh-observed-models.mjs` refreshes it (`--dir` for a corpus elsewhere,
 `--out` for another target) and names any id it found that has no price. Refresh it rather
 than editing it by hand: a hand-written copy of the table's own keys is what let

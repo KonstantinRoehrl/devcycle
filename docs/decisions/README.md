@@ -5,17 +5,39 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-02 — unpriced models: per-model cache reads, provisional prices only for newer models
+
+**Decision:** `scripts/doctor.mjs` prices cache reads per model, from an optional `cacheRead` rate on
+each `scripts/pricing.mjs` row; a row without one reads at 0.1× its input price. A model with no row
+gets a provisional price, at its family's newest priced row, only when it is newer than every priced
+model in that family — never when it is older. Provisional dollars are reported beside the measured
+total (`≈$… provisional`, `totals.provisional` in `--json`), never added to it, and a cohort, version
+delta or revert comparison that includes such requests is marked `(inferred: …)` or, for a revert
+comparison, skipped and listed.
+
+**Why:** a flat 0.1× cache-read rate mispriced models whose listed cache-read price differs, and a
+model absent from the table silently dropped out of every figure. A newer model most likely costs what
+its family's newest row does; an older one may not (Sonnet 4.6 is $3/$15 against Sonnet 5.5's $2/$10),
+and a plausible wrong figure is worse than an exclusion. Estimates stay out of measured totals so a
+reader never mistakes one for the other.
+
+**Supersedes:** doctor's flat 0.1× input cache-read rate for every model. Consequence: advisory and
+dispatch-cost figures for Opus 5.5 and Fable 5.1 (which now have their own cache-read rates), and
+Fable 5 against Fable 5.1 (which now differ), are not comparable before and after this change.
+`CHANGELOG.md` is drafted by hand at release time, so this is where that comparability note lives.
+
 ## 2026-10-02 — budgets re-baselined for the unpriced-model draft route
 
 **Decision:** the unpriced-model branch re-baselines two budget keys to their exact measured values,
 both read from `node scripts/validate.mjs`'s failure output. `tests/fixtures/surface-budget.json`:
 `surfaceTotal` 5683 → 5693. `tests/fixtures/context-budget.json`: `playbooks/profiling-sessions.md`
-64924 → 65407 (+483 bytes, playbook plus its cited references). `commandMax` and `playbookMax` and the
+64924 → 65426 (+502 bytes, playbook plus its cited references). `commandMax` and `playbookMax` and the
 other thirteen context entries did not move.
 
 **Why:** `playbooks/profiling-sessions.md` gained the minimum text the new behaviour needs: the
 `PROVISIONAL PRICE` sentence beside the `UNPRICED MODEL` one, the `unpriced-model` slug in the drafting
-step, and the `Drafted: [doctor:<slug>] <title>` marker form that `DRAFTED_MARKER_RE` now accepts.
+step, the `Drafted: [doctor:<slug>] <title>` marker form that `DRAFTED_MARKER_RE` now accepts, and the
+`[doctor:<slug>]` prefix in the sentence naming what `outer_loop` counts.
 `scripts/validate.mjs` only fails when a measurement *exceeds* its baseline, so the baselines are set
 to the measured values rather than rounded up, or the budget stops measuring anything.
 

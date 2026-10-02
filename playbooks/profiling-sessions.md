@@ -202,7 +202,7 @@ to draft. For each finding it chose:
    Pass no `--label`, and create none. Labelling that repo needs push access, so a filer who is
    not a collaborator gets a 403 — after both gates, with the draft already recorded — and GitHub
    drops labels such a filer supplies anyway. The draft's `labels:` line says what the maintainer
-   applies at triage; `doctor --json`'s `outer_loop` counts by the `[culprit:<slug>]` or `[compliance:<slug>]`
+   applies at triage; `doctor --json`'s `outer_loop` counts by the `[culprit:<slug>]`, `[compliance:<slug>]` or `[doctor:<slug>]`
    title prefix, which every filer can set.
 
 ## Config-drift mode
