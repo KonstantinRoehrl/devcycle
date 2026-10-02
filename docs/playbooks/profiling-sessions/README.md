@@ -24,6 +24,14 @@ by re-running the mining loop, and every run with at least one finding persists 
 a GitHub issue (screened, then gated by two separate confirmations before anything is filed) or
 hand back a `/devcycle:cycle` entry-point string — the playbook itself never starts one.
 
+**Models the price table lacks.** A model missing from `scripts/pricing.mjs` is excluded from every
+dollar figure and reported on its own line. One not older than every priced model in its family is
+instead priced provisionally at that family's newest price, shown as `≈$… provisional` beside the
+measured total and never folded into it. Cohort and version tables that include such requests carry
+an `(inferred: …)` mark, and a revert comparison involving them is skipped and listed in the report.
+`--json` carries the estimate as `totals.provisional` and the skipped comparisons as
+`revert_skipped`; `doctor --issue-body unpriced-model` drafts the issue asking for the missing rows.
+
 ## How it fits
 - Up: [the pipeline](../../pipeline/README.md) — devcycle's guided cycle; `doctor` sits outside
   it as a standalone entry point.
