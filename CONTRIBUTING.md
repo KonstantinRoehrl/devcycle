@@ -90,7 +90,7 @@ node scripts/doctor.mjs               # token/context profile; --depth is the co
 Pass the test files as a glob, exactly as above and as CI does: a bare `tests/unit/` directory
 argument fails spuriously.
 
-When a playbook or command edit trips a line budget, `validate.mjs` reports the measured value:
+When a playbook or command edit trips a size budget (lines for the surface, bytes for the context), `validate.mjs` reports the measured value:
 set `tests/fixtures/surface-budget.json` or `tests/fixtures/context-budget.json` to exactly that
 number and record the change in `docs/decisions/README.md`.
 
@@ -115,7 +115,7 @@ runs from the installed plugin, not this repo.
 that holds per-model dollar rates and context windows with no CLI of its own — update that
 file when prices change. A row may carry `cacheRead`, the model's cache-read rate; omit it and
 doctor assumes 0.1× the input price. A model with no row is excluded from every dollar figure; one
-newer than its family's newest priced row is shown provisionally at that row's price, but that
+not older than its family's newest priced row is shown provisionally at that row's price, but that
 estimate does not satisfy the coverage test below (`priceFor` stays strict) — add a real row. What
 says the table is complete is `tests/fixtures/observed-model-ids.json`, the model ids real corpora
 recorded;

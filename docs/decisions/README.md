@@ -9,8 +9,8 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 
 **Decision:** `scripts/doctor.mjs` prices cache reads per model, from an optional `cacheRead` rate on
 each `scripts/pricing.mjs` row; a row without one reads at 0.1× its input price. A model with no row
-gets a provisional price, at its family's newest priced row, only when it is newer than every priced
-model in that family — never when it is older. Provisional dollars are reported beside the measured
+gets a provisional price, at its family's newest priced row, only when it is not older than every
+priced model in that family — never when it is older. Provisional dollars are reported beside the measured
 total (`≈$… provisional`, `totals.provisional` in `--json`), never added to it, and a cohort, version
 delta or revert comparison that includes such requests is marked `(inferred: …)` or, for a revert
 comparison, skipped and listed.
@@ -22,8 +22,9 @@ and a plausible wrong figure is worse than an exclusion. Estimates stay out of m
 reader never mistakes one for the other.
 
 **Supersedes:** doctor's flat 0.1× input cache-read rate for every model. Consequence: advisory and
-dispatch-cost figures for Opus 5.5 and Fable 5.1 (which now have their own cache-read rates), and
-Fable 5 against Fable 5.1 (which now differ), are not comparable before and after this change.
+dispatch-cost figures are not comparable before and after this change for Fable 5.1 (which now has
+its own cache-read rate) and for Fable 5 against Fable 5.1 (which now differ). Opus 5.5 and Sonnet
+5.5 are newly priced: their spend was excluded before and now appears.
 `CHANGELOG.md` is drafted by hand at release time, so this is where that comparability note lives.
 
 ## 2026-10-02 — budgets re-baselined for the unpriced-model draft route
