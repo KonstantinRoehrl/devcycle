@@ -1215,6 +1215,21 @@ test("context budget: the total counts a cited reference, and counts it once whe
   assert.equal(res.status, 0, res.stderr);
 });
 
+test("context budget: validate reports each playbook's all-hops figure and never fails on it", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "playbooks/showing-things.md", "# Showing things\n\nA second fixture playbook.\n");
+  playbook(dir, "Read `${CLAUDE_PLUGIN_ROOT}/playbooks/showing-things.md` next.\n");
+  writeInto(
+    dir,
+    CONTEXT_PATH,
+    JSON.stringify({ "playbooks/demoing-things.md": 999999, "playbooks/showing-things.md": 999999 }, null, 2) + "\n"
+  );
+  const res = runValidate(dir);
+  ok(res);
+  assert.match(res.stdout, /context \(check 15 gates refs-only bytes; all-hops is reported, never gated\):/);
+  assert.match(res.stdout, /playbooks\/demoing-things\.md {2}refs-only \d+\/999999 B {2}all-hops 2 files, \d+ words/);
+});
+
 test("context budget: one byte less than the transitive total fails, proving the closure is followed", () => {
   const dir = makePluginFixture();
   writeInto(dir, "references/alpha.md", "# Alpha\n\nA reference the playbook loads.\n");

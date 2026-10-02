@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { SEMVER_RE, cmpSemver } from "./semver.mjs";
 import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run-record.mjs";
 import { readPolicy } from "./reinforcement-policy.mjs";
+import { closure } from "./context-closure.mjs";
 import { ROSTER } from "./resolve-knobs.mjs";
 
 
@@ -747,10 +748,12 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
   }
 
+  const contextRows = [];
   // 15. Per-stage context budget: a playbook's own bytes plus every reference reachable from it
   //     through ${CLAUDE_PLUGIN_ROOT} citations, against a committed baseline. Bytes, not lines:
   //     a context window is spent in bytes, and a long line costs what it costs. Growth is a
-  //     reviewed decision, same rule as check 9.
+  //     reviewed decision, same rule as check 9. Citations are followed by
+  //     scripts/context-closure.mjs, which context-report.mjs shares.
   const CONTEXT_BUDGET_PATH = "tests/fixtures/context-budget.json";
   const contextFile = join(root, CONTEXT_BUDGET_PATH);
   if (!existsSync(contextFile)) {
@@ -776,26 +779,6 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       parsed = false;
     }
     if (parsed) {
-      // Citations are followed to a fixed point; `seen` makes a citation cycle terminate and
-      // counts each file exactly once, which is also what the reader's context actually pays.
-      const citationsIn = (text) =>
-        [...text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(references\/[A-Za-z0-9._-]+\.md)/g)].map((m) => m[1]);
-      const transitiveBytes = (startRel) => {
-        const seen = new Set();
-        const queue = [startRel];
-        let total = 0;
-        while (queue.length) {
-          const relPath = queue.shift();
-          if (seen.has(relPath)) continue;
-          seen.add(relPath);
-          const abs = join(root, relPath);
-          if (!existsSync(abs)) continue;
-          const text = readFileSync(abs, "utf8");
-          total += Buffer.byteLength(text);
-          queue.push(...citationsIn(text));
-        }
-        return total;
-      };
       const playbookNames = namesIn("playbooks").map((f) => `playbooks/${f}`);
       for (const p of playbookNames) {
         if (!(p in contextBaseline)) {
@@ -807,7 +790,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           fail(`${CONTEXT_BUDGET_PATH}: ${p} must be an integer, got ${JSON.stringify(limit)}`);
           continue;
         }
-        const bytes = transitiveBytes(p);
+        const { bytes } = closure(p, { follow: "refs", root });
+        contextRows.push({ path: p, bytes, limit, allHops: closure(p, { follow: "all", root }) });
         if (bytes > limit)
           fail(
             `${p}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, playbook plus its cited references) — ` +
@@ -1133,6 +1117,15 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   docsSubdirTrackingErrors(root).forEach(fail);
 
   recordStoreTrackingErrors(process.cwd()).forEach(fail);
+
+  // L17: the all-hops closure follows playbook→playbook hops check 15 deliberately does not gate.
+  // Reported beside the gated figure so the hops stay visible without collapsing every budget
+  // into one number.
+  if (contextRows.length) {
+    console.log("context (check 15 gates refs-only bytes; all-hops is reported, never gated):");
+    for (const r of contextRows)
+      console.log(`  ${r.path}  refs-only ${r.bytes}/${r.limit} B  all-hops ${r.allHops.files.length} files, ${r.allHops.words} words`);
+  }
 
   if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
   console.log("validate: ok");
