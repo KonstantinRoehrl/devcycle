@@ -82,6 +82,7 @@ node scripts/validate.mjs             # manifests, command frontmatter, descript
 node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-listed terms — CI
 node scripts/duplication-check.mjs    # duplicated prose across commands/playbooks/agents/references, and within a file — CI
 node scripts/temp-dir-check.mjs       # temp dirs created outside makeTempDir, which owns removing them — CI
+node scripts/citation-grammar.mjs     # the citation grammar's worklist (back-edge, owner-sentence, bare-read, bare-exists; --references: references nothing reads); exits 1 while any remain — local
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
 gitleaks git --no-banner --redact     # credentials, over the full history — CI
 node scripts/doctor.mjs               # token/context profile; --depth is the context gate's probe — local only
