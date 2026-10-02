@@ -19,7 +19,7 @@ import {
   bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
   renderReport, complianceIssueBody, COMPLIANCE_TYPES, NoComplianceCandidateError,
   formatComplianceCandidate, parseDraftedMarkers, complianceType, COMPLIANCE_TITLES,
-  ENTRY_TAGS, PLAYBOOK_STAGE, stageSignal, splitReason,
+  ENTRY_TAGS, PLAYBOOK_STAGE, stageSignal, splitReason, provisionalCostUSD, excludedRequestsOf,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -642,13 +642,13 @@ test("summarizeSession: cacheBand covers only the priced turns, and an unpriced 
   };
   const recs = [
     turn({ message: { model: "claude-opus-5", usage: splitUsage } }),
-    turn({ message: { model: "claude-opus-9", usage: splitUsage } }), // not in PRICING
+    turn({ message: { model: "claude-mythos-9", usage: splitUsage } }), // not in PRICING
   ];
   const s = summarizeSession("sess-abcdef123456", recs);
   // costBand computed directly over the one priced turn is the only value the wiring may produce;
   // a summary that fed both turns in, or none, would diverge from this exactly.
   assert.deepStrictEqual(s.cacheBand, costBand([recs[0]]));
-  assert.equal(s.unpriced["claude-opus-9"], 1);
+  assert.equal(s.unpriced["claude-mythos-9"], 1);
 });
 
 test("a forward-filled session is labelled inferred in text AND in --json", () => {
@@ -740,13 +740,13 @@ test("cli: an unpriced model gets its own line and is excluded from the dollar t
       "\n" +
       JSON.stringify({
         type: "assistant",
-        message: { model: "claude-opus-9", usage: usage(1_000_000, 0, 0, 0), content: [] },
+        message: { model: "claude-mythos-9", usage: usage(1_000_000, 0, 0, 0), content: [] },
       }) +
       "\n",
   );
   const out = run(["--dir", dir]);
   assert.equal(out.status, 0, out.stderr);
-  assert.match(out.stdout, /UNPRICED MODEL: claude-opus-9 \(1 requests?\)/);
+  assert.match(out.stdout, /UNPRICED MODEL: claude-mythos-9 \(1 requests?\)/);
 });
 
 test("formatReport: discloses the price vintage", () => {
@@ -766,7 +766,7 @@ test("cli: --json emits a candidates array carrying emitCandidates' signals", ()
       "\n" +
       JSON.stringify({
         type: "assistant",
-        message: { model: "claude-opus-9", usage: usage(1_000_000, 0, 0, 0), content: [] },
+        message: { model: "claude-mythos-9", usage: usage(1_000_000, 0, 0, 0), content: [] },
       }) +
       "\n",
   );
@@ -788,7 +788,7 @@ test("cli: the markdown report surfaces candidate signals, not just the raw aggr
       "\n" +
       JSON.stringify({
         type: "assistant",
-        message: { model: "claude-opus-9", usage: usage(1_000_000, 0, 0, 0), content: [] },
+        message: { model: "claude-mythos-9", usage: usage(1_000_000, 0, 0, 0), content: [] },
       }) +
       "\n",
   );
@@ -2496,4 +2496,95 @@ test("renderReport: no COLLECTION GAP warning when the corpus carries no missing
     { pluginVersion: "0.11.0", costByStage: {}, medianDepth: 10, complianceCandidates: [] },
   ], { repo: "x", today: "2026-09-02", scope: "all" });
   assert.doesNotMatch(text, /COLLECTION GAP/, "a corpus with no committing-no-workload gap must not raise the warning");
+});
+
+const near = (actual, expected) =>
+  assert.ok(Math.abs(actual - expected) < 1e-9, `expected ${expected}, got ${actual}`);
+
+test("costUSD: cache reads are priced per model, not at a flat 0.1x input", () => {
+  const read = { cache_read_input_tokens: 1_000_000 };
+  near(costUSD(read, "claude-opus-5-5"), 0.2);   // listed $0.20/M — a flat 0.1x would say $0.40
+  near(costUSD(read, "claude-sonnet-5-5"), 0.2);
+  near(costUSD(read, "claude-fable-5-1"), 0.25); // listed — a flat 0.1x would say $1.00
+  near(costUSD(read, "claude-fable-5"), 1.0);    // unlisted, assumed 0.1x input
+  near(costUSD(read, "claude-opus-5"), 0.5);     // unlisted, unchanged
+});
+
+test("costUSD: Opus 5.5 and Sonnet 5.5 price input and output at their listed rates", () => {
+  near(costUSD({ input_tokens: 1_000_000, output_tokens: 1_000_000 }, "claude-opus-5-5"), 24);
+  near(costUSD({ input_tokens: 1_000_000, output_tokens: 1_000_000 }, "claude-sonnet-5-5"), 12);
+});
+
+test("provisionalCostUSD: a newer unpriced model prices at its family's newest row and names the basis", () => {
+  const got = provisionalCostUSD({ input_tokens: 1_000_000 }, "claude-opus-5-6");
+  assert.equal(got.basedOn, "claude-opus-5-5");
+  near(got.dollars, 4);
+});
+
+test("provisionalCostUSD: exact ids, older models and families with no price return null", () => {
+  assert.equal(provisionalCostUSD({ input_tokens: 1 }, "claude-opus-5-5"), null);
+  assert.equal(provisionalCostUSD({ input_tokens: 1 }, "claude-sonnet-4-6"), null);
+  assert.equal(provisionalCostUSD({ input_tokens: 1 }, "claude-mythos-9"), null);
+});
+
+test("summarizeSession: provisional dollars are tallied on their own and enter no measured figure", () => {
+  const u = { input_tokens: 1_000_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 };
+  const recs = [
+    turn({ message: { model: "claude-opus-5", usage: u } }),    // measured: $5
+    turn({ message: { model: "claude-opus-5-6", usage: u } }),  // provisional: priced as Opus 5.5, $4
+    turn({ message: { model: "claude-mythos-9", usage: u } }),  // no family: excluded
+  ];
+  const s = summarizeSession("sess-abcdef123456", recs);
+  near(s.costUSD, 5);
+  assert.deepEqual(Object.keys(s.costByModel), ["claude-opus-5"]);
+  assert.ok(Object.values(s.costByStage).every((d) => d <= 5), "no stage may carry the provisional dollars");
+  assert.equal(s.provisional["claude-opus-5-6"].requests, 1);
+  assert.equal(s.provisional["claude-opus-5-6"].basedOn, "claude-opus-5-5");
+  near(s.provisional["claude-opus-5-6"].dollars, 4);
+  assert.equal(s.unpriced["claude-mythos-9"], 1);
+  assert.equal(s.unpriced["claude-opus-5-6"], undefined, "a provisionally priced model is not also unpriced");
+  assert.deepStrictEqual(s.cacheBand, costBand([recs[0]]), "the TTL band covers measured turns only");
+  assert.equal(excludedRequestsOf(s), 2);
+});
+
+test("summarizeSession: a session with only measured models has an empty provisional map", () => {
+  const u = { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 10 };
+  const s = summarizeSession("sess-abcdef123457", [turn({ message: { model: "claude-opus-5", usage: u } })]);
+  assert.deepEqual(s.provisional, {});
+  assert.equal(excludedRequestsOf(s), 0);
+});
+
+test("excludedRequestsOf: sums unpriced and provisional requests, and tolerates a summary with neither", () => {
+  assert.equal(excludedRequestsOf({ unpriced: { a: 3, b: 2 }, provisional: { c: { requests: 4, dollars: 1, basedOn: "x" } } }), 9);
+  assert.equal(excludedRequestsOf({}), 0);
+});
+
+test("resolveDepth: a newer unpriced model measures against its family's window and says so", () => {
+  const { root, cwd } = depthFixture("sess-5566", [turnWithUsage("claude-opus-5-6", usage(100, 200, 300, 5))]);
+  const r = resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-5566", CLAUDE_DOCTOR_PROJECTS: root }, cwd);
+  assert.equal(r.window, 1_000_000);
+  assert.equal(r.windowProvisionalAs, "claude-opus-5-5");
+});
+
+test("resolveDepth: an exact model carries no provisional marker", () => {
+  const { root, cwd } = depthFixture("sess-5567", [turnWithUsage("claude-opus-5", usage(1, 2, 3, 4))]);
+  const r = resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-5567", CLAUDE_DOCTOR_PROJECTS: root }, cwd);
+  assert.equal("windowProvisionalAs" in r, false);
+});
+
+test("resolveDepth: a model with no priced family refuses, naming the file that fixes it", () => {
+  const { root, cwd } = depthFixture("sess-5568", [turnWithUsage("claude-mythos-9", usage(1, 2, 3, 4))]);
+  assert.throws(
+    () => resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-5568", CLAUDE_DOCTOR_PROJECTS: root }, cwd),
+    /claude-mythos-9 is not in the pricing table \(scripts\/pricing\.mjs\)/,
+  );
+});
+
+test("cli: --depth names the family a provisional window was assumed from", () => {
+  const { root, cwd } = depthFixture("sess-5569", [turnWithUsage("claude-opus-5-6", usage(100, 200, 300, 5))]);
+  const out = spawnSync(process.execPath, [SCRIPT, "--depth"], {
+    cwd, encoding: "utf8", env: { ...process.env, CLAUDE_CODE_SESSION_ID: "sess-5569", CLAUDE_DOCTOR_PROJECTS: root },
+  });
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /window assumed from claude-opus-5-5/);
 });

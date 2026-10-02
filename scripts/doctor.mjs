@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // The one owner of CLI flag parsing across the scripts; an unrecognised flag is fatal here rather
 // than a silent no-op that would profile the default corpus instead of the one asked for.
 import { parseFlags, requireValue } from "./cli-flags.mjs";
-import { PRICING, priceFor } from "./pricing.mjs";
+import { PRICING, priceFor, provisionalPriceFor, cacheReadDollars } from "./pricing.mjs";
 // The one reader of this repo's promotion records; doctor's Cost-by-version "Shipped" column
 // names what each version shipped rather than parsing those records a second time here.
 import { readPromotions } from "./promotions.mjs";
@@ -207,11 +207,9 @@ export function contextDepth(usage) {
 const CACHE_WRITE_1H_MULTIPLIER = 2.0;
 const CACHE_WRITE_5M_MULTIPLIER = 1.25;
 
-// Dollars for one request. Returns null when the model is not in the pricing table, so the
-// caller can report it and exclude it instead of silently defaulting to a price.
-export function costUSD(usage, model) {
-  const p = priceFor(model);
-  if (!p) return null;
+// Dollars for one usage record against a given price row. Both the strict and the provisional
+// entry points go through it, so the two can never disagree about how a record is priced.
+function priceUsage(usage, p) {
   const cc = usage.cache_creation ?? {};
   const h1 = cc.ephemeral_1h_input_tokens ?? 0;
   const m5 = cc.ephemeral_5m_input_tokens ?? 0;
@@ -224,9 +222,34 @@ export function costUSD(usage, model) {
   const perMillion =
     (usage.input_tokens ?? 0) * p.in +
     write +
-    (usage.cache_read_input_tokens ?? 0) * p.in * 0.1 +
+    cacheReadDollars(usage.cache_read_input_tokens ?? 0, p) +
     (usage.output_tokens ?? 0) * p.out;
   return perMillion / 1e6;
+}
+
+// Dollars for one request. Returns null when the model is not in the pricing table, so the
+// caller can report it and exclude it instead of silently defaulting to a price. Strict on
+// purpose: dispatch-cost and the routing advisories call this and present the result as measured.
+export function costUSD(usage, model) {
+  const p = priceFor(model);
+  return p ? priceUsage(usage, p) : null;
+}
+
+// The estimate for a model newer than anything priced in its family (scripts/pricing.mjs owns
+// the rule). Never folded into a measured figure: summarizeSession tallies it on its own.
+export function provisionalCostUSD(usage, model) {
+  const provisional = provisionalPriceFor(model);
+  return provisional ? { dollars: priceUsage(usage, provisional.price), basedOn: provisional.basedOn } : null;
+}
+
+// Requests a model's absence from the price table kept out of (unpriced) or estimated apart from
+// (provisional) a cost figure. A cohort or delta that includes any of these is not comparing like
+// with like, which is what the `inferred` marking in the cohort tables says.
+export function excludedRequestsOf(summary) {
+  return (
+    Object.values(summary?.unpriced ?? {}).reduce((n, c) => n + c, 0) +
+    Object.values(summary?.provisional ?? {}).reduce((n, p) => n + (p.requests ?? 0), 0)
+  );
 }
 
 // Cache-write pricing is the one genuinely unrecoverable number. A record carrying the 1h/5m split
@@ -332,9 +355,16 @@ export function resolveDepth(env, cwd) {
   if (!last) throw new Error(`no usage record in ${basename(file)} — nothing to measure`);
 
   const depth = contextDepth(last.usage);
-  const window = priceFor(last.model)?.window;
-  if (!window) throw new Error(`model ${last.model} is not in the pricing table — no window to measure against`);
-  return { depth, model: last.model, window, fraction: depth / window, band: budgetBand(depth, window) };
+  const exact = priceFor(last.model);
+  const provisional = exact ? null : provisionalPriceFor(last.model);
+  const window = (exact ?? provisional?.price)?.window;
+  if (!window)
+    throw new Error(`model ${last.model} is not in the pricing table (scripts/pricing.mjs) — no window to measure against`);
+  return {
+    depth, model: last.model, window,
+    ...(provisional ? { windowProvisionalAs: provisional.basedOn } : {}),
+    fraction: depth / window, band: budgetBand(depth, window),
+  };
 }
 
 export function median(numbers) {
@@ -1096,6 +1126,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   const costByAgentType = {};
   const costByLens = {};
   const unpriced = {};
+  const provisional = {};
   const priced = [];
   const bandCounts = Object.fromEntries(BAND_LABELS.map((l) => [l, 0]));
   const startupFloor = {};
@@ -1151,7 +1182,14 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     if (model) models[model] = (models[model] ?? 0) + 1;
     const dollars = costUSD(r.message.usage, model);
     if (dollars === null) {
-      bump(unpriced, model ?? "(none)", 1);
+      const estimate = provisionalCostUSD(r.message.usage, model);
+      if (estimate) {
+        const entry = (provisional[model] ??= { requests: 0, dollars: 0, basedOn: estimate.basedOn });
+        entry.requests += 1;
+        entry.dollars += estimate.dollars;
+      } else {
+        bump(unpriced, model ?? "(none)", 1);
+      }
     } else {
       totalCost += dollars;
       bump(costByModel, model, dollars);
@@ -1217,6 +1255,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     carryWeighted,
     dispatches,
     unpriced,
+    provisional,
     cacheBand: costBand(priced),
     models,
     profile: profile ?? "unknown",
@@ -1743,7 +1782,8 @@ function main() {
       console.log(JSON.stringify(r));
     } else {
       const pct = (r.fraction * 100).toFixed(1);
-      console.log(`depth: ${r.depth} tokens (${pct}% of ${r.window}, model ${r.model}) — band: ${r.band}`);
+      const assumed = r.windowProvisionalAs ? `, window assumed from ${r.windowProvisionalAs}` : "";
+      console.log(`depth: ${r.depth} tokens (${pct}% of ${r.window}, model ${r.model}${assumed}) — band: ${r.band}`);
     }
     return;
   }

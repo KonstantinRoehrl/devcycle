@@ -95,3 +95,17 @@ test("pricedDispatches: a description with no task number yields taskId null, no
 test("pricedDispatches: a slug directory that does not exist is an empty corpus, not a throw", () => {
   assert.deepEqual(pricedDispatches(join(makeTempDir("dispatch-cost-"), "absent")), []);
 });
+
+test("priceTranscript: Fable 5.1 cache reads use the listed $0.25/M rate, Fable 5 the assumed 0.1x input", () => {
+  const readTurn = (model) => JSON.stringify({
+    type: "assistant",
+    message: { model, usage: { input_tokens: 0, cache_read_input_tokens: 1_000_000, output_tokens: 0 } },
+  });
+  const slug = slugDirWith({
+    "agent-f51": { meta: impl("Task 1"), lines: [readTurn("claude-fable-5-1")] },
+    "agent-f5": { meta: impl("Task 2"), lines: [readTurn("claude-fable-5")] },
+  });
+  const rows = Object.fromEntries(pricedDispatches(slug).map((r) => [r.agentId, r]));
+  assert.ok(Math.abs(rows["agent-f51"].usd - 0.25) < 1e-9, `got ${rows["agent-f51"].usd}`);
+  assert.ok(Math.abs(rows["agent-f5"].usd - 1.0) < 1e-9, `got ${rows["agent-f5"].usd}`);
+});
