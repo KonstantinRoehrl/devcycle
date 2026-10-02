@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Resolves a *Model knob to a concrete dispatch model, under the orchestrator-tier ceiling.
-// references/config.md states the policy for the coordinator that reads it and names this file
-// as the policy's single implementation; this file owns the arithmetic and nothing else.
+// references/model-routing.md states the policy for the coordinator that reads it and names this
+// file as the policy's single implementation; this file owns the arithmetic and nothing else.
 //
 // `model: null` means "dispatch with no model override" — the session tier, which inherits the
 // orchestrator's own model and therefore cannot exceed it. Every unresolvable case converges on
@@ -127,9 +127,9 @@ const KNOWN_FLAGS = {
 };
 
 // CLI only, so the pure helpers above stay importable by tests — the guard scripts/bump-version.mjs
-// already uses. references/config.md § Model tiers owns when a caller runs this: only for a knob
-// that resolves to a pin or a pool, since parsePool reads `auto` and an unsubstituted placeholder
-// as unset and there is nothing for this module to decide.
+// already uses. references/model-routing.md § Model tiers owns when a caller runs this: only for a
+// knob that resolves to a pin or a pool, since parsePool reads `auto` and an unsubstituted
+// placeholder as unset and there is nothing for this module to decide.
 function cliResolve(argv) {
   // This CLI takes no positional arguments, so a bare token is a dropped flag name -- `--signals 5`
   // typed as `5` -- and discarding it resolves rung 1 for a caller who asked for rung 6. Same

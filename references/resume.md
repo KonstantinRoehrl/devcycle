@@ -29,16 +29,38 @@ transition, in this shape:
 - ledger: .devcycle/ledger.md
 - checklist: <path or none>
 - run: <run id from scripts/run-record.mjs, or none>
-- configured: <no | defaults | date + KEY=VALUE list (possibly empty)>[ · profile-asked]
+- configured: <no | defaults | date [+ KEY=VALUE list]>
+- knobs: <the resolver's knobs: line, verbatim after "knobs: ">
 - updated: <ISO-8601 UTC>
 ```
 
 `stage:` names the stage the NEXT session resumes at, never the one just completed.
 `run:` is the run record's id, minted once per cycle and carried across `/clear` so a resumed
 cycle appends to the same record rather than starting a second one.
-`configured:` records what configuration was written for this repo and is carried
-forward unchanged when a new cycle reuses the file; `references/config.md` owns what
-its values mean.
+`knobs:` is the persisted copy of the resolved knob values —
+`references/config.md` § Knob channel owns who reads it. Only
+`/devcycle:cycle`, `/devcycle:continue`'s knob-change question, and `/devcycle:continue` on a
+state file that has no `knobs:` line yet write it; every other stage rewrite carries it forward
+unchanged, like `kind:` and `plan-counts:`. `configured:` is carried forward the
+same way; the next section owns its forms.
+Two optional rows sit outside the template. Only `/devcycle:continue`'s knob comparison and the
+knob-change question it gates write or drop them; every other rewrite carries them forward, and
+`/devcycle:cycle`'s `stage: done` reuse resets them with the rest.
+
+- `- knobs-declined: <a fresh knobs: line's values>` — global values the user chose not to apply.
+  **Keep this cycle's values** writes it, replacing any earlier row. While a comparison's fresh
+  line still equals the row, the question is skipped and this cycle's values are kept. **Apply**
+  drops it, and so does a comparison that prints nothing — the global values match the cycle's
+  own `knobs:` line again, though they now differ from the row — so a later change asks afresh.
+- `- knobs-changed: <stamp> <the compare lines joined by "; ">` — the first **apply** made before
+  this cycle's ledger exists, so the run record's minted knobs are known superseded from that
+  stamp; a second such apply leaves that row alone. This cycle's ledger exists once
+  `.devcycle/ledger.md`'s `Plan:` header names the state file's `plan:` path. A ledger file whose
+  header names another plan is a previous cycle's slot, and a `plan: none` cycle (fast path,
+  sweep) never has one: neither is appended to. Once it exists, an apply appends a `task=config
+  event=user-decision` line per `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` instead, outcome
+  `knobs changed mid-cycle: <the compare lines joined by "; ">`, ref `.devcycle/state.md`.
+
 `updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`
 taken when the field is written — never a narrated or estimated time.
 `kind:` records the confirmed triage request kind and `plan-counts:` the plan's Dispatch-Map
@@ -64,6 +86,20 @@ give, and an Other answer to it appends `user-correction-at-gate` to the run rec
 resume already carries; `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that rule. A
 file with no `root:` line predates this format and is not foreign: adopt it by writing
 `root:` and `request:` at the next rewrite.
+
+## The state file's `configured:` line
+
+One line records the first-run configuration offer, one form per outcome:
+
+- `no` — the offer was never made.
+- `defaults` — the offer ran and wrote nothing, every answer matching its recommended default.
+- `<date>` plus a KEY=VALUE list — the offer ran and wrote those; the drift notice has not run yet.
+- `<date>` alone — the drift notice in `references/config.md` § Knob channel ran against the list
+  and retired it.
+
+A trailing `· profile-asked` marker is legacy — accepted on read and kept through the drift
+notice's rewrite, never newly written — and changes nothing a reader does. The line is a record of
+the offer, never a source of knob values; its only other reader is that drift notice.
 
 ## Settle the branch first, before reading anything else
 

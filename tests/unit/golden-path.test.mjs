@@ -13,6 +13,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DESIGN_DOC } from "../../scripts/doc-paths.mjs";
 import { PLAYBOOK_STAGE } from "../../scripts/doctor.mjs";
+import { ROSTER } from "../../scripts/resolve-knobs.mjs";
 
 const root = process.cwd();
 const read = (p) => readFileSync(join(root, p), "utf8");
@@ -520,15 +521,15 @@ test("harvested: commands/profile-resolution — an explicit knob beats the prof
   assert.ok(t.includes("| branch review engine (`reviewDepth`) | `single` | `single` | `panel` |"), "engine row changed");
   assert.ok(t.includes("| branch-review round cap | 2 | 3 | 5 |"), "round-cap row changed");
   assert.match(t, /`profile` ∈ `lean \| standard \| thorough`, default `standard`/);
-  assert.match(t, /· profile-asked/);
+  assert.match(read("references/resume.md"), /· profile-asked/, "the legacy profile-asked marker must stay documented as accepted on read");
 });
 
 test("harvested: commands/state-file-resume — the state file's shape and ownership check are pinned", () => {
   const t = read("references/resume.md");
   const template = t.match(/```markdown\n# devcycle state\n([\s\S]*?)```/)?.[1] ?? "";
   const lines = template.trim().split("\n");
-  assert.equal(lines.length, 16, "the state template is no longer 16 lines");
-  for (const field of ["stage", "root", "branch", "request", "kind", "scope", "audit", "diagnosis", "spec", "plan", "plan-counts", "ledger", "checklist", "run", "configured", "updated"])
+  assert.equal(lines.length, 17, "the state template is no longer 17 lines");
+  for (const field of ["stage", "root", "branch", "request", "kind", "scope", "audit", "diagnosis", "spec", "plan", "plan-counts", "ledger", "checklist", "run", "configured", "knobs", "updated"])
     assert.ok(lines.some((l) => l.startsWith(`- ${field}:`)), `state field missing: ${field}`);
   assert.ok(template.includes("- ledger: .devcycle/ledger.md"), "the ledger path is not pinned");
   assert.match(t, /The ownership check, run before trusting anything else in the file/);
@@ -729,7 +730,7 @@ test("harvested: executing-waves/handoff-block-shape — seven fields, and only 
 });
 
 test("harvested: executing-waves/model-routing — every escalation trigger and the ledger's audit shape are pinned", () => {
-  const t = read("references/config.md");
+  const t = read("references/model-routing.md");
   assert.match(t, /\*\*Files:\*\*` block lists\s+more than 5 files/);
   assert.match(t, /`\*\*Dependencies:\*\*` is anything other than `none`/);
   assert.match(t, /any step fails to name its file and expected behavior/);
@@ -2060,10 +2061,11 @@ test("C6: docs/known-issues.md records open defects only — no fixed entry surv
   );
 });
 
-// `CONTRIBUTING.md:136-140` concedes that the config knobs are hand-kept in four copies and
+// `CONTRIBUTING.md:136-140` concedes that the config knobs are hand-kept in five copies and
 // that no check compares the description text. F13, F15 and F16 were three live instances of
-// that class; set equality across all four — the manifest, the configuration hub,
-// references/config.md's roster and DESIGN §7's schema — is what stops a fourth. Each parse is
+// that class; set equality across all five — the manifest, the configuration hub,
+// references/config.md's roster, DESIGN §7's schema and scripts/resolve-knobs.mjs's ROSTER —
+// is what stops a fourth instance. Each parse is
 // scoped to its own table's header row, never to prose: C10 moves 134 lines out of references/config.md,
 // and an assertion coupled to wording would break on an innocent edit and be deleted rather
 // than fixed. A table header is a structure that move can carry intact.
@@ -2091,7 +2093,7 @@ const designKnobs = () => {
   return Object.keys(JSON.parse(json));
 };
 
-test("C6: plugin.json, the configuration hub, references/config.md and DESIGN §7 agree on the knob set", () => {
+test("C6: plugin.json, the configuration hub, references/config.md, DESIGN §7 and the resolver's ROSTER agree on the knob set", () => {
   const manifest = Object.keys(JSON.parse(read(".claude-plugin/plugin.json")).userConfig);
   const options = firstCells(read("docs/configuration/README.md"), "| Option | What it controls | Values | Default |");
   const config = firstCells(read("references/config.md"), "| Knob | Owner | Falls back to |");
@@ -2116,6 +2118,29 @@ test("C6: plugin.json, the configuration hub, references/config.md and DESIGN §
     "docs/design/README.md §7's userConfig schema must enumerate exactly the manifest's keys — " +
       "#10 config parity; a schema section that lags the manifest is how docTrackingPolicy drifted"
   );
+  const resolver = ROSTER.map(({ key }) => key);
+  assert.deepEqual(
+    sorted(resolver),
+    sorted(manifest),
+    "scripts/resolve-knobs.mjs's ROSTER is what every command resolves through — a key it lacks never reaches a stage"
+  );
+  assert.deepEqual(resolver, config, "scripts/resolve-knobs.mjs prints knobs: in references/config.md's roster order");
+});
+
+test("every entry command except doctor resolves knobs through the identical full-roster invocation", () => {
+  const INVOCATION =
+    "```\n" +
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \\\n' +
+    ROSTER.map(({ key }) => `  --${key} '\${user_config.${key}}'`).join(" \\\n") +
+    "\n```";
+  for (const f of readdirSync(join(root, "commands")).filter((n) => n.endsWith(".md"))) {
+    const text = read(`commands/${f}`);
+    if (f === "doctor.md") {
+      assert.ok(!text.includes("user_config."), "commands/doctor.md consumes no knob and must carry no placeholder");
+      continue;
+    }
+    assert.ok(text.includes(`\n\n${INVOCATION}\n\n`), `commands/${f} must carry the resolver invocation verbatim, as its own paragraph (references/config.md § Knob channel)`);
+  }
 });
 
 test("C6: the workload sensor's integration-branch list matches the prose that owns it", () => {

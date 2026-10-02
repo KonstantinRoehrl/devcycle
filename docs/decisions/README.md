@@ -5,6 +5,115 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-02 — fixed-set knobs declare `options`, held to the resolver's values
+
+**Decision:** `profile`, `gitPolicy`, `docTrackingPolicy`, `reviewDepth` and `onDeviceGate`
+declare `options` in `.claude-plugin/plugin.json`: `scripts/resolve-knobs.mjs`'s `ROSTER`
+values, with `auto` first on the two knobs whose fallback is a profile row. `scripts/validate.mjs`
+fails a list the plugin loader would reject and any list that differs from `ROSTER`.
+
+**Why:** without `options`, `/plugin configure` shows an unset string option as a blank text
+field, so the config channel's on-device walkthrough failed both `auto` defaults. The schema
+takes `options` (`docs/platform-notes.md` § (g)); a hand-kept list would drift from the
+resolver, and a malformed one stops the plugin loading, as `integer` did in 0.17.0.
+
+**Supersedes:** `docs/platform-notes.md` § (a)'s reading that allowed values can live only in
+description text.
+
+## 2026-09-29 — commands resolve knobs; playbooks read the `knobs:` line
+
+**Decision:** every entry command except `/devcycle:doctor` runs `scripts/resolve-knobs.mjs` with
+all thirteen rendered `${user_config.<key>}` placeholders and prints a `knobs:` line; playbooks,
+references and agents carry no placeholder and read that line (or the state file's `- knobs:`
+copy inside a cycle). `scripts/validate.mjs` check 2 fails a placeholder anywhere else.
+
+**Why:** only command text is templated. Since 2026-08-06 (skills dissolved into playbooks),
+playbooks and references are files a stage opens with Read, so every playbook-resident placeholder
+rendered literally and resolved as unset — a configured `gitPolicy`, `reviewDepth` or model pin
+never reached its stage except through the state file's `configured:` line (audit finding H2).
+
+**Supersedes:** the 2026-07-27 assumption that placeholders substitute wherever a stage reads
+them; the upgrade offer and its `· profile-asked` marker (retired — unreachable by construction);
+and per-repo configuration, which existed only as the accidental `configured:` shadow of resolution
+step 4 and is dropped: values are global, and a repo's old values surface as a drift notice.
+
+## 2026-09-29 — budgets re-baselined for the config-channel branch
+
+**Decision:** the config-channel branch re-baselines both budget fixtures to their exact measured
+values. `tests/fixtures/surface-budget.json`: `surfaceTotal` 5518 → 5683, `commandMax` 132 → 168,
+`playbookMax` 319 → 320. `tests/fixtures/context-budget.json`, all 14 entries — six fall:
+
+| Playbook | Before | After | Change |
+|---|---|---|---|
+| `executing-waves` | 114897 | 119489 | +4592 |
+| `finishing-the-cycle` | 103719 | 99053 | −4666 |
+| `learning-from-sessions` | 127374 | 122739 | −4635 |
+| `maintaining-the-repo` | 107164 | 111776 | +4612 |
+| `onboarding-a-repo` | 94805 | 90204 | −4601 |
+| `planning-waves` | 99120 | 94554 | −4566 |
+| `profiling-sessions` | 112251 | 64924 | −47327 |
+| `receiving-review` | 125118 | 129617 | +4499 |
+| `reviewing-code` | 134130 | 138646 | +4516 |
+| `reviewing-the-branch` | 105211 | 109709 | +4498 |
+| `scoping-the-request` | 90845 | 59188 | −31657 |
+| `sweeping-mechanical-changes` | 105187 | 109711 | +4524 |
+| `taking-the-fast-path` | 98299 | 102820 | +4521 |
+| `verifying-on-device` | 100712 | 105247 | +4535 |
+
+"Before" is `dev` at the branch cut (`075ed92`), whose figures were exact. Each change traces to
+these causes:
+
+- **−7195 bytes to the twelve playbooks that still reach `references/config.md`** — it shrank
+  21220 → 14025: § Model tiers moved to the new `references/model-routing.md` and
+  § The state file's `configured:` line moved to `references/resume.md` (`61b447b`), each leaving
+  a pointer, offset in part by the new § Knob channel.
+- **+2539 bytes to every playbook but `profiling-sessions`** — `references/resume.md` grew
+  10471 → 13010: the `- knobs:` row and the `configured:` section (`61b447b`, `3fc8a91`), then
+  the optional `knobs-declined:`/`knobs-changed:` rows and the retired-list `configured:` form
+  (branch review round 1), then those rows' complete write-and-drop rule (branch review round 2).
+- **+36 bytes to all fourteen** — `references/delegation.md` grew 10115 → 10151 (`61b447b`).
+- **+9112 bytes to the eight dispatching playbooks** — `executing-waves`, `maintaining-the-repo`,
+  `receiving-review`, `reviewing-code`, `reviewing-the-branch`, `sweeping-mechanical-changes`,
+  `taking-the-fast-path` and `verifying-on-device` newly reach `references/model-routing.md`, new
+  in `61b447b`. `maintaining-the-repo` and `taking-the-fast-path` first cited it bare, which
+  check 15 does not follow, so the gate undercounted both until branch review round 1 moved them
+  to the followed form.
+- **+7 bytes to `executing-waves` only** — `references/sweep-execution.md`, which only it reaches,
+  grew 3538 → 3545 in `3fc8a91` by pointing its audit shape at `model-routing.md`.
+- **`scoping-the-request` and `profiling-sessions` no longer reach `config.md` at all.** They
+  reached it only through `delegation.md`'s `${CLAUDE_PLUGIN_ROOT}/references/config.md` citation,
+  which `61b447b` replaced with a bare `references/model-routing.md`. So they lose config.md's
+  full 21220 bytes and what only it reached: `references/quality-criteria.md` (13012) for
+  `scoping-the-request`, and for `profiling-sessions`, instead, `resume.md` (10471), `handoff.md`
+  (7948), `ledger.md` (4484) and `commit-convention.md` (3240). `taking-the-fast-path` lost the
+  same citation but reaches `config.md` again through `model-routing.md`'s followed citation.
+- **Own changes**, at most ±120 bytes each: the playbooks' switch from placeholders to the
+  `knobs:` line (`5ec8fe6`, `3fc8a91`), the two model-routing citations above, and this branch's
+  line rewraps.
+
+`references/config.md` and `references/delegation.md` name `model-routing.md` in bare backticks
+because check 15 follows only the `${CLAUDE_PLUGIN_ROOT}/references/…` form, and every playbook
+reaches both files: a followed citation there would pull `model-routing.md` into every playbook's
+budget, dispatching or not. A surface that dispatches cites it in the followed form itself, so its
+budget carries the file exactly where a stage reads it.
+
+`references/first-run-config.md` shrank 8561 → 3283 bytes (`bcc87ee`), then grew to 3349 when
+the on-device fix round offered `auto` for `reviewDepth` and `onDeviceGate`, but moves no context
+entry: no playbook or reference cites it in the followed `${CLAUDE_PLUGIN_ROOT}/references/…` form.
+
+`surfaceTotal`'s +165 balances across the surface: commands +180 (`cycle.md` +36, `continue.md`
++30, and +19 in each of the six standalone commands — the resolver invocation, its blank lines and
+its lead-in line), references −21 (`config.md` −112, `first-run-config.md` −83,
+`model-routing.md` +136, `resume.md` +36, `README.md` +1, `delegation.md` +1), playbooks +6.
+`commandMax` follows `commands/cycle.md`, still the longest command; `playbookMax` follows
+`learning-from-sessions.md`, still the longest playbook at +1 line.
+
+**Why:** a baseline only fails when a measurement exceeds it, so a fall — six of fourteen entries
+here — leaves slack no gate catches. The branch's early commits set provisional headroom in both
+fixtures so its parallel tasks could land independently; that headroom never reached a release.
+Every figure above was proven tight by lowering it by 1 and confirming `scripts/validate.mjs`
+fails naming that exact entry — all 17 numbers.
+
 ## 2026-09-14 — budgets raised for the tier-1 pipeline-guarantees branch
 
 **Decision:** the tier-1 pipeline-guarantees branch raises
@@ -836,6 +945,9 @@ in `references/delegation.md`, and scoping-interview — with planning and audit
 at it rather than carrying a copy.
 
 ## 2026-07-27 — `auto` releases a knob back to the profile; the upgrade trap is asked about, not fixed silently
+
+*(Partly superseded 2026-09-29, above: the upgrade offer and its `· profile-asked` marker are
+retired; `auto` as "let the profile govern" still holds.)*
 
 **Decision:** `auto` becomes a sanctioned value on the two profile-covered behavioral knobs
 (`reviewDepth`, `onDeviceGate`), meaning "let the profile govern this" — the same convention

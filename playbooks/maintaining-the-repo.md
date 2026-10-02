@@ -40,8 +40,8 @@ cut; only `gh pr create --base` takes `$base_branch`, as GitHub rejects an `orig
 `stranded <ref>` line is an earlier pass's store writes that never landed: stop and ask whether to
 land or delete that branch first, or to proceed knowingly. `skipped` lines are reported, not blocking.
 
-1. **Resolve maintenance depth.** Resolve `profile` per
-   `${CLAUDE_PLUGIN_ROOT}/references/config.md` and read its **maintenance depth** row:
+1. **Resolve maintenance depth.** Read `profile` from the `knobs:` line per
+   `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel and read its **maintenance depth** row:
    `lean` = existing criteria only; `standard` = + the **Abstraction** criterion
    (`${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`); `thorough` = + the history inspector.
 2. **Scoping gate (mandatory, before any dispatch).** Run `reviewing-code.md` § 1's criteria
@@ -126,8 +126,9 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
      survives cosmetic line moves; `apply-pass` derives each `<culprit-kind>:<hash>` id from
      it, and ids are never written to `references/culprits.json`. Two entries deriving one id reject
      the pass: merge them (highest severity, union of affected files, the clearer title) and re-run.
-   - **Decide the doc-tracking veto — before comparing.** Resolve `${user_config.docTrackingPolicy}`
-     against `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, then `git check-ignore`
+   - **Decide the doc-tracking veto — before comparing.** Read `docTrackingPolicy` from the
+     `knobs:` line and check it against `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking,
+     then `git check-ignore`
      the store path; either one vetoing committing the store is a veto. It picks the store every
      dry run below reads: under a veto, the checkout's (`--root <checkout>`, no `--ref`), which
      holds earlier uncommitted passes; otherwise the one committed at `"$base"` (`--ref "$base"`),
@@ -192,7 +193,8 @@ A repo-wide multi-lens pass is the unbounded fan-out shape that has historically
 - a **hard stop at the ≥20% context-depth band** `delegation.md` already defines
   (`node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth`); on a hard stop the coverage statement
   names the unswept remainder;
-- every dispatch names its model; the history inspector routes to the fast tier.
+- every dispatch resolves its model per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`; the
+  history inspector routes to the fast tier.
 
 ## Boundaries
 

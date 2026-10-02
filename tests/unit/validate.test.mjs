@@ -91,10 +91,40 @@ test("stage check: a backticked stage outside the enum fails, naming file and to
 
 // --- check 2: ${user_config.X} against plugin.json's userConfig ---
 
-test("user_config check: a declared knob passes, and the literal ${user_config.KEY} placeholder is exempt", () => {
+test("user_config check: a declared knob inside a command's resolver invocation passes, and the literal ${user_config.KEY} placeholder is exempt", () => {
   const dir = makePluginFixture();
-  playbook(dir, "Resolve `${user_config.profile}`. The convention is `${user_config.KEY}`.\n");
+  playbook(dir, "The convention is `${user_config.KEY}`.\n");
+  // The invocation's ${CLAUDE_PLUGIN_ROOT}/scripts/... path must name a file (check 4).
+  writeInto(dir, "scripts/resolve-knobs.mjs", "");
+  writeInto(
+    dir,
+    "commands/cycle.md",
+    readFileSync(join(dir, "commands/cycle.md"), "utf8") +
+      "\n```\nnode \"${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs\" \\\n  --profile '${user_config.profile}'\n```\n"
+  );
   ok(runValidate(dir));
+});
+
+for (const [where, rel, body] of [
+  ["a playbook", "playbooks/demoing-things.md", null],
+  ["an agent", "agents/demo.md", "---\nname: demo\n---\n\nResolve `${user_config.profile}`.\n"],
+  ["command prose outside the invocation", "commands/cycle.md", null],
+]) {
+  test(`user_config check: a declared knob in ${where} fails, naming the file`, () => {
+    const dir = makePluginFixture();
+    if (rel === "playbooks/demoing-things.md") playbook(dir, "Resolve `${user_config.profile}` first.\n");
+    else if (rel === "commands/cycle.md")
+      writeInto(dir, rel, readFileSync(join(dir, rel), "utf8") + "\nResolve `${user_config.profile}` first.\n");
+    else writeInto(dir, rel, body);
+    failsWith(runValidate(dir), new RegExp(rel.replace(/[./]/g, "\\$&")), /outside the resolve-knobs\.mjs invocation/);
+  });
+}
+
+test("user_config check: a resolver invocation copied into a playbook still fails — only command text is templated", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "scripts/resolve-knobs.mjs", "");
+  playbook(dir, "```\nnode \"${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs\" \\\n  --profile '${user_config.profile}'\n```\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /outside the resolve-knobs\.mjs invocation/);
 });
 
 test("user_config check: an undeclared knob fails, naming file and token", () => {
@@ -181,6 +211,79 @@ test("manifest check: every allowed userConfig type passes", () => {
       2
     ) + "\n"
   );
+  ok(runValidate(dir));
+});
+
+// A fixture manifest carrying exactly the given userConfig entries.
+const withUserConfig = (dir, userConfig) =>
+  writeInto(
+    dir,
+    ".claude-plugin/plugin.json",
+    JSON.stringify(
+      { name: "devcycle", version: "0.0.1", description: "Fixture plugin.", license: "MIT", dependencies: [], userConfig },
+      null,
+      2
+    ) + "\n"
+  );
+const stringKnob = (fields) => ({ type: "string", title: "Knob", description: "Fixture knob.", ...fields });
+
+// The five fixed-set knobs as `/plugin configure` must list them: the resolver's values, with
+// `auto` first on the two knobs whose fallback is a profile row.
+const FIXED_SET_OPTIONS = {
+  profile: { default: "standard", options: ["lean", "standard", "thorough"] },
+  gitPolicy: { default: "local-commits-only", options: ["local-commits-only", "push-allowed", "open-pr"] },
+  docTrackingPolicy: { default: "standard", options: ["all-local", "standard", "all-tracked"] },
+  reviewDepth: { default: "auto", options: ["auto", "single", "panel"] },
+  onDeviceGate: { default: "auto", options: ["auto", "human-required", "auto-ok"] },
+};
+const fixedSetKnobs = (overrides = {}) =>
+  Object.fromEntries(
+    Object.entries({ ...FIXED_SET_OPTIONS, ...overrides }).map(([key, fields]) => [key, stringKnob(fields)])
+  );
+
+test("manifest check: an options list the plugin loader would reject fails, naming the knob", () => {
+  // Claude Code's `claude plugin validate --strict` rejects each of these shapes, and a rejected
+  // manifest means the plugin does not load at all — catch it here, before it ships.
+  for (const [shape, fields, pattern] of [
+    ["an empty list", { default: "x", options: [] }, /at least one/],
+    ["a bare string", { default: "x", options: "x" }, /array of strings/],
+    ["a non-string entry", { default: "x", options: ["x", 2] }, /array of strings/],
+    ["a default outside the list", { default: "z", options: ["x", "y"] }, /default "z" is not one of/],
+  ]) {
+    const dir = makePluginFixture();
+    withUserConfig(dir, { ...fixedSetKnobs(), color: stringKnob(fields) });
+    const res = runValidate(dir);
+    assert.equal(res.status, 1, `${shape}: expected failure, got:\n${res.stdout}${res.stderr}`);
+    assert.match(res.stderr, /userConfig\.color\.options/, shape);
+    assert.match(res.stderr, pattern, shape);
+  }
+});
+
+test("manifest check: a fixed-set knob whose options differ from the resolver's values fails, naming the knob and the expected list", () => {
+  for (const [shape, key, fields] of [
+    ["missing", "profile", { default: "standard" }],
+    ["a value short", "gitPolicy", { default: "local-commits-only", options: ["local-commits-only", "open-pr"] }],
+    ["out of order", "docTrackingPolicy", { default: "standard", options: ["standard", "all-local", "all-tracked"] }],
+    ["no auto on a profile-governed knob", "reviewDepth", { default: "single", options: ["single", "panel"] }],
+    ["auto on a knob the profile does not govern", "profile", { default: "auto", options: ["auto", "lean", "standard", "thorough"] }],
+  ]) {
+    const dir = makePluginFixture();
+    withUserConfig(dir, fixedSetKnobs({ [key]: fields }));
+    const res = runValidate(dir);
+    assert.equal(res.status, 1, `${shape}: expected failure, got:\n${res.stdout}${res.stderr}`);
+    assert.match(res.stderr, new RegExp(`userConfig\\.${key}\\.options`), shape);
+    assert.match(res.stderr, /resolve-knobs\.mjs/, shape);
+  }
+});
+
+test("manifest check: fixed-set options matching the resolver pass, and knobs outside the fixed set need none", () => {
+  const dir = makePluginFixture();
+  withUserConfig(dir, {
+    ...fixedSetKnobs(),
+    crossModelReview: { type: "boolean", title: "b", default: false, description: "d" },
+    implementerModel: stringKnob({ default: "auto" }),
+    learnSessionCap: { type: "number", title: "n", default: 100, description: "d" },
+  });
   ok(runValidate(dir));
 });
 
@@ -1902,6 +2005,7 @@ test("dispatch-governance check: an ungoverned devcycle:task-reviewer dispatch f
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
   assert.match(stderr, /demoing-things\.md:\d+: dispatch ".*devcycle:task-reviewer.*" names no governing model-tier rule/);
+  assert.match(stderr, /see references\/model-routing\.md § Model tiers/);
 });
 
 test("dispatch-governance check: a dispatch citing its *Model knob inline passes", () => {
@@ -1912,6 +2016,17 @@ test("dispatch-governance check: a dispatch citing its *Model knob inline passes
     "## The mini-cycle\n\n" +
       "1. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model\n" +
       "   `taskReviewerModel` resolves per `references/config.md`, with the diff.\n"
+  );
+  ok(runValidate(dir));
+});
+
+test("dispatch-governance check: a dispatch citing references/model-routing.md passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "agents/implementer.md", "---\nname: implementer\n---\n\nImplementer.\n");
+  playbook(
+    dir,
+    "## The mini-cycle\n\n" +
+      "1. **Fix.** Dispatch `devcycle:implementer` on the model `references/model-routing.md` resolves.\n"
   );
   ok(runValidate(dir));
 });

@@ -23,6 +23,25 @@ is a whole-repo property, not a diff's.
 A pass also folds in the target repo's own **open GitHub issues** as a read-only second input
 source. `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md` step 7 owns that pipeline.
 
+Resolve knobs first — run this exactly as rendered; `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel owns what follows:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
+  --profile '${user_config.profile}' \
+  --gitPolicy '${user_config.gitPolicy}' \
+  --docTrackingPolicy '${user_config.docTrackingPolicy}' \
+  --reviewDepth '${user_config.reviewDepth}' \
+  --crossModelReview '${user_config.crossModelReview}' \
+  --onDeviceGate '${user_config.onDeviceGate}' \
+  --implementerModel '${user_config.implementerModel}' \
+  --taskReviewerModel '${user_config.taskReviewerModel}' \
+  --branchReviewModel '${user_config.branchReviewModel}' \
+  --walkthroughModel '${user_config.walkthroughModel}' \
+  --learnStalenessSessions '${user_config.learnStalenessSessions}' \
+  --learnStalenessDays '${user_config.learnStalenessDays}' \
+  --learnSessionCap '${user_config.learnSessionCap}'
+```
+
 Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md`. It starts no cycle, writes no state
 file, and writes its findings store only through that playbook's step 8.
 

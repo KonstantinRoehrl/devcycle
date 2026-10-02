@@ -65,7 +65,13 @@ export function makePluginFixture() {
         license: "MIT",
         dependencies: [],
         userConfig: {
-          profile: { type: "string", title: "Pipeline profile", default: "standard", description: "Fixture knob." },
+          profile: {
+            type: "string",
+            title: "Pipeline profile",
+            default: "standard",
+            options: ["lean", "standard", "thorough"],
+            description: "Fixture knob.",
+          },
         },
       },
       null,

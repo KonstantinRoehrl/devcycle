@@ -57,9 +57,10 @@ recorded. An unknown depth is never evidence of a shallow one.
 ## Research dispatches
 
 Repo research — locating code, mapping surfaces, tracing usage, discovering docs — is a
-subagent dispatch that returns **a map, not file dumps**. Every dispatch names its model
-explicitly; `${CLAUDE_PLUGIN_ROOT}/references/config.md` owns the tier, how an omitted one
-resolves, and the ceiling that stops any dispatch resolving above the orchestrator's own tier.
+subagent dispatch that returns **a map, not file dumps**. Every dispatch resolves its model
+per `references/model-routing.md` — the tier, the ceiling that stops any dispatch resolving above
+the orchestrator's own tier, and the session tier, whose dispatch omits the override and logs
+`outcome=model session`.
 It names its agent type explicitly too: read-only search, mapping and tracing go to `Explore`,
 never `general-purpose` — measured at a 13955 startup floor against a 32711 median, ~2.3× per
 dispatch. `general-purpose` is for work that must also write or judge.

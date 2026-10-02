@@ -16,14 +16,15 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
 
 ## Configuration
 
-Resolve every knob and the profile per `${CLAUDE_PLUGIN_ROOT}/references/config.md`, including
-its resolution order; none of it is repeated here. What this stage consumes:
+Read every knob and the profile from the `knobs:` line per
+`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel; none of the resolution is repeated
+here. What this stage consumes:
 
-- `reviewDepth` — `${user_config.reviewDepth}`, allowed `single` | `panel`; it picks the engine.
-- `crossModelReview` — `${user_config.crossModelReview}`, default `false`.
-- `branchReviewModel` — `${user_config.branchReviewModel}`. What it resolves to — an explicit
-  model id, binding, or the session tier — is what every rule below means by "the branch-review
-  model".
+- `reviewDepth` — `single` | `panel`; it picks the engine.
+- `crossModelReview` — `true` | `false`.
+- `branchReviewModel` — routed per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`. What it
+  resolves to — an explicit model id, binding, or the session tier — is what every rule below
+  means by "the branch-review model".
 - The **round cap** for the findings loop is the profile's branch-review round cap.
 
 ## Engine selection
@@ -93,7 +94,7 @@ green and diff tidy, and still fail its spec:
 2. **Only blocking findings re-open the loop.** **Blocking means `critical` or `high`** —
    `${CLAUDE_PLUGIN_ROOT}/references/findings.md` owns the severity vocabulary and derives
    blocking from it, and neither is restated here. Each blocking finding goes to a fresh
-   `devcycle:implementer` dispatch on the model `references/config.md` resolves — brief = the finding plus the spec path; never the review
+   `devcycle:implementer` dispatch on the model `references/model-routing.md` resolves — brief = the finding plus the spec path; never the review
    conversation. It is an implementer dispatch bound by the same evidence contract every other
    one is, so the brief carries a minted task-id (`branch-fix-<round>-<n>`) and an
    `**Evidence:**` class line, and asks the implementer to check the fix against the repo
@@ -150,8 +151,8 @@ session resumes at — then emit the block per
 - Artifacts: the review report location and the branch
 - Carry-overs: the accepted non-blocking findings (or `none`), followed by `Start the fresh
   session on <model>.` — this stage's job, because the on-device session's model is chosen by
-  whoever launches it. `<model>` is whatever `walkthroughModel` resolves to per
-  `${CLAUDE_PLUGIN_ROOT}/references/config.md`, named by its present id.
+  whoever launches it. `<model>` is whatever the `knobs:` line's `walkthroughModel`
+  resolves to per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`, named by its present id.
 - Compaction hint: n/a — clears (`Fresh session` boundary). When the state file records
   `checklist: none` (no rendered surface produced a checklist), record instead the marker
   `checklist: none — on-device stage will judge applicability`.

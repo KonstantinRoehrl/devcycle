@@ -9,10 +9,9 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
 
 ## Learn staleness nudge
 
-Resolve `${user_config.learnStalenessSessions}` (default `5`),
-`${user_config.learnStalenessDays}` (default `14`) and `${user_config.learnSessionCap}`
-(default `100`) per
-`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Learn staleness, then run
+Read `learnStalenessSessions`, `learnStalenessDays` and `learnSessionCap` from the `knobs:` line
+per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel (§ Learn staleness owns what they
+mean), then run
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --staleness --max-sessions <sessions> --max-days <days> --cap <cap>`.
 It reads the distilling checkpoint's `last-run:` and prints
 `{ stale, unminedSessions, daysSince, lastRun, threshold }`. When `stale` is `true`, surface
@@ -24,8 +23,8 @@ is `false`, say nothing.
 
 ## Configured policy
 
-Resolve `${user_config.gitPolicy}` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`: allowed
-values `local-commits-only` | `push-allowed` | `open-pr`, default `local-commits-only`. Call
+Read `gitPolicy` from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references/config.md`
+§ Knob channel — one of `local-commits-only` | `push-allowed` | `open-pr`. Call
 the result the **configured policy**. Never offer the first-run configuration walkthrough here
 — it belongs to `/devcycle:cycle` only.
 

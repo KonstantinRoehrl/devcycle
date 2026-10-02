@@ -3,7 +3,7 @@
 The pipeline's last stage, run by both `/devcycle:cycle` and `/devcycle:continue`: resolve the
 effective git policy, act on it, then close the state file.
 
-The configured policy resolves from `${user_config.gitPolicy}` — `local-commits-only`
+The stage reads `gitPolicy` from the `knobs:` line — `local-commits-only`
 (default), `push-allowed`, or `open-pr` — read once per run; this stage never re-offers the
 first-run configuration walkthrough, which belongs to `/devcycle:cycle` alone.
 `local-commits-only` is already the floor, so it needs no further checks; for the other two,

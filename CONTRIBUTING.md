@@ -133,11 +133,12 @@ Writing a new `scripts/*.mjs`? Reuse `doctor.mjs`'s exported helpers
 project-path escaping, and missing/unreadable-directory handling rather than
 reimplementing them.
 
-`plugin.json`'s `userConfig` descriptions are one of the four hand-kept copies of the config
-knobs that `references/config.md` § The knob roster enumerates — the other three are that
-roster, `docs/configuration/README.md`'s option table and `docs/design/README.md` §7's schema.
-Change one, change all four. `tests/unit/golden-path.test.mjs` fails on a key only some of them
-carry, but no check compares the description text, so a stale description ships silently.
+`plugin.json`'s `userConfig` descriptions are one of the five hand-kept copies of the config
+knobs that `references/config.md` § The knob roster enumerates — the other four are that
+roster, `docs/configuration/README.md`'s option table, `docs/design/README.md` §7's schema and
+`scripts/resolve-knobs.mjs`'s `ROSTER`. Change one, change all five.
+`tests/unit/golden-path.test.mjs` fails on a key only some of them carry, but no check compares
+the description text, so a stale description ships silently.
 
 **PR titles must be Conventional Commits** (`type(scope)?!: subject`), and so must every
 commit subject on the PR — CI checks both. PRs are

@@ -23,8 +23,8 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
      alongside the list it produced;
    - the **verifyCommand**: the repo's own documented verification convention (test suite, linter, build).
      The script hard-requires one; if the repo documents none, the user supplies one at gate 2;
-   - the **model**: resolve `DEVCYCLE_SWEEP_MODEL` from the `implementerModel` knob per
-     `${CLAUDE_PLUGIN_ROOT}/references/config.md` — a sweep edit is single-file mechanical, the fast tier's
+   - the **model**: resolve `DEVCYCLE_SWEEP_MODEL` from the `knobs:` line's `implementerModel` per
+     `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md` — a sweep edit is single-file mechanical, the fast tier's
      ideal case. One route-specific departure: where that reference falls back to the session tier, leave
      the variable unset instead so the CLI's default applies, since an environment variable cannot inherit
      the session model the way a dispatch can;
@@ -36,7 +36,7 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
      from unrelated work depend on the sweep's own edits being the only dirty state on a target.
 3. **Confirm the blast radius (gate 2).** Write the derived parameters to `.devcycle/sweep-plan.md` —
    instruction, verifyCommand, derivation command, the full file list with its count, the clean-targets
-   check with its result, and the model in the audit shape `${CLAUDE_PLUGIN_ROOT}/references/config.md`
+   check with its result, and the model in the audit shape `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`
    defines or this path's own `model unset (auto: no fast-tier id resolved; CLI default applies)`, since a bare
    name hides which path chose it. Then ask ONE AskUserQuestion presenting exactly that blast radius, model
    included: confirm / adjust (re-run the clean-targets check over the adjusted list, rewrite the plan
@@ -87,7 +87,7 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    line in `.devcycle/state.md` IMMEDIATELY, before any other action — resume's commit-marker check keys off
    that line rather than guessing which `git log` entry is the sweep's.
 6. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model
-   `taskReviewerModel` resolves per `references/config.md`, with the diff, the two evidence
+   `taskReviewerModel` resolves per `references/model-routing.md`, with the diff, the two evidence
    files, and the sweep report (skips included). On reject: fix in-session, re-run the verifyCommand
    (rewriting `.devcycle/evidence/sweep-after.txt`), re-dispatch, then fold the accepted fix into the sweep
    commit. The fix must stay within the confirmed target files — a finding whose fix needs any other file

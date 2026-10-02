@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { SEMVER_RE, cmpSemver } from "./semver.mjs";
 import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run-record.mjs";
 import { readPolicy } from "./reinforcement-policy.mjs";
+import { ROSTER } from "./resolve-knobs.mjs";
 
 
 // devcycle's own record stores must stay tracked: README/DECISIONS say lessons + promotion
@@ -86,12 +87,35 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     // Every userConfig entry's type must be one the plugin loader accepts, or the whole
     // manifest is rejected on install (0.17.0 shipped type "integer" and failed to load).
     const CONFIG_TYPES = new Set(["string", "number", "boolean", "directory", "file"]);
-    if (plugin.userConfig && typeof plugin.userConfig === "object" && !Array.isArray(plugin.userConfig))
+    if (plugin.userConfig && typeof plugin.userConfig === "object" && !Array.isArray(plugin.userConfig)) {
       for (const [knob, spec] of Object.entries(plugin.userConfig)) {
         const t = spec?.type;
         if (!CONFIG_TYPES.has(t))
           fail(`plugin.json: userConfig.${knob}.type "${t}" invalid — must be one of ${[...CONFIG_TYPES].join(", ")}`);
+        // `options` is what turns the knob into a pick-list in /plugin configure. The loader takes
+        // only a non-empty array of strings that contains the default, and rejects the rest.
+        if (spec && "options" in spec) {
+          const opts = spec.options;
+          if (!Array.isArray(opts) || opts.some((o) => typeof o !== "string"))
+            fail(`plugin.json: userConfig.${knob}.options must be an array of strings`);
+          else if (!opts.length) fail(`plugin.json: userConfig.${knob}.options needs at least one value`);
+          else if (!opts.includes(spec.default))
+            fail(`plugin.json: userConfig.${knob}.options: default ${JSON.stringify(spec.default)} is not one of ${opts.join(", ")}`);
+        }
       }
+      // A fixed-set knob's pick-list is exactly the resolver's value set, with `auto` first when
+      // the profile supplies the fallback — the resolver owns the set, the manifest mirrors it.
+      for (const { key, kind, values, fallback } of ROSTER) {
+        const spec = plugin.userConfig[key];
+        if (kind !== "enum" || !spec) continue;
+        const expected = typeof fallback === "object" ? ["auto", ...values] : values;
+        if (JSON.stringify(spec.options) !== JSON.stringify(expected))
+          fail(
+            `plugin.json: userConfig.${key}.options must be [${expected.join(", ")}] to match ` +
+              `scripts/resolve-knobs.mjs's ROSTER, got ${spec.options === undefined ? "none" : JSON.stringify(spec.options)}`
+          );
+      }
+    }
   } catch (e) { fail(`plugin.json: ${e.message}`); }
   try {
     const m = JSON.parse(readFileSync(join(root, ".claude-plugin/marketplace.json"), "utf8"));
@@ -177,10 +201,23 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
 
     // 2. Every ${user_config.X} must name a key in plugin.json's userConfig.
     //    ${user_config.KEY} is the literal placeholder documenting the convention.
+    //    It must also sit inside a command's resolve-knobs.mjs invocation — nowhere else is templated.
     for (const [, key] of text.matchAll(/\$\{user_config\.([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
       if (key === "KEY") continue;
       if (!knobs) once(`knob:${key}`, `${rel(p)}: \${user_config.${key}} unverifiable — no userConfig object in plugin.json`);
       else if (!knobs.has(key)) once(`knob:${key}`, `${rel(p)}: unknown knob \${user_config.${key}} (not in plugin.json userConfig)`);
+    }
+    // Only command text is templated (references/config.md § Knob channel): a placeholder
+    // anywhere but a command's resolve-knobs.mjs invocation renders literally and resolves as
+    // unset, so it is a defect even when the knob exists.
+    const RESOLVER_BLOCK_RE = /^```[^\n]*\nnode "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/resolve-knobs\.mjs"[\s\S]*?^```$/gm;
+    const outsideInvocation = rel(p).startsWith("commands/") ? text.replace(RESOLVER_BLOCK_RE, "") : text;
+    for (const [, key] of outsideInvocation.matchAll(/\$\{user_config\.([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+      if (key === "KEY") continue;
+      once(
+        `channel:${key}`,
+        `${rel(p)}: \${user_config.${key}} outside the resolve-knobs.mjs invocation — only a command's resolver invocation may carry a knob placeholder (references/config.md § Knob channel)`
+      );
     }
 
     // 3. Every devcycle:<name> must resolve to an agent or a command. Playbooks are addressed
@@ -805,7 +842,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
 
   // 18. The model-tier table (references/model-tiers.json) is well-formed: every entry names a
   //     family, an integer rank and a compilable match, ranks ascend strictly, and no family
-  //     repeats. The ceiling rule in references/config.md is only as trustworthy as this ordering,
+  //     repeats. The ceiling rule in references/model-routing.md is only as trustworthy as this ordering,
   //     and scripts/model-pool.mjs reads it verbatim.
   const TIERS_PATH_REL = "references/model-tiers.json";
   const tiersFile = join(root, TIERS_PATH_REL);
@@ -1032,18 +1069,18 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   }
 
   // 23. Every dispatch instruction in playbooks/ and commands/ names its governing model-tier
-  //     rule -- a *Model knob, references/config.md, or an inline
+  //     rule -- a *Model knob, references/model-routing.md (or references/config.md), or an inline
   //     "fast tier"/"session tier" -- so a dispatch is never silently undocumented (issue #171).
   //     Checks presence of a citation, not that it is the correct one, the same posture check 11
   //     takes for a reference's consumer. The window is the dispatch's own enclosing numbered
   //     step (or heading section, when no numbered step wraps it) -- never the whole file, or a
   //     citation for one dispatch would silently satisfy an unrelated dispatch elsewhere in the
-  //     same file (references/config.md § Model tiers owns the derivation this checks nothing
+  //     same file (references/model-routing.md § Model tiers owns the derivation this checks nothing
   //     about, only that a pointer to it, or an equivalent citation, exists).
   {
     const DISPATCH_RE = /(?:Dispatch\s+(?:exactly ONE\s+)?`?devcycle:[a-z-]+`?|`?devcycle:[a-z-]+`?\s+dispatch\b)/gi;
     const GOVERNANCE_RE =
-      /implementerModel|taskReviewerModel|branchReviewModel|walkthroughModel|references\/config\.md|\bfast tier\b|\bsession tier\b/i;
+      /implementerModel|taskReviewerModel|branchReviewModel|walkthroughModel|references\/model-routing\.md|references\/config\.md|\bfast tier\b|\bsession tier\b/i;
     const STEP_RE = /^\d+\.\s/;
     const HEADING_RE = /^#{1,6}\s/;
     for (const dir of ["playbooks", "commands"]) {
@@ -1066,8 +1103,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           if (!GOVERNANCE_RE.test(unitText))
             fail(
               `${dir}/${f}:${lineNo}: dispatch "${m[0]}" names no governing model-tier rule (a ` +
-                `*Model knob, references/config.md, or "fast tier"/` +
-                `"session tier") in its enclosing step -- see references/config.md § Model tiers`
+                `*Model knob, references/model-routing.md, references/config.md, or "fast tier"/` +
+                `"session tier") in its enclosing step -- see references/model-routing.md § Model tiers`
             );
         }
       }

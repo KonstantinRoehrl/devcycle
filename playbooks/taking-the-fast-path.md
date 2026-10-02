@@ -42,12 +42,12 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    there and follow it. Run `git add -N` on any file the change creates before committing, or
    the pathspec matches nothing for it and the commit aborts.
 5. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model
-   `taskReviewerModel` resolves per `references/config.md`, with the diff and
-   the two evidence-file paths from step 2; the reviewer reads the declared class and the exact
-   command off `fast-before.txt`'s first line, since the fast path writes no implementer report
-   to carry them. On reject: fix, re-verify the evidence, re-dispatch. No review panel, no
-   cross-model lens, no red-team — those belong to the full branch-review stage, not here. This
-   one-reviewer floor is never profile-conditional: a `lean` run runs it too.
+   `taskReviewerModel` resolves per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`, with the
+   diff and the two evidence-file paths from step 2; the reviewer reads the declared class and
+   the exact command off `fast-before.txt`'s first line, since the fast path writes no
+   implementer report to carry them. On reject: fix, re-verify the evidence, re-dispatch.
+   No review panel, no cross-model lens, no red-team — those belong to the full branch-review
+   stage, not here. This one-reviewer floor is never profile-conditional: a `lean` run runs it too.
 
    Cap: 2 rounds. One round is one reviewer dispatch plus its fix. Statuses and their
    reporting are owned by `${CLAUDE_PLUGIN_ROOT}/references/loops.md`.

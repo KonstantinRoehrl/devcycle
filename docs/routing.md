@@ -1,8 +1,9 @@
 # Routing — intent to entry point, and what each command may do
 
 The single owner of the user-facing surface. No existing reference fits: `${CLAUDE_PLUGIN_ROOT}/references/config.md`
-owns knobs, profiles and model routing, `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns who does the work once a
-stage is running, and neither maps a user's intent to an entry point or says what a command may
+owns knobs and profiles, `references/model-routing.md` owns model routing,
+`${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns who does the work once a
+stage is running, and none of them maps a user's intent to an entry point or says what a command may
 do before its first confirmation. Every entry point appears exactly once. `scripts/validate.mjs`
 fails the build when a command is missing from this table, when a row names no command, when a
 command is listed twice, when a `consequence` cell is not one of the classes below (or that list

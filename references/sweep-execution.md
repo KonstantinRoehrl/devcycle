@@ -18,7 +18,7 @@ the re-run rule — is owned by
   `.devcycle/sweep-args-<task-id>.json` and save the stdout report to
   `.devcycle/sweep-report-<task-id>.json` — per task, since the triage path's single names would
   collide across concurrent sweeps. Ledger IMMEDIATELY before the invocation, in
-  `references/config.md`'s audit shape: `event=dispatched outcome=sweep model <decision>`, so a crash
+  `references/model-routing.md`'s audit shape: `event=dispatched outcome=sweep model <decision>`, so a crash
   mid-sweep still shows the task dispatched.
 - **Clean targets** apply before a task's FIRST invocation, and a dirty target means the sweep does
   not run for that task: ledger `event=user-decision outcome=sweep dirty-targets` naming the files,

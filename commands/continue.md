@@ -39,6 +39,35 @@ recollection, including the user's.
    continuing on the stale record. For any stage with a human-required step (per
    `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § Resuming at the recorded stage), re-walk that step
    on resume rather than assuming a stale `state.md` already cleared it.
+2b. Resolve knobs per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel — only now,
+   once the ownership check and `resume-check` have passed:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
+  --profile '${user_config.profile}' \
+  --gitPolicy '${user_config.gitPolicy}' \
+  --docTrackingPolicy '${user_config.docTrackingPolicy}' \
+  --reviewDepth '${user_config.reviewDepth}' \
+  --crossModelReview '${user_config.crossModelReview}' \
+  --onDeviceGate '${user_config.onDeviceGate}' \
+  --implementerModel '${user_config.implementerModel}' \
+  --taskReviewerModel '${user_config.taskReviewerModel}' \
+  --branchReviewModel '${user_config.branchReviewModel}' \
+  --walkthroughModel '${user_config.walkthroughModel}' \
+  --learnStalenessSessions '${user_config.learnStalenessSessions}' \
+  --learnStalenessDays '${user_config.learnStalenessDays}' \
+  --learnSessionCap '${user_config.learnSessionCap}'
+```
+
+   When the state file carries a `- knobs:` line, rerun that command with `--compare '<that
+   line>'` appended. No output → proceed. Any output (`key: old → new` lines) → show it and ask
+   ONE question, the knob-change question, unless a `- knobs-declined:` row skips it:
+   **apply for the rest of this cycle**, rewriting `- knobs:` from the fresh line, or **keep this
+   cycle's values**, leaving `- knobs:` as it is. Whatever the comparison printed, update the
+   `knobs-declined:`/`knobs-changed:` rows and record an apply per
+   `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file, which owns both rows. A state
+   file with no `- knobs:` line gets one written from the fresh line without asking. Then the
+   drift notice, per § Knob channel.
 3. Read the ledger it names (`.devcycle/ledger.md`) and the plan/spec/
    checklist paths it records, where present.
 4. Settle the branch and derive position from git evidence per
@@ -49,10 +78,11 @@ recollection, including the user's.
    and ask before switching; never switch branches silently. During execution,
    never re-dispatch a task the ledger records as committed.
 
-Both asks above are gates — which cycle to resume, and whether to switch
-branches — and a resume already carries a run record, so an Other answer at
-either appends `user-correction-at-gate` to the run the chosen state file names,
-whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
+The asks above are gates — which cycle to resume, whether to apply changed
+knobs, and whether to switch branches — and a resume already carries a run
+record, so an Other answer at any of them appends `user-correction-at-gate`
+to the run the chosen state file names, whose rule
+`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
 
 ## Announce the derived position
 

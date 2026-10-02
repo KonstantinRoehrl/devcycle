@@ -305,6 +305,60 @@ test("still flags a duplicated paragraph in two reference files that both open w
   }
 });
 
+// EXEMPTION 3: only command text is templated, so each entry command carries the resolver
+// invocation verbatim and no shared file can hold it.
+const INVOCATION =
+  "```\n" +
+  'node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \\\n' +
+  [
+    "profile", "gitPolicy", "docTrackingPolicy", "reviewDepth", "crossModelReview", "onDeviceGate",
+    "implementerModel", "taskReviewerModel", "branchReviewModel", "walkthroughModel",
+    "learnStalenessSessions", "learnStalenessDays", "learnSessionCap",
+  ].map((k) => `  --${k} '\${user_config.${k}}'`).join(" \\\n") +
+  "\n```";
+
+test("exempts the resolver invocation carried verbatim by two commands", () => {
+  const dir = makeFixture({
+    "commands/review.md": `# Review\n\nResolve first.\n\n${INVOCATION}\n`,
+    "commands/verify.md": `# Verify\n\nResolve first.\n\n${INVOCATION}\n`,
+  });
+  try {
+    const out = execFileSync(process.execPath, [SCRIPT], { ...PIPE, cwd: dir });
+    assert.match(out, /duplication-check: ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("still flags a resolver invocation that carries prose in its paragraph", () => {
+  const withProse = `Run this before anything else in the command, exactly as rendered:\n${INVOCATION}`;
+  const dir = makeFixture({
+    "commands/review.md": `# Review\n\n${withProse}\n`,
+    "commands/verify.md": `# Verify\n\n${withProse}\n`,
+  });
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT], { ...PIPE, cwd: dir });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /commands\/review\.md:paragraph 1 ~= commands\/verify\.md:paragraph 1/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("still flags an invocation with an argument that is not a knob placeholder pair", () => {
+  const tampered = INVOCATION.replace("--gitPolicy '${user_config.gitPolicy}'", "--gitPolicy 'open-pr'");
+  const dir = makeFixture({
+    "commands/review.md": `# Review\n\n${tampered}\n`,
+    "commands/verify.md": `# Verify\n\n${tampered}\n`,
+  });
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT], { ...PIPE, cwd: dir });
+    assert.equal(r.status, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // A regression fixture drawn from the corpus, not invented for the test. Every other fixture
 // here is synthetic prose written to exercise a threshold, which shows the passes work on
 // contrived input but not that they would have caught anything real. This pair is the actual

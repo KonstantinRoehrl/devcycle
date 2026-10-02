@@ -8,7 +8,8 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
 
 ## Engine selection (keyed to `profile`)
 
-Resolve `profile` per `${CLAUDE_PLUGIN_ROOT}/references/config.md`. At **`lean` / `standard`** do NOT
+Read `profile` from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob
+channel. At **`lean` / `standard`** do NOT
 load `superpowers:writing-plans` — the Plan mechanics section below is self-contained. At
 **`thorough`** it is a REQUIRED SUB-SKILL for all plan-writing mechanics; where the two disagree this
 playbook wins, and two of that section's rules always override it — the plan header's "For agentic workers"
@@ -178,9 +179,9 @@ stage's handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with
 `Stage completed: planning` and the plan path (or the NO-GO report) as its artifact. The plan carries
 everything execution needs, so the context action is `Clear + /devcycle:continue`.
 
-Committing the saved plan is gated the way the spec's commit is: resolve
-`${user_config.docTrackingPolicy}` against `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc
-tracking, then `git check-ignore` the plan's path, and commit with an explicit pathspec only when
+Committing the saved plan is gated the way the spec's commit is: read
+`docTrackingPolicy` from the `knobs:` line and check it against
+`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, then `git check-ignore` the plan's path, and commit with an explicit pathspec only when
 both permit it — otherwise the plan stays written and uncommitted. This paragraph is outside the
 Plan mechanics section, so it binds at `thorough` too, where the upstream skill has no
 plan-commit step of its own and `all-tracked` would otherwise never track a plan. A new

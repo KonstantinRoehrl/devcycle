@@ -71,7 +71,7 @@ its gate function, red-flags list, or rationalization table.
 - **Producer-side model routing.** The walkthrough's model cannot be chosen from inside the
   session that already exists, so the recommendation travels in the branch-review handoff
   as `Start the fresh session on <model>`, resolved from `walkthroughModel` per
-  `references/config.md`; where that knob derives rather than pins, the walkthrough takes
+  `references/model-routing.md`; where that knob derives rather than pins, the walkthrough takes
   the fast tier, since it is interview mechanics. No upstream analogue.
 - **The `onDeviceGate` conditional.** `human-required`: the stage is complete only when
   every non-`(auto)` item has a human verdict. `auto-ok`: the checklist may close without a

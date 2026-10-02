@@ -26,7 +26,8 @@ how many rounds the findings loop gets.
 
 An explicitly configured `reviewDepth` wins verbatim over the profile column, so a `lean`
 run can be pinned to `panel` and a `thorough` run to `single`; the profile only supplies
-the default. Resolution order and the model tiers come from `references/config.md`.
+the default. Resolution order comes from `references/config.md`, the model tiers from
+`references/model-routing.md`.
 
 ## (a) Upstream's share — referenced, never restated (at every profile)
 
@@ -98,8 +99,9 @@ Unless a line says otherwise, it holds at every profile.
 - **A handoff even on `fixes-required`.** The stop IS the stage result: the block is
   emitted with the outstanding findings as carry-overs and `stage: branch-review` kept in
   `.devcycle/state.md` so the cycle resumes here.
-- **Config and model routing** through `references/config.md` — `branchReviewModel`,
-  `crossModelReview`, and the unset-placeholder rule — plus one panel-specific mechanic:
+- **Config and model routing** through `references/config.md` (`crossModelReview` and the
+  unset-placeholder rule) and `references/model-routing.md` (`branchReviewModel`) — plus one
+  panel-specific mechanic:
   when `branchReviewModel` resolves to an explicit id it is exported as
   `DEVCYCLE_PANEL_MODEL` before invoking the panel, since omitting it would silently
   replace the user's binding choice with the CLI default.

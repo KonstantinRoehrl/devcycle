@@ -211,7 +211,7 @@ export function routingAdvisoriesSection(a) {
 
   lines.push("### Confounds this advisory does not correct", "");
   lines.push(
-    "- **Task selection.** The `auto` predicates in `references/config.md` § Model tiers chose each",
+    "- **Task selection.** The `auto` predicates in `references/model-routing.md` § Model tiers chose each",
     "  dispatch's model from task complexity, so pricier cells hold systematically harder and larger",
     "  tasks. The measured ratio is not a causal efficiency claim about the models.",
     "- **Multiplicity.** One comparison per cell against its class's cheapest, with the comparator",
