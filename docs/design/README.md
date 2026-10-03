@@ -93,7 +93,9 @@ devcycle/                (public GitHub repo)
 │   ├── planning-waves.md         # file-disjoint tasks, explicit dependencies, dispatch map, pinned interfaces
 │   ├── executing-waves.md        # ledger, brief/diff file handoffs, green gate, model routing, handoff blocks
 │   ├── reviewing-code.md         # the review engine both whole-scope reviews share, and the audit stage (§15.3, §16)
+│   ├── writing-the-findings-document.md  # audit runs' and /devcycle:maintain's ranked findings document; never read by branch review
 │   ├── reviewing-the-branch.md   # whole-branch gate: spec-compliance layer + the bounded rounds loop
+│   ├── receiving-review.md       # standalone reconcile stage: triage a PR's review comments into fixes and replies
 │   ├── verifying-on-device.md    # claude-in-chrome structural checks + the human checklist walkthrough
 │   ├── finishing-the-cycle.md    # finish stage: gitPolicy resolution + push-signal clamp
 │   ├── taking-the-fast-path.md   # confirmed-trivial mini-cycle: in-session implementation, one reviewer pass
@@ -255,8 +257,12 @@ gated by `userConfig.crossModelReview`.
   back to the profile's column, the same route an unset knob takes — the escape hatch for a
   user upgrading from an older config whose explicit value would otherwise shadow the profile
   forever (resolution order in `references/config.md`).
-- Shipped defaults: `gitPolicy: local-commits-only` (most conservative), `reviewDepth: single`,
-  `crossModelReview: false`, `onDeviceGate: human-required`, all four model options `auto`.
+- Shipped defaults: `gitPolicy: local-commits-only` (most conservative), `reviewDepth: auto`
+  and `onDeviceGate: auto` (each the profile's row), `crossModelReview: false`, all four model
+  options `auto`.
+- Values reach stages through one channel (added 2026-09-29): every entry command except
+  `/devcycle:doctor` runs `scripts/resolve-knobs.mjs` with the rendered placeholders and stages
+  read the `knobs:` line it prints (`references/config.md` § Knob channel).
 - The finishing stage branches on `gitPolicy`: local-commits-only ends with the branch handed back (the author's
   mode); `open-pr` automates push + PR for users who want it.
 - Before acting on `push-allowed`/`open-pr`, the finishing stage resolves an **effective**
@@ -324,7 +330,7 @@ gated by `userConfig.crossModelReview`.
 
 ### 15.1 The reference layer: one owner per convention
 
-`references/` holds eighteen plain markdown files, each the sole owner of one cross-cutting
+`references/` holds plain markdown files, each the sole owner of one cross-cutting
 convention; each file and what it owns is enumerated, one line apiece, in the
 [references index](../../references/README.md).
 
@@ -347,6 +353,13 @@ These files are addressed only by path. They carry no frontmatter, are never inv
 name as `devcycle:<something>`, and take no share of the description budget §4.6 tracks —
 they cost nothing until a playbook in flight names one and reads it. Since 2026-08-06 the
 playbook layer works the same way (§3), so `commands/` alone spends the description budget.
+
+Since 2026-10-02 that cost-on-demand promise holds by mechanism rather than by habit. A prefixed
+path is a read and a bare path names an owner — the citation grammar in the
+[references index](../../references/README.md#citation-grammar) — and `scripts/validate.mjs`
+check 26 enforces it. `references/stages.json` carries the stage dispatch, so a command reaches a
+stage's entry through `scripts/stage-entry.mjs` and opens `resume.md` only when that lookup fails.
+`scripts/context-report.mjs` reports each entry point's refs-only and all-hops closures.
 
 ### 15.2 Native engines vs upstream overlays, keyed to `profile`
 
@@ -448,7 +461,9 @@ stays a separate file because its stops, outputs and lifecycle genuinely differ 
 a spec and runs a bounded rounds loop, where the audit interviews for criteria and stops for a
 user selection. *(Amended 2026-08-06: the audit's own two steps — the criteria interview and the
 findings document — moved into `reviewing-code.md` as sections marked "audit runs only", so the
-audit is no longer a separate file. The branch review's separation is unchanged.)*
+audit is no longer a separate file. The branch review's separation is unchanged. Amended
+2026-10-02: the findings document moved again, into `playbooks/writing-the-findings-document.md`,
+so the branch-review stage — which delegates to `reviewing-code.md` in full — no longer loads it.)*
 
 **Blocking is derived.** Severity is `critical` / `high` / `medium` / `low`, and blocking
 means `critical` or `high` — not a separate field a reviewer can set independently. Before

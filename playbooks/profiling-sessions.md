@@ -68,7 +68,9 @@ which names the landed lesson whose own cost regressed and so is a verified caus
 Carry forward the script's `prices as of` line into the announce. If it emitted any
 `UNPRICED MODEL` lines, report them by name in the Highlights prose: an unpriced model means
 `scripts/pricing.mjs` needs an entry, and until it has one, that model's requests sit outside
-every dollar figure the report shows.
+every dollar figure the report shows. A `PROVISIONAL PRICE` line means a model newer than any priced
+in its family was estimated at that family's newest price, reported apart from the measured totals;
+name it the same way and say the figure is an estimate.
 
 ## Severity, ranking, and systemic recommendations
 
@@ -76,7 +78,7 @@ The script's candidate lines carry no severity — assigning it is this playbook
 `${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s vocabulary **verbatim** and ranking the list
 in that file's document-form order. The dollar figure rides along per finding as a supporting
 field, never the sort key: quote the figure the report already carries, scored by
-`${CLAUDE_PLUGIN_ROOT}/references/impact-scoring.md`'s formula, and never recompute it. Name a
+`references/impact-scoring.md`'s formula, and never recompute it. Name a
 culprit by its slug in `${CLAUDE_PLUGIN_ROOT}/references/culprits.json`, the vocabulary the
 report's culprit table renders from.
 
@@ -155,7 +157,9 @@ to draft. For each finding it chose:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --issue-body <slug>`. The slug may name a culprit
    (drafting a `[culprit:<slug>]` issue) OR a Compliance candidate — `inherited-model`,
    `missing-workload`, `main-thread-browser`, `general-purpose-search` — drafting a
-   `[compliance:<slug>]` issue from the same section the report renders. Its `repo:` line names the
+   `[compliance:<slug>]` issue from the same section the report renders, OR `unpriced-model` —
+   drafting a `[doctor:unpriced-model]` issue for the models the report names as unpriced or
+   provisionally priced. Its `repo:` line names the
    repo every command below targets — read the slug from there, never from this file.
 2. Screen it before anyone sees it: write it to a file, then run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`. A draft that fails
@@ -172,6 +176,12 @@ to draft. For each finding it chose:
 
    ```
    Drafted: [compliance:<slug>] <title>
+   ```
+
+   — or, for the `unpriced-model` draft, a `[doctor:<slug>]` title:
+
+   ```
+   Drafted: [doctor:<slug>] <title>
    ```
 
    That marker is the only record of a draft: `doctor --json`'s `outer_loop` counts the issues out of
@@ -192,7 +202,7 @@ to draft. For each finding it chose:
    Pass no `--label`, and create none. Labelling that repo needs push access, so a filer who is
    not a collaborator gets a 403 — after both gates, with the draft already recorded — and GitHub
    drops labels such a filer supplies anyway. The draft's `labels:` line says what the maintainer
-   applies at triage; `doctor --json`'s `outer_loop` counts by the `[culprit:<slug>]` or `[compliance:<slug>]`
+   applies at triage; `doctor --json`'s `outer_loop` counts by the `[culprit:<slug>]`, `[compliance:<slug>]` or `[doctor:<slug>]`
    title prefix, which every filer can set.
 
 ## Config-drift mode
@@ -205,7 +215,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --drift <path>
 ```
 
 It resolves the changelog at `${CLAUDE_PLUGIN_ROOT}/docs/configuration/config-changelog.md` — the same
-engine `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md` calls into, one engine, two
+engine `playbooks/learning-from-sessions.md` calls into, one engine, two
 callers — and prints each finding as a `file:line` reference with the changelog's recorded
 replacement. Report them as printed; never re-parse the changelog or re-grep the target file yourself.
 

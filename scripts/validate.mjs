@@ -8,18 +8,32 @@ import { pathToFileURL } from "node:url";
 import { SEMVER_RE, cmpSemver } from "./semver.mjs";
 import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run-record.mjs";
 import { readPolicy } from "./reinforcement-policy.mjs";
+import { closure } from "./context-closure.mjs";
+import { ROSTER } from "./resolve-knobs.mjs";
+import { bareExistsErrors, grammarFiles, grammarHits, referenceReadErrors } from "./citation-grammar.mjs";
+import { loadStages } from "./stage-entry.mjs";
+import { budgetDecisionErrors } from "./budget-decisions.mjs";
+import { DECISIONS_DOC } from "./doc-paths.mjs";
 
 
-// The learn loop's compiled memory must stay tracked: README/DECISIONS say lessons + promotion
-// records survive a clone (the flywheel's suppress/verify/retire need them). A .gitignore that
-// re-ignores them silently half-opens the loop. --no-index makes check-ignore consult the ignore
-// rules regardless of index state: without it git reports "not ignored" for any already-tracked
-// path, so the guard would go permanently dead the moment the store is staged or committed.
-export function lessonsTrackingErrors(repoRoot) {
+// devcycle's own record stores must stay tracked: README/DECISIONS say lessons + promotion
+// records survive a clone (the flywheel's suppress/verify/retire need them), and maintain's findings
+// store is its cross-pass memory. A .gitignore that re-ignores one silently half-opens its loop.
+// --no-index makes check-ignore consult the ignore rules regardless of index state: without it git
+// reports "not ignored" for any already-tracked path, so the guard would go permanently dead the
+// moment a store is staged or committed. A store directory is probed through a file path inside
+// it: under the `docs/devcycle/*` allowlist a bare directory path reads as ignored once nothing
+// sits in it, while the re-included directory's files stay visible — the question that matters.
+const RECORD_STORES = [
+  ["docs/devcycle/lessons.md", "docs/devcycle/lessons.md"],
+  ["docs/devcycle/promotions/", "docs/devcycle/promotions/x.md"],
+  ["docs/devcycle/maintenance-findings/", "docs/devcycle/maintenance-findings/x.md"],
+];
+export function recordStoreTrackingErrors(repoRoot) {
   const errs = [];
-  for (const p of ["docs/devcycle/lessons.md", "docs/devcycle/promotions"]) {
-    const res = spawnSync("git", ["check-ignore", "-q", "--no-index", p], { cwd: repoRoot });
-    if (res.status === 0) errs.push(`.gitignore must not ignore ${p} — the learn loop's records must stay tracked`);
+  for (const [store, probe] of RECORD_STORES) {
+    const res = spawnSync("git", ["check-ignore", "-q", "--no-index", probe], { cwd: repoRoot });
+    if (res.status === 0) errs.push(`.gitignore must not ignore ${store} — devcycle's own records must stay tracked`);
   }
   return errs;
 }
@@ -78,12 +92,35 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     // Every userConfig entry's type must be one the plugin loader accepts, or the whole
     // manifest is rejected on install (0.17.0 shipped type "integer" and failed to load).
     const CONFIG_TYPES = new Set(["string", "number", "boolean", "directory", "file"]);
-    if (plugin.userConfig && typeof plugin.userConfig === "object" && !Array.isArray(plugin.userConfig))
+    if (plugin.userConfig && typeof plugin.userConfig === "object" && !Array.isArray(plugin.userConfig)) {
       for (const [knob, spec] of Object.entries(plugin.userConfig)) {
         const t = spec?.type;
         if (!CONFIG_TYPES.has(t))
           fail(`plugin.json: userConfig.${knob}.type "${t}" invalid — must be one of ${[...CONFIG_TYPES].join(", ")}`);
+        // `options` is what turns the knob into a pick-list in /plugin configure. The loader takes
+        // only a non-empty array of strings that contains the default, and rejects the rest.
+        if (spec && "options" in spec) {
+          const opts = spec.options;
+          if (!Array.isArray(opts) || opts.some((o) => typeof o !== "string"))
+            fail(`plugin.json: userConfig.${knob}.options must be an array of strings`);
+          else if (!opts.length) fail(`plugin.json: userConfig.${knob}.options needs at least one value`);
+          else if (!opts.includes(spec.default))
+            fail(`plugin.json: userConfig.${knob}.options: default ${JSON.stringify(spec.default)} is not one of ${opts.join(", ")}`);
+        }
       }
+      // A fixed-set knob's pick-list is exactly the resolver's value set, with `auto` first when
+      // the profile supplies the fallback — the resolver owns the set, the manifest mirrors it.
+      for (const { key, kind, values, fallback } of ROSTER) {
+        const spec = plugin.userConfig[key];
+        if (kind !== "enum" || !spec) continue;
+        const expected = typeof fallback === "object" ? ["auto", ...values] : values;
+        if (JSON.stringify(spec.options) !== JSON.stringify(expected))
+          fail(
+            `plugin.json: userConfig.${key}.options must be [${expected.join(", ")}] to match ` +
+              `scripts/resolve-knobs.mjs's ROSTER, got ${spec.options === undefined ? "none" : JSON.stringify(spec.options)}`
+          );
+      }
+    }
   } catch (e) { fail(`plugin.json: ${e.message}`); }
   try {
     const m = JSON.parse(readFileSync(join(root, ".claude-plugin/marketplace.json"), "utf8"));
@@ -169,10 +206,23 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
 
     // 2. Every ${user_config.X} must name a key in plugin.json's userConfig.
     //    ${user_config.KEY} is the literal placeholder documenting the convention.
+    //    It must also sit inside a command's resolve-knobs.mjs invocation — nowhere else is templated.
     for (const [, key] of text.matchAll(/\$\{user_config\.([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
       if (key === "KEY") continue;
       if (!knobs) once(`knob:${key}`, `${rel(p)}: \${user_config.${key}} unverifiable — no userConfig object in plugin.json`);
       else if (!knobs.has(key)) once(`knob:${key}`, `${rel(p)}: unknown knob \${user_config.${key}} (not in plugin.json userConfig)`);
+    }
+    // Only command text is templated (references/config.md § Knob channel): a placeholder
+    // anywhere but a command's resolve-knobs.mjs invocation renders literally and resolves as
+    // unset, so it is a defect even when the knob exists.
+    const RESOLVER_BLOCK_RE = /^```[^\n]*\nnode "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/resolve-knobs\.mjs"[\s\S]*?^```$/gm;
+    const outsideInvocation = rel(p).startsWith("commands/") ? text.replace(RESOLVER_BLOCK_RE, "") : text;
+    for (const [, key] of outsideInvocation.matchAll(/\$\{user_config\.([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+      if (key === "KEY") continue;
+      once(
+        `channel:${key}`,
+        `${rel(p)}: \${user_config.${key}} outside the resolve-knobs.mjs invocation — only a command's resolver invocation may carry a knob placeholder (references/config.md § Knob channel)`
+      );
     }
 
     // 3. Every devcycle:<name> must resolve to an agent or a command. Playbooks are addressed
@@ -460,21 +510,17 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     if (frontmatter(join(root, "agents", f))?.model)
       fail(`agents/${f}: frontmatter must not set model: — a pin defeats session-tier escalation`);
 
-  // 11. Every reference has at least one consumer — a surface file that loads it, or a
-  //     script that reads it (references/impact-scoring.md's consumer is a comment in
-  //     scripts/doctor.mjs; it gains its two surface citations in Phases 2 and 3).
-  //     A reference mentioning itself is not a consumer of itself.
+  // 11. Every reference has at least one consumer: a surface file that reads it — a prefixed
+  //     ${CLAUDE_PLUGIN_ROOT} citation, never a bare mention, which only names an owner — or a
+  //     script that reads it. A reference citing itself is not its own consumer, and
+  //     references/README.md is the index, a consumer OF references, so it needs none.
   const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
-  for (const f of namesIn("references")) {
-    // references/README.md is the index — a consumer OF references, not a loadable reference —
-    // so nothing cites it and requiring a consumer of it would be self-defeating.
-    if (f === "README.md") continue;
-    const needle = `references/${f}`;
-    const consumed = [...surface, ...scripts].some(
-      (p) => !rel(p).endsWith(needle) && readFileSync(p, "utf8").includes(needle)
-    );
-    if (!consumed) fail(`references/${f}: no consumer — every reference must be loaded by something`);
-  }
+  for (const h of referenceReadErrors({
+    references: namesIn("references"),
+    surface: surface.map((p) => ({ rel: rel(p), text: readFileSync(p, "utf8") })),
+    scripts: scripts.map((p) => ({ rel: rel(p), text: readFileSync(p, "utf8") })),
+  }))
+    fail(h.message);
 
   // 12. The state file's shape is declared once and carried by a fixture, and the two agree —
   //     the guard on resumability after `/clear`, which nothing else checks. The declaration is
@@ -702,55 +748,38 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
   }
 
+  const contextRows = [];
   // 15. Per-stage context budget: a playbook's own bytes plus every reference reachable from it
   //     through ${CLAUDE_PLUGIN_ROOT} citations, against a committed baseline. Bytes, not lines:
   //     a context window is spent in bytes, and a long line costs what it costs. Growth is a
-  //     reviewed decision, same rule as check 9.
+  //     reviewed decision, same rule as check 9. Citations are followed by
+  //     scripts/context-closure.mjs, which context-report.mjs shares.
   const CONTEXT_BUDGET_PATH = "tests/fixtures/context-budget.json";
   const contextFile = join(root, CONTEXT_BUDGET_PATH);
+  // `contextParsed` tracks whether a usable baseline survived, for check 14's reason: a
+  // `contextBaseline === null` sentinel cannot tell "parse failed" from a file whose whole
+  // content legally parses to `null`, and the shape guard is what keeps a truthy non-object
+  // from reaching the `in` below — which throws on a primitive, killing the run before
+  // checks 17 and 18 execute at all. Check 28 reads both.
+  let contextBaseline, contextParsed = false;
   if (!existsSync(contextFile)) {
     fail(`${CONTEXT_BUDGET_PATH}: missing — no stage declares its context cost, so growth could not be reviewed`);
   } else {
-    // `parsed` tracks whether a usable baseline survived, for check 14's reason: a
-    // `contextBaseline === null` sentinel cannot tell "parse failed" from a file whose whole
-    // content legally parses to `null`, and the shape guard is what keeps a truthy non-object
-    // from reaching the `in` below — which throws on a primitive, killing the run before
-    // checks 17 and 18 execute at all.
-    let contextBaseline, parsed = true;
+    contextParsed = true;
     try {
       contextBaseline = JSON.parse(readFileSync(contextFile, "utf8"));
     } catch (e) {
-      parsed = false;
+      contextParsed = false;
       fail(`${CONTEXT_BUDGET_PATH}: not valid JSON — ${e.message}`);
     }
-    if (parsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
+    if (contextParsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
       fail(
         `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each playbook to its byte budget, ` +
           `got ${JSON.stringify(contextBaseline)}`
       );
-      parsed = false;
+      contextParsed = false;
     }
-    if (parsed) {
-      // Citations are followed to a fixed point; `seen` makes a citation cycle terminate and
-      // counts each file exactly once, which is also what the reader's context actually pays.
-      const citationsIn = (text) =>
-        [...text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(references\/[A-Za-z0-9._-]+\.md)/g)].map((m) => m[1]);
-      const transitiveBytes = (startRel) => {
-        const seen = new Set();
-        const queue = [startRel];
-        let total = 0;
-        while (queue.length) {
-          const relPath = queue.shift();
-          if (seen.has(relPath)) continue;
-          seen.add(relPath);
-          const abs = join(root, relPath);
-          if (!existsSync(abs)) continue;
-          const text = readFileSync(abs, "utf8");
-          total += Buffer.byteLength(text);
-          queue.push(...citationsIn(text));
-        }
-        return total;
-      };
+    if (contextParsed) {
       const playbookNames = namesIn("playbooks").map((f) => `playbooks/${f}`);
       for (const p of playbookNames) {
         if (!(p in contextBaseline)) {
@@ -762,7 +791,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           fail(`${CONTEXT_BUDGET_PATH}: ${p} must be an integer, got ${JSON.stringify(limit)}`);
           continue;
         }
-        const bytes = transitiveBytes(p);
+        const { bytes } = closure(p, { follow: "refs", root });
+        contextRows.push({ path: p, bytes, limit, allHops: closure(p, { follow: "all", root }) });
         if (bytes > limit)
           fail(
             `${p}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, playbook plus its cited references) — ` +
@@ -774,6 +804,20 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           fail(`${CONTEXT_BUDGET_PATH}: entry "${p}" names no such playbook — remove it or restore the file`);
     }
   }
+
+  // 28. M10: no budget fixture value above the newest `budget:` line the decisions log records for
+  //     it (scripts/budget-decisions.mjs). A missing log fails, as a missing fixture does in checks
+  //     9 and 15 — skipping would leave every raise unchecked. An unusable fixture is skipped here
+  //     because checks 9 and 15 have already failed it.
+  const decisionsPath = join(root, DECISIONS_DOC);
+  if (!existsSync(decisionsPath))
+    fail(`${DECISIONS_DOC}: missing — no budget decision is recorded, so no budget raise could be checked against one`);
+  else if (budgetsParsed && contextParsed)
+    for (const message of budgetDecisionErrors({
+      fixtures: { "surface-budget.json": budgets, "context-budget.json": contextBaseline },
+      logText: readFileSync(decisionsPath, "utf8"),
+    }))
+      fail(message);
 
   // 16. Every ${CLAUDE_PLUGIN_ROOT} citation resolves: that is check 4 above, which walks every
   //     surface file and tests every cited path against the tree, scripts included. The number is
@@ -797,7 +841,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
 
   // 18. The model-tier table (references/model-tiers.json) is well-formed: every entry names a
   //     family, an integer rank and a compilable match, ranks ascend strictly, and no family
-  //     repeats. The ceiling rule in references/config.md is only as trustworthy as this ordering,
+  //     repeats. The ceiling rule in references/model-routing.md is only as trustworthy as this ordering,
   //     and scripts/model-pool.mjs reads it verbatim.
   const TIERS_PATH_REL = "references/model-tiers.json";
   const tiersFile = join(root, TIERS_PATH_REL);
@@ -1024,18 +1068,18 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   }
 
   // 23. Every dispatch instruction in playbooks/ and commands/ names its governing model-tier
-  //     rule -- a *Model knob, references/config.md, or an inline
+  //     rule -- a *Model knob, references/model-routing.md (or references/config.md), or an inline
   //     "fast tier"/"session tier" -- so a dispatch is never silently undocumented (issue #171).
   //     Checks presence of a citation, not that it is the correct one, the same posture check 11
   //     takes for a reference's consumer. The window is the dispatch's own enclosing numbered
   //     step (or heading section, when no numbered step wraps it) -- never the whole file, or a
   //     citation for one dispatch would silently satisfy an unrelated dispatch elsewhere in the
-  //     same file (references/config.md § Model tiers owns the derivation this checks nothing
+  //     same file (references/model-routing.md § Model tiers owns the derivation this checks nothing
   //     about, only that a pointer to it, or an equivalent citation, exists).
   {
     const DISPATCH_RE = /(?:Dispatch\s+(?:exactly ONE\s+)?`?devcycle:[a-z-]+`?|`?devcycle:[a-z-]+`?\s+dispatch\b)/gi;
     const GOVERNANCE_RE =
-      /implementerModel|taskReviewerModel|branchReviewModel|walkthroughModel|references\/config\.md|\bfast tier\b|\bsession tier\b/i;
+      /implementerModel|taskReviewerModel|branchReviewModel|walkthroughModel|references\/model-routing\.md|references\/config\.md|\bfast tier\b|\bsession tier\b/i;
     const STEP_RE = /^\d+\.\s/;
     const HEADING_RE = /^#{1,6}\s/;
     for (const dir of ["playbooks", "commands"]) {
@@ -1058,8 +1102,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           if (!GOVERNANCE_RE.test(unitText))
             fail(
               `${dir}/${f}:${lineNo}: dispatch "${m[0]}" names no governing model-tier rule (a ` +
-                `*Model knob, references/config.md, or "fast tier"/` +
-                `"session tier") in its enclosing step -- see references/config.md § Model tiers`
+                `*Model knob, references/model-routing.md, references/config.md, or "fast tier"/` +
+                `"session tier") in its enclosing step -- see references/model-routing.md § Model tiers`
             );
         }
       }
@@ -1087,7 +1131,53 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     saying so. Legal git, which is why only a check catches it.
   docsSubdirTrackingErrors(root).forEach(fail);
 
-  lessonsTrackingErrors(process.cwd()).forEach(fail);
+  recordStoreTrackingErrors(process.cwd()).forEach(fail);
+
+  // 26. The citation grammar (references/README.md): a ${CLAUDE_PLUGIN_ROOT} path is a read and a
+  //     bare one names an owner. back-edge, owner-sentence, bare-read and bare-exists run over
+  //     commands/, playbooks/ and references/; agents/ load in a subagent's own context and keep
+  //     their own citations.
+  for (const h of grammarHits(root, grammarFiles(root))) fail(`${h.rel}:${h.line}: ${h.rule}: ${h.message}`);
+
+  // 27. references/stages.json is the stage dispatch's single owner: well-formed, keyed by exactly the
+  //     stage enum minus `done` (a closed cycle resumes at nothing), every playbook entry and every
+  //     surface path a note names a real file. A tree whose commands/cycle.md declares no stage enum
+  //     has no stages to dispatch, so it may lack the table; any other tree may not.
+  const stagesFile = join(root, "references/stages.json");
+  if (!existsSync(stagesFile)) {
+    if (stages.size) fail("references/stages.json: missing — commands/cycle.md declares a stage enum, and the stage dispatch has no table");
+  } else {
+    try {
+      const table = loadStages(stagesFile);
+      const keys = Object.keys(table).sort();
+      const expected = [...stages].filter((s) => s !== "done").sort();
+      if (!stages.size) fail("references/stages.json: keys unverifiable — no stage enum in commands/cycle.md");
+      else if (JSON.stringify(keys) !== JSON.stringify(expected))
+        fail(
+          `references/stages.json: keys [${keys.join(", ")}] must be exactly commands/cycle.md's stage enum minus done ` +
+            `[${expected.join(", ")}]`
+        );
+      for (const [stage, { entry, note }] of Object.entries(table)) {
+        if (entry.startsWith("playbooks/") && !existsSync(join(root, entry)))
+          fail(`references/stages.json: "${stage}" enters through ${entry}, which names no file in the plugin`);
+        for (const h of bareExistsErrors("references/stages.json", note, (r) => existsSync(join(root, r))))
+          fail(`references/stages.json: "${stage}" note: ${h.message}`);
+      }
+    } catch (err) {
+      // loadStages names the file by its absolute path; render it relative, and name it only once.
+      const reason = err.message.replaceAll(stagesFile, "references/stages.json");
+      fail(reason.includes("references/stages.json") ? reason : `references/stages.json: ${reason}`);
+    }
+  }
+
+  // L17: the all-hops closure follows playbook→playbook hops check 15 deliberately does not gate.
+  // Reported beside the gated figure so the hops stay visible without collapsing every budget
+  // into one number.
+  if (contextRows.length) {
+    console.log("context (check 15 gates refs-only bytes; all-hops is reported, never gated):");
+    for (const r of contextRows)
+      console.log(`  ${r.path}  refs-only ${r.bytes}/${r.limit} B  all-hops ${r.allHops.files.length} files, ${r.allHops.words} words`);
+  }
 
   if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
   console.log("validate: ok");

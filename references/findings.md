@@ -4,7 +4,7 @@ The single owner of how a devcycle finding is expressed, wherever it is raised: 
 the branch review, the shared review engine, the review panel, and the per-task reviewers.
 A consumer names this file and does not restate it.
 
-Nothing here decides *what* is worth flagging — `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`
+Nothing here decides *what* is worth flagging — `references/quality-criteria.md`
 owns what a finding is measured against. This file owns how the result is said.
 
 ## Severity
@@ -59,10 +59,10 @@ rating's prose justification.
 
 ## Strengths
 
-Owned jointly with `quality-criteria.md` § Strengths — not only defects, which this file's shape
-implements. A strength is reported in its own part of the document, ordered by where it was
-found, never interleaved with or ranked against the severity-ordered defect list, never
-blocking, and never a substitute for a defect the same evidence should have produced instead.
+`references/abstraction-and-strengths.md` § Strengths owns the rule; this file's shape implements it.
+A strength is reported in its own part of the document, ordered by where it was found, never
+interleaved with or ranked against the severity-ordered defect list, never blocking, and never a
+substitute for a defect the same evidence should have produced instead.
 
 **Fields:** Title (the pattern, plain language) · Location(s) (`file:line`) · Why it matters
 (what would get worse if this were removed or not replicated elsewhere) · Confidence
@@ -122,9 +122,9 @@ False-positive guards, binding on every reviewing surface, to be read before jud
   or `git diff` to the task under review — scope your checks to the brief's own file list. A
   scope-creep finding built on an unscoped diff is a false positive.
 - A "pre-existing / flaky / unrelated" explanation for a red test is not a finding until it is
-  reproduced: the attribution-discipline counterpart to the concurrent-sibling check (#167). The
-  reproduction-or-reject rule is owned by `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Reviewer
-  verdicts — apply it, do not restate it here.
+  reproduced: the attribution-discipline counterpart to the concurrent-sibling check (#167).
+  Follow the reproduction-or-reject rule in
+  `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Reviewer verdicts.
 - Nothing to flag is stated explicitly; the findings section is never omitted instead.
 
 ## Ordering

@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // The one owner of CLI flag parsing across the scripts; an unrecognised flag is fatal here rather
 // than a silent no-op that would profile the default corpus instead of the one asked for.
 import { parseFlags, requireValue } from "./cli-flags.mjs";
-import { PRICING, priceFor } from "./pricing.mjs";
+import { PRICING, priceFor, provisionalPriceFor, cacheReadDollars } from "./pricing.mjs";
 // The one reader of this repo's promotion records; doctor's Cost-by-version "Shipped" column
 // names what each version shipped rather than parsing those records a second time here.
 import { readPromotions } from "./promotions.mjs";
@@ -77,6 +77,8 @@ export const ENTRY_TAGS = new Set(["devcycle:continue", "devcycle:cycle"]);
 // Neither entry tag is a stage: the stage a resumed session works in is read off the first
 // stage signal after the tag (a playbook read, or a state-file write naming the stage). Keys are
 // playbook basenames; tests/unit/golden-path.test.mjs pins that each exists under playbooks/.
+// writing-the-findings-document is deliberately absent: it is only ever read after reviewing-code
+// or maintaining-the-repo, whose stages already attribute the session.
 export const PLAYBOOK_STAGE = Object.freeze({
   "scoping-the-request": "scoping",
   "reviewing-code": "audit",
@@ -160,7 +162,7 @@ const KNOWN_FLAGS = {
 // report about the operator's real home corpus.
 export function parseArgs(argv) {
   const { flags } = parseFlags(argv, KNOWN_FLAGS);
-  // Each flag says what it wants: --since/--until are dates and --issue-body is a culprit name,
+  // Each flag says what it wants: --since/--until are dates and --issue-body is a draft slug,
   // so only --dir and --drift take the parser's default "a path argument" wording.
   const valued = (name, noun) => requireValue(flags, name, noun) ?? null;
   return {
@@ -172,7 +174,7 @@ export function parseArgs(argv) {
     depth: "--depth" in flags,
     runChecks: "--run-checks" in flags,
     drift: valued("--drift"),
-    issueBody: valued("--issue-body", "a culprit name"),
+    issueBody: valued("--issue-body", "a culprit, compliance or unpriced-model slug"),
   };
 }
 
@@ -207,11 +209,9 @@ export function contextDepth(usage) {
 const CACHE_WRITE_1H_MULTIPLIER = 2.0;
 const CACHE_WRITE_5M_MULTIPLIER = 1.25;
 
-// Dollars for one request. Returns null when the model is not in the pricing table, so the
-// caller can report it and exclude it instead of silently defaulting to a price.
-export function costUSD(usage, model) {
-  const p = priceFor(model);
-  if (!p) return null;
+// Dollars for one usage record against a given price row. Both the strict and the provisional
+// entry points go through it, so the two can never disagree about how a record is priced.
+function priceUsage(usage, p) {
   const cc = usage.cache_creation ?? {};
   const h1 = cc.ephemeral_1h_input_tokens ?? 0;
   const m5 = cc.ephemeral_5m_input_tokens ?? 0;
@@ -224,10 +224,42 @@ export function costUSD(usage, model) {
   const perMillion =
     (usage.input_tokens ?? 0) * p.in +
     write +
-    (usage.cache_read_input_tokens ?? 0) * p.in * 0.1 +
+    cacheReadDollars(usage.cache_read_input_tokens ?? 0, p) +
     (usage.output_tokens ?? 0) * p.out;
   return perMillion / 1e6;
 }
+
+// Dollars for one request. Returns null when the model is not in the pricing table, so the
+// caller can report it and exclude it instead of silently defaulting to a price. Strict on
+// purpose: dispatch-cost and the routing advisories call this and present the result as measured.
+export function costUSD(usage, model) {
+  const p = priceFor(model);
+  return p ? priceUsage(usage, p) : null;
+}
+
+// The estimate for a model newer than anything priced in its family (scripts/pricing.mjs owns
+// the rule). Never folded into a measured figure: summarizeSession tallies it on its own.
+export function provisionalCostUSD(usage, model) {
+  const provisional = provisionalPriceFor(model);
+  return provisional ? { dollars: priceUsage(usage, provisional.price), basedOn: provisional.basedOn } : null;
+}
+
+// Requests a model's absence from the price table kept out of (unpriced) or estimated apart from
+// (provisional) a cost figure. A cohort or delta that includes any of these is not comparing like
+// with like, which is what the `inferred` marking in the cohort tables says.
+export function excludedRequestsOf(summary) {
+  return (
+    Object.values(summary?.unpriced ?? {}).reduce((n, c) => n + c, 0) +
+    Object.values(summary?.provisional ?? {}).reduce((n, p) => n + (p.requests ?? 0), 0)
+  );
+}
+
+// How a request that names no model is tallied among the unpriced. It stays excluded from every
+// figure, but is not a gap in the price table, so the unpriced-model draft leaves it out.
+const NO_MODEL_ID = "(none)";
+
+export const excludedNote = (n) =>
+  n > 0 ? `${n} request${n === 1 ? "" : "s"} on a model with no exact price excluded` : null;
 
 // Cache-write pricing is the one genuinely unrecoverable number. A record carrying the 1h/5m split
 // is priced exactly; one carrying only the flat counter is priced at the 5m rate and is understated
@@ -332,9 +364,16 @@ export function resolveDepth(env, cwd) {
   if (!last) throw new Error(`no usage record in ${basename(file)} — nothing to measure`);
 
   const depth = contextDepth(last.usage);
-  const window = priceFor(last.model)?.window;
-  if (!window) throw new Error(`model ${last.model} is not in the pricing table — no window to measure against`);
-  return { depth, model: last.model, window, fraction: depth / window, band: budgetBand(depth, window) };
+  const exact = priceFor(last.model);
+  const provisional = exact ? null : provisionalPriceFor(last.model);
+  const window = (exact ?? provisional?.price)?.window;
+  if (!window)
+    throw new Error(`model ${last.model} is not in the pricing table (scripts/pricing.mjs) — no window to measure against`);
+  return {
+    depth, model: last.model, window,
+    ...(provisional ? { windowProvisionalAs: provisional.basedOn } : {}),
+    fraction: depth / window, band: budgetBand(depth, window),
+  };
 }
 
 export function median(numbers) {
@@ -462,6 +501,7 @@ export function runAggregates(summaries) {
       filesChanged: wl?.filesChanged ?? null,
       waveCount: wl?.waveCount ?? null,
       costUSD: members.reduce((n, m) => n + (m.costUSD ?? 0), 0),
+      excludedRequests: members.reduce((n, m) => n + excludedRequestsOf(m), 0),
       mainTurns: members.reduce((n, m) => n + (m.mainTurns ?? 0), 0),
       subagentTurns: members.reduce((n, m) => n + (m.subagentTurns ?? 0), 0),
       medianDepth: median(members.map((m) => m.medianDepth ?? 0)),
@@ -488,9 +528,10 @@ export function versionCohorts(summaries) {
   for (const s of summaries) {
     const key = s.pluginVersion ?? "unknown";
     if (!cohorts.has(key))
-      cohorts.set(key, { sessions: 0, dollars: [], depths: [], byStage: new Map(), qualities: [] });
+      cohorts.set(key, { sessions: 0, dollars: [], depths: [], byStage: new Map(), qualities: [], excluded: 0 });
     const c = cohorts.get(key);
     c.sessions++;
+    c.excluded += excludedRequestsOf(s);
     let sessionTotal = 0;
     for (const [skill, d] of Object.entries(s.costByStage ?? {})) {
       if (!c.byStage.has(skill)) c.byStage.set(skill, []);
@@ -542,7 +583,8 @@ export function cohortTable(summaries) {
       medianPerSession: median(c.dollars),
       medianDepth: c.depths.length ? median(c.depths) : null,
       quality: aggregateQuality(c.qualities),
-      inferred: version === "unknown" ? "no version detectable" : null,
+      inferred: [version === "unknown" ? "no version detectable" : null, excludedNote(c.excluded)]
+        .filter(Boolean).join("; ") || null,
     };
   });
 }
@@ -592,12 +634,15 @@ const DIRECTION_MIN_COHORT = 3; // below this the confidence column flags a vers
 export function corpusDirectionOfTravel(runs) {
   const scored = (runs ?? []).filter((r) => r.requestKind != null && r.workloadBand != null);
   const byKey = new Map();
+  const excludedBy = new Map();
   for (const r of scored) {
     const perVersion = byKey.get(matchKeyOf(r)) ?? new Map();
     const arr = perVersion.get(r.version) ?? [];
     arr.push(r.costUSD);
     perVersion.set(r.version, arr);
     byKey.set(matchKeyOf(r), perVersion);
+    const exKey = `${matchKeyOf(r)}\n${r.version}`;
+    excludedBy.set(exKey, (excludedBy.get(exKey) ?? 0) + (r.excludedRequests ?? 0));
   }
   let best = null;
   for (const [key, perVersion] of byKey) {
@@ -617,8 +662,10 @@ export function corpusDirectionOfTravel(runs) {
   if (deltaPct == null)
     return { direction: "insufficient-data", deltaPct: null,
       reason: "the oldest reliable cohort has a zero median" };
+  const from = best.reliable[0], to = best.reliable[best.reliable.length - 1];
+  const excluded = (excludedBy.get(`${best.key}\n${from}`) ?? 0) + (excludedBy.get(`${best.key}\n${to}`) ?? 0);
   return { direction: deltaPct > 1 ? "up" : deltaPct < -1 ? "down" : "flat", deltaPct,
-    matchKey: best.key, from: best.reliable[0], to: best.reliable[best.reliable.length - 1] };
+    matchKey: best.key, from, to, ...(excluded > 0 ? { inferred: excludedNote(excluded) } : {}) };
 }
 
 // A cohort of one is a sample, not a trend. Marked at every render site rather than left for
@@ -649,6 +696,20 @@ export function emitCandidates(summaries) {
         count,
       });
     }
+    for (const [model, p] of Object.entries(s.provisional ?? {})) {
+      candidates.push({
+        type: "unpriced-model",
+        skill: null,
+        version_from: null,
+        version_to: null,
+        delta_pct: null,
+        dollars: null,
+        sessions_sampled: 1,
+        model,
+        count: p.requests,
+        basedOn: p.basedOn,
+      });
+    }
   }
 
   // Version-over-version regression/improvement — same skill, cost moved between two adjacent
@@ -656,12 +717,14 @@ export function emitCandidates(summaries) {
   // ordering, so it is excluded here — but versionCohorts() above still buckets it, and the
   // cohort table (Task 16) still renders it, rather than dropping those sessions.
   const byVersion = new Map(); // version -> { skill -> [dollars] }
-  for (const [version, c] of versionCohorts(settled)) byVersion.set(version, c.byStage);
+  const cohortMap = versionCohorts(settled);
+  for (const [version, c] of cohortMap) byVersion.set(version, c.byStage);
   const versions = [...byVersion.keys()].filter((v) => v !== "unknown").sort(compareVersions);
   const versionCandidates = [];
   for (let i = 0; i + 1 < versions.length; i++) {
     const from = versions[i];
     const to = versions[i + 1];
+    const pairExcludedNote = excludedNote(cohortMap.get(from).excluded + cohortMap.get(to).excluded);
     const fromSkills = byVersion.get(from);
     const toSkills = byVersion.get(to);
     for (const [skill, fromDollars] of fromSkills) {
@@ -684,6 +747,7 @@ export function emitCandidates(summaries) {
           dollars: toMedian,
           delta_dollars,
           sessions_sampled: toDollars.length,
+          ...(pairExcludedNote ? { inferred: pairExcludedNote } : {}),
         });
       }
     }
@@ -1096,6 +1160,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   const costByAgentType = {};
   const costByLens = {};
   const unpriced = {};
+  const provisional = {};
   const priced = [];
   const bandCounts = Object.fromEntries(BAND_LABELS.map((l) => [l, 0]));
   const startupFloor = {};
@@ -1151,7 +1216,14 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     if (model) models[model] = (models[model] ?? 0) + 1;
     const dollars = costUSD(r.message.usage, model);
     if (dollars === null) {
-      bump(unpriced, model ?? "(none)", 1);
+      const estimate = provisionalCostUSD(r.message.usage, model);
+      if (estimate) {
+        const entry = (provisional[model] ??= { requests: 0, dollars: 0, basedOn: estimate.basedOn });
+        entry.requests += 1;
+        entry.dollars += estimate.dollars;
+      } else {
+        bump(unpriced, model ?? NO_MODEL_ID, 1);
+      }
     } else {
       totalCost += dollars;
       bump(costByModel, model, dollars);
@@ -1217,6 +1289,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     carryWeighted,
     dispatches,
     unpriced,
+    provisional,
     cacheBand: costBand(priced),
     models,
     profile: profile ?? "unknown",
@@ -1293,11 +1366,13 @@ export function formatCandidate(c) {
   else if (c.delta_pct != null) parts.push(`delta=${c.delta_pct.toFixed(1)}%`);
   if (c.dollars != null) parts.push(`dollars=${usd(c.dollars)}`);
   if (c.count != null) parts.push(`count=${c.count}`);
+  if (c.basedOn) parts.push(`provisional-as=${c.basedOn}`);
   parts.push(`sessions=${c.sessions_sampled}`);
   // A candidate that already prints a `from->to` line (a version-regression/improvement) carries
   // the same span twice if versions=[..] is also emitted, so the canonical from->to line wins and
   // the redundant range is suppressed; types with no from->to line still render versions=[..].
   if (c.versions && !c.version_from) parts.push(`versions=[${c.versions[0]}..${c.versions[1]}]`);
+  if (c.inferred) parts.push(`(inferred: ${c.inferred})`);
   if (isLowConfidence(c)) parts.push("low confidence: n=1");
   return `CANDIDATE: ${parts.join(" ")}`;
 }
@@ -1425,6 +1500,7 @@ function aggregate(summaries) {
     carryWeighted: {},
     dispatches: { total: 0, withoutModel: 0 },
     unpriced: {},
+    provisional: {},
   };
   for (const s of summaries) {
     agg.costUSD += s.costUSD;
@@ -1432,6 +1508,11 @@ function aggregate(summaries) {
       for (const [k, v] of Object.entries(s[key] ?? {})) bump(agg[key], k, v);
     for (const [k, v] of Object.entries(s.bandCounts ?? {})) bump(agg.bandCounts, k, v);
     for (const [k, v] of Object.entries(s.startupFloor ?? {})) (agg.startupFloor[k] ??= []).push(...v);
+    for (const [model, p] of Object.entries(s.provisional ?? {})) {
+      const into = (agg.provisional[model] ??= { requests: 0, dollars: 0, basedOn: p.basedOn });
+      into.requests += p.requests;
+      into.dollars += p.dollars;
+    }
     agg.dispatches.total += s.dispatches?.total ?? 0;
     agg.dispatches.withoutModel += s.dispatches?.withoutModel ?? 0;
   }
@@ -1439,13 +1520,25 @@ function aggregate(summaries) {
   return agg;
 }
 
+const provisionalTotal = (agg) => Object.values(agg.provisional ?? {}).reduce((n, p) => n + p.dollars, 0);
+
+// The measured total, with any provisional estimate beside it rather than inside it.
+const totalCostText = (agg) => {
+  const extra = provisionalTotal(agg);
+  return extra > 0 ? `${usd(agg.costUSD)} measured + ≈${usd(extra)} provisional` : usd(agg.costUSD);
+};
+
+const provisionalLine = (model, p) =>
+  `PROVISIONAL PRICE: ${model} (${p.requests} requests, ≈${usd(p.dollars)}) priced as ${p.basedOn} — ` +
+  "not in scripts/pricing.mjs; add a row";
+
 // The cache-TTL disclosure, in both its forms. Assembled once because formatReport and caveatLines
 // rendered identical text differing only by a leading bullet, and a reader must be able to tell a
 // band that was checked and found exact from one that was never checked.
 function cacheBandLine(band) {
   return band.collapsed
-    ? "Cost is exact: every cache write in this corpus carries its TTL split."
-    : `Cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
+    ? "Cache-write cost is exact: every cache write in this corpus carries its TTL split."
+    : `Cache-write cost $${band.point.toFixed(2)} (inferred: cache-write TTL, range ` +
         `$${band.low.toFixed(2)}–$${band.high.toFixed(2)}; ` +
         `${(band.fallbackShare * 100).toFixed(1)}% of cache-write tokens lack a TTL split).`;
 }
@@ -1455,7 +1548,7 @@ export function formatReport(summaries) {
   if (!summaries.length) return `no sessions matched.\n\n${vintage}\n`;
   const agg = aggregate(summaries);
   const lines = [
-    `total cost ${usd(agg.costUSD)} over ${summaries.length} session(s)`,
+    `total cost ${totalCostText(agg)} over ${summaries.length} session(s)`,
     `by model: ${ranked(agg.costByModel, usd) || "none"}`,
     `by stage: ${ranked(agg.costByStage, usd) || "none"}`,
     `by agent type: ${ranked(agg.costByAgentType, usd) || "none"}`,
@@ -1471,6 +1564,8 @@ export function formatReport(summaries) {
   ];
   for (const [model, count] of Object.entries(agg.unpriced).sort((a, b) => b[1] - a[1]))
     lines.push(`UNPRICED MODEL: ${model} (${count} requests)`);
+  for (const [model, p] of Object.entries(agg.provisional).sort((a, b) => b[1].requests - a[1].requests))
+    lines.push(provisionalLine(model, p));
   // QC5: any value that remains inferred is labelled inferred at every render site (text and
   // --json alike), never left to read as exact. Classes rendered here: cache-write TTL pricing
   // (costBand, above) and forward-filled stage attribution (no run record for the session). A
@@ -1494,7 +1589,8 @@ export function formatReport(summaries) {
     direction.direction === "insufficient-data"
       ? `direction of travel: insufficient data (${direction.reason})`
       : `direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})`
+        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})` +
+        `${direction.inferred ? ` (inferred: ${direction.inferred})` : ""}`
   );
   for (const r of cohortTable(summaries))
     lines.push(
@@ -1502,7 +1598,7 @@ export function formatReport(summaries) {
       `total=$${r.total.toFixed(2).padStart(9)}  median/session=$${r.medianPerSession.toFixed(2).padStart(7)}  ` +
       `median depth=${r.medianDepth === null ? "n/a" : r.medianDepth}  ` +
       `quality: ${qualityText(r.quality)}` +
-      (r.version === "unknown" ? "   (inferred: no version detectable)" : "")
+      (r.inferred ? `   (inferred: ${r.inferred})` : "")
     );
   lines.push("", "Per-reviewDepth cohorts:");
   for (const r of reviewDepthCohortTable(summaries))
@@ -1626,6 +1722,7 @@ export function buildJsonReport(summaries, ctx = {}) {
     verification: ctx.verification ?? null,
     compiled_knowledge: ctx.compiledKnowledge ?? null,
     cycles: cycleGroups(summaries),
+    revert_skipped: ctx.revertSkipped ?? [],
   };
 }
 
@@ -1688,6 +1785,8 @@ function run(args) {
     mergeCounts(totals.models, s.models);
   }
   totals.costUSD = Math.round(totals.costUSD * 1e4) / 1e4;
+  // Beside costUSD, never in it: the estimate for models the price table lacks.
+  totals.provisional = aggregate(sessions).provisional;
 
   return { ok: true, window: { since: args.since, until: args.until }, sessions, previousSessions, totals };
 }
@@ -1743,7 +1842,8 @@ function main() {
       console.log(JSON.stringify(r));
     } else {
       const pct = (r.fraction * 100).toFixed(1);
-      console.log(`depth: ${r.depth} tokens (${pct}% of ${r.window}, model ${r.model}) — band: ${r.band}`);
+      const assumed = r.windowProvisionalAs ? `, window assumed from ${r.windowProvisionalAs}` : "";
+      console.log(`depth: ${r.depth} tokens (${pct}% of ${r.window}, model ${r.model}${assumed}) — band: ${r.band}`);
     }
     return;
   }
@@ -1771,7 +1871,9 @@ function main() {
     const isCulprit = tables.culprits.some((r) => r.culprit === slug);
     let draft;
     try {
-      if (isCulprit) {
+      if (slug === UNPRICED_MODEL_SLUG) {
+        draft = unpricedModelIssueBody(result.sessions, repoShape(process.cwd()));
+      } else if (isCulprit) {
         draft = issueBody(slug, result.sessions, tables, repoShape(process.cwd()));
       } else if (COMPLIANCE_TYPES.includes(slug)) {
         draft = complianceIssueBody(slug, result.sessions, repoShape(process.cwd()));
@@ -1783,7 +1885,7 @@ function main() {
       // A culprit last seen outside the recency band (StaleCulpritError), or a compliance type
       // with no cohort in this corpus (NoComplianceCandidateError): print why and exit non-zero
       // without emitting a body.
-      if (e instanceof StaleCulpritError || e instanceof NoComplianceCandidateError) {
+      if (e instanceof StaleCulpritError || e instanceof NoComplianceCandidateError || e instanceof NoUnpricedModelError) {
         console.error(`doctor: ${e.message}`);
         process.exitCode = 1;
         return;
@@ -1794,9 +1896,6 @@ function main() {
     return;
   }
   const ctx = reportContext(args, result);
-  // The cost-driven revert sidecar is a by-product of every report run, written for the playbook
-  // to read; its own write is fail-safe, so it never blocks rendering.
-  revertCandidates(result.sessions, ctx.promotions);
   if (args.json) {
     console.log(
       JSON.stringify(
@@ -1809,6 +1908,9 @@ function main() {
     console.log(renderReport(result.sessions, ctx));
   }
 }
+
+// The formula's owner, named in the rendered report beside the figures it prices.
+const IMPACT_SCORING = "references/impact-scoring.md";
 
 // references/impact-scoring.md owns this formula; this is its only implementation. Four of the
 // eight signals the design names are not written to the journal at all — they are already
@@ -2142,6 +2244,7 @@ export function versionProfileTable(summaries, promotions = []) {
       medianDepth: depths.length ? median(depths) : null,
       quality: aggregateQuality(g.members.map((s) => s.quality ?? null)),
       lowConfidence: g.members.length < MIN_COHORT,
+      inferred: excludedNote(g.members.reduce((n, s) => n + excludedRequestsOf(s), 0)),
       // A promotion that named no culprit contributes nothing rather than a blank entry — which
       // is every record on disk until Phase 3 teaches recordPromotion to write the field.
       shipped: [...new Set(promotions
@@ -2187,7 +2290,7 @@ export function stageByVersionTable(summaries) {
   });
   const rendered = (r) => Object.values(r.byVersion).reduce((n, d) => n + (d?.median ?? 0), 0);
   rows.sort((a, b) => rendered(b) - rendered(a) || byName(a.stage, b.stage));
-  return { versions, rows };
+  return { versions, rows, excludedVersions: versions.filter((v) => cohorts.get(v).excluded > 0) };
 }
 
 // Where this window's money went, stage by stage, and how each stage moved against the window
@@ -2345,6 +2448,7 @@ export function winTable(summaries, vocab, candidates = []) {
       impact: Math.abs(c.delta_dollars),
       occurrences: c.sessions_sampled,
       trend: "down",
+      ...(c.inferred ? { inferred: c.inferred } : {}),
     });
   return rows.sort(byImpactDesc);
 }
@@ -2367,14 +2471,15 @@ export function winCandidates(candidates, promotions) {
 // The marker playbooks/profiling-sessions.md writes when the Actionability step drafts an
 // issue. That playbook is the contract's one written source; this parses what it states, and a
 // round-trip test (tests/unit/doctor-report.test.mjs) feeds this parser the literal extracted
-// from that file so neither side can drift.
+// from that file so neither side can drift. `doctor` is the kind `--issue-body unpriced-model` writes
+// (a table gap, neither a culprit nor a compliance cohort).
 // The slug is colon-separated because the flow offers a draft for every culprit, not only
 // vocabulary members: issueBody names an unclassified one by its bare `event:stage` key and a
 // new one as `novel:<slug>`. Each segment is still a slug, so the group cannot reach the
 // closing bracket or run into the title. Leading whitespace is tolerated because the playbook
 // states the marker inside an indented block, and a marker copied from there carries its indent.
 const DRAFTED_MARKER_RE =
-  /^[ \t]*Drafted: \[(?:culprit|compliance):([a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)*)\] (.+)$/gm;
+  /^[ \t]*Drafted: \[(?:culprit|compliance|doctor):([a-z0-9][a-z0-9-]*(?::[a-z0-9][a-z0-9-]*)*)\] (.+)$/gm;
 
 export function parseDraftedMarkers(text) {
   const out = [];
@@ -2464,8 +2569,8 @@ export function outerLoop(reportsDir, ghRunner = defaultGhRunner, vocabOverride 
   try { dates = releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8")); } catch { dates = new Map(); }
 
   // Every issue this author opened on the upstream comes back now that the query filters by no
-  // label; the ones this report produced are the ones whose title carries the `[culprit:<slug>]`
-  // prefix issueBody writes.
+  // label; the ones this report produced are the ones whose title carries the `[culprit:<slug>]`,
+  // `[compliance:<type>]` or `[doctor:<slug>]` prefix its drafts write.
   const filed = issues.filter((i) => titleSlug(i.title) !== null);
 
   const turnarounds = [];
@@ -2654,6 +2759,8 @@ function caveatLines(summaries, agg) {
   const band = agg.cacheBand;
   for (const [model, count] of unpriced)
     out.push(`- UNPRICED MODEL: ${model} (${count} requests)`);
+  const provisional = Object.entries(agg.provisional ?? {}).sort((a, b) => b[1].requests - a[1].requests);
+  for (const [model, p] of provisional) out.push(`- ${provisionalLine(model, p)}`);
   out.push(`- ${cacheBandLine(band)}`);
   // Split by why the record is absent rather than counted as one undifferentiated class: a
   // standalone command mints no record by design, and reading that as a gap in the telemetry
@@ -2671,7 +2778,7 @@ function caveatLines(summaries, agg) {
       );
   if (inFlight > 0)
     out.push(`- ${inFlight} session(s) still in flight (newest record < 30 min old) — ${IN_FLIGHT_NOTE}`);
-  if (band.collapsed && !unpriced.length && filled.length === 0 && inFlight === 0)
+  if (band.collapsed && !unpriced.length && !provisional.length && filled.length === 0 && inFlight === 0)
     out.push("- No caveats apply to this corpus.");
   return out;
 }
@@ -2705,7 +2812,7 @@ function sessionDetailLines(summaries) {
 export function renderReport(summaries, ctx) {
   const {
     repo, today, scope,
-    previousSummaries = null, vocab = [], promotions = [],
+    previousSummaries = null, vocab = [], promotions = [], revertSkipped = [],
     compiledKnowledge: compiled = null, verification = null,
   } = ctx ?? {};
   const L = [];
@@ -2735,7 +2842,7 @@ export function renderReport(summaries, ctx) {
     `# Doctor Report — ${repo} — ${today}`,
     "",
     `Scope: ${scope} · Sessions: ${summaries.length} · Cycles: ${cycleGroups(summaries).length} · ` +
-      `Total cost: ${usd(agg.costUSD)} · Prices as of ${PRICING.asOf}`,
+      `Total cost: ${totalCostText(agg)} · Prices as of ${PRICING.asOf}`,
   );
 
   section("## Read this first", "read-this-first");
@@ -2803,7 +2910,7 @@ export function renderReport(summaries, ctx) {
       "$/main-turn (derived)", "$/sub-turn (derived)", "Turns/task (derived)", "Δ vs previous (derived)",
       "Priciest stage (derived)", "Median depth (derived)", "Quality (derived)", "Shipped (observed)"],
     versionProfileTable(summaries, promotions).map((r) => [
-      r.version,
+      r.inferred ? `${r.version} (inferred: ${r.inferred})` : r.version,
       r.profile,
       cohortSessionsText(r),
       r.cycles,
@@ -2837,6 +2944,12 @@ export function renderReport(summaries, ctx) {
   L.push("", "_Dollar cells are derived per-version medians; Trend is derived. Forward-filled is " +
     "the share of the stage's settled dollars whose stage was inferred from the transcript rather " +
     "than read off a run record._");
+  if (stageTrend.excludedVersions.length)
+    L.push(
+      "",
+      `_Medians for ${stageTrend.excludedVersions.join(", ")} leave out requests on a model with no ` +
+        "exact price (inferred) — compare across them with care._",
+    );
   // stageByVersionTable drops the undetectable-version cohort from every column and every trend,
   // because "unknown" cannot sit on a version axis — right, but silent, and an omission nobody
   // names reads as a clean bill of health. cohortTable is the sibling that keeps that bucket,
@@ -2895,6 +3008,7 @@ export function renderReport(summaries, ctx) {
     ]),
     "no scored culprit events in this corpus",
   ));
+  L.push("", `_Priced by ${IMPACT_SCORING}'s formula; "unmeasurable" could not be priced and is not $0._`);
 
   section("### Compliance", "compliance");
   L.push(...(compliance.length
@@ -2905,7 +3019,8 @@ export function renderReport(summaries, ctx) {
   L.push(...markdownTable(
     ["Win", "Value", "Occurrences", "Trend"],
     winTable(summaries, vocab, candidates).map((r) => [
-      r.win, impactText(r.impact), r.occurrences, r.trend,
+      r.inferred ? `${r.win} (inferred: ${r.inferred})` : r.win,
+      impactText(r.impact), r.occurrences, r.trend,
     ]),
     "no win events recorded in this corpus",
   ));
@@ -2917,7 +3032,8 @@ export function renderReport(summaries, ctx) {
   for (const w of winCandidates(candidates, promotions))
     L.push(`- Actionability — \`/devcycle:learn\` investigate & generalize the ${w.skill} ` +
       `${w.version_from}→${w.version_to} improvement ` +
-      (w.cause ? `(shipped: ${w.cause.join(", ")})` : "(unattributed — investigate manually)"));
+      (w.cause ? `(shipped: ${w.cause.join(", ")})` : "(unattributed — investigate manually)") +
+      (w.inferred ? ` (inferred: ${w.inferred})` : ""));
 
   section("## Cost anomalies", "anomalies");
   // version-improvement belongs to Your wins above; everything else emitCandidates found is a
@@ -2952,6 +3068,11 @@ export function renderReport(summaries, ctx) {
   L.push(...(anomalyLines.length
     ? anomalyLines
     : ["_No rows: no cost anomalies in this corpus._"]));
+  // A promotion's before/after pair a missing price made incomparable: said here, beside the other
+  // cost-comparison findings, so its absence from the revert candidates is not read as "held".
+  for (const k of revertSkipped)
+    L.push(`- Revert check skipped for ${k.culpritId} ${k.from}→${k.to} (${k.profile} profile): ` +
+      `${k.reason} — those versions cannot be compared on dollars.`);
 
   section("## Previously promoted — did it hold", "promoted");
   // The verification engine computes every verdict; this only renders it. One line per scoreboard
@@ -2990,6 +3111,13 @@ export function renderReport(summaries, ctx) {
 
   section("### Cost by model", "appendix-cost-by-model");
   L.push(ranked(agg.costByModel, usd) || "_No rows: no priced turns in this corpus._");
+  const provisionalModels = Object.entries(agg.provisional ?? {});
+  if (provisionalModels.length)
+    L.push(
+      "",
+      "provisional (estimated, not in the ranking above): " +
+        provisionalModels.map(([m, p]) => `${m} ≈${usd(p.dollars)} as ${p.basedOn}`).join(", "),
+    );
 
   section("### Cost by agent type", "appendix-cost-by-agent-type");
   L.push(ranked(agg.costByAgentType, usd) || "_No rows: no priced turns in this corpus._");
@@ -3036,7 +3164,8 @@ export function renderReport(summaries, ctx) {
     direction.direction === "insufficient-data"
       ? `Direction of travel: insufficient data (${direction.reason})`
       : `Direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})`,
+        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})` +
+        `${direction.inferred ? ` (inferred: ${direction.inferred})` : ""}`,
   );
 
   section("### Per-session detail", "appendix-per-session-detail");
@@ -3067,6 +3196,10 @@ function safePromotions() {
 function reportContext(args, result) {
   const vocab = readVocab();
   const promotions = safePromotions();
+  // The cost-driven revert sidecar is a by-product of every report run, written for the playbook
+  // to read; its own write is fail-safe, so it never blocks rendering. The pairs it skipped are
+  // kept so the report can say so.
+  const { skipped: revertSkipped } = revertCandidates(result.sessions, promotions);
   return {
     // The repo's name, never its path — QC8: no emitted artifact carries machine identity.
     repo: basename(process.cwd()),
@@ -3075,6 +3208,7 @@ function reportContext(args, result) {
     previousSummaries: result.previousSessions,
     vocab,
     promotions,
+    revertSkipped,
     outerLoop: args.json ? outerLoop(doctorDir()) : null, // the funnel is --json only: nothing in the markdown reads it, so a markdown run makes no gh call
     compiledKnowledge: compiledKnowledge(promotions),
     verification: promotionVerification(promotions, args.runChecks),
@@ -3139,6 +3273,7 @@ export function revertCandidates(summaries, promotions, { dir = doctorDir() } = 
   const settled = (summaries ?? []).filter((s) => !s.inFlight);
   const profiles = [...new Set(settled.map((s) => s.profile ?? "unknown"))];
   const candidates = [];
+  const skipped = [];
   for (const p of promotions ?? []) {
     if (p.lifecycle || !p.culpritId || !p.pluginVersion) continue;
     for (const profile of profiles) {
@@ -3148,6 +3283,14 @@ export function revertCandidates(summaries, promotions, { dir = doctorDir() } = 
       if (idx < 1) continue;                         // no same-profile predecessor to compare against
       const before = cohorts.get(known[idx - 1]);
       const after = cohorts.get(known[idx]);
+      const excluded = before.excluded + after.excluded;
+      if (excluded > 0) {
+        skipped.push({
+          culpritId: p.culpritId, profile, from: known[idx - 1], to: p.pluginVersion,
+          reason: `${excludedNote(excluded)} in the compared cohorts`,
+        });
+        continue;
+      }
       for (const stage of new Set([...before.byStage.keys(), ...after.byStage.keys()])) {
         const b = median(before.byStage.get(stage) ?? []);
         const a = median(after.byStage.get(stage) ?? []);
@@ -3163,7 +3306,7 @@ export function revertCandidates(summaries, promotions, { dir = doctorDir() } = 
       }
     }
   }
-  const out = { generatedAt: new Date().toISOString(), installedVersion: installedVersion(), candidates };
+  const out = { generatedAt: new Date().toISOString(), installedVersion: installedVersion(), candidates, skipped };
   try {
     mkdirSync(dir, { recursive: true });
     atomicWrite(join(dir, "revert-candidates.json"), JSON.stringify(out, null, 2) + "\n");
@@ -3406,6 +3549,62 @@ const complianceTitle = (slug) => COMPLIANCE_TITLES[slug] ?? slug;
     throw new Error(
       `COMPLIANCE_TITLES keys [${titleKeys.join(", ")}] must equal COMPLIANCE_TYPES [${types.join(", ")}]`,
     );
+}
+
+// `doctor --issue-body unpriced-model`: a table gap, not a process misbehaviour, so it is a third
+// draft route beside culprits and COMPLIANCE_TYPES rather than a member of either (COMPLIANCE_TITLES
+// must keep equalling COMPLIANCE_TYPES).
+export const UNPRICED_MODEL_SLUG = "unpriced-model";
+
+export class NoUnpricedModelError extends Error {
+  constructor() {
+    super("no unpriced or provisionally priced model in this corpus");
+  }
+}
+
+// One issue covering every model the corpus ran that scripts/pricing.mjs has no exact row for:
+// per model its id, request and session counts, version span, and whether it was excluded or
+// priced provisionally (and as what). Ids and integers only — no dollar figure, path or session id.
+export function unpricedModelIssueBody(summaries, shape) {
+  const byModel = new Map();
+  for (const s of summaries ?? []) {
+    const version = s.pluginVersion && s.pluginVersion !== "unknown" ? s.pluginVersion : null;
+    const add = (model, requests, basedOn) => {
+      const entry = byModel.get(model) ?? { requests: 0, sessions: new Set(), versions: [], basedOn };
+      entry.requests += requests;
+      entry.sessions.add(s.id);
+      if (version) entry.versions.push(version);
+      byModel.set(model, entry);
+    };
+    for (const [model, n] of Object.entries(s.unpriced ?? {})) if (model !== NO_MODEL_ID) add(model, n, null);
+    for (const [model, p] of Object.entries(s.provisional ?? {})) add(model, p.requests, p.basedOn);
+  }
+  if (!byModel.size) throw new NoUnpricedModelError();
+  const models = [...byModel.keys()].sort(byName);
+  const line = (model) => {
+    const e = byModel.get(model);
+    const versions = [...e.versions].sort(compareVersions);
+    const span = versions.length ? ` versions=[${versions[0]}..${versions.at(-1)}]` : "";
+    const sessions = e.sessions.size;
+    const status = e.basedOn ? `priced provisionally as ${e.basedOn}` : "excluded from every dollar figure";
+    return `- ${model}: ${e.requests} requests across ${sessions} session${sessions === 1 ? "" : "s"}${span} — ${status}`;
+  };
+  const body = [
+    `Repo shape: monorepo=${shape?.monorepo ?? "unknown"} · language=${shape?.language ?? "unknown"} ` +
+      `· test-runner=${shape?.testRunner ?? "unknown"}`,
+    "",
+    ...models.map(line),
+    "",
+    "Fix: add a row for each model to scripts/pricing.mjs, with its list price from the claude-api reference.",
+    "",
+    "<!-- add anything you want to say here -->",
+  ];
+  return {
+    repo: DEVCYCLE_UPSTREAM,
+    title: `[doctor:${UNPRICED_MODEL_SLUG}] ${models.join(", ")} not in scripts/pricing.mjs`,
+    labels: [UNPRICED_MODEL_SLUG, "from-doctor"],
+    body: body.join("\n"),
+  };
 }
 
 // A ready-to-paste GitHub issue for one COMPLIANCE candidate, the sibling of issueBody for the

@@ -408,3 +408,49 @@ test("a stale branch and a missing artifact are both reported in one exit-1 run"
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+const runWithEnv = (statePath, env) =>
+  spawnSync("node", [SCRIPT, "--state", statePath], { encoding: "utf8", env: { ...process.env, ...env } });
+
+test("on success it prints the stage's entry and note lines from references/stages.json", () => {
+  const dir = makeTempDir("resume-check-");
+  try {
+    const state = makeState(dir, ["- stage: planning", `- root: ${dir}`]);
+    const r = run(state);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.match(r.stdout, /^entry: .*playbooks\/planning-waves\.md$/m);
+    assert.match(r.stdout, /^note: none$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a broken stages table prints no entry line, says why, and leaves the verdict at ok", () => {
+  const dir = makeTempDir("resume-check-");
+  try {
+    const state = makeState(dir, ["- stage: planning", `- root: ${dir}`]);
+    const broken = join(dir, "stages.json");
+    writeFileSync(broken, "{ nope");
+    const r = runWithEnv(state, { DEVCYCLE_STAGES_PATH: broken });
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.doesNotMatch(r.stdout, /^entry:/m);
+    const fallback = join(process.cwd(), "references", "resume.md");
+    assert.ok(r.stdout.includes(`fall back to ${fallback} § Resuming at the recorded stage`), r.stdout);
+    assert.match(r.stdout, /resume-check: no entry line — .*is not valid JSON/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a done cycle is reported as closed, not as a missing entry", () => {
+  const dir = makeTempDir("resume-check-");
+  try {
+    const state = makeState(dir, ["- stage: done", `- root: ${dir}`]);
+    const r = run(state);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.match(r.stdout, /^closed: this cycle is done — nothing to resume/m);
+    assert.doesNotMatch(r.stdout, /no entry line|fall back/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

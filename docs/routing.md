@@ -1,8 +1,9 @@
 # Routing — intent to entry point, and what each command may do
 
 The single owner of the user-facing surface. No existing reference fits: `${CLAUDE_PLUGIN_ROOT}/references/config.md`
-owns knobs, profiles and model routing, `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns who does the work once a
-stage is running, and neither maps a user's intent to an entry point or says what a command may
+owns knobs and profiles, `references/model-routing.md` owns model routing,
+`${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns who does the work once a
+stage is running, and none of them maps a user's intent to an entry point or says what a command may
 do before its first confirmation. Every entry point appears exactly once. `scripts/validate.mjs`
 fails the build when a command is missing from this table, when a row names no command, when a
 command is listed twice, when a `consequence` cell is not one of the classes below (or that list
@@ -19,8 +20,8 @@ any consequence.
 - `read-only` — never modifies the repo's source and starts no cycle; its writes are confined to
   its own report and the devcycle-owned records that same pass derives
   (`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking owns which of those are committed).
-  Anything it writes beyond those — `review`'s PR comments, `doctor`'s filed issues — is an opt-in
-  step it confirms before posting, never automatic.
+  Anything it writes beyond those — `review`'s PR comments, `doctor`'s filed issues, `maintain`'s
+  findings-store branch and PR — is an opt-in step it confirms first, never automatic.
   Must **not** carry `disable-model-invocation`.
 - `confirm-first` — may write, but takes no irreversible action before its first user
   confirmation. The deliberate exception class; each member names its justification below.
@@ -59,10 +60,12 @@ what sets it apart from `review` (single-shot, the code as it stands now), from 
 cost, depth and model routing — not the code), and from `learn` (distilling sessions into landed
 rules — not assessing the repo). Its cross-pass memory — the per-finding
 `docs/devcycle/maintenance-findings/` store — is a devcycle-owned record of the kind the
-`read-only` definition above admits, not a write outside one. Whether that store is committed or
-stays local is the doc-tracking policy's call, never this class's
-(`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, whose `commit` cells
-`git check-ignore` can still veto).
+`read-only` definition above admits, not a write outside one: a pass writes it only through the
+playbook's step 8 — after a commit gate the user answers, on its own
+`chore/maintenance-findings-<date>` branch in a worktree, pushed as a PR only on confirmation; or,
+when doc tracking vetoes committing it, uncommitted in the checkout with no gate asked. Whether
+that store is committed at all is the doc-tracking policy's call, never this class's (`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, whose
+`commit` cells `git check-ignore` can still veto).
 
 **Naming.** Commands are verbs, playbooks are gerunds, agents are role nouns. `doctor` is the
 single recorded exception, justified by `brew doctor` / `flutter doctor` / `npm doctor`.

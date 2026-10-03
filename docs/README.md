@@ -44,14 +44,15 @@ directly.
 | [`scoping-the-request`](playbooks/scoping-the-request/README.md) | The batched scope interview, with a hard stop before design begins. |
 | [`planning-waves`](playbooks/planning-waves/README.md) | Feasibility gate plus wave-structured planning, with self-review gates including budget-fixture and authored-claims checks. |
 | [`executing-waves`](playbooks/executing-waves/README.md) | Parallel subagent execution with green gate, ledger, and commit discipline. |
-| [`reviewing-code`](playbooks/reviewing-code/README.md) | The shared review engine: lens construction, engine selection, adversarial verification, dedup, and ranking; plus the opt-in write-back that files an audit run's findings onto an open PR. |
+| [`reviewing-code`](playbooks/reviewing-code/README.md) | The shared review engine: lens construction, engine selection, adversarial verification, dedup, and ranking. |
+| [`writing-the-findings-document`](playbooks/writing-the-findings-document/README.md) | The ranked findings document an audit run or a `/devcycle:maintain` pass ends in, plus the opt-in filing step onto an open PR. |
 | [`reviewing-the-branch`](playbooks/reviewing-the-branch/README.md) | The whole-branch review gate — spec-compliance layer and bounded rounds, over the shared review engine. |
 | [`verifying-on-device`](playbooks/verifying-on-device/README.md) | Human-verified checklist for rendered and on-device outcomes. |
 | [`finishing-the-cycle`](playbooks/finishing-the-cycle/README.md) | Resolves the effective git policy and hands back, pushes, or opens the PR. |
 | [`taking-the-fast-path`](playbooks/taking-the-fast-path/README.md) | Mini-cycle for confirmed-trivial requests. |
 | [`sweeping-mechanical-changes`](playbooks/sweeping-mechanical-changes/README.md) | Triage-confirmed bulk sweep behind a blast-radius gate. |
 | [`learning-from-sessions`](playbooks/learning-from-sessions/README.md) | Observe, propose, confirm, land: mines transcripts and memory for durable changes. |
-| [`profiling-sessions`](playbooks/profiling-sessions/README.md) | Runs and interprets the token, context, routing, and startup-cost analyzer. |
+| [`profiling-sessions`](playbooks/profiling-sessions/README.md) | Runs and interprets the token, context, routing, and startup-cost analyzer; models the price table lacks are excluded from dollar figures and reported apart. |
 | [`onboarding-a-repo`](playbooks/onboarding-a-repo/README.md) | Detects a repo's real build/test/lint commands and scaffolds its setup. |
 | [`maintaining-the-repo`](playbooks/maintaining-the-repo/README.md) | The longitudinal-health engine behind `/devcycle:maintain`. |
 | [`receiving-review`](playbooks/receiving-review/README.md) | The respond arm of the review write-back path: the standalone reconcile stage that triages a PR's review comments into fixes and consent-gated replies that disclose Claude Code authorship, then resolves the threads it closed from its side. |

@@ -37,8 +37,9 @@ names a file another same-wave task edits, cleared by a dependency or a `- Conte
 override:` line. `budget-fixture-check.mjs` hard-fails when a task's Files touch a budgeted
 surface (`playbooks/`, `commands/`, `agents/`, `references/` markdown) without also touching the
 matching budget fixture — a `references/` edit matches the context budget too, since a playbook's
-budget counts the bytes of every reference it cites — cleared by adding the fixture or a `-
-Budget-fixture override:` line, and run as a leg of `brief-completeness-check.mjs` so the earlier
+budget counts the bytes of every reference it cites — or touches or needs a fixture without
+`docs/decisions/README.md`, whose `budget:` lines `validate.mjs` holds the fixture to; cleared by
+adding the file or a `- Budget-fixture override:` line, and run as a leg of `brief-completeness-check.mjs` so the earlier
 gate names the same gap;
 `authored-claims-check.mjs` is a blocking lint flagging an unguarded `path.ext:line` reference or
 a bare count claim, cleared by a `(verified: <cmd>)` or `(assumption)` marker. A non-zero exit

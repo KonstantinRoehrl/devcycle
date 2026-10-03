@@ -6,7 +6,7 @@ branch does, against the spec that ordered it, before on-device verification or 
 **Inputs** (from the execution handoff / `.devcycle/state.md`): the branch, the spec file path,
 the ledger path (`.devcycle/ledger.md`). These three are ALL the review needs — the
 fresh-context rule that makes that deliberate is owned by
-`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`. One further read serves the handoff, not the
+`playbooks/reviewing-code.md`. One further read serves the handoff, not the
 review: the `checklist:` line of `.devcycle/state.md`, which this stage's handoff carries forward.
 
 This stage, and every agent it dispatches, reports per
@@ -16,19 +16,20 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
 
 ## Configuration
 
-Resolve every knob and the profile per `${CLAUDE_PLUGIN_ROOT}/references/config.md`, including
-its resolution order; none of it is repeated here. What this stage consumes:
+Read every knob and the profile from the `knobs:` line per
+`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel; none of the resolution is repeated
+here. What this stage consumes:
 
-- `reviewDepth` — `${user_config.reviewDepth}`, allowed `single` | `panel`; it picks the engine.
-- `crossModelReview` — `${user_config.crossModelReview}`, default `false`.
-- `branchReviewModel` — `${user_config.branchReviewModel}`. What it resolves to — an explicit
-  model id, binding, or the session tier — is what every rule below means by "the branch-review
-  model".
+- `reviewDepth` — `single` | `panel`; it picks the engine.
+- `crossModelReview` — `true` | `false`.
+- `branchReviewModel` — routed per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`. What it
+  resolves to — an explicit model id, binding, or the session tier — is what every rule below
+  means by "the branch-review model".
 - The **round cap** for the findings loop is the profile's branch-review round cap.
 
 ## Engine selection
 
-Delegated in full to `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` — engine choice from
+Read `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` and follow it — engine choice from
 `reviewDepth`, panel invocation, the `panel→single` degradation with its disclosed reason, the
 model export, and how an oversize diff is chunked so the branch is reviewed in full rather than
 sampled are all its rules, and none of them are restated here.
@@ -48,7 +49,7 @@ record the engine line it returns **verbatim** in the report below.
 **Dirty-tree backstop.** The reviewers this stage dispatches are read-only; snapshot `git status
 --porcelain` before each subagent and check it again after. The backstop itself — what a tree left
 dirtier means, and that its verdict is discarded and re-run — is owned by
-`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` and not restated here.
+`playbooks/reviewing-code.md` and not restated here.
 
 The built-in `code-review` skill is user-invocation-only in current Claude Code — an agent
 cannot launch it, so never plan a review around it. It is an opportunistic fold-in only: if the
@@ -89,11 +90,11 @@ green and diff tidy, and still fail its spec:
    decision, per 5's second terminal state. Only the user may grant rounds beyond the cap, and
    only explicitly: record that as `task=branch event=user-decision outcome=review-cap extended
    to <n>`, treat `<n>` as the cap from then on, and note that granting it via Other also
-   appends `user-correction-at-gate` — `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns both.
+   appends `user-correction-at-gate` — `references/ledger.md` owns both.
 2. **Only blocking findings re-open the loop.** **Blocking means `critical` or `high`** —
-   `${CLAUDE_PLUGIN_ROOT}/references/findings.md` owns the severity vocabulary and derives
+   `references/findings.md` owns the severity vocabulary and derives
    blocking from it, and neither is restated here. Each blocking finding goes to a fresh
-   `devcycle:implementer` dispatch on the model `references/config.md` resolves — brief = the finding plus the spec path; never the review
+   `devcycle:implementer` dispatch on the model `references/model-routing.md` resolves — brief = the finding plus the spec path; never the review
    conversation. It is an implementer dispatch bound by the same evidence contract every other
    one is, so the brief carries a minted task-id (`branch-fix-<round>-<n>`) and an
    `**Evidence:**` class line, and asks the implementer to check the fix against the repo
@@ -116,7 +117,7 @@ green and diff tidy, and still fail its spec:
      and does not proceed to finishing.
 
 **The cap bounds effort, never truth.** Reaching the cap NEVER converts an outstanding
-blocking finding into a pass; `${CLAUDE_PLUGIN_ROOT}/references/loops.md` owns that rule and
+blocking finding into a pass; `references/loops.md` owns that rule and
 the vocabulary for each exhaustion outcome. Severity itself is not this stage's to adjust:
 `references/findings.md` owns it, including what may and may not change it. This guardrail is
 unconditional — it holds at every profile, and the cap's own value never softens it.
@@ -150,8 +151,8 @@ session resumes at — then emit the block per
 - Artifacts: the review report location and the branch
 - Carry-overs: the accepted non-blocking findings (or `none`), followed by `Start the fresh
   session on <model>.` — this stage's job, because the on-device session's model is chosen by
-  whoever launches it. `<model>` is whatever `walkthroughModel` resolves to per
-  `${CLAUDE_PLUGIN_ROOT}/references/config.md`, named by its present id.
+  whoever launches it. `<model>` is whatever the `knobs:` line's `walkthroughModel`
+  resolves to per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`, named by its present id.
 - Compaction hint: n/a — clears (`Fresh session` boundary). When the state file records
   `checklist: none` (no rendered surface produced a checklist), record instead the marker
   `checklist: none — on-device stage will judge applicability`.

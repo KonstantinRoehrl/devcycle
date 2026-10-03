@@ -1,0 +1,83 @@
+#!/usr/bin/env node
+// Which playbook or skill each stage is entered through, and its re-entry note, read from
+// references/stages.json — the stage dispatch's single owner. resume-check.mjs and
+// find-state-files.mjs print the same two lines, so neither command opens references/resume.md
+// to find an entry. Run it as `stage-entry.mjs <stage>` at a stage transition.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseFlags } from "./cli-flags.mjs";
+import { BARE } from "./citation-grammar.mjs";
+
+export const PLUGIN_ROOT = fileURLToPath(new URL("..", import.meta.url));
+// DEVCYCLE_STAGES_PATH lets a test point the loader at a broken table; nothing else sets it.
+export const stagesPath = () => process.env.DEVCYCLE_STAGES_PATH || join(PLUGIN_ROOT, "references/stages.json");
+
+const ENTRY = /^(?:playbooks\/[a-z0-9-]+\.md|superpowers:[a-z-]+)$/;
+
+export function loadStages(path = stagesPath()) {
+  let raw;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    throw new Error(`cannot read ${path}`);
+  }
+  let table;
+  try {
+    table = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`${path} is not valid JSON — ${err.message}`);
+  }
+  if (typeof table !== "object" || table === null || Array.isArray(table))
+    throw new Error(`${path} must be a JSON object mapping each stage to { entry, note }`);
+  for (const [stage, spec] of Object.entries(table)) {
+    if (typeof spec?.entry !== "string" || !ENTRY.test(spec.entry))
+      throw new Error(`${path}: "${stage}".entry must be playbooks/<file>.md or superpowers:<skill>, got ${JSON.stringify(spec?.entry)}`);
+    if (typeof spec.note !== "string")
+      throw new Error(`${path}: "${stage}".note must be a string (empty when the entry needs no note)`);
+  }
+  return table;
+}
+
+// The session reading these lines runs in the user's repo, where a plugin-relative path resolves
+// to nothing — so a playbook entry, and any surface path in the note, prints absolute.
+export function stageEntry(stage, { path = stagesPath(), root = PLUGIN_ROOT } = {}) {
+  const table = loadStages(path);
+  if (!Object.hasOwn(table, stage)) throw new Error(`no entry for stage "${stage}" in ${path}`);
+  const { entry, note } = table[stage];
+  return {
+    entry: entry.startsWith("playbooks/") ? join(root, entry) : entry,
+    note: note.replace(BARE, (m) => join(root, m)),
+  };
+}
+
+export const entryLines = ({ entry, note }) => [`entry: ${entry}`, `note: ${note || "none"}`];
+
+// `done` is in the enum but not the table: a closed cycle resumes at nothing, which is an answer,
+// not a fault, so resume-check.mjs and find-state-files.mjs print this instead of an entry.
+export const CLOSED_STAGE = "done";
+export const CLOSED_LINE = "closed: this cycle is done — nothing to resume; /devcycle:cycle reuses its state file";
+// Where a session reads the dispatch when no entry line printed; absolute for the same reason as an entry.
+export const FALLBACK = `${join(PLUGIN_ROOT, "references/resume.md")} § Resuming at the recorded stage`;
+
+function main(argv) {
+  let positionals;
+  try {
+    ({ positionals } = parseFlags(argv, {}, { allowPositionals: true }));
+  } catch (err) {
+    console.error(`stage-entry: ${err.message}`);
+    process.exit(1);
+  }
+  if (positionals.length !== 1) {
+    console.error("stage-entry: usage: stage-entry.mjs <stage>");
+    process.exit(1);
+  }
+  try {
+    for (const line of entryLines(stageEntry(positionals[0]))) console.log(line);
+  } catch (err) {
+    console.error(`stage-entry: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));

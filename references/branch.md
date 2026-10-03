@@ -23,13 +23,19 @@ this clone has.
 
 **Where this applies.** Every committing path, without exception — the full pipeline's
 pre-flight before wave 1, the fast path, the sweep path, re-entry via `/devcycle:continue`
-(per `${CLAUDE_PLUGIN_ROOT}/references/resume.md`, which settles the recorded branch first
+(per `references/resume.md`, which settles the recorded branch first
 and falls back here only when no topic branch was ever recorded), and every standalone,
 side-effectful playbook that writes and commits outside any cycle — `onboarding-a-repo` (the
 scaffold write) and `learning-from-sessions` (promotion edits) among them. A standalone playbook owns no
 `.devcycle/state.md`, so it follows the rule above minus the `branch:`-line write: check
 the branch, create a topic branch off the default or an integration branch when needed,
 and commit there.
+
+**Standalone worktree commits.** A standalone playbook that commits its own artifact without
+switching the session's checkout cuts its topic branch in a worktree — `git worktree add -b
+<branch> <path> "$base"` — where `$base` is the integration branch when one exists, else the
+default branch, each resolved as above and spelled per § "Names first" below. The session's
+checkout, and whichever branch it sits on, is never touched.
 
 **Per-commit re-check.** Within a stage that commits more than once — `executing-waves`'
 per-task commits, the sweep path's per-file commits — re-run the branch check
@@ -41,7 +47,7 @@ guarding against a concurrent session or worktree switching branches mid-cycle.
 ## Deriving a branch's file set
 
 Which files a branch-scoped stage reads, and where it reads them from.
-`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` and `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` both run this derivation.
+`playbooks/reviewing-code.md` and `playbooks/verifying-on-device.md` both run this derivation.
 What a stage then *does* with the file set is that stage's own — the audit expands it to a
 feature dependency graph, the verify stage traces it to routes and screens — and is
 described there, not here.

@@ -128,12 +128,24 @@ function stripFrontmatter(raw) {
 const isSharedPreamble = (text) =>
   /^the single owner of\b/.test(text) && /names this file and does not restate it/.test(text);
 
+// EXEMPTION 3 — the knob-resolver invocation is the one sanctioned duplicate.
+// Only command text is templated (references/config.md § Knob channel), so every entry command
+// must carry the resolver invocation itself and no shared file can hold the placeholders.
+// Narrow by shape, like EXEMPTION 2, and tested on the raw paragraph before normalize() strips its
+// quoting: the paragraph must be exactly one fenced `node …/resolve-knobs.mjs` call whose only
+// arguments are `--<knob> '${user_config.<knob>}'` pairs. Prose in the same paragraph, or any
+// other argument, puts it back under comparison.
+const isResolverInvocation = (raw) =>
+  /^```\nnode "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/resolve-knobs\.mjs"(?: \\\n {2}--([A-Za-z]+) '\$\{user_config\.\1\}')+\n```$/.test(
+    raw.trim()
+  );
+
 function paragraphs(path) {
   const raw = stripFrontmatter(readFileSync(path, "utf8"));
   return raw
     .split(/\n\s*\n+/)
-    .map(normalize)
-    .filter((p) => p.split(" ").length >= MIN_PARAGRAPH_WORDS);
+    .map((p) => ({ text: normalize(p), resolverInvocation: isResolverInvocation(p) }))
+    .filter(({ text }) => text.split(" ").length >= MIN_PARAGRAPH_WORDS);
 }
 
 function shingles(text) {
@@ -171,11 +183,12 @@ if (files.length === 0) abort(`no .md files under ${targetDir} — nothing was c
 
 const entries = [];
 for (const f of files) {
-  paragraphs(f).forEach((text, idx) => {
+  paragraphs(f).forEach(({ text, resolverInvocation }, idx) => {
     entries.push({
       file: f,
       idx,
       preamble: isSharedPreamble(text),
+      resolverInvocation,
       shingles: shingles(text),
       content: contentWords(text),
     });
@@ -189,6 +202,7 @@ for (let i = 0; i < entries.length; i++) {
     const a = entries[i];
     const b = entries[j];
     if (a.preamble && b.preamble) continue; // see EXEMPTION 2
+    if (a.resolverInvocation && b.resolverInvocation) continue; // see EXEMPTION 3
     const sim = jaccard(a.shingles, b.shingles);
     const contentSim = jaccard(a.content, b.content);
     if (sim >= THRESHOLD || contentSim >= CONTENT_THRESHOLD) {

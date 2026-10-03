@@ -274,10 +274,10 @@ export function routingAdvisories({
     // because there § 4's self-reporting argument does hold.
     const eligibleCells = own.filter((c) => c.dispatches >= comparatorFloor);
     // The comparator is the cheapest ELIGIBLE cell by MEASURED mean cost per dispatch, not by list
-    // price: references/config.md § Model tiers ranks models, but a rank is not a cost per task.
-    // An exact meanUSD tie breaks via the cheaperOfTie ladder above -- never toward whichever of
-    // `a`/`b` the reduce happened to be holding, which is what let a reordered-but-identical
-    // corpus flip which cell counted as cheapest.
+    // price: references/model-routing.md § Model tiers ranks models, but a rank is not a cost per
+    // task. An exact meanUSD tie breaks via the cheaperOfTie ladder above -- never toward
+    // whichever of `a`/`b` the reduce happened to be holding, which is what let a
+    // reordered-but-identical corpus flip which cell counted as cheapest.
     const comparator = eligibleCells.length
       ? eligibleCells.reduce((a, b) => {
         if (b.meanUSD !== a.meanUSD) return b.meanUSD < a.meanUSD ? b : a;

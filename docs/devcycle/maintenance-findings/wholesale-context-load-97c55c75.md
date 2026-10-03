@@ -1,0 +1,11 @@
+# On ref scope the changed-file list reaches every lens subprocess uncapped and rides into the verifier unused
+- finding-kind: maintenance-finding
+- finding-id: wholesale-context-load:97c55c75
+- culprit-kind: wholesale-context-load
+- severity: medium
+- confidence: verified
+- affected-files: workflows/review-panel.js
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- verify: 

@@ -1,7 +1,7 @@
 # Taking the Fast Path
 
 The mini-cycle for requests triage has judged trivial and the user has confirmed via the
-AskUserQuestion gate (fast path vs. full pipeline), where an Other answer appends `user-correction-at-gate`, the rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns. This playbook never re-litigates that
+AskUserQuestion gate (fast path vs. full pipeline), where an Other answer appends `user-correction-at-gate`, the rule `references/ledger.md` owns. This playbook never re-litigates that
 verdict — by the time it runs, the trivial checklist has already passed. Instead of the full
 scoping → brainstorm → planning → execution → branch-review → on-device walk it runs a single
 in-session pass: implement, commit, one reviewer pass, hand to finish. The ceremony
@@ -42,18 +42,17 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    there and follow it. Run `git add -N` on any file the change creates before committing, or
    the pathspec matches nothing for it and the commit aborts.
 5. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model
-   `taskReviewerModel` resolves per `references/config.md`, with the diff and
-   the two evidence-file paths from step 2; the reviewer reads the declared class and the exact
-   command off `fast-before.txt`'s first line, since the fast path writes no implementer report
-   to carry them. On reject: fix, re-verify the evidence, re-dispatch. No review panel, no
-   cross-model lens, no red-team — those belong to the full branch-review stage, not here. This
-   one-reviewer floor is never profile-conditional: a `lean` run runs it too.
+   `taskReviewerModel` resolves per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`, with the
+   diff and the two evidence-file paths from step 2; the reviewer reads the declared class and
+   the exact command off `fast-before.txt`'s first line, since the fast path writes no
+   implementer report to carry them. On reject: fix, re-verify the evidence, re-dispatch.
+   No review panel, no cross-model lens, no red-team — those belong to the full branch-review
+   stage, not here. This one-reviewer floor is never profile-conditional: a `lean` run runs it too.
 
-   Cap: 2 rounds. One round is one reviewer dispatch plus its fix. Statuses and their
-   reporting are owned by `${CLAUDE_PLUGIN_ROOT}/references/loops.md`.
+   Cap: 2 rounds. One round is one reviewer dispatch plus its fix.
 
    Write the exit status to `.devcycle/findings/fast-path-status.md` in the one-line form
-   `references/loops.md` defines, before reporting anything to the user. The finish stage
+   `${CLAUDE_PLUGIN_ROOT}/references/loops.md` defines, before reporting anything to the user. The finish stage
    reads that file, not the conversation.
 6. **Handoff.** Emit this stage's block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` with
    `Stage completed: fast-path` — its table's `fast-path → finish` row gives the context
@@ -75,7 +74,7 @@ On re-entry at `stage: fast-path`, read `${CLAUDE_PLUGIN_ROOT}/references/resume
 follow it. Mapped onto this playbook: its `(re)implement` row is step 2, its `dispatch the
 task reviewer` row is step 5, and the acceptance it says is never inferable from git is
 recorded only by step 6 advancing `stage:` to `finish` — after which `/devcycle:continue`
-routes to `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` and never re-enters here.
+routes to `playbooks/finishing-the-cycle.md` and never re-enters here.
 
 **No step is optional because the change is small.** A one-line change still gets step 1's
 topic branch, step 2's evidence files, step 5's single reviewer dispatch, and — the moment it

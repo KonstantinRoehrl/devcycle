@@ -1,0 +1,11 @@
+# doctor run() holds every parsed record of the whole corpus in memory before summarizing any session
+- finding-kind: maintenance-finding
+- finding-id: unbounded-memory:55c1a6a9
+- culprit-kind: unbounded-memory
+- severity: medium
+- confidence: verified
+- affected-files: scripts/doctor.mjs, scripts/jsonl.mjs
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- verify: 

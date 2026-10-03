@@ -10,6 +10,25 @@ Reconcile the pull-request review named in `$ARGUMENTS`. Grammar:
 comment→finding classification, the fix loop, the reply and consent gates, and finish. Do not
 restate or replace its process here.
 
+Resolve knobs first, per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel — run this exactly as rendered:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
+  --profile '${user_config.profile}' \
+  --gitPolicy '${user_config.gitPolicy}' \
+  --docTrackingPolicy '${user_config.docTrackingPolicy}' \
+  --reviewDepth '${user_config.reviewDepth}' \
+  --crossModelReview '${user_config.crossModelReview}' \
+  --onDeviceGate '${user_config.onDeviceGate}' \
+  --implementerModel '${user_config.implementerModel}' \
+  --taskReviewerModel '${user_config.taskReviewerModel}' \
+  --branchReviewModel '${user_config.branchReviewModel}' \
+  --walkthroughModel '${user_config.walkthroughModel}' \
+  --learnStalenessSessions '${user_config.learnStalenessSessions}' \
+  --learnStalenessDays '${user_config.learnStalenessDays}' \
+  --learnSessionCap '${user_config.learnSessionCap}'
+```
+
 `branch:` is the fact the playbook cannot infer for itself. Given none, the command halts and
 requests one instead of assuming whatever happens to be checked out. The optional `base:`,
 `pr:`, and `from:paste` tokens are each derived by the playbook when omitted — it resolves the

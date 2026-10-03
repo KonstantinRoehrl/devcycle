@@ -96,10 +96,13 @@ jobs:
     # Pin maintenance: bump CLAUDE_CLI_VERSION by hand (there is no package.json for Dependabot
     # to track a global CLI). A bump to a version that adds a new validator warning reddens this
     # job first under --strict — which is the intended early-warning, not a regression.
+    # The pin is also the plugin's minimum supported CLI: 2.1.271 is the first release whose
+    # validator accepts `userConfig.<knob>.options` (2.1.270 and earlier reject the key; see
+    # docs/platform-notes.md § (g)), so CI proves the manifest loads on the oldest CLI we claim.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      CLAUDE_CLI_VERSION: 2.1.258
+      CLAUDE_CLI_VERSION: 2.1.271
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

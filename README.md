@@ -90,7 +90,7 @@ devcycle depends on the [superpowers] plugin. Installing devcycle installs it
 automatically from the official Claude Code plugin directory; afterwards
 `claude plugin list` shows both `devcycle` and `superpowers` as enabled.
 
-Requires a recent Claude Code CLI — verified on 2.1.217 and later.
+Requires Claude Code 2.1.271 or later — earlier releases reject the manifest's `userConfig` pick-lists.
 
 For the on-device verification stage's automatic checks, also install the claude-in-chrome
 plugin — Claude Code's integration with your own Chrome (without it, every checklist item
@@ -136,10 +136,12 @@ run at once. The full configuration surface is in
   marketplace before installing devcycle, and the dependency pulled in the official-directory
   copy as well. Both work; keep one, e.g.
   `claude plugin uninstall superpowers@superpowers-marketplace`.
-- **A literal `${user_config.KEY}` string appears in output** — that option is simply
-  unset; this is expected. What the pipeline uses instead follows the resolution order in
-  [`docs/configuration/`](docs/configuration/README.md). Set the option to make the value
-  substitute.
+- **A literal `${user_config.KEY}` string appears in output** — you are looking at the
+  resolver invocation of an entry command with that option unset; this is expected, and
+  `scripts/resolve-knobs.mjs` resolves it per [`docs/configuration/`](docs/configuration/README.md).
+  Set the option in `/plugin configure` to make the value substitute. Configured and still
+  literal under `claude --plugin-dir`? That load never sees configured values —
+  [`docs/platform-notes.md`](docs/platform-notes.md) § (h).
 - **A command fails on a path that starts with `/scripts/`** — a plugin script was named
   with `${CLAUDE_PLUGIN_ROOT}` in text that reached a shell, where that token is empty: it is
   substituted when a playbook is rendered into a prompt, not by the shell. devcycle names plugin

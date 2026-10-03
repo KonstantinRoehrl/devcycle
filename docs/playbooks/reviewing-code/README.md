@@ -27,22 +27,15 @@ deduplicated across lenses, and ranked before anything is reported.
 
 Reviewers work from fresh context — the scope, criteria, and spec path only, never the
 authoring conversation — and never write the tree they're reviewing (formatters and linters run
-check-mode only). Only an audit run takes the final step: writing
-`docs/audits/YYYY-MM-DD-<topic>.md`, complete with a coverage statement and a provenance header —
-a local per-run snapshot it does **not** commit (audit reports stay local at every policy depth). A branch-review run returns findings and an engine
-line and stops there — the rounds-and-cap loop, the ledger cross-check, and the handoff belong
-to that stage, not this one.
+check-mode only). Only an audit run goes on to the findings document, which
+[`writing-the-findings-document`](../writing-the-findings-document/README.md) writes as
+`docs/audits/YYYY-MM-DD-<topic>.md`. A branch-review run returns findings and an engine line and
+stops there — the rounds-and-cap loop, the ledger cross-check, and the handoff belong to that
+stage, not this one.
 
-A standalone `/devcycle:review` audit run over a `branch` scope with an open PR can take one
-further, opt-in step: **filing** its own ranked findings back onto that PR as a single batched,
-diff-anchored review — the **file** arm of the review write-back path. It stays read-only toward
-code (only PR state changes; the audit document is still the only working-tree file written), is
-confirm-first behind a content gate and a post gate, anchors each finding against the PR-head diff,
-and renders every comment body through the comment-body contract
-[`references/review-comments.md`](../../../references/review-comments.md) owns — the same body shape
-a `/devcycle:reconcile` reply uses. The step lives in
-[`playbooks/reviewing-code.md`](../../../playbooks/reviewing-code.md) §5; this page names it and
-does not restate its gates.
+A standalone `/devcycle:review` audit run over a `branch` scope with an open PR can also opt in to
+**filing** its findings onto that PR — the **file** arm of the review write-back path, described in
+[`writing-the-findings-document`](../writing-the-findings-document/README.md).
 
 ## How it fits
 - Up: [the pipeline](../../pipeline/README.md) — where the Audit stage sits.

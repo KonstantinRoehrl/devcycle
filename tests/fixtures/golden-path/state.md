@@ -14,4 +14,5 @@
 - checklist: none
 - run: none
 - configured: no
+- knobs: profile=standard gitPolicy=local-commits-only docTrackingPolicy=standard reviewDepth=single crossModelReview=false onDeviceGate=human-required implementerModel=auto taskReviewerModel=auto branchReviewModel=auto walkthroughModel=auto learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100
 - updated: 2026-01-01T00:00:00Z

@@ -1,21 +1,19 @@
 # Reviewing Code
 
 The single review engine: *given this scope and these criteria, what is wrong with this code —
-and what does it already do right, concretely enough to name and keep doing?* The second half
-is additive per `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md` § Strengths — not only
-defects and never softens, delays, or substitutes for a defect finding the same evidence would
-otherwise produce.
+and what does it already do right, concretely enough to name and keep doing?* The second half is
+additive, per the Strengths rule `references/abstraction-and-strengths.md` owns.
 **Which caller invoked it decides more than the scope does.** An **audit run** — `/devcycle:review`
 standalone, or `/devcycle:cycle`'s audit stage, at any scope below — runs the criteria interview
-(step 1) and ends in the ranked findings document (step 5). **`/devcycle:maintain`**
-(`${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md`) is a third class: it brings its own
+(step 1), then hands off to `playbooks/writing-the-findings-document.md`.
+**`/devcycle:maintain`** (`playbooks/maintaining-the-repo.md`) is a third class: it brings its own
 longitudinal criteria — depth-gated, not discovered — into that same step-1 interview (its own
-scoping gate mandates the hard STOP) rather than skipping it, and it owes step 5's ranked findings
-document exactly as an audit run does. **The branch-review stage**
-(`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md`) skips both, inheriting the cycle spec's
-criteria and taking its findings back inline. Resolve `profile` first per
-`${CLAUDE_PLUGIN_ROOT}/references/config.md` (`audit depth` sets how far an audit sweeps) and report
-per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
+scoping gate mandates the hard STOP) rather than skipping it, and it owes that findings document
+exactly as an audit run does. **The branch-review stage** (`playbooks/reviewing-the-branch.md`)
+skips both, inheriting the cycle spec's criteria and taking its findings back inline. Read
+`profile` first from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob
+channel (`audit depth` sets how far an audit sweeps) and report per
+`${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
 Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons audit`. No store, no output.
 
@@ -62,16 +60,16 @@ criteria rather than to run step 2's sweep:
 
 Interview via AskUserQuestion, 1–4 questions in one batch, concrete options plus Other — an Other
 answer appends `user-correction-at-gate` when this stage runs inside a cycle run, and nothing on
-the standalone `/devcycle:review` entry; `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that condition. Slot 1 is
+the standalone `/devcycle:review` entry; `references/ledger.md` owns that condition. Slot 1 is
 **a criteria set you derived from discovery**, for the user to correct — never a blank menu, and a
-good proposal is never permission to act on it. It and the other slots draw from
-`${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`, the single owner of what a review measures
-against; no second menu lives here to drift from it. Settle in the same batch the audit scope — at
+good proposal is never permission to act on it. Read
+`${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md` and draw it and the other slots from that
+catalog; no second menu lives here to drift from it. Settle in the same batch the audit scope — at
 `branch` scope show the derived base and stabilized file set here too, correctable exactly like the
 criteria — any criterion the catalog does not carry, and **the audit plan**: which areas will be
 covered, risk-ranked, and why — areas, never findings. Then **hard STOP**, exactly as
-`${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` stops: no sweep, no draft findings, no
-assumed answers until the user replies.
+`playbooks/scoping-the-request.md` stops: no sweep, no draft findings, no assumed answers until the
+user replies.
 
 ## 2. Research and lens construction
 
@@ -93,11 +91,11 @@ the lens charters as known risks the reviewers must weigh the scope against. The
 <id>` tail on each line lets a reviewer pull that record when a lens needs it. Nothing is
 folded in when the match returns empty. **The branch-review stage** does not run this call at all:
 it matches its own stage's lessons before invoking this engine, per
-`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md`.
+`playbooks/reviewing-the-branch.md`.
 
 **Optional caller-supplied orientation (used by `/devcycle:maintain`, ignored otherwise).** A caller
 may hand this stage a pre-computed **orientation digest** and **hotspot file list** — the compact
-repo picture `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`'s Research-dispatch procedure produces.
+repo picture `references/delegation.md`'s Research-dispatch procedure produces.
 When supplied, the `--files` argument above is that hotspot list rather than the whole stabilized
 scope (at `repo` scope the stabilized set can be the entire tree, and lessons cluster on central
 files, so the hotspot list is cheaper and more relevant), and the digest is offered to the lens
@@ -111,10 +109,12 @@ criteria share a lens so each reviewer holds a charter it can actually hold ("co
 contracts across boundaries", "the repo's own documented conventions"), and a lens is never one
 criterion wide. Below two it stops being a panel; above five each charter thins. Each charter names
 what it measures against, so findings can carry it. With a `specPath`, one lens is spec compliance.
+Read `${CLAUDE_PLUGIN_ROOT}/references/abstraction-and-strengths.md`: its Strengths rule binds every
+lens, and its Abstraction section applies when that criterion is confirmed.
 
 ## 3. Engine selection
 
-Keyed to `reviewDepth`, resolved per `${CLAUDE_PLUGIN_ROOT}/references/config.md`. **`panel`** runs
+Keyed to the `knobs:` line's `reviewDepth`. **`panel`** runs
 the constructed lenses through the workflow:
 
 ```bash
@@ -124,13 +124,13 @@ node "${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js" '{"scope":{"ref":"<base>.
 One JSON argv: `scope` carries exactly one of `ref` or `paths`, `specPath` is omitted when no spec
 governs the scope, `lenses` mixes built-in keys and `{key, charter}` objects, and `crossModel`
 mirrors `crossModelReview`. The JSON report is stdout ONLY — progress goes to stderr. When
-`branchReviewModel` resolves to an explicit id, export it (`DEVCYCLE_PANEL_MODEL=<id> node ...`) or
+`branchReviewModel` resolves to an explicit id per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`,
+export it (`DEVCYCLE_PANEL_MODEL=<id> node ...`) or
 the CLI's default silently replaces the user's binding choice; on the session tier omit it.
 
 `maxChunks` is the profile's Frontier ceiling on how many diff chunks the panel reviews; past it
 the panel reviews the highest-churn chunks and names the deferred files in its `COVERAGE WARNING`.
-The playbook resolves `profile` per `${CLAUDE_PLUGIN_ROOT}/references/config.md` and passes the
-matching ceiling:
+The playbook reads `profile` from the `knobs:` line and passes the matching ceiling:
 
 | `profile` | `maxChunks` |
 | --- | --- |
@@ -186,12 +186,12 @@ source is not enough on its own: run it and independently recompute the figure b
 path where feasible, per `findings.md`'s evidence discipline. A headline number that quietly skips
 a normalization step every other code path performs can read as correct from the source alone and
 still be wrong in practice. Unverified findings are marked, never dropped; findings are then
-deduplicated across lenses and ranked. The severity vocabulary, core fields,
-evidence discipline and machine ordering are owned by
-`${CLAUDE_PLUGIN_ROOT}/references/findings.md`. Depth never weakens step 1 or this pass, which is
-real machinery at every profile rather than a paragraph performed by hand. A red test explained
+deduplicated across lenses and ranked: read `${CLAUDE_PLUGIN_ROOT}/references/findings.md` for
+the severity vocabulary, core fields, evidence discipline and machine ordering they follow. Depth
+never weakens step 1 or this pass, which is real machinery at every profile rather than a paragraph
+performed by hand. A red test explained
 as pre-existing/flaky/unrelated/environmental without a logged clean-HEAD-vs-change reproduction
-is rejected, per `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Reviewer verdicts.
+is rejected, per `references/evidence.md` § Reviewer verdicts.
 
 **Cross-reference open work before finalizing.** Check `docs/known-issues.md` and the repo's
 live issue tracker for anything already tracking a candidate finding — they are not guaranteed to
@@ -201,114 +201,12 @@ it from scratch) and to check whether the two are independent or one is a **prec
 other — a finding whose evidence rests on data another open defect is already known to corrupt
 (a log a known bug under- or over-populates, a timestamp a known bug estimates rather than
 measures) inherits that unreliability silently unless the document says so. Note any such
-dependency in the finding itself; step 5 carries it into the document's ordering.
+dependency in the finding itself; the findings document carries it into its ordering.
 
-**The branch-review stage returns exactly this and stops**, taking no step 5: findings in
-`references/findings.md`'s shape plus an **engine line** naming what ran — `single`, `single +
-user-run code-review`, `panel`, `panel [+ cross-model lens]` when the cross-model lens ran, or
-`panel→single (panel unavailable: <reason>)` — recorded verbatim, no variants. The rounds-and-cap
-loop, spec-requirement enumeration, the ledger cross-check and every state-file and handoff duty
-belong to that stage. An audit run or a `/devcycle:maintain` pass continues below, at every scope.
-
-## 5. The findings document — audit runs and `/devcycle:maintain`
-
-Every finding also carries the **document tier** `references/findings.md` lists — detailed enough to
-start work from that one finding alone: what, where, why, how. The document adds a **coverage
-statement** of what was read and what was not (areas skipped, criteria the evidence was thin for,
-limits the scope imposed; silent truncation must never read as completeness) and a **provenance
-header** whose every line is **omitted rather than guessed** when it cannot be determined: the audited
-**branch**, the **sha of the audited content** (that branch's tip at `branch` scope, the sweep's
-checkout HEAD otherwise — never this document's own topic branch, which need not contain the audited
-code), and a **PR link** when one exists. Locations inside findings stay plain `file:line`.
-
-Where step 4 noted a precondition between findings — one finding's reliability resting on
-another's fix landing first, in this document or in the tracker — the document states the
-dependency explicitly and closes with a **suggested sequencing** line ordering the affected
-findings; this supplements the severity/impact/complexity ranking in `findings.md`'s Ordering, it
-does not replace it.
-
-Write `docs/audits/YYYY-MM-DD-<topic>.md` and **do not commit it**: the audit report is a local
-per-run snapshot at every policy depth (`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking,
-audit-report row = local across `all-local`/`standard`/`all-tracked`). Writing the file is the whole
-of this step; the committed durable artifact is the maintenance-findings store, not this snapshot.
-
-Branch discipline follows `${CLAUDE_PLUGIN_ROOT}/references/branch.md`, resolved by caller class and
-never by which state file happens to exist beside the run. The branch-review stage returned its
-findings back at step 4 and never arrives here, so the classes that resolve are the audit run's two
-entries and `/devcycle:maintain`:
-
-- **The cycle's own audit stage** — the run owns the `.devcycle/state.md` it reads: follow that
-  reference in full including the `branch:`-line write, keep `stage: audit` while that is the stage to
-  resume at, record the document on the `audit:` line, and emit the handoff block per
-  `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` with `Stage completed: audit`.
-- **Standalone `/devcycle:review`** — owns no state file: that baseline forces a topic branch only
-  off a default or integration branch, so a run during another cycle would land this document in that
-  cycle's history and review. It therefore always gets its own topic branch, cut from current HEAD and
-  named in the report, and must NOT create, read-modify, or write `.devcycle/state.md`.
-- **`/devcycle:maintain`** — owns no state file either, and never resolves to the first arm however
-  much a concurrent cycle's state file looks like a match:
-  `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md` § Boundaries forbids it to create, read or
-  write one and forbids a handoff block, so it writes no `branch:` line, holds no stage and records no
-  `audit:` line. It writes this document uncommitted as above; its one commit is the
-  maintenance-findings store that playbook's § Run requires, and that commit takes the reference's
-  Committing rule for a standalone playbook — a topic branch only off a default or integration branch,
-  minus the `branch:`-line write — so a pass already on a topic branch commits the store there.
-
-**Then stop.** Present the ranked list; the user picks, and each pick starts its own
-`/devcycle:cycle` naming that finding — never auto-chain. This playbook is **read-only**: it fixes
-nothing it notices in passing, even a trivial one, and that document is the only file it writes.
-
-### Filing the findings to the PR — standalone `/devcycle:review`, `branch` scope, open PR only
-
-An opt-in, confirm-first step that files this run's findings as PR review comments. It stays
-**read-only toward code exactly as the rest of this playbook is**: it touches only PR state, never
-the working tree, and the audit document above remains the only working-tree file the run writes.
-It runs only when **all** three hold — this is a standalone `/devcycle:review` audit run (never the
-in-cycle branch-review stage, which returned its findings inline back at step 4 and never reaches
-step 5), the scope is `branch`, and an open PR exists for that branch. Absent any one, §5 ends at
-**Then stop.** exactly as above.
-
-Filing consumes the run's **own in-memory ranked findings** — never re-parsing the findings
-document just written, never a machine-readable sidecar.
-
-The scope/severity gate below runs only on the standalone `/devcycle:review` entry, which carries
-no run record, so an Other answer here **never appends** `user-correction-at-gate` —
-`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that condition (a gate appends exactly when a run
-record exists, and here none does).
-
-Orchestration, once the three conditions hold:
-
-1. **Resolve once.** The open PR, its head sha as the `commit_id` every anchor pins against, and
-   `<login>` from `gh api user --jq .login` — resolved once for the whole step.
-2. **One scope/severity gate** via AskUserQuestion: which findings to file (default: the blocking
-   set — `critical` + `high` in `${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s four-value severity
-   vocabulary), and the review verdict — `COMMENT`, `REQUEST_CHANGES`, or `APPROVE`. On the user's
-   **own** PR, `REQUEST_CHANGES` and `APPROVE` are **not offered**: a self-PR non-`COMMENT` verdict
-   refuses with a named error and files nothing. At most the Frontier-25 cap
-   `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md` owns is shown at the gate; beyond it,
-   remaining findings are named and deferred, never silently truncated.
-3. **Anchor against the PR-head diff, never the checkout.** Write the PR-head diff
-   (`gh pr diff <pr> --repo <owner/name>`) and the selected findings (a JSON array where each
-   entry carries `line` and either `path` or `file` — `pr-diff-anchor.mjs` accepts both, so the
-   review panel's own `finding.file` shape composes directly, no hand-translation needed) to
-   temp files, then partition them with
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-diff-anchor.mjs" --diff-file <diff> --findings-file
-   <findings>` — anchoring line numbers come only from that diff, never the checkout. It prints
-   `{"anchored":[…RIGHT-side lines…],"degraded":[…]}`; a finding that will not anchor lands in
-   `degraded` and **degrades into the review summary body**, never dropped.
-4. **Draft each body through the comment-body contract** — the `## The comment-body contract`
-   subsection of `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md` owns the body shape and its
-   attribution footer; this step names it and never restates it.
-5. **Screen every draft** — inline bodies and the summary body alike — by writing each body to a temp
-   file and screening it with `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file
-   <draft>`; a body that would leak a host path or secret is fixed or dropped before any gate.
-6. **Two gates, then one post.** Gate 1 (content: is what will be filed right?) → Gate 2 (post: may
-   I file it?), then post through the `review` route of
-   `${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs` — one batched review carrying every inline
-   comment plus the summary body, one notification.
-7. **Never clobber a pending review.** When the `review` route reports an existing pending review,
-   surface its `PRR_…` node id and ask: merge into it (`--merge-into <PRR_…>`) or abort. Without an
-   explicit `--merge-into` the route exits non-zero naming that node id and files nothing.
-8. **Record the write.** Append one `review-writeback` marker via
-   `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append` — finding counts, the verdict event enum,
-   and the PR number only; never body text, never a host path.
+**The branch-review stage returns exactly this and stops**, never reading the findings document
+playbook: findings in `references/findings.md`'s shape plus an **engine line** naming what ran —
+`single`, `single + user-run code-review`, `panel`, `panel [+ cross-model lens]` when the
+cross-model lens ran, or `panel→single (panel unavailable: <reason>)` — recorded verbatim, no
+variants. The rounds-and-cap loop, spec-requirement enumeration, the ledger cross-check and every
+state-file and handoff duty belong to that stage. An audit run or a `/devcycle:maintain` pass then
+reads `${CLAUDE_PLUGIN_ROOT}/playbooks/writing-the-findings-document.md`, at every scope.

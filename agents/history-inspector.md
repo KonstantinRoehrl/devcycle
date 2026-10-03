@@ -36,4 +36,4 @@ history, say so in your report rather than implying you read all of it.
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`; every load-bearing claim carries the
 command that produced it (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims), and
 findings carry the fields `${CLAUDE_PLUGIN_ROOT}/references/findings.md` owns. The coordinator names
-your model at dispatch (`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Model tiers — the fast tier).
+your model at dispatch (`${CLAUDE_PLUGIN_ROOT}/references/model-routing.md` § Model tiers — the fast tier).

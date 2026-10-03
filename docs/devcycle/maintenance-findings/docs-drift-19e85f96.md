@@ -1,0 +1,11 @@
+# docs/playbooks mirrors co-change with their source playbook in 0-25% of source commits; executing-waves is 7 commits behind
+- finding-kind: maintenance-finding
+- finding-id: docs-drift:19e85f96
+- culprit-kind: docs-drift
+- severity: medium
+- confidence: verified
+- affected-files: docs/playbooks/*/README.md, CLAUDE.md
+- first-seen: 2026-09-20
+- last-seen: 2026-09-20
+- passes: 1
+- verify: 

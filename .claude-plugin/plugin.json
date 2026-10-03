@@ -1,6 +1,6 @@
 {
   "name": "devcycle",
-  "version": "0.22.0",
+  "version": "0.22.1",
   "description": "Opinionated pipeline from a feature, bug, or refactor description to a verified, publish-ready implementation: scoped interview, wave-based plan, parallelized subagent execution, cross-model branch review, on-device UI verification via claude-in-chrome, and GitHub reconcile — layered on the superpowers skill set, with a doctor/learn loop that benchmarks and improves the pipeline from session to session.",
   "author": {
     "name": "Konstantin Röhrl",
@@ -20,18 +20,33 @@
       "type": "string",
       "title": "Pipeline profile",
       "default": "standard",
+      "options": [
+        "lean",
+        "standard",
+        "thorough"
+      ],
       "description": "Cost/rigor preset. One of: lean, standard, thorough. Individual knobs override it when explicitly configured. Default: standard."
     },
     "gitPolicy": {
       "type": "string",
       "title": "Git policy",
       "default": "local-commits-only",
+      "options": [
+        "local-commits-only",
+        "push-allowed",
+        "open-pr"
+      ],
       "description": "What the finish stage may do with the branch. One of: local-commits-only, push-allowed, open-pr. Default: local-commits-only."
     },
     "docTrackingPolicy": {
       "type": "string",
       "title": "Doc-tracking policy",
       "default": "standard",
+      "options": [
+        "all-local",
+        "standard",
+        "all-tracked"
+      ],
       "description": "What devcycle attempts to commit of the specs, plans, lessons, promotion records and audit reports it writes (the repo's own .gitignore always wins, and a few artifacts sit outside the policy). One of: all-local (commit none of them), standard (commit lessons and promotion records; keep specs, plans and audit reports local), all-tracked (also commit specs + plans). Default: standard."
     },
     "implementerModel": {
@@ -61,8 +76,13 @@
     "reviewDepth": {
       "type": "string",
       "title": "Review depth",
-      "default": "single",
-      "description": "Branch review engine. Unset → the profile's branch-review row (single at lean and standard, panel at thorough); set → this value, verbatim, and the profile never moves it. One of: single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass), panel (multi-lens review panel workflow), auto (identical to unset). Default: single."
+      "default": "auto",
+      "options": [
+        "auto",
+        "single",
+        "panel"
+      ],
+      "description": "Branch review engine. auto (default) defers to the profile's branch-review row (single at lean and standard, panel at thorough); set → this value, verbatim, and the profile never moves it. One of: auto, single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass), panel (multi-lens review panel workflow). Default: auto."
     },
     "crossModelReview": {
       "type": "boolean",
@@ -73,8 +93,13 @@
     "onDeviceGate": {
       "type": "string",
       "title": "On-device gate",
-      "default": "human-required",
-      "description": "Whether the on-device checklist closes only via a human walkthrough. Unset → the profile's on-device row (auto-ok at lean, human-required at standard and thorough); set → this value, verbatim, and the profile never moves it. One of: human-required, auto-ok, auto (identical to unset). Default: human-required."
+      "default": "auto",
+      "options": [
+        "auto",
+        "human-required",
+        "auto-ok"
+      ],
+      "description": "Whether the on-device checklist closes only via a human walkthrough. auto (default) defers to the profile's on-device row (auto-ok at lean, human-required at standard and thorough); set → this value, verbatim, and the profile never moves it. One of: auto, human-required, auto-ok. Default: auto."
     },
     "learnStalenessSessions": {
       "type": "number",

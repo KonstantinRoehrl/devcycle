@@ -14,16 +14,23 @@ and runs a deterministic-facts pre-pass — dependency audit, lint, the duplicat
 checks, cross-reference checking — so the engine's lenses receive tooling facts instead of
 re-deriving them. The confirmed criteria (plus **Abstraction** at `standard`, plus a history
 inspector's signal at `thorough`) are then handed to `reviewing-code.md` at `repo` scope, which
-owns the panel dispatch, dedup-and-rank, and the ranked `docs/audits/` document itself.
+owns the panel dispatch and dedup-and-rank, then hands off to
+[`writing-the-findings-document`](../writing-the-findings-document/README.md) for the ranked
+`docs/audits/` document itself.
 
 Two things this playbook still owns end to end. First, a second input source folds in at every
 depth: the target repo's own open GitHub issues, fetched read-only, decomposed into
 independently verifiable claims, classified (bug/refactor fragments become candidates, feature
 fragments are counted but excluded), verified against an existing lens methodology, then ranked
 into the same list as the lens findings — distinguished only by provenance, never by rank.
-Second, cross-pass memory: each finding gets a stable id, is compared against a prior-pass store
-to render as persisting/resolved/regressed/new, can be dismissed with a load-bearing reason, and
-is persisted back to that store — the only new write this read-only playbook makes.
+Second, cross-pass memory: each finding gets a stable id and is compared against the prior-pass
+store to render as new, persisting, or dismissed; it can be dismissed with a load-bearing reason;
+and, only on the user's confirmation after a complete pass, a finding no longer detected is
+resolved out of the store. Before any lens runs, a pass checks for an earlier pass's store writes
+that never landed. The store is written through one command, in a worktree on its own
+`chore/maintenance-findings-<date>` branch, committed and opened as a PR only on the user's say —
+or, when doc tracking vetoes committing it, left uncommitted in the session's checkout (the
+playbook's step 8) — which is the only write this otherwise read-only playbook makes.
 
 A fan-out ceiling bounds the whole pass: at most 5 concurrent panel lenses and 8 total LLM
 dispatches, with a hard stop at the ≥20% context-depth band. The playbook mutates no code and no

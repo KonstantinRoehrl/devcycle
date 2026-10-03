@@ -71,6 +71,16 @@ floor here, not the whole rule: it catches near-identical prose, and a second pa
 words catches a fair share of the same rule restated in different words, but neither pass
 judges whether the surviving copy is the right owner.
 
+## Citations
+
+A `${CLAUDE_PLUGIN_ROOT}`-prefixed path is a read: the citing step opens that file there. A bare
+path only names the file that owns a rule, and nobody opens it on the strength of the mention.
+`references/README.md` § Citation grammar owns the rule, and `scripts/validate.mjs` holds it with
+five rules: back-edge, owner-sentence, bare-read, bare-exists and reference-read.
+`node scripts/citation-grammar.mjs <files>` prints the worklist, and
+`node scripts/context-report.mjs --diff <ref>` lists every citation that lost its prefix since
+`<ref>` and every file that left a closure — review it for over-demotion.
+
 ## Before opening a PR
 
 Run the validators and the unit suite locally. CI (`.github/workflows/validate.yml`)
@@ -82,6 +92,8 @@ node scripts/validate.mjs             # manifests, command frontmatter, descript
 node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-listed terms — CI
 node scripts/duplication-check.mjs    # duplicated prose across commands/playbooks/agents/references, and within a file — CI
 node scripts/temp-dir-check.mjs       # temp dirs created outside makeTempDir, which owns removing them — CI
+node scripts/citation-grammar.mjs     # the citation grammar's worklist (back-edge, owner-sentence, bare-read, bare-exists; --references: references nothing reads); exits 1 while any remain — local
+node scripts/context-report.mjs       # per command and playbook: refs-only and all-hops closure words; --diff <ref> lists citations that lost their prefix — local
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
 gitleaks git --no-banner --redact     # credentials, over the full history — CI
 node scripts/doctor.mjs               # token/context profile; --depth is the context gate's probe — local only
@@ -89,6 +101,15 @@ node scripts/doctor.mjs               # token/context profile; --depth is the co
 
 Pass the test files as a glob, exactly as above and as CI does: a bare `tests/unit/` directory
 argument fails spuriously.
+
+When a playbook or command edit trips a size budget (lines for the surface, bytes for the context), `validate.mjs` reports the measured value:
+set `tests/fixtures/surface-budget.json` or `tests/fixtures/context-budget.json` to exactly that
+number and record the change in `docs/decisions/README.md`. The decision entry carries one machine
+line per key it sets, `budget: <fixture-basename> <key> <value>` (for example
+`budget: surface-budget.json surfaceTotal 5693`), in a fenced `text` block; `validate.mjs` check 28
+fails a fixture value above the newest such line for its key. A key removed from a fixture is
+closed with a newer `budget: <fixture-basename> <key> retired` line, since older entries are never
+rewritten.
 
 The two scanners divide the work and neither subsumes the other. gitleaks owns credentials and
 tokens: it is rule-maintained, and it reads **history**, so a secret that was committed and
@@ -109,8 +130,12 @@ runs from the installed plugin, not this repo.
 
 `scripts/doctor.mjs` prices what it measures against `scripts/pricing.mjs`, the data module
 that holds per-model dollar rates and context windows with no CLI of its own — update that
-file when prices change. What says the table is complete is
-`tests/fixtures/observed-model-ids.json`, the model ids real corpora recorded;
+file when prices change. A row may carry `cacheRead`, the model's cache-read rate; omit it and
+doctor assumes 0.1× the input price. A model with no row is excluded from every dollar figure; one
+not older than its family's newest priced row is shown provisionally at that row's price, but that
+estimate does not satisfy the coverage test below (`priceFor` stays strict) — add a real row. What
+says the table is complete is `tests/fixtures/observed-model-ids.json`, the model ids real corpora
+recorded;
 `node scripts/refresh-observed-models.mjs` refreshes it (`--dir` for a corpus elsewhere,
 `--out` for another target) and names any id it found that has no price. Refresh it rather
 than editing it by hand: a hand-written copy of the table's own keys is what let
@@ -133,11 +158,12 @@ Writing a new `scripts/*.mjs`? Reuse `doctor.mjs`'s exported helpers
 project-path escaping, and missing/unreadable-directory handling rather than
 reimplementing them.
 
-`plugin.json`'s `userConfig` descriptions are one of the four hand-kept copies of the config
-knobs that `references/config.md` § The knob roster enumerates — the other three are that
-roster, `docs/configuration/README.md`'s option table and `docs/design/README.md` §7's schema.
-Change one, change all four. `tests/unit/golden-path.test.mjs` fails on a key only some of them
-carry, but no check compares the description text, so a stale description ships silently.
+`plugin.json`'s `userConfig` descriptions are one of the five hand-kept copies of the config
+knobs that `references/config.md` § The knob roster enumerates — the other four are that
+roster, `docs/configuration/README.md`'s option table, `docs/design/README.md` §7's schema and
+`scripts/resolve-knobs.mjs`'s `ROSTER`. Change one, change all five.
+`tests/unit/golden-path.test.mjs` fails on a key only some of them carry, but no check compares
+the description text, so a stale description ships silently.
 
 **PR titles must be Conventional Commits** (`type(scope)?!: subject`), and so must every
 commit subject on the PR — CI checks both. PRs are
@@ -164,12 +190,15 @@ results, plans, and specs out of the repository — they are records of one run 
 they date immediately, and nobody installing the plugin has a use for them. `.devcycle/` is
 gitignored and is where those belong.
 
+Three places hold defect state, each for one kind, and this paragraph owns the split.
 `docs/known-issues.md` is the hand-curated store of confirmed defects in devcycle's own engines;
-fixing one means deleting its entry in the same commit. The same rule holds for the second store,
-`docs/devcycle/maintenance-findings/`: a resolved finding's record is deleted outright — here,
-where that store is tracked, in its own `git rm` commit — rather than kept with a resolved marker.
-A *dismissed* finding is the one record that stays: deleting it would let the finding resurface as
-new on the next pass. `docs/known-issues.md` owns how the two stores split.
+fixing one means deleting its entry in the same commit. `docs/devcycle/maintenance-findings/` holds
+what `/devcycle:maintain` passes detect, written only through `scripts/maintenance-findings.mjs`: a
+resolved finding's record is deleted outright — here, where that store is tracked, in its own
+`git rm` commit — rather than kept with a resolved marker, and a *dismissed* finding is the one
+record that stays, since deleting it would let the finding resurface as new on the next pass.
+GitHub holds issue state: the store keeps no copy of an issue, and a pass cites a folded issue in
+its report only.
 
 ## Releasing
 

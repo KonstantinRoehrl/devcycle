@@ -6,9 +6,6 @@
 - confidence: verified
 - affected-files: playbooks/maintaining-the-repo.md
 - first-seen: 2026-08-30
-- last-seen: 2026-08-30
-- passes: 1
-- origin: lens
+- last-seen: 2026-09-20
+- passes: 2
 - verify: 
-- lifecycle: 
-- dismissed-reason: 
