@@ -4,17 +4,16 @@ Assess a repository's longitudinal health and stop at a ranked findings document
 assess-then-stop, starting no cycle. **Announce at start:** "I'm using the maintaining-the-repo
 playbook to assess the repository."
 
-This playbook wraps the shared review engine (`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`)
+This playbook wraps the shared review engine (`playbooks/reviewing-code.md`)
 rather than adding a second one: it orients the pass graph-first, gathers deterministic facts, then
 runs depth-gated longitudinal lenses through that engine. It adds no control plane of its own — the
 one engine touch is the optional orientation/hotspot input the engine already documents — and
-stays **read-only**: beyond its report, its one write is the findings store, and only through
-step 8.
+stays inside § Boundaries.
 
 ## Scope
 
 - No argument → the whole repository.
-- A `<concern>` argument, handed over by `${CLAUDE_PLUGIN_ROOT}/commands/maintain.md` (which owns
+- A `<concern>` argument, handed over by `commands/maintain.md` (which owns
   the `$ARGUMENTS` grammar; never re-derive it here) → the concern narrows the criteria the audit
   confirms.
 
@@ -24,8 +23,7 @@ maintain has no branch scope: longitudinal health is a whole-repo property.
 
 Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons audit`. Reuses the audit store.
 
-This playbook is **read-only**: it starts no cycle, writes no `.devcycle/state.md`, mutates no code
-and no GitHub issue, and writes the findings store only through step 8.
+This playbook's limits are § Boundaries'.
 
 **Pass start — before anything is dispatched.** Resolve `$base_branch` — the integration branch when
 one exists, else the default branch — per `${CLAUDE_PLUGIN_ROOT}/references/branch.md` § Committing,
@@ -42,8 +40,8 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
 
 1. **Resolve maintenance depth.** Read `profile` from the `knobs:` line per
    `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel and read its **maintenance depth** row:
-   `lean` = existing criteria only; `standard` = + the **Abstraction** criterion
-   (`${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`); `thorough` = + the history inspector.
+   `lean` = existing criteria only; `standard` = + the **Abstraction** criterion; `thorough` = + the
+   history inspector.
 2. **Scoping gate (mandatory, before any dispatch).** Run `reviewing-code.md` § 1's criteria
    interview and resolve knobs — the batched AskUserQuestion gate. Hard STOP until the user replies.
 3. **Orientation — one shared digest, graph-first.** Compute graph availability with
@@ -69,11 +67,13 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
    Fold its churn/convergence signal into the Abstraction charter's historical-convergence input and
    keep its own findings.
 6. **Depth-gated criteria → the engine.** Confirmed criteria = existing criteria always; **standard**
-   adds **abstraction**; **thorough** additionally carries **history** evidence. Follow
+   adds **abstraction** — read `${CLAUDE_PLUGIN_ROOT}/references/abstraction-and-strengths.md` for
+   its method; **thorough** additionally carries **history** evidence. Follow
    `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` at `repo` scope, handing it the confirmed
    criteria, the **hotspot file list** (which scopes its `--match … --files` call rather than the
    whole tree), and the **digest** (its optional orientation input). The engine owns the panel
-   dispatch, dedup-and-rank, and the ranked `docs/audits/` document.
+   dispatch and dedup-and-rank; `playbooks/writing-the-findings-document.md` writes the ranked
+   `docs/audits/` document.
 7. **GitHub issues as a second input source — read-only, all depths.** Unless the scoping gate
    excluded it, fold in the target repo's own open issues alongside the lens findings; this runs at
    every profile depth (lean, standard, thorough), since it is a separate input source, not a
@@ -181,7 +181,7 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
 
 A repo-wide multi-lens pass is the unbounded fan-out shape that has historically blown up spend, so:
 
-- the existing per-lens delegation budget (`${CLAUDE_PLUGIN_ROOT}/references/delegation.md`,
+- the existing per-lens delegation budget (`references/delegation.md`,
   ~30 tool calls / ~15 files) applies **per lens**;
 - a global pass ceiling of **at most 5 concurrent panel lenses** and **at most 8 total LLM dispatches
   per pass** (≤5 lenses + 1 history inspector + 1 issue decompose/classify + 1 issue verification;
@@ -203,7 +203,7 @@ A repo-wide multi-lens pass is the unbounded fan-out shape that has historically
 - Issue-folding is read-only: `gh issue list`/`view` only, never `close`/`comment`/`edit`/`label`.
 - Ends at the ranked findings document, a **local** per-run report (`references/config.md` § Doc
   tracking, audit-report row = local at all depths) exactly as
-  `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` writes it.
+  `playbooks/writing-the-findings-document.md` writes it.
 - Writes the per-finding `docs/devcycle/maintenance-findings/` store only through step 8's CLI and
   only after its commit gate: on its own `chore/maintenance-findings-<date>` branch in a worktree,
   pushed as a PR only on the user's say — in the checkout only when doc tracking vetoes committing

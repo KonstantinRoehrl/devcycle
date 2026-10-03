@@ -77,6 +77,8 @@ export const ENTRY_TAGS = new Set(["devcycle:continue", "devcycle:cycle"]);
 // Neither entry tag is a stage: the stage a resumed session works in is read off the first
 // stage signal after the tag (a playbook read, or a state-file write naming the stage). Keys are
 // playbook basenames; tests/unit/golden-path.test.mjs pins that each exists under playbooks/.
+// writing-the-findings-document is deliberately absent: it is only ever read after reviewing-code
+// or maintaining-the-repo, whose stages already attribute the session.
 export const PLAYBOOK_STAGE = Object.freeze({
   "scoping-the-request": "scoping",
   "reviewing-code": "audit",

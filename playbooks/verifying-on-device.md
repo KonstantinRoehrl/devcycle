@@ -98,7 +98,7 @@ reporting a walkthrough that did not run as done, and never fakes a checkmark.
 
 `/devcycle:verify <branch>` is not a pipeline stage and owns no cycle. It **must not create,
 read-modify, or write `.devcycle/state.md`** — an existing state file belongs to somebody
-else's in-flight cycle, exactly as `playbooks/reviewing-code.md`'s
+else's in-flight cycle, exactly as `playbooks/writing-the-findings-document.md`'s
 standalone rule establishes. The checklist is scratch at the diff-derived path
 `${CLAUDE_PLUGIN_ROOT}/references/checklist.md` pins, handled as that file states, and its
 path goes in the handoff and nowhere else. Everything else — walkthrough, interview rule,

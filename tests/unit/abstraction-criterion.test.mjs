@@ -32,7 +32,7 @@ test("the charter names the degraded-evidence fallback and vocabulary hygiene", 
   assert.match(section(), /`module`.*`interface`.*`implementation`.*`seam`.*`adapter`/);
 });
 
-test("review sources its criteria from quality-criteria.md, so it picks up Abstraction automatically", () => {
+test("review reads abstraction-and-strengths.md when the confirmed criteria include Abstraction", () => {
   const reviewing = readFileSync(join(root, "playbooks/reviewing-code.md"), "utf8");
-  assert.match(reviewing, /quality-criteria\.md/);
+  assert.ok(reviewing.includes("${CLAUDE_PLUGIN_ROOT}/references/abstraction-and-strengths.md"));
 });

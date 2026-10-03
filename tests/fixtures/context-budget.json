@@ -12,5 +12,6 @@
   "playbooks/scoping-the-request.md": 59188,
   "playbooks/sweeping-mechanical-changes.md": 109711,
   "playbooks/taking-the-fast-path.md": 102820,
-  "playbooks/verifying-on-device.md": 105247
+  "playbooks/verifying-on-device.md": 105247,
+  "playbooks/writing-the-findings-document.md": 65477
 }

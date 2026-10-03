@@ -460,9 +460,11 @@ test("harvested: auditing-a-repo/finding-format — every contract field, value 
 });
 
 test("harvested: auditing-a-repo/frontier-reporting — the frontier is named file by file in the coverage statement", () => {
-  const t = read("playbooks/reviewing-code.md");
-  assert.ok(t.includes("name **every** file left at the frontier, with its reason, in the coverage statement"), "frontier rule absent");
-  assert.match(t, /silent truncation must never read as completeness/);
+  assert.ok(
+    read("playbooks/reviewing-code.md").includes("name **every** file left at the frontier, with its reason, in the coverage statement"),
+    "frontier rule absent"
+  );
+  assert.match(read("playbooks/writing-the-findings-document.md"), /silent truncation must never read as completeness/);
 });
 
 test("harvested: commands/bulk-mechanical-triage — the sweep verdict has a checklist and two gates", () => {
@@ -1178,15 +1180,15 @@ const DESCRIBES_NOT_GATES = [
 
 // Sections that gate the user but run ONLY on an entry that carries no run record, so their
 // gate can never append — the runless twin of PRE_MINT_SURFACES, one level down at the section
-// rather than the file. `reviewing-code.md` is reachable both in-cycle (run-bearing) and
-// standalone, so the FILE is not exempt; but its `### Filing …` section runs exclusively on the
+// rather than the file. `writing-the-findings-document.md` is read both in-cycle (run-bearing) and
+// standalone, so the FILE is not exempt; but its `## Filing …` section runs exclusively on the
 // standalone `/devcycle:review` entry, which mints no run record. Such a section must still cite
 // the write site — honestly, in the negative — so it is held to verdict "negative" below rather
 // than the affirmative every run-bearing gate owes. Listed, not derived: "runs only on the
 // standalone entry" is a fact about which entry reaches this section, carried nowhere in the file
 // structure. Guarded below: an entry that stops gating, or flips to affirmative, fails.
 const RUNLESS_SECTIONS = [
-  "playbooks/reviewing-code.md § ### Filing the findings to the PR — standalone `/devcycle:review`, `branch` scope, open PR only",
+  "playbooks/writing-the-findings-document.md § ## Filing the findings to the PR — standalone `/devcycle:review`, `branch` scope, open PR only",
 ];
 
 // A gate that runs before any run record exists must say so, rather than claim an append that
