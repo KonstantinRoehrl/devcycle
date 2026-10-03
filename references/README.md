@@ -28,3 +28,17 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 | `review-comments.md` | How PR review comments are triaged — the six-bucket taxonomy, the comment-to-finding mapping, and the reply-posting contract for the `reconcile` command. |
 | `stages.json` | The stage dispatch — each stage's entry playbook or skill and its re-entry note, printed by `scripts/stage-entry.mjs`. |
 | `sweep-execution.md` | How a plan task marked `**Execution:** sweep` runs inside the execution stage. |
+
+## Citation grammar
+
+- `${CLAUDE_PLUGIN_ROOT}/<dir>/<file>.md` means **read**: the citing step opens and executes that
+  file, or the named section of it, at that point. `scripts/validate.mjs` check 15 counts it.
+- A bare `references/<file>.md`, `playbooks/<file>.md` or `commands/<file>.md` means **owner**: it
+  names where a rule lives, and an agent does not open it on the strength of the mention.
+- A conventions list is an owner list. Its entries are bare, and a step that executes one of those
+  owners carries its own prefixed citation at that step.
+
+`scripts/validate.mjs` check 26 holds the grammar over `commands/`, `playbooks/` and `references/`:
+no reference cites a playbook or command prefixed; no prefixed citation sits in an owner sentence
+without a read verb; no sentence that opens with a read verb names its target bare; every bare path
+resolves. `agents/` keep their own citations.

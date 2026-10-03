@@ -5,6 +5,39 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-02 — citation grammar: a prefixed path is a read, a bare path names an owner
+
+**Decision:** a `${CLAUDE_PLUGIN_ROOT}/<dir>/<file>.md` citation means the citing step opens that
+file, or the named section of it, at that point; a bare `references/`, `playbooks/` or `commands/`
+path names where a rule lives and is never opened on the strength of the mention.
+[`references/README.md` § Citation grammar](../../references/README.md#citation-grammar) states it
+once. `scripts/validate.mjs` check 26 holds it over `commands/`, `playbooks/` and `references/`
+(back-edge, owner-sentence, bare-read, bare-exists), and check 11 counts only a prefixed read or a
+script as a reference's consumer (reference-read). bare-read fires only on an imperative read — a
+read verb that opens the sentence.
+
+**Why:** the prefix had become an attribution habit — owner mentions carried it as often as reads
+did — so an agent could not tell which citations to follow, and the context a stage loads grew
+with every mention. Making the two forms mean different things lets a stage's closure be measured
+and gated. bare-read is imperative-only because a planning spike on the live tree found matching a
+read verb anywhere in the sentence flagged 22 sentences, nearly all false ("read-only", "a run",
+verbs inside code spans), against 0 for the imperative form.
+
+**Supersedes:** the habit design §15.1 described, where a consumer cited a reference prefixed
+whether it read the file or only named its owner.
+
+## 2026-10-02 — reference-core structural merges deferred (M1c)
+
+**Decision:** `references/ledger.md` stays separate from `references/resume.md`, and
+`references/loops.md` from `references/handoff.md`.
+
+**Why:** the merges were proposed to cut the hops a stage follows to reach those files. Under the
+citation grammar a bare name is never followed, so the hop count no longer drives what a stage
+loads. Revisit only if a measured closure (`scripts/context-report.mjs`) says otherwise.
+
+**Supersedes:** part (c) of finding M1's fix in the 2026-09-05 whole-repo audit, which proposed
+both merges.
+
 ## 2026-10-02 — unpriced models: per-model cache reads, provisional prices only for newer models
 
 **Decision:** `scripts/doctor.mjs` prices cache reads per model, from an optional `cacheRead` rate on

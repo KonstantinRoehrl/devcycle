@@ -71,6 +71,16 @@ floor here, not the whole rule: it catches near-identical prose, and a second pa
 words catches a fair share of the same rule restated in different words, but neither pass
 judges whether the surviving copy is the right owner.
 
+## Citations
+
+A `${CLAUDE_PLUGIN_ROOT}`-prefixed path is a read: the citing step opens that file there. A bare
+path only names the file that owns a rule, and nobody opens it on the strength of the mention.
+`references/README.md` § Citation grammar owns the rule, and `scripts/validate.mjs` holds it with
+five rules: back-edge, owner-sentence, bare-read, bare-exists and reference-read.
+`node scripts/citation-grammar.mjs <files>` prints the worklist, and
+`node scripts/context-report.mjs --diff <ref>` lists every citation that lost its prefix since
+`<ref>` and every file that left a closure — review it for over-demotion.
+
 ## Before opening a PR
 
 Run the validators and the unit suite locally. CI (`.github/workflows/validate.yml`)
