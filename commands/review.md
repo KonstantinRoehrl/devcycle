@@ -29,7 +29,7 @@ that fails the validate-then-quote rule in `${CLAUDE_PLUGIN_ROOT}/references/bra
 resolves to no ref once spelled as that reference spells it, stops the run with that error
 rather than falling back to treating it as a concern.
 
-Resolve knobs first — run this exactly as rendered; `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel owns what follows:
+Resolve knobs first, per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel — run this exactly as rendered:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \

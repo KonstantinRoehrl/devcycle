@@ -113,6 +113,17 @@ export function makePluginFixture() {
     "references/model-tiers.json",
     JSON.stringify([{ family: "fixture-family", rank: 1, match: "fixture" }], null, 2) + "\n"
   );
+  // Check 27 requires a stage table wherever commands/cycle.md declares a stage enum, so every
+  // fixture tree ships one keyed by exactly the enum above.
+  writeInto(
+    dir,
+    "references/stages.json",
+    JSON.stringify(
+      Object.fromEntries(["scoping", "planning", "execution"].map((s) => [s, { entry: "playbooks/demoing-things.md", note: "" }])),
+      null,
+      2
+    ) + "\n"
+  );
   // Check 9 reads its limits from a committed baseline, so every fixture tree ships one.
   writeInto(
     dir,

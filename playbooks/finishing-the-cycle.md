@@ -41,9 +41,9 @@ needed. Otherwise (`push-allowed` or `open-pr`), check two signals before pushin
   `Bash(git push:*)`, `Bash(git:*)`, or a bare `Bash` deny. An `ask`-only rule (no matching
   `deny`) does NOT fire it — leave the configured policy alone; the normal permission prompt
   at push time communicates the restriction.
-- **Protected-branch signal:** resolve the repo's release/default branch exactly as
-  `${CLAUDE_PLUGIN_ROOT}/references/branch.md` resolves it — that file owns the resolution
-  chain and this stage runs no other. The signal fires if the branch recorded in
+- **Protected-branch signal:** resolve the repo's release/default branch — follow
+  `${CLAUDE_PLUGIN_ROOT}/references/branch.md`, which owns the resolution
+  chain; this stage runs no other. The signal fires if the branch recorded in
   `.devcycle/state.md` (this cycle's branch) IS that default branch — devcycle never pushes
   directly to the repo's default branch.
 

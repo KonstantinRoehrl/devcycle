@@ -115,7 +115,7 @@ proceed — an unmeasurable depth is not a deep one.
 Continue at the recorded stage by following the `entry:` and `note:` lines step 2a's
 `resume-check.mjs` printed. If it printed `no entry line`, report its reason, then read
 `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § Resuming at the recorded stage, which names the
-file that owns the dispatch.
+file that owns the dispatch. If it printed `closed:`, the cycle is done — say so and stop.
 
 From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file updates, and at
 every stage boundary read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and emit its block.

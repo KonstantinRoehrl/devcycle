@@ -40,5 +40,5 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 
 `scripts/validate.mjs` check 26 holds the grammar over `commands/`, `playbooks/` and `references/`:
 no reference cites a playbook or command prefixed; no prefixed citation sits in an owner sentence
-without a read verb; no sentence that opens with a read verb names its target bare; every bare path
-resolves. `agents/` keep their own citations.
+unless a read verb opens it or a clause; no sentence that opens with a read verb names its target
+bare; every bare path resolves. `agents/` keep their own citations.

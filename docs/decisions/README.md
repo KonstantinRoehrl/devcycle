@@ -34,23 +34,44 @@ execution no gate could reach them. By the user's decision, `commands/cycle.md` 
 `commands/continue.md` each carry one prefixed read of `references/ledger.md` at their
 gate-correction sentence; the per-playbook mentions stay bare.
 
+**The grammar's checks, tightened in the same review:** check 11 counts a script as a reference's
+consumer only where its code names the file — a path literal or `join(…, "references", "<name>.md")`
+segments — never a comment. That left `references/impact-scoring.md` with no consumer: doctor.mjs,
+dream.mjs and impact-ledger.mjs implement its formula but named it only in comments, and no stage
+executes it — profiling and learn quote the figures the scripts compute. By the user's decision its
+consumer is code, not a restored read: doctor.mjs renders the formula's owner under its culprit
+table (`_Priced by references/impact-scoring.md's formula; …_`) from a path constant, which keeps
+every stage's context unchanged and needs no allowlist. The owner-sentence exemption needs an
+imperative read verb opening the sentence, one of its clauses, or a table cell, so "owns what
+follows" or "a run" no longer exempts a sentence; three commands' knob sentences now match their
+siblings' `per … — run this` form, and finishing-the-cycle's branch resolution and planning-waves'
+repo-research sentence open their read clause with the verb. bare-read also catches a read inside
+bold (`**Read** …`) and no longer fires on "Read-only". Check 27 fails a tree whose
+`commands/cycle.md` declares a stage enum but ships no `references/stages.json`, and checks every
+surface path a stage's `note` names. The plan pre-flight (`scripts/budget-fixture-check.mjs`)
+now also requires `docs/decisions/README.md` of any task that touches or needs a budget fixture,
+since check 28 would otherwise fail that task mid-execution.
+
 **Budgets:** `surfaceTotal` 5703 → 5710 (cycle.md +4 lines, continue.md +1, quality-criteria.md
 +2) and `commandMax` 168 → 172 (cycle.md). `executing-waves.md` 103388 → 103391 bytes for the
 shim-form read; `planning-waves.md` 68403 → 68513 and `reviewing-code.md` 90565 → 90675 for the
 Abstraction line, since both read `references/quality-criteria.md`. Seven playbooks that read
 `references/config.md` drop 5 bytes each with its trimmed maintenance-depth paragraph.
+The reworded reads take `finishing-the-cycle.md` to 53027 and `planning-waves.md` to 68507.
 
-**Supersedes:** the spec's §1 bare form for the gate-correction sentence in those two commands.
+**Supersedes:** the spec's §1 bare form for the gate-correction sentence in those two commands; the
+2026-10-02 entry's "a script" as a reference's consumer, now a script's code; check 27's skip when
+`references/stages.json` is absent.
 
 ```text
 budget: surface-budget.json surfaceTotal 5710
 budget: surface-budget.json commandMax 172
 budget: context-budget.json playbooks/executing-waves.md 103391
-budget: context-budget.json playbooks/finishing-the-cycle.md 53049
+budget: context-budget.json playbooks/finishing-the-cycle.md 53027
 budget: context-budget.json playbooks/learning-from-sessions.md 60715
 budget: context-budget.json playbooks/maintaining-the-repo.md 63180
 budget: context-budget.json playbooks/onboarding-a-repo.md 29097
-budget: context-budget.json playbooks/planning-waves.md 68513
+budget: context-budget.json playbooks/planning-waves.md 68507
 budget: context-budget.json playbooks/receiving-review.md 107511
 budget: context-budget.json playbooks/reviewing-code.md 90675
 budget: context-budget.json playbooks/reviewing-the-branch.md 54490

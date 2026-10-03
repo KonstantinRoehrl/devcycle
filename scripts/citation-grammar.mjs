@@ -4,24 +4,31 @@
 // nobody opens on the strength of the mention. Pure rule functions scripts/validate.mjs calls, and
 // a CLI that prints every hit as a worklist.
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseFlags } from "./cli-flags.mjs";
 
+// The grammar's vocabulary, owned here and imported by context-closure.mjs, context-report.mjs and
+// stage-entry.mjs, so a path one of them recognises is a path all of them recognise.
 export const GRAMMAR_DIRS = ["commands", "playbooks", "references"];
-const PREFIXED = /\$\{CLAUDE_PLUGIN_ROOT\}\/((?:references|playbooks|commands)\/[A-Za-z0-9._-]+\.md)/g;
-const BACK_EDGE = /\$\{CLAUDE_PLUGIN_ROOT\}\/((?:playbooks|commands)\/[A-Za-z0-9._-]+\.md)/g;
+const NAME = "[A-Za-z0-9._-]+";
+export const prefixedPattern = (dirs = GRAMMAR_DIRS) =>
+  new RegExp(String.raw`\$\{CLAUDE_PLUGIN_ROOT\}\/((?:${dirs.join("|")})\/${NAME}\.md)`, "g");
+export const PREFIXED = prefixedPattern();
+const BACK_EDGE = prefixedPattern(["playbooks", "commands"]);
 // The lookbehind keeps a path inside a longer one (`docs/playbooks/…`, `tests/fixtures/references/…`)
 // and the prefixed form from counting as bare; a `<name>` placeholder never matches the name class.
-const BARE = /(?<![\w./}-])((?:references|playbooks|commands)\/[a-z0-9-]+\.md)/g;
+export const BARE = new RegExp(String.raw`(?<![\w./}-])((?:${GRAMMAR_DIRS.join("|")})\/${NAME}\.md)`, "g");
 const OWNER_VERB = /\b(?:owns|owner|owners|owned|restate|restates|restated|restating)\b/i;
-const READ_VERB =
-  /\b(?:read|reads|reading|follow|follows|followed|following|run|runs|running|ran|open|opens|opened|opening|consult|consults|consulted|consulting|load|loads|loaded|loading|execute|executes|executed|executing)\b/i;
-// bare-read fires only on an imperative read — the verb opens the sentence, after any list marker,
-// bold step label, or sequencing word. A read verb anywhere fired on "read-only", "a run" and verbs
-// inside code spans far more often than on a real instruction.
-const IMPERATIVE_READ =
-  /^(?:(?:[-*+]|\d+[a-z]?\.)\s+)?(?:\*\*[^*]+\*\*\s*)?(?:(?:then|first|next|always),?\s+)?(?:re-?read|read|follow|run|open|consult|load|execute)\b/i;
+// A read is imperative: the verb opens the sentence, after any list marker, bold step label (or the
+// bold that opens one), or sequencing word. A read verb anywhere fired on "read-only", "a run",
+// "what follows" and verbs inside code spans far more often than on a real instruction.
+const READ = String.raw`(?:re-?read|read|follow|run|open|consult|load|execute)(?![\w-])`;
+const LEAD = String.raw`(?:(?:[-*+]|\d+[a-z]?\.)\s+)?(?:\*\*[^*]+\*\*\s*)?(?:\*\*)?(?:(?:then|first|next|always),?\s+)?`;
+const IMPERATIVE_READ = new RegExp(`^${LEAD}${READ}`, "i");
+// The owner-sentence exemption also takes an imperative read that opens a later clause or a table
+// cell: "It owns the walk, so read `…` first."
+const CLAUSE_READ = new RegExp(String.raw`(?:^${LEAD}|(?:[,;:|—–]\s+|\(\s*|\b(?:and|so|then)\s+)(?:(?:then|first|next|always),?\s+)?)${READ}`, "i");
 const FENCE = /^\s*(```|~~~)/;
 
 const maskCode = (s) => s.replace(/`[^`]*`/g, (m) => " ".repeat(m.length));
@@ -95,7 +102,7 @@ export function backEdgeErrors(rel, text) {
 
 export function ownerSentenceErrors(rel, text) {
   return sentences(text)
-    .filter((s) => has(PREFIXED, s.text) && OWNER_VERB.test(maskCode(s.text)) && !READ_VERB.test(maskCode(s.text)))
+    .filter((s) => has(PREFIXED, s.text) && OWNER_VERB.test(maskCode(s.text)) && !CLAUSE_READ.test(maskCode(s.text)))
     .map((s) =>
       hit(rel, s.line, "owner-sentence", `prefixed citation in an owner sentence — make it bare, or split a read sentence from an owner sentence: "${excerpt(s.text)}"`)
     );
@@ -118,17 +125,48 @@ export function bareExistsErrors(rel, text, exists) {
   return out;
 }
 
+// A script's comments, blanked. String and template literals are kept whole, so the `//` in a URL
+// is no comment; an opener right after a backslash is a regex's escaped slash, not a comment.
+export function stripComments(src) {
+  let out = "";
+  let quote = null;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (quote) {
+      out += c;
+      if (c === "\\") out += src[++i] ?? "";
+      else if (c === quote || (c === "\n" && quote !== "`")) quote = null;
+    } else if (c === "/" && (src[i + 1] === "/" || src[i + 1] === "*") && src[i - 1] !== "\\") {
+      const close = src[i + 1] === "/" ? src.indexOf("\n", i) : src.indexOf("*/", i + 2);
+      const end = close === -1 ? src.length : src[i + 1] === "/" ? close : close + 2;
+      out += src.slice(i, end).replace(/[^\n]/g, " ");
+      i = end - 1;
+    } else {
+      if (c === '"' || c === "'" || c === "`") quote = c;
+      out += c;
+    }
+  }
+  return out;
+}
+
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// A script reads a reference when its code names the path — as a literal (`"references/x.md"`,
+// `` `${root}/references/x.md` ``) or as `join(…, "references", "x.md")` segments.
+const namesInCode = (code, name) =>
+  new RegExp(String.raw`(?<![\w-])references\/${escape(name)}(?![\w-])|["'\`]references["'\`]\s*,\s*["'\`]${escape(name)}["'\`]`).test(code);
+
 // Check 11, tightened: a substring mention no longer counts, because a reference demoted to bare
-// everywhere would still pass while nothing reads it. validate.mjs names references in its own
-// messages and checks, which makes it their checker, not their consumer.
+// everywhere would still pass while nothing reads it — and a script counts only where its code,
+// not a comment, names the file. validate.mjs names references in its own messages and checks,
+// which makes it their checker, not their consumer.
 export function referenceReadErrors({ references, surface, scripts }) {
-  const consumers = scripts.filter((s) => s.rel !== "scripts/validate.mjs");
+  const consumers = scripts.filter((s) => s.rel !== "scripts/validate.mjs").map((s) => stripComments(s.text));
   return references
     .filter((f) => f !== "README.md")
     .filter((f) => {
       const own = `references/${f}`;
       const prefixed = `\${CLAUDE_PLUGIN_ROOT}/${own}`;
-      return !surface.some((s) => s.rel !== own && s.text.includes(prefixed)) && !consumers.some((s) => s.text.includes(own));
+      return !surface.some((s) => s.rel !== own && s.text.includes(prefixed)) && !consumers.some((code) => namesInCode(code, f));
     })
     .map((f) => hit(`references/${f}`, 0, "reference-read", `references/${f}: no consumer — no surface file reads it prefixed and no script reads it`));
 }
@@ -173,7 +211,15 @@ function main(argv) {
     process.exit(1);
   }
   const root = process.cwd();
-  const rels = parsed.flags["--references"] ? [] : parsed.positionals.length ? parsed.positionals : grammarFiles(root);
+  // Every rule keys on the root-relative path, so `./references/x.md` or an absolute path must
+  // reach them as `references/x.md`, or back-edge never sees the reference.
+  const named = parsed.positionals.map((p) => ({ p, rel: relative(root, resolve(root, p)) }));
+  const outside = named.filter(({ rel }) => rel.startsWith("..") || isAbsolute(rel)).map(({ p }) => p);
+  if (outside.length) {
+    console.error(`citation-grammar: outside the plugin root: ${outside.join(", ")}`);
+    process.exit(1);
+  }
+  const rels = parsed.flags["--references"] ? [] : named.length ? named.map(({ rel }) => rel) : grammarFiles(root);
   const missing = rels.filter((r) => !existsSync(join(root, r)));
   if (missing.length) {
     console.error(`citation-grammar: no such file: ${missing.join(", ")}`);

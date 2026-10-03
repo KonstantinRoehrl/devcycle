@@ -8,10 +8,8 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { closure, diskReader } from "./context-closure.mjs";
+import { GRAMMAR_DIRS, PREFIXED } from "./citation-grammar.mjs";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
-
-const SURFACE_DIRS = ["commands", "playbooks", "references"];
-const PREFIXED = /\$\{CLAUDE_PLUGIN_ROOT\}\/((?:references|playbooks|commands)\/[A-Za-z0-9._-]+\.md)/g;
 
 const listMd = (root, dir) =>
   existsSync(join(root, dir)) ? readdirSync(join(root, dir)).filter((f) => f.endsWith(".md")).map((f) => `${dir}/${f}`) : [];
@@ -41,33 +39,61 @@ function gitReader(root, ref) {
   };
 }
 
-const prefixedCounts = (text) => {
-  const counts = new Map();
-  for (const m of (text ?? "").matchAll(PREFIXED)) counts.set(m[1], (counts.get(m[1]) ?? 0) + 1);
-  return counts;
-};
+// One line's citations: its prefixed targets, how often each target sits bare, and its text with
+// every prefix dropped — the key that recognises the line again once a prefix is removed.
+const PREFIX = "${CLAUDE_PLUGIN_ROOT}/";
+const citationLines = (text) =>
+  (text ?? "").split("\n").map((l, i) => {
+    const rest = l.replace(PREFIXED, "");
+    return {
+      line: i + 1,
+      key: l.replaceAll(PREFIX, "").replace(/\s+/g, " ").trim(),
+      prefixed: [...l.matchAll(PREFIXED)].map((m) => m[1]),
+      bare: (target) => rest.split(target).length - 1,
+    };
+  });
 
-const bareLines = (text, target) =>
-  (text ?? "").split("\n").flatMap((l, i) => (l.replace(PREFIXED, "").includes(target) ? [i + 1] : []));
+// Matched per citation, never by count: a prefix dropped on one line and added on another for the
+// same target is still a demotion. In order: a citation whose line is unchanged but for the prefix
+// is kept or demoted in place; one whose line was reworded is kept if any line still carries the
+// prefix unclaimed; the rest are lost at a line where the target now sits bare, or at none.
+function lostCitations(file, beforeText, nowText) {
+  const now = citationLines(nowText).map((l) => ({ ...l, bareTaken: new Map() }));
+  const takePrefixed = (l, target) => {
+    const i = l.prefixed.indexOf(target);
+    if (i !== -1) l.prefixed.splice(i, 1);
+    return i !== -1;
+  };
+  const takeBare = (l, target) => {
+    const taken = l.bareTaken.get(target) ?? 0;
+    if (taken >= l.bare(target)) return false;
+    l.bareTaken.set(target, taken + 1);
+    return true;
+  };
+  const lost = [];
+  const loseAt = (c, at) => lost.push({ file, target: c.target, beforeLine: c.beforeLine, line: at ? at.line : null });
+  const reworded = [];
+  for (const c of citationLines(beforeText).flatMap((b) => b.prefixed.map((target) => ({ target, beforeLine: b.line, key: b.key })))) {
+    if (now.some((l) => l.key === c.key && takePrefixed(l, c.target))) continue;
+    const inPlace = now.find((l) => l.key === c.key && takeBare(l, c.target));
+    if (inPlace) loseAt(c, inPlace);
+    else reworded.push(c);
+  }
+  for (const c of reworded)
+    if (!now.some((l) => takePrefixed(l, c.target))) loseAt(c, now.find((l) => takeBare(l, c.target)));
+  return lost.sort((a, b) => a.beforeLine - b.beforeLine);
+}
 
 export function diffSince(root, ref) {
   if (git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).status !== 0)
     throw new Error(`unknown git ref "${ref}"`);
-  const listed = git(root, ["ls-tree", "-r", "--name-only", ref, "--", ...SURFACE_DIRS]);
+  const listed = git(root, ["ls-tree", "-r", "--name-only", ref, "--", ...GRAMMAR_DIRS]);
   const before = gitReader(root, ref);
   const now = diskReader(root);
   const files = [
-    ...new Set([...listed.stdout.split("\n").filter((p) => p.endsWith(".md")), ...SURFACE_DIRS.flatMap((d) => listMd(root, d))]),
+    ...new Set([...listed.stdout.split("\n").filter((p) => p.endsWith(".md")), ...GRAMMAR_DIRS.flatMap((d) => listMd(root, d))]),
   ].sort();
-  const lostPrefixes = [];
-  for (const file of files) {
-    const was = prefixedCounts(before(file));
-    const is = prefixedCounts(now(file));
-    for (const [target, n] of was) {
-      const left = is.get(target) ?? 0;
-      if (left < n) lostPrefixes.push({ file, target, before: n, after: left, bareLines: bareLines(now(file), target) });
-    }
-  }
+  const lostPrefixes = files.flatMap((file) => lostCitations(file, before(file), now(file)));
   const dropped = [];
   for (const file of entryPoints(root)) {
     if (before(file) === null) continue;
@@ -120,7 +146,7 @@ function main(argv) {
   if (!diff) return;
   console.log(`\nlost prefixes since ${diff.ref}:`);
   for (const l of diff.lostPrefixes)
-    console.log(`  ${l.file}  ${l.target}  ${l.before} → ${l.after}  bare at ${l.bareLines.join(", ") || "(removed)"}`);
+    console.log(`  ${l.file}:${l.beforeLine}  ${l.target}  ${l.line === null ? "removed" : `bare at line ${l.line}`}`);
   console.log(`\ndropped from closures since ${diff.ref}:`);
   for (const d of diff.dropped)
     console.log(`  ${d.file}  refs-only: ${d.refsOnly.join(", ") || "none"}  all-hops: ${d.allHops.join(", ") || "none"}`);

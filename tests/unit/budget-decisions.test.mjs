@@ -40,6 +40,14 @@ test("a line naming an unknown fixture or key fails, unless a newer line retires
   assert.deepEqual(retired, []);
 });
 
+test("a key retired in the log while its fixture still carries a value counts as unrecorded", () => {
+  const [err] = budgetDecisionErrors({
+    fixtures: { "surface-budget.json": { surfaceTotal: 5 } },
+    logText: log("budget: surface-budget.json surfaceTotal retired", "budget: surface-budget.json surfaceTotal 9"),
+  });
+  assert.match(err, /surfaceTotal is 5, above the unrecorded 0/);
+});
+
 test("a malformed budget line fails with its line number", () => {
   const [err] = budgetDecisionErrors({ fixtures: {}, logText: log("budget: surface-budget.json surfaceTotal lots") });
   assert.match(err, /docs\/decisions\/README\.md:3: malformed budget line/);

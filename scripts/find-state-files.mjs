@@ -10,7 +10,7 @@ import { basename, dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
-import { stageEntry, entryLines } from "./stage-entry.mjs";
+import { stageEntry, entryLines, CLOSED_STAGE, CLOSED_LINE } from "./stage-entry.mjs";
 
 // Reuses scripts/validate.mjs's walk-prune convention: .git holds no state file and node_modules
 // would be slow noise. .devcycle is NEVER pruned — it is exactly what this walk looks for.
@@ -93,8 +93,9 @@ function fmtAge(s) {
 }
 
 // The same lines resume-check prints, so the candidate list already says where each cycle would
-// resume; a stage with no entry says why instead of printing a guess.
+// resume; a closed cycle says so, and a stage with no entry says why instead of printing a guess.
 function entryFor(stage) {
+  if (stage === CLOSED_STAGE) return { entry: null, note: null, closed: true, lines: [CLOSED_LINE] };
   try {
     const e = stageEntry(stage);
     return { entry: e.entry, note: e.note, lines: entryLines(e) };

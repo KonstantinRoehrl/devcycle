@@ -1909,6 +1909,9 @@ function main() {
   }
 }
 
+// The formula's owner, named in the rendered report beside the figures it prices.
+const IMPACT_SCORING = "references/impact-scoring.md";
+
 // references/impact-scoring.md owns this formula; this is its only implementation. Four of the
 // eight signals the design names are not written to the journal at all — they are already
 // reconstructible from verdict and dispatch lines, so writing them too would be a second source
@@ -3005,6 +3008,7 @@ export function renderReport(summaries, ctx) {
     ]),
     "no scored culprit events in this corpus",
   ));
+  L.push("", `_Priced by ${IMPACT_SCORING}'s formula; "unmeasurable" could not be priced and is not $0._`);
 
   section("### Compliance", "compliance");
   L.push(...(compliance.length

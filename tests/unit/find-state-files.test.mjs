@@ -101,13 +101,16 @@ test("each candidate carries the entry and note it would resume through, in text
   }
 });
 
-test("a done cycle says it has no entry rather than printing one", () => {
+test("a done cycle says it is closed rather than printing an entry or a fault", () => {
   const dir = makeTempDir("fsf-");
   try {
     writeState(dir, "# devcycle state\n- stage: done\n- request: demo\n");
     const h = spawnSync("node", [SCRIPT, "--dir", dir], { encoding: "utf8" });
-    assert.match(h.stdout, /^ {3}\(no entry — no entry for stage "done"/m);
-    assert.doesNotMatch(h.stdout, /^ {3}entry:/m);
+    assert.match(h.stdout, /^ {3}closed: this cycle is done — nothing to resume/m);
+    assert.doesNotMatch(h.stdout, /^ {3}entry:|no entry/m);
+    const [rec] = JSON.parse(spawnSync("node", [SCRIPT, "--dir", dir, "--json"], { encoding: "utf8" }).stdout);
+    assert.equal(rec.closed, true);
+    assert.equal(rec.entryError, undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

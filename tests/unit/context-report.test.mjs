@@ -42,10 +42,40 @@ test("--diff lists each citation that lost its prefix, with its bare lines, and 
     const r = run(dir, "--json", "--diff", "HEAD");
     assert.equal(r.status, 0, r.stderr);
     const { diff } = JSON.parse(r.stdout);
-    assert.deepEqual(diff.lostPrefixes, [{ file: "playbooks/a.md", target: "references/y.md", before: 1, after: 0, bareLines: [3] }]);
+    assert.deepEqual(diff.lostPrefixes, [{ file: "playbooks/a.md", target: "references/y.md", beforeLine: 1, line: 3 }]);
     const a = diff.dropped.find((d) => d.file === "playbooks/a.md");
     assert.deepEqual(a.refsOnly, ["references/y.md"]);
     assert.deepEqual(a.allHops, ["references/y.md"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--diff lists a demotion even when a new prefixed read of the same target offsets the count", () => {
+  const dir = makeRepo();
+  try {
+    seed(dir);
+    writeInto(dir, "playbooks/a.md", `Read \`${P}/references/x.md\`.\n\nThen \`${P}/references/y.md\` applies.\n`);
+    commitAll(dir, "seed");
+    writeInto(dir, "playbooks/a.md", `Read \`references/x.md\`.\n\nThen \`${P}/references/y.md\` applies.\n\nAlso \`${P}/references/x.md\` here.\n`);
+    const r = run(dir, "--json", "--diff", "HEAD");
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout).diff.lostPrefixes, [{ file: "playbooks/a.md", target: "references/x.md", beforeLine: 1, line: 1 }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--diff lists one of two citations of a target losing its prefix, and not a reworded line that kept it", () => {
+  const dir = makeRepo();
+  try {
+    seed(dir);
+    writeInto(dir, "playbooks/a.md", `A \`${P}/references/y.md\`.\n\nB \`${P}/references/y.md\`.\n\nRead \`${P}/references/x.md\` first.\n`);
+    commitAll(dir, "seed");
+    writeInto(dir, "playbooks/a.md", `A \`${P}/references/y.md\`.\n\nB \`references/y.md\`.\n\nRead \`${P}/references/x.md\` before anything else.\n`);
+    const r = run(dir, "--json", "--diff", "HEAD");
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout).diff.lostPrefixes, [{ file: "playbooks/a.md", target: "references/y.md", beforeLine: 3, line: 3 }]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -60,7 +90,7 @@ test("text output names the totals and the diff sections", () => {
     const r = run(dir, "--diff", "HEAD");
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /playbooks\/a\.md {2}refs-only: 2 files \/ \d+ words \/ \d+ bytes {3}all-hops: 2 files \/ \d+ words/);
-    assert.match(r.stdout, /lost prefixes since HEAD:/);
+    assert.match(r.stdout, /lost prefixes since HEAD:\n {2}playbooks\/a\.md:1 {2}references\/y\.md {2}removed\n/);
     assert.match(r.stdout, /dropped from closures since HEAD:/);
   } finally {
     rmSync(dir, { recursive: true, force: true });

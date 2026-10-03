@@ -10,7 +10,7 @@ import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run
 import { readPolicy } from "./reinforcement-policy.mjs";
 import { closure } from "./context-closure.mjs";
 import { ROSTER } from "./resolve-knobs.mjs";
-import { grammarFiles, grammarHits, referenceReadErrors } from "./citation-grammar.mjs";
+import { bareExistsErrors, grammarFiles, grammarHits, referenceReadErrors } from "./citation-grammar.mjs";
 import { loadStages } from "./stage-entry.mjs";
 import { budgetDecisionErrors } from "./budget-decisions.mjs";
 import { DECISIONS_DOC } from "./doc-paths.mjs";
@@ -1140,11 +1140,13 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   for (const h of grammarHits(root, grammarFiles(root))) fail(`${h.rel}:${h.line}: ${h.rule}: ${h.message}`);
 
   // 27. references/stages.json is the stage dispatch's single owner: well-formed, keyed by exactly the
-  //     stage enum minus `done` (a closed cycle resumes at nothing), every playbook entry a real file.
-  //     Skipped when absent, like the continue.md check: fixture trees carry no table, and golden-path
-  //     pins the real one against the enum.
+  //     stage enum minus `done` (a closed cycle resumes at nothing), every playbook entry and every
+  //     surface path a note names a real file. A tree whose commands/cycle.md declares no stage enum
+  //     has no stages to dispatch, so it may lack the table; any other tree may not.
   const stagesFile = join(root, "references/stages.json");
-  if (existsSync(stagesFile)) {
+  if (!existsSync(stagesFile)) {
+    if (stages.size) fail("references/stages.json: missing — commands/cycle.md declares a stage enum, and the stage dispatch has no table");
+  } else {
     try {
       const table = loadStages(stagesFile);
       const keys = Object.keys(table).sort();
@@ -1155,9 +1157,12 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           `references/stages.json: keys [${keys.join(", ")}] must be exactly commands/cycle.md's stage enum minus done ` +
             `[${expected.join(", ")}]`
         );
-      for (const [stage, { entry }] of Object.entries(table))
+      for (const [stage, { entry, note }] of Object.entries(table)) {
         if (entry.startsWith("playbooks/") && !existsSync(join(root, entry)))
           fail(`references/stages.json: "${stage}" enters through ${entry}, which names no file in the plugin`);
+        for (const h of bareExistsErrors("references/stages.json", note, (r) => existsSync(join(root, r))))
+          fail(`references/stages.json: "${stage}" note: ${h.message}`);
+      }
     } catch (err) {
       // loadStages names the file by its absolute path; render it relative, and name it only once.
       const reason = err.message.replaceAll(stagesFile, "references/stages.json");

@@ -30,6 +30,16 @@ test("a skill entry prints verbatim and a surface path in the note prints absolu
   assert.ok(e.note.includes(join(PLUGIN_ROOT, "commands/cycle.md")), e.note);
 });
 
+test("a surface path in a note prints absolute whatever its name's case or punctuation", () => {
+  const dir = makeTempDir("stage-entry-");
+  try {
+    const path = writeInto(dir, "stages.json", JSON.stringify({ planning: { entry: "playbooks/planning-waves.md", note: "see references/README.md first" } }));
+    assert.equal(stageEntry("planning", { path, root: "/plugin" }).note, `see ${join("/plugin", "references/README.md")} first`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("an unknown stage, and done, have no entry", () => {
   assert.throws(() => stageEntry("nope"), /no entry for stage "nope"/);
   assert.throws(() => stageEntry("done"), /no entry for stage "done"/);

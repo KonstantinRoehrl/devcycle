@@ -856,6 +856,7 @@ test("the culprit table names the slug, marks an unattributed key, and carries n
   assert.ok(!/\| Kind \|/.test(table), "the Kind column still renders");
   assert.match(table, /^\| partial-evidence-capture \| \$6\.00 \|/m);
   assert.match(table, /^\| review-reject:execution \(unattributed\) \| \$2\.00 \|/m);
+  assert.match(table, /^_Priced by references\/impact-scoring\.md's formula; "unmeasurable" could not be priced and is not \$0\._$/m);
 });
 
 test("the report leads with an At a glance workload-adjusted step, carrying its confidence", () => {

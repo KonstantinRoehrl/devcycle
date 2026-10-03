@@ -4,11 +4,9 @@
 // `all` follows playbook and command citations too (reported by context-report.mjs, never gated).
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { PREFIXED, prefixedPattern } from "./citation-grammar.mjs";
 
-const FOLLOW = {
-  refs: /\$\{CLAUDE_PLUGIN_ROOT\}\/(references\/[A-Za-z0-9._-]+\.md)/g,
-  all: /\$\{CLAUDE_PLUGIN_ROOT\}\/((?:references|playbooks|commands)\/[A-Za-z0-9._-]+\.md)/g,
-};
+const FOLLOW = { refs: prefixedPattern(["references"]), all: PREFIXED };
 
 export const countWords = (text) => text.split(/\s+/).filter(Boolean).length;
 

@@ -57,8 +57,9 @@ const playbook = (dir, body) => writeInto(dir, "playbooks/demoing-things.md", FI
 // own heading so it never widens check 23's window around a dispatch.
 const readSection = (name) => `\n## Inputs\n\nRead \`\${CLAUDE_PLUGIN_ROOT}/references/${name}\` first.\n`;
 
-// The stage enum lives in commands/cycle.md; checks that consult it need it present.
-const withStageEnum = (dir) =>
+// The stage enum lives in commands/cycle.md; checks that consult it need it present, and check 27
+// holds the stage table to it.
+const withStageEnum = (dir) => {
   writeInto(
     dir,
     "commands/cycle.md",
@@ -67,6 +68,9 @@ const withStageEnum = (dir) =>
       "- stage: <scoping|planning|execution|finish|done>  (the stage to RESUME at)\n" +
       "```\n"
   );
+  const entry = { entry: "playbooks/demoing-things.md", note: "" };
+  writeInto(dir, "references/stages.json", JSON.stringify({ scoping: entry, planning: entry, execution: entry, finish: entry }));
+};
 
 const ok = (res) => assert.equal(res.status, 0, `expected pass, got:\n${res.stdout}${res.stderr}`);
 const failsWith = (res, ...patterns) => {
@@ -2257,6 +2261,22 @@ test("stages: with no stage enum to compare against, the table's keys fail as un
   writeInto(dir, "commands/cycle.md", "---\ndescription: Fixture command.\n---\n\n# /devcycle:cycle\n");
   writeInto(dir, "references/stages.json", JSON.stringify({ bogus: { entry: "playbooks/demoing-things.md", note: "" } }));
   failsWith(runValidate(dir), /references\/stages\.json: keys unverifiable — no stage enum in commands\/cycle\.md/);
+});
+
+test("stages: a plugin whose commands/cycle.md declares a stage enum fails without the table", () => {
+  const dir = makePluginFixture();
+  ok(runValidate(dir));
+  rmSync(join(dir, "references/stages.json"));
+  failsWith(runValidate(dir), /references\/stages\.json: missing — commands\/cycle\.md declares a stage enum/);
+});
+
+test("stages: a surface path in a note must name a file in the plugin", () => {
+  const dir = makePluginFixture();
+  const table = JSON.parse(readFileSync(join(dir, "references/stages.json"), "utf8"));
+  table.planning.note = "re-read playbooks/demoing-things.md, then references/renamed.md § Somewhere";
+  writeInto(dir, "references/stages.json", JSON.stringify(table));
+  failsWith(runValidate(dir), /references\/stages\.json: "planning" note: references\/renamed\.md names no file in the plugin/);
+  assert.doesNotMatch(runValidate(dir).stderr, /demoing-things\.md names no file/);
 });
 
 test("stages: a malformed table fails with its reason, naming the file once and relative to the plugin", () => {

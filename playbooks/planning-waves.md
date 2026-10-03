@@ -162,7 +162,7 @@ an override) — never by handing off around it.
 
 What planning does with the rule `references/quality-criteria.md` (§Reuse before rebuild) owns:
 each task names the existing modules, helpers, or components it extends, and a task introducing
-a new abstraction states why no existing one fits. Find them by running the repo-research
+a new abstraction states why no existing one fits. Find them: run the repo-research
 procedure `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`) before
 searching file-by-file, with the confirmed scope and affected areas recorded in `.devcycle/scope.md`
 as this stage's relevance filter, starting from implementation-scoped docs (a `frontend.md`,

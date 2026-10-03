@@ -7,13 +7,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseFlags } from "./cli-flags.mjs";
+import { BARE } from "./citation-grammar.mjs";
 
 export const PLUGIN_ROOT = fileURLToPath(new URL("..", import.meta.url));
 // DEVCYCLE_STAGES_PATH lets a test point the loader at a broken table; nothing else sets it.
 export const stagesPath = () => process.env.DEVCYCLE_STAGES_PATH || join(PLUGIN_ROOT, "references/stages.json");
 
 const ENTRY = /^(?:playbooks\/[a-z0-9-]+\.md|superpowers:[a-z-]+)$/;
-const BARE_PATH = /(?<![\w./}-])((?:references|playbooks|commands)\/[a-z0-9-]+\.md)/g;
 
 export function loadStages(path = stagesPath()) {
   let raw;
@@ -47,11 +47,18 @@ export function stageEntry(stage, { path = stagesPath(), root = PLUGIN_ROOT } = 
   const { entry, note } = table[stage];
   return {
     entry: entry.startsWith("playbooks/") ? join(root, entry) : entry,
-    note: note.replace(BARE_PATH, (m) => join(root, m)),
+    note: note.replace(BARE, (m) => join(root, m)),
   };
 }
 
 export const entryLines = ({ entry, note }) => [`entry: ${entry}`, `note: ${note || "none"}`];
+
+// `done` is in the enum but not the table: a closed cycle resumes at nothing, which is an answer,
+// not a fault, so resume-check.mjs and find-state-files.mjs print this instead of an entry.
+export const CLOSED_STAGE = "done";
+export const CLOSED_LINE = "closed: this cycle is done — nothing to resume; /devcycle:cycle reuses its state file";
+// Where a session reads the dispatch when no entry line printed; absolute for the same reason as an entry.
+export const FALLBACK = `${join(PLUGIN_ROOT, "references/resume.md")} § Resuming at the recorded stage`;
 
 function main(argv) {
   let positionals;
