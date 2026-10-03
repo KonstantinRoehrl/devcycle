@@ -23,8 +23,9 @@ failures — is a dispatch.
 
 **Exempt from delegation**, read directly however deep the session has run: files whose exact
 path is already known and whose contents the coordinator must reason about itself —
-`.devcycle/state.md`, `.devcycle/ledger.md`, the run record, the plan's dispatch map, a spec or plan under approval, and the on-device
-checklist. Small and bounded; a subagent would cost more than it saves.
+`.devcycle/state.md`, `.devcycle/ledger.md`, the run record, the plan's dispatch map, a spec or
+plan under approval, and the on-device checklist. Small and bounded; a subagent would cost more
+than it saves.
 
 ## The stage budget
 
@@ -90,11 +91,11 @@ The procedure, named rather than restated by the stages that run it:
 
 The coordinator never tells a subagent to go invoke graphify: a subagent's skill list may
 differ from the coordinator's, and content a subagent must fetch can be silently skipped while
-injected content cannot (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Preloading a class into a brief).
+injected content cannot (`references/evidence.md` § Preloading a class into a brief).
 
-Each caller supplies its own relevance filter — `${CLAUDE_PLUGIN_ROOT}/playbooks/scoping-the-request.md` judges against
-the request itself, since scope is not yet confirmed; `${CLAUDE_PLUGIN_ROOT}/playbooks/planning-waves.md` against the
-confirmed scope in `.devcycle/scope.md`; `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` against the confirmed
+Each caller supplies its own relevance filter — `playbooks/scoping-the-request.md` judges against
+the request itself, since scope is not yet confirmed; `playbooks/planning-waves.md` against the
+confirmed scope in `.devcycle/scope.md`; `playbooks/reviewing-code.md` against the confirmed
 audit criteria.
 
 **Issue intake (used by `/devcycle:maintain`).** Decomposing a fetched issue body into
@@ -164,7 +165,7 @@ The coordinator opens a report or findings file only when a decision needs conte
 envelope cannot carry.
 
 **Why the envelope carries counts and not just paths.** Both counted fields drive a
-coordinator duty that fires *without* reading the file: `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` must
+coordinator duty that fires *without* reading the file: `playbooks/executing-waves.md` must
 generate the on-device checklist in the same wave a task reports rendered changes, and the
 deviations count tells the coordinator whether opening the file is a decision it has to make.
 An envelope that dropped either field would trade a real gate for a token saving. The `lessons`
@@ -175,7 +176,7 @@ to open the findings file for one token or record the event unattributed.
 
 ## The short paths
 
-`${CLAUDE_PLUGIN_ROOT}/playbooks/taking-the-fast-path.md` and `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md` are in-session by design. The
+`playbooks/taking-the-fast-path.md` and `playbooks/sweeping-mechanical-changes.md` are in-session by design. The
 **delegation default does not apply to them**; the **counters do**. A short path that reaches
 the budget means triage judged the change trivial and was wrong: say so and escalate to the
 full pipeline. It is a signal, not a licence to keep going.

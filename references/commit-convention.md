@@ -1,8 +1,8 @@
 # Commit convention — deriving and recording this repo's own commit-message rules
 
 The single owner of how a devcycle-driven commit's subject matches the target repo's own
-conventions. `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` runs the derivation once, before wave 1's first
-commit; `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` names this file when a PR title needs the same
+conventions. `playbooks/executing-waves.md` runs the derivation once, before wave 1's first
+commit; `playbooks/finishing-the-cycle.md` names this file when a PR title needs the same
 match. Neither restates the derivation here.
 
 ## Deriving the convention

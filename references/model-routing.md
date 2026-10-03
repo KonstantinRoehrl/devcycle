@@ -4,7 +4,7 @@ The single owner of how a `*Model` knob's value becomes a dispatch model. A play
 agent that needs any of this names this file and does not restate it.
 
 A `*Model` knob's value arrives on the `knobs:` line
-(`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel): `auto`, a single id, or a
+(`references/config.md` § Knob channel): `auto`, a single id, or a
 comma-separated pool the resolver has already normalized.
 
 ## Model tiers

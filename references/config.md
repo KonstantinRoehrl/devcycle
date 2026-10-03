@@ -6,7 +6,7 @@ that needs any of this names this file and does not restate it.
 ## Knob resolution
 
 Knob values reach stages through the channel below, each read by the stage
-playbook that consumes it (gitPolicy by `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md`,
+playbook that consumes it (gitPolicy by `playbooks/finishing-the-cycle.md`,
 docTrackingPolicy by every stage that writes an artifact — § Doc tracking below owns which —
 models and review depth and the on-device gate by their stages).
 
@@ -77,15 +77,15 @@ carry the same keys; without it the copies drift one release at a time.
 | Knob | Owner | Falls back to |
 | --- | --- | --- |
 | `profile` | § The profile, below | `standard` |
-| `gitPolicy` | `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` | `local-commits-only` |
+| `gitPolicy` | `playbooks/finishing-the-cycle.md` | `local-commits-only` |
 | `docTrackingPolicy` | § Doc tracking, below | `standard` |
-| `reviewDepth` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` | the profile's branch-review row |
-| `crossModelReview` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` | `false` |
-| `onDeviceGate` | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` | the profile's on-device row |
-| `implementerModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
-| `taskReviewerModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
-| `branchReviewModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md` | `auto` — the session's own model |
-| `walkthroughModel` | `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md` | `auto` — a fast model |
+| `reviewDepth` | `playbooks/reviewing-the-branch.md` | the profile's branch-review row |
+| `crossModelReview` | `playbooks/reviewing-the-branch.md` | `false` |
+| `onDeviceGate` | `playbooks/verifying-on-device.md` | the profile's on-device row |
+| `implementerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
+| `taskReviewerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
+| `branchReviewModel` | `playbooks/reviewing-the-branch.md` | `auto` — the session's own model |
+| `walkthroughModel` | `playbooks/verifying-on-device.md` | `auto` — a fast model |
 | `learnStalenessSessions` | § Learn staleness | `5` |
 | `learnStalenessDays` | § Learn staleness | `14` |
 | `learnSessionCap` | § Learn staleness | `100` |
@@ -96,7 +96,7 @@ resolution order above owns what "unset" then resolves to, and this column only 
 ## The state file's `configured:` line
 
 The state file's `configured:` line records what the first-run offer wrote and is never a source
-of knob values; `${CLAUDE_PLUGIN_ROOT}/references/resume.md` owns its forms.
+of knob values; `references/resume.md` owns its forms.
 
 ## The profile
 
@@ -129,7 +129,7 @@ copy of it.
 
 The maintenance depth row governs `/devcycle:maintain`'s longitudinal lenses: **lean** runs the
 existing criteria only; **standard** adds the Abstraction criterion
-(`${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md`), which degrades to
+(`references/quality-criteria.md`), which degrades to
 consumer/implementation/invariant evidence and states the gap when no history is available;
 **thorough** additionally dispatches the history inspector within its bounded traversal window.
 Resolves through the same knob order as `audit depth`. **Known gap (§M7):** a maintenance pass
@@ -179,7 +179,7 @@ the ignore lines the policy depends on unwritten. And `.devcycle/` is run scratc
 
 A site that commits an artifact resolves the policy, checks this table permits tracking, drops
 any path `git check-ignore` vetoes, names the side effect, asks the user, then commits with an
-explicit pathspec. `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`'s step 3 is the
+explicit pathspec. `playbooks/learning-from-sessions.md`'s step 3 is the
 reference implementation of that order.
 
 ## Learn staleness
@@ -187,19 +187,19 @@ reference implementation of that order.
 `learnStalenessSessions` (default `5`) and `learnStalenessDays` (default `14`) are two
 non-profile integer knobs, each accepting `0` or more — **`0` nudges after every cycle**.
 They sit outside the profile matrix — no profile column moves them — and gate the single
-staleness nudge `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` surfaces at cycle end.
+staleness nudge `playbooks/finishing-the-cycle.md` surfaces at cycle end.
 
 That playbook runs `scripts/dream.mjs --staleness`, which reads the distilling checkpoint's
 `last-run:` (`.devcycle/distilling-state.md`, owned by
-`${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`) and reports whether enough
+`playbooks/learning-from-sessions.md`) and reports whether enough
 unmined sessions or elapsed days have accrued to warrant another `/devcycle:learn` pass.
 **Whichever threshold crosses first triggers the nudge** — `learnStalenessSessions` unmined
 sessions since `last-run:`, or `learnStalenessDays` days since it — and a corpus that was
 never mined (`last-run:` unset or `never`) is always stale. The nudge is advisory: it never
 forces a mining run and advances no checkpoint.
 
-`learnSessionCap` reaches the engine the same way: `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md`
-and `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` pass `--cap <n>` to
+`learnSessionCap` reaches the engine the same way: `playbooks/learning-from-sessions.md`
+and `playbooks/finishing-the-cycle.md` pass `--cap <n>` to
 `scripts/dream.mjs --plan` and `--staleness` respectively. **Its minimum is `1`**, unlike the two
 thresholds above: a cap of `0` is refused rather than mining nothing and printing a manifest
 indistinguishable from a corpus with nothing left to mine.
