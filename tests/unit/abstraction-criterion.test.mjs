@@ -6,12 +6,13 @@ import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const criteria = readFileSync(join(root, "references/quality-criteria.md"), "utf8");
-const section = () => criteria.slice(criteria.search(/^##\s+Abstraction\b/m));
+const abstraction = readFileSync(join(root, "references/abstraction-and-strengths.md"), "utf8");
+const section = () => abstraction.slice(abstraction.search(/^##\s+Abstraction\b/m));
 
-test("quality-criteria.md carries an Abstraction criterion, distinct from Reuse before rebuild", () => {
-  assert.match(criteria, /^##\s+Abstraction\b/m, "no `## Abstraction` heading");
+test("abstraction-and-strengths.md carries the Abstraction criterion, distinct from Reuse before rebuild", () => {
+  assert.match(abstraction, /^##\s+Abstraction\b/m, "no `## Abstraction` heading");
   assert.match(criteria, /^##\s+Reuse before rebuild\b/m, "Reuse before rebuild must remain, distinct");
-  assert.notEqual(criteria.search(/^##\s+Abstraction\b/m), criteria.search(/^##\s+Reuse before rebuild\b/m));
+  assert.doesNotMatch(criteria, /^##\s+Abstraction\b/m, "Abstraction must keep one owner, not two");
 });
 
 test("the charter states KEEP as a first-class success and forbids anti-abstraction bias", () => {

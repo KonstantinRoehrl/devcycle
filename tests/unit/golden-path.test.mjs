@@ -1173,7 +1173,7 @@ const DESCRIBES_NOT_GATES = [
   // evidence — not a cycle-run gate with a write site. Its outcome vocabulary trips the gate
   // matcher, but nothing in a run writes against it; the section states as much ("No dedicated
   // agent — this is judgment over evidence a generic read-only reviewer already gathers").
-  "references/quality-criteria.md § ## Abstraction — does an existing abstraction still earn its complexity",
+  "references/abstraction-and-strengths.md § ## Abstraction — does an existing abstraction still earn its complexity",
 ];
 
 // Sections that gate the user but run ONLY on an entry that carries no run record, so their
