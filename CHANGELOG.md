@@ -1,5 +1,48 @@
 # Changelog
 
+**Config channel: every knob now reaches the stage that reads it (C4, #308).** Claude Code
+substitutes `${user_config.*}` only in commands, never in playbooks or references, so 8 of the
+12 knobs could never reach the stages that read them. Commands are now the only knob readers:
+the new `scripts/resolve-knobs.mjs` validates the values a command passes in, falls back to the
+profile defaults for unset or unsubstituted ones, and prints one `knobs:` line.
+`/devcycle:cycle` persists that line in `.devcycle/state.md`; `/devcycle:continue` re-resolves
+it, asks before applying changed global values, remembers a declined set, and records a
+mid-cycle change in the cycle's ledger. Every playbook reads `knobs:` instead of a placeholder.
+`references/config.md` now covers only the knob channel; model tiers moved to the new
+`references/model-routing.md`, and the dead first-run paths are gone. The five fixed-set knobs
+declare `options` in the manifest, so `/plugin configure` shows them as pick-lists.
+`validate.mjs` check 2 fails on any `${user_config.*}` outside `commands/`.
+
+**Maintenance findings store write path (C3, #299; #185, #186, #197, #204, #243).**
+`/devcycle:maintain` gets one real CLI entry point (`apply-pass`) that writes the findings
+store without losing a title or deleting anything unconfirmed, validates each entry's severity
+and affected files, and backfills the blank titles earlier passes left. The store collapses
+onto a single dismissed-only lifecycle (stale `github-issue-N` shells and the
+`resolved`/`origin` fields are retired; `dismiss` and `stranded` verbs added), the
+`!docs/devcycle/` gitignore re-include is replaced by explicit per-surface entries, and
+`CONTRIBUTING.md` now names which of `docs/known-issues.md`, the store, and GitHub owns which
+kind of defect state (#204). A maintain pass also commits the store only from a dedicated
+worktree, never onto the checked-out topic branch (#290, #289).
+
+**Pricing for the 5.5 models and honest handling of unpriced ones (#301, #309).**
+`scripts/pricing.mjs` prices `claude-opus-5-5` and `claude-sonnet-5-5` with per-model
+cache-read rates, where doctor previously priced cache reads at a flat 0.1x input. A model
+newer than anything priced in its family is estimated provisionally, reported on its own
+PROVISIONAL PRICE line beside the measured total, and kept out of measured figures; cohorts
+and deltas that exclude requests are marked inferred and their revert pairs skipped.
+`unpriced-model` is a draftable `doctor --issue-body` slug.
+
+**Per-stage read closure cut by owner citations and a stage table (C5, #310; #177-#182,
+#193-#196, #208).** References now cite each other by owner name, with the citation grammar
+stated once and enforced by `validate.mjs`. The stage-to-playbook dispatch moved out of prose
+into `references/stages.json`, which `/devcycle:cycle` and `/devcycle:continue` route through,
+reading only what the resumed stage needs. The findings document has its own playbook
+(`playbooks/writing-the-findings-document.md`), Abstraction and Strengths moved into
+`references/abstraction-and-strengths.md` so planning stops loading them, and restated rules
+across the playbooks were reduced to pointers. `scripts/context-report.mjs` prints each entry
+point's read closure, and every context-budget raise now needs a recorded decision. The
+execution closure is about 15.4k words, roughly 400 over the 15k target.
+
 ## 0.22.0 — 2026-09-14
 
 - feat(learn): add reinforcement thresholds, win consolidation, and routing advisories; harden devcycle's tier-1 pipeline (#171, #237, #280, #279, #201, #234, #89, #154, #202, #265)
