@@ -1726,23 +1726,62 @@ export function buildJsonReport(summaries, ctx = {}) {
   };
 }
 
-// One window's worth of summaries. The current window and the preceding one differ only in
-// their bounds: same membership rule, same skip of a session with nothing inside the window,
-// same session-id resolution. They share this helper because the report subtracts one window
-// from the other and calls the difference a trend — two copies that drifted apart would be
-// measuring two different corpora and reporting the gap between them as a change in cost.
-function summarizeWindow(groups, since, until, args, runRecords) {
-  const out = [];
-  for (const [key, records] of groups) {
-    // Membership is a session-level property, so it is decided over every record;
-    // the window then narrows only what gets measured.
-    if (!args.all && !isDevcycleSession(records)) continue;
-    const windowed = records.filter((r) => inWindow(r.timestamp, since, until));
-    if (windowed.length === 0) continue;
-    const sessionId = records.find((r) => r.sessionId)?.sessionId ?? key;
-    out.push(summarizeSession(sessionId, windowed, runRecords));
+// A session's own transcript and its subagents' transcripts are one session's records, so the group
+// key is the owning session. Paths only: nothing is read here, which is what lets the caller hold one
+// session's records at a time instead of the whole corpus.
+export function groupFilesBySession(files) {
+  const groups = new Map();
+  for (const file of files) {
+    const key = owningSession(file);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(file);
   }
-  return out;
+  return groups;
+}
+
+// One session's summary per requested window, from a single read of its files. `windows` is a list of
+// { since, until }; the result is aligned with it, with null where the session contributes nothing.
+// The records are unreachable once this returns, so peak memory tracks the largest session.
+export function summarizeSessionGroup(key, files, windows, args, runRecords) {
+  const records = [];
+  // A visitor push, not records.push(...array): a spread passes every record as an argument, and a
+  // very large transcript exceeds the call-stack argument limit.
+  for (const file of files) eachRecord(file, (r) => { records.push(r); });
+  // Membership is a session-level property, so it is decided over every record; the window then
+  // narrows only what gets measured.
+  if (!args.all && !isDevcycleSession(records)) return windows.map(() => null);
+  const sessionId = records.find((r) => r.sessionId)?.sessionId ?? key;
+  return windows.map(({ since, until }) => {
+    const windowed = records.filter((r) => inWindow(r.timestamp, since, until));
+    return windowed.length === 0 ? null : summarizeSession(sessionId, windowed, runRecords);
+  });
+}
+
+// The current window and the preceding one differ only in their bounds: same membership rule, same
+// skip of a session with nothing inside the window, same session-id resolution. They share
+// summarizeSessionGroup because the report subtracts one window from the other and calls the
+// difference a trend — two copies that drifted apart would be measuring two different corpora and
+// reporting the gap between them as a change in cost. The preceding window has to be summarized
+// separately: `inWindow` filters records before summarizeSession ever sees them, so its cost is not
+// recoverable from `sessions` at any granularity. Only built when a window was requested — `null`
+// rather than `[]`, because "no window to compare against" is not "the previous window was empty",
+// and the tables render those two differently.
+export function summarizeCorpus(files, args, runRecords) {
+  const windows = [{ since: args.since, until: args.until }];
+  if (args.since) {
+    const untilMs = args.until ? new Date(args.until).getTime() : Date.now();
+    const sinceMs = new Date(args.since).getTime();
+    const span = untilMs - sinceMs;
+    windows.push({ since: new Date(sinceMs - span).toISOString(), until: args.since });
+  }
+  const sessions = [];
+  const previousSessions = args.since ? [] : null;
+  for (const [key, groupFiles] of groupFilesBySession(files)) {
+    const [current, previous] = summarizeSessionGroup(key, groupFiles, windows, args, runRecords);
+    if (current) sessions.push(current);
+    if (previous) previousSessions.push(previous);
+  }
+  return { sessions, previousSessions };
 }
 
 function run(args) {
@@ -1750,30 +1789,8 @@ function run(args) {
   if (files === null) return { ok: false, reasons: [`directory not found: ${args.dir}`] };
   if (files.length === 0) return { ok: false, reasons: [`no readable session files under ${args.dir}`] };
 
-  // A session's own transcript and its subagents' transcripts are one session's records.
-  const groups = new Map();
-  for (const file of files) {
-    const key = owningSession(file);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(...readRecords(file));
-  }
-
   const runRecords = readRunRecords();
-  const sessions = summarizeWindow(groups, args.since, args.until, args, runRecords);
-
-  // The preceding window has to be summarized separately: `inWindow` filters records before
-  // summarizeSession ever sees them, so the preceding window's cost is not recoverable from
-  // `sessions` at any granularity. Only built when a window was actually requested — `null`
-  // rather than `[]`, because "no window to compare against" is not "the previous window was
-  // empty", and the tables render those two differently.
-  let previousSessions = null;
-  if (args.since) {
-    const untilMs = args.until ? new Date(args.until).getTime() : Date.now();
-    const sinceMs = new Date(args.since).getTime();
-    const span = untilMs - sinceMs;
-    const prevSince = new Date(sinceMs - span).toISOString();
-    previousSessions = summarizeWindow(groups, prevSince, args.since, args, runRecords);
-  }
+  const { sessions, previousSessions } = summarizeCorpus(files, args, runRecords);
 
   const totals = { turns: 0, mainTurns: 0, subagentTurns: 0, costUSD: 0, tools: {}, models: {} };
   for (const s of sessions) {
