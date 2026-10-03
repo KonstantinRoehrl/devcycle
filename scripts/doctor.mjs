@@ -351,16 +351,17 @@ export function resolveDepth(env, cwd) {
   if (!file) throw new Error(`no transcript found for session ${id} under ${root}`);
 
   let last = null;
-  for (const line of readFileSync(file, "utf8").split("\n")) {
-    if (!line.includes('"usage"')) continue;
-    let r;
-    try {
-      r = JSON.parse(line);
-    } catch {
-      continue; // transcripts are appended live; a torn trailing line is normal
-    }
-    if (r.message?.usage && r.message.model && r.message.model !== SYNTHETIC_MODEL) last = r.message;
-  }
+  // The "usage" substring is a cheap pre-filter: most transcript lines are not assistant turns with a
+  // usage block, and a rejected line costs no parse. eachRecord streams the file in chunks, so no
+  // whole-file string is held however long the session is. A torn trailing line (transcripts are
+  // appended live) fails to parse and is skipped by the reader.
+  eachRecord(
+    file,
+    (r) => {
+      if (r.message?.usage && r.message.model && r.message.model !== SYNTHETIC_MODEL) last = r.message;
+    },
+    { lineFilter: (line) => line.includes('"usage"') },
+  );
   if (!last) throw new Error(`no usage record in ${basename(file)} — nothing to measure`);
 
   const depth = contextDepth(last.usage);

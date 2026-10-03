@@ -2,7 +2,7 @@
 // against synthetic transcripts. No real session transcript is ever read.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, chmodSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, appendFileSync, rmSync, copyFileSync, chmodSync, readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2579,6 +2579,28 @@ test("resolveDepth: a model with no priced family refuses, naming the file that 
     () => resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-5568", CLAUDE_DOCTOR_PROJECTS: root }, cwd),
     /claude-mythos-9 is not in the pricing table \(scripts\/pricing\.mjs\)/,
   );
+});
+
+test("resolveDepth: the last usage record wins and a torn trailing line is skipped", () => {
+  const { root, cwd, slug } = depthFixture("sess-5570", [
+    turnWithUsage("claude-opus-5", usage(10, 20, 30, 5)),
+    turnWithUsage("claude-opus-5", usage(100, 200, 300, 5)),
+    { type: "user", message: { content: "a later line that carries no usage" } },
+  ]);
+  // A transcript is appended live, so its last line may be cut mid-record. This one contains "usage",
+  // so it passes the cheap substring filter and reaches the parser, which must skip it.
+  appendFileSync(
+    join(slug, "sess-5570.jsonl"),
+    '{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":9999',
+  );
+  try {
+    const r = resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-5570", CLAUDE_DOCTOR_PROJECTS: root }, cwd);
+    assert.equal(r.depth, 600, "the last complete usage record (100+200+300) must win");
+    assert.equal(r.model, "claude-opus-5");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("cli: --depth names the family a provisional window was assumed from", () => {
