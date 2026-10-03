@@ -14,7 +14,9 @@ and runs a deterministic-facts pre-pass — dependency audit, lint, the duplicat
 checks, cross-reference checking — so the engine's lenses receive tooling facts instead of
 re-deriving them. The confirmed criteria (plus **Abstraction** at `standard`, plus a history
 inspector's signal at `thorough`) are then handed to `reviewing-code.md` at `repo` scope, which
-owns the panel dispatch, dedup-and-rank, and the ranked `docs/audits/` document itself.
+owns the panel dispatch and dedup-and-rank, then hands off to
+[`writing-the-findings-document`](../writing-the-findings-document/README.md) for the ranked
+`docs/audits/` document itself.
 
 Two things this playbook still owns end to end. First, a second input source folds in at every
 depth: the target repo's own open GitHub issues, fetched read-only, decomposed into

@@ -9,7 +9,7 @@ Verify on-device the branch named in `$ARGUMENTS`. Follow
 resolution, the diff-derived generation, the walkthrough, the gate, and the standalone
 reporting rules. Do not restate or replace its process here.
 
-Resolve knobs first — run this exactly as rendered; `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel owns what follows:
+Resolve knobs first, per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel — run this exactly as rendered:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \

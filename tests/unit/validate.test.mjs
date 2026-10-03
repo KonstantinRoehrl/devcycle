@@ -7,7 +7,8 @@ import { dirname, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { makePluginFixture as makeBaseFixture, writeInto, runValidate, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
+import { DECISIONS_DOC } from "../../scripts/doc-paths.mjs";
+import { makePluginFixture as makeBaseFixture, writeInto, runValidate, recordBudgets, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
 import { recordStoreTrackingErrors, docsSubdirTrackingErrors } from "../../scripts/validate.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
@@ -51,8 +52,14 @@ const makePluginFixture = () => {
 // have no frontmatter.
 const playbook = (dir, body) => writeInto(dir, "playbooks/demoing-things.md", FIXTURE_PLAYBOOK_HEAD + "\n" + body);
 
-// The stage enum lives in commands/cycle.md; checks that consult it need it present.
-const withStageEnum = (dir) =>
+// A fixture that names a reference bare (an owner) must ship that file, or check 26's bare-exists
+// fails, and must read it prefixed somewhere, or check 11 finds no consumer. The read sits under its
+// own heading so it never widens check 23's window around a dispatch.
+const readSection = (name) => `\n## Inputs\n\nRead \`\${CLAUDE_PLUGIN_ROOT}/references/${name}\` first.\n`;
+
+// The stage enum lives in commands/cycle.md; checks that consult it need it present, and check 27
+// holds the stage table to it.
+const withStageEnum = (dir) => {
   writeInto(
     dir,
     "commands/cycle.md",
@@ -61,6 +68,9 @@ const withStageEnum = (dir) =>
       "- stage: <scoping|planning|execution|finish|done>  (the stage to RESUME at)\n" +
       "```\n"
   );
+  const entry = { entry: "playbooks/demoing-things.md", note: "" };
+  writeInto(dir, "references/stages.json", JSON.stringify({ scoping: entry, planning: entry, execution: entry, finish: entry }));
+};
 
 const ok = (res) => assert.equal(res.status, 0, `expected pass, got:\n${res.stdout}${res.stderr}`);
 const failsWith = (res, ...patterns) => {
@@ -293,7 +303,12 @@ test("devcycle: reference check: names resolving to an agent or a command all pa
   const dir = makePluginFixture();
   withStageEnum(dir);
   writeInto(dir, "agents/task-reviewer.md", "---\nname: task-reviewer\n---\n\nReviewer.\n");
-  playbook(dir, "Dispatch `devcycle:task-reviewer` with the `taskReviewerModel` per `references/config.md`, resume via `/devcycle:cycle`.\n");
+  writeInto(dir, "references/config.md", "# Config\n");
+  playbook(
+    dir,
+    "Dispatch `devcycle:task-reviewer` with the `taskReviewerModel` per `references/config.md`, resume via `/devcycle:cycle`.\n" +
+      readSection("config.md")
+  );
   ok(runValidate(dir));
 });
 
@@ -639,7 +654,8 @@ test("budget check: a command over 100 lines fails", () => {
 // Pads the surface with `count` gerund-named playbooks of 100 lines each — each
 // one under the 150-line per-file ceiling, so only the total arm can fire.
 // Each padding playbook also gets a context-budget entry, generous enough never to fire:
-// check 15 requires every playbook to declare one, and these exist to move the line total.
+// check 15 requires every playbook to declare one, and these exist to move the line total. The
+// decisions log records the new entries, so check 28 does not fail them either.
 const padSurface = (dir, count) => {
   const context = { "playbooks/demoing-things.md": 999999 };
   for (let i = 0; i < count; i++) {
@@ -647,6 +663,7 @@ const padSurface = (dir, count) => {
     context[`playbooks/padding-${i}.md`] = 999999;
   }
   writeInto(dir, CONTEXT_PATH, JSON.stringify(context, null, 2) + "\n");
+  recordBudgets(dir);
 };
 
 test("budget check: a surface over 3500 lines in total fails", () => {
@@ -1105,6 +1122,7 @@ test("budget baseline: a baseline that admits the current surface passes", () =>
 test("budget baseline: a surface smaller than the baseline passes and the baseline is not rewritten", () => {
   const dir = makePluginFixture();
   budget(dir, { surfaceTotal: 9999 });
+  recordBudgets(dir);
   assert.equal(runValidate(dir).status, 0);
   assert.match(readFileSync(join(dir, BUDGET_PATH), "utf8"), /"surfaceTotal": 9999/);
 });
@@ -1213,6 +1231,22 @@ test("context budget: the total counts a cited reference, and counts it once whe
   writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": playbookBytes + alphaBytes + betaBytes }, null, 2) + "\n");
   const res = runValidate(dir);
   assert.equal(res.status, 0, res.stderr);
+});
+
+test("context budget: validate reports each playbook's all-hops figure and never fails on it", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "playbooks/showing-things.md", "# Showing things\n\nA second fixture playbook.\n");
+  playbook(dir, "Read `${CLAUDE_PLUGIN_ROOT}/playbooks/showing-things.md` next.\n");
+  writeInto(
+    dir,
+    CONTEXT_PATH,
+    JSON.stringify({ "playbooks/demoing-things.md": 999999, "playbooks/showing-things.md": 999999 }, null, 2) + "\n"
+  );
+  recordBudgets(dir);
+  const res = runValidate(dir);
+  ok(res);
+  assert.match(res.stdout, /context \(check 15 gates refs-only bytes; all-hops is reported, never gated\):/);
+  assert.match(res.stdout, /playbooks\/demoing-things\.md {2}refs-only \d+\/999999 B {2}all-hops 2 files, \d+ words/);
 });
 
 test("context budget: one byte less than the transitive total fails, proving the closure is followed", () => {
@@ -2011,11 +2045,13 @@ test("dispatch-governance check: an ungoverned devcycle:task-reviewer dispatch f
 test("dispatch-governance check: a dispatch citing its *Model knob inline passes", () => {
   const dir = makePluginFixture();
   writeInto(dir, "agents/task-reviewer.md", "---\nname: task-reviewer\n---\n\nReviewer.\n");
+  writeInto(dir, "references/config.md", "# Config\n");
   playbook(
     dir,
     "## The mini-cycle\n\n" +
       "1. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model\n" +
-      "   `taskReviewerModel` resolves per `references/config.md`, with the diff.\n"
+      "   `taskReviewerModel` resolves per `references/config.md`, with the diff.\n" +
+      readSection("config.md")
   );
   ok(runValidate(dir));
 });
@@ -2023,10 +2059,12 @@ test("dispatch-governance check: a dispatch citing its *Model knob inline passes
 test("dispatch-governance check: a dispatch citing references/model-routing.md passes", () => {
   const dir = makePluginFixture();
   writeInto(dir, "agents/implementer.md", "---\nname: implementer\n---\n\nImplementer.\n");
+  writeInto(dir, "references/model-routing.md", "# Model routing\n");
   playbook(
     dir,
     "## The mini-cycle\n\n" +
-      "1. **Fix.** Dispatch `devcycle:implementer` on the model `references/model-routing.md` resolves.\n"
+      "1. **Fix.** Dispatch `devcycle:implementer` on the model `references/model-routing.md` resolves.\n" +
+      readSection("model-routing.md")
   );
   ok(runValidate(dir));
 });
@@ -2059,12 +2097,14 @@ test("dispatch-governance check: a citation in one step does not govern an unrel
 test("dispatch-governance check: a dispatch under a flowing (non-numbered) heading section is governed by an earlier citation in the same section", () => {
   const dir = makePluginFixture();
   writeInto(dir, "agents/on-device-driver.md", "---\nname: on-device-driver\n---\n\nDriver.\n");
+  writeInto(dir, "references/config.md", "# Config\n");
   playbook(
     dir,
     "## The walkthrough\n\n" +
       "Its model cannot be routed from inside it, so the recommendation travels producer-side,\n" +
       "resolved from `walkthroughModel` per `references/config.md`.\n\n" +
-      "When the app renders as a page, dispatch `devcycle:on-device-driver` to observe an item.\n"
+      "When the app renders as a page, dispatch `devcycle:on-device-driver` to observe an item.\n" +
+      readSection("config.md")
   );
   ok(runValidate(dir));
 });
@@ -2086,12 +2126,14 @@ test("dispatch-governance check: a reversed-phrasing dispatch (agent before disp
 test("dispatch-governance check: a reversed-phrasing dispatch (agent before dispatch) that cites a *Model knob passes", () => {
   const dir = makePluginFixture();
   writeInto(dir, "agents/implementer.md", "---\nname: implementer\n---\n\nImplementer.\n");
+  writeInto(dir, "references/config.md", "# Config\n");
   playbook(
     dir,
     "## Findings loop\n\n" +
       "1. **Round 1.** Log a review-round event.\n\n" +
       "2. **Fix dispatch.** Send a fresh `devcycle:implementer` dispatch on the model\n" +
-      "   `branchReviewModel` per `references/config.md` with the finding.\n"
+      "   `branchReviewModel` per `references/config.md` with the finding.\n" +
+      readSection("config.md")
   );
   ok(runValidate(dir));
 });
@@ -2125,7 +2167,7 @@ const reinforcementPolicyFixture = (dir, policy) => {
   writeInto(
     dir,
     "playbooks/demoing-things.md",
-    FIXTURE_PLAYBOOK_HEAD + "\nThe reinforcement bars live in references/reinforcement-policy.md.\n"
+    FIXTURE_PLAYBOOK_HEAD + "\nThe reinforcement bars live in `${CLAUDE_PLUGIN_ROOT}/references/reinforcement-policy.md`.\n"
   );
 };
 
@@ -2143,4 +2185,127 @@ test("reinforcement-policy check: a policy whose win bar is not strictly above t
 
 test("reinforcement-policy check: the real repo's shipped policy parses and passes validate", () => {
   ok(runValidate(REPO_ROOT));
+});
+
+// --- check 26: the citation grammar ---
+
+test("grammar: a reference citing a playbook prefixed fails (back-edge)", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/thing.md", "Uses `${CLAUDE_PLUGIN_ROOT}/playbooks/demoing-things.md`.\n");
+  playbook(dir, "Read `${CLAUDE_PLUGIN_ROOT}/references/thing.md`.\n");
+  failsWith(runValidate(dir), /references\/thing\.md:1: back-edge:/);
+});
+
+test("grammar: a prefixed owner sentence fails, and the same sentence with a read verb passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/thing.md", "# Thing\n");
+  playbook(dir, "The rule `${CLAUDE_PLUGIN_ROOT}/references/thing.md` owns.\n");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md:\d+: owner-sentence:/);
+  playbook(dir, "Follow `${CLAUDE_PLUGIN_ROOT}/references/thing.md`, which owns the rule.\n");
+  ok(runValidate(dir));
+});
+
+test("grammar: an imperative read of a bare path fails (bare-read)", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/thing.md", "# Thing\n");
+  playbook(dir, "Consumed: `${CLAUDE_PLUGIN_ROOT}/references/thing.md` is read below.\n\nRead `references/thing.md` first.\n");
+  failsWith(runValidate(dir), /bare-read:/);
+});
+
+test("grammar: a bare path that names no file fails (bare-exists)", () => {
+  const dir = makePluginFixture();
+  playbook(dir, "The owner is `references/missing.md`.\n");
+  failsWith(runValidate(dir), /bare-exists: references\/missing\.md names no file/);
+});
+
+test("grammar: an inline-code dot, a fenced block and a table row do not split or trip a sentence", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/thing.md", "# Thing\n");
+  playbook(
+    dir,
+    "Read `${CLAUDE_PLUGIN_ROOT}/references/thing.md` — see `thing.md` for the shape.\n\n" +
+      "```\nThe rule references/missing.md owns.\n```\n\n" +
+      "| Read `references/thing.md`? | no — this row names an owner, `${CLAUDE_PLUGIN_ROOT}/references/thing.md` is read |\n"
+  );
+  ok(runValidate(dir));
+});
+
+// --- check 11, tightened: a bare mention is not a consumer ---
+
+test("reference check: a reference named only bare has no consumer", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/orphan.md", "# Orphan\n");
+  playbook(dir, "The owner is `references/orphan.md`.\n");
+  failsWith(runValidate(dir), /references\/orphan\.md: no consumer/);
+});
+
+// --- check 27: references/stages.json ---
+
+test("stages: keys must be the stage enum minus done, and a playbook entry must exist", () => {
+  const dir = makePluginFixture();
+  withStageEnum(dir);
+  writeInto(
+    dir,
+    "references/stages.json",
+    JSON.stringify({ scoping: { entry: "playbooks/demoing-things.md", note: "" }, planning: { entry: "playbooks/gone.md", note: "" } })
+  );
+  failsWith(
+    runValidate(dir),
+    /references\/stages\.json: keys \[planning, scoping\] must be exactly commands\/cycle\.md's stage enum minus done/,
+    /references\/stages\.json: "planning" enters through playbooks\/gone\.md, which names no file/
+  );
+});
+
+test("stages: with no stage enum to compare against, the table's keys fail as unverifiable", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "commands/cycle.md", "---\ndescription: Fixture command.\n---\n\n# /devcycle:cycle\n");
+  writeInto(dir, "references/stages.json", JSON.stringify({ bogus: { entry: "playbooks/demoing-things.md", note: "" } }));
+  failsWith(runValidate(dir), /references\/stages\.json: keys unverifiable — no stage enum in commands\/cycle\.md/);
+});
+
+test("stages: a plugin whose commands/cycle.md declares a stage enum fails without the table", () => {
+  const dir = makePluginFixture();
+  ok(runValidate(dir));
+  rmSync(join(dir, "references/stages.json"));
+  failsWith(runValidate(dir), /references\/stages\.json: missing — commands\/cycle\.md declares a stage enum/);
+});
+
+test("stages: a surface path in a note must name a file in the plugin", () => {
+  const dir = makePluginFixture();
+  const table = JSON.parse(readFileSync(join(dir, "references/stages.json"), "utf8"));
+  table.planning.note = "re-read playbooks/demoing-things.md, then references/renamed.md § Somewhere";
+  writeInto(dir, "references/stages.json", JSON.stringify(table));
+  failsWith(runValidate(dir), /references\/stages\.json: "planning" note: references\/renamed\.md names no file in the plugin/);
+  assert.doesNotMatch(runValidate(dir).stderr, /demoing-things\.md names no file/);
+});
+
+test("stages: a malformed table fails with its reason, naming the file once and relative to the plugin", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/stages.json", "{ nope");
+  failsWith(runValidate(dir), /^ - references\/stages\.json is not valid JSON — /m);
+});
+
+// --- check 28: M10, a budget raise needs a recorded decision ---
+
+test("budget decisions: a fixture above its newest budget line fails", () => {
+  const dir = makePluginFixture();
+  const budget = JSON.parse(readFileSync(join(dir, "tests/fixtures/surface-budget.json"), "utf8"));
+  ok(runValidate(dir));
+  writeInto(
+    dir,
+    DECISIONS_DOC,
+    "# Decision log\n\n```text\n" +
+      `budget: surface-budget.json surfaceTotal ${budget.surfaceTotal - 1}\n` +
+      `budget: surface-budget.json commandMax ${budget.commandMax}\n` +
+      `budget: surface-budget.json playbookMax ${budget.playbookMax}\n` +
+      "budget: context-budget.json playbooks/demoing-things.md 999999\n```\n"
+  );
+  failsWith(runValidate(dir), /surface-budget\.json: surfaceTotal is \d+, above the newest recorded figure/);
+});
+
+test("budget decisions: a tree without the decisions log fails rather than skipping the rule", () => {
+  const dir = makePluginFixture();
+  ok(runValidate(dir));
+  rmSync(join(dir, DECISIONS_DOC));
+  failsWith(runValidate(dir), /docs\/decisions\/README\.md: missing/);
 });

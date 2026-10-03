@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Pre-flight check for a devcycle plan: every "### Task N" block must carry the required
 // dispatch fields, the Evidence value must name a valid class, "## Dispatch Map" must list
-// every task, and a Files block that edits a budgeted file must list the size baseline that
-// edit trips. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
+// every task, and a Files block that edits a budgeted file must list the size baselines that
+// edit trips and the decisions log that holds them. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
 // implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
 import { taskBlocks, parseDispatchMap, filesFieldValue } from "./task-files.mjs";
-import { budgetFixtureGaps } from "./budget-fixture-check.mjs";
+import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
 
 const planPath = process.argv[2];
 if (!planPath) {
@@ -62,10 +62,7 @@ for (const { num, text: block } of blocks) {
 // under -- deciding it here too is the drift duplication-check.mjs exists to stop.
 try {
   for (const { task, file, fixture } of budgetFixtureGaps(text)) {
-    errors.push(
-      `Task ${task}: **Files:** edits ${file} but omits ${fixture}, the size baseline that edit trips — ` +
-        `add it, or record a "- Budget-fixture override: ${file} — <reason>"`
-    );
+    errors.push(`Task ${task}: **Files:** edits ${file} but omits ${fixture} — ${gapRemedy(fixture)}`);
   }
 } catch (e) {
   errors.push(e.message);

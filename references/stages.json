@@ -1,0 +1,35 @@
+{
+  "scoping": { "entry": "playbooks/scoping-the-request.md", "note": "" },
+  "audit": {
+    "entry": "playbooks/reviewing-code.md",
+    "note": "re-read the confirmed criteria from the state file's audit: artifact if one was written, otherwise re-run the criteria interview; never assume criteria a previous session did not record"
+  },
+  "diagnosis": {
+    "entry": "superpowers:systematic-debugging",
+    "note": "bugs only — with devcycle's notes for this stage in commands/cycle.md § Stage walk; read that entry, since this session may never have loaded it"
+  },
+  "brainstorm": {
+    "entry": "superpowers:brainstorming",
+    "note": "with devcycle's notes for this stage in commands/cycle.md § Stage walk; read that entry, since this session may never have loaded it"
+  },
+  "planning": { "entry": "playbooks/planning-waves.md", "note": "" },
+  "execution": {
+    "entry": "playbooks/executing-waves.md",
+    "note": "resume each task from its last ledger event, per the per-task table in references/resume.md § Resuming a wave's per-task position"
+  },
+  "branch-review": { "entry": "playbooks/reviewing-the-branch.md", "note": "" },
+  "on-device": {
+    "entry": "playbooks/verifying-on-device.md",
+    "note": "its checklist walkthrough is a human-required step when onDeviceGate is human-required"
+  },
+  "fast-path": { "entry": "playbooks/taking-the-fast-path.md", "note": "re-enter through its Resume section" },
+  "sweep": { "entry": "playbooks/sweeping-mechanical-changes.md", "note": "re-enter through its Resume section" },
+  "receiving-review": {
+    "entry": "playbooks/receiving-review.md",
+    "note": "a standalone reconcile stage, re-entered per §6.6 of its own flow; not part of the pipeline walk"
+  },
+  "finish": {
+    "entry": "playbooks/finishing-the-cycle.md",
+    "note": "it owns the whole stage: gitPolicy resolution, the external-push-signal clamp, acting on the effective policy, the Git policy: handoff line, and the stage: done close"
+  }
+}

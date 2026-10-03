@@ -34,19 +34,18 @@ stage` with the stage name, its outcome (`complete|blocked|skipped|partial`), `e
 boundary time, and `startedAt` as the `updated:` timestamp `state.md` carried when this stage was
 **entered** (the value written from
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now` when the state file was last rewritten to enter
-this stage), never the boundary time. Sourcing
-`startedAt` from stage entry is what makes the `[startedAt, endedAt)` window `scripts/doctor.mjs`
-joins cost to actually span the stage's work — including a stage entered in one session and
-completed in a later `/devcycle:continue` session, whose cost would otherwise land in
-`unattributed` or forward-fill to `devcycle:continue`. Those timestamps are the
-window `scripts/doctor.mjs` joins cost to, so a boundary that emits a handoff block without the
-record line leaves that stage's cost unattributable.
+this stage), never the boundary time.
+`[startedAt, endedAt)` is the window `scripts/doctor.mjs` joins cost to: sourcing `startedAt` from
+stage entry makes it span the stage's work — including a stage entered in one session and completed
+in a later `/devcycle:continue` session, whose cost would otherwise land in `unattributed` or
+forward-fill to `devcycle:continue` — and a boundary that emits a handoff block without the record
+line leaves that stage's cost unattributable.
 
 The run's `workload` record is not a boundary instruction: the `hooks/workload-sensor.mjs`
 commit-sensor refreshes it on each commit, so no `stage` boundary carries a step to write it.
 
 `Context depth:` is measured, not estimated: at every boundary this file names, run the depth
-probe `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` (`## The stage budget`) owns and copy
+probe in `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` (`## The stage budget`) and copy
 its numbers into the field. A failed probe is written
 `Context depth: unknown (<the probe's one-line reason>)`.
 
@@ -55,7 +54,7 @@ At a wave → wave boundary within execution the first field is instead `Wave co
 only two sanctioned first-field labels.
 
 At the finish stage specifically, the block carries one additional line, directly after
-`Artifacts:` — the resolved git policy, in the exact shape `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md`
+`Artifacts:` — the resolved git policy, in the exact shape `playbooks/finishing-the-cycle.md`
 defines. No other stage's block carries this line.
 
 Pick the context action from this table and recommend it to the user explicitly. The action
@@ -76,10 +75,12 @@ column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, 
 | fast-path → finish | Clear + `/devcycle:continue` | branch, what changed | the implementation conversation |
 | sweep → finish | Clear + `/devcycle:continue` | branch, sweep report path | per-file sweep output |
 | on-device → finish | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
+| receiving-review → (end), in-cycle | Continue | — | — |
+| receiving-review → brainstorm (reopen recommended) | Clear + `/devcycle:continue` | `.devcycle/reopen-request.md` | the triage and reply conversation |
 | finish → (end) | Continue | — | — |
 
 `execution → branch-review` resets rather than carries: the clear is bias control, per
-`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` § Fresh context.
+`playbooks/reviewing-code.md` § Fresh context.
 
 **When `Continue` is permitted instead.** At `scoping → brainstorm`, `scoping → diagnosis`,
 `audit → brainstorm`, `fast-path → finish`, and `sweep → finish` — and nowhere else — the

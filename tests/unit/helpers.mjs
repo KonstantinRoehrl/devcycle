@@ -1,11 +1,12 @@
 // Shared helpers for the deterministic workflow-script tests.
 // Everything here is keyless: the `claude`/`codex` CLIs are stubbed with fake
 // executables placed first on PATH — no model call ever happens.
-import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 import { join, dirname, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
+import { DECISIONS_DOC } from "../../scripts/doc-paths.mjs";
 
 const GIT_IDENT = ["-c", "user.name=devcycle-test", "-c", "user.email=test@devcycle.invalid"];
 const VALIDATE_SCRIPT = fileURLToPath(new URL("../../scripts/validate.mjs", import.meta.url));
@@ -112,6 +113,17 @@ export function makePluginFixture() {
     "references/model-tiers.json",
     JSON.stringify([{ family: "fixture-family", rank: 1, match: "fixture" }], null, 2) + "\n"
   );
+  // Check 27 requires a stage table wherever commands/cycle.md declares a stage enum, so every
+  // fixture tree ships one keyed by exactly the enum above.
+  writeInto(
+    dir,
+    "references/stages.json",
+    JSON.stringify(
+      Object.fromEntries(["scoping", "planning", "execution"].map((s) => [s, { entry: "playbooks/demoing-things.md", note: "" }])),
+      null,
+      2
+    ) + "\n"
+  );
   // Check 9 reads its limits from a committed baseline, so every fixture tree ships one.
   writeInto(
     dir,
@@ -125,7 +137,22 @@ export function makePluginFixture() {
     "tests/fixtures/context-budget.json",
     JSON.stringify({ "playbooks/demoing-things.md": 999999 }, null, 2) + "\n"
   );
+  // Check 28 holds both baselines to the decisions log's `budget:` lines, so every fixture tree
+  // ships a log recording exactly the figures above.
+  recordBudgets(dir);
   return dir;
+}
+
+// Rewrites a fixture tree's decisions log so its `budget:` lines record exactly the tree's current
+// budget fixtures. A test that raises or adds a budget key to exercise another check calls this,
+// so check 28 does not fail it for a decision it never meant to test.
+export function recordBudgets(dir) {
+  const lines = ["surface-budget.json", "context-budget.json"].flatMap((fixture) =>
+    Object.entries(JSON.parse(readFileSync(join(dir, "tests/fixtures", fixture), "utf8"))).map(
+      ([key, value]) => `budget: ${fixture} ${key} ${value}`
+    )
+  );
+  writeInto(dir, DECISIONS_DOC, "# Decision log\n\n```text\n" + lines.join("\n") + "\n```\n");
 }
 
 // Runs `scripts/validate.mjs` against a fixture tree, exactly as CI invokes it:

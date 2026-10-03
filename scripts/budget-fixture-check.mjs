@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Pre-flight check for a devcycle plan: a task whose Files touch a budgeted surface
 // (playbooks/, commands/, agents/, references/ markdown) must also touch the matching budget
-// fixture(s), or record an override -- the transitively-required-fixture gap (#230).
+// fixture(s) and the decisions log that records them, or record an override -- the
+// transitively-required-fixture gap (#230).
 // The join is exported as `budgetFixtureGaps` because brief-completeness-check.mjs runs it as a
 // leg: a brief that mandates doc growth without listing the baseline that growth trips should
 // fail on the first scripted gate a planner runs, not later inside validate.mjs.
@@ -9,6 +10,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { taskBlocks, taskFileMap, normalizeFileToken } from "./task-files.mjs";
+import { DECISIONS_DOC } from "./doc-paths.mjs";
 
 // Surface dirs mirror scripts/validate.mjs check 9 (SURFACE = playbooks, commands, agents,
 // references). Keep this list in sync with validate.mjs.
@@ -22,13 +24,27 @@ const isPlaybook = (f) => f.startsWith("playbooks/") && f.endsWith(".md");
 // the Files block appears to touch. That is the shape the recurring failure took.
 const isReference = (f) => f.startsWith("references/") && f.endsWith(".md");
 
-// The join, in one place: which committed size baselines a tracked path sits under.
+// The join, in one place: which committed size baselines a tracked path sits under. A baseline is
+// itself held by the decisions log -- validate.mjs check 28 fails a fixture value above its newest
+// `budget:` line -- so a fixture requires the log, and so does every edit that requires a fixture.
 function requiredFixtures(file) {
   const fixtures = [];
   if (isSurface(file)) fixtures.push(SURFACE_BUDGET);
   if (isPlaybook(file) || isReference(file)) fixtures.push(CONTEXT_BUDGET);
+  if (file === SURFACE_BUDGET || file === CONTEXT_BUDGET) fixtures.push(DECISIONS_DOC);
   return fixtures;
 }
+
+const WHY = {
+  [DECISIONS_DOC]: "a fixture raise needs a budget: line there",
+  [SURFACE_BUDGET]: "growth needs a baseline bump",
+  [CONTEXT_BUDGET]: "growth needs a baseline bump",
+};
+
+// What clears one gap, for both gates' messages. The override is keyed on the missing file: one
+// keyed on the edited surface file would waive every baseline that file trips, not just this one.
+export const gapRemedy = (missing) =>
+  `add it (${WHY[missing]}) or record a "- Budget-fixture override: ${missing} — <reason>"`;
 
 // The resolution: a planner acknowledges a surface edit that legitimately needs no fixture
 // bump, with a reason, keyed on either the surface path or the fixture name it would satisfy:
@@ -55,9 +71,17 @@ export function budgetFixtureGaps(planText) {
       overridden.add(normalizeFileToken(m[1]) ?? m[1]);
     }
 
+    // Follows the join transitively -- an edit requires its fixture, a non-overridden fixture
+    // requires the log -- and names each missing file once per task, at the first edit needing it.
+    const named = new Set();
     for (const file of files) {
-      for (const fixture of requiredFixtures(file)) {
-        if (files.has(fixture) || overridden.has(file) || overridden.has(fixture)) continue;
+      if (overridden.has(file)) continue;
+      const pending = requiredFixtures(file);
+      for (const fixture of pending) {
+        if (overridden.has(fixture)) continue;
+        pending.push(...requiredFixtures(fixture).filter((f) => !pending.includes(f)));
+        if (files.has(fixture) || (fixture === DECISIONS_DOC && named.has(fixture))) continue;
+        named.add(fixture);
         gaps.push({ task: num, file, fixture });
       }
     }
@@ -94,10 +118,7 @@ function main() {
 
   if (gaps.length > 0) {
     for (const { task, file, fixture } of gaps) {
-      console.error(
-        `budget-fixture-check: Task ${task} edits ${file} but its Files omit ${fixture} — ` +
-          `add it (growth needs a baseline bump) or record a "- Budget-fixture override: ${file} — <reason>"`
-      );
+      console.error(`budget-fixture-check: Task ${task} edits ${file} but its Files omit ${fixture} — ${gapRemedy(fixture)}`);
     }
     process.exit(1);
   }

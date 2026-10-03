@@ -6,7 +6,7 @@ Only `/devcycle:cycle` runs it — no other stage loads it.
 ## First-run configuration
 
 `/devcycle:cycle` runs this only when its first-run test passes — after it resolves knobs,
-before triage; no other command offers configuration. Nothing here is profile-conditional. Every question below takes an Other answer, and none of them journals one: `user-correction-at-gate` needs a run record, and this walkthrough runs before `/devcycle:cycle` mints it — `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that condition.
+before triage; no other command offers configuration. Nothing here is profile-conditional. Every question below takes an Other answer, and none of them journals one: `user-correction-at-gate` needs a run record, and this walkthrough runs before `/devcycle:cycle` mints it — `references/ledger.md` owns that condition.
 
 ### The first-run walkthrough
 

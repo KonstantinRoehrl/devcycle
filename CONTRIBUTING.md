@@ -71,6 +71,16 @@ floor here, not the whole rule: it catches near-identical prose, and a second pa
 words catches a fair share of the same rule restated in different words, but neither pass
 judges whether the surviving copy is the right owner.
 
+## Citations
+
+A `${CLAUDE_PLUGIN_ROOT}`-prefixed path is a read: the citing step opens that file there. A bare
+path only names the file that owns a rule, and nobody opens it on the strength of the mention.
+`references/README.md` § Citation grammar owns the rule, and `scripts/validate.mjs` holds it with
+five rules: back-edge, owner-sentence, bare-read, bare-exists and reference-read.
+`node scripts/citation-grammar.mjs <files>` prints the worklist, and
+`node scripts/context-report.mjs --diff <ref>` lists every citation that lost its prefix since
+`<ref>` and every file that left a closure — review it for over-demotion.
+
 ## Before opening a PR
 
 Run the validators and the unit suite locally. CI (`.github/workflows/validate.yml`)
@@ -82,6 +92,8 @@ node scripts/validate.mjs             # manifests, command frontmatter, descript
 node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-listed terms — CI
 node scripts/duplication-check.mjs    # duplicated prose across commands/playbooks/agents/references, and within a file — CI
 node scripts/temp-dir-check.mjs       # temp dirs created outside makeTempDir, which owns removing them — CI
+node scripts/citation-grammar.mjs     # the citation grammar's worklist (back-edge, owner-sentence, bare-read, bare-exists; --references: references nothing reads); exits 1 while any remain — local
+node scripts/context-report.mjs       # per command and playbook: refs-only and all-hops closure words; --diff <ref> lists citations that lost their prefix — local
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
 gitleaks git --no-banner --redact     # credentials, over the full history — CI
 node scripts/doctor.mjs               # token/context profile; --depth is the context gate's probe — local only
@@ -92,7 +104,12 @@ argument fails spuriously.
 
 When a playbook or command edit trips a size budget (lines for the surface, bytes for the context), `validate.mjs` reports the measured value:
 set `tests/fixtures/surface-budget.json` or `tests/fixtures/context-budget.json` to exactly that
-number and record the change in `docs/decisions/README.md`.
+number and record the change in `docs/decisions/README.md`. The decision entry carries one machine
+line per key it sets, `budget: <fixture-basename> <key> <value>` (for example
+`budget: surface-budget.json surfaceTotal 5693`), in a fenced `text` block; `validate.mjs` check 28
+fails a fixture value above the newest such line for its key. A key removed from a fixture is
+closed with a newer `budget: <fixture-basename> <key> retired` line, since older entries are never
+rewritten.
 
 The two scanners divide the work and neither subsumes the other. gitleaks owns credentials and
 tokens: it is rule-maintained, and it reads **history**, so a secret that was committed and

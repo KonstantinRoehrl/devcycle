@@ -10,7 +10,7 @@ Reconcile the pull-request review named in `$ARGUMENTS`. Grammar:
 comment→finding classification, the fix loop, the reply and consent gates, and finish. Do not
 restate or replace its process here.
 
-Resolve knobs first — run this exactly as rendered; `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel owns what follows:
+Resolve knobs first, per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel — run this exactly as rendered:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \

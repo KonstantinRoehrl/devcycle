@@ -44,7 +44,8 @@ directly.
 | [`scoping-the-request`](playbooks/scoping-the-request/README.md) | The batched scope interview, with a hard stop before design begins. |
 | [`planning-waves`](playbooks/planning-waves/README.md) | Feasibility gate plus wave-structured planning, with self-review gates including budget-fixture and authored-claims checks. |
 | [`executing-waves`](playbooks/executing-waves/README.md) | Parallel subagent execution with green gate, ledger, and commit discipline. |
-| [`reviewing-code`](playbooks/reviewing-code/README.md) | The shared review engine: lens construction, engine selection, adversarial verification, dedup, and ranking; plus the opt-in write-back that files an audit run's findings onto an open PR. |
+| [`reviewing-code`](playbooks/reviewing-code/README.md) | The shared review engine: lens construction, engine selection, adversarial verification, dedup, and ranking. |
+| [`writing-the-findings-document`](playbooks/writing-the-findings-document/README.md) | The ranked findings document an audit run or a `/devcycle:maintain` pass ends in, plus the opt-in filing step onto an open PR. |
 | [`reviewing-the-branch`](playbooks/reviewing-the-branch/README.md) | The whole-branch review gate — spec-compliance layer and bounded rounds, over the shared review engine. |
 | [`verifying-on-device`](playbooks/verifying-on-device/README.md) | Human-verified checklist for rendered and on-device outcomes. |
 | [`finishing-the-cycle`](playbooks/finishing-the-cycle/README.md) | Resolves the effective git policy and hands back, pushes, or opens the PR. |

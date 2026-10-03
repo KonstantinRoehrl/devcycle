@@ -21,9 +21,9 @@ even in a repo that has a branch by that name. maintain has no branch scope — 
 is a whole-repo property, not a diff's.
 
 A pass also folds in the target repo's own **open GitHub issues** as a read-only second input
-source. `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md` step 7 owns that pipeline.
+source. `playbooks/maintaining-the-repo.md` step 7 owns that pipeline.
 
-Resolve knobs first — run this exactly as rendered; `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel owns what follows:
+Resolve knobs first, per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel — run this exactly as rendered:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \

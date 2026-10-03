@@ -8,7 +8,12 @@ import { pathToFileURL } from "node:url";
 import { SEMVER_RE, cmpSemver } from "./semver.mjs";
 import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run-record.mjs";
 import { readPolicy } from "./reinforcement-policy.mjs";
+import { closure } from "./context-closure.mjs";
 import { ROSTER } from "./resolve-knobs.mjs";
+import { bareExistsErrors, grammarFiles, grammarHits, referenceReadErrors } from "./citation-grammar.mjs";
+import { loadStages } from "./stage-entry.mjs";
+import { budgetDecisionErrors } from "./budget-decisions.mjs";
+import { DECISIONS_DOC } from "./doc-paths.mjs";
 
 
 // devcycle's own record stores must stay tracked: README/DECISIONS say lessons + promotion
@@ -505,21 +510,17 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     if (frontmatter(join(root, "agents", f))?.model)
       fail(`agents/${f}: frontmatter must not set model: — a pin defeats session-tier escalation`);
 
-  // 11. Every reference has at least one consumer — a surface file that loads it, or a
-  //     script that reads it (references/impact-scoring.md's consumer is a comment in
-  //     scripts/doctor.mjs; it gains its two surface citations in Phases 2 and 3).
-  //     A reference mentioning itself is not a consumer of itself.
+  // 11. Every reference has at least one consumer: a surface file that reads it — a prefixed
+  //     ${CLAUDE_PLUGIN_ROOT} citation, never a bare mention, which only names an owner — or a
+  //     script that reads it. A reference citing itself is not its own consumer, and
+  //     references/README.md is the index, a consumer OF references, so it needs none.
   const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
-  for (const f of namesIn("references")) {
-    // references/README.md is the index — a consumer OF references, not a loadable reference —
-    // so nothing cites it and requiring a consumer of it would be self-defeating.
-    if (f === "README.md") continue;
-    const needle = `references/${f}`;
-    const consumed = [...surface, ...scripts].some(
-      (p) => !rel(p).endsWith(needle) && readFileSync(p, "utf8").includes(needle)
-    );
-    if (!consumed) fail(`references/${f}: no consumer — every reference must be loaded by something`);
-  }
+  for (const h of referenceReadErrors({
+    references: namesIn("references"),
+    surface: surface.map((p) => ({ rel: rel(p), text: readFileSync(p, "utf8") })),
+    scripts: scripts.map((p) => ({ rel: rel(p), text: readFileSync(p, "utf8") })),
+  }))
+    fail(h.message);
 
   // 12. The state file's shape is declared once and carried by a fixture, and the two agree —
   //     the guard on resumability after `/clear`, which nothing else checks. The declaration is
@@ -747,55 +748,38 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
   }
 
+  const contextRows = [];
   // 15. Per-stage context budget: a playbook's own bytes plus every reference reachable from it
   //     through ${CLAUDE_PLUGIN_ROOT} citations, against a committed baseline. Bytes, not lines:
   //     a context window is spent in bytes, and a long line costs what it costs. Growth is a
-  //     reviewed decision, same rule as check 9.
+  //     reviewed decision, same rule as check 9. Citations are followed by
+  //     scripts/context-closure.mjs, which context-report.mjs shares.
   const CONTEXT_BUDGET_PATH = "tests/fixtures/context-budget.json";
   const contextFile = join(root, CONTEXT_BUDGET_PATH);
+  // `contextParsed` tracks whether a usable baseline survived, for check 14's reason: a
+  // `contextBaseline === null` sentinel cannot tell "parse failed" from a file whose whole
+  // content legally parses to `null`, and the shape guard is what keeps a truthy non-object
+  // from reaching the `in` below — which throws on a primitive, killing the run before
+  // checks 17 and 18 execute at all. Check 28 reads both.
+  let contextBaseline, contextParsed = false;
   if (!existsSync(contextFile)) {
     fail(`${CONTEXT_BUDGET_PATH}: missing — no stage declares its context cost, so growth could not be reviewed`);
   } else {
-    // `parsed` tracks whether a usable baseline survived, for check 14's reason: a
-    // `contextBaseline === null` sentinel cannot tell "parse failed" from a file whose whole
-    // content legally parses to `null`, and the shape guard is what keeps a truthy non-object
-    // from reaching the `in` below — which throws on a primitive, killing the run before
-    // checks 17 and 18 execute at all.
-    let contextBaseline, parsed = true;
+    contextParsed = true;
     try {
       contextBaseline = JSON.parse(readFileSync(contextFile, "utf8"));
     } catch (e) {
-      parsed = false;
+      contextParsed = false;
       fail(`${CONTEXT_BUDGET_PATH}: not valid JSON — ${e.message}`);
     }
-    if (parsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
+    if (contextParsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
       fail(
         `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each playbook to its byte budget, ` +
           `got ${JSON.stringify(contextBaseline)}`
       );
-      parsed = false;
+      contextParsed = false;
     }
-    if (parsed) {
-      // Citations are followed to a fixed point; `seen` makes a citation cycle terminate and
-      // counts each file exactly once, which is also what the reader's context actually pays.
-      const citationsIn = (text) =>
-        [...text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(references\/[A-Za-z0-9._-]+\.md)/g)].map((m) => m[1]);
-      const transitiveBytes = (startRel) => {
-        const seen = new Set();
-        const queue = [startRel];
-        let total = 0;
-        while (queue.length) {
-          const relPath = queue.shift();
-          if (seen.has(relPath)) continue;
-          seen.add(relPath);
-          const abs = join(root, relPath);
-          if (!existsSync(abs)) continue;
-          const text = readFileSync(abs, "utf8");
-          total += Buffer.byteLength(text);
-          queue.push(...citationsIn(text));
-        }
-        return total;
-      };
+    if (contextParsed) {
       const playbookNames = namesIn("playbooks").map((f) => `playbooks/${f}`);
       for (const p of playbookNames) {
         if (!(p in contextBaseline)) {
@@ -807,7 +791,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           fail(`${CONTEXT_BUDGET_PATH}: ${p} must be an integer, got ${JSON.stringify(limit)}`);
           continue;
         }
-        const bytes = transitiveBytes(p);
+        const { bytes } = closure(p, { follow: "refs", root });
+        contextRows.push({ path: p, bytes, limit, allHops: closure(p, { follow: "all", root }) });
         if (bytes > limit)
           fail(
             `${p}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, playbook plus its cited references) — ` +
@@ -819,6 +804,20 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           fail(`${CONTEXT_BUDGET_PATH}: entry "${p}" names no such playbook — remove it or restore the file`);
     }
   }
+
+  // 28. M10: no budget fixture value above the newest `budget:` line the decisions log records for
+  //     it (scripts/budget-decisions.mjs). A missing log fails, as a missing fixture does in checks
+  //     9 and 15 — skipping would leave every raise unchecked. An unusable fixture is skipped here
+  //     because checks 9 and 15 have already failed it.
+  const decisionsPath = join(root, DECISIONS_DOC);
+  if (!existsSync(decisionsPath))
+    fail(`${DECISIONS_DOC}: missing — no budget decision is recorded, so no budget raise could be checked against one`);
+  else if (budgetsParsed && contextParsed)
+    for (const message of budgetDecisionErrors({
+      fixtures: { "surface-budget.json": budgets, "context-budget.json": contextBaseline },
+      logText: readFileSync(decisionsPath, "utf8"),
+    }))
+      fail(message);
 
   // 16. Every ${CLAUDE_PLUGIN_ROOT} citation resolves: that is check 4 above, which walks every
   //     surface file and tests every cited path against the tree, scripts included. The number is
@@ -1133,6 +1132,52 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   docsSubdirTrackingErrors(root).forEach(fail);
 
   recordStoreTrackingErrors(process.cwd()).forEach(fail);
+
+  // 26. The citation grammar (references/README.md): a ${CLAUDE_PLUGIN_ROOT} path is a read and a
+  //     bare one names an owner. back-edge, owner-sentence, bare-read and bare-exists run over
+  //     commands/, playbooks/ and references/; agents/ load in a subagent's own context and keep
+  //     their own citations.
+  for (const h of grammarHits(root, grammarFiles(root))) fail(`${h.rel}:${h.line}: ${h.rule}: ${h.message}`);
+
+  // 27. references/stages.json is the stage dispatch's single owner: well-formed, keyed by exactly the
+  //     stage enum minus `done` (a closed cycle resumes at nothing), every playbook entry and every
+  //     surface path a note names a real file. A tree whose commands/cycle.md declares no stage enum
+  //     has no stages to dispatch, so it may lack the table; any other tree may not.
+  const stagesFile = join(root, "references/stages.json");
+  if (!existsSync(stagesFile)) {
+    if (stages.size) fail("references/stages.json: missing — commands/cycle.md declares a stage enum, and the stage dispatch has no table");
+  } else {
+    try {
+      const table = loadStages(stagesFile);
+      const keys = Object.keys(table).sort();
+      const expected = [...stages].filter((s) => s !== "done").sort();
+      if (!stages.size) fail("references/stages.json: keys unverifiable — no stage enum in commands/cycle.md");
+      else if (JSON.stringify(keys) !== JSON.stringify(expected))
+        fail(
+          `references/stages.json: keys [${keys.join(", ")}] must be exactly commands/cycle.md's stage enum minus done ` +
+            `[${expected.join(", ")}]`
+        );
+      for (const [stage, { entry, note }] of Object.entries(table)) {
+        if (entry.startsWith("playbooks/") && !existsSync(join(root, entry)))
+          fail(`references/stages.json: "${stage}" enters through ${entry}, which names no file in the plugin`);
+        for (const h of bareExistsErrors("references/stages.json", note, (r) => existsSync(join(root, r))))
+          fail(`references/stages.json: "${stage}" note: ${h.message}`);
+      }
+    } catch (err) {
+      // loadStages names the file by its absolute path; render it relative, and name it only once.
+      const reason = err.message.replaceAll(stagesFile, "references/stages.json");
+      fail(reason.includes("references/stages.json") ? reason : `references/stages.json: ${reason}`);
+    }
+  }
+
+  // L17: the all-hops closure follows playbook→playbook hops check 15 deliberately does not gate.
+  // Reported beside the gated figure so the hops stay visible without collapsing every budget
+  // into one number.
+  if (contextRows.length) {
+    console.log("context (check 15 gates refs-only bytes; all-hops is reported, never gated):");
+    for (const r of contextRows)
+      console.log(`  ${r.path}  refs-only ${r.bytes}/${r.limit} B  all-hops ${r.allHops.files.length} files, ${r.allHops.words} words`);
+  }
 
   if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
   console.log("validate: ok");

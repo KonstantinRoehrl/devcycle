@@ -41,9 +41,9 @@ needed. Otherwise (`push-allowed` or `open-pr`), check two signals before pushin
   `Bash(git push:*)`, `Bash(git:*)`, or a bare `Bash` deny. An `ask`-only rule (no matching
   `deny`) does NOT fire it — leave the configured policy alone; the normal permission prompt
   at push time communicates the restriction.
-- **Protected-branch signal:** resolve the repo's release/default branch exactly as
-  `${CLAUDE_PLUGIN_ROOT}/references/branch.md` resolves it — that file owns the resolution
-  chain and this stage runs no other. The signal fires if the branch recorded in
+- **Protected-branch signal:** resolve the repo's release/default branch — follow
+  `${CLAUDE_PLUGIN_ROOT}/references/branch.md`, which owns the resolution
+  chain; this stage runs no other. The signal fires if the branch recorded in
   `.devcycle/state.md` (this cycle's branch) IS that default branch — devcycle never pushes
   directly to the repo's default branch.
 
@@ -58,7 +58,7 @@ regardless of the configured value; otherwise effective equals configured. The c
 - `push-allowed`: push the branch; NEVER merge it.
 - `open-pr`: push the branch and open a PR, and do not merge it. Its title parses as a
   Conventional Commit and additionally matches whatever
-  `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md` derived for this run, recorded at
+  `references/commit-convention.md` derived for this run, recorded at
   the top of `.devcycle/ledger.md`.
 
 **Screen this cycle's real artifacts for privacy.** Constraint 4 (`.devcycle/scope.md`) is a
@@ -93,7 +93,7 @@ paths, comma-separated and repo-relative>` from the repo root. `scripts/self-dev
 what it checks and how it says so; three properties of it are this stage's to know. It is inert in
 every repo but this plugin's own source, so elsewhere this costs one exit-0 call. It takes no base
 flag: the branch base comes from `.devcycle/state.md`'s `(cut from <base> at <sha>)` annotation
-(`${CLAUDE_PLUGIN_ROOT}/references/branch.md` owns that shape), and a missing annotation is a loud
+(`references/branch.md` owns that shape), and a missing annotation is a loud
 failure rather than a skipped check — as is a missing `--preflight` baseline, which `/devcycle:cycle`
 writes at the start of the run. And a non-zero exit stops the finish exactly as the screen above
 does: surface the finding rather than reporting a green cycle over it.
@@ -145,7 +145,7 @@ files whose only purpose was to pass content between this cycle's dispatches.
    any generated per-task brief files. Nothing else is a candidate.
 2. **Show and ask.** Present the list and what it totals — file count and size — and ask for
    confirmation in one question, answered inside a cycle run: an Other answer appends
-   `user-correction-at-gate`, whose rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns.
+   `user-correction-at-gate`, whose rule `references/ledger.md` owns.
 3. **Remove only on an explicit yes.** Anything short of that leaves every file in place.
 
 **Never removed, whatever the answer:** `.devcycle/state.md`, `.devcycle/ledger.md`,

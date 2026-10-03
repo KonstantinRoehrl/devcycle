@@ -15,7 +15,7 @@ file-referenced evidence and a concrete fix. Three scopes:
 Invoked standalone, every scope confirms its criteria at an interview first and produces a ranked
 findings document; `branch` scope against an open PR can then opt in to filing those findings back
 as PR review comments, the file arm of the review write-back path
-(`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` §5). Only the in-cycle branch-review stage
+(`playbooks/writing-the-findings-document.md`). Only the in-cycle branch-review stage
 skips the interview and returns its findings inline.
 
 **`$ARGUMENTS` grammar — explicit tokens, never inference. This command owns it; the playbook
@@ -29,7 +29,7 @@ that fails the validate-then-quote rule in `${CLAUDE_PLUGIN_ROOT}/references/bra
 resolves to no ref once spelled as that reference spells it, stops the run with that error
 rather than falling back to treating it as a concern.
 
-Resolve knobs first — run this exactly as rendered; `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel owns what follows:
+Resolve knobs first, per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel — run this exactly as rendered:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \

@@ -5,6 +5,196 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-03 — branch-review fix: step-level reads where a demoted owner was the only route
+
+**Decision:** the steps that execute an owner the citation-grammar pass demoted carry their own
+prefixed read again; every conventions list stays bare. In `commands/cycle.md`: the first
+`.devcycle/state.md` write reads `references/resume.md` § The state file, the boundary of a stage
+entered through a `superpowers:` skill (diagnosis, brainstorm) reads `references/handoff.md`,
+brainstorm's permitted spec commit follows `references/branch.md` § Committing, and the command
+ends with the `Report per` read of `references/output.md` every other command carries. In
+`commands/continue.md` the stage-boundary handoff sentence is a read again, and the command ends
+with the same `Report per` read, since a session it resumes never loads cycle.md's. In
+`playbooks/executing-waves.md` the implementer brief names `references/delegation.md` § Read
+discipline in the `"$(devcycle-root)/…"` shim form, which an implementer can resolve.
+`references/quality-criteria.md` lists Abstraction as a criterion any audit run (`/devcycle:review`
+or the audit stage, at any scope) may select, whose method
+`references/abstraction-and-strengths.md` owns; that file and `references/README.md` name the same
+audit runs in place of the undefined "whole-scope reviews", and `references/config.md`'s
+maintenance-depth paragraph names that file as the owner.
+
+**Why:** the spec's goal 2 — no stage loses a file it executes. Diagnosis and brainstorm run
+upstream skills, so no playbook read `references/handoff.md` for their boundaries; the first state
+file had no reachable template, since cycle.md's only `references/resume.md` read sat on the
+stage-entry failure path; the implementer brief was the only route to the Read discipline; and the
+audit criteria interview drew from a catalog that no longer named Abstraction. Golden-path tests
+now hold the state-file read, each command's own handoff read, and every command's `Report per`
+read.
+
+**Deviation from the spec's §1 (gate corrections):** §1 keeps every `user-correction-at-gate`
+clause a bare owner pointer to `references/ledger.md`. The append's fields
+(`--culprit … --attributedBy coordinator`) live only in that file's `event` row, so outside
+execution no gate could reach them. By the user's decision, `commands/cycle.md` and
+`commands/continue.md` each carry one prefixed read of `references/ledger.md` at their
+gate-correction sentence; the per-playbook mentions stay bare.
+
+**The grammar's checks, tightened in the same review:** check 11 counts a script as a reference's
+consumer only where a string literal names the file — a path literal or adjacent
+`join(…, "references", "<name>.md")` segments — never a comment, a regex or bare code; the literals
+come from a tokenizer that walks past comments and regex literals whole, so a quote inside
+`/[^']/` neither hides a literal nor turns a comment into one. That left `references/impact-scoring.md` with no consumer: doctor.mjs,
+dream.mjs and impact-ledger.mjs implement its formula but named it only in comments, and no stage
+executes it — profiling and learn quote the figures the scripts compute. By the user's decision its
+consumer is code, not a restored read: doctor.mjs renders the formula's owner under its culprit
+table (`_Priced by references/impact-scoring.md's formula; …_`) from a path constant, which keeps
+every stage's context unchanged and needs no allowlist. The owner-sentence exemption needs an
+imperative read verb that takes an object (a code span or a determiner) and opens the sentence,
+one of its clauses, or a table cell, so "owns what follows", "a run", "run by validate.mjs" or
+"the run order" no longer exempts a sentence; three commands' knob sentences now match their
+siblings' `per … — run this` form, and finishing-the-cycle's branch resolution and planning-waves'
+repo-research sentence open their read clause with the verb. bare-read also catches a read inside
+bold (`**Read** …`) and no longer fires on "Read-only". Check 27 fails a tree whose
+`commands/cycle.md` declares a stage enum but ships no `references/stages.json`, and checks every
+surface path a stage's `note` names. The plan pre-flight (`scripts/budget-fixture-check.mjs`)
+now also requires `docs/decisions/README.md` of any task that touches or needs a budget fixture,
+since check 28 would otherwise fail that task mid-execution, and `playbooks/planning-waves.md` step
+12 says so. Both pre-flights give each missing file its own reason and key the suggested override
+on that file, never on the edited surface file, whose override would waive every baseline it
+trips. `scripts/context-report.mjs --diff` pairs a reworded line with the most similar line still
+naming the target, so a demotion that a new prefixed read elsewhere offsets is still listed.
+
+**Budgets:** `surfaceTotal` 5703 → 5713 (cycle.md +4 lines, continue.md +3, quality-criteria.md
++3) and `commandMax` 168 → 172 (cycle.md). All ten playbooks that read `references/config.md`
+lose 5 bytes with its trimmed maintenance-depth paragraph, and six of them net-drop:
+`finishing-the-cycle.md` to 53027 (its reworded read −22 more) and five by those 5 bytes alone.
+Net of that −5, the other four grow: `executing-waves.md` 103388 → 103391 (+8 for the shim-form
+read); `maintaining-the-repo.md` 63185 → 63222 (+42 for the audit-run wording in
+`references/abstraction-and-strengths.md`); `reviewing-code.md` 90565 → 90759 (+157 for the
+Abstraction lines in `references/quality-criteria.md`, +42 for the same audit-run wording);
+`planning-waves.md` 68403 → 68653 (the same +157, −6 for its reworded repo-research read, +104
+for step 12's decisions-log requirement).
+
+**Supersedes:** the spec's §1 bare form for the gate-correction sentence in those two commands; the
+2026-10-02 entry's "a script" as a reference's consumer, now a script's code; check 27's skip when
+`references/stages.json` is absent.
+
+```text
+budget: surface-budget.json surfaceTotal 5713
+budget: surface-budget.json commandMax 172
+budget: context-budget.json playbooks/executing-waves.md 103391
+budget: context-budget.json playbooks/finishing-the-cycle.md 53027
+budget: context-budget.json playbooks/learning-from-sessions.md 60715
+budget: context-budget.json playbooks/maintaining-the-repo.md 63222
+budget: context-budget.json playbooks/onboarding-a-repo.md 29097
+budget: context-budget.json playbooks/planning-waves.md 68653
+budget: context-budget.json playbooks/receiving-review.md 107511
+budget: context-budget.json playbooks/reviewing-code.md 90759
+budget: context-budget.json playbooks/reviewing-the-branch.md 54490
+budget: context-budget.json playbooks/verifying-on-device.md 50014
+```
+
+## 2026-10-03 — budgets re-anchored after the citation-grammar pass; raises now need a budget: line
+
+**Decision:** both budget fixtures sit at their measured values on the tree the citation-grammar
+pass left. Every `tests/fixtures/context-budget.json` entry drops to its playbook's measured
+refs-only bytes; the three `tests/fixtures/surface-budget.json` keys already equalled their
+measured lines and stay. From now on every entry that sets a budget carries one machine line per
+key it sets, `budget: <fixture-basename> <key> <value>`, in a fenced `text` block, and
+`scripts/validate.mjs` check 28 (`scripts/budget-decisions.mjs`) fails any fixture value above the
+newest such line for its key; a key with no line counts as 0.
+
+**Why:** the 2026-09-05 whole-repo audit's M10 found the surface-line budget raised in 14 of its 31
+fixture commits with no decision-log entry, so the gate tracked growth instead of bounding it. A
+raise now cannot land without a decision naming its exact figure. The budgets are set to the
+measured values rather than rounded up, or they stop measuring anything. Before is `dev` at
+`2666860`, after is this tree; bytes and lines are what `node scripts/validate.mjs` reports, and
+words are `scripts/context-report.mjs`'s figures, the before column computed by its `report()` over
+`dev`'s files.
+
+| Key | Before | After |
+| --- | ---: | ---: |
+| `surfaceTotal` (lines) | 5693 | 5703 |
+| `commandMax` (lines) | 168 | 168 |
+| `playbookMax` (lines) | 320 | 320 |
+
+| Stage playbook | Bytes before | Bytes after | Refs-only words before | after | All-hops words before | after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `executing-waves.md` | 119489 | 103388 | 17539 | 15379 | 45592 | 19056 |
+| `finishing-the-cycle.md` | 99053 | 53054 | 14623 | 7975 | 45592 | 7975 |
+| `learning-from-sessions.md` | 122739 | 60720 | 18086 | 8938 | 45592 | 8938 |
+| `maintaining-the-repo.md` | 111776 | 63185 | 16392 | 9253 | 45592 | 19939 |
+| `onboarding-a-repo.md` | 90204 | 29102 | 13374 | 4391 | 46230 | 4391 |
+| `planning-waves.md` | 94554 | 68403 | 13935 | 10215 | 45592 | 10215 |
+| `profiling-sessions.md` | 65426 | 45948 | 9879 | 6960 | 47635 | 6960 |
+| `receiving-review.md` | 129617 | 107516 | 19195 | 16120 | 45592 | 24963 |
+| `reviewing-code.md` | 138646 | 90565 | 20681 | 13691 | 45592 | 17719 |
+| `reviewing-the-branch.md` | 109709 | 54495 | 16456 | 8309 | 45592 | 19614 |
+| `scoping-the-request.md` | 59188 | 26641 | 8788 | 4069 | 45592 | 4069 |
+| `sweeping-mechanical-changes.md` | 109711 | 80628 | 16322 | 12184 | 45592 | 15938 |
+| `taking-the-fast-path.md` | 102820 | 73753 | 15313 | 11176 | 45592 | 14798 |
+| `verifying-on-device.md` | 105247 | 50019 | 15638 | 7581 | 45592 | 7581 |
+| `writing-the-findings-document.md` | new | 65477 | new | 9896 | new | 9896 |
+
+`surfaceTotal` is the one key above its `dev` value: this branch raised it from 5693 to the
+measured 5703.
+
+**Supersedes:** the convention that a budget raise is "recorded in the decisions log" in prose only,
+with nothing holding a fixture to the figure the log records.
+
+```text
+budget: surface-budget.json surfaceTotal 5703
+budget: surface-budget.json commandMax 168
+budget: surface-budget.json playbookMax 320
+budget: context-budget.json playbooks/executing-waves.md 103388
+budget: context-budget.json playbooks/finishing-the-cycle.md 53054
+budget: context-budget.json playbooks/learning-from-sessions.md 60720
+budget: context-budget.json playbooks/maintaining-the-repo.md 63185
+budget: context-budget.json playbooks/onboarding-a-repo.md 29102
+budget: context-budget.json playbooks/planning-waves.md 68403
+budget: context-budget.json playbooks/profiling-sessions.md 45948
+budget: context-budget.json playbooks/receiving-review.md 107516
+budget: context-budget.json playbooks/reviewing-code.md 90565
+budget: context-budget.json playbooks/reviewing-the-branch.md 54495
+budget: context-budget.json playbooks/scoping-the-request.md 26641
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 80628
+budget: context-budget.json playbooks/taking-the-fast-path.md 73753
+budget: context-budget.json playbooks/verifying-on-device.md 50019
+budget: context-budget.json playbooks/writing-the-findings-document.md 65477
+```
+
+## 2026-10-02 — citation grammar: a prefixed path is a read, a bare path names an owner
+
+**Decision:** a `${CLAUDE_PLUGIN_ROOT}/<dir>/<file>.md` citation means the citing step opens that
+file, or the named section of it, at that point; a bare `references/`, `playbooks/` or `commands/`
+path names where a rule lives and is never opened on the strength of the mention.
+[`references/README.md` § Citation grammar](../../references/README.md#citation-grammar) states it
+once. `scripts/validate.mjs` check 26 holds it over `commands/`, `playbooks/` and `references/`
+(back-edge, owner-sentence, bare-read, bare-exists), and check 11 counts only a prefixed read or a
+script as a reference's consumer (reference-read). bare-read fires only on an imperative read — a
+read verb that opens the sentence.
+
+**Why:** the prefix had become an attribution habit — owner mentions carried it as often as reads
+did — so an agent could not tell which citations to follow, and the context a stage loads grew
+with every mention. Making the two forms mean different things lets a stage's closure be measured
+and gated. bare-read is imperative-only because a planning spike on the live tree found matching a
+read verb anywhere in the sentence flagged 22 sentences, nearly all false ("read-only", "a run",
+verbs inside code spans), against 0 for the imperative form.
+
+**Supersedes:** the habit design §15.1 described, where a consumer cited a reference prefixed
+whether it read the file or only named its owner.
+
+## 2026-10-02 — reference-core structural merges deferred (M1c)
+
+**Decision:** `references/ledger.md` stays separate from `references/resume.md`, and
+`references/loops.md` from `references/handoff.md`.
+
+**Why:** the merges were proposed to cut the hops a stage follows to reach those files. Under the
+citation grammar a bare name is never followed, so the hop count no longer drives what a stage
+loads. Revisit only if a measured closure (`scripts/context-report.mjs`) says otherwise.
+
+**Supersedes:** part (c) of finding M1's fix in the 2026-09-05 whole-repo audit, which proposed
+both merges.
+
 ## 2026-10-02 — unpriced models: per-model cache reads, provisional prices only for newer models
 
 **Decision:** `scripts/doctor.mjs` prices cache reads per model, from an optional `cacheRead` rate on

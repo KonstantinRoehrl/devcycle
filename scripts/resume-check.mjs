@@ -7,6 +7,7 @@ import { isAbsolute, join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { field } from "./md-field.mjs";
+import { stageEntry, entryLines, CLOSED_STAGE, CLOSED_LINE, FALLBACK } from "./stage-entry.mjs";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -128,3 +129,11 @@ if (errors.length) {
   process.exit(1);
 }
 console.log(`resume-check: ok — stage ${stage}, all recorded artifacts present`);
+if (stage === CLOSED_STAGE) console.log(CLOSED_LINE);
+else {
+  try {
+    for (const line of entryLines(stageEntry(stage))) console.log(line);
+  } catch (err) {
+    console.log(`resume-check: no entry line — ${err.message}; fall back to ${FALLBACK}`);
+  }
+}

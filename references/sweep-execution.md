@@ -1,18 +1,17 @@
 # Sweep-executed tasks inside a wave
 
 The single owner of how a plan task marked `**Execution:** sweep` runs inside the execution
-stage. No existing file owns this: `${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md` is a playbook — the
+stage. No existing file owns this: `playbooks/sweeping-mechanical-changes.md` is a playbook — the
 standalone short path — and owns the sweep *invocation* contract, while
-`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` and `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` own the shape of the artifacts a
+`references/evidence.md` and `references/ledger.md` own the shape of the artifacts a
 sweep writes, neither of them the per-task cycle a sweep replaces.
-`${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` names this file and does not restate it.
+`playbooks/executing-waves.md` names this file and does not restate it.
 
 A task whose plan entry carries `**Execution:** sweep` replaces steps 2–3 of that playbook's
 per-task cycle with one run of the mechanical-sweep workflow; steps 4–7 then apply with the
 deltas below. The invocation contract — args-JSON shape, the `$(cat …)` invocation,
 `DEVCYCLE_SWEEP_MODEL` resolution, the clean-targets precondition, the exit-code taxonomy, and
-the re-run rule — is owned by
-**${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md** (REQUIRED, its steps 2–4).
+the re-run rule — is owned by `playbooks/sweeping-mechanical-changes.md` (its steps 2–4).
 
 - **Run it.** Take files, instruction, and verifyCommand verbatim from the task body into
   `.devcycle/sweep-args-<task-id>.json` and save the stdout report to

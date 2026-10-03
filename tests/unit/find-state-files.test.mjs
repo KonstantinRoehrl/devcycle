@@ -83,3 +83,35 @@ test("a --dir with no value exits non-zero with the script's prefix, not a raw s
   assert.match(r.stderr, /find-state-files:/);
   assert.doesNotMatch(r.stderr, /^\s+at .+:\d+:\d+/m); // no uncaught-exception stack frames
 });
+
+test("each candidate carries the entry and note it would resume through, in text and in --json", () => {
+  const dir = makeTempDir("fsf-");
+  try {
+    writeState(dir, "# devcycle state\n- stage: execution\n- request: demo\n");
+    const h = spawnSync("node", [SCRIPT, "--dir", dir], { encoding: "utf8" });
+    assert.equal(h.status, 0, h.stderr);
+    assert.match(h.stdout, /^ {3}entry: .*playbooks\/executing-waves\.md$/m);
+    assert.match(h.stdout, /^ {3}note: resume each task from its last ledger event/m);
+    const j = spawnSync("node", [SCRIPT, "--dir", dir, "--json"], { encoding: "utf8" });
+    const [rec] = JSON.parse(j.stdout);
+    assert.ok(rec.entry.endsWith("playbooks/executing-waves.md"), rec.entry);
+    assert.match(rec.note, /last ledger event/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a done cycle says it is closed rather than printing an entry or a fault", () => {
+  const dir = makeTempDir("fsf-");
+  try {
+    writeState(dir, "# devcycle state\n- stage: done\n- request: demo\n");
+    const h = spawnSync("node", [SCRIPT, "--dir", dir], { encoding: "utf8" });
+    assert.match(h.stdout, /^ {3}closed: this cycle is done — nothing to resume/m);
+    assert.doesNotMatch(h.stdout, /^ {3}entry:|no entry/m);
+    const [rec] = JSON.parse(spawnSync("node", [SCRIPT, "--dir", dir, "--json"], { encoding: "utf8" }).stdout);
+    assert.equal(rec.closed, true);
+    assert.equal(rec.entryError, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

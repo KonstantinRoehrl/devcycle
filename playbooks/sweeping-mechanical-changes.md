@@ -6,7 +6,8 @@ AskUserQuestion gate. This playbook never re-litigates that verdict. Instead of 
 one supervised pass: derive the sweep parameters from the repo, confirm the exact blast radius, run
 `workflows/mechanical-sweep.js` (pilot-first, per-file verify, worktree isolation), commit once, one
 reviewer pass, hand to finish. Subagent implementers, the plan file, and the wave ledger are dropped;
-nothing in the steps below is.
+nothing in the steps below is. An Other answer at gate 2, or at resume's confirmation of uncommitted
+target edits or the decision it falls back to, appends `user-correction-at-gate`; `references/ledger.md` owns that rule.
 
 **Announce at start:** "I'm using the sweeping-mechanical-changes playbook to run this as a supervised sweep."
 
@@ -40,7 +41,7 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    defines or this path's own `model unset (auto: no fast-tier id resolved; CLI default applies)`, since a bare
    name hides which path chose it. Then ask ONE AskUserQuestion presenting exactly that blast radius, model
    included: confirm / adjust (re-run the clean-targets check over the adjusted list, rewrite the plan
-   file, re-present) / abort (closed out per **State file** below); an Other answer appends `user-correction-at-gate`, the rule `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns. Nothing runs and no agent edits anything
+   file, re-present) / abort (closed out per **State file** below). Nothing runs and no agent edits anything
    until this gate passes. On confirm, write `{"files": [...], "instruction": "...", "verifyCommand":
    "..."}` to `.devcycle/sweep-args.json`.
 4. **Capture the baseline, then run the sweep.** BEFORE invoking anything, run the confirmed verifyCommand in
@@ -98,7 +99,7 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    not amend; commit the fix as a separate follow-up. No panel, no cross-model lens, no red-team here.
 
    Cap: 2 rounds. One round is one reviewer dispatch, its fix, and the verifyCommand re-run.
-   Statuses and their reporting are owned by `${CLAUDE_PLUGIN_ROOT}/references/loops.md`.
+   Write and report its exit status as `${CLAUDE_PLUGIN_ROOT}/references/loops.md` defines.
 7. **Handoff.** Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and follow it — the block's shape, the
    `sweep → finish` context action, and the await gate are all its rules. This stage's block reports `Stage
    completed: sweep`, listing the branch, the commit sha, `.devcycle/sweep-plan.md`, and
@@ -106,7 +107,7 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    `stage: finish` in `.devcycle/state.md` and hand to
    `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` unchanged.
 
-**Evidence.** Owned by `${CLAUDE_PLUGIN_ROOT}/references/evidence.md`. Three things are route-specific: the
+**Evidence.** Follow `${CLAUDE_PLUGIN_ROOT}/references/evidence.md`. Three things are route-specific: the
 class is `green-green` by construction, since a sweep preserves behavior; `sweep-before.txt` comes from step
 4's own pre-sweep verify run, not from the script; and an exit 0 with an empty `applied` list commits
 nothing, so the evidence is then the report's per-file skip reasons.
@@ -151,6 +152,4 @@ accepted and step 6 runs again. On top of that reference's rows, this path reads
 but not one made *after* the interruption, which `git status` cannot tell apart from sweep work. So wherever a
 row above finds uncommitted target edits, show `git diff -- <targets>` and have the user confirm they are this
 sweep's own before anything is reverted, re-run, or amended; if they cannot vouch, stop for a decision —
-revert, commit separately, or drop those files. An Other answer at that confirmation, or at the decision it
-falls back to, appends `user-correction-at-gate` to the run record the resume carries;
-`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns that rule.
+revert, commit separately, or drop those files.
