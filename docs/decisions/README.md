@@ -5,6 +5,75 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-03 — budgets re-anchored after the citation-grammar pass; raises now need a budget: line
+
+**Decision:** both budget fixtures sit at their measured values on the tree the citation-grammar
+pass left. Every `tests/fixtures/context-budget.json` entry drops to its playbook's measured
+refs-only bytes; the three `tests/fixtures/surface-budget.json` keys already equalled their
+measured lines and stay. From now on every entry that sets a budget carries one machine line per
+key it sets, `budget: <fixture-basename> <key> <value>`, in a fenced `text` block, and
+`scripts/validate.mjs` check 28 (`scripts/budget-decisions.mjs`) fails any fixture value above the
+newest such line for its key; a key with no line counts as 0.
+
+**Why:** the 2026-09-05 whole-repo audit's M10 found the surface-line budget raised in 14 of its 31
+fixture commits with no decision-log entry, so the gate tracked growth instead of bounding it. A
+raise now cannot land without a decision naming its exact figure. The budgets are set to the
+measured values rather than rounded up, or they stop measuring anything. Before is `dev` at
+`2666860`, after is this tree; bytes and lines are what `node scripts/validate.mjs` reports, and
+words are `scripts/context-report.mjs`'s figures, the before column computed by its `report()` over
+`dev`'s files.
+
+| Key | Before | After |
+| --- | ---: | ---: |
+| `surfaceTotal` (lines) | 5693 | 5703 |
+| `commandMax` (lines) | 168 | 168 |
+| `playbookMax` (lines) | 320 | 320 |
+
+| Stage playbook | Bytes before | Bytes after | Refs-only words before | after | All-hops words before | after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `executing-waves.md` | 119489 | 103388 | 17539 | 15379 | 45592 | 19056 |
+| `finishing-the-cycle.md` | 99053 | 53054 | 14623 | 7975 | 45592 | 7975 |
+| `learning-from-sessions.md` | 122739 | 60720 | 18086 | 8938 | 45592 | 8938 |
+| `maintaining-the-repo.md` | 111776 | 63185 | 16392 | 9253 | 45592 | 19939 |
+| `onboarding-a-repo.md` | 90204 | 29102 | 13374 | 4391 | 46230 | 4391 |
+| `planning-waves.md` | 94554 | 68403 | 13935 | 10215 | 45592 | 10215 |
+| `profiling-sessions.md` | 65426 | 45948 | 9879 | 6960 | 47635 | 6960 |
+| `receiving-review.md` | 129617 | 107516 | 19195 | 16120 | 45592 | 24963 |
+| `reviewing-code.md` | 138646 | 90565 | 20681 | 13691 | 45592 | 17719 |
+| `reviewing-the-branch.md` | 109709 | 54495 | 16456 | 8309 | 45592 | 19614 |
+| `scoping-the-request.md` | 59188 | 26641 | 8788 | 4069 | 45592 | 4069 |
+| `sweeping-mechanical-changes.md` | 109711 | 80628 | 16322 | 12184 | 45592 | 15938 |
+| `taking-the-fast-path.md` | 102820 | 73753 | 15313 | 11176 | 45592 | 14798 |
+| `verifying-on-device.md` | 105247 | 50019 | 15638 | 7581 | 45592 | 7581 |
+| `writing-the-findings-document.md` | new | 65477 | new | 9896 | new | 9896 |
+
+`surfaceTotal` is the one key above its `dev` value: this branch raised it from 5693 to the
+measured 5703.
+
+**Supersedes:** the convention that a budget raise is "recorded in the decisions log" in prose only,
+with nothing holding a fixture to the figure the log records.
+
+```text
+budget: surface-budget.json surfaceTotal 5703
+budget: surface-budget.json commandMax 168
+budget: surface-budget.json playbookMax 320
+budget: context-budget.json playbooks/executing-waves.md 103388
+budget: context-budget.json playbooks/finishing-the-cycle.md 53054
+budget: context-budget.json playbooks/learning-from-sessions.md 60720
+budget: context-budget.json playbooks/maintaining-the-repo.md 63185
+budget: context-budget.json playbooks/onboarding-a-repo.md 29102
+budget: context-budget.json playbooks/planning-waves.md 68403
+budget: context-budget.json playbooks/profiling-sessions.md 45948
+budget: context-budget.json playbooks/receiving-review.md 107516
+budget: context-budget.json playbooks/reviewing-code.md 90565
+budget: context-budget.json playbooks/reviewing-the-branch.md 54495
+budget: context-budget.json playbooks/scoping-the-request.md 26641
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 80628
+budget: context-budget.json playbooks/taking-the-fast-path.md 73753
+budget: context-budget.json playbooks/verifying-on-device.md 50019
+budget: context-budget.json playbooks/writing-the-findings-document.md 65477
+```
+
 ## 2026-10-02 — citation grammar: a prefixed path is a read, a bare path names an owner
 
 **Decision:** a `${CLAUDE_PLUGIN_ROOT}/<dir>/<file>.md` citation means the citing step opens that

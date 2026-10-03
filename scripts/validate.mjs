@@ -12,6 +12,8 @@ import { closure } from "./context-closure.mjs";
 import { ROSTER } from "./resolve-knobs.mjs";
 import { grammarFiles, grammarHits, referenceReadErrors } from "./citation-grammar.mjs";
 import { loadStages } from "./stage-entry.mjs";
+import { budgetDecisionErrors } from "./budget-decisions.mjs";
+import { DECISIONS_DOC } from "./doc-paths.mjs";
 
 
 // devcycle's own record stores must stay tracked: README/DECISIONS say lessons + promotion
@@ -754,29 +756,30 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     scripts/context-closure.mjs, which context-report.mjs shares.
   const CONTEXT_BUDGET_PATH = "tests/fixtures/context-budget.json";
   const contextFile = join(root, CONTEXT_BUDGET_PATH);
+  // `contextParsed` tracks whether a usable baseline survived, for check 14's reason: a
+  // `contextBaseline === null` sentinel cannot tell "parse failed" from a file whose whole
+  // content legally parses to `null`, and the shape guard is what keeps a truthy non-object
+  // from reaching the `in` below — which throws on a primitive, killing the run before
+  // checks 17 and 18 execute at all. Check 28 reads both.
+  let contextBaseline, contextParsed = false;
   if (!existsSync(contextFile)) {
     fail(`${CONTEXT_BUDGET_PATH}: missing — no stage declares its context cost, so growth could not be reviewed`);
   } else {
-    // `parsed` tracks whether a usable baseline survived, for check 14's reason: a
-    // `contextBaseline === null` sentinel cannot tell "parse failed" from a file whose whole
-    // content legally parses to `null`, and the shape guard is what keeps a truthy non-object
-    // from reaching the `in` below — which throws on a primitive, killing the run before
-    // checks 17 and 18 execute at all.
-    let contextBaseline, parsed = true;
+    contextParsed = true;
     try {
       contextBaseline = JSON.parse(readFileSync(contextFile, "utf8"));
     } catch (e) {
-      parsed = false;
+      contextParsed = false;
       fail(`${CONTEXT_BUDGET_PATH}: not valid JSON — ${e.message}`);
     }
-    if (parsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
+    if (contextParsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
       fail(
         `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each playbook to its byte budget, ` +
           `got ${JSON.stringify(contextBaseline)}`
       );
-      parsed = false;
+      contextParsed = false;
     }
-    if (parsed) {
+    if (contextParsed) {
       const playbookNames = namesIn("playbooks").map((f) => `playbooks/${f}`);
       for (const p of playbookNames) {
         if (!(p in contextBaseline)) {
@@ -801,6 +804,20 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           fail(`${CONTEXT_BUDGET_PATH}: entry "${p}" names no such playbook — remove it or restore the file`);
     }
   }
+
+  // 28. M10: no budget fixture value above the newest `budget:` line the decisions log records for
+  //     it (scripts/budget-decisions.mjs). A missing log fails, as a missing fixture does in checks
+  //     9 and 15 — skipping would leave every raise unchecked. An unusable fixture is skipped here
+  //     because checks 9 and 15 have already failed it.
+  const decisionsPath = join(root, DECISIONS_DOC);
+  if (!existsSync(decisionsPath))
+    fail(`${DECISIONS_DOC}: missing — no budget decision is recorded, so no budget raise could be checked against one`);
+  else if (budgetsParsed && contextParsed)
+    for (const message of budgetDecisionErrors({
+      fixtures: { "surface-budget.json": budgets, "context-budget.json": contextBaseline },
+      logText: readFileSync(decisionsPath, "utf8"),
+    }))
+      fail(message);
 
   // 16. Every ${CLAUDE_PLUGIN_ROOT} citation resolves: that is check 4 above, which walks every
   //     surface file and tests every cited path against the tree, scripts included. The number is

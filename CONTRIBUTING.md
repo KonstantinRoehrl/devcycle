@@ -104,7 +104,12 @@ argument fails spuriously.
 
 When a playbook or command edit trips a size budget (lines for the surface, bytes for the context), `validate.mjs` reports the measured value:
 set `tests/fixtures/surface-budget.json` or `tests/fixtures/context-budget.json` to exactly that
-number and record the change in `docs/decisions/README.md`.
+number and record the change in `docs/decisions/README.md`. The decision entry carries one machine
+line per key it sets, `budget: <fixture-basename> <key> <value>` (for example
+`budget: surface-budget.json surfaceTotal 5693`), in a fenced `text` block; `validate.mjs` check 28
+fails a fixture value above the newest such line for its key. A key removed from a fixture is
+closed with a newer `budget: <fixture-basename> <key> retired` line, since older entries are never
+rewritten.
 
 The two scanners divide the work and neither subsumes the other. gitleaks owns credentials and
 tokens: it is rule-maintained, and it reads **history**, so a secret that was committed and

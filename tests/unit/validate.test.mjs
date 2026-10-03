@@ -7,7 +7,8 @@ import { dirname, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { makePluginFixture as makeBaseFixture, writeInto, runValidate, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
+import { DECISIONS_DOC } from "../../scripts/doc-paths.mjs";
+import { makePluginFixture as makeBaseFixture, writeInto, runValidate, recordBudgets, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
 import { recordStoreTrackingErrors, docsSubdirTrackingErrors } from "../../scripts/validate.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
@@ -649,7 +650,8 @@ test("budget check: a command over 100 lines fails", () => {
 // Pads the surface with `count` gerund-named playbooks of 100 lines each — each
 // one under the 150-line per-file ceiling, so only the total arm can fire.
 // Each padding playbook also gets a context-budget entry, generous enough never to fire:
-// check 15 requires every playbook to declare one, and these exist to move the line total.
+// check 15 requires every playbook to declare one, and these exist to move the line total. The
+// decisions log records the new entries, so check 28 does not fail them either.
 const padSurface = (dir, count) => {
   const context = { "playbooks/demoing-things.md": 999999 };
   for (let i = 0; i < count; i++) {
@@ -657,6 +659,7 @@ const padSurface = (dir, count) => {
     context[`playbooks/padding-${i}.md`] = 999999;
   }
   writeInto(dir, CONTEXT_PATH, JSON.stringify(context, null, 2) + "\n");
+  recordBudgets(dir);
 };
 
 test("budget check: a surface over 3500 lines in total fails", () => {
@@ -1115,6 +1118,7 @@ test("budget baseline: a baseline that admits the current surface passes", () =>
 test("budget baseline: a surface smaller than the baseline passes and the baseline is not rewritten", () => {
   const dir = makePluginFixture();
   budget(dir, { surfaceTotal: 9999 });
+  recordBudgets(dir);
   assert.equal(runValidate(dir).status, 0);
   assert.match(readFileSync(join(dir, BUDGET_PATH), "utf8"), /"surfaceTotal": 9999/);
 });
@@ -1234,6 +1238,7 @@ test("context budget: validate reports each playbook's all-hops figure and never
     CONTEXT_PATH,
     JSON.stringify({ "playbooks/demoing-things.md": 999999, "playbooks/showing-things.md": 999999 }, null, 2) + "\n"
   );
+  recordBudgets(dir);
   const res = runValidate(dir);
   ok(res);
   assert.match(res.stdout, /context \(check 15 gates refs-only bytes; all-hops is reported, never gated\):/);
@@ -2258,4 +2263,29 @@ test("stages: a malformed table fails with its reason, naming the file once and 
   const dir = makePluginFixture();
   writeInto(dir, "references/stages.json", "{ nope");
   failsWith(runValidate(dir), /^ - references\/stages\.json is not valid JSON — /m);
+});
+
+// --- check 28: M10, a budget raise needs a recorded decision ---
+
+test("budget decisions: a fixture above its newest budget line fails", () => {
+  const dir = makePluginFixture();
+  const budget = JSON.parse(readFileSync(join(dir, "tests/fixtures/surface-budget.json"), "utf8"));
+  ok(runValidate(dir));
+  writeInto(
+    dir,
+    DECISIONS_DOC,
+    "# Decision log\n\n```text\n" +
+      `budget: surface-budget.json surfaceTotal ${budget.surfaceTotal - 1}\n` +
+      `budget: surface-budget.json commandMax ${budget.commandMax}\n` +
+      `budget: surface-budget.json playbookMax ${budget.playbookMax}\n` +
+      "budget: context-budget.json playbooks/demoing-things.md 999999\n```\n"
+  );
+  failsWith(runValidate(dir), /surface-budget\.json: surfaceTotal is \d+, above the newest recorded figure/);
+});
+
+test("budget decisions: a tree without the decisions log fails rather than skipping the rule", () => {
+  const dir = makePluginFixture();
+  ok(runValidate(dir));
+  rmSync(join(dir, DECISIONS_DOC));
+  failsWith(runValidate(dir), /docs\/decisions\/README\.md: missing/);
 });
