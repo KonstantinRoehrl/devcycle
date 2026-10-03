@@ -14,6 +14,8 @@ import { join } from "node:path";
 import { DESIGN_DOC } from "../../scripts/doc-paths.mjs";
 import { PLAYBOOK_STAGE } from "../../scripts/doctor.mjs";
 import { ROSTER } from "../../scripts/resolve-knobs.mjs";
+import { closure } from "../../scripts/context-closure.mjs";
+import { sentences } from "../../scripts/citation-grammar.mjs";
 
 const root = process.cwd();
 const read = (p) => readFileSync(join(root, p), "utf8");
@@ -120,6 +122,27 @@ test("continue routes every resumable stage to a playbook that exists, through t
     const { ok, paths } = routesSomewhere(entry);
     assert.ok(ok, `references/stages.json resumes stage "${s}" into no playbook that exists (found: ${paths.join(", ") || entry})`);
   }
+});
+
+// A stage entered through an upstream skill has no devcycle playbook to read handoff.md for it, so
+// the command walking it must: the same reads check 15 follows (`refs` mode), from either entry.
+test("every skill-entered stage's boundary reaches references/handoff.md from cycle or continue", () => {
+  const reached = new Set(["commands/cycle.md", "commands/continue.md"].flatMap((c) => closure(c, { follow: "refs", root }).files));
+  const skillStages = [...stageEntries()].filter(([, entry]) => entry.startsWith("superpowers:")).map(([stage]) => stage);
+  assert.ok(skillStages.length > 0, "references/stages.json enters no stage through a skill — this check would pass vacuously");
+  for (const s of skillStages)
+    assert.ok(reached.has("references/handoff.md"), `stage "${s}" enters through a skill, and neither commands/cycle.md nor commands/continue.md reads references/handoff.md for its boundary`);
+});
+
+// The stage-entry failure path's resume.md read fires only on a non-zero exit; the first state-file
+// write needs its own, or the file's shape is unreachable on the normal path.
+test("cycle.md's first state-file write reads references/resume.md for the shape", () => {
+  const cycle = read("commands/cycle.md");
+  assert.ok(closure("commands/cycle.md", { follow: "refs", root }).files.includes("references/resume.md"));
+  const section = cycle.split("\n## Before the first confirmation\n")[1]?.split("\n## ")[0] ?? "";
+  const write = sentences(section).find((s) => s.text.includes("write `.devcycle/state.md`"));
+  assert.ok(write, "commands/cycle.md § Before the first confirmation no longer writes `.devcycle/state.md`");
+  assert.ok(write.text.includes("${CLAUDE_PLUGIN_ROOT}/references/resume.md"), `the state-file write carries no read of references/resume.md: "${write.text}"`);
 });
 
 test("every playbook path referenced anywhere in the surface resolves", () => {

@@ -129,9 +129,9 @@ copy of it.
 
 The maintenance depth row governs `/devcycle:maintain`'s longitudinal lenses: **lean** runs the
 existing criteria only; **standard** adds the Abstraction criterion
-(`references/quality-criteria.md`), which degrades to
-consumer/implementation/invariant evidence and states the gap when no history is available;
-**thorough** additionally dispatches the history inspector within its bounded traversal window.
+(`references/abstraction-and-strengths.md`), which degrades to
+consumer/implementation/invariant evidence and states the gap when no history exists;
+**thorough** also dispatches the history inspector within its bounded traversal window.
 Resolves through the same knob order as `audit depth`. **Known gap (§M7):** a maintenance pass
 deliberately emits no `workload` run-record — it produces zero diff by design — so it is visibly
 excluded from doctor's `## At a glance` and `EXCESS-COST` views; its cost stays visible in the

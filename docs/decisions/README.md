@@ -5,6 +5,58 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-03 — branch-review fix: step-level reads where a demoted owner was the only route
+
+**Decision:** the steps that execute an owner the citation-grammar pass demoted carry their own
+prefixed read again; every conventions list stays bare. In `commands/cycle.md`: the first
+`.devcycle/state.md` write reads `references/resume.md` § The state file, the boundary of a stage
+entered through a `superpowers:` skill (diagnosis, brainstorm) reads `references/handoff.md`,
+brainstorm's permitted spec commit follows `references/branch.md` § Committing, and the command
+ends with the `Report per` read of `references/output.md` every other command carries. In
+`commands/continue.md` the stage-boundary handoff sentence is a read again. In
+`playbooks/executing-waves.md` the implementer brief names `references/delegation.md` § Read
+discipline in the `"$(devcycle-root)/…"` shim form, which an implementer can resolve.
+`references/quality-criteria.md` lists Abstraction as a selectable criterion whose method
+`references/abstraction-and-strengths.md` owns, and `references/config.md`'s maintenance-depth
+paragraph names that file as the owner.
+
+**Why:** the spec's goal 2 — no stage loses a file it executes. Diagnosis and brainstorm run
+upstream skills, so no playbook read `references/handoff.md` for their boundaries; the first state
+file had no reachable template, since cycle.md's only `references/resume.md` read sat on the
+stage-entry failure path; the implementer brief was the only route to the Read discipline; and the
+audit criteria interview drew from a catalog that no longer named Abstraction. Two golden-path
+tests now hold the first two.
+
+**Deviation from the spec's §1 (gate corrections):** §1 keeps every `user-correction-at-gate`
+clause a bare owner pointer to `references/ledger.md`. The append's fields
+(`--culprit … --attributedBy coordinator`) live only in that file's `event` row, so outside
+execution no gate could reach them. By the user's decision, `commands/cycle.md` and
+`commands/continue.md` each carry one prefixed read of `references/ledger.md` at their
+gate-correction sentence; the per-playbook mentions stay bare.
+
+**Budgets:** `surfaceTotal` 5703 → 5710 (cycle.md +4 lines, continue.md +1, quality-criteria.md
++2) and `commandMax` 168 → 172 (cycle.md). `executing-waves.md` 103388 → 103391 bytes for the
+shim-form read; `planning-waves.md` 68403 → 68513 and `reviewing-code.md` 90565 → 90675 for the
+Abstraction line, since both read `references/quality-criteria.md`. Seven playbooks that read
+`references/config.md` drop 5 bytes each with its trimmed maintenance-depth paragraph.
+
+**Supersedes:** the spec's §1 bare form for the gate-correction sentence in those two commands.
+
+```text
+budget: surface-budget.json surfaceTotal 5710
+budget: surface-budget.json commandMax 172
+budget: context-budget.json playbooks/executing-waves.md 103391
+budget: context-budget.json playbooks/finishing-the-cycle.md 53049
+budget: context-budget.json playbooks/learning-from-sessions.md 60715
+budget: context-budget.json playbooks/maintaining-the-repo.md 63180
+budget: context-budget.json playbooks/onboarding-a-repo.md 29097
+budget: context-budget.json playbooks/planning-waves.md 68513
+budget: context-budget.json playbooks/receiving-review.md 107511
+budget: context-budget.json playbooks/reviewing-code.md 90675
+budget: context-budget.json playbooks/reviewing-the-branch.md 54490
+budget: context-budget.json playbooks/verifying-on-device.md 50014
+```
+
 ## 2026-10-03 — budgets re-anchored after the citation-grammar pass; raises now need a budget: line
 
 **Decision:** both budget fixtures sit at their measured values on the tree the citation-grammar

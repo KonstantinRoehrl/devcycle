@@ -59,7 +59,7 @@ file conflicts these invariants already preserve.)
    (create/modify/test); `**Interfaces:**` (consumes/produces, exact signatures); `**Dependencies:**`; the
    `**Evidence:**` class from the plan; an `**Evidence tail:** <N>` line, `<N>` from the profile; the
    task's steps; the global constraints and pinned interfaces that apply; the task's quality constraints
-   resolved; and one named reference, `references/delegation.md` § Read discipline.
+   resolved; and one read, `"$(devcycle-root)/references/delegation.md"` § Read discipline.
    Nothing else, and nothing restated that a named reference owns —
    `references/evidence.md` owns the evidence classes, the evidence file paths (keyed
    on the task id, which is why every brief carries it), and the report shape the implementer must produce.

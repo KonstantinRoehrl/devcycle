@@ -57,6 +57,8 @@ Apply regardless of stack:
 - conformance to the project's own stated conventions — the documents in Precedence rule 1
   above, audited as a subject rather than only used as a yardstick.
 
+Whole-scope reviews may also select **Abstraction**, whose method `references/abstraction-and-strengths.md` owns.
+
 ## Stack-specific anchors
 
 Derived per detected stack, never assumed. The examples below are illustrative anchors,

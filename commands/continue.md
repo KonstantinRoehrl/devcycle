@@ -12,7 +12,8 @@ recollection, including the user's.
 
 Every ask in this command is a gate on a live run record — the chosen state file's `run:` — and so
 is every gate of the stage it resumes: an Other answer at any of them appends
-`user-correction-at-gate` to that run, whose rule `references/ledger.md` owns.
+`user-correction-at-gate` to that run; read `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` § The run
+record's `event` row for its fields.
 
 ## Re-derive position from files
 
@@ -116,5 +117,5 @@ Continue at the recorded stage by following the `entry:` and `note:` lines step 
 `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § Resuming at the recorded stage, which names the
 file that owns the dispatch.
 
-From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file updates and a
-handoff block at every stage boundary, per `references/handoff.md`.
+From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file updates, and at
+every stage boundary read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and emit its block.
