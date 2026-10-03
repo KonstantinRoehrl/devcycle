@@ -10,6 +10,8 @@ import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run
 import { readPolicy } from "./reinforcement-policy.mjs";
 import { closure } from "./context-closure.mjs";
 import { ROSTER } from "./resolve-knobs.mjs";
+import { grammarFiles, grammarHits, referenceReadErrors } from "./citation-grammar.mjs";
+import { loadStages } from "./stage-entry.mjs";
 
 
 // devcycle's own record stores must stay tracked: README/DECISIONS say lessons + promotion
@@ -506,21 +508,17 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     if (frontmatter(join(root, "agents", f))?.model)
       fail(`agents/${f}: frontmatter must not set model: — a pin defeats session-tier escalation`);
 
-  // 11. Every reference has at least one consumer — a surface file that loads it, or a
-  //     script that reads it (references/impact-scoring.md's consumer is a comment in
-  //     scripts/doctor.mjs; it gains its two surface citations in Phases 2 and 3).
-  //     A reference mentioning itself is not a consumer of itself.
+  // 11. Every reference has at least one consumer: a surface file that reads it — a prefixed
+  //     ${CLAUDE_PLUGIN_ROOT} citation, never a bare mention, which only names an owner — or a
+  //     script that reads it. A reference citing itself is not its own consumer, and
+  //     references/README.md is the index, a consumer OF references, so it needs none.
   const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
-  for (const f of namesIn("references")) {
-    // references/README.md is the index — a consumer OF references, not a loadable reference —
-    // so nothing cites it and requiring a consumer of it would be self-defeating.
-    if (f === "README.md") continue;
-    const needle = `references/${f}`;
-    const consumed = [...surface, ...scripts].some(
-      (p) => !rel(p).endsWith(needle) && readFileSync(p, "utf8").includes(needle)
-    );
-    if (!consumed) fail(`references/${f}: no consumer — every reference must be loaded by something`);
-  }
+  for (const h of referenceReadErrors({
+    references: namesIn("references"),
+    surface: surface.map((p) => ({ rel: rel(p), text: readFileSync(p, "utf8") })),
+    scripts: scripts.map((p) => ({ rel: rel(p), text: readFileSync(p, "utf8") })),
+  }))
+    fail(h.message);
 
   // 12. The state file's shape is declared once and carried by a fixture, and the two agree —
   //     the guard on resumability after `/clear`, which nothing else checks. The declaration is
@@ -1117,6 +1115,38 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   docsSubdirTrackingErrors(root).forEach(fail);
 
   recordStoreTrackingErrors(process.cwd()).forEach(fail);
+
+  // 26. The citation grammar (references/README.md): a ${CLAUDE_PLUGIN_ROOT} path is a read and a
+  //     bare one names an owner. back-edge, owner-sentence, bare-read and bare-exists run over
+  //     commands/, playbooks/ and references/; agents/ load in a subagent's own context and keep
+  //     their own citations.
+  for (const h of grammarHits(root, grammarFiles(root))) fail(`${h.rel}:${h.line}: ${h.rule}: ${h.message}`);
+
+  // 27. references/stages.json is the stage dispatch's single owner: well-formed, keyed by exactly the
+  //     stage enum minus `done` (a closed cycle resumes at nothing), every playbook entry a real file.
+  //     Skipped when absent, like the continue.md check: fixture trees carry no table, and golden-path
+  //     pins the real one against the enum.
+  const stagesFile = join(root, "references/stages.json");
+  if (existsSync(stagesFile)) {
+    try {
+      const table = loadStages(stagesFile);
+      const keys = Object.keys(table).sort();
+      const expected = [...stages].filter((s) => s !== "done").sort();
+      if (!stages.size) fail("references/stages.json: keys unverifiable — no stage enum in commands/cycle.md");
+      else if (JSON.stringify(keys) !== JSON.stringify(expected))
+        fail(
+          `references/stages.json: keys [${keys.join(", ")}] must be exactly commands/cycle.md's stage enum minus done ` +
+            `[${expected.join(", ")}]`
+        );
+      for (const [stage, { entry }] of Object.entries(table))
+        if (entry.startsWith("playbooks/") && !existsSync(join(root, entry)))
+          fail(`references/stages.json: "${stage}" enters through ${entry}, which names no file in the plugin`);
+    } catch (err) {
+      // loadStages names the file by its absolute path; render it relative, and name it only once.
+      const reason = err.message.replaceAll(stagesFile, "references/stages.json");
+      fail(reason.includes("references/stages.json") ? reason : `references/stages.json: ${reason}`);
+    }
+  }
 
   // L17: the all-hops closure follows playbook→playbook hops check 15 deliberately does not gate.
   // Reported beside the gated figure so the hops stay visible without collapsing every budget
