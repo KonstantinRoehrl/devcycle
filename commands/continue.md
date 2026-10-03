@@ -119,3 +119,5 @@ file that owns the dispatch. If it printed `closed:`, the cycle is done — say 
 
 From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file updates, and at
 every stage boundary read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and emit its block.
+
+Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

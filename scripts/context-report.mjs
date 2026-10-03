@@ -53,10 +53,17 @@ const citationLines = (text) =>
     };
   });
 
+const words = (key) => new Set(key.toLowerCase().split(/\s+/).map((w) => w.replace(/^\W+|\W+$/g, "")).filter(Boolean));
+const overlap = (a, b) => {
+  const shared = [...a].filter((w) => b.has(w)).length;
+  return shared / (a.size + b.size - shared || 1);
+};
+
 // Matched per citation, never by count: a prefix dropped on one line and added on another for the
 // same target is still a demotion. In order: a citation whose line is unchanged but for the prefix
-// is kept or demoted in place; one whose line was reworded is kept if any line still carries the
-// prefix unclaimed; the rest are lost at a line where the target now sits bare, or at none.
+// is kept or demoted in place; one whose line was reworded pairs with the most similar line that
+// still names the target, prefixed or bare — a tie counts as bare — and is kept or lost there; a
+// citation no line names any more is lost at none.
 function lostCitations(file, beforeText, nowText) {
   const now = citationLines(nowText).map((l) => ({ ...l, bareTaken: new Map() }));
   const takePrefixed = (l, target) => {
@@ -79,8 +86,23 @@ function lostCitations(file, beforeText, nowText) {
     if (inPlace) loseAt(c, inPlace);
     else reworded.push(c);
   }
-  for (const c of reworded)
-    if (!now.some((l) => takePrefixed(l, c.target))) loseAt(c, now.find((l) => takeBare(l, c.target)));
+  for (const c of reworded) {
+    const was = words(c.key);
+    const unclaimedBare = (l) => (l.bareTaken.get(c.target) ?? 0) < l.bare(c.target);
+    let best = null;
+    for (const l of now) {
+      const prefixed = l.prefixed.includes(c.target);
+      if (!prefixed && !unclaimedBare(l)) continue;
+      const score = overlap(was, words(l.key));
+      if (!best || score > best.score || (score === best.score && !prefixed)) best = { l, score, prefixed };
+    }
+    if (!best) loseAt(c, null);
+    else if (best.prefixed) takePrefixed(best.l, c.target);
+    else {
+      takeBare(best.l, c.target);
+      loseAt(c, best.l);
+    }
+  }
   return lost.sort((a, b) => a.beforeLine - b.beforeLine);
 }
 

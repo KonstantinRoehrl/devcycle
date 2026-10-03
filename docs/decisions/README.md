@@ -13,19 +13,23 @@ prefixed read again; every conventions list stays bare. In `commands/cycle.md`: 
 entered through a `superpowers:` skill (diagnosis, brainstorm) reads `references/handoff.md`,
 brainstorm's permitted spec commit follows `references/branch.md` § Committing, and the command
 ends with the `Report per` read of `references/output.md` every other command carries. In
-`commands/continue.md` the stage-boundary handoff sentence is a read again. In
+`commands/continue.md` the stage-boundary handoff sentence is a read again, and the command ends
+with the same `Report per` read, since a session it resumes never loads cycle.md's. In
 `playbooks/executing-waves.md` the implementer brief names `references/delegation.md` § Read
 discipline in the `"$(devcycle-root)/…"` shim form, which an implementer can resolve.
-`references/quality-criteria.md` lists Abstraction as a selectable criterion whose method
-`references/abstraction-and-strengths.md` owns, and `references/config.md`'s maintenance-depth
-paragraph names that file as the owner.
+`references/quality-criteria.md` lists Abstraction as a criterion any audit run (`/devcycle:review`
+or the audit stage, at any scope) may select, whose method
+`references/abstraction-and-strengths.md` owns; that file and `references/README.md` name the same
+audit runs in place of the undefined "whole-scope reviews", and `references/config.md`'s
+maintenance-depth paragraph names that file as the owner.
 
 **Why:** the spec's goal 2 — no stage loses a file it executes. Diagnosis and brainstorm run
 upstream skills, so no playbook read `references/handoff.md` for their boundaries; the first state
 file had no reachable template, since cycle.md's only `references/resume.md` read sat on the
 stage-entry failure path; the implementer brief was the only route to the Read discipline; and the
-audit criteria interview drew from a catalog that no longer named Abstraction. Two golden-path
-tests now hold the first two.
+audit criteria interview drew from a catalog that no longer named Abstraction. Golden-path tests
+now hold the state-file read, each command's own handoff read, and every command's `Report per`
+read.
 
 **Deviation from the spec's §1 (gate corrections):** §1 keeps every `user-correction-at-gate`
 clause a bare owner pointer to `references/ledger.md`. The append's fields
@@ -35,45 +39,56 @@ execution no gate could reach them. By the user's decision, `commands/cycle.md` 
 gate-correction sentence; the per-playbook mentions stay bare.
 
 **The grammar's checks, tightened in the same review:** check 11 counts a script as a reference's
-consumer only where its code names the file — a path literal or `join(…, "references", "<name>.md")`
-segments — never a comment. That left `references/impact-scoring.md` with no consumer: doctor.mjs,
+consumer only where a string literal names the file — a path literal or adjacent
+`join(…, "references", "<name>.md")` segments — never a comment, a regex or bare code; the literals
+come from a tokenizer that walks past comments and regex literals whole, so a quote inside
+`/[^']/` neither hides a literal nor turns a comment into one. That left `references/impact-scoring.md` with no consumer: doctor.mjs,
 dream.mjs and impact-ledger.mjs implement its formula but named it only in comments, and no stage
 executes it — profiling and learn quote the figures the scripts compute. By the user's decision its
 consumer is code, not a restored read: doctor.mjs renders the formula's owner under its culprit
 table (`_Priced by references/impact-scoring.md's formula; …_`) from a path constant, which keeps
 every stage's context unchanged and needs no allowlist. The owner-sentence exemption needs an
-imperative read verb opening the sentence, one of its clauses, or a table cell, so "owns what
-follows" or "a run" no longer exempts a sentence; three commands' knob sentences now match their
+imperative read verb that takes an object (a code span or a determiner) and opens the sentence,
+one of its clauses, or a table cell, so "owns what follows", "a run", "run by validate.mjs" or
+"the run order" no longer exempts a sentence; three commands' knob sentences now match their
 siblings' `per … — run this` form, and finishing-the-cycle's branch resolution and planning-waves'
 repo-research sentence open their read clause with the verb. bare-read also catches a read inside
 bold (`**Read** …`) and no longer fires on "Read-only". Check 27 fails a tree whose
 `commands/cycle.md` declares a stage enum but ships no `references/stages.json`, and checks every
 surface path a stage's `note` names. The plan pre-flight (`scripts/budget-fixture-check.mjs`)
 now also requires `docs/decisions/README.md` of any task that touches or needs a budget fixture,
-since check 28 would otherwise fail that task mid-execution.
+since check 28 would otherwise fail that task mid-execution, and `playbooks/planning-waves.md` step
+12 says so. Both pre-flights give each missing file its own reason and key the suggested override
+on that file, never on the edited surface file, whose override would waive every baseline it
+trips. `scripts/context-report.mjs --diff` pairs a reworded line with the most similar line still
+naming the target, so a demotion that a new prefixed read elsewhere offsets is still listed.
 
-**Budgets:** `surfaceTotal` 5703 → 5710 (cycle.md +4 lines, continue.md +1, quality-criteria.md
-+2) and `commandMax` 168 → 172 (cycle.md). `executing-waves.md` 103388 → 103391 bytes for the
-shim-form read; `planning-waves.md` 68403 → 68513 and `reviewing-code.md` 90565 → 90675 for the
-Abstraction line, since both read `references/quality-criteria.md`. Seven playbooks that read
-`references/config.md` drop 5 bytes each with its trimmed maintenance-depth paragraph.
-The reworded reads take `finishing-the-cycle.md` to 53027 and `planning-waves.md` to 68507.
+**Budgets:** `surfaceTotal` 5703 → 5713 (cycle.md +4 lines, continue.md +3, quality-criteria.md
++3) and `commandMax` 168 → 172 (cycle.md). All ten playbooks that read `references/config.md`
+lose 5 bytes with its trimmed maintenance-depth paragraph, and six of them net-drop:
+`finishing-the-cycle.md` to 53027 (its reworded read −22 more) and five by those 5 bytes alone.
+Net of that −5, the other four grow: `executing-waves.md` 103388 → 103391 (+8 for the shim-form
+read); `maintaining-the-repo.md` 63185 → 63222 (+42 for the audit-run wording in
+`references/abstraction-and-strengths.md`); `reviewing-code.md` 90565 → 90759 (+157 for the
+Abstraction lines in `references/quality-criteria.md`, +42 for the same audit-run wording);
+`planning-waves.md` 68403 → 68653 (the same +157, −6 for its reworded repo-research read, +104
+for step 12's decisions-log requirement).
 
 **Supersedes:** the spec's §1 bare form for the gate-correction sentence in those two commands; the
 2026-10-02 entry's "a script" as a reference's consumer, now a script's code; check 27's skip when
 `references/stages.json` is absent.
 
 ```text
-budget: surface-budget.json surfaceTotal 5710
+budget: surface-budget.json surfaceTotal 5713
 budget: surface-budget.json commandMax 172
 budget: context-budget.json playbooks/executing-waves.md 103391
 budget: context-budget.json playbooks/finishing-the-cycle.md 53027
 budget: context-budget.json playbooks/learning-from-sessions.md 60715
-budget: context-budget.json playbooks/maintaining-the-repo.md 63180
+budget: context-budget.json playbooks/maintaining-the-repo.md 63222
 budget: context-budget.json playbooks/onboarding-a-repo.md 29097
-budget: context-budget.json playbooks/planning-waves.md 68507
+budget: context-budget.json playbooks/planning-waves.md 68653
 budget: context-budget.json playbooks/receiving-review.md 107511
-budget: context-budget.json playbooks/reviewing-code.md 90675
+budget: context-budget.json playbooks/reviewing-code.md 90759
 budget: context-budget.json playbooks/reviewing-the-branch.md 54490
 budget: context-budget.json playbooks/verifying-on-device.md 50014
 ```

@@ -125,13 +125,34 @@ test("continue routes every resumable stage to a playbook that exists, through t
 });
 
 // A stage entered through an upstream skill has no devcycle playbook to read handoff.md for it, so
-// the command walking it must: the same reads check 15 follows (`refs` mode), from either entry.
-test("every skill-entered stage's boundary reaches references/handoff.md from cycle or continue", () => {
-  const reached = new Set(["commands/cycle.md", "commands/continue.md"].flatMap((c) => closure(c, { follow: "refs", root }).files));
+// each command that walks it must, in the sentence that names the boundary — held per file, so
+// one command's read never covers for the other's.
+const HANDOFF_REF = "${CLAUDE_PLUGIN_ROOT}/references/handoff.md";
+const sectionOf = (text, heading) => text.split(`\n## ${heading}\n`)[1]?.split("\n## ")[0] ?? "";
+
+test("cycle.md reads references/handoff.md in the stage-walk sentence naming the skill-entered stages", () => {
   const skillStages = [...stageEntries()].filter(([, entry]) => entry.startsWith("superpowers:")).map(([stage]) => stage);
   assert.ok(skillStages.length > 0, "references/stages.json enters no stage through a skill — this check would pass vacuously");
-  for (const s of skillStages)
-    assert.ok(reached.has("references/handoff.md"), `stage "${s}" enters through a skill, and neither commands/cycle.md nor commands/continue.md reads references/handoff.md for its boundary`);
+  const boundary = sentences(sectionOf(read("commands/cycle.md"), "Stage walk")).find(
+    (s) => s.text.includes("boundary") && skillStages.every((stage) => s.text.includes(stage))
+  );
+  assert.ok(boundary, `commands/cycle.md § Stage walk no longer names the skill-entered stages (${skillStages.join(", ")}) at a boundary`);
+  assert.ok(boundary.text.includes(HANDOFF_REF), `the skill-entered stages' boundary carries no read of references/handoff.md: "${boundary.text}"`);
+});
+
+test("continue.md's stage-boundary sentence reads references/handoff.md", () => {
+  const boundary = sentences(sectionOf(read("commands/continue.md"), "Resume")).find((s) => s.text.includes("stage boundary"));
+  assert.ok(boundary, "commands/continue.md § Resume no longer names the stage boundary");
+  assert.ok(boundary.text.includes(HANDOFF_REF), `continue.md's stage boundary carries no read of references/handoff.md: "${boundary.text}"`);
+});
+
+// A session resumed through /devcycle:continue never loads cycle.md, so each command carries its own.
+test("every command reads references/output.md for how it reports", () => {
+  for (const f of readdirSync(join(root, "commands")).filter((f) => f.endsWith(".md")))
+    assert.ok(
+      read(`commands/${f}`).includes("Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`."),
+      `commands/${f} carries no "Report per" read of references/output.md`
+    );
 });
 
 // The stage-entry failure path's resume.md read fires only on a non-zero exit; the first state-file
@@ -139,7 +160,7 @@ test("every skill-entered stage's boundary reaches references/handoff.md from cy
 test("cycle.md's first state-file write reads references/resume.md for the shape", () => {
   const cycle = read("commands/cycle.md");
   assert.ok(closure("commands/cycle.md", { follow: "refs", root }).files.includes("references/resume.md"));
-  const section = cycle.split("\n## Before the first confirmation\n")[1]?.split("\n## ")[0] ?? "";
+  const section = sectionOf(cycle, "Before the first confirmation");
   const write = sentences(section).find((s) => s.text.includes("write `.devcycle/state.md`"));
   assert.ok(write, "commands/cycle.md § Before the first confirmation no longer writes `.devcycle/state.md`");
   assert.ok(write.text.includes("${CLAUDE_PLUGIN_ROOT}/references/resume.md"), `the state-file write carries no read of references/resume.md: "${write.text}"`);

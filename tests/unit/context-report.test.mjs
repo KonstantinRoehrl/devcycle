@@ -66,6 +66,25 @@ test("--diff lists a demotion even when a new prefixed read of the same target o
   }
 });
 
+test("--diff lists a demotion on a reworded line even when a new prefixed read of the same target offsets it", () => {
+  const dir = makeRepo();
+  try {
+    seed(dir);
+    writeInto(dir, "playbooks/a.md", `Read \`${P}/references/x.md\` first.\n\nThen \`${P}/references/y.md\` applies.\n`);
+    commitAll(dir, "seed");
+    writeInto(
+      dir,
+      "playbooks/a.md",
+      `Read \`references/x.md\` before anything else.\n\nThen \`${P}/references/y.md\` applies.\n\nAlso \`${P}/references/x.md\` here.\n`
+    );
+    const r = run(dir, "--json", "--diff", "HEAD");
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout).diff.lostPrefixes, [{ file: "playbooks/a.md", target: "references/x.md", beforeLine: 1, line: 1 }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("--diff lists one of two citations of a target losing its prefix, and not a reworded line that kept it", () => {
   const dir = makeRepo();
   try {

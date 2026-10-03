@@ -41,6 +41,11 @@ const WHY = {
   [CONTEXT_BUDGET]: "growth needs a baseline bump",
 };
 
+// What clears one gap, for both gates' messages. The override is keyed on the missing file: one
+// keyed on the edited surface file would waive every baseline that file trips, not just this one.
+export const gapRemedy = (missing) =>
+  `add it (${WHY[missing]}) or record a "- Budget-fixture override: ${missing} — <reason>"`;
+
 // The resolution: a planner acknowledges a surface edit that legitimately needs no fixture
 // bump, with a reason, keyed on either the surface path or the fixture name it would satisfy:
 //   - Budget-fixture override: <surface-or-fixture> — <reason>
@@ -113,10 +118,7 @@ function main() {
 
   if (gaps.length > 0) {
     for (const { task, file, fixture } of gaps) {
-      console.error(
-        `budget-fixture-check: Task ${task} edits ${file} but its Files omit ${fixture} — ` +
-          `add it (${WHY[fixture]}) or record a "- Budget-fixture override: ${file} — <reason>"`
-      );
+      console.error(`budget-fixture-check: Task ${task} edits ${file} but its Files omit ${fixture} — ${gapRemedy(fixture)}`);
     }
     process.exit(1);
   }

@@ -164,3 +164,18 @@ test("the decisions log follows the fixture's override: overriding the fixture o
   const { code, out } = run(logOverride);
   assert.equal(code, 0, out);
 });
+
+test("a gap's remedy gives the missing file's own reason and keys the override on that file, never on the edited surface file", () => {
+  const log = run(FIXTURES_WITHOUT_LOG);
+  assert.equal(log.code, 1);
+  assert.match(
+    log.out,
+    /omit docs\/decisions\/README\.md — add it \(a fixture raise needs a budget: line there\) or record a "- Budget-fixture override: docs\/decisions\/README\.md — <reason>"/
+  );
+  const fixture = run(AGENT_ONLY);
+  assert.match(
+    fixture.out,
+    /omit tests\/fixtures\/surface-budget\.json — add it \(growth needs a baseline bump\) or record a "- Budget-fixture override: tests\/fixtures\/surface-budget\.json — <reason>"/
+  );
+  assert.doesNotMatch(log.out + fixture.out, /override: (?:playbooks|agents)\//);
+});

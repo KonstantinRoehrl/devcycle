@@ -27,11 +27,17 @@ const READ = String.raw`(?:re-?read|read|follow|run|open|consult|load|execute)(?
 const LEAD = String.raw`(?:(?:[-*+]|\d+[a-z]?\.)\s+)?(?:\*\*[^*]+\*\*\s*)?(?:\*\*)?(?:(?:then|first|next|always),?\s+)?`;
 const IMPERATIVE_READ = new RegExp(`^${LEAD}${READ}`, "i");
 // The owner-sentence exemption also takes an imperative read that opens a later clause or a table
-// cell: "It owns the walk, so read `…` first."
-const CLAUSE_READ = new RegExp(String.raw`(?:^${LEAD}|(?:[,;:|—–]\s+|\(\s*|\b(?:and|so|then)\s+)(?:(?:then|first|next|always),?\s+)?)${READ}`, "i");
+// cell: "It owns the walk, so read `…` first." The verb must take an object — a code span or a
+// determiner — so "run by validate.mjs" and "the run order" are no reads.
+const OBJECT = String.raw`(?=\s+(?:\x60|(?:the|a|an|it|its|this|that|these|those|each|every|both|all|them)\b))`;
+const CLAUSE_READ = new RegExp(
+  String.raw`(?:^${LEAD}|(?:[,;:|—–]\s+|\(\s*|\b(?:and|so|then)\s+)(?:(?:then|first|next|always),?\s+)?)${READ}${OBJECT}`,
+  "i"
+);
 const FENCE = /^\s*(```|~~~)/;
 
-const maskCode = (s) => s.replace(/`[^`]*`/g, (m) => " ".repeat(m.length));
+// Blanks a code span's content but keeps its backticks, so a read verb's object still shows.
+const maskCode = (s) => s.replace(/`[^`]*`/g, (m) => `\`${" ".repeat(m.length - 2)}\``);
 // `search`, not `test`: a /g regex's `test` carries `lastIndex` from one call into the next.
 const has = (re, s) => s.search(re) !== -1;
 const excerpt = (s) => (s.length > 120 ? `${s.slice(0, 117)}...` : s);
@@ -125,48 +131,98 @@ export function bareExistsErrors(rel, text, exists) {
   return out;
 }
 
-// A script's comments, blanked. String and template literals are kept whole, so the `//` in a URL
-// is no comment; an opener right after a backslash is a regex's escaped slash, not a comment.
-export function stripComments(src) {
-  let out = "";
-  let quote = null;
-  for (let i = 0; i < src.length; i++) {
+// A `/` after one of these words opens a regex literal; after any other word it divides.
+const REGEX_AFTER_WORD = new Set(["return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else", "yield", "await"]);
+
+// A script's string literals and template-literal text, in source order, each with the source span
+// of its delimiters. Comments and regex literals are walked past whole, so a quote inside `/[^']/`
+// opens nothing and a `//` inside a string closes nothing; a `${…}` expression is scanned as code.
+// `whole` marks a literal that is the entire quoted value — a template with no `${…}` included.
+export function scriptLiterals(src) {
+  const out = [];
+  const templateBraces = []; // one per open `{`: true when it is a template's `${`
+  let regexAllowed = true;
+  let i = src.startsWith("#!") ? src.indexOf("\n") + 1 || src.length : 0;
+  // Scan to the unescaped `close`; a string stops at a newline, a template only at `close` or `${`.
+  const scanTo = (from, close, multiline) => {
+    let j = from;
+    while (j < src.length && src[j] !== close && (multiline || src[j] !== "\n")) {
+      if (src[j] === "\\") j++;
+      else if (close === "`" && src[j] === "$" && src[j + 1] === "{") break;
+      j++;
+    }
+    return Math.min(j, src.length);
+  };
+  const templateText = (open) => {
+    const j = scanTo(open + 1, "`", true);
+    const opensExpr = src[j] === "$";
+    out.push({ value: src.slice(open + 1, j), start: open, end: j + (opensExpr ? 2 : 1), whole: src[open] === "`" && !opensExpr });
+    if (opensExpr) templateBraces.push(true);
+    regexAllowed = opensExpr;
+    return j + (opensExpr ? 2 : 1);
+  };
+  while (i < src.length) {
     const c = src[i];
-    if (quote) {
-      out += c;
-      if (c === "\\") out += src[++i] ?? "";
-      else if (c === quote || (c === "\n" && quote !== "`")) quote = null;
-    } else if (c === "/" && (src[i + 1] === "/" || src[i + 1] === "*") && src[i - 1] !== "\\") {
-      const close = src[i + 1] === "/" ? src.indexOf("\n", i) : src.indexOf("*/", i + 2);
-      const end = close === -1 ? src.length : src[i + 1] === "/" ? close : close + 2;
-      out += src.slice(i, end).replace(/[^\n]/g, " ");
-      i = end - 1;
+    if (/\s/.test(c)) i++;
+    else if (c === "/" && src[i + 1] === "/") i = src.indexOf("\n", i) === -1 ? src.length : src.indexOf("\n", i);
+    else if (c === "/" && src[i + 1] === "*") i = src.indexOf("*/", i + 2) === -1 ? src.length : src.indexOf("*/", i + 2) + 2;
+    else if (c === '"' || c === "'") {
+      const j = scanTo(i + 1, c, false);
+      out.push({ value: src.slice(i + 1, j), start: i, end: j + 1, whole: true });
+      i = j + 1;
+      regexAllowed = false;
+    } else if (c === "`" || (c === "}" && templateBraces.at(-1))) {
+      if (c === "}") templateBraces.pop();
+      i = templateText(i);
+    } else if (c === "/" && regexAllowed) {
+      let j = i + 1;
+      for (let inClass = false; j < src.length && src[j] !== "\n" && (inClass || src[j] !== "/"); j++) {
+        if (src[j] === "\\") j++;
+        else if (src[j] === "[") inClass = true;
+        else if (src[j] === "]") inClass = false;
+      }
+      i = j + 1;
+      while (/\w/.test(src[i] ?? "")) i++;
+      regexAllowed = false;
+    } else if (/[\w$]/.test(c)) {
+      const word = src.slice(i).match(/^[\w$]+/)[0];
+      i += word.length;
+      regexAllowed = REGEX_AFTER_WORD.has(word);
     } else {
-      if (c === '"' || c === "'" || c === "`") quote = c;
-      out += c;
+      if (c === "{") templateBraces.push(false);
+      else if (c === "}") templateBraces.pop();
+      regexAllowed = c !== ")" && c !== "]";
+      i++;
     }
   }
   return out;
 }
 
+// A script reads a reference when a string literal names the path (`"references/x.md"`,
+// `` `${root}/references/x.md` ``) or two adjacent ones are `join(…, "references", "x.md")`'s
+// segments. A path in a comment, a regex or bare code is no read.
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-// A script reads a reference when its code names the path — as a literal (`"references/x.md"`,
-// `` `${root}/references/x.md` ``) or as `join(…, "references", "x.md")` segments.
-const namesInCode = (code, name) =>
-  new RegExp(String.raw`(?<![\w-])references\/${escape(name)}(?![\w-])|["'\`]references["'\`]\s*,\s*["'\`]${escape(name)}["'\`]`).test(code);
+const namesInCode = ({ src, literals }, name) => {
+  const path = new RegExp(String.raw`(?<![\w-])references\/${escape(name)}(?![\w-])`);
+  const segments = (l, next) =>
+    l.whole && next?.whole && l.value === "references" && next.value === name && /^\s*,\s*$/.test(src.slice(l.end, next.start));
+  return literals.some((l, k) => path.test(l.value) || segments(l, literals[k + 1]));
+};
 
 // Check 11, tightened: a substring mention no longer counts, because a reference demoted to bare
-// everywhere would still pass while nothing reads it — and a script counts only where its code,
-// not a comment, names the file. validate.mjs names references in its own messages and checks,
+// everywhere would still pass while nothing reads it — and a script counts only where a string
+// literal in it names the file. validate.mjs names references in its own messages and checks,
 // which makes it their checker, not their consumer.
 export function referenceReadErrors({ references, surface, scripts }) {
-  const consumers = scripts.filter((s) => s.rel !== "scripts/validate.mjs").map((s) => stripComments(s.text));
+  const consumers = scripts
+    .filter((s) => s.rel !== "scripts/validate.mjs")
+    .map((s) => ({ src: s.text, literals: scriptLiterals(s.text) }));
   return references
     .filter((f) => f !== "README.md")
     .filter((f) => {
       const own = `references/${f}`;
       const prefixed = `\${CLAUDE_PLUGIN_ROOT}/${own}`;
-      return !surface.some((s) => s.rel !== own && s.text.includes(prefixed)) && !consumers.some((code) => namesInCode(code, f));
+      return !surface.some((s) => s.rel !== own && s.text.includes(prefixed)) && !consumers.some((script) => namesInCode(script, f));
     })
     .map((f) => hit(`references/${f}`, 0, "reference-read", `references/${f}: no consumer — no surface file reads it prefixed and no script reads it`));
 }

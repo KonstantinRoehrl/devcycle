@@ -1,8 +1,8 @@
 # Abstraction and strengths — the longitudinal criterion and the strengths rule
 
-Two criteria only whole-scope reviews and `/devcycle:maintain` apply; split from
-`references/quality-criteria.md` so planning, which reads that catalog on every cycle, no longer
-loads them. This file is the single owner of the Strengths rule.
+Two criteria only audit runs (`/devcycle:review` or the audit stage, any scope) and
+`/devcycle:maintain` apply; split from `references/quality-criteria.md` so planning, which reads
+that catalog on every cycle, no longer loads them. This file is the single owner of the Strengths rule.
 
 ## Abstraction — does an existing abstraction still earn its complexity
 

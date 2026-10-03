@@ -5,7 +5,7 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 
 | File | What it owns |
 | --- | --- |
-| `abstraction-and-strengths.md` | The Abstraction criterion and the Strengths rule — applied by whole-scope reviews and `/devcycle:maintain` only. |
+| `abstraction-and-strengths.md` | The Abstraction criterion and the Strengths rule — applied by audit runs (`/devcycle:review` or the audit stage, any scope) and `/devcycle:maintain` only. |
 | `branch.md` | Branch discipline — the rule every committing path follows and the derivation every branch-scoped stage runs to turn a branch into a file set. |
 | `checklist.md` | The on-device checklist contract — paths, item shape, dimensions, and the `(auto)` boundary — shared by checklist generation and the on-device stage. |
 | `commit-convention.md` | How a devcycle-driven commit's subject matches the target repo's own commit-message rules — deriving and recording them. |

@@ -74,6 +74,19 @@ test("owner-sentence: a read verb that does not open a clause is no exemption", 
   assert.deepEqual(ownerSentenceErrors("commands/c.md", clause), []);
 });
 
+test("owner-sentence: a clause verb that takes no object — passive `by`, or a noun — is no read", () => {
+  const text =
+    `\`${P}/references/x.md\` owns the gate, run by validate.mjs.\n\n` +
+    `What \`${P}/references/x.md\` owns (run by validate.mjs) is final.\n\n` +
+    `\`${P}/references/x.md\` owns the procedure and run order.\n`;
+  assert.deepEqual(rules(ownerSentenceErrors("commands/c.md", text)), ["owner-sentence@1", "owner-sentence@3", "owner-sentence@5"]);
+  const reads =
+    `If it printed nothing, report its reason, then read\n\`${P}/references/resume.md\` § Resuming, which names the owner.\n\n` +
+    `- **Signal:** resolve the branch — follow\n  \`${P}/references/branch.md\`, which owns the chain.\n\n` +
+    `**On an audit run**, first run the repo-research procedure\n\`${P}/references/delegation.md\` owns.\n`;
+  assert.deepEqual(ownerSentenceErrors("playbooks/p.md", reads), []);
+});
+
 test("owner-sentence: a bare owner path never trips it, and a verb inside a code span does not count", () => {
   assert.deepEqual(ownerSentenceErrors("playbooks/p.md", "`references/ledger.md` owns the rule.\n"), []);
   const text = `The \`read\` field of \`${P}/references/x.md\` is owned there.\n`;
@@ -157,6 +170,42 @@ test("reference-read: a script consumes a reference only in code — a comment n
     ],
   });
   assert.deepEqual(hits.map((h) => h.rel), ["references/commented.md", "references/blocked.md"]);
+});
+
+// Each script on its own, so one desync cannot mask another case.
+const consumedBy = (texts, references) =>
+  referenceReadErrors({ references, surface: [], scripts: texts.map((text, i) => ({ rel: `scripts/s${i}.mjs`, text })) }).map((h) => h.rel);
+
+test("reference-read: a quote or backtick inside a regex literal opens no string", () => {
+  const scripts = [
+    "const TRAIL = /[`(),.]+$/, ESCAPED = /[\\`]/; // references/after-backtick.md\n",
+    "const SHELL_UNSAFE = /[$`'\";&|<>\\n]/; // references/after-class.md\n",
+    "const notQuote = /[^']/; // references/after-quote.md\n",
+    "const URL_RE = /^https?:\\/\\/[^ ]+/; // references/after-slashes.md\n",
+    "const SLASHES = /[//]/, p = \"references/after-slash-class.md\";\n",
+  ];
+  const refs = ["after-backtick.md", "after-class.md", "after-quote.md", "after-slashes.md", "after-slash-class.md"];
+  assert.deepEqual(consumedBy(scripts, refs), [
+    "references/after-backtick.md",
+    "references/after-class.md",
+    "references/after-quote.md",
+    "references/after-slashes.md",
+  ]);
+});
+
+test("reference-read: a // inside a string or template is no comment, wherever it follows a regex", () => {
+  const scripts = [
+    "const re = /[\\`]/;\nconst u = `https://example.com`, p = \"references/after-template-url.md\";\n",
+    "const t = `${a ? \"x\" : `y`}//${b}`, q = \"references/after-nested.md\";\n",
+    "const s = \"a \\\"// not a comment\\\" b\", p = 'it\\'s', r = \"references/after-escaped-quote.md\";\n",
+    "const x = a / b; const y = c / d, r = \"references/after-division.md\";\n",
+  ];
+  const refs = ["after-template-url.md", "after-nested.md", "after-escaped-quote.md", "after-division.md"];
+  assert.deepEqual(consumedBy(scripts, refs), []);
+});
+
+test("reference-read: a path outside any string literal is no read", () => {
+  assert.deepEqual(consumedBy(["const re = /references\\/x.md|references/;\nlabel: references/y.md;\n"], ["y.md"]), ["references/y.md"]);
 });
 
 test("reference-read: the validator naming a reference is not a consumer", () => {
