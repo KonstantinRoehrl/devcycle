@@ -6,7 +6,7 @@ branch does, against the spec that ordered it, before on-device verification or 
 **Inputs** (from the execution handoff / `.devcycle/state.md`): the branch, the spec file path,
 the ledger path (`.devcycle/ledger.md`). These three are ALL the review needs — the
 fresh-context rule that makes that deliberate is owned by
-`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`. One further read serves the handoff, not the
+`playbooks/reviewing-code.md`. One further read serves the handoff, not the
 review: the `checklist:` line of `.devcycle/state.md`, which this stage's handoff carries forward.
 
 This stage, and every agent it dispatches, reports per
@@ -29,7 +29,7 @@ here. What this stage consumes:
 
 ## Engine selection
 
-Delegated in full to `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` — engine choice from
+Read `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` and follow it — engine choice from
 `reviewDepth`, panel invocation, the `panel→single` degradation with its disclosed reason, the
 model export, and how an oversize diff is chunked so the branch is reviewed in full rather than
 sampled are all its rules, and none of them are restated here.
@@ -49,7 +49,7 @@ record the engine line it returns **verbatim** in the report below.
 **Dirty-tree backstop.** The reviewers this stage dispatches are read-only; snapshot `git status
 --porcelain` before each subagent and check it again after. The backstop itself — what a tree left
 dirtier means, and that its verdict is discarded and re-run — is owned by
-`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` and not restated here.
+`playbooks/reviewing-code.md` and not restated here.
 
 The built-in `code-review` skill is user-invocation-only in current Claude Code — an agent
 cannot launch it, so never plan a review around it. It is an opportunistic fold-in only: if the
@@ -90,9 +90,9 @@ green and diff tidy, and still fail its spec:
    decision, per 5's second terminal state. Only the user may grant rounds beyond the cap, and
    only explicitly: record that as `task=branch event=user-decision outcome=review-cap extended
    to <n>`, treat `<n>` as the cap from then on, and note that granting it via Other also
-   appends `user-correction-at-gate` — `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns both.
+   appends `user-correction-at-gate` — `references/ledger.md` owns both.
 2. **Only blocking findings re-open the loop.** **Blocking means `critical` or `high`** —
-   `${CLAUDE_PLUGIN_ROOT}/references/findings.md` owns the severity vocabulary and derives
+   `references/findings.md` owns the severity vocabulary and derives
    blocking from it, and neither is restated here. Each blocking finding goes to a fresh
    `devcycle:implementer` dispatch on the model `references/model-routing.md` resolves — brief = the finding plus the spec path; never the review
    conversation. It is an implementer dispatch bound by the same evidence contract every other
@@ -117,7 +117,7 @@ green and diff tidy, and still fail its spec:
      and does not proceed to finishing.
 
 **The cap bounds effort, never truth.** Reaching the cap NEVER converts an outstanding
-blocking finding into a pass; `${CLAUDE_PLUGIN_ROOT}/references/loops.md` owns that rule and
+blocking finding into a pass; `references/loops.md` owns that rule and
 the vocabulary for each exhaustion outcome. Severity itself is not this stage's to adjust:
 `references/findings.md` owns it, including what may and may not change it. This guardrail is
 unconditional — it holds at every profile, and the cap's own value never softens it.

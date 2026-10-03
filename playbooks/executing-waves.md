@@ -6,9 +6,9 @@ Read `profile` first from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/reference
 § Knob channel, and follow § The profile; this stage's two model knobs, `implementerModel` and
 `taskReviewerModel`, come off the same line and route per
 `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md` (`walkthroughModel` and `branchReviewModel`
-belong to later stages). Every agent this playbook dispatches reports per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
-What the coordinator does itself and what it delegates — including the stage budget, which binds this
-playbook hardest — is owned by `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`: read it and follow it.
+belong to later stages). Every agent this playbook dispatches reports per `references/output.md`.
+Read `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` and follow it: it settles what the coordinator
+does itself and what it delegates — including the stage budget, which binds this playbook hardest.
 
 Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons execution`. No store, no output.
 
@@ -59,9 +59,9 @@ file conflicts these invariants already preserve.)
    (create/modify/test); `**Interfaces:**` (consumes/produces, exact signatures); `**Dependencies:**`; the
    `**Evidence:**` class from the plan; an `**Evidence tail:** <N>` line, `<N>` from the profile; the
    task's steps; the global constraints and pinned interfaces that apply; the task's quality constraints
-   resolved; and one named reference, `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` § Read discipline.
+   resolved; and one named reference, `references/delegation.md` § Read discipline.
    Nothing else, and nothing restated that a named reference owns —
-   `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` owns the evidence classes, the evidence file paths (keyed
+   `references/evidence.md` owns the evidence classes, the evidence file paths (keyed
    on the task id, which is why every brief carries it), and the report shape the implementer must produce.
    - **Resolve the quality constraints:** look each id on the task's `**Quality constraints:**` line up in
      the plan's `## Quality Constraints` section and splice those lines in verbatim, ids included, since a
@@ -84,9 +84,10 @@ file conflicts these invariants already preserve.)
    implementer envelope `references/delegation.md` defines — never the report body — and that
    envelope's on-device count is what triggers the checklist below.
 4. **Confirm the report file exists** at the envelope's named path, **and that it carries the fields
-   its declared evidence class requires** (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` owns the
-   classes), before logging `event=report-received` with `ref=` that path — the envelope's `report:`
-   field is a claim, not proof. Missing or mismatched: ledger `event=report-received
+   its declared evidence class requires** (read them off the report shape in
+   `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § File-backed evidence), before logging
+   `event=report-received` with `ref=` that path — the envelope's `report:` field is a claim, not
+   proof. Missing or mismatched: ledger `event=report-received
    outcome=rejected (missing report file)`, `ref=` the named path, back to the implementer, no
    reviewer dispatch. Otherwise write the `dispatch` line now — `run-record.mjs append --kind
    dispatch` — using step 3's own `startedAt`, this step's time as `endedAt`, the envelope's
@@ -105,7 +106,7 @@ file conflicts these invariants already preserve.)
    `.devcycle/findings/<task-id>-round-<n>.md` itself (the dispatch supplies the path and round n).
    As part of evidence verification the reviewer runs
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <report-path>` on the
-   implementer's report, per `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims.
+   implementer's report, per `references/evidence.md` § Authored claims.
    The coordinator **confirms the findings file exists at the named path before logging `event=review-verdict`** —
    mirroring step 4. Missing or empty: ledger `event=review-verdict
    outcome=rejected (missing findings file)`, re-dispatch the reviewer, no verdict acted on and no
@@ -119,9 +120,9 @@ file conflicts these invariants already preserve.)
    line).
 
    Cap: 3 rounds per task; one round is one reviewer dispatch plus the implementer's fix pass.
-   Statuses and their reporting are owned by `${CLAUDE_PLUGIN_ROOT}/references/loops.md` — a task
-   that reaches round 3 without acceptance exits `exhausted-unresolved` and is surfaced to the user
-   as a decision, never committed as if it had passed.
+   Read `${CLAUDE_PLUGIN_ROOT}/references/loops.md` for how an exit status is written and reported —
+   a task that reaches round 3 without acceptance exits `exhausted-unresolved` and is surfaced to
+   the user as a decision, never committed as if it had passed.
 6. **Green gate (REQUIRED, deterministic).** Before accepting, re-run the task's test command
    yourself and read the exit status. A repo with no test suite runs its documented convention instead.
    On failure, acceptance is blocked: no commit, ledger
@@ -134,7 +135,7 @@ file conflicts these invariants already preserve.)
    win is not a culprit. Enums and ids only — never the failure text.
    On a whole-suite failure, before attributing the red to this task, run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/foreign-change-check.mjs" <this task's **Files:** list>` (the
-   concurrent-sibling guard `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § File-backed evidence
+   concurrent-sibling guard `references/evidence.md` § File-backed evidence
    names). **Clean** (exit 0) → attribute the red as today: block, `event=review-verdict
    outcome=rejected (green gate: <symptom>)`, back to the implementer. **Foreign paths reported**
    (non-zero) → the whole-suite red is indeterminate: re-run the task's file-scoped subset (the
@@ -147,7 +148,7 @@ file conflicts these invariants already preserve.)
    normally.
 7. **Branch re-check, then commit.** Immediately before the commit, re-run
    `git rev-parse --abbrev-ref HEAD` against the recorded `branch:` line, per
-   `${CLAUDE_PLUGIN_ROOT}/references/branch.md`'s per-commit re-check; a mismatch stops the run rather than
+   `references/branch.md`'s per-commit re-check; a mismatch stops the run rather than
    committing to the wrong branch. Then, on acceptance: a local commit with a Conventional Commit subject,
    scoped per `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit". Ledger
    `event=committed` with the sha, then `run-record.mjs append --kind commit` with the task id and sha.
@@ -161,12 +162,17 @@ handoff below.
 ### Sweep-executed tasks
 
 A task whose plan entry carries `**Execution:** sweep` replaces steps 2–3 with one mechanical-sweep
-run; steps 4–7 apply with six deltas: `${CLAUDE_PLUGIN_ROOT}/references/sweep-execution.md` owns them.
+run; steps 4–7 here then apply with six deltas. Read
+`${CLAUDE_PLUGIN_ROOT}/references/sweep-execution.md` and apply its deltas to that task; for the
+run itself, follow only the invocation contract it names from steps 2–4 of
+`${CLAUDE_PLUGIN_ROOT}/playbooks/sweeping-mechanical-changes.md`, and wherever those steps and
+the deltas disagree, the deltas win.
 
 ## Ledger
 
 Progress is written to `.devcycle/ledger.md`; pre-flight steps 1–2 supply its `Branch:` and
-`Commit-convention:` lines, and `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns its write format.
+`Commit-convention:` lines; read `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` for the format every
+line is written in.
 
 ## UI and on-device outcomes
 
@@ -176,7 +182,7 @@ deferred to the end of the wave or the branch. That trigger is this playbook's o
 a checklist — its path and state-file record, its item shape, the dimensions it covers, and the
 `(auto)` boundary that decides what may ever be checked off without a human — is
 `${CLAUDE_PLUGIN_ROOT}/references/checklist.md`: read it and follow it. The later walkthrough of that
-checklist is `${CLAUDE_PLUGIN_ROOT}/playbooks/verifying-on-device.md`'s stage, on the same file.
+checklist is `playbooks/verifying-on-device.md`'s stage, on the same file.
 
 ## Wave boundaries and handoff
 
@@ -186,7 +192,7 @@ artifact paths, timestamp), then emit the handoff block per
 `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`: read it and follow it, including which first-field
 label the boundary takes, the context action, and the gate that stops the run until the user acts.
 After the last wave's handoff this playbook ends; the next stage is
-**${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-the-branch.md** (REQUIRED — the branch gate before
+**`playbooks/reviewing-the-branch.md`** (REQUIRED — the branch gate before
 finishing).
 
 ## Resuming after /clear

@@ -17,7 +17,7 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
 Two sources, one engine. Which one applies is settled before the walkthrough begins;
 everything after is identical either way.
 
-**Plan-derived (in-cycle).** `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` produced
+**Plan-derived (in-cycle).** `playbooks/executing-waves.md` produced
 the checklist during execution; read its path from the `checklist:` field of
 `.devcycle/state.md`.
 
@@ -57,15 +57,15 @@ Runs in a **fresh session** — it needs only the checklist path and the branch,
 the implementation conversation. Its model cannot be routed from inside it, so the
 recommendation travels producer-side: the branch-review handoff carries a `Start the fresh
 session on <model>` line, resolved from `walkthroughModel` per
-`${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`. Where that knob derives rather than pins, the
-walkthrough takes the fast tier per `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`.
+`references/model-routing.md`. Where that knob derives rather than pins, the
+walkthrough takes the fast tier per `references/delegation.md`.
 
 Interview rule: **ONE question per checklist item, never batched** — a deliberate exception to
 devcycle's batched-interview standard, because findings quality drops when items are bundled.
 Each question covers exactly one item and tells the human how to observe it (where to click,
 which viewport, which theme). Wait for the verdict before the next item; a verdict given via
 Other appends `user-correction-at-gate` on the in-cycle entry, where a run record exists, and
-nothing on standalone `/devcycle:verify` — `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` owns
+nothing on standalone `/devcycle:verify` — `references/ledger.md` owns
 that condition. When the app renders
 as a page and claude-in-chrome is connected, dispatch `devcycle:on-device-driver` to observe an
 item rather than observing it yourself; the human still gives every verdict.
@@ -98,7 +98,7 @@ reporting a walkthrough that did not run as done, and never fakes a checkmark.
 
 `/devcycle:verify <branch>` is not a pipeline stage and owns no cycle. It **must not create,
 read-modify, or write `.devcycle/state.md`** — an existing state file belongs to somebody
-else's in-flight cycle, exactly as `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`'s
+else's in-flight cycle, exactly as `playbooks/reviewing-code.md`'s
 standalone rule establishes. The checklist is scratch at the diff-derived path
 `${CLAUDE_PLUGIN_ROOT}/references/checklist.md` pins, handled as that file states, and its
 path goes in the handoff and nowhere else. Everything else — walkthrough, interview rule,

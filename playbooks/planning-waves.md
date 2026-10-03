@@ -13,7 +13,7 @@ channel. At **`lean` / `standard`** do NOT
 load `superpowers:writing-plans` — the Plan mechanics section below is self-contained. At
 **`thorough`** it is a REQUIRED SUB-SKILL for all plan-writing mechanics; where the two disagree this
 playbook wins, and two of that section's rules always override it — the plan header's "For agentic workers"
-line names `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` as the executor (never upstream's
+line names `playbooks/executing-waves.md` as the executor (never upstream's
 subagent-vs-inline execution choice), and no task gets a commit step. Everything outside that one
 section is unconditional, so a finished plan has the same shape whichever engine produced it.
 
@@ -41,7 +41,7 @@ section is **not** `## Global Constraints`: those lines are copied verbatim from
 derived from the criteria catalog, and the precedence rule requires the difference to stay visible,
 so the two never merge. Each task then carries a `**Quality constraints:**` line — `QC1, QC3`, or
 `none` — naming the ids whose subject its own `**Files:**` touch, and
-`${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` resolves them back to verbatim lines when it
+`playbooks/executing-waves.md` resolves them back to verbatim lines when it
 slices each brief, so an implementer is told up front what a later audit would flag it for.
 
 ## Execution strategy — twin goals
@@ -74,7 +74,7 @@ run it and confirm red / write the minimal code / run it and confirm green; for 
 suite run is step 1. Never a commit step.
 
 **Plan header — every plan starts with it:** an H1 `<Feature Name> Implementation Plan`; a blockquote
-for agentic workers naming `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` as the REQUIRED
+for agentic workers naming `playbooks/executing-waves.md` as the REQUIRED
 executor and noting checkbox (`- [ ]`) step syntax; `**Goal:**` (one sentence); `**Architecture:**`
 (2–3 sentences); `**Tech Stack:**`; `## Global Constraints` (the spec's project-wide requirements —
 version floors, dependency limits, naming and copy rules, platform requirements — one line each,
@@ -85,7 +85,7 @@ copied verbatim, implicitly part of every task's requirements); and `## Quality 
 — what this task uses from earlier tasks, exact signatures; Produces — what later tasks rely on, exact
 function names and parameter and return types); the declaration lines below plus the
 `**Quality constraints:**` line above and a `**Lessons:**` line right after it — emitted empty by
-planning and filled by `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md`'s brief-slice from
+planning and filled by `playbooks/executing-waves.md`'s brief-slice from
 `--match`; then `- [ ]` steps carrying the actual code, the exact command,
 and the expected output inline.
 
@@ -106,7 +106,7 @@ fixing what it finds inline as you go; no re-review pass.
 4. **Factual-claim accuracy:** every load-bearing plan-authored claim — file/section targets,
    locked "must show no changes" regions, verification greps, counts — was checked by running
    the proving command/grep and citing its result, or is marked an assumption; never stated as
-   bare fact (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims). Its mechanized
+   bare fact (`references/evidence.md` § Authored claims). Its mechanized
    backstop: run `node "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <plan-path>` —
    a blocking lint that flags an unguarded `path.ext:line` reference or a bare count claim,
    cleared by a `(verified: <cmd>)` or `(assumption)` marker on the same or an adjacent line.
@@ -131,8 +131,8 @@ fixing what it finds inline as you go; no re-review pass.
   with its reason like any other dependency; anything not forced into sequence stays parallel. The
   line takes exactly one of `none (completely independent)`, `Task 2 (consumes its X interface)`, or
   `Tasks 1+4 committed`.
-- `**Evidence:**` — `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` owns the three classes and their
-  exact declaration forms; use those forms verbatim.
+- `**Evidence:**` — read the three classes and their exact declaration forms from
+  `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § The three evidence classes; use those forms verbatim.
 - `**Execution:** sweep` — optional, and declared only when the task is one uniform edit rule applied
   identically across its whole file list AND the task body pins all three sweep parameters verbatim:
   the instruction, the concrete file list, and the verifyCommand. Executing-waves then runs the task
@@ -148,7 +148,7 @@ The plan ends with a `## Dispatch Map` grouping tasks into waves — `- Wave 1: 
 only dependency-ready, file-disjoint tasks: never place two tasks touching the same file in one
 wave, even if both declare `none`. Execution dispatches by readiness from this map, never by written
 order. That map, the plan header, and the per-task blocks are the whole contract
-`${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` consumes. Before handing the plan off, run
+`playbooks/executing-waves.md` consumes. Before handing the plan off, run
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/wave-disjointness-check.mjs" <plan-path>` and
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/content-coupling-check.mjs" <plan-path>` -- the first only
 catches a literal Files-block overlap within one wave; the second catches the harder case of two
@@ -160,13 +160,13 @@ an override) — never by handing off around it.
 
 ## Reuse before rebuild
 
-The rule is owned by `${CLAUDE_PLUGIN_ROOT}/references/quality-criteria.md` (§Reuse before rebuild).
-What planning does with it: each task names the existing modules, helpers, or components it extends,
-and a task introducing a new abstraction states why no existing one fits. Find them by running the
-repo-research procedure `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research
-dispatches`) before searching file-by-file, with the confirmed scope and affected areas recorded in
-`.devcycle/scope.md` as this stage's relevance filter, starting from implementation-scoped docs (a
-`frontend.md`, `backend.md`, or equivalent).
+What planning does with the rule `references/quality-criteria.md` (§Reuse before rebuild) owns:
+each task names the existing modules, helpers, or components it extends, and a task introducing
+a new abstraction states why no existing one fits. Find them by running the repo-research
+procedure `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`) before
+searching file-by-file, with the confirmed scope and affected areas recorded in `.devcycle/scope.md`
+as this stage's relevance filter, starting from implementation-scoped docs (a `frontend.md`,
+`backend.md`, or equivalent).
 
 ## Handoff — required final output
 
