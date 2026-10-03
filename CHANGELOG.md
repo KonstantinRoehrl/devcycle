@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.1 — 2026-10-03
+
+- fix(config): route every knob through one resolver, land the maintenance store write path, price the 5.5 models, and cut the per-stage read closure
+
 **Config channel: every knob now reaches the stage that reads it (C4, #308).** Claude Code
 substitutes `${user_config.*}` only in commands, never in playbooks or references, so 8 of the
 12 knobs could never reach the stages that read them. Commands are now the only knob readers:
