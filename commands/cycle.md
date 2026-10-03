@@ -125,10 +125,10 @@ playbook owns and runs before any agent edits.
 
 Run these in order, rewriting the state file at every transition; two short paths bypass the walk on
 confirmation (`fast-path`, `sweep`), and `receiving-review`, a standalone `reconcile` stage entered
-directly, has a `references/stages.json` entry but no numbered one below. At each transition, run
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/stage-entry.mjs" <stage>` and follow what it prints: open the
-`entry:` playbook or invoke the `entry:` skill, and apply its `note:`. On a non-zero exit, report its
-reason, then read `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § Resuming at the recorded stage. The
+directly, has a `references/stages.json` entry but no numbered one below. At each transition into a
+stage other than `done`, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/stage-entry.mjs" <stage>` and follow
+what it prints: open the `entry:` playbook or invoke the `entry:` skill, and apply its `note:`. On a non-zero exit,
+report its reason, then read `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § Resuming at the recorded stage. The
 enum below is the stages' single source of truth — `scripts/validate.mjs` reads its literal form:
 
 - stage: <scoping|audit|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|receiving-review|finish|done>

@@ -78,7 +78,7 @@ The script's candidate lines carry no severity — assigning it is this playbook
 `${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s vocabulary **verbatim** and ranking the list
 in that file's document-form order. The dollar figure rides along per finding as a supporting
 field, never the sort key: quote the figure the report already carries, scored by
-`${CLAUDE_PLUGIN_ROOT}/references/impact-scoring.md`'s formula, and never recompute it. Name a
+`references/impact-scoring.md`'s formula, and never recompute it. Name a
 culprit by its slug in `${CLAUDE_PLUGIN_ROOT}/references/culprits.json`, the vocabulary the
 report's culprit table renders from.
 
@@ -215,7 +215,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --drift <path>
 ```
 
 It resolves the changelog at `${CLAUDE_PLUGIN_ROOT}/docs/configuration/config-changelog.md` — the same
-engine `${CLAUDE_PLUGIN_ROOT}/playbooks/learning-from-sessions.md` calls into, one engine, two
+engine `playbooks/learning-from-sessions.md` calls into, one engine, two
 callers — and prints each finding as a `file:line` reference with the changelog's recorded
 replacement. Report them as printed; never re-parse the changelog or re-grep the target file yourself.
 

@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 Observe → propose → confirm → land. One loop.
 
-Resolve knobs first — run this exactly as rendered; `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel owns what follows:
+Resolve knobs first, per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel — run this exactly as rendered:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
