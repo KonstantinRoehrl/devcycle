@@ -37,3 +37,16 @@ fallback path, and only for a session that moved between repos.
 there, so the reduce stage's memory scales with the observation store's total size. This is a
 second memory path, independent of corpus planning, and the 2026-09-09 cycle did not address
 it: its scope was which sessions a run reads, not how the mined output is later folded.
+
+## Session profiler — `scripts/doctor.mjs`
+
+### Memory is bounded by the largest session, not by the corpus (low)
+
+`run()` summarizes the transcript corpus one session at a time (`summarizeCorpus`), so peak memory
+tracks the largest single session — its main transcript plus its subagents' — and no longer the
+whole corpus. A session's records are still held together while it is summarized, because
+membership (`isDevcycleSession`) and the session id are decided over every record of the session
+before a window narrows what is measured. A single transcript larger than Node's default heap would
+therefore still abort the run. It was left rather than fixed because streaming within one session
+would need a two-pass read — membership first, then the window — for a case no corpus has produced.
+If one does, `NODE_OPTIONS=--max-old-space-size=<MB>` is the stop-gap.
