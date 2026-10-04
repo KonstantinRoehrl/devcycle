@@ -1173,38 +1173,83 @@ test("doctor.mjs exports its transcript-walk helpers", async () => {
     assert.equal(typeof m[name], "function", `${name} must be exported`);
 });
 
+// The static import closure of `entry` under `scriptsDir`: every module reachable through a
+// double-quoted relative `from "./x.mjs"` (imports, re-exports and multi-line import lists all end
+// in that form). It is a text walk, which is sound only while the closure has no dynamic
+// `import(` and no comment spelling out an import; the test below the helper pins the first, and a
+// stray comment merely copies one module too many.
+function importClosure(scriptsDir, entry) {
+  const seen = new Set();
+  const visit = (name) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    const text = readFileSync(join(scriptsDir, name), "utf8");
+    for (const m of text.matchAll(/from "\.\/([^"]+\.mjs)"/g)) visit(m[1]);
+  };
+  visit(entry);
+  return [...seen].sort();
+}
+
+const SCRIPTS_DIR = new URL("../../scripts/", import.meta.url).pathname;
+
+test("importClosure follows imports, re-exports and cycles, and each module once", () => {
+  const dir = makeTempDir("doctor-closure-");
+  try {
+    writeFileSync(join(dir, "a.mjs"), 'import { x } from "./b.mjs";\nimport os from "node:os";\n');
+    writeFileSync(join(dir, "b.mjs"), 'import {\n  y,\n} from "./c.mjs";\nimport { a } from "./a.mjs";\n');
+    writeFileSync(join(dir, "c.mjs"), 'export { z } from "./d.mjs";\n');
+    writeFileSync(join(dir, "d.mjs"), "export const z = 1;\n");
+    writeFileSync(join(dir, "unrelated.mjs"), "export const u = 1;\n");
+    assert.deepEqual(importClosure(dir, "a.mjs"), ["a.mjs", "b.mjs", "c.mjs", "d.mjs"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor.mjs's import closure has no dynamic import and no side-effect-only or single-quoted import", () => {
+  // importClosure reads only `from "./x.mjs"`; a module loaded any other way would be missing from
+  // the copy installDoctor builds, and --drift would fail with a module-not-found stack.
+  for (const name of importClosure(SCRIPTS_DIR, "doctor.mjs")) {
+    const text = readFileSync(join(SCRIPTS_DIR, name), "utf8");
+    assert.doesNotMatch(text, /\bimport\(/, `${name} imports dynamically`);
+    assert.doesNotMatch(text, /^import ["']/m, `${name} has a side-effect-only import`);
+    assert.doesNotMatch(text, /from '\.\//, `${name} imports with single quotes`);
+  }
+});
+
 // Installs a runnable copy of doctor.mjs at <dir>/scripts/, so the copy's own location —
 // not the working directory — is what its changelog resolution has to work from. `changelog`
-// null means the tree ships no docs/configuration/config-changelog.md at all.
-function installDoctor(changelog) {
+// null means the tree ships no docs/configuration/config-changelog.md at all. The copy is
+// doctor.mjs's whole static import closure, computed rather than listed: a hand list went stale
+// each time doctor.mjs gained a module, and a copy missing one cannot be loaded at all (#236).
+function installDoctor(changelog, scriptsDir = SCRIPTS_DIR) {
   // realpath: on macOS the temp dir is a symlink, and Node resolves an ESM entry point to its
   // real path — so an unresolved path would make the script's own `is this the entry point`
   // check fail and main() would never run.
   const dir = realpathSync(makeTempDir("doctor-install-"));
   mkdirSync(join(dir, "scripts"), { recursive: true });
-  // promotions.mjs travels with it: doctor.mjs imports readPromotions from it to name what each
-  // version shipped, so a copy without it cannot be loaded at all. This list is doctor.mjs's whole
-  // load-time import closure — a copy missing any of it cannot be loaded, so --drift would report a
-  // module-not-found stack rather than the doctor: diagnostic these tests pin. doctor → verification
-  // → {journal → run-record → {stamp, git-identity}, semver}, plus pricing, promotions, cli-flags
-  // and jsonl (readRecords' streaming reader). run-record.mjs re-exports gitToplevel from
-  // git-identity.mjs, so that module is now part of the closure too. promotions.mjs imports
-  // fieldText from md-field.mjs, so md-field.mjs is in the closure too. verification.mjs reads the
-  // severity-weighting policy via reinforcement-policy.mjs, so that module is in the closure too.
-  // verification.mjs imports lessonKind and isConsolidated from lessons.mjs, so lessons.mjs is in
-  // the closure too.
-  for (const name of [
-    "doctor.mjs", "atomic-write.mjs", "pricing.mjs", "promotions.mjs", "cli-flags.mjs",
-    "jsonl.mjs", "verification.mjs", "reinforcement-policy.mjs", "journal.mjs", "semver.mjs", "run-record.mjs", "stamp.mjs",
-    "git-identity.mjs", "md-field.mjs", "lessons.mjs",
-  ])
-    copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
+  for (const name of importClosure(scriptsDir, "doctor.mjs"))
+    copyFileSync(join(scriptsDir, name), join(dir, "scripts", name));
   if (changelog !== null) {
     mkdirSync(join(dir, "docs", "configuration"), { recursive: true });
     writeFileSync(join(dir, "docs", "configuration", "config-changelog.md"), changelog, "utf8");
   }
   return dir;
 }
+
+test("installDoctor copies a module that doctor.mjs imports and no list names", () => {
+  const source = makeTempDir("doctor-fresh-source-");
+  let dir;
+  try {
+    writeFileSync(join(source, "doctor.mjs"), 'import { fresh } from "./fresh-module.mjs";\n');
+    writeFileSync(join(source, "fresh-module.mjs"), "export const fresh = 1;\n");
+    dir = installDoctor(null, source);
+    assert.ok(existsSync(join(dir, "scripts", "fresh-module.mjs")), "the freshly imported module was not copied");
+  } finally {
+    rmSync(source, { recursive: true, force: true });
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 const yamlChangelog = (...records) => ["# Config changelog", "", "```yaml", ...records, "```", ""].join("\n");
 
