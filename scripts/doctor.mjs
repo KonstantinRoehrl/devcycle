@@ -22,7 +22,7 @@ import { atomicWrite } from "./atomic-write.mjs";
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 import { eachRecord } from "./jsonl.mjs";
-import { usd, markdownTable, deltaText, cohortSessionsText } from "./doctor-format.mjs";
+import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, unpricedMediansNote } from "./doctor-format.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // docs/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -585,6 +585,7 @@ export function cohortTable(summaries) {
       medianPerSession: median(c.dollars),
       medianDepth: c.depths.length ? median(c.depths) : null,
       quality: aggregateQuality(c.qualities),
+      excluded: c.excluded,
       inferred: [version === "unknown" ? "no version detectable" : null, excludedNote(c.excluded)]
         .filter(Boolean).join("; ") || null,
     };
@@ -1585,13 +1586,7 @@ export function formatReport(summaries) {
     );
   lines.push("", "Per-version cohorts:");
   const direction = corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight)));
-  lines.push(
-    direction.direction === "insufficient-data"
-      ? `direction of travel: insufficient data (${direction.reason})`
-      : `direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})` +
-        `${direction.inferred ? ` (inferred: ${direction.inferred})` : ""}`
-  );
+  lines.push(directionLine(direction));
   for (const r of cohortTable(summaries))
     lines.push(
       `  ${r.version.padEnd(10)} n=${String(r.sessions).padStart(3)}  ` +
@@ -2101,6 +2096,9 @@ function deltaAgainstPrevious(rows, index, valueOf) {
   const previous = rows.slice(0, index).reverse()
     .find((r) => r.version !== "unknown" && r.profile === row.profile);
   if (!previous) return { state: "first-seen", pct: null };
+  // A side with requests on an unpriced model is not the whole of its cost, so no move against it
+  // is a measurement. Checked before the sample-size rule: unpriced is the more useful reason.
+  if (row.excluded > 0 || previous.excluded > 0) return { state: "not-compared", pct: null, reason: "unpriced" };
   if (row.lowConfidence || previous.lowConfidence) return { state: "not-compared", pct: null };
   const before = valueOf(previous), now = valueOf(row);
   // A division that cannot be taken is not a 0% change, and an unmeasurable side is not a zero.
@@ -2231,6 +2229,7 @@ export function versionProfileTable(summaries, promotions = []) {
         stageTotals.set(stage, (stageTotals.get(stage) ?? 0) + dollars);
     const priciest = [...stageTotals.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
     const depths = g.members.map((s) => s.medianDepth).filter((d) => typeof d === "number");
+    const excluded = g.members.reduce((n, s) => n + excludedRequestsOf(s), 0);
     // Decomposed $/turn (issue #114): a blended $/turn hides whether the money went to the main
     // thread or its subagents, and conflates the two turn populations. main dollars are the
     // agent-type-keyed "main" cost; everything else the session cost is sub-thread. Each rate is
@@ -2261,7 +2260,8 @@ export function versionProfileTable(summaries, promotions = []) {
       medianDepth: depths.length ? median(depths) : null,
       quality: aggregateQuality(g.members.map((s) => s.quality ?? null)),
       lowConfidence: g.members.length < MIN_COHORT,
-      inferred: excludedNote(g.members.reduce((n, s) => n + excludedRequestsOf(s), 0)),
+      excluded,
+      inferred: excludedNote(excluded),
       // A promotion that named no culprit contributes nothing rather than a blank entry — which
       // is every record on disk until Phase 3 teaches recordPromotion to write the field.
       shipped: [...new Set(promotions
@@ -2934,11 +2934,7 @@ export function renderReport(summaries, ctx) {
     "the share of the stage's settled dollars whose stage was inferred from the transcript rather " +
     "than read off a run record._");
   if (stageTrend.excludedVersions.length)
-    L.push(
-      "",
-      `_Medians for ${stageTrend.excludedVersions.join(", ")} leave out requests on a model with no ` +
-        "exact price (inferred) — compare across them with care._",
-    );
+    L.push("", unpricedMediansNote(stageTrend.excludedVersions));
   // stageByVersionTable drops the undetectable-version cohort from every column and every trend,
   // because "unknown" cannot sit on a version axis — right, but silent, and an omission nobody
   // names reads as a clean bill of health. cohortTable is the sibling that keeps that bucket,
@@ -3148,14 +3144,7 @@ export function renderReport(summaries, ctx) {
     "no settled sessions in this corpus",
   ));
   const direction = corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight)));
-  L.push(
-    "",
-    direction.direction === "insufficient-data"
-      ? `Direction of travel: insufficient data (${direction.reason})`
-      : `Direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})` +
-        `${direction.inferred ? ` (inferred: ${direction.inferred})` : ""}`,
-  );
+  L.push("", directionLine(direction));
 
   section("### Per-session detail", "appendix-per-session-detail");
   L.push(...sessionDetailLines(summaries));

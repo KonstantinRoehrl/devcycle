@@ -17,6 +17,7 @@ import {
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
   changelogEntry, regressionAttribution, excludedNote, formatReport,
+  cohortTable,
   COMPLIANCE_TYPES, UNPRICED_MODEL_SLUG, NoUnpricedModelError, unpricedModelIssueBody,
 } from "../../scripts/doctor.mjs";
 import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
@@ -1193,7 +1194,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "- 1 session(s) still in flight (newest record < 30 min old) — in-flight sessions have only part of their cost recorded",
     // Cost by version — the whole row, out to its last cell: a needle that stopped at the depth
     // column still matched after the Quality and Shipped columns were deleted.
-    `| 0.12.0 (inferred: 3 requests on a model with no exact price excluded) | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | +36.4% | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
+    `| 0.12.0 (inferred: 3 requests on a model with no exact price excluded) | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | not compared (⚠ unpriced) | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
     // Cost by stage, across versions and within this window
     "| execution | $10.00 (n=3) | $5.00 (n=4) | down | 3% |",
     "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
@@ -1222,7 +1223,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     `| panel | 7 | $178.00 | $15.00 | ${COVERAGE_QUALITY_TEXT} |`,
     `| 0.12.0 (inferred: 3 requests on a model with no exact price excluded) | 4 | $145.00 | $15.00 | 40000 | ${COVERAGE_QUALITY_TEXT} |`,
     // No session in this fixture carries a runId, so no run projection exists to score (#127).
-    "Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)",
+    "Direction of travel: undetermined (no matched cohort spans two versions with n>=3)",
     "session 22222221 — turns 20 (main 15, subagent 5), depth median 40000 max 60000, cost $15.00, " +
       "models [claude-opus-5], tools [Read:2], quality: unavailable (no run record) " +
       "[stage costs inferred — forward-filled, no run record]",
@@ -1297,7 +1298,8 @@ test("the rendered report states the corpus direction of travel, under the cohor
     run("a", "0.11.0", 10), run("b", "0.11.0", 10), run("c", "0.11.0", 10),
     run("d", "0.12.0", 5), run("e", "0.12.0", 5), run("f", "0.12.0", 5),
   ], ctx());
-  const directionAt = out.indexOf("Direction of travel:");
+  // The Overview states the direction first; the appendix line this test is about is the last one.
+  const directionAt = out.lastIndexOf("Direction of travel:");
   assert.ok(directionAt !== -1, "the shipped report states no direction of travel");
   const line = out.slice(directionAt, out.indexOf("\n", directionAt));
   assert.match(line, /Direction of travel: down \(-50\.0% median cost, .+, 0\.11\.0→0\.12\.0\)/);
@@ -1313,7 +1315,8 @@ test("one known version is insufficient data, never a flat trend", () => {
     costUSD: 1, workload: wl,
   });
   const out = renderReport([run("a"), run("b"), run("c")], ctx());
-  assert.ok(out.includes("Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)"));
+  assert.ok(out.includes("Direction of travel: undetermined (no matched cohort spans two versions with n>=3)"));
+  assert.ok(!out.includes("Direction of travel: insufficient data"));
 });
 
 test("an in-flight session cannot set the direction of travel", () => {
@@ -1329,7 +1332,7 @@ test("an in-flight session cannot set the direction of travel", () => {
     run("d", "0.12.0", 5), run("e", "0.12.0", 5),
     run("f", "0.12.0", 90, { inFlight: true }),
   ], ctx());
-  assert.ok(out.includes("Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)"));
+  assert.ok(out.includes("Direction of travel: undetermined (no matched cohort spans two versions with n>=3)"));
 });
 
 test("direction of travel normalizes and never anchors on an n<3 endpoint (#127)", () => {
@@ -2283,4 +2286,54 @@ test("the playbook states the doctor Drafted: marker form, and it parses", () =>
   assert.ok(literal, "playbooks/profiling-sessions.md no longer states the doctor Drafted: marker form");
   const filled = literal.replace("<slug>", "unpriced-model").replace("<title>", "A model is not priced");
   assert.deepEqual(parseDraftedMarkers(filled), [{ slug: "unpriced-model", title: "A model is not priced" }]);
+});
+
+// --- the overview every reply carries (#302) ---
+
+// The unpriced rule is implemented once, in deltaAgainstPrevious, and both the Cost-by-version table and
+// the overview read it. Every row below is hand-built, so a table's inputs sit in the test that pins it.
+const unpricedModel = { "some-unpriced-model": 3 };
+const trio = (version, over = {}) => ["a", "b", "c"].map((id) => sum({ id: `${version}${id}`, pluginVersion: version, ...over }));
+
+test("a version×profile row and a cohort row carry the count of requests left out for want of a price", () => {
+  const summaries = [...trio("0.11.0"), ...trio("0.12.0"), sum({ id: "x", pluginVersion: "0.12.0", unpriced: unpricedModel })];
+  assert.deepEqual(versionProfileTable(summaries).map((r) => r.excluded), [0, 3]);
+  assert.deepEqual(cohortTable(summaries).map((r) => r.excluded), [0, 3]);
+});
+
+test("a delta against or from a row with unpriced requests is withheld, ahead of the sample-size rule", () => {
+  const unpricedNew = versionProfileTable([...trio("0.11.0"), ...trio("0.12.0", { unpriced: unpricedModel })]);
+  assert.deepEqual(unpricedNew[1].delta, { state: "not-compared", pct: null, reason: "unpriced" });
+  const unpricedOld = versionProfileTable([...trio("0.11.0", { unpriced: unpricedModel }), ...trio("0.12.0")]);
+  assert.deepEqual(unpricedOld[1].delta, { state: "not-compared", pct: null, reason: "unpriced" });
+  // Two sessions is also low confidence, which is the older reason: unpriced is the one named.
+  const thin = versionProfileTable([...trio("0.11.0"), sum({ id: "t1", pluginVersion: "0.12.0", unpriced: unpricedModel })]);
+  assert.deepEqual(thin[1].delta, { state: "not-compared", pct: null, reason: "unpriced" });
+  // A clean pair is compared as before, and the first row of a profile stays first seen.
+  const clean = versionProfileTable([...trio("0.11.0"), ...trio("0.12.0")]);
+  assert.equal(clean[0].delta.state, "first-seen");
+  assert.equal(clean[1].delta.state, "compared");
+  assert.deepEqual(versionProfileTable([...trio("0.11.0", { unpriced: unpricedModel })])[0].delta, { state: "first-seen", pct: null });
+});
+
+test("the culprit table, whose rows carry no unpriced count, is not affected by the unpriced rule", () => {
+  const rows = culpritTable([...trio("0.11.0", { unpriced: unpricedModel }), ...trio("0.12.0", { unpriced: unpricedModel })], VOCAB);
+  assert.ok(rows.every((r) => r.delta.reason === undefined));
+});
+
+// The issue draft quotes the Δ the Cost-by-version table renders, so a cohort whose requests include an
+// unpriced model must reach a filed issue as "not compared", never as a bare percentage.
+test("the issue draft quotes a cohort with unpriced requests as not compared", () => {
+  const older = [1, 2, 3].map((n) => sum({ id: `o${n}`, pluginVersion: "0.0.1", costUSD: 2, costByStage: { execution: 2 } }));
+  const newer = [1, 2, 3].map((n) => sum({
+    id: `s${n}`, pluginVersion: DRAFT_VERSION, costUSD: 4, costByStage: { execution: 4 }, unpriced: unpricedModel,
+    impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
+    culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
+  }));
+  const summaries = [...older, ...newer];
+  const tables = { versionProfile: versionProfileTable(summaries), culprits: culpritTable(summaries, VOCAB) };
+  const row = tables.versionProfile.find((r) => r.version === DRAFT_VERSION && r.profile === "thorough");
+  assert.deepEqual(row.delta, { state: "not-compared", pct: null, reason: "unpriced" });
+  const d = issueBody("partial-evidence-capture", summaries, tables, repoShape(process.cwd()));
+  assert.ok(d.body.includes("- Δ vs previous: not compared (⚠ unpriced)"), "the draft quotes a delta the report withholds");
 });
