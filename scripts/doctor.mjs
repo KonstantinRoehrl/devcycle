@@ -22,6 +22,7 @@ import { atomicWrite } from "./atomic-write.mjs";
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 import { eachRecord } from "./jsonl.mjs";
+import { usd, markdownTable, deltaText, cohortSessionsText } from "./doctor-format.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // docs/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -1333,8 +1334,6 @@ const IN_FLIGHT_NOTE =
 const DEPTH_DISCLOSURE =
   "Depth bands are a fraction of the model's context window, not an absolute token count: " +
   "the same depth reads as a different band on a different model.";
-
-const usd = (n) => "$" + (n >= 1 ? n.toFixed(2) : n.toFixed(4));
 
 // QC4/QC5: absent, not zero — a record-less run's "0 review rounds" would read as flawless work
 // rather than as no data, so the missing case renders its own label instead of a zero figure.
@@ -2719,36 +2718,8 @@ const GLOSSES = {
 const HIGHLIGHTS_ANCHOR = "<!-- devcycle:highlights -->";
 const FINDINGS_ANCHOR = "<!-- devcycle:findings -->";
 
-// An absent value renders as an em dash, never as a blank cell a reader would take for a zero.
-const markdownCell = (v) => (v === null || v === undefined || v === "" ? "—" : String(v));
-
-// Every table renders its header row and separator even with nothing in it, and says why it is
-// empty — an empty table with no explanation reads as a clean bill of health (QC3).
-function markdownTable(headers, rows, whyEmpty) {
-  const out = [
-    `| ${headers.join(" | ")} |`,
-    `| ${headers.map(() => "---").join(" | ")} |`,
-    ...rows.map((r) => `| ${r.map(markdownCell).join(" | ")} |`),
-  ];
-  if (!rows.length) out.push("", `_No rows: ${whyEmpty}._`);
-  return out;
-}
-
-// deltaAgainstPrevious' three states, rendered. A comparison that could not be taken names its
-// reason; it never falls back to 0%, which would read as a version that changed nothing.
-const deltaText = (d) =>
-  d.state === "compared"
-    ? `${d.pct >= 0 ? "+" : ""}${d.pct.toFixed(1)}%`
-    : d.state === "first-seen" ? "first seen" : "not compared";
-
 // An impact nobody could price is labelled, never rendered as $0.00.
 const impactText = (v) => (v === null || v === undefined ? "unmeasurable" : usd(v));
-
-// The Sessions cell of a version×profile row. One owner for two render sites: the issue draft
-// quotes the same row this table renders, and a cohort the report declines to stand behind must
-// not be quoted as a bare number in an issue filed from it.
-const cohortSessionsText = (r) =>
-  r.lowConfidence ? `${r.sessions} (low confidence: n<${MIN_COHORT})` : String(r.sessions);
 
 // Cost anomalies are ranked by the money at stake. A candidate carrying no dollar figure ranks
 // last rather than being sorted as if it had been measured at zero.
@@ -2930,7 +2901,7 @@ export function renderReport(summaries, ctx) {
     versionProfileTable(summaries, promotions).map((r) => [
       r.inferred ? `${r.version} (inferred: ${r.inferred})` : r.version,
       r.profile,
-      cohortSessionsText(r),
+      cohortSessionsText(r, MIN_COHORT),
       r.cycles,
       usd(r.medianCostPerCycle),
       r.dollarsPerMainTurn === null ? null : usd(r.dollarsPerMainTurn),
@@ -3520,7 +3491,7 @@ export function issueBody(slug, summaries, tables, shape) {
     row ? "Cohort, as the report renders it:" : "Cohort: unavailable (no settled cohort row for this culprit)",
     ...(row
       ? [
-          `- Sessions: ${cohortSessionsText(row)}`,
+          `- Sessions: ${cohortSessionsText(row, MIN_COHORT)}`,
           `- Cycles: ${row.cycles}`,
           `- Median $/cycle: ${usd(row.medianCostPerCycle)}`,
           `- Priciest stage: ${row.priciestStage ?? "unrecorded"}`,
