@@ -43,8 +43,9 @@ it: its scope was which sessions a run reads, not how the mined output is later 
 ### Memory is bounded by the largest session, not by the corpus (low)
 
 `run()` summarizes the transcript corpus one session at a time (`summarizeCorpus`), so peak memory
-tracks the largest single session — its main transcript plus its subagents' — and no longer the
-whole corpus. A session's records are still held together while it is summarized, because
+tracks the largest single session — its main transcript plus its subagents' — plus one small summary
+object per session, and no longer the whole corpus. A session's records are still held together
+while it is summarized, because
 membership (`isDevcycleSession`) and the session id are decided over every record of the session
 before a window narrows what is measured. A single transcript larger than Node's default heap would
 therefore still abort the run. It was left rather than fixed because streaming within one session
