@@ -2495,3 +2495,15 @@ test("the Sessions cell covers every profile while $/cycle and the Δ are the ma
   const newerRow = json.version_profile_cohorts.find((r) => r.version === "0.12.0");
   assert.equal(newer[5], `+${newerRow.delta.pct.toFixed(1)}%`);
 });
+
+test("the playbook names the two overview headings the report emits and the --json keys that carry them", () => {
+  const playbook = readFileSync(new URL("../../playbooks/profiling-sessions.md", import.meta.url), "utf8");
+  const out = renderReport([sum()], ctx());
+  for (const heading of ["## Overview", "## Trend summary"]) {
+    assert.ok(out.includes(`\n${heading}\n`), `renderReport no longer emits ${heading}`);
+    assert.ok(playbook.includes(`\`${heading}\``), `the playbook does not name ${heading}`);
+  }
+  const { overview } = buildJsonReport([sum()], ctx());
+  for (const key of Object.keys(overview.markdown))
+    assert.ok(playbook.includes(`overview.markdown.${key}`), `the playbook does not name overview.markdown.${key}`);
+});

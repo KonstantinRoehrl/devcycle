@@ -24,6 +24,13 @@ by re-running the mining loop, and every run with at least one finding persists 
 a GitHub issue (screened, then gated by two separate confirmations before anything is filed) or
 hand back a `/devcycle:cycle` entry-point string — the playbook itself never starts one.
 
+Two blocks the script renders ride in every cost-analysis reply byte for byte (`--depth` and `--drift` print neither): `## Overview` — a per-version and a
+per-stage table over settled sessions, with the notes that read them — and `## Trend summary`, three
+lines on cost, stages and how far to trust them. The playbook splices nothing into either and
+never rebuilds a figure; it moves the Trend summary to the end of the reply, just ahead of the
+actionability step. A version whose requests include an unpriced model is flagged ⚠ with its Δ
+withheld, and a corpus that cannot name a direction says `undetermined`.
+
 **Models the price table lacks.** A model missing from `scripts/pricing.mjs` is excluded from every
 dollar figure and reported on its own line. One not older than every priced model in its family is
 instead priced provisionally at that family's newest price, shown as `≈$… provisional` beside the
@@ -41,7 +48,7 @@ an `(inferred: …)` mark, and a revert comparison involving them is skipped and
 ```mermaid
 ---
 title: profiling-sessions — mode split through report and optional actionability
-accDescr: Playbook-internal flowchart of the profiling-sessions playbook, from the config-drift-versus-cost-analysis mode split, through running doctor.mjs and splicing its two marked sections, to the persisted report and the optional, fully skippable actionability offer.
+accDescr: Playbook-internal flowchart of the profiling-sessions playbook, from the config-drift-versus-cost-analysis mode split, through running doctor.mjs, splicing its two marked sections and carrying its two overview blocks verbatim, to the persisted report and the optional, fully skippable actionability offer.
 ---
 flowchart TD
     MODE{"config-drift mode requested?"}:::stage
@@ -49,7 +56,8 @@ flowchart TD
     DRIFT --> DRIFTOUT(["findings printed — no report file"]):::tool
     MODE -->|no| RUN("Run doctor.mjs over the scoped transcript corpus"):::stage
     RUN --> SPLICE("Splice Highlights + ranked findings into the two marked sections only"):::stage
-    SPLICE --> PERSIST[("<doctor dir>/YYYY-MM-DD-report.md — only when findings exist")]:::structural
+    SPLICE --> CARRY("Carry the Overview and Trend summary blocks verbatim; Trend summary last in the reply"):::stage
+    CARRY --> PERSIST[("<doctor dir>/YYYY-MM-DD-report.md — only when findings exist")]:::structural
     PERSIST --> ACT{"findings worth acting on?"}:::stage
     ACT -->|"yes, optional"| OFFER("Offer per finding: skip / draft issue (two gates) / /devcycle:cycle entry point"):::stage
     ACT -->|no| DONE(["report delivered"]):::tool

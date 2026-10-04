@@ -11,7 +11,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" [--all] [--since <date>] [--unti
 Add `--json` for machine output, `--depth` for the bare depth probe — the probe ignores the window
 flags and exits non-zero with a one-line reason when it cannot resolve a depth. Do not walk
 transcripts yourself. What it prints is the finished report, owned end to end by
-`scripts/doctor.mjs`: read it, splice the two sections below into it, and retype none of it.
+`scripts/doctor.mjs`: read it, splice the two sections below into it, carry its two overview blocks
+as the next section says, and retype none of it.
 
 ## Scope — what the script actually covers, and announce it
 
@@ -26,6 +27,18 @@ window or not.
 State the scope the run actually used — "every `devcycle:`-tagged transcript", "every
 transcript, tagged or not", or the window — in the announce. The report states it again in its
 own header line, which the script writes. Every number in it is only as wide as that corpus.
+
+## The overview blocks
+
+`## Overview` and `## Trend summary` follow Highlights in the report, rendered end to end by the
+script. Unlike the two splice slots they are carried **byte for byte**, and every cost-analysis reply
+carries both — zero findings, "just the overview, no action" and windowed runs included; no
+Actionability choice gates them. `--depth` and `drift` print neither. Under `--json` they are
+`overview.markdown.overview` and `overview.markdown.trendSummary`, carried the same way. Never rebuild
+one or retype a figure: when a block is absent from a report (a script too old for it, or an error), say so.
+
+The reply runs Highlights, the Overview, the ranked findings and systemic recommendations, the Trend
+summary — relocated here verbatim from its place in the report — then the Actionability question.
 
 ## The splice rule
 
@@ -55,8 +68,8 @@ qualify. Rank the findings by dollar impact, and give each one its concrete leve
 - whether the plugin got cheaper or more expensive across versions, and by how much.
 
 The sixth is corpus-level rather than per-finding, and the Highlights prose must state its
-**direction of travel** explicitly — down, up, or flat — carrying forward the line the script
-renders under the per-version cohort table. A report that lists regressions without saying which
+**direction of travel** explicitly — down, up, flat or undetermined — carried from the Overview's
+direction line, never a direction that line does not state. A report that lists regressions without saying which
 way the whole corpus moved is the failure issue #44 recorded: the split was 21 worse / 18 better /
 5 flat, direction down, and the report stated the opposite.
 

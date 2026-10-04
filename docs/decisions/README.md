@@ -5,6 +5,30 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-04 — doctor overview: the profiling playbook states the reply contract, and its budget grows by it
+
+**Decision:** `playbooks/profiling-sessions.md` gains a section on how a cost-analysis reply carries
+the two script-rendered blocks `## Overview` and `## Trend summary` — byte for byte, with the Trend
+summary last — and its direction-of-travel paragraph now says "undetermined" is a direction the
+Highlights may state. `commands/doctor.md` loses the report-column detail it restated and says only
+that every cost-analysis reply carries the overview, because the playbook owns what the report
+contains. The playbook's context budget and the surface total are raised by the growth; nothing is
+offset.
+
+**Why:** the reply contract is the playbook's to state, and the user reads the overview in the reply.
+A net-zero rewrite would have to delete text this change does not touch: the verdict glossary of the
+promotion scoreboard or the two-gate issue procedure.
+
+**Budgets:** `surfaceTotal` 5713 → 5725 (the playbook +13 lines, the command −1) and
+`playbooks/profiling-sessions.md` 45948 → 46852 (+904 bytes).
+
+**Supersedes:** nothing.
+
+```text
+budget: surface-budget.json surfaceTotal 5725
+budget: context-budget.json playbooks/profiling-sessions.md 46852
+```
+
 ## 2026-10-03 — branch-review fix: step-level reads where a demoted owner was the only route
 
 **Decision:** the steps that execute an owner the citation-grammar pass demoted carry their own
