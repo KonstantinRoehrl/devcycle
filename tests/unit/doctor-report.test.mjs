@@ -17,12 +17,13 @@ import {
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
   changelogEntry, regressionAttribution, excludedNote, formatReport,
-  cohortTable,
+  cohortTable, inferredUnknownDollars, overviewFor,
   COMPLIANCE_TYPES, UNPRICED_MODEL_SLUG, NoUnpricedModelError, unpricedModelIssueBody,
 } from "../../scripts/doctor.mjs";
 import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
 import { readPolicy } from "../../scripts/reinforcement-policy.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
+import { usd } from "../../scripts/doctor-format.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
@@ -819,7 +820,7 @@ test("the section order is fixed", () => {
   const out = renderReport([sum()], ctx());
   const order = [
     "# Doctor Report", "## Read this first", "## At a glance", "## Highlights",
-    "## Workload (observed)", "## Cost by version",
+    "## Overview", "## Trend summary", "## Workload (observed)", "## Cost by version",
     "## Cost by stage", "### Cost by stage (this window)", "## Outcome (observed)",
     "## Your culprits", "### Compliance",
     "## Your wins", "## Cost anomalies", "## Previously promoted — did it hold",
@@ -2336,4 +2337,161 @@ test("the issue draft quotes a cohort with unpriced requests as not compared", (
   assert.deepEqual(row.delta, { state: "not-compared", pct: null, reason: "unpriced" });
   const d = issueBody("partial-evidence-capture", summaries, tables, repoShape(process.cwd()));
   assert.ok(d.body.includes("- Δ vs previous: not compared (⚠ unpriced)"), "the draft quotes a delta the report withholds");
+});
+
+test("inferredUnknownDollars counts a forward-filled session whole and a record session's unattributed dollars once", () => {
+  assert.equal(inferredUnknownDollars([
+    sum({ id: "a", attributionSource: "forward-filled", costByStage: { "entry (stage unknown)": 3, execution: 2 } }),
+    sum({ id: "b", attributionSource: "record", costByStage: { execution: 4, unattributed: 1 } }),
+    sum({ id: "c", costByStage: { execution: 7 } }),
+  ]), 6);
+  assert.equal(inferredUnknownDollars([]), 0);
+});
+
+const overviewSection = (out) => out.slice(out.indexOf("## Overview"), out.indexOf("## Trend summary"));
+const trendSection = (out) => out.slice(out.indexOf("## Trend summary"), out.indexOf("## Workload (observed)"));
+// The cells of one markdown table in a section, row by row, from the row after its separator.
+const tableRows = (section, firstHeader) => {
+  const lines = section.split("\n");
+  const start = lines.findIndex((l) => l.startsWith(`| ${firstHeader} |`));
+  assert.ok(start !== -1, `no table headed ${firstHeader}`);
+  const rows = [];
+  for (let i = start + 2; i < lines.length && lines[i].startsWith("| "); i++) rows.push(lines[i].slice(2, -2).split(" | "));
+  return rows;
+};
+
+test("the Overview and the Trend summary follow Highlights and precede Workload, on every report", () => {
+  for (const summaries of [[], [sum()], COVERAGE_CORPUS]) {
+    const out = renderReport(summaries, ctx());
+    const at = (needle) => out.indexOf(needle);
+    assert.ok(at("<!-- devcycle:highlights -->") < at("## Overview"), "the Overview does not follow Highlights");
+    assert.ok(at("## Overview") < at("## Trend summary"));
+    assert.ok(at("## Trend summary") < at("## Workload (observed)"), "the Trend summary does not precede Workload");
+  }
+});
+
+test("the Overview states the corpus direction in the same words as the appendix line", () => {
+  const out = renderReport(COVERAGE_CORPUS, ctx());
+  const line = "Direction of travel: undetermined (no matched cohort spans two versions with n>=3)";
+  assert.ok(overviewSection(out).includes(line), "the Overview carries no direction line");
+  assert.ok(out.indexOf(line, out.indexOf("### Total cost by version")) !== -1, "the appendix lost its direction line");
+});
+
+test("a version with unpriced requests reads ⚠ and not compared in the Overview and in Cost by version alike", () => {
+  const out = renderReport(COVERAGE_CORPUS, ctx());
+  const row = tableRows(overviewSection(out), "Version").find((cells) => cells[0].includes("0.12.0"));
+  assert.equal(row[0], "⚠ 0.12.0");
+  assert.equal(row[5], "not compared (⚠ unpriced)");
+  assert.ok(row.slice(2, 4).every((cell) => cell.endsWith("⚠")), "the Total and Median cells carry no ⚠");
+  assert.ok(!/-100\.0%/.test(overviewSection(out)));
+  assert.match(out, /\| 0\.12\.0 \(inferred: [^|]+\| thorough \| [^\n]*\| not compared \(⚠ unpriced\) \| execution \|/);
+  assert.match(trendSection(out), /Trust: ⚠ Δ withheld for 0\.12\.0/);
+});
+
+test("an in-flight session is in no overview figure and is named in the reconciliation line", () => {
+  const out = renderReport([sum({ id: "a", costUSD: 1 }), sum({ id: "b", costUSD: 4, costByStage: { execution: 4 }, inFlight: true })], ctx());
+  assert.match(overviewSection(out), /Total sums to \$1\.00, the settled sessions' spend\. 1 in-flight session \(\$4\.00\) is not in these tables/);
+});
+
+// A settled corpus with no stage left unattributed: two versions of three sessions, one session whose
+// version cannot be read, and a stage that exists only in that session.
+const CROSS_CHECK_CORPUS = [
+  ...["a", "b", "c"].map((id) => sum({ id: `o${id}`, pluginVersion: "0.11.0", costUSD: 10, costByStage: { execution: 8, planning: 2 } })),
+  ...["a", "b", "c"].map((id) => sum({ id: `n${id}`, pluginVersion: "0.12.0", costUSD: 12, costByStage: { execution: 6, planning: 6 } })),
+  sum({ id: "u", pluginVersion: "unknown", costUSD: 5, costByStage: { "entry (stage unknown)": 5 } }),
+];
+
+test("every number the Overview prints is a number the report's own tables carry", () => {
+  const out = renderReport(CROSS_CHECK_CORPUS, ctx());
+  const json = buildJsonReport(CROSS_CHECK_CORPUS, ctx());
+  const section = overviewSection(out);
+
+  const versionRows = tableRows(section, "Version");
+  assert.equal(versionRows.length, json.version_cohorts.length);
+  for (const c of json.version_cohorts) {
+    const row = versionRows.find((cells) => cells[0] === (c.version === "unknown" ? "no version detectable" : c.version));
+    assert.ok(row, `no overview row for ${c.version}`);
+    assert.equal(row[1].split(" ")[0], String(c.sessions));
+    assert.equal(row[2], usd(c.total));
+    assert.equal(row[3], usd(c.medianPerSession));
+  }
+  const profile = json.version_profile_cohorts.find((r) => r.version === "0.12.0");
+  assert.equal(versionRows.find((cells) => cells[0] === "0.12.0")[4], usd(profile.medianCostPerCycle));
+
+  const stageRows = tableRows(section, "Stage");
+  for (const w of json.stage_window) {
+    const row = stageRows.find((cells) => cells[0] === w.stage);
+    assert.equal(row[1], usd(w.total));
+    assert.equal(row[2], `${w.pctOfWindow.toFixed(1)}%`);
+  }
+  for (const r of json.stage_by_version.rows) {
+    const cells = stageRows.find((cells) => cells[0] === r.stage);
+    json.stage_by_version.versions.forEach((v, i) => {
+      const cell = r.byVersion[v];
+      assert.equal(cells[3 + i], cell ? `${usd(cell.median)} (n=${cell.n})` : "—");
+    });
+    assert.equal(cells.at(-1), r.trend);
+  }
+
+  // The two Total columns and the stated total are one figure.
+  const dollars = (cell) => Number(cell.replace(/[^0-9.]/g, ""));
+  const total = json.overview.reconciliation.settledTotal;
+  assert.ok(Math.abs(versionRows.reduce((n, cells) => n + dollars(cells[2]), 0) - total) < 0.01);
+  assert.ok(Math.abs(stageRows.reduce((n, cells) => n + dollars(cells[1]), 0) - total) < 0.01);
+  assert.equal(total, json.stage_window.reduce((n, r) => n + r.total, 0));
+});
+
+test("--json's overview pre-renders the two blocks exactly as the markdown report carries them", () => {
+  const out = renderReport(CROSS_CHECK_CORPUS, ctx());
+  const { overview } = buildJsonReport(CROSS_CHECK_CORPUS, ctx());
+  assert.ok(out.includes(overview.markdown.overview));
+  assert.ok(out.includes(overview.markdown.trendSummary));
+  assert.ok(overview.markdown.overview.startsWith("## Overview\n"));
+  assert.ok(overview.markdown.trendSummary.startsWith("## Trend summary\n"));
+});
+
+test("--json carries the overview first, and every key the report had still has its name", () => {
+  const json = buildJsonReport([sum()], ctx());
+  assert.equal(Object.keys(json)[0], "overview");
+  for (const key of [
+    "pricesAsOf", "sessions", "candidates", "version_cohorts", "review_depth_cohorts", "direction_of_travel",
+    "inFlight", "cost_band", "version_profile_cohorts", "stage_by_version", "stage_window", "culprits", "wins",
+    "outer_loop", "verification", "compiled_knowledge", "cycles", "revert_skipped",
+  ]) assert.ok(key in json, `the report lost its ${key} key`);
+  assert.deepEqual(
+    Object.keys(json.overview),
+    ["scope", "bands", "reconciliation", "versions", "stages", "summary", "markdown"],
+  );
+  assert.deepEqual(Object.keys(json.overview.markdown), ["overview", "trendSummary"]);
+  assert.equal(json.overview.scope, "every devcycle-tagged session");
+  assert.equal(overviewFor([sum()]).scope, null);
+});
+
+test("the Overview names the spend no version column holds, in words that are not the report's own excluded-table line", () => {
+  const out = renderReport([sum({ id: "a" }), sum({ id: "b", pluginVersion: "unknown" })], ctx());
+  assert.match(overviewSection(out), /of settled spend\) sits in sessions with no detectable version/);
+  assert.ok(!overviewSection(out).includes("Excluded from this table"));
+  // A corpus with every version known has nothing to say here, and the report's clean-report rule holds.
+  assert.ok(!overviewSection(renderReport([sum()], ctx())).includes("sits in sessions with no detectable version"));
+  assert.ok(!renderReport([sum()], ctx()).includes("Excluded from this table"));
+});
+
+test("the Sessions cell covers every profile while $/cycle and the Δ are the main profile's", () => {
+  const corpus = [
+    ...["a", "b", "c"].map((id) => sum({ id: `t${id}`, pluginVersion: "0.11.0", profile: "thorough", costUSD: 6, costByStage: { execution: 6 } })),
+    sum({ id: "l1", pluginVersion: "0.11.0", profile: "lean", costUSD: 2, costByStage: { execution: 2 } }),
+    ...["a", "b", "c"].map((id) => sum({ id: `u${id}`, pluginVersion: "0.12.0", profile: "thorough", costUSD: 9, costByStage: { execution: 9 } })),
+  ];
+  const out = renderReport(corpus, ctx());
+  const json = buildJsonReport(corpus, ctx());
+  const section = overviewSection(out);
+  const row = tableRows(section, "Version").find((cells) => cells[0] === "0.11.0");
+  assert.equal(row[1], String(json.version_cohorts.find((c) => c.version === "0.11.0").sessions));
+  assert.equal(row[1], "4");
+  const thorough = json.version_profile_cohorts.find((r) => r.version === "0.11.0" && r.profile === "thorough");
+  assert.equal(row[4], usd(thorough.medianCostPerCycle));
+  assert.match(section, /Median \$\/cycle and Δ are the thorough profile's\. Other profiles: lean \(1 cycle, 1 session\)\./);
+  const newer = tableRows(section, "Version").find((cells) => cells[0] === "0.12.0");
+  const newerRow = json.version_profile_cohorts.find((r) => r.version === "0.12.0");
+  assert.equal(newer[5], `+${newerRow.delta.pct.toFixed(1)}%`);
 });

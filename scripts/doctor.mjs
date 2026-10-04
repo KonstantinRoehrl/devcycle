@@ -23,6 +23,7 @@ import { atomicWrite } from "./atomic-write.mjs";
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, unpricedMediansNote } from "./doctor-format.mjs";
+import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // docs/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -1682,6 +1683,7 @@ function mergeCounts(target, source) {
 // derivable from summaries alone.
 export function buildJsonReport(summaries, ctx = {}) {
   return {
+    overview: overviewFor(summaries, ctx.scope ?? null),
     pricesAsOf: PRICING.asOf,
     sessions: summaries.map((s) => ({
       ...s,
@@ -1909,9 +1911,12 @@ function main() {
   }
   const ctx = reportContext(args, result);
   if (args.json) {
+    // overview first: a consumer that truncates a long reply keeps it, where a key after the
+    // per-session rows would be cut off on a real corpus.
+    const { overview, ...rest } = buildJsonReport(result.sessions, ctx);
     console.log(
       JSON.stringify(
-        { window: result.window, totals: result.totals, ...buildJsonReport(result.sessions, ctx) },
+        { overview, window: result.window, totals: result.totals, ...rest },
         null,
         2,
       ),
@@ -2650,6 +2655,10 @@ const GLOSSES = {
     "Workload-adjusted, matched-cohort cost movement across the recency band (derived) — like-for-" +
     "like runs only, so session length or count can't masquerade as a cost change.",
   highlights: "The three things worth knowing before reading any table.",
+  overview:
+    "Cost per plugin version and per stage over settled sessions, in one place — how cost moved " +
+    "across releases and where it goes.",
+  "trend-summary": "Where cost is heading and how far to trust it, in three lines — every figure is the Overview's own.",
   "workload-observed":
     "The raw work each run did — files changed, changed lines, planned tasks, waves — straight " +
     "off the run's workload record (observed, never derived). A run with no workload record is " +
@@ -2711,6 +2720,62 @@ const GLOSSES = {
   "appendix-per-session-detail":
     "One line per session, so any figure above can be traced back to the sessions that produced it.",
 };
+
+// A section's heading, its one-line gloss and the blank lines around them. One owner, so the
+// report's own sections and the two blocks --json pre-renders cannot word a heading differently.
+function sectionLines(heading, glossKey) {
+  const gloss = GLOSSES[glossKey];
+  if (gloss === undefined) throw new Error(`missing gloss for ${glossKey}`);
+  return [heading, "", `*${gloss}*`, ""];
+}
+
+// What a session cost, as its stage buckets add up: the figure every stage table is built from.
+const sessionDollars = (s) => Object.values(s.costByStage ?? {}).reduce((a, b) => a + b, 0);
+
+// Dollars in sessions whose stage is a guess: every forward-filled session (the only producer of
+// "entry (stage unknown)" and "resumed (stage unknown)") plus the "unattributed" dollars of the
+// sessions attributed from a run record. Each dollar is counted once.
+export function inferredUnknownDollars(summaries) {
+  return summaries.reduce(
+    (n, s) => n + (s.attributionSource === "forward-filled" ? sessionDollars(s) : s.costByStage?.unattributed ?? 0),
+    0,
+  );
+}
+
+// What the overview is built from: the tables this report already builds, every one over the
+// SAME settled sessions. cohortTable, versionProfileTable and stageByVersionTable drop in-flight
+// sessions on their own but stageWindowTable does not, and /devcycle:doctor always runs inside a
+// session newer than the in-flight threshold — so feeding all four the settled set is what makes
+// the stage Total column and the version Total column the same figure.
+export function overviewInput(summaries, scope) {
+  const settled = summaries.filter((s) => !s.inFlight);
+  const inFlight = summaries.filter((s) => s.inFlight);
+  return {
+    scope,
+    cohorts: cohortTable(settled),
+    profileRows: versionProfileTable(settled),
+    stageByVersion: stageByVersionTable(settled),
+    stageWindow: stageWindowTable(settled, null),
+    direction: corpusDirectionOfTravel(runAggregates(settled)),
+    shares: { inferredUnknownDollars: inferredUnknownDollars(settled) },
+    inFlight: { sessions: inFlight.length, dollars: inFlight.reduce((n, s) => n + sessionDollars(s), 0) },
+    bands: { flatBandPct: FLAT_BAND_PCT, minTrendN: MIN_TREND_N, minCohort: MIN_COHORT },
+  };
+}
+
+// The overview object plus its two sections pre-rendered, heading and gloss included. The markdown
+// report prints the blocks as they are and --json carries them, so a reply built from either is
+// the same bytes — nothing downstream rebuilds a figure.
+export function overviewFor(summaries, scope = null) {
+  const overview = buildOverview(overviewInput(summaries, scope));
+  return {
+    ...overview,
+    markdown: {
+      overview: [...sectionLines("## Overview", "overview"), ...renderOverview(overview)].join("\n"),
+      trendSummary: [...sectionLines("## Trend summary", "trend-summary"), ...renderTrendSummary(overview)].join("\n"),
+    },
+  };
+}
 
 // Rendered in place of the two sections the playbook owns. playbooks/profiling-sessions.md
 // replaces exactly these two lines when it persists the report and changes nothing else, so the
@@ -2805,11 +2870,7 @@ export function renderReport(summaries, ctx) {
     compiledKnowledge: compiled = null, verification = null,
   } = ctx ?? {};
   const L = [];
-  const section = (heading, glossKey) => {
-    const gloss = GLOSSES[glossKey];
-    if (gloss === undefined) throw new Error(`missing gloss for ${glossKey}`);
-    L.push("", heading, "", `*${gloss}*`, "");
-  };
+  const section = (heading, glossKey) => L.push("", ...sectionLines(heading, glossKey));
   const agg = aggregate(summaries);
   const candidates = emitCandidates(summaries);
   // The run-level, workload-adjusted view (issue #114): run aggregates over the settled corpus,
@@ -2870,6 +2931,10 @@ export function renderReport(summaries, ctx) {
 
   section("## Highlights", "highlights");
   L.push(HIGHLIGHTS_ANCHOR);
+
+  // Both blocks are script-rendered end to end; playbooks/profiling-sessions.md carries them as they are.
+  const overview = overviewFor(summaries, scope);
+  L.push("", overview.markdown.overview, "", overview.markdown.trendSummary);
 
   // The raw observed workload family (spec C3): one row per run that wrote a workload record,
   // its raw counts straight off that record. Runs with no workload record have nothing to

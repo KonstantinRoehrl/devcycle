@@ -2948,3 +2948,117 @@ test("doctor completes at a small heap over a corpus larger than the heap", () =
     cleanup();
   }
 });
+
+// --- the overview, end to end through the CLI (#302) ---
+
+// Two plugin versions of three settled sessions each, one session whose version and stage cannot be
+// read, and one session written a minute ago, which is still in flight. A turn that reads a
+// playbook under .../devcycle/devcycle/<version>/ carries both signals at once: the stage
+// (the playbook's) and the plugin version (the path's).
+function overviewCorpusDir({ unpricedInNewest = false } = {}) {
+  const dir = makeTempDir("doctor-overview-");
+  const proj = join(dir, "-overview-project");
+  mkdirSync(proj, { recursive: true });
+  const read = (version) => ({
+    type: "tool_use", name: "Read",
+    input: { file_path: `/h/.claude/plugins/cache/devcycle/devcycle/${version}/playbooks/executing-waves.md` },
+  });
+  const session = (id, version, day, model = "claude-opus-5") => {
+    const lines = [
+      turn({ sessionId: id, timestamp: day, attributionSkill: "devcycle:cycle",
+        message: { model, usage: usage(10, 100, 1000, 20), content: version ? [read(version)] : [] } }),
+      turn({ sessionId: id, timestamp: day.replace("T10", "T11"), message: { model, usage: usage(10, 100, 1000, 20) } }),
+    ];
+    writeFileSync(join(proj, `${id}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  };
+  ["a", "b", "c"].forEach((x, i) => session(`sess-old-${x}`, "0.1.0", `2026-07-0${i + 1}T10:00:00.000Z`));
+  ["a", "b", "c"].forEach((x, i) => session(`sess-new-${x}`, "0.2.0", `2026-07-1${i + 1}T10:00:00.000Z`));
+  session("sess-nover", null, "2026-07-20T10:00:00.000Z");
+  session("sess-live", "0.2.0", new Date(Date.now() - 60_000).toISOString().replace(/\.\d+Z$/, ".000Z"));
+  if (unpricedInNewest) session("sess-unpriced", "0.2.0", "2026-07-14T10:00:00.000Z", "claude-mythos-9");
+  return dir;
+}
+
+const overviewRun = (flags, options) => {
+  const dir = overviewCorpusDir(options);
+  const { env, cwd, cleanup } = streamIsolation();
+  const res = run(["--dir", dir, ...flags], env, cwd);
+  rmSync(dir, { recursive: true, force: true });
+  cleanup();
+  return res;
+};
+
+const headingsInOrder = (stdout) =>
+  ["## Highlights", "## Overview", "## Trend summary", "## Workload (observed)"].map((h) => stdout.indexOf(h));
+
+for (const [name, flags] of [
+  ["a default run", []],
+  ["a windowed run", ["--since", "2026-07-01"]],
+  ["a run over every transcript", ["--all"]],
+]) {
+  test(`cli: ${name} prints the Overview and the Trend summary between Highlights and Workload`, () => {
+    const res = overviewRun(flags);
+    assert.equal(res.status, 0, res.stderr);
+    const at = headingsInOrder(res.stdout);
+    assert.ok(at.every((p) => p !== -1), `a heading is missing: ${at}`);
+    assert.deepEqual(at, [...at].sort((a, b) => a - b), "the headings are out of order");
+    assert.match(res.stdout, /^\| 0\.1\.0 \| 3 \| /m);
+    assert.match(res.stdout, /^- Trust: /m);
+  });
+}
+
+test("cli: a run with no findings still prints the Overview and the Trend summary", () => {
+  const flags = ["--since", "2026-07-01"];
+  const json = JSON.parse(overviewRun([...flags, "--json"]).stdout);
+  // Vacuity guard: the fixture has to be a zero-findings corpus, or this test is the default run again.
+  assert.equal(json.candidates.length, 0, `the fixture raised candidates: ${JSON.stringify(json.candidates)}`);
+  const res = overviewRun(flags);
+  assert.equal(res.status, 0, res.stderr);
+  assert.ok(headingsInOrder(res.stdout).every((p) => p !== -1));
+});
+
+test("cli: --depth and --drift print neither the Overview nor the Trend summary", () => {
+  const cwd = makeTempDir("doctor-cwd-");
+  writeFileSync(join(cwd, "CLAUDE.md"), "profile: standard\n", "utf8");
+  try {
+    const drift = run(["--drift", join(cwd, "CLAUDE.md")], { CLAUDE_PLUGIN_ROOT: "" }, cwd);
+    assert.equal(drift.status, 0, drift.stderr);
+    assert.doesNotMatch(drift.stdout, /## Overview|## Trend summary/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+  const { root, cwd: depthCwd } = depthFixture("sess-7777", [turnWithUsage("claude-opus-5", usage(0, 0, 152_340, 10))]);
+  try {
+    const res = run(["--depth"], { CLAUDE_CODE_SESSION_ID: "sess-7777", CLAUDE_DOCTOR_PROJECTS: root }, depthCwd);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /^depth: 152340 tokens/);
+    assert.doesNotMatch(res.stdout, /## Overview|## Trend summary/);
+  } finally {
+    for (const d of [root, depthCwd]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("cli --json: the overview comes first, reconciles with the totals, and carries the blocks the markdown run prints", () => {
+  const dir = overviewCorpusDir({ unpricedInNewest: true });
+  const { env, cwd, cleanup } = streamIsolation();
+  try {
+    const json = run(["--dir", dir, "--json"], env, cwd);
+    const markdown = run(["--dir", dir], env, cwd);
+    assert.equal(json.status, 0, json.stderr);
+    const out = JSON.parse(json.stdout);
+    assert.equal(Object.keys(out)[0], "overview");
+    const { reconciliation } = out.overview;
+    assert.equal(reconciliation.inFlightSessions, 1);
+    assert.ok(Math.abs(reconciliation.settledTotal + reconciliation.inFlightDollars - out.totals.costUSD) < 1e-3,
+      `${reconciliation.settledTotal} + ${reconciliation.inFlightDollars} != ${out.totals.costUSD}`);
+    // The unpriced session sits in the newest version: flagged, and its delta withheld.
+    const newest = out.overview.versions.rows.find((r) => r.version === "0.2.0");
+    assert.equal(newest.unpriced, true);
+    assert.equal(newest.delta.reason, "unpriced");
+    assert.ok(markdown.stdout.includes(out.overview.markdown.overview));
+    assert.ok(markdown.stdout.includes(out.overview.markdown.trendSummary));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  }
+});
