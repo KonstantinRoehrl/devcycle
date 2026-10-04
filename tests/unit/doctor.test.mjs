@@ -2,7 +2,7 @@
 // against synthetic transcripts. No real session transcript is ever read.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, chmodSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, appendFileSync, rmSync, copyFileSync, chmodSync, readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +20,7 @@ import {
   renderReport, complianceIssueBody, COMPLIANCE_TYPES, NoComplianceCandidateError,
   formatComplianceCandidate, parseDraftedMarkers, complianceType, COMPLIANCE_TITLES,
   ENTRY_TAGS, PLAYBOOK_STAGE, stageSignal, splitReason, provisionalCostUSD, excludedRequestsOf, excludedNote, stageByVersionTable,
+  owningSession, readRecords, inWindow, summarizeCorpus, groupFilesBySession, issueDraftLines, unpricedModelIssueBody, repoShape, UNPRICED_MODEL_SLUG,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 
@@ -2580,6 +2581,28 @@ test("resolveDepth: a model with no priced family refuses, naming the file that 
   );
 });
 
+test("resolveDepth: the last usage record wins and a torn trailing line is skipped", () => {
+  const { root, cwd, slug } = depthFixture("sess-5570", [
+    turnWithUsage("claude-opus-5", usage(10, 20, 30, 5)),
+    turnWithUsage("claude-opus-5", usage(100, 200, 300, 5)),
+    { type: "user", message: { content: "a later line that carries no usage" } },
+  ]);
+  // A transcript is appended live, so its last line may be cut mid-record. This one contains "usage",
+  // so it passes the cheap substring filter and reaches the parser, which must skip it.
+  appendFileSync(
+    join(slug, "sess-5570.jsonl"),
+    '{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":9999',
+  );
+  try {
+    const r = resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-5570", CLAUDE_DOCTOR_PROJECTS: root }, cwd);
+    assert.equal(r.depth, 600, "the last complete usage record (100+200+300) must win");
+    assert.equal(r.model, "claude-opus-5");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("cli: --depth names the family a provisional window was assumed from", () => {
   const { root, cwd } = depthFixture("sess-5569", [turnWithUsage("claude-opus-5-6", usage(100, 200, 300, 5))]);
   const out = spawnSync(process.execPath, [SCRIPT, "--depth"], {
@@ -2677,4 +2700,206 @@ test("stageByVersionTable: names the versions whose medians leave out excluded r
     withExcluded({ id: "a2", pluginVersion: "0.22.0" }, { "claude-mythos-9": 3 }),
   ]);
   assert.deepEqual(t.excludedVersions, ["0.22.0"]);
+});
+
+// --- corpus streaming: output must equal the pre-change whole-corpus pass ---
+
+const STREAM_SINCE = "2026-07-10T00:00:00.000Z";
+const STREAM_UNTIL = "2026-07-20T00:00:00.000Z";
+
+// sess-aaaa: devcycle, a main transcript plus a subagent transcript, plus one unpriced-model turn.
+// sess-bbbb: devcycle, previous window only. sess-cccc: not devcycle. sess-dddd: devcycle, straddles
+// the --since boundary. sess-eeee: devcycle, before both windows. Timestamps are fixed and --until is
+// pinned, because an unpinned previous window is relative to Date.now().
+function streamCorpusDir() {
+  const dir = makeTempDir("doctor-stream-");
+  const proj = join(dir, "-stream-project");
+  mkdirSync(join(proj, "sess-aaaa", "subagents"), { recursive: true });
+  const write = (rel, records) =>
+    writeFileSync(join(proj, rel), records.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  const t = (sessionId, timestamp, over = {}) => turn({ sessionId, timestamp, ...over });
+  write("sess-aaaa.jsonl", [
+    t("sess-aaaa", "2026-07-12T10:00:00.000Z", { attributionSkill: "devcycle:cycle" }),
+    t("sess-aaaa", "2026-07-13T10:00:00.000Z"),
+    t("sess-aaaa", "2026-07-13T11:00:00.000Z", {
+      message: { model: "claude-mythos-9", usage: usage(10, 100, 1000, 20) },
+    }),
+  ]);
+  write(join("sess-aaaa", "subagents", "agent-1.jsonl"), [
+    t("sess-aaaa", "2026-07-12T10:30:00.000Z", { isSidechain: true }),
+  ]);
+  write("sess-bbbb.jsonl", [
+    t("sess-bbbb", "2026-07-05T10:00:00.000Z", { attributionSkill: "devcycle:cycle" }),
+    t("sess-bbbb", "2026-07-06T10:00:00.000Z"),
+  ]);
+  write("sess-cccc.jsonl", [t("sess-cccc", "2026-07-12T10:00:00.000Z", { attributionSkill: "graphify" })]);
+  write("sess-dddd.jsonl", [
+    t("sess-dddd", "2026-07-08T10:00:00.000Z", { attributionSkill: "devcycle:cycle" }),
+    t("sess-dddd", "2026-07-15T10:00:00.000Z"),
+  ]);
+  write("sess-eeee.jsonl", [t("sess-eeee", "2026-06-01T10:00:00.000Z", { attributionSkill: "devcycle:cycle" })]);
+  return dir;
+}
+
+// The pre-change algorithm, kept here as the oracle: buffer every record of the corpus per owning
+// session, then summarize each window over that map.
+function wholeCorpusReference(files, args) {
+  const groups = new Map();
+  for (const file of files) {
+    const key = owningSession(file);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(...readRecords(file));
+  }
+  const window = (since, until) => {
+    const out = [];
+    for (const [key, records] of groups) {
+      if (!args.all && !isDevcycleSession(records)) continue;
+      const windowed = records.filter((r) => inWindow(r.timestamp, since, until));
+      if (windowed.length === 0) continue;
+      const sessionId = records.find((r) => r.sessionId)?.sessionId ?? key;
+      out.push(summarizeSession(sessionId, windowed, new Map()));
+    }
+    return out;
+  };
+  let previousSessions = null;
+  if (args.since) {
+    const sinceMs = new Date(args.since).getTime();
+    const span = new Date(args.until).getTime() - sinceMs;
+    previousSessions = window(new Date(sinceMs - span).toISOString(), args.since);
+  }
+  return { sessions: window(args.since, args.until), previousSessions };
+}
+
+const streamIsolation = () => {
+  const runsDir = makeTempDir("doctor-runs-");
+  const outDir = makeTempDir("doctor-out-");
+  const cwd = makeTempDir("doctor-cwd-");
+  return {
+    env: { DEVCYCLE_RUNS_DIR: runsDir, DEVCYCLE_DOCTOR_DIR: outDir },
+    cwd,
+    cleanup: () => {
+      for (const dir of [runsDir, outDir, cwd]) rmSync(dir, { recursive: true, force: true });
+    },
+  };
+};
+
+test("groupFilesBySession keys a subagent transcript to its owning session and holds paths only", () => {
+  const files = [
+    join("/p", "-proj", "sess-a.jsonl"),
+    join("/p", "-proj", "sess-a", "subagents", "agent-1.jsonl"),
+    join("/p", "-proj", "sess-b.jsonl"),
+  ];
+  const groups = groupFilesBySession(files);
+  assert.deepEqual([...groups.keys()], ["sess-a", "sess-b"]);
+  assert.deepEqual(groups.get("sess-a"), [files[0], files[1]]);
+  assert.deepEqual(groups.get("sess-b"), [files[2]]);
+});
+
+for (const [name, flags, expectedCurrent, expectPrevious] of [
+  ["default", [], 4, false],
+  ["--all", ["--all"], 5, false],
+  ["--since", ["--since", STREAM_SINCE, "--until", STREAM_UNTIL], 2, true],
+  ["--all --since", ["--all", "--since", STREAM_SINCE, "--until", STREAM_UNTIL], 3, true],
+]) {
+  test(`summarizeCorpus equals the whole-corpus pass: ${name}`, () => {
+    const dir = streamCorpusDir();
+    try {
+      const args = parseArgs(["--dir", dir, ...flags]);
+      const files = findTranscriptFiles(dir);
+      const expected = wholeCorpusReference(files, args);
+      // Vacuity guards: the fixture must actually exercise membership, the subagent merge and the
+      // straddling session, or equality of two empty-ish results would prove nothing.
+      assert.equal(expected.sessions.length, expectedCurrent);
+      assert.equal(expected.previousSessions !== null, expectPrevious);
+      if (expectPrevious) assert.equal(expected.previousSessions.length, 2);
+      assert.deepEqual(summarizeCorpus(files, args, new Map()), expected);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const [name, flags, expectedSessions] of [
+  ["default", [], 4],
+  ["--all", ["--all"], 5],
+  ["--since", ["--since", STREAM_SINCE, "--until", STREAM_UNTIL], 2],
+]) {
+  test(`cli --json: per-session output equals the whole-corpus reference's report sessions: ${name}`, () => {
+    const dir = streamCorpusDir();
+    const { env, cwd, cleanup } = streamIsolation();
+    try {
+      const res = run(["--dir", dir, "--json", ...flags], env, cwd);
+      assert.equal(res.status, 0, res.stderr);
+      const byId = (list) => [...list].sort((a, b) => a.id.localeCompare(b.id));
+      const args = parseArgs(["--dir", dir, ...flags]);
+      const expected = buildJsonReport(wholeCorpusReference(findTranscriptFiles(dir), args).sessions).sessions;
+      assert.equal(expected.length, expectedSessions);
+      assert.deepEqual(byId(JSON.parse(res.stdout).sessions), byId(JSON.parse(JSON.stringify(expected))));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+}
+
+test("cli --issue-body unpriced-model: the draft equals the one built from the whole-corpus reference", () => {
+  const dir = streamCorpusDir();
+  const { env, cwd, cleanup } = streamIsolation();
+  try {
+    const res = run(["--dir", dir, "--issue-body", UNPRICED_MODEL_SLUG], env, cwd);
+    assert.equal(res.status, 0, res.stderr);
+    const args = parseArgs(["--dir", dir]);
+    const reference = wholeCorpusReference(findTranscriptFiles(dir), args);
+    const draft = unpricedModelIssueBody(reference.sessions, repoShape(cwd));
+    assert.equal(res.stdout, issueDraftLines(draft).join("\n") + "\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  }
+});
+
+// --- the regression itself: a corpus larger than the heap, each session small ---
+
+// 250 sessions x 130 turns x ~1 KB of content is about 40 MB on disk. Calibrated while planning:
+// the whole-corpus pass aborted on it at every cap from 16 to 40 MB with --since.
+function writeHeapCorpus(dir, { sessions = 250, turnsPerSession = 130, padBytes = 1000 } = {}) {
+  const proj = join(dir, "-heap-project");
+  mkdirSync(proj, { recursive: true });
+  const pad = "x".repeat(padBytes);
+  for (let s = 0; s < sessions; s += 1) {
+    const sessionId = `sess-${String(s).padStart(12, "0")}`;
+    const lines = [];
+    for (let i = 0; i < turnsPerSession; i += 1) {
+      lines.push(JSON.stringify(turn({
+        sessionId,
+        timestamp: `2026-07-20T10:${String(i % 60).padStart(2, "0")}:00.000Z`,
+        attributionSkill: i === 0 ? "devcycle:cycle" : undefined,
+        message: { model: "claude-opus-5", usage: usage(10, 100, 1000, 20), content: [{ type: "text", text: pad }] },
+      })));
+    }
+    writeFileSync(join(proj, `${sessionId}.jsonl`), lines.join("\n") + "\n");
+  }
+}
+
+const HEAP_CAP_MB = 24;
+
+test("doctor completes at a small heap over a corpus larger than the heap", () => {
+  const dir = makeTempDir("doctor-heap-");
+  const { env, cwd, cleanup } = streamIsolation();
+  try {
+    writeHeapCorpus(dir);
+    const res = spawnSync(
+      process.execPath,
+      [`--max-old-space-size=${HEAP_CAP_MB}`, SCRIPT, "--dir", dir, "--since", "2026-07-01", "--json"],
+      // Stdout is ignored: a --json run over this corpus is far past spawnSync's default 1 MB buffer.
+      { cwd, stdio: ["ignore", "ignore", "pipe"], encoding: "utf8",
+        env: { ...process.env, CLAUDE_CODE_SESSION_ID: "", PATH: "", ...env } },
+    );
+    // An out-of-memory abort is { status: null, signal: "SIGABRT" } under spawnSync, not 134.
+    assert.equal(res.signal, null, `aborted by ${res.signal} at a ${HEAP_CAP_MB} MB heap`);
+    assert.equal(res.status, 0, res.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  }
 });

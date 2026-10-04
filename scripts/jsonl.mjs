@@ -12,6 +12,9 @@
 // a caller hashing these chunks gets the digest the previous whole-file hash.update(raw) produced
 // — including for a transcript that is not well-formed UTF-8, where the raw bytes and the decoded
 // text differ. `bytes` is the raw on-disk count, unaffected by decoding.
+//
+// `lineFilter(line) → boolean` skips a line before it is parsed, and a skipped line is not counted
+// in `records`.
 import { openSync, readSync, closeSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 
@@ -20,7 +23,7 @@ import { StringDecoder } from "node:string_decoder";
 // fixtures decoding wholly inside one chunk and passing while asserting nothing.
 export const CHUNK = 64 * 1024;
 
-export function eachRecord(file, visit, { onChunk } = {}) {
+export function eachRecord(file, visit, { onChunk, lineFilter } = {}) {
   let fd;
   try {
     fd = openSync(file, "r");
@@ -40,6 +43,9 @@ export function eachRecord(file, visit, { onChunk } = {}) {
 
   const offer = (line) => {
     if (!line.trim()) return true;
+    // Consulted on the whole reassembled line, before JSON.parse: a rejected line costs no parse and is
+    // not a record. This is what lets a caller keep a cheap substring skip without a whole-file string.
+    if (lineFilter && !lineFilter(line)) return true;
     let record;
     try {
       record = JSON.parse(line);

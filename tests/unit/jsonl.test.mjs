@@ -48,6 +48,46 @@ test("eachRecord reassembles a record split across a 64KB chunk boundary", () =>
   assert.deepEqual(seen, [70000, 2], "a record longer than one chunk must survive reassembly");
 });
 
+test("eachRecord skips lines the lineFilter rejects without parsing or counting them", () => {
+  // Every line is valid JSON, so a skipped line is indistinguishable from a malformed one only if the
+  // filter did not run: the rejected record would otherwise be visited and counted.
+  const file = write("s.jsonl", `{"keep":1}\n{"drop":2}\n{"keep":3}\n`);
+  const seen = [];
+  const out = eachRecord(
+    file,
+    (r) => { seen.push(r.keep); },
+    { lineFilter: (line) => line.includes('"keep"') },
+  );
+  assert.deepEqual(seen, [1, 3]);
+  assert.equal(out.records, 2, "a rejected line is not a record");
+  assert.equal(out.stopped, false);
+});
+
+test("eachRecord hands the lineFilter whole reassembled lines across a chunk boundary", () => {
+  const filler = "x".repeat(70000);
+  const first = `{"keep":"${filler}"}`;
+  const file = write("s.jsonl", `${first}\n{"drop":2}\n{"keep":3}\n`);
+  assert.ok(!readFileSync(file).subarray(0, CHUNK).includes(0x0a),
+    "the first chunk must contain no line terminator, or the line never spans a boundary");
+  const lengths = [];
+  const seen = [];
+  eachRecord(
+    file,
+    (r) => { seen.push(typeof r.keep === "string" ? r.keep.length : r.keep); },
+    { lineFilter: (line) => { lengths.push(line.length); return line.includes('"keep"'); } },
+  );
+  assert.deepEqual(lengths, [first.length, '{"drop":2}'.length, '{"keep":3}'.length],
+    "the filter must see each complete line, never a chunk-sized fragment");
+  assert.deepEqual(seen, [70000, 3]);
+});
+
+test("eachRecord does not call the lineFilter for a blank line", () => {
+  const file = write("s.jsonl", `{"keep":1}\n\n   \n{"keep":2}\n`);
+  let calls = 0;
+  eachRecord(file, () => {}, { lineFilter: () => { calls += 1; return true; } });
+  assert.equal(calls, 2);
+});
+
 test("eachRecord reassembles a multi-byte character split across a chunk boundary", () => {
   // The character has to START on the last byte of a chunk: one that merely sits somewhere in the
   // second chunk is decoded whole even by a per-chunk buf.toString("utf8"), which is the defect
