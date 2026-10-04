@@ -22,7 +22,7 @@ import { atomicWrite } from "./atomic-write.mjs";
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 import { eachRecord } from "./jsonl.mjs";
-import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, unpricedMediansNote } from "./doctor-format.mjs";
+import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, withInferredNote, unpricedMediansNote } from "./doctor-format.mjs";
 import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
@@ -2964,7 +2964,7 @@ export function renderReport(summaries, ctx) {
       "$/main-turn (derived)", "$/sub-turn (derived)", "Turns/task (derived)", "Δ vs previous (derived)",
       "Priciest stage (derived)", "Median depth (derived)", "Quality (derived)", "Shipped (observed)"],
     versionProfileTable(summaries, promotions).map((r) => [
-      r.inferred ? `${r.version} (inferred: ${r.inferred})` : r.version,
+      withInferredNote(r.version, r),
       r.profile,
       cohortSessionsText(r, MIN_COHORT),
       r.cycles,
@@ -3539,15 +3539,15 @@ export function issueBody(slug, summaries, tables, shape) {
       ? events.map(([k, n]) => `- ${k} ×${n}`)
       : ["- none recorded for this culprit"]),
     "",
-    // The cohort figures carry the same qualifier the report's Cost-by-version table carries for
-    // this row, so a two-session cohort cannot be quoted bare in an issue filed from a report
-    // that declines to stand behind it.
+    // Each figure the report's Cost-by-version table qualifies for this row is qualified here too:
+    // the Sessions count for low confidence, the median and the Δ for unpriced requests. A cohort
+    // the report declines to stand behind is never quoted as a bare number in an issue filed from it.
     row ? "Cohort, as the report renders it:" : "Cohort: unavailable (no settled cohort row for this culprit)",
     ...(row
       ? [
           `- Sessions: ${cohortSessionsText(row, MIN_COHORT)}`,
           `- Cycles: ${row.cycles}`,
-          `- Median $/cycle: ${usd(row.medianCostPerCycle)}`,
+          `- Median $/cycle: ${withInferredNote(usd(row.medianCostPerCycle), row)}`,
           `- Priciest stage: ${row.priciestStage ?? "unrecorded"}`,
           `- Δ vs previous: ${deltaText(row.delta)}`,
         ]

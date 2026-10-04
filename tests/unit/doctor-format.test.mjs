@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  usd, markdownTable, deltaText, cohortSessionsText, directionLine, directionPhrase,
+  usd, markdownTable, deltaText, cohortSessionsText, withInferredNote, directionLine, directionPhrase,
   unpricedMediansNote,
 } from "../../scripts/doctor-format.mjs";
 
@@ -40,6 +40,14 @@ test("cohortSessionsText marks a low-confidence row with the band it was judged 
   assert.equal(cohortSessionsText({ sessions: 2, lowConfidence: true }, 3), "2 (low confidence: n<3)");
   assert.equal(cohortSessionsText({ sessions: 2, lowConfidence: true }, 5), "2 (low confidence: n<5)");
   assert.equal(cohortSessionsText({ sessions: 7, lowConfidence: false }, 3), "7");
+});
+
+test("withInferredNote appends the row's own note, and leaves a row with none bare", () => {
+  const note = "9 requests on a model with no exact price excluded";
+  assert.equal(withInferredNote("0.12.0", { inferred: note }), `0.12.0 (inferred: ${note})`);
+  assert.equal(withInferredNote(usd(0.2), { inferred: note }), `$0.2000 (inferred: ${note})`);
+  assert.equal(withInferredNote("0.12.0", { inferred: null }), "0.12.0");
+  assert.equal(withInferredNote("0.12.0", {}), "0.12.0");
 });
 
 test("directionLine states a determined direction with its evidence", () => {

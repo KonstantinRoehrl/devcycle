@@ -316,8 +316,8 @@ export function renderOverview(overview) {
         : ""),
   ));
   const unknownProfile =
-    "Profile `unknown` is a session with no run record, which forms a one-session cycle, so its $/cycle is really per-session, " +
-    "or a run record that names no profile.";
+    "Profile `unknown` is either a session with no run record (which forms a one-session cycle, " +
+    "so its $/cycle is really per-session) or a run record that names no profile.";
   L.push(...note(
     versions.main_profile === "unknown"
       ? `${unknownProfile} Every cycle here is under it, so Median $/cycle is a per-session median.`

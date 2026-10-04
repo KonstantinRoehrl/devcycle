@@ -2322,9 +2322,10 @@ test("the culprit table, whose rows carry no unpriced count, is not affected by 
   assert.ok(rows.every((r) => r.delta.reason === undefined));
 });
 
-// The issue draft quotes the Δ the Cost-by-version table renders, so a cohort whose requests include an
-// unpriced model must reach a filed issue as "not compared", never as a bare percentage.
-test("the issue draft quotes a cohort with unpriced requests as not compared", () => {
+// The issue draft quotes the Δ and the median the Cost-by-version table renders, so a cohort whose
+// requests include an unpriced model must reach a filed issue as "not compared" with its median
+// qualified the way the table qualifies the row, never as a bare percentage or a bare dollar figure.
+test("the issue draft quotes a cohort with unpriced requests as not compared, with its median qualified", () => {
   const older = [1, 2, 3].map((n) => sum({ id: `o${n}`, pluginVersion: "0.0.1", costUSD: 2, costByStage: { execution: 2 } }));
   const newer = [1, 2, 3].map((n) => sum({
     id: `s${n}`, pluginVersion: DRAFT_VERSION, costUSD: 4, costByStage: { execution: 4 }, unpriced: unpricedModel,
@@ -2337,6 +2338,24 @@ test("the issue draft quotes a cohort with unpriced requests as not compared", (
   assert.deepEqual(row.delta, { state: "not-compared", pct: null, reason: "unpriced" });
   const d = issueBody("partial-evidence-capture", summaries, tables, repoShape(process.cwd()));
   assert.ok(d.body.includes("- Δ vs previous: not compared (⚠ unpriced)"), "the draft quotes a delta the report withholds");
+
+  // The median line carries the same `inferred` text the report's Version cell carries for this row.
+  const medianLine = (body) => body.split("\n").find((l) => l.startsWith("- Median $/cycle:"));
+  assert.ok(row.inferred, "the fixture cohort carries no unpriced qualifier, so nothing below would be checked");
+  const report = renderReport(summaries, ctx());
+  assert.ok(
+    report.slice(report.indexOf("## Cost by version"), report.indexOf("## Cost by stage"))
+      .includes(`${DRAFT_VERSION} (inferred: ${row.inferred})`),
+    "the report no longer qualifies this row, so the draft has nothing to match",
+  );
+  assert.equal(medianLine(d.body), `- Median $/cycle: ${usd(row.medianCostPerCycle)} (inferred: ${row.inferred})`);
+
+  // A fully priced cohort's median line stays bare.
+  const pricedTables = draftTables();
+  const pricedRow = pricedTables.versionProfile.find((r) => r.version === DRAFT_VERSION && r.profile === "thorough");
+  assert.equal(pricedRow.inferred, null);
+  const priced = issueBody("partial-evidence-capture", draftSummaries, pricedTables, repoShape(process.cwd()));
+  assert.equal(medianLine(priced.body), `- Median $/cycle: ${usd(pricedRow.medianCostPerCycle)}`);
 });
 
 test("inferredUnknownDollars counts a forward-filled session whole and a record session's unattributed dollars once", () => {

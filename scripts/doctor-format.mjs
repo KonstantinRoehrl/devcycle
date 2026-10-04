@@ -35,6 +35,12 @@ export const deltaText = (d) =>
 export const cohortSessionsText = (row, minCohort) =>
   row.lowConfidence ? `${row.sessions} (low confidence: n<${minCohort})` : String(row.sessions);
 
+// A label or figure of a cohort row, followed by the row's own `inferred` note when it has one.
+// The report's Version cell and the issue draft's median line both derive from it, so a cohort
+// whose figures leave out unpriced requests is never quoted bare in one place and qualified in
+// the other.
+export const withInferredNote = (text, row) => (row.inferred ? `${text} (inferred: ${row.inferred})` : text);
+
 // What the corpus direction of travel says, as a phrase both the direction line and the trend
 // summary embed. "undetermined" is the word for a corpus that cannot say: never a guessed
 // direction, never "flat" by default (#44).

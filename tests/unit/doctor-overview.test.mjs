@@ -142,7 +142,11 @@ test("an all-unknown-profile corpus is headed unknown profile and says the figur
   });
   assert.match(text(overview), /\| Median \$\/cycle \(unknown profile\) \|/);
   assert.match(text(overview), /Median \$\/cycle is a per-session median/);
-  assert.match(text(overview), /or a run record that names no profile/);
+  // One sentence naming both things the profile covers; a tail-only match let the clauses drift apart.
+  assert.ok(text(overview).includes(
+    "Profile `unknown` is either a session with no run record (which forms a one-session cycle, " +
+      "so its $/cycle is really per-session) or a run record that names no profile.",
+  ));
 });
 
 test("the main profile's cycles and delta fill the version row; other profiles are named in a footnote", () => {
@@ -356,6 +360,19 @@ test("steadily rising needs a trend of up, three reliable cells and no reliable 
   assert.deepEqual(rising({ "0.1.0": cell(1), "0.2.0": cell(50, 1), "0.3.0": cell(3) }), []);
   // The pair is judged across a skipped cell: 0.1.0 → 0.3.0 falls here.
   assert.deepEqual(rising({ "0.1.0": cell(10), "0.2.0": cell(50, 1), "0.3.0": cell(9) }), []);
+});
+
+// The thin-middle-cell assertion above also trips the adjacent-dip rule (50 then 3), so it would
+// stay empty with the n>=3 gate deleted. These cells climb with no dip, so only the gate holds
+// the thin one out: remove it and each of the thin series below reads as steadily rising.
+test("a cell below n=3 anchors no trend: the gate, not the dip rule, keeps a thin cell out of a rising series", () => {
+  const rising = (cells) => buildOverview(risingInput(cells)).stages.notes.risingStages;
+  // The control: the same climb with every cell at n=3, the smallest n the gate admits, rises.
+  assert.deepEqual(rising({ "0.1.0": cell(1, 3), "0.2.0": cell(2, 3), "0.3.0": cell(3, 3) }), ["execution"]);
+  // One cell short of n=3 leaves two reliable cells, in any position.
+  assert.deepEqual(rising({ "0.1.0": cell(1, 3), "0.2.0": cell(2, 2), "0.3.0": cell(3, 3) }), []);
+  assert.deepEqual(rising({ "0.1.0": cell(1, 2), "0.2.0": cell(2, 3), "0.3.0": cell(3, 3) }), []);
+  assert.deepEqual(rising({ "0.1.0": cell(1, 3), "0.2.0": cell(2, 3), "0.3.0": cell(3, 2) }), []);
 });
 
 test("a stage whose trend is not up is never steadily rising, however its cells climb", () => {
