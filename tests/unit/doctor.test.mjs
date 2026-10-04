@@ -2770,10 +2770,18 @@ function wholeCorpusReference(files, args) {
   return { sessions: window(args.since, args.until), previousSessions };
 }
 
-const streamIsolation = () => ({
-  env: { DEVCYCLE_RUNS_DIR: makeTempDir("doctor-runs-"), DEVCYCLE_DOCTOR_DIR: makeTempDir("doctor-out-") },
-  cwd: makeTempDir("doctor-cwd-"),
-});
+const streamIsolation = () => {
+  const runsDir = makeTempDir("doctor-runs-");
+  const outDir = makeTempDir("doctor-out-");
+  const cwd = makeTempDir("doctor-cwd-");
+  return {
+    env: { DEVCYCLE_RUNS_DIR: runsDir, DEVCYCLE_DOCTOR_DIR: outDir },
+    cwd,
+    cleanup: () => {
+      for (const dir of [runsDir, outDir, cwd]) rmSync(dir, { recursive: true, force: true });
+    },
+  };
+};
 
 test("groupFilesBySession keys a subagent transcript to its owning session and holds paths only", () => {
   const files = [
@@ -2811,26 +2819,32 @@ for (const [name, flags, expectedCurrent, expectPrevious] of [
   });
 }
 
-test("cli --json: per-session output equals the whole-corpus reference's report sessions", () => {
-  const dir = streamCorpusDir();
-  const { env, cwd } = streamIsolation();
-  try {
-    const flags = ["--since", STREAM_SINCE, "--until", STREAM_UNTIL];
-    const res = run(["--dir", dir, "--json", ...flags], env, cwd);
-    assert.equal(res.status, 0, res.stderr);
-    const byId = (list) => [...list].sort((a, b) => a.id.localeCompare(b.id));
-    const args = parseArgs(["--dir", dir, ...flags]);
-    const expected = buildJsonReport(wholeCorpusReference(findTranscriptFiles(dir), args).sessions).sessions;
-    assert.equal(expected.length, 2);
-    assert.deepEqual(byId(JSON.parse(res.stdout).sessions), byId(JSON.parse(JSON.stringify(expected))));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+for (const [name, flags, expectedSessions] of [
+  ["default", [], 4],
+  ["--all", ["--all"], 5],
+  ["--since", ["--since", STREAM_SINCE, "--until", STREAM_UNTIL], 2],
+]) {
+  test(`cli --json: per-session output equals the whole-corpus reference's report sessions: ${name}`, () => {
+    const dir = streamCorpusDir();
+    const { env, cwd, cleanup } = streamIsolation();
+    try {
+      const res = run(["--dir", dir, "--json", ...flags], env, cwd);
+      assert.equal(res.status, 0, res.stderr);
+      const byId = (list) => [...list].sort((a, b) => a.id.localeCompare(b.id));
+      const args = parseArgs(["--dir", dir, ...flags]);
+      const expected = buildJsonReport(wholeCorpusReference(findTranscriptFiles(dir), args).sessions).sessions;
+      assert.equal(expected.length, expectedSessions);
+      assert.deepEqual(byId(JSON.parse(res.stdout).sessions), byId(JSON.parse(JSON.stringify(expected))));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+}
 
 test("cli --issue-body unpriced-model: the draft equals the one built from the whole-corpus reference", () => {
   const dir = streamCorpusDir();
-  const { env, cwd } = streamIsolation();
+  const { env, cwd, cleanup } = streamIsolation();
   try {
     const res = run(["--dir", dir, "--issue-body", UNPRICED_MODEL_SLUG], env, cwd);
     assert.equal(res.status, 0, res.stderr);
@@ -2840,6 +2854,7 @@ test("cli --issue-body unpriced-model: the draft equals the one built from the w
     assert.equal(res.stdout, issueDraftLines(draft).join("\n") + "\n");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    cleanup();
   }
 });
 
@@ -2870,7 +2885,7 @@ const HEAP_CAP_MB = 24;
 
 test("doctor completes at a small heap over a corpus larger than the heap", () => {
   const dir = makeTempDir("doctor-heap-");
-  const { env, cwd } = streamIsolation();
+  const { env, cwd, cleanup } = streamIsolation();
   try {
     writeHeapCorpus(dir);
     const res = spawnSync(
@@ -2885,5 +2900,6 @@ test("doctor completes at a small heap over a corpus larger than the heap", () =
     assert.equal(res.status, 0, res.stderr);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    cleanup();
   }
 });
