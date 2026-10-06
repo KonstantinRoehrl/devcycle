@@ -174,6 +174,12 @@ test("an all-unknown-profile corpus is headed unknown profile and says the figur
     "Profile `unknown` is either a session with no run record (which forms a one-session cycle, " +
       "so its $/cycle is really per-session) or a run record that names no profile.",
   ));
+  // A detectable version whose every cycle is under unknown keeps the per-session wording whole; only
+  // a corpus with no detectable version says no figure is computed.
+  assert.ok(text(overview).includes(
+    "or a run record that names no profile. Every cycle here is under it, so Median $/cycle is a per-session median._",
+  ));
+  assert.doesNotMatch(text(overview), /No version is detectable/);
 });
 
 test("the main profile's cycles and delta fill the version row; other profiles are named in a footnote", () => {
@@ -291,29 +297,43 @@ test("a version unpriced only in a profile that has no row beside the main one h
   assert.doesNotMatch(text(overview), /via another profile/);
 });
 
-test("the 'via another profile' footnote appears only when the main profile's delta is a compared percentage", () => {
-  // 0.2.0 is unpriced only in lean; the main (standard) row's own delta decides whether "that Δ is the
-  // profile's own" is true.
-  const withMainDelta = (mainRow, previous = profileRow("0.1.0", "standard", { cycles: 9 })) => text(build({
-    cohorts: [cohort("0.1.0"), cohort("0.2.0", { excluded: 2 })],
-    profileRows: [previous, mainRow, profileRow("0.2.0", "lean", { cycles: 1, excluded: 2 })],
-    stageByVersion: { versions: ["0.1.0", "0.2.0"], excludedVersions: [], rows: [] },
+test("a version unpriced only outside the main profile is footnoted whatever its own delta, and the next version's delta against it is a real percentage", () => {
+  // 0.2.0 is unpriced only in lean, so its standard row holds none of those requests: they withhold no
+  // standard-profile Δ to or from it, and 0.3.0's Δ against it is compared.
+  const threeVersions = (ownDelta, previous = profileRow("0.1.0", "standard", { cycles: 9 })) => text(build({
+    cohorts: [cohort("0.1.0", { excluded: previous.excluded }), cohort("0.2.0", { excluded: 2 }), cohort("0.3.0")],
+    profileRows: [
+      previous,
+      profileRow("0.2.0", "standard", { cycles: 9, delta: ownDelta }),
+      profileRow("0.2.0", "lean", { cycles: 1, excluded: 2 }),
+      profileRow("0.3.0", "standard", { cycles: 9, medianCostPerCycle: 15, delta: { state: "compared", pct: 50 } }),
+    ],
+    stageByVersion: { versions: ["0.1.0", "0.2.0", "0.3.0"], excludedVersions: [], rows: [] },
   }));
-  const main = (over) => profileRow("0.2.0", "standard", { cycles: 9, ...over });
-  assert.match(withMainDelta(main({ delta: { state: "compared", pct: 10 } })), /⚠ via another profile: 0\.2\.0/);
-  // The Δ is withheld because the previous version's main-profile row is unpriced.
-  const withheld = withMainDelta(
-    main({ delta: { state: "not-compared", pct: null, reason: "unpriced" } }),
-    profileRow("0.1.0", "standard", { cycles: 9, excluded: 1 }),
-  );
-  assert.match(withheld, /^\| ⚠ 0\.2\.0 \|.* \| not compared \(⚠ unpriced\) \| — \|$/m);
-  assert.doesNotMatch(withheld, /via another profile/);
-  const lowConfidence = withMainDelta(main({ lowConfidence: true, sessions: 2, delta: { state: "not-compared", pct: null } }));
-  assert.match(lowConfidence, /^\| ⚠ 0\.2\.0 \|.* \| not compared \| — \|$/m);
-  assert.doesNotMatch(lowConfidence, /via another profile/);
-  const firstSeen = withMainDelta(main(), profileRow("0.1.0", "lean", { cycles: 1 }));
-  assert.match(firstSeen, /^\| ⚠ 0\.2\.0 \|.* \| first seen \| — \|$/m);
-  assert.doesNotMatch(firstSeen, /via another profile/);
+  const cases = {
+    "first seen": threeVersions({ state: "first-seen", pct: null }, profileRow("0.1.0", "lean", { cycles: 1 })),
+    // Withheld because the previous version's main-profile row is unpriced, not because of 0.2.0's own requests.
+    "not compared \\(⚠ unpriced\\)": threeVersions(
+      { state: "not-compared", pct: null, reason: "unpriced" },
+      profileRow("0.1.0", "standard", { cycles: 9, excluded: 1 }),
+    ),
+    "\\+25\\.0%": threeVersions({ state: "compared", pct: 25 }),
+  };
+  for (const [ownDelta, out] of Object.entries(cases)) {
+    assert.match(out, new RegExp(`^\\| ⚠ 0\\.2\\.0 \\|.* \\| ${ownDelta} \\| — \\|$`, "m"));
+    assert.match(out, /^\| 0\.3\.0 \|.* \| \+50\.0% \| — \|$/m);
+    assert.ok(out.includes(
+      "_⚠ via another profile: 0.2.0 — the unpriced requests sit outside the standard profile, " +
+        "so they withhold no standard-profile Δ to or from it._",
+    ), `no 'via another profile' footnote when 0.2.0's own Δ is ${ownDelta}`);
+    // The legend scopes the withheld Δ to a profile row holding the unpriced requests, so 0.3.0's
+    // compared Δ against ⚠ 0.2.0 does not contradict it.
+    assert.ok(out.includes(
+      "_⚠ marks a version with requests on a model with no exact price: they are left out of its dollar " +
+        "figures, and any Δ that compares a profile row holding them is withheld._",
+    ));
+    assert.doesNotMatch(out, /so that Δ is the profile's own|any Δ that compares against it/);
+  }
 });
 
 test("the trust line counts every cell that carries a low-n mark, and no cell that does not", () => {
@@ -380,7 +400,9 @@ test("the dearest version is the one with the highest total, and a different hig
   });
   const { dearest } = overview.versions;
   assert.equal(dearest.version, "0.2.0");
-  assert.deepEqual(dearest.medianLeader, { version: "0.1.0", medianPerSession: 100 });
+  assert.deepEqual(dearest.medianLeader, {
+    version: "0.1.0", medianPerSession: 100, unpriced: false, sessions: 3, sessionsLowConfidence: false,
+  });
   assert.match(text(overview), /Dearest version: 0\.2\.0 \(\$800\.00\); highest median \$\/session: 0\.1\.0 \(\$100\.00\)/);
   assert.equal(build({ cohorts: [cohort("unknown")] }).versions.dearest, null);
 });
@@ -403,17 +425,53 @@ test("the highest median is taken over every known version, so a thin version wi
       cohort("0.2.0", { sessions: 1, total: 60, medianPerSession: 60 }),
     ],
   });
-  assert.deepEqual(thinLeader.versions.dearest.medianLeader, { version: "0.2.0", medianPerSession: 60 });
-  assert.match(text(thinLeader), /Dearest version: 0\.1\.0 \(\$800\.00\); highest median \$\/session: 0\.2\.0 \(\$60\.00\)/);
+  assert.equal(thinLeader.versions.dearest.medianLeader.version, "0.2.0");
+  assert.match(text(thinLeader), /Dearest version: 0\.1\.0 \(\$800\.00\); highest median \$\/session: 0\.2\.0 \(\$60\.00, /);
 });
 
-test("a corpus with no detectable version is headed unknown profile and never claims a main profile's figures", () => {
-  const overview = build({ cohorts: [cohort("unknown")] });
-  assert.equal(overview.versions.main_profile, null);
-  const out = text(overview);
-  assert.match(out, /\| Median \$\/cycle \(unknown profile\) \|/);
-  assert.match(out, /Median \$\/cycle is a per-session median/);
-  assert.doesNotMatch(out, /main profile's/);
+test("the highest median $/session carries the ⚠ and the low-confidence mark its own table cells carry", () => {
+  const leaderLine = (leader) => text(build({
+    cohorts: [cohort("0.1.0", { sessions: 10, total: 200, medianPerSession: 20 }), cohort("0.2.0", leader)],
+  })).split("\n").find((line) => line.startsWith("Dearest version:"));
+  // The control: a priced leader at the cohort minimum is named bare.
+  assert.equal(
+    leaderLine({ sessions: 3, total: 90, medianPerSession: 30 }),
+    "Dearest version: 0.1.0 ($200.00); highest median $/session: 0.2.0 ($30.00)",
+  );
+  assert.equal(
+    leaderLine({ sessions: 3, total: 90, medianPerSession: 30, excluded: 3 }),
+    "Dearest version: 0.1.0 ($200.00); highest median $/session: 0.2.0 ($30.00 ⚠)",
+  );
+  // The mark is the Sessions cell's own wording, so the line and the table cannot disagree on n.
+  assert.equal(
+    leaderLine({ sessions: 1, total: 83.7, medianPerSession: 83.7 }),
+    "Dearest version: 0.1.0 ($200.00); highest median $/session: 0.2.0 ($83.70, sessions: 1 (low confidence: n<3))",
+  );
+  assert.equal(
+    leaderLine({ sessions: 1, total: 83.7, medianPerSession: 83.7, excluded: 1 }),
+    "Dearest version: 0.1.0 ($200.00); highest median $/session: 0.2.0 ($83.70 ⚠, sessions: 1 (low confidence: n<3))",
+  );
+});
+
+test("a corpus with no detectable version is headed unknown profile and says no per-version figure is computed", () => {
+  // Without run records every cycle is under unknown; with them, the runs here name standard. Either
+  // way no version row exists to take a $/cycle or Δ from.
+  const corpora = {
+    "no run records": [profileRow("unknown", "unknown", { sessions: 3, cycles: 3 })],
+    "run records naming standard": [
+      profileRow("unknown", "standard", { sessions: 2, cycles: 1 }),
+      profileRow("unknown", "unknown", { sessions: 1, cycles: 1 }),
+    ],
+  };
+  for (const [corpus, profileRows] of Object.entries(corpora)) {
+    const overview = build({ cohorts: [cohort("unknown", { sessions: 3 })], profileRows });
+    assert.equal(overview.versions.main_profile, null, corpus);
+    const out = text(overview);
+    assert.match(out, /\| Median \$\/cycle \(unknown profile\) \|/);
+    assert.match(out, /^\| no version detectable \| 3 \|.* \| — \| — \| — \|$/m);
+    assert.ok(out.includes("No version is detectable, so no per-version Median $/cycle or Δ is computed."), corpus);
+    assert.doesNotMatch(out, /Every cycle here is under it|Median \$\/cycle is a per-session median|main profile's/, corpus);
+  }
 });
 
 test("quality renders rounds per task and retries over tasks, and an em dash with no run record", () => {
@@ -695,9 +753,9 @@ test("buildOverview and the renderers are deterministic and leave their input un
 });
 
 // The module's code with its comments removed: a comment may name the very things the code must not
-// use. A `//` counts as a comment only at a line start or after whitespace, so one inside a URL
-// string (`https://`) cannot swallow the code after it.
-const codeOf = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+// use. Only the module's own comment style is dropped, whole-line `//` comments and `/* */` blocks
+// that open a line, so a `//` or `/*` inside a string can never swallow the code after it.
+const codeOf = (source) => source.replace(/^[ \t]*\/\*[\s\S]*?\*\//gm, "").replace(/^[ \t]*\/\/.*$/gm, "");
 const IMPURE = /\b(Date|process|readFileSync|Math\.random)\b/;
 
 test("doctor-overview imports only doctor-format and reads no file, clock or environment", () => {
@@ -707,6 +765,10 @@ test("doctor-overview imports only doctor-format and reads no file, clock or env
   // The stripping keeps code and drops only comments, or the check below would pass vacuously.
   assert.match(codeOf("// a process step\n/* a Date */ const at = Date.now();"), IMPURE);
   assert.doesNotMatch(codeOf("// one process step over the rows\n/* no Date here */\nconst x = 1;"), IMPURE);
+  // A `//` or `/*` inside a string is not a comment, so the clock call after it stays in the code.
+  assert.match(codeOf("const note = (t) => [\"\", `_${t} // see below_`, String(Date.now())];"), IMPURE);
+  assert.match(codeOf("const glob = \"dir/*\"; const at = process.env.X; const end = \"*/\";"), IMPURE);
+  assert.doesNotMatch(codeOf("  // stamps nothing with Date.now()\nconst x = 1;"), IMPURE);
   assert.ok(codeOf(source).includes("export function buildOverview("), "stripping comments removed code");
   assert.doesNotMatch(codeOf(source), IMPURE);
   assert.ok(!source.startsWith("#!"));
