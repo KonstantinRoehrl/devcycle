@@ -39,6 +39,7 @@ one or retype a figure: when a block is absent from a report (a script too old f
 
 The reply runs Highlights, the Overview, the ranked findings and systemic recommendations, the Trend
 summary — relocated here verbatim from its place in the report — then the Actionability question.
+Only the Actionability question follows the Trend summary in the reply; the persisted `YYYY-MM-DD-report.md` keeps the script's order.
 
 ## The splice rule
 
@@ -151,17 +152,15 @@ acting on, offer one batched `AskUserQuestion` (multi-select), letting the user 
   non-corrective — nothing is broken — and this run never invokes `/devcycle:learn` itself.
 
 A `recurred` r2 escalation candidate from the scoreboard is itself one of these findings: its
-`/devcycle:cycle` entry point re-addresses the culprit the promotion failed to fix, the same
-escalation the scoreboard already rendered inline as an `Actionability — /devcycle:cycle re-address`
-line.
+`/devcycle:cycle` entry point re-addresses the culprit the promotion failed to fix.
 
 A detected win is the same, mirrored: the report already renders it inline after the wins table as
 an `Actionability — /devcycle:learn investigate & generalize` line, naming the promotion that
 shipped with the improved version as the correlational cause (or `unattributed` when no promotion
 matches — a lead to chase manually, never a verified attribution).
 
-Always include an explicit "just the overview, no action" choice in the same batch — the
-follow-up is itself skippable, never a forced gate on finishing the command.
+Always include an explicit "just the overview, no action" choice in the same batch —
+never a forced gate on finishing the command.
 
 **Drafting an issue: two gates before anything is posted.** The selection above only chooses what
 to draft. For each finding it chose:
