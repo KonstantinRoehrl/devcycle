@@ -49,7 +49,6 @@ function profileSplit(profileRows, shownVersions) {
 
 function versionRow(cohort, mainRow, minCohort) {
   const unpriced = (cohort.excluded ?? 0) > 0;
-  const mainUnpriced = (mainRow?.excluded ?? 0) > 0;
   return {
     version: cohort.version,
     sessions: cohort.sessions,
@@ -61,28 +60,26 @@ function versionRow(cohort, mainRow, minCohort) {
     medianPerCycle: mainRow?.medianCostPerCycle ?? null,
     cycleSessions: mainRow?.sessions ?? null,
     cycleLowConfidence: mainRow?.lowConfidence ?? false,
-    cycleUnpriced: mainUnpriced,
+    cycleUnpriced: (mainRow?.excluded ?? 0) > 0,
     delta: mainRow?.delta ?? null,
-    viaOtherProfile: unpriced && Boolean(mainRow) && !mainUnpriced,
+    // "That Δ is the profile's own" holds only when the main profile's Δ is a compared percentage.
+    viaOtherProfile: unpriced && mainRow?.delta?.state === "compared",
     quality: cohort.quality ?? null,
   };
 }
 
 // The dearest version by total, over every known version (shown or older). A different version
-// with the highest median $/session is carried alongside, so neither reading is lost — but only
-// among versions with enough sessions for a median to mean something.
-function dearestOf(known, minCohort) {
+// with the highest median $/session, over the same versions, is carried alongside so neither
+// reading is lost.
+function dearestOf(known) {
   if (!known.length) return null;
   const byTotal = known.reduce((best, c) => (c.total >= best.total ? c : best));
-  const reliable = known.filter((c) => c.sessions >= minCohort);
-  const byMedian = reliable.length
-    ? reliable.reduce((best, c) => (c.medianPerSession >= best.medianPerSession ? c : best))
-    : null;
+  const byMedian = known.reduce((best, c) => (c.medianPerSession >= best.medianPerSession ? c : best));
   return {
     version: byTotal.version,
     total: byTotal.total,
     unpriced: (byTotal.excluded ?? 0) > 0,
-    medianLeader: byMedian && byMedian.version !== byTotal.version
+    medianLeader: byMedian.version !== byTotal.version
       ? { version: byMedian.version, medianPerSession: byMedian.medianPerSession }
       : null,
   };
@@ -219,7 +216,7 @@ export function buildOverview(input) {
       folded,
       unknown,
       direction,
-      dearest: dearestOf(known, bands.minCohort),
+      dearest: dearestOf(known),
       sidelinedDollars: (unknown?.total ?? 0) + (folded?.total ?? 0),
     },
     stages: { versions: shownVersions, rows: rendered, remaining, notes },
@@ -263,9 +260,10 @@ export function renderOverview(overview) {
   const { versions, stages, reconciliation } = overview;
   const { minCohort } = overview.bands;
   const { settledTotal, inFlightSessions, inFlightDollars } = reconciliation;
-  const mainLabel = versions.main_profile === null
-    ? "Median $/cycle"
-    : versions.main_profile === "unknown" ? "Median $/cycle (unknown profile)" : `Median $/cycle (${versions.main_profile})`;
+  // No main profile at all (nothing to take cycles from) reads as the unknown profile, like a corpus
+  // whose every cycle is under it.
+  const unknownOnly = versions.main_profile === null || versions.main_profile === "unknown";
+  const mainLabel = unknownOnly ? "Median $/cycle (unknown profile)" : `Median $/cycle (${versions.main_profile})`;
   const L = [...(overview.scope ? [`Scope: ${overview.scope} · settled sessions only`, ""] : []), "**Per version**", ""];
 
   const versionRows = [
@@ -287,7 +285,7 @@ export function renderOverview(overview) {
       : []),
     ...(versions.unknown
       ? [[
-          flagged("no version detectable", versions.unknown.unpriced),
+          flagged("no version detectable", versions.unknown.unpriced, true),
           sessionsCell(versions.unknown.sessions, versions.unknown.sessionsLowConfidence, minCohort),
           moneyCell(versions.unknown.total, versions.unknown),
           moneyCell(versions.unknown.medianPerSession, versions.unknown),
@@ -319,9 +317,9 @@ export function renderOverview(overview) {
     "Profile `unknown` is either a session with no run record (which forms a one-session cycle, " +
     "so its $/cycle is really per-session) or a run record that names no profile.";
   L.push(...note(
-    versions.main_profile === "unknown"
+    unknownOnly
       ? `${unknownProfile} Every cycle here is under it, so Median $/cycle is a per-session median.`
-      : `Sessions, Total, Median $/session and Quality cover every profile; Median $/cycle and Δ are the ${versions.main_profile ?? "main"} profile's.` +
+      : `Sessions, Total, Median $/session and Quality cover every profile; Median $/cycle and Δ are the ${versions.main_profile} profile's.` +
         (versions.other_profiles.length
           ? ` Other profiles: ${versions.other_profiles.map((p) => `${p.profile} (${plural(p.cycles, "cycle")}, ${plural(p.sessions, "session")})`).join(", ")}.`
           : "") +
@@ -334,7 +332,7 @@ export function renderOverview(overview) {
     L.push(...note("⚠ marks a version with requests on a model with no exact price: they are left out of its figures, so any Δ that compares against it is withheld."));
   const other = versions.rows.filter((r) => r.viaOtherProfile).map((r) => r.version);
   if (other.length)
-    L.push(...note(`⚠ via another profile: ${other.join(", ")} — the unpriced requests sit outside the ${versions.main_profile ?? "main"} profile, so that Δ is the profile's own.`));
+    L.push(...note(`⚠ via another profile: ${other.join(", ")} — the unpriced requests sit outside the ${versions.main_profile} profile, so that Δ is the profile's own.`));
   L.push(...note("Δ is profile-matched, not workload-adjusted: direction, not verdict."));
 
   L.push("", "**Per stage**", "");

@@ -232,12 +232,12 @@ test("the unknown-version row and the dearest version carry the ⚠ like any oth
     cohorts: [cohort("0.1.0", { total: 90, excluded: 1 }), cohort("unknown", { excluded: 2 })],
     stageByVersion: { versions: ["0.1.0"], excludedVersions: [], rows: [] },
   }));
-  assert.match(flaggedUnknown, /^\| no version detectable ⚠ \| 4 \| \$40\.00 ⚠ \| \$10\.00 ⚠ \| — \| — \| — \|$/m);
+  assert.match(flaggedUnknown, /^\| ⚠ no version detectable \| 4 \| \$40\.00 ⚠ \| \$10\.00 ⚠ \| — \| — \| — \|$/m);
   assert.match(flaggedUnknown, /^Dearest version: 0\.1\.0 \(\$90\.00 ⚠\)$/m);
   const fullyUnpriced = text(build({
     cohorts: [cohort("unknown", { total: 0, medianPerSession: 0, excluded: 2 })],
   }));
-  assert.match(fullyUnpriced, /^\| no version detectable ⚠ \| 4 \| ⚠ unpriced \| ⚠ unpriced \| — \| — \| — \|$/m);
+  assert.match(fullyUnpriced, /^\| ⚠ no version detectable \| 4 \| ⚠ unpriced \| ⚠ unpriced \| — \| — \| — \|$/m);
 });
 
 test("a version unpriced only in a profile that has no row beside the main one has no 'via another profile' footnote", () => {
@@ -250,6 +250,31 @@ test("a version unpriced only in a profile that has no row beside the main one h
   assert.equal(overview.versions.main_profile, "standard");
   assert.match(text(overview), /^\| ⚠ 0\.2\.0 \| 4 \| \$40\.00 ⚠ \| \$10\.00 ⚠ \| — \| — \| — \|$/m);
   assert.doesNotMatch(text(overview), /via another profile/);
+});
+
+test("the 'via another profile' footnote appears only when the main profile's delta is a compared percentage", () => {
+  // 0.2.0 is unpriced only in lean; the main (standard) row's own delta decides whether "that Δ is the
+  // profile's own" is true.
+  const withMainDelta = (mainRow, previous = profileRow("0.1.0", "standard", { cycles: 9 })) => text(build({
+    cohorts: [cohort("0.1.0"), cohort("0.2.0", { excluded: 2 })],
+    profileRows: [previous, mainRow, profileRow("0.2.0", "lean", { cycles: 1, excluded: 2 })],
+    stageByVersion: { versions: ["0.1.0", "0.2.0"], excludedVersions: [], rows: [] },
+  }));
+  const main = (over) => profileRow("0.2.0", "standard", { cycles: 9, ...over });
+  assert.match(withMainDelta(main({ delta: { state: "compared", pct: 10 } })), /⚠ via another profile: 0\.2\.0/);
+  // The Δ is withheld because the previous version's main-profile row is unpriced.
+  const withheld = withMainDelta(
+    main({ delta: { state: "not-compared", pct: null, reason: "unpriced" } }),
+    profileRow("0.1.0", "standard", { cycles: 9, excluded: 1 }),
+  );
+  assert.match(withheld, /^\| ⚠ 0\.2\.0 \|.* \| not compared \(⚠ unpriced\) \| — \|$/m);
+  assert.doesNotMatch(withheld, /via another profile/);
+  const lowConfidence = withMainDelta(main({ lowConfidence: true, sessions: 2, delta: { state: "not-compared", pct: null } }));
+  assert.match(lowConfidence, /^\| ⚠ 0\.2\.0 \|.* \| not compared \| — \|$/m);
+  assert.doesNotMatch(lowConfidence, /via another profile/);
+  const firstSeen = withMainDelta(main(), profileRow("0.1.0", "lean", { cycles: 1 }));
+  assert.match(firstSeen, /^\| ⚠ 0\.2\.0 \|.* \| first seen \| — \|$/m);
+  assert.doesNotMatch(firstSeen, /via another profile/);
 });
 
 test("the trust line counts every cell that carries a low-n mark, and no cell that does not", () => {
@@ -309,10 +334,40 @@ test("the dearest version is the one with the highest total, and a different hig
   });
   const { dearest } = overview.versions;
   assert.equal(dearest.version, "0.2.0");
-  // 0.3.0's median is a single session: it cannot be named the dearest median.
   assert.deepEqual(dearest.medianLeader, { version: "0.1.0", medianPerSession: 100 });
   assert.match(text(overview), /Dearest version: 0\.2\.0 \(\$800\.00\); highest median \$\/session: 0\.1\.0 \(\$100\.00\)/);
   assert.equal(build({ cohorts: [cohort("unknown")] }).versions.dearest, null);
+});
+
+test("the highest median is taken over every known version, so a thin version with the top median is named and a cheaper median never is", () => {
+  // 0.2.0 has two sessions: the dearest by total and by median. 0.1.0 has three sessions and a lower
+  // median, so it must not be named "highest median".
+  const dearestIsMedianLeader = build({
+    cohorts: [
+      cohort("0.1.0", { sessions: 3, total: 10, medianPerSession: 3.4 }),
+      cohort("0.2.0", { sessions: 2, total: 204.7, medianPerSession: 102.3 }),
+    ],
+  });
+  assert.equal(dearestIsMedianLeader.versions.dearest.medianLeader, null);
+  assert.doesNotMatch(text(dearestIsMedianLeader), /highest median/);
+  // A thin version genuinely holding the top median is named beside the dearest by total.
+  const thinLeader = build({
+    cohorts: [
+      cohort("0.1.0", { sessions: 40, total: 800, medianPerSession: 20 }),
+      cohort("0.2.0", { sessions: 1, total: 60, medianPerSession: 60 }),
+    ],
+  });
+  assert.deepEqual(thinLeader.versions.dearest.medianLeader, { version: "0.2.0", medianPerSession: 60 });
+  assert.match(text(thinLeader), /Dearest version: 0\.1\.0 \(\$800\.00\); highest median \$\/session: 0\.2\.0 \(\$60\.00\)/);
+});
+
+test("a corpus with no detectable version is headed unknown profile and never claims a main profile's figures", () => {
+  const overview = build({ cohorts: [cohort("unknown")] });
+  assert.equal(overview.versions.main_profile, null);
+  const out = text(overview);
+  assert.match(out, /\| Median \$\/cycle \(unknown profile\) \|/);
+  assert.match(out, /Median \$\/cycle is a per-session median/);
+  assert.doesNotMatch(out, /main profile's/);
 });
 
 test("quality renders rounds per task and retries over tasks, and an em dash with no run record", () => {
