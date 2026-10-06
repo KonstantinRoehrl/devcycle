@@ -3206,7 +3206,8 @@ test("cli: the Overview's low-n marks and rising note follow the report's own ba
 
     const section = overviewOf(markdown.stdout);
     assert.match(section, /^\| 0\.4\.0 \| 2 \(low confidence: n<3\) \| /m);
-    assert.match(section, /^\| execution \|.* \| \$[\d.]+ \(n=3\) \| \$[\d.]+ \(n=2, low n\) \| up \|$/m);
+    assert.match(section, /^\| execution \| \$[\d.]+ \| [\d.]+% \| up \|$/m);
+    assert.match(section, /^- execution: .*0\.3\.0 \$[\d.]+ \(n=3\) · 0\.4\.0 \$[\d.]+ \(n=2, low n\)$/m);
     assert.match(section, /^- Steadily rising: execution$/m);
   } finally {
     rmSync(dir, { recursive: true, force: true });

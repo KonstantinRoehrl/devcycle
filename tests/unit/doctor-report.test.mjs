@@ -2447,14 +2447,20 @@ test("every number the Overview prints is a number the report's own tables carry
     assert.equal(row[1], usd(w.total));
     assert.equal(row[2], `${w.pctOfWindow.toFixed(1)}%`);
   }
-  for (const r of json.stage_by_version.rows) {
+  // Each stage's version medians are the bullet beneath the table, in the report's version order.
+  const bulletOf = (stage) => section.split("\n").find((l) => l.startsWith(`- ${stage}: `));
+  const bulletEntries = json.stage_by_version.rows.map((r) => json.stage_by_version.versions.flatMap((v) => {
+    const cell = r.byVersion[v];
+    return cell ? [`${v} ${usd(cell.median)} (n=${cell.n})`] : [];
+  }));
+  // Vacuity guard: at least one stage has a cell, or the bullet assertions below compare empty lists.
+  assert.ok(bulletEntries.some((entries) => entries.length > 0), "no stage in the corpus has a version cell");
+  json.stage_by_version.rows.forEach((r, i) => {
     const cells = stageRows.find((cells) => cells[0] === r.stage);
-    json.stage_by_version.versions.forEach((v, i) => {
-      const cell = r.byVersion[v];
-      assert.equal(cells[3 + i], cell ? `${usd(cell.median)} (n=${cell.n})` : "—");
-    });
+    assert.equal(cells.length, 4, "the stage table is wider than four columns");
+    assert.equal(bulletOf(r.stage), `- ${r.stage}: ${bulletEntries[i].length ? bulletEntries[i].join(" · ") : "—"}`);
     assert.equal(cells.at(-1), r.trend);
-  }
+  });
 
   // The two Total columns and the stated total are one figure.
   const dollars = (cell) => Number(cell.replace(/[^0-9.]/g, ""));

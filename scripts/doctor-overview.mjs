@@ -351,22 +351,25 @@ export function renderOverview(overview) {
 
   L.push("", "**Per stage**", "");
   const stageRows = [
-    ...stages.rows.map((r) => [
-      r.stage, usd(r.total), percent(r.sharePct), ...r.cells.map(stageCell), r.trend,
-    ]),
+    ...stages.rows.map((r) => [r.stage, usd(r.total), percent(r.sharePct), r.trend]),
     ...(stages.remaining
-      ? [[
-          `remaining ${plural(stages.remaining.count, "stage")}`, usd(stages.remaining.total),
-          percent(stages.remaining.sharePct), ...stages.versions.map(() => null), null,
-        ]]
+      ? [[`remaining ${plural(stages.remaining.count, "stage")}`, usd(stages.remaining.total), percent(stages.remaining.sharePct), null]]
       : []),
   ];
-  L.push(...markdownTable(
-    ["Stage", "Total", "Share", ...stages.versions, "Trend"],
-    stageRows,
-    "no stage cost recorded among settled sessions",
-  ));
-  L.push(...note("Total and Share are over the settled sessions' spend; version cells are per-session medians (n = sessions with that stage). A stage with no version cell has no per-version data: `—`, never `insufficient data`."));
+  L.push(...markdownTable(["Stage", "Total", "Share", "Trend"], stageRows, "no stage cost recorded among settled sessions"));
+  // The per-version medians sit beneath the table, one bullet per stage, so the table stays narrow
+  // enough to render in a terminal.
+  if (stages.rows.length)
+    L.push(
+      "", "**Per stage, by version**",
+      ...note("Version cells are per-session medians (n = sessions with that stage). A stage with no version cell has no per-version data: `—`, never `insufficient data`."),
+      "",
+      ...stages.rows.map((r) => {
+        const byVersion = stages.versions.flatMap((v, i) => (r.cells[i] ? [`${v} ${stageCell(r.cells[i])}`] : []));
+        return `- ${r.stage}: ${byVersion.length ? byVersion.join(" · ") : "—"}`;
+      }),
+    );
+  L.push(...note("Total and Share are over the settled sessions' spend."));
   if (versions.sidelinedDollars > 0)
     L.push(...note(`${usd(versions.sidelinedDollars)} (${percent(settledTotal === 0 ? 0 : (versions.sidelinedDollars / settledTotal) * 100)} of settled spend) sits in sessions with no detectable version or in versions older than the columns shown: it is in Total and Share but in no version column.`));
   if (stages.notes.skippedVersions.length) L.push("", unpricedMediansNote(stages.notes.skippedVersions));

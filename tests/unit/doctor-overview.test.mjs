@@ -88,7 +88,8 @@ test("a stage with spend only in unknown-version sessions keeps its Total and Sh
   assert.equal(row.sharePct, 80);
   assert.deepEqual(row.cells, [null]);
   assert.equal(row.trend, null);
-  assert.match(text(overview), /^\| unversioned-stage \| \$80\.00 \| 80\.0% \| — \| — \|$/m);
+  assert.match(text(overview), /^\| unversioned-stage \| \$80\.00 \| 80\.0% \| — \|$/m);
+  assert.match(text(overview), /^- unversioned-stage: —$/m);
   // The dropped spend is named, in words that are not the report's own "Excluded from this table".
   assert.match(text(overview), /\$80\.00 \(80\.0% of settled spend\) sits in sessions with no detectable version/);
   assert.doesNotMatch(text(overview), /Excluded from this table/);
@@ -110,7 +111,7 @@ test("the stage table shows the top stages and folds the tail into one remaining
     sumOf(overview.stages.rows, (r) => r.total) + overview.stages.remaining.total,
     overview.reconciliation.settledTotal,
   );
-  assert.match(text(overview), /^\| remaining 2 stages \| \$183\.00 \| [\d.]+% \| — \| — \|$/m);
+  assert.match(text(overview), /^\| remaining 2 stages \| \$183\.00 \| [\d.]+% \| — \|$/m);
   // s0 is $100.00 of the window's $955.00.
   assert.match(text(overview), /^- Dearest stage: s0 \(\$100\.00, 10\.5% of settled spend\)$/m);
   assert.equal(build({ cohorts: [cohort("0.1.0")], stageWindow: stageWindow.slice(0, 1) }).stages.remaining, null);
@@ -495,7 +496,64 @@ test("stage cells carry n, and a cell below the trend gate says it is low n", ()
       rows: [stageRow("execution", { "0.1.0": cell(1, 3), "0.2.0": cell(2, 1) }, "insufficient data (n=3→1)")],
     },
   });
-  assert.match(text(overview), /^\| execution \| \$10\.00 \| 100\.0% \| \$1\.00 \(n=3\) \| \$2\.00 \(n=1, low n\) \| insufficient data \(n=3→1\) \|$/m);
+  assert.match(text(overview), /^\| execution \| \$10\.00 \| 100\.0% \| insufficient data \(n=3→1\) \|$/m);
+  assert.match(text(overview), /^- execution: 0\.1\.0 \$1\.00 \(n=3\) · 0\.2\.0 \$2\.00 \(n=1, low n\)$/m);
+});
+
+// The per-stage table keeps only the columns that fit a terminal; the per-version medians follow it
+// as one bullet per stage. The version-bearing cells render through stageCell alone.
+const STAGE_TABLE_HEADER = "| Stage | Total | Share | Trend |";
+
+test("the stage table is four columns wide and each stage's version medians follow it as one bullet", () => {
+  const stageWindow = [
+    { stage: "execution", total: 50 }, { stage: "planning", total: 30 }, { stage: "review", total: 10 },
+    // Two stages past the shown ones, so the table ends in a remaining row.
+    ...Array.from({ length: OVERVIEW_STAGES - 3 + 2 }, (_, i) => ({ stage: `tail${i}`, total: 1 })),
+  ];
+  const overview = build({
+    cohorts: [cohort("0.1.0"), cohort("0.2.0"), cohort("0.3.0")],
+    stageWindow,
+    stageByVersion: {
+      versions: ["0.1.0", "0.2.0", "0.3.0"], excludedVersions: [],
+      rows: [
+        // Cells for the first and last shown version only; the middle one is skipped, in order.
+        stageRow("execution", { "0.1.0": cell(1, 4), "0.3.0": cell(3, 2) }, "insufficient data (n=4→2)"),
+        stageRow("planning", {}, null),
+      ],
+    },
+  });
+  const lines = renderOverview(overview);
+  const header = lines.indexOf(STAGE_TABLE_HEADER);
+  // Vacuity guards: the layout under test is on the page, and the corpus has both a remaining row
+  // and a stage with a cell, or the checks below pass on an empty list.
+  assert.ok(header !== -1, `no four-column stage table header in:\n${lines.join("\n")}`);
+  assert.ok(overview.stages.remaining, "the corpus has no remaining row");
+  assert.ok(overview.stages.rows.some((r) => r.cells.some((c) => c !== null)), "no stage has a version cell");
+
+  const tableEnd = lines.findIndex((l, i) => i > header && !l.startsWith("|"));
+  const tableRows = lines.slice(header + 2, tableEnd);
+  assert.ok(tableRows.every((l) => l.split(" | ").length === 4), `a stage row is wider than four columns:\n${tableRows.join("\n")}`);
+  assert.ok(!lines.slice(header, tableEnd).join("\n").includes("$1.00 (n=4)"), "a version cell is still in the table");
+
+  assert.equal(lines[tableEnd + 1], "**Per stage, by version**");
+  const legend = lines[tableEnd + 3];
+  assert.match(legend, /^_.*per-session medians.*n = sessions with that stage.*`—`/);
+  const bullets = lines.slice(tableEnd + 5, tableEnd + 5 + overview.stages.rows.length);
+  assert.deepEqual(bullets, [
+    "- execution: 0.1.0 $1.00 (n=4) · 0.3.0 $3.00 (n=2, low n)",
+    "- planning: —",
+    "- review: —",
+    ...Array.from({ length: OVERVIEW_STAGES - 3 }, (_, i) => `- tail${i}: —`),
+  ]);
+  assert.equal(overview.stages.rows.length, OVERVIEW_STAGES);
+  // The remaining row has a table row and no bullet.
+  assert.ok(tableRows.some((l) => l.startsWith("| remaining ")));
+  assert.ok(!lines.some((l) => l.startsWith("- remaining")));
+  // The bullets sit between the table and the notes: the first note follows the last bullet.
+  const afterBullets = lines.slice(tableEnd + 5 + bullets.length);
+  assert.equal(afterBullets[0], "");
+  assert.match(afterBullets[1], /^_Total and Share are over the settled sessions' spend/);
+  assert.ok(lines.findIndex((l) => l.startsWith("- Dearest stage")) > lines.lastIndexOf(bullets.at(-1)), "the summary bullets do not follow the stage bullets");
 });
 
 // A steadily-rising fixture: execution climbs through three reliable cells.

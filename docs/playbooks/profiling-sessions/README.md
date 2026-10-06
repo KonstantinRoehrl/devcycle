@@ -25,7 +25,7 @@ a GitHub issue (screened, then gated by two separate confirmations before anythi
 hand back a `/devcycle:cycle` entry-point string — the playbook itself never starts one.
 
 Two blocks the script renders ride in every cost-analysis reply byte for byte (`--depth` and `--drift` print neither): `## Overview` — a per-version and a
-per-stage table over settled sessions, with the notes that read them — and `## Trend summary`, three
+per-stage table over settled sessions, followed by a bullet per stage with its per-version medians, and the notes that read them — and `## Trend summary`, three
 lines on cost, stages and how far to trust them. The playbook splices nothing into either and
 never rebuilds a figure; it moves the Trend summary to the end of the reply, just ahead of the
 actionability step. A version whose requests include an unpriced model is flagged ⚠ with its Δ
