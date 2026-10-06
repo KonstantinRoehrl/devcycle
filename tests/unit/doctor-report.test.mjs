@@ -2364,6 +2364,10 @@ test("inferredUnknownDollars counts a forward-filled session whole and a record 
     sum({ id: "b", attributionSource: "record", costByStage: { execution: 4, unattributed: 1 } }),
     sum({ id: "c", costByStage: { execution: 7 } }),
   ]), 6);
+  // A forward-filled session can carry an unattributed bucket too; counting it whole counts that once.
+  assert.equal(inferredUnknownDollars([
+    sum({ id: "a", attributionSource: "forward-filled", costByStage: { "entry (stage unknown)": 3, unattributed: 1 } }),
+  ]), 4);
   assert.equal(inferredUnknownDollars([]), 0);
 });
 
@@ -2525,4 +2529,14 @@ test("the playbook names the two overview headings the report emits and the --js
   const { overview } = buildJsonReport([sum()], ctx());
   for (const key of Object.keys(overview.markdown))
     assert.ok(playbook.includes(`overview.markdown.${key}`), `the playbook does not name overview.markdown.${key}`);
+});
+
+test("the playbook states the reply order: Highlights, the Overview, the findings, the relocated Trend summary, then Actionability", () => {
+  const playbook = readFileSync(new URL("../../playbooks/profiling-sessions.md", import.meta.url), "utf8");
+  // The sentence wraps in the source; compare it as prose.
+  const prose = playbook.replace(/\s+/g, " ");
+  assert.ok(prose.includes(
+    "The reply runs Highlights, the Overview, the ranked findings and systemic recommendations, the Trend " +
+      "summary — relocated here verbatim from its place in the report — then the Actionability question.",
+  ), "the playbook no longer states the reply order");
 });

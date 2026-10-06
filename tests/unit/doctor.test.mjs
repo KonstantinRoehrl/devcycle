@@ -3160,3 +3160,56 @@ test("cli: an in-flight forward-filled session is in neither the Overview's infe
     cleanup();
   }
 });
+
+// Four versions, each placed so one of the report's bands decides what the Overview prints: 0.1.0
+// and 0.2.0 at 14 turns a session and 0.3.0 at 15 climb 7.1% (past the 5% flat band, inside a 10%
+// one), and 0.4.0 has two sessions (under a cohort minimum and trend gate of 3, at a gate of 2).
+// Every turn is the same priced playbook read, so a session's cost is its turn count times one turn.
+function bandsCorpusDir() {
+  const dir = makeTempDir("doctor-overview-bands-");
+  const proj = join(dir, "-overview-project");
+  mkdirSync(proj, { recursive: true });
+  const playbook = (version) => ({ file_path: `/h/.claude/plugins/cache/devcycle/devcycle/${version}/playbooks/executing-waves.md` });
+  [["0.1.0", 3, 14], ["0.2.0", 3, 14], ["0.3.0", 3, 15], ["0.4.0", 2, 15]].forEach(([version, sessions, turns], v) => {
+    for (let s = 0; s < sessions; s++) {
+      const sessionId = `sess-${version}-${s}`;
+      const lines = Array.from({ length: turns }, (_, t) => toolTurn("Read", playbook(version), {
+        sessionId, attributionSkill: "devcycle:cycle",
+        timestamp: `2026-07-${String(v * 5 + s + 1).padStart(2, "0")}T10:${String(t).padStart(2, "0")}:00.000Z`,
+      }));
+      writeFileSync(join(proj, `${sessionId}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    }
+  });
+  return dir;
+}
+
+test("cli: the Overview's low-n marks and rising note follow the report's own bands", () => {
+  const dir = bandsCorpusDir();
+  const { env, cwd, cleanup } = streamIsolation();
+  try {
+    const json = run(["--dir", dir, "--json"], env, cwd);
+    const markdown = run(["--dir", dir], env, cwd);
+    assert.equal(json.status, 0, json.stderr);
+    assert.equal(markdown.status, 0, markdown.stderr);
+    const out = JSON.parse(json.stdout);
+
+    // Vacuity guards: the report's own trend calls the stage up, its climb over the reliable cells sits
+    // between a 5% and a 10% band, and 0.4.0 is two sessions with a two-session stage cell.
+    const execution = out.stage_by_version.rows.find((r) => r.stage === "execution");
+    assert.ok(execution, `no execution stage: ${JSON.stringify(out.stage_by_version.rows)}`);
+    assert.equal(execution.trend, "up");
+    const climb = ((execution.byVersion["0.3.0"].median - execution.byVersion["0.1.0"].median) /
+      execution.byVersion["0.1.0"].median) * 100;
+    assert.ok(climb > 5 && climb <= 10, `the climb is ${climb}%`);
+    assert.equal(execution.byVersion["0.4.0"].n, 2);
+    assert.equal(out.version_cohorts.find((c) => c.version === "0.4.0").sessions, 2);
+
+    const section = overviewOf(markdown.stdout);
+    assert.match(section, /^\| 0\.4\.0 \| 2 \(low confidence: n<3\) \| /m);
+    assert.match(section, /^\| execution \|.* \| \$[\d.]+ \(n=3\) \| \$[\d.]+ \(n=2, low n\) \| up \|$/m);
+    assert.match(section, /^- Steadily rising: execution$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  }
+});

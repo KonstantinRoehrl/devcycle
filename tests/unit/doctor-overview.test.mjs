@@ -95,17 +95,24 @@ test("a stage with spend only in unknown-version sessions keeps its Total and Sh
 });
 
 test("the stage table shows the top stages and folds the tail into one remaining row", () => {
+  // The window arrives dearest first, so the shown rows are its head and the dearest stage its first.
   const stageWindow = Array.from({ length: OVERVIEW_STAGES + 2 }, (_, i) => ({ stage: `s${i}`, total: 100 - i }));
   const overview = build({
     cohorts: [cohort("0.1.0")],
     stageWindow,
     stageByVersion: { versions: ["0.1.0"], excludedVersions: [], rows: [] },
   });
-  assert.equal(overview.stages.rows.length, OVERVIEW_STAGES);
+  assert.deepEqual(overview.stages.rows.map((r) => r.stage), stageWindow.slice(0, OVERVIEW_STAGES).map((r) => r.stage));
   assert.deepEqual(overview.stages.remaining, {
     count: 2, total: 100 - 8 + (100 - 9), sharePct: ((100 - 8 + (100 - 9)) / sumOf(stageWindow, (r) => r.total)) * 100,
   });
+  assert.equal(
+    sumOf(overview.stages.rows, (r) => r.total) + overview.stages.remaining.total,
+    overview.reconciliation.settledTotal,
+  );
   assert.match(text(overview), /^\| remaining 2 stages \| \$183\.00 \| [\d.]+% \| — \| — \|$/m);
+  // s0 is $100.00 of the window's $955.00.
+  assert.match(text(overview), /^- Dearest stage: s0 \(\$100\.00, 10\.5% of settled spend\)$/m);
   assert.equal(build({ cohorts: [cohort("0.1.0")], stageWindow: stageWindow.slice(0, 1) }).stages.remaining, null);
 });
 
@@ -118,6 +125,9 @@ test("older versions fold into one row that sums sessions and total and leaves t
   assert.deepEqual(overview.versions.folded, { count: 2, sessions: 5, total: 12, unpriced: false });
   assert.deepEqual(overview.versions.rows.map((r) => r.version), ["0.3.0"]);
   assert.match(text(overview), /^\| 2 older versions \| 5 \| \$12\.00 \| — \| — \| — \| — \|$/m);
+  // With no unknown-version row, the folded versions are the whole of the spend no column shows.
+  assert.equal(overview.versions.unknown, null);
+  assert.match(text(overview), /^_\$12\.00 \(23\.1% of settled spend\) sits in sessions with no detectable version or in versions older than the columns shown/m);
 });
 
 test("the main profile has the most cycles; a tie goes to the name; unknown wins only alone", () => {
@@ -133,6 +143,23 @@ test("the main profile has the most cycles; a tie goes to the name; unknown wins
   assert.deepEqual(split(rows(["lean", 2], ["standard", 9], ["unknown", 4])).other_profiles, [
     { profile: "lean", cycles: 2, sessions: 2 }, { profile: "unknown", cycles: 4, sessions: 4 },
   ]);
+});
+
+test("the main profile is counted over the shown versions only, so an older folded version cannot pick it", () => {
+  const profileRows = [
+    profileRow("0.1.0", "lean", { cycles: 50, sessions: 50 }),
+    profileRow("0.2.0", "standard", { cycles: 4 }),
+    profileRow("0.2.0", "lean", { cycles: 1, sessions: 1 }),
+  ];
+  const splitShowing = (versions) => build({
+    cohorts: [cohort("0.1.0"), cohort("0.2.0")], profileRows,
+    stageByVersion: { versions, excludedVersions: [], rows: [] },
+  }).versions;
+  // The control: with 0.1.0 shown, its 50 lean cycles do make lean the main profile.
+  assert.equal(splitShowing(["0.1.0", "0.2.0"]).main_profile, "lean");
+  const shownOnly = splitShowing(["0.2.0"]);
+  assert.equal(shownOnly.main_profile, "standard");
+  assert.deepEqual(shownOnly.other_profiles, [{ profile: "lean", cycles: 1, sessions: 1 }]);
 });
 
 test("an all-unknown-profile corpus is headed unknown profile and says the figure is per-session", () => {
@@ -161,6 +188,7 @@ test("the main profile's cycles and delta fill the version row; other profiles a
   });
   assert.match(text(overview), /^\| 0\.2\.0 \| 5 \| \$90\.00 \| \$18\.00 \| \$22\.50 \| \+125\.0% \| — \|$/m);
   assert.match(text(overview), /Other profiles: lean \(1 cycle, 1 session\)\./);
+  assert.match(text(overview), /^_Δ is profile-matched, not workload-adjusted: direction, not verdict\._$/m);
 });
 
 test("a low-confidence cohort is marked in the Sessions cell and in the $/cycle cell by its own session count", () => {
@@ -170,6 +198,17 @@ test("a low-confidence cohort is marked in the Sessions cell and in the $/cycle 
     stageByVersion: { versions: ["0.1.0"], excludedVersions: [], rows: [] },
   });
   assert.match(text(overview), /^\| 0\.1\.0 \| 2 \(low confidence: n<3\) \| \$40\.00 \| \$10\.00 \| \$10\.00 \(n=2\) \| first seen \| — \|$/m);
+  // A version of five sessions, two of them in the main profile: the $/cycle n is the profile's two.
+  const mixed = build({
+    cohorts: [cohort("0.1.0", { sessions: 5 })],
+    profileRows: [
+      profileRow("0.1.0", "standard", { sessions: 2, lowConfidence: true }),
+      profileRow("0.1.0", "lean", { cycles: 1, sessions: 3 }),
+    ],
+    stageByVersion: { versions: ["0.1.0"], excludedVersions: [], rows: [] },
+  });
+  assert.equal(mixed.versions.main_profile, "standard");
+  assert.match(text(mixed), /^\| 0\.1\.0 \| 5 \| \$40\.00 \| \$10\.00 \| \$10\.00 \(n=2\) \| first seen \| — \|$/m);
 });
 
 test("a version with unpriced requests is flagged, its delta withheld, and never shown as $0 or -100%", () => {
@@ -300,6 +339,13 @@ test("the trust line counts every cell that carries a low-n mark, and no cell th
     stageByVersion: { versions: ["0.1.0"], excludedVersions: [], rows: [] },
   });
   assert.equal(unpriced.summary.trust.lowNCells, 0);
+  // The unknown-version row's Sessions cell is one like any other.
+  const unknownWith = (sessions) => build({ cohorts: [cohort("0.1.0"), cohort("unknown", { sessions })] });
+  assert.equal(unknownWith(3).summary.trust.lowNCells, 0, "the control: an unknown row at the minimum is no low-n cell");
+  const thinUnknown = unknownWith(2);
+  assert.match(text(thinUnknown), /^\| no version detectable \| 2 \(low confidence: n<3\) \|/m);
+  assert.equal(thinUnknown.summary.trust.lowNCells, 1);
+  assert.match(renderTrendSummary(thinUnknown).join("\n"), /Trust: 1 low-n cell\b/);
 });
 
 test("the Overview states its scope, and says nothing of one when the run named none", () => {
@@ -417,6 +463,16 @@ test("steadily rising needs a trend of up, three reliable cells and no reliable 
   assert.deepEqual(rising({ "0.1.0": cell(10), "0.2.0": cell(50, 1), "0.3.0": cell(9) }), []);
 });
 
+// Medians over a base of 100 put each move exactly on the 5% flat band, with no rounding either side.
+test("the flat band is inclusive: a net rise of exactly 5% is flat, and a dip of exactly 5% does not break a run", () => {
+  const rising = (cells) => buildOverview(risingInput(cells)).stages.notes.risingStages;
+  assert.equal(BANDS.flatBandPct, 5, "the fixture's band moved, so these medians no longer sit on it");
+  assert.deepEqual(rising({ "0.1.0": cell(100), "0.2.0": cell(102), "0.3.0": cell(106) }), ["execution"], "the control: 6% rises");
+  assert.deepEqual(rising({ "0.1.0": cell(100), "0.2.0": cell(102), "0.3.0": cell(105) }), []);
+  assert.deepEqual(rising({ "0.1.0": cell(100), "0.2.0": cell(94), "0.3.0": cell(200) }), [], "the control: a 6% dip breaks the run");
+  assert.deepEqual(rising({ "0.1.0": cell(100), "0.2.0": cell(95), "0.3.0": cell(200) }), ["execution"]);
+});
+
 // The thin-middle-cell assertion above also trips the adjacent-dip rule (50 then 3), so it would
 // stay empty with the n>=3 gate deleted. These cells climb with no dip, so only the gate holds
 // the thin one out: remove it and each of the thin series below reads as steadily rising.
@@ -509,8 +565,23 @@ test("a version-wide spike is two thirds of at least three comparable stages ris
   assert.deepEqual(spikes([["a", 10, 10 * past], ["b", 10, 10 * past]]), []);
 });
 
-test("a thin cell makes a stage not comparable, and an unpriced version is skipped at either end", () => {
-  const spikesWith = (nOfC) => buildOverview(input({
+test("a version-wide spike needs a rise strictly past the spike band and a share of at least two thirds", () => {
+  const spikes = (pairs) => buildOverview(spikeInput(pairs)).stages.notes.spikes;
+  // Over a base of 100 the band is an exact median, so a rise lands on it with no rounding.
+  const onBand = 100 + SPIKE_BAND_PCT;
+  assert.deepEqual(spikes([["a", 100, onBand + 1], ["b", 100, onBand + 1], ["c", 100, onBand + 1]]), [
+    { version: "0.2.0", comparable: 3, rose: 3 },
+  ], "the control: one past the band spikes");
+  assert.deepEqual(spikes([["a", 100, onBand], ["b", 100, onBand], ["c", 100, onBand]]), []);
+  // Two of four is a half, short of two thirds; three of four is past it.
+  assert.deepEqual(spikes([["a", 10, 20], ["b", 10, 20], ["c", 10, 20], ["d", 10, 10]]), [
+    { version: "0.2.0", comparable: 4, rose: 3 },
+  ], "the control: three of four comparable stages spike");
+  assert.deepEqual(spikes([["a", 10, 20], ["b", 10, 20], ["c", 10, 10], ["d", 10, 10]]), []);
+});
+
+test("a thin cell on either side makes a stage not comparable, and an unpriced version is skipped at either end", () => {
+  const spikesWith = ({ nBefore = 3, nNow = 3 } = {}) => buildOverview(input({
     cohorts: [cohort("0.1.0"), cohort("0.2.0")],
     stageWindow: ["a", "b", "c"].map((stage) => ({ stage, total: 10 })),
     stageByVersion: {
@@ -518,12 +589,13 @@ test("a thin cell makes a stage not comparable, and an unpriced version is skipp
       rows: [
         stageRow("a", { "0.1.0": cell(10), "0.2.0": cell(20) }),
         stageRow("b", { "0.1.0": cell(10), "0.2.0": cell(20) }),
-        stageRow("c", { "0.1.0": cell(10, nOfC), "0.2.0": cell(20) }),
+        stageRow("c", { "0.1.0": cell(10, nBefore), "0.2.0": cell(20, nNow) }),
       ],
     },
   })).stages.notes.spikes;
-  assert.equal(spikesWith(3).length, 1, "the control: with a reliable third cell the version spikes");
-  assert.deepEqual(spikesWith(2), []);
+  assert.equal(spikesWith().length, 1, "the control: with a reliable third cell the version spikes");
+  assert.deepEqual(spikesWith({ nBefore: 2 }), []);
+  assert.deepEqual(spikesWith({ nNow: 2 }), []);
   const pairs = [["a", 10, 20], ["b", 10, 20], ["c", 10, 20]];
   for (const excluded of [["0.1.0"], ["0.2.0"]])
     assert.deepEqual(buildOverview(spikeInput(pairs, {
@@ -553,6 +625,15 @@ test("the inferred or unknown share is dollars over the settled total", () => {
   });
   assert.deepEqual(overview.stages.notes.inferredUnknown, { dollars: 50, sharePct: 25 });
   assert.match(text(overview), /^- Inferred or unknown stage: \$50\.00 \(25\.0% of settled spend\)$/m);
+});
+
+test("the four stage notes are consecutive lines in a fixed order", () => {
+  const lines = renderOverview(build({ cohorts: [cohort("0.1.0")], stageWindow: [{ stage: "execution", total: 10 }] }));
+  const at = lines.findIndex((l) => l.startsWith("- Dearest stage:"));
+  assert.ok(at !== -1, "the overview printed no Dearest stage note");
+  assert.deepEqual(lines.slice(at, at + 4).map((l) => l.slice(2, l.indexOf(":"))), [
+    "Dearest stage", "Steadily rising", "Version-wide spike", "Inferred or unknown stage",
+  ]);
 });
 
 test("the trend summary is three bullets in a fixed order, and says no caveats when none apply", () => {
@@ -613,10 +694,20 @@ test("buildOverview and the renderers are deterministic and leave their input un
   assert.deepEqual(renderOverview(build(over)), renderOverview(build(over)));
 });
 
+// The module's code with its comments removed: a comment may name the very things the code must not
+// use. A `//` counts as a comment only at a line start or after whitespace, so one inside a URL
+// string (`https://`) cannot swallow the code after it.
+const codeOf = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+const IMPURE = /\b(Date|process|readFileSync|Math\.random)\b/;
+
 test("doctor-overview imports only doctor-format and reads no file, clock or environment", () => {
   const source = readFileSync(new URL("../../scripts/doctor-overview.mjs", import.meta.url), "utf8");
   const imports = [...source.matchAll(/from "([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(imports, ["./doctor-format.mjs"]);
-  assert.doesNotMatch(source, /\b(Date|process|readFileSync|Math\.random)\b/);
+  // The stripping keeps code and drops only comments, or the check below would pass vacuously.
+  assert.match(codeOf("// a process step\n/* a Date */ const at = Date.now();"), IMPURE);
+  assert.doesNotMatch(codeOf("// one process step over the rows\n/* no Date here */\nconst x = 1;"), IMPURE);
+  assert.ok(codeOf(source).includes("export function buildOverview("), "stripping comments removed code");
+  assert.doesNotMatch(codeOf(source), IMPURE);
   assert.ok(!source.startsWith("#!"));
 });
