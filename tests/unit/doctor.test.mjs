@@ -23,6 +23,7 @@ import {
   owningSession, readRecords, inWindow, summarizeCorpus, groupFilesBySession, issueDraftLines, unpricedModelIssueBody, repoShape, UNPRICED_MODEL_SLUG,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
+import { usd } from "../../scripts/doctor-format.mjs";
 
 const SCRIPT = new URL("../../scripts/doctor.mjs", import.meta.url).pathname;
 
@@ -2991,6 +2992,18 @@ const overviewRun = (flags, options) => {
 const headingsInOrder = (stdout) =>
   ["## Highlights", "## Overview", "## Trend summary", "## Workload (observed)"].map((h) => stdout.indexOf(h));
 
+// The Overview's own text, from its heading to the next section's. The full report's appendix
+// repeats the same figures in its own tables, so an assertion read off the whole output can be
+// satisfied by an appendix row while the Overview prints something else.
+const overviewOf = (stdout) => {
+  const start = stdout.indexOf("## Overview\n");
+  assert.ok(start !== -1, "no ## Overview heading in the output");
+  const next = stdout.indexOf("\n## ", start);
+  const section = stdout.slice(start, next === -1 ? undefined : next);
+  assert.ok(section.includes("| Version |"), `the Overview section is empty: ${section}`);
+  return section;
+};
+
 for (const [name, flags] of [
   ["a default run", []],
   ["a windowed run", ["--since", "2026-07-01"]],
@@ -3002,10 +3015,27 @@ for (const [name, flags] of [
     const at = headingsInOrder(res.stdout);
     assert.ok(at.every((p) => p !== -1), `a heading is missing: ${at}`);
     assert.deepEqual(at, [...at].sort((a, b) => a - b), "the headings are out of order");
-    assert.match(res.stdout, /^\| 0\.1\.0 \| 3 \| /m);
+    // Three sessions meet the cohort minimum, so the Sessions cell is the bare count.
+    assert.match(overviewOf(res.stdout), /^\| 0\.1\.0 \| 3 \| /m);
     assert.match(res.stdout, /^- Trust: /m);
   });
 }
+
+test("cli: the Overview marks a Sessions cell below the cohort minimum and leaves one at it bare", () => {
+  // From 2026-07-02 the window drops one 0.1.0 session: 0.1.0 has two sessions, 0.2.0 three.
+  const flags = ["--since", "2026-07-02"];
+  const { overview } = JSON.parse(overviewRun([...flags, "--json"]).stdout);
+  const sessionsOf = (version) => overview.versions.rows.find((r) => r.version === version)?.sessions;
+  const { minCohort } = overview.bands;
+  // Vacuity guard: the two rows have to straddle the minimum, or neither side of it is tested.
+  assert.equal(sessionsOf("0.1.0"), minCohort - 1);
+  assert.equal(sessionsOf("0.2.0"), minCohort);
+  const res = overviewRun(flags);
+  assert.equal(res.status, 0, res.stderr);
+  const section = overviewOf(res.stdout);
+  assert.match(section, new RegExp(`^\\| 0\\.1\\.0 \\| ${minCohort - 1} \\(low confidence: n<${minCohort}\\) \\| `, "m"));
+  assert.match(section, new RegExp(`^\\| 0\\.2\\.0 \\| ${minCohort} \\| `, "m"));
+});
 
 test("cli: a run with no findings still prints the Overview and the Trend summary", () => {
   const flags = ["--since", "2026-07-01"];
@@ -3038,7 +3068,15 @@ test("cli: --depth and --drift print neither the Overview nor the Trend summary"
   }
 });
 
-test("cli --json: the overview comes first, reconciles with the totals, and carries the blocks the markdown run prints", () => {
+// The top-level keys of --json before the overview was added (commit 66dbb21's main() and
+// buildJsonReport).
+const PRE_OVERVIEW_JSON_KEYS = [
+  "window", "totals", "pricesAsOf", "sessions", "candidates", "version_cohorts", "review_depth_cohorts",
+  "direction_of_travel", "inFlight", "cost_band", "version_profile_cohorts", "stage_by_version", "stage_window",
+  "culprits", "wins", "outer_loop", "verification", "compiled_knowledge", "cycles", "revert_skipped",
+];
+
+test("cli --json: the overview comes first, every earlier key survives, it reconciles with the totals, and carries the blocks the markdown run prints", () => {
   const dir = overviewCorpusDir({ unpricedInNewest: true });
   const { env, cwd, cleanup } = streamIsolation();
   try {
@@ -3047,6 +3085,18 @@ test("cli --json: the overview comes first, reconciles with the totals, and carr
     assert.equal(json.status, 0, json.stderr);
     const out = JSON.parse(json.stdout);
     assert.equal(Object.keys(out)[0], "overview");
+    // Every top-level key --json carried before the overview existed is still there, and the
+    // overview is the only key added: window and totals come from main(), the rest from
+    // buildJsonReport, so a test of buildJsonReport alone cannot see the first two go missing.
+    assert.deepEqual(Object.keys(out).sort(), ["overview", ...PRE_OVERVIEW_JSON_KEYS].sort());
+    // The two rows that changed shape: every version_cohorts row counts the requests it left
+    // out, and a Δ withheld for unpriced requests says so in version_profile_cohorts too.
+    assert.ok(out.version_cohorts.length > 0, "no version_cohorts rows to check");
+    for (const row of out.version_cohorts) assert.equal(typeof row.excluded, "number", `${row.version} has no excluded count`);
+    assert.ok(out.version_cohorts.find((r) => r.version === "0.2.0").excluded > 0);
+    const newestProfileRow = out.version_profile_cohorts.find((r) => r.version === "0.2.0");
+    assert.ok(newestProfileRow, "no version_profile_cohorts row for 0.2.0");
+    assert.equal(newestProfileRow.delta.reason, "unpriced");
     const { reconciliation } = out.overview;
     assert.equal(reconciliation.inFlightSessions, 1);
     assert.ok(Math.abs(reconciliation.settledTotal + reconciliation.inFlightDollars - out.totals.costUSD) < 1e-3,
@@ -3057,6 +3107,54 @@ test("cli --json: the overview comes first, reconciles with the totals, and carr
     assert.equal(newest.delta.reason, "unpriced");
     assert.ok(markdown.stdout.includes(out.overview.markdown.overview));
     assert.ok(markdown.stdout.includes(out.overview.markdown.trendSummary));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  }
+});
+
+test("cli: an in-flight forward-filled session is in neither the Overview's inferred-stage share nor its direction line", () => {
+  const dir = overviewCorpusDir();
+  const { env, cwd, cleanup } = streamIsolation();
+  try {
+    // One run per session, all in one matched cohort and none with a stage window, so every
+    // session stays forward-filled. Settled, 0.1.0 has three runs and 0.2.0 two: no direction.
+    // The in-flight session is 0.2.0's third run, the one that would make a direction readable.
+    const repo = join(env.DEVCYCLE_RUNS_DIR, "overview-repo");
+    mkdirSync(repo);
+    [
+      ["sess-old-a", "0.1.0"], ["sess-old-b", "0.1.0"], ["sess-old-c", "0.1.0"],
+      ["sess-new-a", "0.2.0"], ["sess-new-b", "0.2.0"], ["sess-live", "0.2.0"],
+    ].forEach(([sessionId, pluginVersion], i) => {
+      const runId = String(i + 1).padStart(16, "0");
+      writeFileSync(join(repo, `${runId}.jsonl`), [
+        { kind: "run", runId, schemaVersion: 1, pluginVersion, profile: "standard", knobs: {} },
+        { kind: "session", runId, sessionHash: createHash("sha256").update(sessionId).digest("hex") },
+        { kind: "workload", runId, requestKind: "feature", insertions: 120, deletions: 30 },
+      ].map((o) => JSON.stringify(o)).join("\n") + "\n");
+    });
+    const json = run(["--dir", dir, "--json"], env, cwd);
+    const markdown = run(["--dir", dir], env, cwd);
+    assert.equal(json.status, 0, json.stderr);
+    assert.equal(markdown.status, 0, markdown.stderr);
+    const out = JSON.parse(json.stdout);
+
+    // Vacuity guards: the in-flight session is forward-filled, has spend, and is a run that
+    // would turn the direction from undetermined into a reading if it were counted.
+    const live = out.sessions.filter((s) => s.inFlight);
+    assert.equal(live.length, 1);
+    assert.equal(live[0].attribution.source, "forward-filled");
+    assert.ok(live[0].runId && live[0].workload, "the in-flight session is not a run");
+    const { settledTotal, inFlightDollars } = out.overview.reconciliation;
+    assert.ok(inFlightDollars > 0, "the in-flight session has no spend to leak");
+    assert.notEqual(corpusDirectionOfTravel(runAggregates(out.sessions)).direction, "insufficient-data");
+    assert.ok(out.sessions.filter((s) => !s.inFlight).every((s) => s.attribution.source === "forward-filled"),
+      "a settled session has a recorded stage, so the inferred share is not the whole settled spend");
+
+    const section = overviewOf(markdown.stdout);
+    assert.match(section, /^Direction of travel: undetermined \(/m);
+    assert.ok(section.includes(`- Inferred or unknown stage: ${usd(settledTotal)} (100.0% of settled spend)`),
+      `the inferred share counts more than the settled spend: ${section}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     cleanup();
