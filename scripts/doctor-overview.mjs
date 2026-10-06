@@ -242,7 +242,8 @@ export function buildOverview(input) {
 const flagged = (text, unpriced, before = false) => (unpriced ? (before ? `⚠ ${text}` : `${text} ⚠`) : text);
 const moneyCell = (value, row) => (row.fullyUnpriced ? "⚠ unpriced" : flagged(usd(value), row.unpriced));
 const sessionsCell = (sessions, low, minCohort) => cohortSessionsText({ sessions, lowConfidence: low }, minCohort);
-const qualityCell = (q) => (q ? `${q.roundsPerTask.toFixed(1)} rounds/task · ${q.retries}/${q.tasks} retries/tasks` : null);
+// Bare figures: the units are named once, in the legend under the per-version table.
+const qualityCell = (q) => (q ? `${q.roundsPerTask.toFixed(1)} · ${q.retries}/${q.tasks}` : null);
 const stageCell = (c) => (c ? `${usd(c.median)} (n=${c.n}${c.lowN ? ", low n" : ""})` : null);
 
 function cycleCell(row) {
@@ -271,7 +272,7 @@ export function renderOverview(overview) {
   // its header reads as the unknown profile, like a corpus whose every cycle is under it.
   const noVersion = versions.main_profile === null;
   const unknownOnly = noVersion || versions.main_profile === "unknown";
-  const mainLabel = unknownOnly ? "Median $/cycle (unknown profile)" : `Median $/cycle (${versions.main_profile})`;
+  const mainLabel = unknownOnly ? "Median $/cycle (unknown)" : `Median $/cycle (${versions.main_profile})`;
   const L = [...(overview.scope ? [`Scope: ${overview.scope} · settled sessions only`, ""] : []), "**Per version**", ""];
 
   const versionRows = [
@@ -302,10 +303,11 @@ export function renderOverview(overview) {
       : []),
   ];
   L.push(...markdownTable(
-    ["Version", "Sessions", "Total", "Median $/session", mainLabel, "Δ vs previous", "Quality (rounds/task · retries/tasks)"],
+    ["Version", "Sessions", "Total", "Median $/session", mainLabel, "Δ vs previous", "Quality"],
     versionRows,
     "no settled sessions in this corpus",
   ));
+  L.push(...note("Quality is review rounds per task · retries/tasks."));
   L.push("", directionLine(versions.direction));
   if (versions.dearest) {
     const d = versions.dearest;
@@ -346,7 +348,7 @@ export function renderOverview(overview) {
     L.push(...note("⚠ marks a version with requests on a model with no exact price: they are left out of its dollar figures, and any Δ that compares a profile row holding them is withheld."));
   const other = versions.rows.filter((r) => r.viaOtherProfile).map((r) => r.version);
   if (other.length)
-    L.push(...note(`⚠ via another profile: ${other.join(", ")} — the unpriced requests sit outside the ${versions.main_profile} profile, so they withhold no ${versions.main_profile}-profile Δ to or from it.`));
+    L.push(...note(`⚠ via another profile: ${other.join(", ")} — the unpriced requests sit outside the ${versions.main_profile} profile, so they withhold no ${versions.main_profile}-profile Δ to or from ${other.length === 1 ? "it" : "any of them"}.`));
   L.push(...note("Δ is profile-matched, not workload-adjusted: direction, not verdict."));
 
   L.push("", "**Per stage**", "");

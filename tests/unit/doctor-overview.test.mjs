@@ -168,7 +168,7 @@ test("an all-unknown-profile corpus is headed unknown profile and says the figur
     cohorts: [cohort("0.1.0")], profileRows: [profileRow("0.1.0", "unknown")],
     stageByVersion: { versions: ["0.1.0"], excludedVersions: [], rows: [] },
   });
-  assert.match(text(overview), /\| Median \$\/cycle \(unknown profile\) \|/);
+  assert.match(text(overview), /\| Median \$\/cycle \(unknown\) \|/);
   assert.match(text(overview), /Median \$\/cycle is a per-session median/);
   // One sentence naming both things the profile covers; a tail-only match let the clauses drift apart.
   assert.ok(text(overview).includes(
@@ -337,6 +337,26 @@ test("a version unpriced only outside the main profile is footnoted whatever its
   }
 });
 
+test("the via-another-profile footnote ends 'to or from it' for one version and 'to or from any of them' for several", () => {
+  const viaOtherProfile = (...flagged) => text(build({
+    cohorts: ["0.1.0", "0.2.0", "0.3.0"].map((v) => cohort(v, { excluded: flagged.includes(v) ? 2 : 0 })),
+    profileRows: [
+      ...["0.1.0", "0.2.0", "0.3.0"].map((v) => profileRow(v, "standard", { cycles: 9 })),
+      ...flagged.map((v) => profileRow(v, "lean", { cycles: 1, excluded: 2 })),
+    ],
+    stageByVersion: { versions: ["0.1.0", "0.2.0", "0.3.0"], excludedVersions: [], rows: [] },
+  }));
+  const one = viaOtherProfile("0.2.0");
+  const several = viaOtherProfile("0.2.0", "0.3.0");
+  // Vacuity guards: each corpus carries the footnote naming exactly the versions it flags.
+  assert.match(one, /⚠ via another profile: 0\.2\.0 — /);
+  assert.match(several, /⚠ via another profile: 0\.2\.0, 0\.3\.0 — /);
+  assert.match(one, /standard-profile Δ to or from it\._$/m);
+  assert.match(several, /standard-profile Δ to or from any of them\._$/m);
+  assert.doesNotMatch(one, /any of them/);
+  assert.doesNotMatch(several, /to or from it/);
+});
+
 test("the trust line counts every cell that carries a low-n mark, and no cell that does not", () => {
   const overview = build({
     cohorts: [cohort("0.1.0", { sessions: 2 }), cohort("0.2.0", { sessions: 1 })],
@@ -468,7 +488,7 @@ test("a corpus with no detectable version is headed unknown profile and says no 
     const overview = build({ cohorts: [cohort("unknown", { sessions: 3 })], profileRows });
     assert.equal(overview.versions.main_profile, null, corpus);
     const out = text(overview);
-    assert.match(out, /\| Median \$\/cycle \(unknown profile\) \|/);
+    assert.match(out, /\| Median \$\/cycle \(unknown\) \|/);
     assert.match(out, /^\| no version detectable \| 3 \|.* \| — \| — \| — \|$/m);
     assert.ok(out.includes("No version is detectable, so no per-version Median $/cycle or Δ is computed."), corpus);
     assert.doesNotMatch(out, /Every cycle here is under it|Median \$\/cycle is a per-session median|main profile's/, corpus);
@@ -483,8 +503,80 @@ test("quality renders rounds per task and retries over tasks, and an em dash wit
     ],
     stageByVersion: { versions: ["0.1.0", "0.2.0"], excludedVersions: [], rows: [] },
   });
-  assert.match(text(overview), /^\| 0\.1\.0 \|.* \| 1\.3 rounds\/task · 2\/8 retries\/tasks \|$/m);
+  assert.match(text(overview), /^\| 0\.1\.0 \|.* \| 1\.3 · 2\/8 \|$/m);
   assert.match(text(overview), /^\| 0\.2\.0 \|.* \| — \|$/m);
+  // The cell carries bare figures, so the units sit in a legend under the table, and in the header only once.
+  assert.match(text(overview), /^_Quality is review rounds per task · retries\/tasks\._$/m);
+  assert.ok(renderOverview(overview).some((l) => l.startsWith("| Version |") && l.endsWith("| Quality |")));
+});
+
+// Claude Code's terminal renderer was observed to keep a table of at most this many characters as a
+// table, and to stack a wider one into per-row blocks.
+const MAX_TABLE_WIDTH = 110;
+
+test("no overview table line is wider than the terminal keeps as a table, and no quality figure is lost to get there", () => {
+  const quality = (tasks, retries, roundsPerTask) => ({ tasks, reviewRounds: 0, retries, roundsPerTask });
+  const versions = ["0.19.0", "0.20.0", "0.20.1", "0.21.0", "0.22.0", "0.22.1"];
+  const cohorts = [
+    cohort("0.18.0", { sessions: 40, total: 9000.5, quality: quality(30, 9, 1.1) }),
+    cohort("0.19.0", { sessions: 52, total: 1625.14, medianPerSession: 18.43, quality: quality(38, 11, 1.1) }),
+    // One version with a withheld Δ, and one below the cohort floor: the two longest marks, on their own rows.
+    cohort("0.20.0", { sessions: 19, total: 394.37, excluded: 3, quality: quality(15, 2, 1.2) }),
+    cohort("0.20.1", { sessions: 2, total: 199.47, quality: quality(7, 1, 1.3) }),
+    cohort("0.21.0", { sessions: 86, total: 2203.31, quality: quality(63, 28, 1.4) }),
+    cohort("0.22.0", { sessions: 212, total: 6413.99, quality: quality(255, 53, 1.5) }),
+    cohort("0.22.1", { sessions: 31, total: 362.14, quality: quality(31, 6, 0.9) }),
+    cohort("unknown", { sessions: 66, total: 947.05, quality: quality(12, 3, 1.6) }),
+  ];
+  const stageCells = (median) => Object.fromEntries(versions.map((v, i) => [v, cell(median + i, i === 0 ? 1 : 5)]));
+  const overview = build({
+    cohorts,
+    profileRows: versions.map((v, i) => profileRow(v, "standard", {
+      medianCostPerCycle: 100 + i, cycles: 9,
+      lowConfidence: v === "0.20.1", excluded: v === "0.20.0" ? 3 : 0,
+      delta: v === "0.20.0"
+        ? { state: "not-compared", pct: null, reason: "unpriced" }
+        : { state: "compared", pct: 652.3 - i },
+    })),
+    stageByVersion: {
+      versions, excludedVersions: [],
+      rows: [
+        stageRow("superpowers:subagent-driven-development", stageCells(10), "insufficient data (n=4→2)"),
+        stageRow("planning", stageCells(5), "up"),
+      ],
+    },
+    stageWindow: [
+      { stage: "superpowers:subagent-driven-development", total: 9000 }, { stage: "planning", total: 3000 },
+      ...Array.from({ length: OVERVIEW_STAGES }, (_, i) => ({ stage: `tail${i}`, total: 10 - i })),
+    ],
+  });
+  const lines = renderOverview(overview);
+  const section = (from, to) => lines.slice(lines.indexOf(from), lines.indexOf(to));
+  const versionTable = section("**Per version**", "**Per stage**").filter((l) => l.startsWith("|"));
+  const stageTable = section("**Per stage**", "**Per stage, by version**").filter((l) => l.startsWith("|"));
+  // Vacuity guards: both tables hold a header, a separator and every kind of row the width has to survive.
+  assert.ok(overview.versions.folded && overview.versions.unknown, "the fixture has no folded or unknown row");
+  assert.ok(versionTable.some((l) => l.startsWith("| ⚠ 0.20.0 |") && l.includes("not compared (⚠ unpriced)")), "no flagged version row");
+  assert.ok(versionTable.some((l) => l.startsWith("| 0.20.1 |") && l.includes("low confidence")), "no low-n version row");
+  assert.ok(versionTable.length >= versions.length + 4, `the version table is too short:\n${versionTable.join("\n")}`);
+  assert.ok(stageTable.some((l) => l.startsWith("| superpowers:subagent-driven-development |")), "no long stage name row");
+  assert.ok(stageTable.some((l) => l.startsWith("| remaining ")), "no remaining stage row");
+  assert.ok(lines.some((l) => l.startsWith("- planning:") && l.includes("low n")), "no low-n stage cell");
+
+  for (const line of [...versionTable, ...stageTable])
+    assert.ok(line.length <= MAX_TABLE_WIDTH, `${line.length} characters, over ${MAX_TABLE_WIDTH}: ${line}`);
+
+  // Every quality figure the fixture carries is still on its own row.
+  const rowFor = (version) => versionTable.find((l) => l.split(" | ")[0].replace(/^\| (⚠ )?/, "") === version);
+  for (const c of cohorts.filter((r) => r.version !== "0.18.0")) {
+    const label = c.version === "unknown" ? "no version detectable" : c.version;
+    const row = rowFor(label);
+    assert.ok(row, `no row for ${label}`);
+    assert.ok(
+      row.endsWith(`| ${c.quality.roundsPerTask.toFixed(1)} · ${c.quality.retries}/${c.quality.tasks} |`),
+      `${label} lost a quality figure: ${row}`,
+    );
+  }
 });
 
 test("stage cells carry n, and a cell below the trend gate says it is low n", () => {
