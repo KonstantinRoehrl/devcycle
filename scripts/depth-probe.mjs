@@ -140,6 +140,8 @@ function main(argv) {
     const file = requireValue(flags, "--transcript");
     const agentId = requireValue(flags, "--agent", "an agent id");
     if (file) {
+      // transcriptStats reads a missing file as an empty one, which would misreport a typo'd path.
+      if (!existsSync(file)) throw new Error(`transcript not found: ${file}`);
       const s = transcriptStats(file);
       if (!s) throw new Error(`no usage record in ${basename(file)} — nothing to measure`);
       r = measured(s.depth, s.model);

@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { findStateFile } from "./lib/find-state-file.mjs";
 import { field } from "../scripts/md-field.mjs";
 import { transcriptStats } from "../scripts/depth-probe.mjs";
+import { isMain } from "../scripts/is-main.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("../scripts/run-record.mjs", import.meta.url));
 export const DEPTH_WARN = 150_000;
@@ -20,8 +21,10 @@ const STAGES = new Set(["scoping", "audit", "diagnosis", "brainstorm", "planning
 
 export const depthOf = (tokens) => (tokens > DEPTH_BREACH ? "breach" : tokens > DEPTH_WARN ? "warn" : "ok");
 
-// Hook input is model-adjacent text: strip control characters, keep the schema's charset, cap length.
-const clean = (s, allowed, max) => String(s ?? "").replace(/[\u0000-\u001f\u007f]/g, "").replace(allowed, "-").slice(0, max);
+// Hook input is model-adjacent text: drop everything outside the schema's charset (control
+// characters included) and cap length. run-record rejects a row that misses its schema pattern,
+// so a substitute character the charset lacks would lose the whole row.
+const clean = (s, disallowed, max) => String(s ?? "").replace(disallowed, "").slice(0, max);
 
 function readInput() {
   const o = JSON.parse(readFileSync(0, "utf8") || "{}");
@@ -57,5 +60,7 @@ function main() {
   append(["--kind", "event", "--event", "depth-breach", "--stage", stage]);
 }
 
-try { main(); } catch { /* SubagentStop is observe-only here: any failure is a silent no-op */ }
-process.exit(0);
+if (isMain(import.meta.url, process.argv[1])) {
+  try { main(); } catch { /* SubagentStop is observe-only here: any failure is a silent no-op */ }
+  process.exit(0);
+}

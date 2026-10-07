@@ -8,10 +8,12 @@ import { makeRepo, writeInto } from "./helpers.mjs";
 import { repoSlug, gitToplevel } from "../../scripts/run-record.mjs";
 
 const HOOK = new URL("../../hooks/dispatch-sensor.mjs", import.meta.url).pathname;
+const SCHEMA = JSON.parse(readFileSync(new URL("../fixtures/run-record.schema.json", import.meta.url), "utf8"));
+const ROW_SCHEMA = SCHEMA.oneOf.find((b) => b.title === "agent-depth").properties;
 const RUN = "00000000000000a1";
 const usage = (i, cc, cr, o) => ({ input_tokens: i, cache_creation_input_tokens: cc, cache_read_input_tokens: cr, output_tokens: o });
 
-function fixture({ depth = 16149, stage = "planning", run = RUN } = {}) {
+function fixture({ depth = 16149, stage = "planning", run = RUN, model = "claude-haiku-4-5-20251001" } = {}) {
   const repo = makeRepo();
   writeInto(repo, ".devcycle/state.md", `# devcycle state\n- stage: ${stage}\n- run: ${run}\n`);
   const runsDir = makeTempDir("dispatch-sensor-runs");
@@ -19,7 +21,7 @@ function fixture({ depth = 16149, stage = "planning", run = RUN } = {}) {
   writeFileSync(transcript, [
     { type: "user", timestamp: "2026-10-07T07:18:05.680Z", message: { content: "go" } },
     { type: "assistant", timestamp: "2026-10-07T07:18:12.261Z",
-      message: { model: "claude-haiku-4-5-20251001", usage: usage(depth, 0, 0, 38), content: [{ type: "tool_use", id: "t", name: "Bash", input: {} }] } },
+      message: { model, usage: usage(depth, 0, 0, 38), content: [{ type: "tool_use", id: "t", name: "Bash", input: {} }] } },
   ].map((r) => JSON.stringify(r)).join("\n") + "\n");
   return { repo, runsDir, transcript };
 }
@@ -73,16 +75,36 @@ test("no state file, a run of none, a stage outside the enum, malformed input: s
   assert.equal(callHook(done).status, 0);
   const bare = { ...fixture(), repo: makeTempDir("dispatch-sensor-norepo") };
   assert.equal(callHook(bare).status, 0);
-  const junk = spawnSync("node", [HOOK], { input: "{not json", encoding: "utf8" });
+  const junkRuns = makeTempDir("dispatch-sensor-junk-runs");
+  const junk = spawnSync("node", [HOOK], { input: "{not json", encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: junkRuns } });
   assert.equal(junk.status, 0);
   assert.equal(junk.stdout + junk.stderr, "");
+  assert.deepEqual(readdirSync(junkRuns), []);
   for (const f of [fx, done]) assert.deepEqual(rows(f.repo, f.runsDir), []);
+  assert.deepEqual(readdirSync(bare.runsDir), []);
 });
 
-test("model-authored strings are sanitized: control characters stripped, length capped", () => {
-  const fx = fixture();
-  callHook(fx, { agent_type: "evil\u001b[31m\ntype" + "x".repeat(200) });
+test("model-authored strings are sanitized to the agent-depth schema: control characters stripped, length capped", () => {
+  const fx = fixture({ model: "claude haiku/4\u001b[31m" + "m".repeat(200) });
+  callHook(fx, { agent_type: "evil\u001b[31m\ntype" + "x".repeat(200), agent_id: "A3382414BF-x\u0007" + "f".repeat(60) });
   const row = rows(fx.repo, fx.runsDir)[0];
-  assert.match(row.agentType, /^[A-Za-z0-9:_.-]{1,80}$/);
+  for (const key of ["agentType", "agentId", "model"]) assert.match(row[key], new RegExp(ROW_SCHEMA[key].pattern), key);
   assert.ok(!row.agentType.includes("\u001b"));
+});
+
+test("an agent_id with nothing schema-valid left in it writes the row without an agentId", () => {
+  const fx = fixture();
+  callHook(fx, { agent_id: "--ABC--" });
+  const [row, ...rest] = rows(fx.repo, fx.runsDir);
+  assert.equal(rest.length, 0);
+  assert.equal(row.kind, "agent-depth");
+  assert.ok(!("agentId" in row));
+});
+
+test("importing the hook exposes depthOf without reading stdin or exiting the importer", () => {
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e",
+    `const m = await import(${JSON.stringify(HOOK)}); console.log(typeof m.depthOf, m.depthOf(m.DEPTH_BREACH + 1));`],
+  { input: "", encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "function breach");
 });

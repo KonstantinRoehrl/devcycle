@@ -270,11 +270,11 @@ export function costBand(records) {
     const model = r.message?.model ?? r.model;
     const p = priceFor(model);
     // An unpriced model must not throw on `p.in` (costUSD guards the same way with `if (!p)`) and
-    // must not enter the band's numerator OR its
-    // totalTokens denominator — leaving it in the denominator while it prices at nothing would
-    // understate cost-per-token by exactly the unpriced share, the same plausible-and-wrong shape
-    // the /1e6 fix above corrects. `costBand` has no reference to the per-session `unpriced` tally
-    // (`:458`) to bump — the real partition happens one level up, in Step 5.
+    // must not enter the band's numerator OR its totalTokens denominator — leaving it in the
+    // denominator while it prices at nothing would understate cost-per-token by exactly the
+    // unpriced share, the same plausible-and-wrong shape the /1e6 fix above corrects. `costBand`
+    // has no reference to the per-session `unpriced` tally (`:458`) to bump — the real partition
+    // happens one level up, in Step 5.
     if (!p) continue;
     const h1 = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
     const m5 = u.cache_creation?.ephemeral_5m_input_tokens ?? 0;

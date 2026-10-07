@@ -68,3 +68,10 @@ test("cli: a failure exits 1 with one depth-probe line on stderr", () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /^depth-probe: CLAUDE_CODE_SESSION_ID is not set/);
 });
+
+test("cli: a --transcript that does not exist says so, not that it holds no usage record", () => {
+  const missing = join(makeTempDir("depth-probe"), "nonexistent.jsonl");
+  const r = spawnSync(process.execPath, [SCRIPT, "--transcript", missing], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, `depth-probe: transcript not found: ${missing}\n`);
+});
