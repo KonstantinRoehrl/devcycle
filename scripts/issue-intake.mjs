@@ -69,15 +69,18 @@ export function intake({
   // a home-path/secret in a title is exactly the class this screen exists to catch. Redaction is
   // a safety net, not a gate: a failure leaves the originals rather than dropping the issue.
   if (kept.length && scratchDir) {
-    mkdirSync(scratchDir, { recursive: true });
-    for (const it of kept) {
-      writeFileSync(join(scratchDir, `issue-${it.number}-title.txt`), it.title ?? "");
-      writeFileSync(join(scratchDir, `issue-${it.number}-body.md`), it.body ?? "");
-    }
-    try { redactRunner(scratchDir); } catch { /* keep originals */ }
-    for (const it of kept) {
-      try { it.title = readFileSync(join(scratchDir, `issue-${it.number}-title.txt`), "utf8").replace(/\n$/, ""); } catch { /* keep original */ }
-      try { it.body = readFileSync(join(scratchDir, `issue-${it.number}-body.md`), "utf8"); } catch { /* keep original */ }
+    let scratchReady = true;
+    try { mkdirSync(scratchDir, { recursive: true }); } catch { scratchReady = false; }
+    if (scratchReady) {
+      for (const it of kept) {
+        try { writeFileSync(join(scratchDir, `issue-${it.number}-title.txt`), it.title ?? ""); } catch { /* keep original */ }
+        try { writeFileSync(join(scratchDir, `issue-${it.number}-body.md`), it.body ?? ""); } catch { /* keep original */ }
+      }
+      try { redactRunner(scratchDir); } catch { /* keep originals */ }
+      for (const it of kept) {
+        try { it.title = readFileSync(join(scratchDir, `issue-${it.number}-title.txt`), "utf8").replace(/\n$/, ""); } catch { /* keep original */ }
+        try { it.body = readFileSync(join(scratchDir, `issue-${it.number}-body.md`), "utf8"); } catch { /* keep original */ }
+      }
     }
   }
 
