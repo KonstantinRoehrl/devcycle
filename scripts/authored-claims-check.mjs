@@ -5,12 +5,7 @@
 // Conservative by design: fenced code, inline code, and URLs are blanked before matching so a
 // guarded span can never trigger a false positive. See references/evidence.md § Authored claims.
 import { readFileSync } from "node:fs";
-
-const [, , filePath] = process.argv;
-if (!filePath) {
-  console.error("usage: node scripts/authored-claims-check.mjs <file>");
-  process.exit(1);
-}
+import { isMain } from "./is-main.mjs";
 
 // A path with a file extension, then `:line` (optionally `-line` for a range). The trailing
 // `(?![\d.])` lookahead rejects a `:8080`-then-more port and a semver-ish tail; ISO dates and
@@ -29,47 +24,55 @@ const URL_RE = /https?:\/\/\S+/g;
 // claim written after the label on the same line, still trips.
 const TAIL_FIELD_RE = /^\s*-\s*Tail\b.*?\blast\s+\d+\s+lines\b/i;
 
-const rawLines = readFileSync(filePath, "utf8").split("\n");
-
 // Blanks a matched span to same-length spaces so a guarded span cannot match while line/column
 // positions of everything else stay meaningful.
 const blank = (line, re) => line.replace(re, (m) => " ".repeat(m.length));
 
-let inFence = false;
-const guardedLines = rawLines.map((line) => {
-  if (FENCE_RE.test(line)) {
-    inFence = !inFence;
-    return null; // the fence delimiter line itself carries no claims
-  }
-  if (inFence) return null;
-  return blank(blank(blank(line, INLINE_CODE_RE), URL_RE), TAIL_FIELD_RE);
-});
+export function authoredClaimsLeg(text, { planPath }) {
+  const rawLines = text.split("\n");
 
-function markerClears(lineIdx) {
-  return [lineIdx - 1, lineIdx, lineIdx + 1].some(
-    (i) => rawLines[i] !== undefined && MARKER_RE.test(rawLines[i])
-  );
-}
+  let inFence = false;
+  const guardedLines = rawLines.map((line) => {
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      return null; // the fence delimiter line itself carries no claims
+    }
+    if (inFence) return null;
+    return blank(blank(blank(line, INLINE_CODE_RE), URL_RE), TAIL_FIELD_RE);
+  });
 
-const violations = [];
-guardedLines.forEach((guarded, idx) => {
-  if (guarded === null) return;
-  if (markerClears(idx)) return;
-  for (const m of guarded.matchAll(LINE_REF_RE)) {
-    violations.push({ line: idx + 1, kind: "line-reference", text: m[0] });
-  }
-  for (const m of guarded.matchAll(COUNT_RE)) {
-    violations.push({ line: idx + 1, kind: "count", text: m[0] });
-  }
-});
-
-if (violations.length > 0) {
-  for (const v of violations) {
-    console.error(
-      `authored-claims-check: ${filePath}:${v.line}: unverified ${v.kind} claim "${v.text}" — add a (verified: <cmd>) or (assumption) marker`
+  const markerClears = (lineIdx) =>
+    [lineIdx - 1, lineIdx, lineIdx + 1].some(
+      (i) => rawLines[i] !== undefined && MARKER_RE.test(rawLines[i])
     );
-  }
-  process.exit(1);
+
+  const findings = [];
+  const flag = (idx, kind, claim) =>
+    findings.push(`${planPath}:${idx + 1}: unverified ${kind} claim "${claim}" — add a (verified: <cmd>) or (assumption) marker`);
+  guardedLines.forEach((guarded, idx) => {
+    if (guarded === null) return;
+    if (markerClears(idx)) return;
+    for (const m of guarded.matchAll(LINE_REF_RE)) flag(idx, "line-reference", m[0]);
+    for (const m of guarded.matchAll(COUNT_RE)) flag(idx, "count", m[0]);
+  });
+
+  return { findings, ok: `ok — ${planPath}`, notes: [] };
 }
-console.log(`authored-claims-check: ok — ${filePath}`);
-process.exit(0);
+
+function main() {
+  const [, , filePath] = process.argv;
+  if (!filePath) {
+    console.error("usage: node scripts/authored-claims-check.mjs <file>");
+    process.exit(1);
+  }
+
+  const { findings, ok } = authoredClaimsLeg(readFileSync(filePath, "utf8"), { planPath: filePath });
+  if (findings.length > 0) {
+    for (const f of findings) console.error(`authored-claims-check: ${f}`);
+    process.exit(1);
+  }
+  console.log(`authored-claims-check: ${ok}`);
+  process.exit(0);
+}
+
+if (isMain(import.meta.url, process.argv[1])) main();
