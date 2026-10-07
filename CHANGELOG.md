@@ -1,11 +1,12 @@
 # Changelog
 
 **Every subagent's context depth is now recorded.** A new `SubagentStop` hook,
-`hooks/dispatch-sensor.mjs`, writes one `agent-depth` run-record row for each subagent that
-finishes during a cycle: its final context depth, model, tool uses and duration, marked `warn`
-above 150k tokens and `breach` above 200k. A breach also records a `depth-breach` event. The hook
-only observes — it never blocks a subagent and always exits 0. These rows are their own record
-kind, separate from `dispatch`, so implementer dispatches are not counted twice.
+`hooks/dispatch-sensor.mjs`, writes one `agent-depth` run-record row for each subagent that a
+cycle's own sessions run, when it finishes: its final context depth, model, tool uses and
+duration, marked `warn` above 150k tokens and `breach` above 200k. A breach also records a
+`depth-breach` event. The hook only observes — it never blocks a subagent and always exits 0.
+These rows are their own record kind, separate from `dispatch`, so implementer dispatches are not
+counted twice.
 
 **The depth gate has its own probe.** The depth gate now runs `scripts/depth-probe.mjs`, which
 reads one transcript's last usage record, instead of loading all of `doctor.mjs` to do the same
@@ -14,8 +15,8 @@ measured against an assumed 1M window and labelled as assumed, instead of being 
 
 **Doctor reports agent depth per stage.** The doctor report gains an
 `### Agent depth by stage (observed)` table — dispatches, median and maximum depth, and warn and
-breach counts per stage — and a `sensor-inactive` finding when a planning stage produced a plan
-but recorded no depth rows, which means the dispatch-sensor hook was not running.
+breach counts per stage — and a `sensor-inactive` finding when a run's planning stage produced a
+plan but recorded no depth rows, which means the dispatch-sensor hook was not running.
 
 **One plan gate.** Planning's self-review now runs a single command, `scripts/plan-check.mjs`, in
 place of seven separate gate scripts (code blocks, brief completeness, blast radius, content

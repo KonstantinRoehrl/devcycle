@@ -394,8 +394,13 @@ branch with real settings, install the checkout through a directory-source marke
   `agent_type`, `agent_transcript_path` and `cwd` in its input.
 - The transcript at `agent_transcript_path` ends with an assistant record carrying `message.model`
   and `message.usage`, from which the agent's final context depth is read.
+- `session_id` was not recorded.
 
 **Consequence.** `hooks/dispatch-sensor.mjs` registers on `SubagentStop` only (decision D15,
 `docs/decisions/README.md` 2026-10-07): it is the one event that sees every agent, and it reads the
 single transcript the input names. Because its input always carries `agent_type`/`agent_id`, the
-subagent-origin guard § (f) describes for the workload sensor does not apply here.
+subagent-origin guard § (f) describes for the workload sensor does not apply here. It also records
+only when the input's `session_id` — Claude Code's common hook-input field, assumed to be the
+parent session's `$CLAUDE_CODE_SESSION_ID` — has a `session` row in the run, which is unverified
+until the on-device check: if the id differs, every row is silently dropped, and doctor's
+`sensor-inactive` candidate is what surfaces it.

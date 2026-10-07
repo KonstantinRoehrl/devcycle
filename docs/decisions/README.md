@@ -8,21 +8,23 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 ## 2026-10-07 — planning context safety, Plan A: the depth gate gets its own probe, the plan gates become one
 
 **Decision:** the depth gate runs `scripts/depth-probe.mjs` directly instead of `doctor.mjs --depth`
-(which stays, as an adapter), and an unpriced model is measured against an assumed 1M window,
-labelled, instead of refused. Budgets move by the measured amounts below; nothing is offset.
+(which stays, as an adapter), and a model with no priced family is measured against an assumed 1M
+window, labelled, instead of refused; an older model of a priced family still fails the probe, its
+depth unknown. Budgets move by the measured amounts below; nothing is offset.
 
 **Why:** the gate loaded doctor's whole import closure to read one usage record, and a refusal on a
 brand-new model blinded the gate exactly when it is least trusted.
 
 **Fourth hook:** the plugin ships `hooks/dispatch-sensor.mjs`, registered in `hooks/hooks.json` on
 `SubagentStop` (D15). While `.devcycle/state.md` names a run it appends one `agent-depth` record
-per finished subagent — final context depth, model, tool uses, duration — marked `warn` above 150k
-and `breach` above 200k, and a breach also appends a `depth-breach` event. It only observes: it
-never blocks and always exits 0. It is the one hook allowed to read something larger than its input:
-beyond the state file it reads only the single transcript `agent_transcript_path` names, because the
-depth is nowhere else; `SubagentStop` is the one event that reports a background dispatch's finish —
-its Agent `PostToolUse` fires at launch with no counts (`docs/platform-notes.md` § (i)). This
-supersedes the 2026-09-05 entry's "third hook".
+per finished subagent of a session with a `session` row in that run — final context depth, model,
+tool uses, duration — marked `warn` above 150k and `breach` above 200k, and a breach also appends a
+`depth-breach` event. It only observes: it never blocks and always exits 0. It is the one hook
+allowed to read something larger than its input: beyond the state file and the run record it reads
+only the single transcript `agent_transcript_path` names, because the depth is nowhere else;
+`SubagentStop` is the one event that reports a background dispatch's finish — its Agent
+`PostToolUse` fires at launch with no counts (`docs/platform-notes.md` § (i)). This supersedes the
+2026-09-05 entry's "third hook".
 
 **Budgets:** every context budget below falls by the 3 bytes the shorter probe command saves in
 `references/delegation.md`: `playbooks/executing-waves.md` 103391 → 103388,
@@ -42,7 +44,9 @@ moves `playbooks/planning-waves.md` 68650 → 67353 (−1297 bytes) and `surface
 record then adds 471 bytes to the four playbooks whose cited references include it —
 `playbooks/executing-waves.md` 103388 → 103859, `playbooks/receiving-review.md` 107508 → 107979,
 `playbooks/sweeping-mechanical-changes.md` 80625 → 81096 and `playbooks/taking-the-fast-path.md`
-73750 → 74221 — and its one new table row moves `surfaceTotal` 5726 → 5727.
+73750 → 74221 — and its one new table row moves `surfaceTotal` 5726 → 5727. Limiting that row to a
+session with a `session` row in the run then adds 35 bytes to the same four — 103859 → 103894,
+107979 → 108014, 81096 → 81131 and 74221 → 74256.
 
 **Plan gate:** planning's scripted self-review checks become one command, `scripts/plan-check.mjs`,
 running seven legs in order — `codeBlocks`, `briefCompleteness`, `blastRadius`, `contentCoupling`,
@@ -59,10 +63,10 @@ its `pass` or `fail` result (A-M6, L27).
 ```text
 budget: surface-budget.json surfaceTotal 5727
 budget: context-budget.json playbooks/profiling-sessions.md 46850
-budget: context-budget.json playbooks/executing-waves.md 103859
-budget: context-budget.json playbooks/receiving-review.md 107979
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 81096
-budget: context-budget.json playbooks/taking-the-fast-path.md 74221
+budget: context-budget.json playbooks/executing-waves.md 103894
+budget: context-budget.json playbooks/receiving-review.md 108014
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 81131
+budget: context-budget.json playbooks/taking-the-fast-path.md 74256
 ```
 
 ## 2026-10-04 — doctor overview: the profiling playbook states the reply contract, and its budget grows by it
