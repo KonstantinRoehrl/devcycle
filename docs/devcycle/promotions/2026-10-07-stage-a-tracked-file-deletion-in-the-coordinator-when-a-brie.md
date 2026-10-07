@@ -1,0 +1,14 @@
+# Stage a tracked-file deletion in the coordinator when a brief forbids staging
+- promotion-type: doc-edit
+- cluster-signature: novel:tracked-deletion-by-no-stage-brief-reds-git-ls-files-test|3 occurrences|2 sessions
+- files-touched: docs/devcycle/lessons.md
+- affected-files: docs/devcycle/lessons.md
+- landed: 2026-10-07
+- commit: 
+- plugin-version: 0.22.1
+- sourced-from-memory: false
+- culprit-id: novel:tracked-deletion-by-no-stage-brief-reds-git-ls-files-test
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases: 

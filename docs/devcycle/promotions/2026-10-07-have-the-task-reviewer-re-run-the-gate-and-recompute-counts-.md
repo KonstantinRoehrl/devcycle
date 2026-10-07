@@ -1,0 +1,14 @@
+# Have the task reviewer re-run the gate and recompute counts instead of trusting the report
+- promotion-type: doc-edit
+- cluster-signature: novel:reviewer-reexecutes-claims-instead-of-trusting-report|10 occurrences|7 sessions
+- files-touched: docs/devcycle/lessons.md
+- affected-files: docs/devcycle/lessons.md
+- landed: 2026-10-07
+- commit: 
+- plugin-version: 0.22.1
+- sourced-from-memory: false
+- culprit-id: novel:reviewer-reexecutes-claims-instead-of-trusting-report
+- rung: r2
+- audience: repo-devs
+- verify: journal-reinforcement
+- aliases: 
