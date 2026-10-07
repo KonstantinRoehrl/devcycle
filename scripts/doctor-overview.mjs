@@ -241,7 +241,9 @@ export function buildOverview(input) {
 // A ⚠ after a figure, or before a label (`before`), for a version with requests left out as unpriced.
 const flagged = (text, unpriced, before = false) => (unpriced ? (before ? `⚠ ${text}` : `${text} ⚠`) : text);
 const moneyCell = (value, row) => (row.fullyUnpriced ? "⚠ unpriced" : flagged(usd(value), row.unpriced));
-const sessionsCell = (sessions, low, minCohort) => cohortSessionsText({ sessions, lowConfidence: low }, minCohort);
+// The table's compact Sessions cell: the floor is stated once, in the legend, so a row that is both
+// below it and has a withheld Δ still fits the terminal. The prose line keeps the full wording.
+const sessionsCell = (sessions, low) => `${sessions}${low ? " (low n)" : ""}`;
 // Bare figures: the units are named once, in the legend under the per-version table.
 const qualityCell = (q) => (q ? `${q.roundsPerTask.toFixed(1)} · ${q.retries}/${q.tasks}` : null);
 const stageCell = (c) => (c ? `${usd(c.median)} (n=${c.n}${c.lowN ? ", low n" : ""})` : null);
@@ -278,7 +280,7 @@ export function renderOverview(overview) {
   const versionRows = [
     ...versions.rows.map((r) => [
       r.unpriced ? `⚠ ${r.version}` : r.version,
-      sessionsCell(r.sessions, r.sessionsLowConfidence, minCohort),
+      sessionsCell(r.sessions, r.sessionsLowConfidence),
       moneyCell(r.total, r),
       moneyCell(r.medianPerSession, r),
       cycleCell(r),
@@ -295,7 +297,7 @@ export function renderOverview(overview) {
     ...(versions.unknown
       ? [[
           flagged("no version detectable", versions.unknown.unpriced, true),
-          sessionsCell(versions.unknown.sessions, versions.unknown.sessionsLowConfidence, minCohort),
+          sessionsCell(versions.unknown.sessions, versions.unknown.sessionsLowConfidence),
           moneyCell(versions.unknown.total, versions.unknown),
           moneyCell(versions.unknown.medianPerSession, versions.unknown),
           null, null, qualityCell(versions.unknown.quality),
@@ -307,7 +309,9 @@ export function renderOverview(overview) {
     versionRows,
     "no settled sessions in this corpus",
   ));
-  L.push(...note("Quality is review rounds per task · retries/tasks."));
+  L.push(...note(
+    `Quality is review rounds per task · retries/tasks. A Sessions cell marked low n has fewer than ${minCohort} sessions.`,
+  ));
   L.push("", directionLine(versions.direction));
   if (versions.dearest) {
     const d = versions.dearest;
@@ -317,7 +321,7 @@ export function renderOverview(overview) {
       `Dearest version: ${d.version} (${usd(d.total)}${d.unpriced ? " ⚠" : ""})` +
         (m
           ? `; highest median $/session: ${m.version} (${flagged(usd(m.medianPerSession), m.unpriced)}` +
-            `${m.sessionsLowConfidence ? `, sessions: ${sessionsCell(m.sessions, true, minCohort)}` : ""})`
+            `${m.sessionsLowConfidence ? `, sessions: ${cohortSessionsText({ sessions: m.sessions, lowConfidence: true }, minCohort)}` : ""})`
           : ""),
     );
   }

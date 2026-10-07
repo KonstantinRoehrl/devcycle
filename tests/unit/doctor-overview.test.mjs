@@ -204,7 +204,7 @@ test("a low-confidence cohort is marked in the Sessions cell and in the $/cycle 
     profileRows: [profileRow("0.1.0", "standard", { sessions: 2, lowConfidence: true })],
     stageByVersion: { versions: ["0.1.0"], excludedVersions: [], rows: [] },
   });
-  assert.match(text(overview), /^\| 0\.1\.0 \| 2 \(low confidence: n<3\) \| \$40\.00 \| \$10\.00 \| \$10\.00 \(n=2\) \| first seen \| — \|$/m);
+  assert.match(text(overview), /^\| 0\.1\.0 \| 2 \(low n\) \| \$40\.00 \| \$10\.00 \| \$10\.00 \(n=2\) \| first seen \| — \|$/m);
   // A version of five sessions, two of them in the main profile: the $/cycle n is the profile's two.
   const mixed = build({
     cohorts: [cohort("0.1.0", { sessions: 5 })],
@@ -384,7 +384,7 @@ test("the trust line counts every cell that carries a low-n mark, and no cell th
   const unknownWith = (sessions) => build({ cohorts: [cohort("0.1.0"), cohort("unknown", { sessions })] });
   assert.equal(unknownWith(3).summary.trust.lowNCells, 0, "the control: an unknown row at the minimum is no low-n cell");
   const thinUnknown = unknownWith(2);
-  assert.match(text(thinUnknown), /^\| no version detectable \| 2 \(low confidence: n<3\) \|/m);
+  assert.match(text(thinUnknown), /^\| no version detectable \| 2 \(low n\) \|/m);
   assert.equal(thinUnknown.summary.trust.lowNCells, 1);
   assert.match(renderTrendSummary(thinUnknown).join("\n"), /Trust: 1 low-n cell\b/);
 });
@@ -506,7 +506,7 @@ test("quality renders rounds per task and retries over tasks, and an em dash wit
   assert.match(text(overview), /^\| 0\.1\.0 \|.* \| 1\.3 · 2\/8 \|$/m);
   assert.match(text(overview), /^\| 0\.2\.0 \|.* \| — \|$/m);
   // The cell carries bare figures, so the units sit in a legend under the table, and in the header only once.
-  assert.match(text(overview), /^_Quality is review rounds per task · retries\/tasks\._$/m);
+  assert.match(text(overview), /^_Quality is review rounds per task · retries\/tasks\. A Sessions cell marked low n has fewer than 3 sessions\._$/m);
   assert.ok(renderOverview(overview).some((l) => l.startsWith("| Version |") && l.endsWith("| Quality |")));
 });
 
@@ -557,7 +557,7 @@ test("no overview table line is wider than the terminal keeps as a table, and no
   // Vacuity guards: both tables hold a header, a separator and every kind of row the width has to survive.
   assert.ok(overview.versions.folded && overview.versions.unknown, "the fixture has no folded or unknown row");
   assert.ok(versionTable.some((l) => l.startsWith("| ⚠ 0.20.0 |") && l.includes("not compared (⚠ unpriced)")), "no flagged version row");
-  assert.ok(versionTable.some((l) => l.startsWith("| 0.20.1 |") && l.includes("low confidence")), "no low-n version row");
+  assert.ok(versionTable.some((l) => l.startsWith("| 0.20.1 |") && l.includes("low n")), "no low-n version row");
   assert.ok(versionTable.length >= versions.length + 4, `the version table is too short:\n${versionTable.join("\n")}`);
   assert.ok(stageTable.some((l) => l.startsWith("| superpowers:subagent-driven-development |")), "no long stage name row");
   assert.ok(stageTable.some((l) => l.startsWith("| remaining ")), "no remaining stage row");
@@ -577,6 +577,41 @@ test("no overview table line is wider than the terminal keeps as a table, and no
       `${label} lost a quality figure: ${row}`,
     );
   }
+});
+
+test("a version row both below the cohort floor and with a withheld Δ still fits the terminal, and the legend names the floor", () => {
+  const minCohort = 5;
+  const overview = build({
+    bands: { ...BANDS, minCohort },
+    cohorts: [
+      cohort("0.19.0", { sessions: 52, total: 1625.14, medianPerSession: 18.43, quality: { tasks: 38, reviewRounds: 0, retries: 11, roundsPerTask: 1.1 } }),
+      cohort("0.20.1", { sessions: 2, total: 199.47, medianPerSession: 10, excluded: 3, quality: { tasks: 7, reviewRounds: 0, retries: 1, roundsPerTask: 1.3 } }),
+    ],
+    profileRows: [
+      profileRow("0.19.0", "standard", { sessions: 52, cycles: 9, medianCostPerCycle: 102 }),
+      profileRow("0.20.1", "standard", {
+        sessions: 2, cycles: 9, medianCostPerCycle: 102, lowConfidence: true, excluded: 3,
+        delta: { state: "not-compared", pct: null, reason: "unpriced" },
+      }),
+    ],
+    stageByVersion: { versions: ["0.19.0", "0.20.1"], excludedVersions: [], rows: [] },
+  });
+  const lines = renderOverview(overview);
+  const section = lines.slice(lines.indexOf("**Per version**"), lines.indexOf("**Per stage**"));
+  const versionTable = section.filter((l) => l.startsWith("|"));
+  const mergedRow = versionTable.find((l) => l.startsWith("| ⚠ 0.20.1 |"));
+  // Vacuity guards: the one row carries both marks and a quality figure, and the legend is not absent.
+  assert.ok(mergedRow, `no merged version row:\n${versionTable.join("\n")}`);
+  assert.ok(mergedRow.includes("not compared (⚠ unpriced)"), `the merged row has no withheld Δ: ${mergedRow}`);
+  assert.ok(mergedRow.includes("low n"), `the merged row has no low-n mark: ${mergedRow}`);
+  assert.ok(mergedRow.endsWith("| 1.3 · 1/7 |"), `the merged row has no quality figure: ${mergedRow}`);
+
+  for (const line of versionTable)
+    assert.ok(line.length <= MAX_TABLE_WIDTH, `${line.length} characters, over ${MAX_TABLE_WIDTH}: ${line}`);
+
+  const legend = section.filter((l) => l.startsWith("_") && l.includes("low n"));
+  assert.equal(legend.length, 1, `expected one legend line naming low n:\n${section.join("\n")}`);
+  assert.ok(legend[0].includes(`fewer than ${minCohort} sessions`), `the legend does not state the floor: ${legend[0]}`);
 });
 
 test("stage cells carry n, and a cell below the trend gate says it is low n", () => {

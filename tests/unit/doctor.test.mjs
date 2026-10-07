@@ -3033,7 +3033,7 @@ test("cli: the Overview marks a Sessions cell below the cohort minimum and leave
   const res = overviewRun(flags);
   assert.equal(res.status, 0, res.stderr);
   const section = overviewOf(res.stdout);
-  assert.match(section, new RegExp(`^\\| 0\\.1\\.0 \\| ${minCohort - 1} \\(low confidence: n<${minCohort}\\) \\| `, "m"));
+  assert.match(section, new RegExp(`^\\| 0\\.1\\.0 \\| ${minCohort - 1} \\(low n\\) \\| `, "m"));
   assert.match(section, new RegExp(`^\\| 0\\.2\\.0 \\| ${minCohort} \\| `, "m"));
 });
 
@@ -3205,7 +3205,7 @@ test("cli: the Overview's low-n marks and rising note follow the report's own ba
     assert.equal(out.version_cohorts.find((c) => c.version === "0.4.0").sessions, 2);
 
     const section = overviewOf(markdown.stdout);
-    assert.match(section, /^\| 0\.4\.0 \| 2 \(low confidence: n<3\) \| /m);
+    assert.match(section, /^\| 0\.4\.0 \| 2 \(low n\) \| /m);
     assert.match(section, /^\| execution \| \$[\d.]+ \| [\d.]+% \| up \|$/m);
     assert.match(section, /^- execution: .*0\.3\.0 \$[\d.]+ \(n=3\) · 0\.4\.0 \$[\d.]+ \(n=2, low n\)$/m);
     assert.match(section, /^- Steadily rising: execution$/m);
