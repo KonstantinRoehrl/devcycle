@@ -95,12 +95,16 @@ node scripts/temp-dir-check.mjs       # temp dirs created outside makeTempDir, w
 node scripts/citation-grammar.mjs     # the citation grammar's worklist (back-edge, owner-sentence, bare-read, bare-exists; --references: references nothing reads); exits 1 while any remain — local
 node scripts/context-report.mjs       # per command and playbook: refs-only and all-hops closure words; --diff <ref> lists citations that lost their prefix — local
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
+claude plugin validate . --strict     # the plugin under Claude Code's real loader (CI also validates .claude-plugin/plugin.json) — CI, on the floor and current pins
+claude plugin test .                  # the hooks module's TypeScript tests under tests/mod/ — CI, on the floor and current pins
 gitleaks git --no-banner --redact     # credentials, over the full history — CI
 node scripts/doctor.mjs               # token/context profile; --depth adapts scripts/depth-probe.mjs, the context gate's probe — local only
 ```
 
 Pass the test files as a glob, exactly as above and as CI does: a bare `tests/unit/` directory
-argument fails spuriously.
+argument fails spuriously. A session started with `--plugin-dir` on this checkout gets the hooks
+module's type declarations written into `.claude-plugin/types/` at every load; `.gitignore` keeps
+them out of commits.
 
 When a playbook or command edit trips a size budget (lines for the surface, bytes for the context), `validate.mjs` reports the measured value:
 set `tests/fixtures/surface-budget.json` or `tests/fixtures/context-budget.json` to exactly that
