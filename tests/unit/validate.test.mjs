@@ -1946,6 +1946,37 @@ test('hooks check: the documented match-all matcher "*" passes rather than faili
   ok(runValidate(hooksFixture(makePluginFixture(), doc)));
 });
 
+const withModules = (modules) => ({ ...goodHooks, modules });
+
+test("hooks check: a modules entry naming one file inside hooks/ passes", () => {
+  const dir = hooksFixture(makePluginFixture(), withModules(["./mod.mjs"]));
+  writeInto(dir, "hooks/mod.mjs", "export function register() {}\n");
+  ok(runValidate(dir));
+});
+
+test("hooks check: a modules entry naming a missing file fails — the module never loads", () => {
+  failsWith(runValidate(hooksFixture(makePluginFixture(), withModules(["./mod.mjs"]))), /hooks\/hooks\.json: modules\[0\] "\.\/mod\.mjs" names no file in hooks\//);
+});
+
+test("hooks check: modules with two entries fails — Claude Code loads exactly one", () => {
+  const dir = hooksFixture(makePluginFixture(), withModules(["./a.mjs", "./b.mjs"]));
+  writeInto(dir, "hooks/a.mjs", "export function register() {}\n");
+  writeInto(dir, "hooks/b.mjs", "export function register() {}\n");
+  failsWith(runValidate(dir), /hooks\/hooks\.json: "modules" must be an array of exactly one path/);
+});
+
+test("hooks check: a modules path that leaves hooks/ fails", () => {
+  const dir = hooksFixture(makePluginFixture(), withModules(["../scripts/mod.mjs"]));
+  writeInto(dir, "scripts/mod.mjs", "export function register() {}\n");
+  failsWith(runValidate(dir), /hooks\/hooks\.json: modules\[0\] "\.\.\/scripts\/mod\.mjs" must be a relative path inside hooks\//);
+});
+
+test("hooks check: an unknown top-level key fails — Claude Code reads only hooks and modules", () => {
+  const dir = hooksFixture(makePluginFixture(), { ...goodHooks, Modules: ["./mod.mjs"] });
+  writeInto(dir, "hooks/mod.mjs", "export function register() {}\n");
+  failsWith(runValidate(dir), /hooks\/hooks\.json: unknown top-level key "Modules"/);
+});
+
 // --- continue.md resume discovery must stay hook-proof ---
 
 // commands/*.md need frontmatter with a description (validate.mjs), so each fixture continue.md
