@@ -1,22 +1,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
-import { repoSlug, gitToplevel } from "../../scripts/run-record.mjs";
+import { repoSlug, gitToplevel, hashSession } from "../../scripts/run-record.mjs";
 
 const HOOK = new URL("../../hooks/dispatch-sensor.mjs", import.meta.url).pathname;
 const SCHEMA = JSON.parse(readFileSync(new URL("../fixtures/run-record.schema.json", import.meta.url), "utf8"));
 const ROW_SCHEMA = SCHEMA.oneOf.find((b) => b.title === "agent-depth").properties;
 const RUN = "00000000000000a1";
+const SESSION = "cycle-session-resumed";
 const usage = (i, cc, cr, o) => ({ input_tokens: i, cache_creation_input_tokens: cc, cache_read_input_tokens: cr, output_tokens: o });
 
-function fixture({ depth = 16149, stage = "planning", run = RUN, model = "claude-haiku-4-5-20251001" } = {}) {
+// `sessions` seeds the run file with the `session` rows cycle.md/continue.md append per real session.
+function fixture({ depth = 16149, stage = "planning", run = RUN, model = "claude-haiku-4-5-20251001", sessions = [SESSION] } = {}) {
   const repo = makeRepo();
   writeInto(repo, ".devcycle/state.md", `# devcycle state\n- stage: ${stage}\n- run: ${run}\n`);
   const runsDir = makeTempDir("dispatch-sensor-runs");
+  if (sessions.length) {
+    const runFile = join(runsDir, repoSlug(gitToplevel(repo)), `${run}.jsonl`);
+    mkdirSync(dirname(runFile), { recursive: true });
+    writeFileSync(runFile, sessions.map((id) => JSON.stringify({ kind: "session", runId: run, sessionHash: hashSession(id) }) + "\n").join(""));
+  }
   const transcript = join(makeTempDir("dispatch-sensor-t"), "agent-a3382414bf84c15db.jsonl");
   writeFileSync(transcript, [
     { type: "user", timestamp: "2026-10-07T07:18:05.680Z", message: { content: "go" } },
@@ -29,14 +36,16 @@ function fixture({ depth = 16149, stage = "planning", run = RUN, model = "claude
 function callHook({ repo, runsDir, transcript }, extra = {}) {
   return spawnSync("node", [HOOK], {
     input: JSON.stringify({ hook_event_name: "SubagentStop", agent_id: "a3382414bf84c15db", agent_type: "devcycle:plan-researcher",
-      agent_transcript_path: transcript, cwd: repo, stop_hook_active: false, ...extra }),
+      agent_transcript_path: transcript, cwd: repo, session_id: SESSION, stop_hook_active: false, ...extra }),
     encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: runsDir } });
 }
 
+// The rows the hook appended: everything in the repo's runs dir except the seeded session rows.
 function rows(repo, runsDir) {
   const dir = join(runsDir, repoSlug(gitToplevel(repo)));
   if (!existsSync(dir)) return [];
-  return readdirSync(dir).flatMap((f) => readFileSync(join(dir, f), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+  return readdirSync(dir).flatMap((f) => readFileSync(join(dir, f), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)))
+    .filter((o) => o.kind !== "session");
 }
 
 test("a finished subagent leaves one agent-depth row with its final depth", () => {
@@ -73,7 +82,7 @@ test("no state file, a run of none, a stage outside the enum, malformed input: s
   assert.equal(callHook(fx).status, 0);
   const done = fixture({ stage: "done" });
   assert.equal(callHook(done).status, 0);
-  const bare = { ...fixture(), repo: makeTempDir("dispatch-sensor-norepo") };
+  const bare = { ...fixture({ sessions: [] }), repo: makeTempDir("dispatch-sensor-norepo") };
   assert.equal(callHook(bare).status, 0);
   const junkRuns = makeTempDir("dispatch-sensor-junk-runs");
   const junk = spawnSync("node", [HOOK], { input: "{not json", encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: junkRuns } });
@@ -82,6 +91,36 @@ test("no state file, a run of none, a stage outside the enum, malformed input: s
   assert.deepEqual(readdirSync(junkRuns), []);
   for (const f of [fx, done]) assert.deepEqual(rows(f.repo, f.runsDir), []);
   assert.deepEqual(readdirSync(bare.runsDir), []);
+});
+
+test("a parallel session that never joined the run records nothing, even past the breach line", () => {
+  const fx = fixture({ depth: 250_000 });
+  const r = callHook(fx, { session_id: "UNRELATED-PARALLEL-SESSION" });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "");
+  assert.deepEqual(rows(fx.repo, fx.runsDir), []);
+});
+
+test("after a /clear resume every session row of the run counts as the cycle's, not only the latest", () => {
+  const before = "cycle-session-started";
+  for (const sessionId of [before, SESSION]) {
+    const fx = fixture({ sessions: [before, SESSION] });
+    assert.equal(callHook(fx, { session_id: sessionId }).status, 0);
+    assert.deepEqual(rows(fx.repo, fx.runsDir).map((o) => o.kind), ["agent-depth"], sessionId);
+  }
+});
+
+test("no session_id, a non-string one, or a run with no record yet: nothing written, silent exit 0", () => {
+  for (const extra of [{ session_id: undefined }, { session_id: "" }, { session_id: 42 }]) {
+    const fx = fixture();
+    const r = callHook(fx, extra);
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout + r.stderr, "");
+    assert.deepEqual(rows(fx.repo, fx.runsDir), [], JSON.stringify(extra));
+  }
+  const unrecorded = fixture({ sessions: [] });
+  assert.equal(callHook(unrecorded).status, 0);
+  assert.deepEqual(readdirSync(unrecorded.runsDir), []);
 });
 
 test("model-authored strings are sanitized to the agent-depth schema: control characters stripped, length capped", () => {

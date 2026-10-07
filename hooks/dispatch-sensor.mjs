@@ -2,8 +2,10 @@
 // SubagentStop hook — the dispatch depth-sensor. When a subagent finishes during an active cycle it
 // appends one `agent-depth` run-record row: the agent's final context depth, model, tool uses and
 // duration, read from the one transcript the hook input names, marked `warn` above DEPTH_WARN and
-// `breach` above DEPTH_BREACH (a breach also appends a `depth-breach` event). Observe-only: any
-// error, malformed input, or absent/partial cycle => exit 0 with no stdout. Counts/enums only.
+// `breach` above DEPTH_BREACH (a breach also appends a `depth-breach` event). Only a session that
+// joined the run records: a parallel session in the same checkout reads the same state.md but never
+// appended a `session` row. Observe-only: any error, malformed input, or absent/partial cycle =>
+// exit 0 with no stdout. Counts/enums only.
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -12,6 +14,7 @@ import { findStateFile } from "./lib/find-state-file.mjs";
 import { field } from "../scripts/md-field.mjs";
 import { transcriptStats } from "../scripts/depth-probe.mjs";
 import { isMain } from "../scripts/is-main.mjs";
+import { gitToplevel, hashSession, recordPath } from "../scripts/run-record.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("../scripts/run-record.mjs", import.meta.url));
 export const DEPTH_WARN = 150_000;
@@ -31,6 +34,18 @@ function readInput() {
   return o && typeof o === "object" && !Array.isArray(o) ? o : null;
 }
 
+// Any of the run's session rows counts, not only the latest: cycle.md and every /devcycle:continue
+// append one, and a /clear mints a fresh id, so an earlier id is either gone or still finishing
+// this cycle's own agents. A session that never joined matches none of them either way.
+function joinedRun(runFile, sessionId) {
+  const hash = hashSession(sessionId);
+  return readFileSync(runFile, "utf8").split("\n").some((line) => {
+    if (!line.includes(hash)) return false;
+    const row = JSON.parse(line);
+    return row.kind === "session" && row.sessionHash === hash;
+  });
+}
+
 function main() {
   const input = readInput();
   if (!input || input.hook_event_name !== "SubagentStop" || typeof input.agent_transcript_path !== "string") return;
@@ -40,10 +55,12 @@ function main() {
   const run = field(state, "run");
   const stage = field(state, "stage");
   if (!/^[0-9a-f]{16}$/.test(run ?? "") || !STAGES.has(stage)) return;
+  if (typeof input.session_id !== "string" || !input.session_id) return;
+  const repoRoot = dirname(dirname(stateFile));
+  if (!joinedRun(recordPath(gitToplevel(repoRoot), run), input.session_id)) return;
   const stats = transcriptStats(input.agent_transcript_path);
   if (!stats) return;
 
-  const repoRoot = dirname(dirname(stateFile));
   const depth = depthOf(stats.depth);
   // No --repo: run-record resolves the git toplevel from cwd, so the record lands under the same
   // real-path slug every other writer uses (macOS temp paths are symlinks).
