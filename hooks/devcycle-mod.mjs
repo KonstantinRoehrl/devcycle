@@ -8,7 +8,7 @@
 // when it fails. Claude Code's loader refuses the module unless `$` reaches only functions declared
 // at the top of this file and each event is registered once, so every helper below takes the
 // per-load state, `st`, as an argument, and one tool.call hook serves every behaviour.
-import { budgetBand, contextDepth, windowFor } from "../scripts/depth-bands.mjs";
+import { HARD_STOP, OVER_BUDGET, budgetBand, contextDepth, windowFor } from "../scripts/depth-bands.mjs";
 import { activeRun } from "./lib/run-scope.mjs";
 
 // The first Claude Code whose hooks-module API this module is written against; below it the
@@ -19,6 +19,18 @@ const SINK = decodeURIComponent(new URL("./mod-sink.mjs", import.meta.url).pathn
 const STATE_REL = ".devcycle/state.md";
 const MAX_WALK = 64;
 const INERT = Object.freeze({ active: false, stateFile: null });
+// The limiter's tiers, the reads `enforce` refuses at the hard stop (never Write, Edit or Bash), and
+// how often the over-budget note repeats after its first crossing.
+const TIERS = ["off", "warn", "enforce"];
+const BOUNDED_READS = new Set(["Read", "Grep", "Glob", "WebFetch", "WebSearch"]);
+const NOTE_EVERY = 5;
+const percent = (fraction) => Math.round(fraction * 100);
+const HARD_STOP_DENY =
+  `devcycle budget: hard stop at ${percent(HARD_STOP)}% of the context window. Do not read further; ` +
+  "return what you have and name what you did not explore.";
+const budgetNote = (fraction) =>
+  `devcycle budget: this subagent is at ≈${percent(fraction)}% of its context window (over budget at ` +
+  `${percent(OVER_BUDGET)}%, hard stop at ${percent(HARD_STOP)}%). Finish with what you have; name what you did not explore.`;
 
 function atLeastFloor(base) {
   const parts = String(base ?? "").match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
@@ -32,12 +44,14 @@ const parentOf = (dir) => dir.slice(0, dir.lastIndexOf("/")) || "/";
 
 // A subagent's per-turn counters. Its identity survives a reset, because a continued agent
 // (SendMessage, a resume) keeps its agentId.
-const turnCounters = () => ({ steps: 0, peakDepth: 0, lastDepth: null, model: null, toolResultChars: 0, warned: 0, refused: 0 });
+const turnCounters = () => ({ steps: 0, peakDepth: 0, lastDepth: null, model: null, toolResultChars: 0, warned: 0, refused: 0, overResults: 0 });
 
 // Everything one load of the module knows. `joinedKey` is "<session id> <run id>" once the sink
 // answered joined; a negative answer is never cached. `scope` is the promise active() answers from.
-function newState() {
-  return { versionOk: null, notNested: null, joinedKey: null, scope: null, agents: new Map() };
+// `tier` is the subagentBudget value Claude Code hands register; anything else reads as warn.
+function newState(options) {
+  return { versionOk: null, notNested: null, joinedKey: null, scope: null, agents: new Map(),
+    tier: TIERS.includes(options?.subagentBudget) ? options.subagentBudget : "warn" };
 }
 
 async function resolveScope(st, $) {
@@ -99,12 +113,36 @@ async function mainLoopToolCall(st, $, e, next) {
   return result;
 }
 
+// Where a bounded subagent stands, or null: untracked, a fork (it inherits its parent's context, so
+// it would meet the hard stop on its first step) or a teammate (a session of its own), no measured
+// step yet, or a window no model table knows. An assumed window counts.
+function standing(st, agentId) {
+  const a = st.agents.get(agentId);
+  if (!a?.tracked || a.fork || a.isTeammate || a.lastDepth === null || !a.model) return null;
+  const w = windowFor(a.model);
+  return w ? { a, band: budgetBand(a.lastDepth, w.window), fraction: a.lastDepth / w.window } : null;
+}
+
+// The observer's character count and the limiter: past the over-budget band a bounded subagent's
+// result carries the note on the first crossing and every NOTE_EVERY-th result after it; under
+// enforce a bounded read at the hard stop is refused before it runs. A refused call carries no
+// result to attach a note to.
 async function subagentToolCall(st, $, e, next) {
+  const at = st.tier === "off" ? null : standing(st, e.agentId);
+  const bounded = at !== null && at.band !== "ok" && (await active(st, $));
+  if (bounded && st.tier === "enforce" && at.band === "hard-stop" && BOUNDED_READS.has(e.tool)) {
+    at.a.refused += 1;
+    return { deny: HARD_STOP_DENY };
+  }
   const result = await next(e);
   const a = st.agents.get(e.agentId);
   // A character count of the result text, named as such: not tokens.
   if (a?.tracked) a.toolResultChars += result.text?.length ?? 0;
-  return result;
+  if (!bounded || result.deny !== undefined) return result;
+  at.a.overResults += 1;
+  if ((at.a.overResults - 1) % NOTE_EVERY !== 0) return result;
+  at.a.warned += 1;
+  return { ...result, context: [...(result.context ?? []), budgetNote(at.fraction)] };
 }
 
 function flush($, seen, agentId, a, e) {
@@ -121,8 +159,8 @@ function flush($, seen, agentId, a, e) {
     .catch(() => {});
 }
 
-export function register(on) {
-  const st = newState();
+export function register(on, options) {
+  const st = newState(options);
 
   // Every main-loop turn re-derives the run and the joined answer; the version and the child marker
   // are read once per load.
