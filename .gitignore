@@ -6,6 +6,11 @@ scripts/redaction-terms.local.txt
 .DS_Store
 .worktrees/
 graphify-out/
+# Claude Code lays its hooks-module type declarations beside a module loaded from a --plugin-dir
+# checkout, at every load; they are the CLI's, not this repo's.
+.claude-plugin/types/
+.claude/*
+!.claude/CLAUDE.md
 
 # Everything under docs/ is ignored and each tracked surface is re-included by name, so a new
 # scaffolding directory is ignored by default and a new tracked doc is a deliberate line — the
