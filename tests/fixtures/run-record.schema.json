@@ -239,6 +239,44 @@
       },
       "required": ["kind", "runId", "stage", "agentType", "model", "tokens", "depth", "ts"],
       "additionalProperties": false
+    },
+    {
+      "title": "agent-trace",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "agent-trace" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "stage": {
+          "enum": [
+            "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
+            "branch-review", "on-device", "fast-path", "sweep", "finish", "maintain"
+          ]
+        },
+        "agentId": { "type": "string", "pattern": "^[0-9a-z]{1,40}$" },
+        "agentType": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9:_.-]{1,80}$" },
+        "requestedModel": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9:_.\\[\\]-]{1,80}$" },
+        "resolvedModel": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9:_.\\[\\]-]{1,80}$" },
+        "parentAgentId": { "type": ["string", "null"], "pattern": "^[0-9a-z]{1,40}$" },
+        "background": { "type": "boolean" },
+        "fork": { "type": "boolean" },
+        "steps": { "type": "integer", "minimum": 0 },
+        "peakDepth": { "type": "integer", "minimum": 0 },
+        "window": { "type": ["integer", "null"], "minimum": 1 },
+        "windowAssumed": { "type": "boolean" },
+        "peakBand": { "enum": ["ok", "over-budget", "hard-stop", null] },
+        "toolResultChars": { "type": "integer", "minimum": 0 },
+        "warned": { "type": "integer", "minimum": 0 },
+        "refused": { "type": "integer", "minimum": 0 },
+        "reason": { "enum": ["answer", "aborted", "refusal", "error"] },
+        "isAborted": { "type": "boolean" },
+        "ts": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "kind", "runId", "stage", "agentId", "agentType", "requestedModel", "resolvedModel", "parentAgentId",
+        "background", "fork", "steps", "peakDepth", "window", "windowAssumed", "peakBand", "toolResultChars",
+        "warned", "refused", "reason", "isAborted", "ts"
+      ],
+      "additionalProperties": false
     }
   ]
 }
