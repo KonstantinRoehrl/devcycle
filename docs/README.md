@@ -74,13 +74,15 @@ run locally.
 
 ## Hooks
 
-The hooks the plugin ships. No command loads them; each fires on a matched tool call.
+The hooks the plugin ships. No command loads them; each fires on a matched tool call, or — the
+dispatch-sensor — when a subagent stops.
 
 | Hook | What it does |
 | --- | --- |
 | [`hooks/block-main-thread-browser.mjs`](../hooks/block-main-thread-browser.mjs) | Registered on `PreToolUse` over `mcp__claude-in-chrome__.*`, it denies any browser tool call whose origin is not the `on-device-driver` subagent — the main thread included — so the coordinator cannot drive the browser at its own context depth ([`decisions/`](decisions/README.md), 2026-08-20). |
 | [`hooks/block-destructive-git.mjs`](../hooks/block-destructive-git.mjs) | Registered on `PreToolUse` over `Bash`. For a guarded dispatch origin (`task-reviewer`, `red-team-reviewer`, `implementer`) it denies destructive or ambiguous git subcommands (`checkout`/`reset`/`restore`/`clean`/`stash`/…), allowing only inspection commands and `git add -N`; on the main thread it denies `git stash` while a `.devcycle/state.md` at or above the call's `cwd` reports a stage other than `done` — `list`/`show` are excepted only when written plainly, because a stash behind a wrapper or a command substitution is denied on ambiguity. The structural backstop for the never-revert-a-sibling ban (#165, #235). |
 | [`hooks/workload-sensor.mjs`](../hooks/workload-sensor.mjs) | Registered on `PostToolUse` over `Bash`, it re-derives the run's `workload` record from `.devcycle/state.md` and git on each HEAD-advancing commit in an active cycle, so workload collection never depends on the finish stage running ([`playbooks/finishing-the-cycle/`](playbooks/finishing-the-cycle/README.md)). |
+| [`hooks/dispatch-sensor.mjs`](../hooks/dispatch-sensor.mjs) | Registered on `SubagentStop`, it appends one `agent-depth` run-record row per finished subagent during an active cycle — final context depth, model, tool uses, duration — marking `warn` above 150k and `breach` above 200k (with a `depth-breach` event). Observe-only: never blocks, always exits 0. |
 
 ## Agents
 

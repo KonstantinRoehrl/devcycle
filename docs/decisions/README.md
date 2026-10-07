@@ -14,6 +14,16 @@ labelled, instead of refused. Budgets move by the measured amounts below; nothin
 **Why:** the gate loaded doctor's whole import closure to read one usage record, and a refusal on a
 brand-new model blinded the gate exactly when it is least trusted.
 
+**Fourth hook:** the plugin ships `hooks/dispatch-sensor.mjs`, registered in `hooks/hooks.json` on
+`SubagentStop` (D15). While `.devcycle/state.md` names a run it appends one `agent-depth` record
+per finished subagent — final context depth, model, tool uses, duration — marked `warn` above 150k
+and `breach` above 200k, and a breach also appends a `depth-breach` event. It only observes: it
+never blocks and always exits 0. It is the one hook allowed to read beyond its input, and only the
+single transcript `agent_transcript_path` names, because the depth is nowhere else; `SubagentStop`
+is the one event that reports a background dispatch's finish — its Agent `PostToolUse` fires at
+launch with no counts (`docs/platform-notes.md` § (i)). This
+supersedes the 2026-09-05 entry's "third hook".
+
 **Budgets:** every context budget below falls by the 3 bytes the shorter probe command saves in
 `references/delegation.md`: `playbooks/executing-waves.md` 103391 → 103388,
 `playbooks/finishing-the-cycle.md` 53027 → 53024, `playbooks/learning-from-sessions.md` 60715 → 60712,

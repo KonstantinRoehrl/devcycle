@@ -377,3 +377,25 @@ values.
 
 **Consequence.** Under `--plugin-dir` every knob resolves to its fallback, silently. To try a
 branch with real settings, install the checkout through a directory-source marketplace instead.
+
+## (i) SubagentStop: what the hook input carries
+
+**What was tried.** A spike on 2026-10-07 against the installed Claude Code (2.1.292): a headless
+`claude -p` session with a capture hook, recording what the Agent tool's `PostToolUse` and
+`SubagentStop` each receive for foreground and background dispatches.
+
+**Exact result.**
+
+- An Agent `PostToolUse` carries
+  `tool_response.{totalTokens,totalDurationMs,totalToolUseCount,resolvedModel,agentType,agentId,status}`
+  only for a foreground dispatch. A background dispatch's `PostToolUse` fires at launch with
+  `status: "async_launched"` and no counts.
+- `SubagentStop` fires exactly once per agent, foreground and background alike, with `agent_id`,
+  `agent_type`, `agent_transcript_path` and `cwd` in its input.
+- The transcript at `agent_transcript_path` ends with an assistant record carrying `message.model`
+  and `message.usage`, from which the agent's final context depth is read.
+
+**Consequence.** `hooks/dispatch-sensor.mjs` registers on `SubagentStop` only (decision D15,
+`docs/decisions/README.md` 2026-10-07): it is the one event that sees every agent, and it reads the
+single transcript the input names. Because its input always carries `agent_type`/`agent_id`, the
+subagent-origin guard § (f) describes for the workload sensor does not apply here.
