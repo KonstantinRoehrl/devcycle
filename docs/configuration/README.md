@@ -92,10 +92,11 @@ and silently runs every knob at its fallback. [`docs/platform-notes.md`](../plat
 | `learnStalenessSessions` | Unmined sessions since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer `0` or more (`0` nudges every cycle) | `5` |
 | `learnStalenessDays` | Days since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer `0` or more (`0` nudges every cycle) | `14` |
 | `learnSessionCap` | How many sessions one `/devcycle:learn` run may mine | integer `1` or more (`0` is refused, not a no-op run) | `100` |
+| `subagentBudget` | What devcycle's hooks module does with a subagent past its context budget | `off` / `warn` / `enforce` | `warn` (a note on its tool results from 15% of its window; `enforce` also refuses reads at 20%) |
 
 ## Other options
 
-The remaining twelve knobs above are secondary to `profile` — most runs never touch them.
+The remaining thirteen knobs above are secondary to `profile` — most runs never touch them.
 
 **`gitPolicy`** is the pipeline's blast radius: `local-commits-only` means it only ever
 commits on a local branch and hands it to you (never pushes); `push-allowed` lets it push

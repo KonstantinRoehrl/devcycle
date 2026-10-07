@@ -118,6 +118,17 @@
       "title": "Learn session cap",
       "default": 100,
       "description": "How many sessions a single /devcycle:learn run may mine. Planning ranks candidates by recency and reads only this many, so raising it raises the run's cost proportionally. Minimum 1 — a cap of 0 is refused rather than silently mining nothing. Default: 100."
+    },
+    "subagentBudget": {
+      "type": "string",
+      "title": "Subagent budget",
+      "default": "warn",
+      "options": [
+        "off",
+        "warn",
+        "enforce"
+      ],
+      "description": "What devcycle's hooks module does when a subagent of a devcycle run goes past its context budget. One of: off (nothing), warn (adds a budget note to the subagent's tool results from 15% of its context window), enforce (also refuses Read, Grep, Glob, WebFetch and WebSearch at 20%; never Write, Edit or Bash, and never a fork or a teammate). Profile-independent. Default: warn."
     }
   }
 }

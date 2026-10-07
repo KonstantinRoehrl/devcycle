@@ -19,10 +19,33 @@ contributor's `.claude/` also holds untracked worktree checkouts and local setti
 top-level directory.
 
 **Budgets:** `playbooks/profiling-sessions.md` 46850 → 46866 (+16 bytes, the `mod-inactive` slug in
-its issue-drafting list of Compliance candidates).
+its issue-drafting list of Compliance candidates). The `subagentBudget` knob raises the runtime
+surface 5727 → 5740 (+13 lines: the subagentBudget resolver flag in each of the eight entry
+commands, the mint flag in `commands/cycle.md`, and the roster row and exception sentence in
+`references/config.md`) and `commandMax` 172 → 174 (+2 lines, `commands/cycle.md`'s resolver flag
+and mint flag). The roster row and exception sentence in `references/config.md` add 291 bytes to
+every playbook whose closure cites it: `playbooks/executing-waves.md` 103894 → 104185,
+`playbooks/finishing-the-cycle.md` 53024 → 53315, `playbooks/learning-from-sessions.md`
+60712 → 61003, `playbooks/maintaining-the-repo.md` 63216 → 63507,
+`playbooks/onboarding-a-repo.md` 29097 → 29388, `playbooks/planning-waves.md` 67353 → 67644,
+`playbooks/receiving-review.md` 108014 → 108305, `playbooks/reviewing-code.md` 90756 → 91047,
+`playbooks/reviewing-the-branch.md` 54487 → 54778 and `playbooks/verifying-on-device.md`
+50011 → 50302 (+291 bytes each).
 
 ```text
 budget: context-budget.json playbooks/profiling-sessions.md 46866
+budget: surface-budget.json surfaceTotal 5740
+budget: surface-budget.json commandMax 174
+budget: context-budget.json playbooks/executing-waves.md 104185
+budget: context-budget.json playbooks/finishing-the-cycle.md 53315
+budget: context-budget.json playbooks/learning-from-sessions.md 61003
+budget: context-budget.json playbooks/maintaining-the-repo.md 63507
+budget: context-budget.json playbooks/onboarding-a-repo.md 29388
+budget: context-budget.json playbooks/planning-waves.md 67644
+budget: context-budget.json playbooks/receiving-review.md 108305
+budget: context-budget.json playbooks/reviewing-code.md 91047
+budget: context-budget.json playbooks/reviewing-the-branch.md 54778
+budget: context-budget.json playbooks/verifying-on-device.md 50302
 ```
 
 ## 2026-10-07 — planning context safety, Plan A: the depth gate gets its own probe, the plan gates become one

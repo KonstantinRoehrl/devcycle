@@ -16,13 +16,13 @@ const cli = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding:
 const STANDARD_DEFAULTS =
   "knobs: profile=standard gitPolicy=local-commits-only docTrackingPolicy=standard reviewDepth=single " +
   "crossModelReview=false onDeviceGate=human-required implementerModel=auto taskReviewerModel=auto " +
-  "branchReviewModel=auto walkthroughModel=auto learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100";
+  "branchReviewModel=auto walkthroughModel=auto learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100 subagentBudget=warn";
 
-test("the roster carries the 13 shipped knobs in config.md's roster order", () => {
+test("the roster carries the 14 shipped knobs in config.md's roster order", () => {
   assert.deepEqual(ROSTER.map(({ key }) => key), [
     "profile", "gitPolicy", "docTrackingPolicy", "reviewDepth", "crossModelReview", "onDeviceGate",
     "implementerModel", "taskReviewerModel", "branchReviewModel", "walkthroughModel",
-    "learnStalenessSessions", "learnStalenessDays", "learnSessionCap",
+    "learnStalenessSessions", "learnStalenessDays", "learnSessionCap", "subagentBudget",
   ]);
 });
 

@@ -239,7 +239,8 @@ gated by `userConfig.crossModelReview`.
   "walkthroughModel": "auto | <model id>",
   "learnStalenessSessions": 5,
   "learnStalenessDays": 14,
-  "learnSessionCap": 100
+  "learnSessionCap": 100,
+  "subagentBudget": "off | warn | enforce"
 }
 ```
 
@@ -286,6 +287,9 @@ gated by `userConfig.crossModelReview`.
   whole-root scan did), and the read counters `readSessions` / `readFiles` (resolution and
   ownership, including this knob's floor, in `references/config.md` § Learn staleness).
 - Once encoded, corresponding personal memories (e.g. never-local-merge-to-dev) are deleted.
+- `subagentBudget` (added 2026-10-07) is the hooks module's limiter tier: `warn`, the default,
+  adds a budget note to a subagent's tool results from 15% of its context window; `enforce` also
+  refuses reads at 20%; `off` does neither. It is profile-independent, so it takes no `auto`.
 
 ---
 
