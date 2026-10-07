@@ -179,8 +179,9 @@ plugin ships. Start there.
   run starts — by content hash, via `scripts/tree-hash.mjs` — and the finish stage fails when an
   expected deliverable is absent from the branch or the installed copy was written to during the
   run. It is inert in every other repo.
-- The evidence-and-verification contract's gates: planning runs `scripts/budget-fixture-check.mjs`
-  and `scripts/authored-claims-check.mjs` in its self-review, and `/devcycle:cycle` runs
+- The evidence-and-verification contract's gates: planning runs `scripts/plan-check.mjs` in its
+  self-review — one fail-closed gate over seven legs, including the budget-fixture and
+  authored-claims checks — and `/devcycle:cycle` runs
   `scripts/contract-staleness-check.mjs` as an advisory preflight that warns when a cached plugin's
   contract predates the target repo's. A host repo can declare its whole-gate checks in the
   required-checks manifest `tests/fixtures/required-gate-checks.json` — a committed JSON array of

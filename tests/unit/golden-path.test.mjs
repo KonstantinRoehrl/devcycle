@@ -1735,17 +1735,55 @@ test("every gh-spawning script except the sanctioned poster is free of field-fla
 // invoking the module it merely imports — counting an import as a CLI call would be exactly the
 // named-vs-reachable confusion this cycle exists to end. (run-record.mjs still passes this leg
 // on its own genuine invocations in commands/continue.md and commands/cycle.md.)
+// A CLI is also reached when a reached script statically imports it: plan-check.mjs runs every
+// plan-gate leg in-process, so the surface needs one command, not one per leg. Only a static
+// `import … from "./<file>.mjs"` in a script already reached counts — never a `node -e "import(…)"`
+// on the surface (above), and never an importer that is itself unreached.
+const STATIC_IMPORT = /^import\s[^;]*?\bfrom\s+["']\.\/([\w.-]+\.mjs)["']/gm;
+
+function uninvokedClis(clis, surfaceText, readScript) {
+  const reached = new Set(
+    clis.filter((f) =>
+      new RegExp(
+        String.raw`node\s+["']?(?:\$\{CLAUDE_PLUGIN_ROOT\}/)?scripts/${f.replace(".", "\\.")}`,
+      ).test(surfaceText),
+    ),
+  );
+  for (const pending = [...reached]; pending.length > 0; ) {
+    for (const [, imported] of readScript(pending.pop()).matchAll(STATIC_IMPORT)) {
+      if (clis.includes(imported) && !reached.has(imported)) {
+        reached.add(imported);
+        pending.push(imported);
+      }
+    }
+  }
+  return clis.filter((f) => !reached.has(f));
+}
+
 test("C3 leg 3: every CLI script is invoked from the surface", () => {
   const text = invocationSurface().map(read).join("\n");
-  const uninvoked = scriptFiles()
-    .filter(hasShebang)
-    .filter(
-      (f) =>
-        !new RegExp(
-          String.raw`node\s+["']?(?:\$\{CLAUDE_PLUGIN_ROOT\}/)?scripts/${f.replace(".", "\\.")}`,
-        ).test(text),
-    );
+  const uninvoked = uninvokedClis(scriptFiles().filter(hasShebang), text, (f) => read(`scripts/${f}`));
   assert.deepEqual(uninvoked, [], "a CLI nothing invokes is unreachable, however well documented");
+});
+
+const syntheticClis = {
+  "gate.mjs": 'import { legA } from "./leg-a.mjs";\nimport {\n  legB,\n} from "./leg-b.mjs";\n',
+  "leg-a.mjs": 'import { helper } from "./leg-b.mjs";\n',
+  "leg-b.mjs": "",
+  "orphan-importer.mjs": 'import { x } from "./orphan-leg.mjs";\n',
+  "orphan-leg.mjs": "",
+};
+const syntheticSurface = 'Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/gate.mjs" <plan>`.\n';
+
+test("C3 leg 3: a CLI a surface-invoked script statically imports counts as reached", () => {
+  const uninvoked = uninvokedClis(Object.keys(syntheticClis), syntheticSurface, (f) => syntheticClis[f]);
+  assert.ok(!uninvoked.includes("leg-a.mjs") && !uninvoked.includes("leg-b.mjs"), `got ${uninvoked}`);
+});
+
+test("C3 leg 3: a CLI that nothing invokes and no surface-invoked script imports still fails", () => {
+  // orphan-leg.mjs is imported, but only by orphan-importer.mjs, which nothing reaches either.
+  const uninvoked = uninvokedClis(Object.keys(syntheticClis), syntheticSurface, (f) => syntheticClis[f]);
+  assert.deepEqual(uninvoked, ["orphan-importer.mjs", "orphan-leg.mjs"]);
 });
 
 test("C3 leg 4: a shebang means the file has a CLI, and only a CLI file carries one", () => {

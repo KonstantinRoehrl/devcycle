@@ -24,29 +24,27 @@ template comes from the `superpowers:writing-plans` sub-skill instead, with two 
 playbook always keeps regardless: the executor named in the plan header is always
 `executing-waves.md`, and no task ever carries a commit step.
 
-Once the plan is drafted, planning runs its own twelve-item self-review — spec coverage,
+Once the plan is drafted, planning runs its own eight-item self-review — spec coverage,
 placeholder scan, type consistency, factual-claim accuracy, no count-only enumeration,
-mirrored-file parity, scripted checks (`lint-plan-code-blocks.mjs`,
-`brief-completeness-check.mjs`, `blast-radius-check.mjs`, `content-coupling-check.mjs`,
-`budget-fixture-check.mjs`, and `authored-claims-check.mjs` as the factual-claim item's
-backstop), and a manual assumed-tooling cross-check — fixing what it finds inline, with no
-separate re-review pass. `blast-radius-check.mjs` hard-fails on any referencer (test or non-test)
-of a task's changed file that sits in no Files block, cleared by adding the file or a `-
-Blast-radius override:` line; `content-coupling-check.mjs` flags a same-wave task whose brief
-names a file another same-wave task edits, cleared by a dependency or a `- Content-coupling
-override:` line. `budget-fixture-check.mjs` hard-fails when a task's Files touch a budgeted
-surface (`playbooks/`, `commands/`, `agents/`, `references/` markdown) without also touching the
-matching budget fixture — a `references/` edit matches the context budget too, since a playbook's
-budget counts the bytes of every reference it cites — or touches or needs a fixture without
-`docs/decisions/README.md`, whose `budget:` lines `validate.mjs` holds the fixture to; cleared by
-adding the file or a `- Budget-fixture override:` line, and run as a leg of `brief-completeness-check.mjs` so the earlier
-gate names the same gap;
-`authored-claims-check.mjs` is a blocking lint flagging an unguarded `path.ext:line` reference or
-a bare count claim, cleared by a `(verified: <cmd>)` or `(assumption)` marker. A non-zero exit
-from the brief-completeness, blast-radius, content-coupling, budget-fixture, or authored-claims
-checks is a hard stop, resolved by fixing the plan or recording an explicit override, never by
-handing off around it. `wave-disjointness-check.mjs` runs separately as a pre-handoff gate on the
-`## Dispatch Map` — not as a self-review item — joined there by `content-coupling-check.mjs`.
+mirrored-file parity, the plan gate, and a manual assumed-tooling cross-check — fixing what it
+finds inline, with no separate re-review pass. The plan gate is one command,
+`scripts/plan-check.mjs`, running seven legs over the plan: `codeBlocks` (pasted JS/mjs code
+blocks parse), `briefCompleteness` (every task carries its required fields and the Dispatch Map
+lists every task), `blastRadius` (every referencer of a changed file, test or not, sits in some
+Files block), `contentCoupling` (no same-wave task's brief names a file another same-wave task
+edits), `budgetFixtures` (a task touching a budgeted surface — `playbooks/`, `commands/`,
+`agents/`, `references/` markdown — also touches its budget fixtures and
+`docs/decisions/README.md`, whose `budget:` lines `validate.mjs` holds the fixtures to),
+`waveDisjointness` (no two same-wave tasks list the same file), and `authoredClaims` (the
+factual-claim item's backstop: an unguarded `path.ext:line` reference or bare count claim,
+cleared by a `(verified: <cmd>)` or `(assumption)` marker). It fails closed: a plan with no
+`## Dispatch Map` is a finding before any leg runs. Three findings clear by an explicit override
+line instead of a fix — `- Blast-radius override:`, `- Content-coupling override:`, and
+`- Budget-fixture override:`, each with a reason. A non-zero exit is a hard stop, resolved by
+fixing the plan or recording an override, never by handing off around it. On success the gate
+prints one ok line, with each leg's notes (such as cleared overrides) reduced to a count unless
+`--verbose` lists them; a failing run always lists them. A run in progress records a `gate-ran`
+event with its result.
 
 The plan's required final section, the `## Dispatch Map`, groups every task into waves — a wave
 holds only dependency-ready, file-disjoint tasks, never two tasks that touch the same file even
@@ -64,7 +62,7 @@ policy and whether the plan's path is git-ignored.
 ```mermaid
 ---
 title: planning-waves — from feasibility gate to the Dispatch Map
-accDescr: Playbook-internal flowchart of the planning stage, from the feasibility gate's GO/NO-GO verdict through quality-constraint derivation, task cutting to the twin goals of parallelism and minimal context, the twelve-item self-review gate, the Dispatch Map, and the handoff to execution.
+accDescr: Playbook-internal flowchart of the planning stage, from the feasibility gate's GO/NO-GO verdict through quality-constraint derivation, task cutting to the twin goals of parallelism and minimal context, the eight-item self-review gate, the Dispatch Map, and the handoff to execution.
 ---
 flowchart TD
     FEAS{"Feasibility gate — GO or NO-GO?"}:::stage
@@ -72,8 +70,8 @@ flowchart TD
     FEAS -->|GO| QC("Derive Quality Constraints from the criteria catalog, filtered to scope"):::stage
     QC --> CUT("Cut tasks to twin goals: maximize parallelism, minimize each brief's context"):::stage
     CUT --> TASK("Each task gets Files · Interfaces · Dependencies · Evidence class · Quality constraints · Lessons"):::stage
-    TASK --> SELFREVIEW("Twelve-item self-review, fixed inline as it goes"):::stage
-    SELFREVIEW --> GATE{"Brief-completeness / blast-radius / content-coupling / budget-fixture / authored-claims checks clean?"}:::stage
+    TASK --> SELFREVIEW("Eight-item self-review, fixed inline as it goes"):::stage
+    SELFREVIEW --> GATE{"plan-check.mjs clean (seven legs)?"}:::stage
     GATE -->|no| SELFREVIEW
     GATE -->|yes| MAP[("Dispatch Map — tasks grouped into file-disjoint waves")]:::structural
     MAP --> HANDOFF("Handoff — state.md set to stage: execution, plan path recorded"):::stage

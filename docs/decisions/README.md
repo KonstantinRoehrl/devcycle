@@ -18,8 +18,9 @@ brand-new model blinded the gate exactly when it is least trusted.
 `SubagentStop` (D15). While `.devcycle/state.md` names a run it appends one `agent-depth` record
 per finished subagent — final context depth, model, tool uses, duration — marked `warn` above 150k
 and `breach` above 200k, and a breach also appends a `depth-breach` event. It only observes: it
-never blocks and always exits 0. It is the one hook allowed to read beyond its input, and only the
-single transcript `agent_transcript_path` names, because the depth is nowhere else; `SubagentStop`
+never blocks and always exits 0. It is the one hook allowed to read something larger than its input:
+beyond the state file it reads only the single transcript `agent_transcript_path` names, because the
+depth is nowhere else; `SubagentStop`
 is the one event that reports a background dispatch's finish — its Agent `PostToolUse` fires at
 launch with no counts (`docs/platform-notes.md` § (i)). This
 supersedes the 2026-09-05 entry's "third hook".
@@ -34,10 +35,28 @@ supersedes the 2026-09-05 entry's "third hook".
 50014 → 50011 and `playbooks/writing-the-findings-document.md` 65477 → 65474;
 `playbooks/maintaining-the-repo.md` 63222 → 63216 (−3 more for its own inline gate command); and
 `playbooks/profiling-sessions.md` 46852 → 46831 (−3, plus 18 bytes of slack it already carried).
-No value rose, so no `budget:` line is added.
+Doctor's `sensor-inactive` finding then raised `playbooks/profiling-sessions.md` 46831 → 46850 (+19
+bytes, the slug named in its issue-drafting list). Collapsing the planning self-review into one gate
+moves `playbooks/planning-waves.md` 68650 → 67353 (−1297 bytes) and `surfaceTotal` 5725 → 5726
+(+1 line: the plan-gate item is wrapped, where four of the five items it replaces were each one long
+line).
 
-**Supersedes:** the depth probe's refusal of a model with no priced family, which shipped with the
-2026-10-02 unpriced-models change (#301) without an entry of its own.
+**Plan gate:** planning's scripted self-review checks become one command, `scripts/plan-check.mjs`,
+running seven legs in order — `codeBlocks`, `briefCompleteness`, `blastRadius`, `contentCoupling`,
+`budgetFixtures`, `waveDisjointness`, `authoredClaims` — each still exported by the script that
+serves it standalone. It fails closed: a plan with no `## Dispatch Map` is a finding before any leg
+runs (M16), where two legs used to report it as "cannot verify" and pass. On success it prints one
+line, and while `.devcycle/state.md` names a run, every invocation appends a `gate-ran` event with
+its `pass` or `fail` result (A-M6, L27).
+
+**Supersedes:** the depth probe's refusal of a model with no priced family, recorded by the
+2026-10-02 entry "unpriced models: per-model cache reads, provisional prices only for newer models"
+(#301).
+
+```text
+budget: surface-budget.json surfaceTotal 5726
+budget: context-budget.json playbooks/profiling-sessions.md 46850
+```
 
 ## 2026-10-04 — doctor overview: the profiling playbook states the reply contract, and its budget grows by it
 
