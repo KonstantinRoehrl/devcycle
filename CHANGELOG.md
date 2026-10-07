@@ -35,6 +35,30 @@ started through a symlinked path, such as the plugin cache or macOS's `/var`, wh
 silently skipped it (#147). Issue intake keeps the issues it fetched when its scratch directory
 cannot be written, instead of failing (#184).
 
+**Every doctor reply carries the overview tables (#302, #217).** `scripts/doctor-overview.mjs`
+renders a per-version table and a per-stage table, plus per-version bullets for the
+stage-by-version detail, and `scripts/doctor.mjs` prints them as `## Overview` directly after the
+Highlights. `## Trend summary` moves to the end of the reply, just before the Actionability
+question. Both blocks are carried byte for byte and are not gated behind the Actionability choice.
+A version with fewer sessions than the floor reads "low n" in its Sessions cell, and a version with
+unpriced requests gets a footnote and a withheld Δ rather than a $0 row. The `--issue-body` draft
+gains a median line, and `--json` gains `unpriced`, `sessions` and `sessionsLowConfidence` on
+`overview.versions.dearest.medianLeader`; every pre-existing `--json` key is unchanged. The table
+helpers shared with the report moved into `scripts/doctor-format.mjs`, and the copy of
+`doctor.mjs` that its tests install is now built from its import closure instead of a hand-kept
+list that went stale whenever doctor gained a module (#236).
+
+**Doctor no longer aborts at Node's default heap (#315).** `scripts/doctor.mjs` used to read every
+transcript of the corpus into one map before summarizing, so a 4.3 GB corpus aborted at about 4 GB
+of heap. It now groups transcript paths by owning session, reads one session at a time, summarizes
+it for the current and (with `--since`) previous window in that single read, and drops its
+records. Memory tracks the largest single session instead of the whole corpus; that bound is
+recorded in `docs/known-issues.md`. A heap-capped regression test covers `--since`, and the
+output for a given corpus is unchanged.
+
+**Learned lessons.** Four execution lessons from the 2026-10-07 learn run were adopted, with their
+promotion records (#319).
+
 ## 0.22.1 — 2026-10-03
 
 - fix(config): route every knob through one resolver, land the maintenance store write path, price the 5.5 models, and cut the per-stage read closure
