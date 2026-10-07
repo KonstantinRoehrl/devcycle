@@ -7,48 +7,12 @@
 // playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
 import { taskBlocks, parseDispatchMap, filesFieldValue, extractFiles } from "./task-files.mjs";
-
-const planPath = process.argv[2];
-if (!planPath) {
-  console.error("usage: node scripts/content-coupling-check.mjs <plan-file>");
-  process.exit(1);
-}
-if (!existsSync(planPath)) {
-  console.error(`content-coupling-check: plan file not found: ${planPath}`);
-  process.exit(1);
-}
-
-const text = readFileSync(planPath, "utf8");
-const blocks = new Map(taskBlocks(text).map((b) => [b.num, b.text]));
-const waves = parseDispatchMap(text);
-
-// A parse failure is not a clean plan: mirror wave-disjointness-check's guard so an empty parse
-// never prints ok. No "### Task N" blocks, or no Dispatch Map, means this check cannot run.
-if (blocks.size === 0) {
-  console.error(`content-coupling-check: no "### Task N" blocks found in ${planPath}`);
-  process.exit(1);
-}
-if (waves === null) {
-  console.log(`content-coupling-check: no "## Dispatch Map" section found in ${planPath} -- cannot verify content coupling`);
-  process.exit(0);
-}
+import { isMain } from "./is-main.mjs";
 
 // Overrides: "- Content-coupling override: Task <B> → <file> (Task <A>) — <reason>". A missing
 // reason is a hard error, exactly the silent walk-around this gate exists to prevent.
 const OVERRIDE_START = /^\s*-\s*Content-coupling override:/;
 const OVERRIDE_RE = /^\s*-\s*Content-coupling override:\s*Task\s+(\d+)\s*→\s*(\S+)\s*\(Task\s+(\d+)\)\s*—\s*(.*\S)\s*$/;
-const overrides = [];
-for (const line of text.split("\n")) {
-  if (!OVERRIDE_START.test(line)) continue;
-  const m = line.match(OVERRIDE_RE);
-  if (!m) {
-    console.error(`content-coupling-check: malformed override (needs "Task <B> → <file> (Task <A>) — <reason>"): ${line.trim()}`);
-    process.exit(1);
-  }
-  overrides.push({ b: Number(m[1]), file: m[2].replace(/[`]/g, ""), a: Number(m[3]) });
-}
-const isOverridden = (b, file, a) =>
-  overrides.some((o) => o.b === b && o.a === a && o.file === file);
 
 // taskBlocks() runs the LAST task's block from its "### Task N:" heading to end-of-file, so
 // trailing plan-level "## " sections (Dispatch Map, Blast-radius overrides, ...) after the last
@@ -76,10 +40,6 @@ const boundedFilesValue = (blockText) => {
   return raw ? raw.split(/\n\s*\n/)[0] : raw;
 };
 
-const filesByTask = new Map(
-  [...blocks].map(([num, blockText]) => [num, extractFiles(boundedFilesValue(blockText))])
-);
-
 // A path token is matched with a boundary so it never collides with a coincidentally similar
 // path: the match must be a COMPLETE path token, bounded on both ends by a non-path-continuation
 // character. Path-continuation characters are [\w.\-/] (word chars, dot, dash, slash) -- so a
@@ -103,34 +63,82 @@ const mentions = (haystack, path) => {
   return new RegExp(`(^|[\\s'"\`(])${esc}(?![\\w])(?![.\\-/]\\w)`, "m").test(haystack);
 };
 
-const violations = [];
-for (const [waveNum, taskNums] of waves) {
-  for (const a of taskNums) {
-    const aFiles = filesByTask.get(a);
-    if (!aFiles || aFiles.size === 0) continue;
-    for (const b of taskNums) {
-      if (b === a) continue;
-      // Exclude B's own **Files:** field from the searched text -- B naming its own files is not
-      // coupling. Search only B's brief prose. Both bText (bounded at the first "## " heading, so
-      // a plan-level section is never scanned as the last task's own brief prose) and bFilesValue
-      // (additionally bounded at the first blank line) flow through the same two helpers aFiles
-      // uses above, so the editor and referencer sides agree on where a task's block really ends.
-      const bText = cutAtPlanLevel(blocks.get(b) ?? "");
-      const bFilesValue = boundedFilesValue(bText);
-      const bProse = bFilesValue ? bText.replace(bFilesValue, "") : bText;
-      for (const file of aFiles) {
-        if (mentions(bFilesValue, file)) continue; // a literal overlap is wave-disjointness-check's job
-        if (mentions(bProse, file) && !isOverridden(b, file, a))
-          violations.push({ wave: waveNum, a, b, file });
+const failed = (finding) => ({ findings: [finding], ok: "", notes: [] });
+
+export function contentCouplingLeg(planText, { planPath }) {
+  const blocks = new Map(taskBlocks(planText).map((b) => [b.num, b.text]));
+  const waves = parseDispatchMap(planText);
+
+  // A parse failure is not a clean plan: mirror wave-disjointness-check's guard so an empty parse
+  // never reports ok. No "### Task N" blocks, or no Dispatch Map, means this check cannot run.
+  if (blocks.size === 0) return failed(`no "### Task N" blocks found in ${planPath}`);
+  if (waves === null) {
+    return {
+      findings: [],
+      ok: `no "## Dispatch Map" section found in ${planPath} -- cannot verify content coupling`,
+      notes: [],
+    };
+  }
+
+  const overrides = [];
+  for (const line of planText.split("\n")) {
+    if (!OVERRIDE_START.test(line)) continue;
+    const m = line.match(OVERRIDE_RE);
+    if (!m) return failed(`malformed override (needs "Task <B> → <file> (Task <A>) — <reason>"): ${line.trim()}`);
+    overrides.push({ b: Number(m[1]), file: m[2].replace(/[`]/g, ""), a: Number(m[3]) });
+  }
+  const isOverridden = (b, file, a) =>
+    overrides.some((o) => o.b === b && o.a === a && o.file === file);
+
+  const filesByTask = new Map(
+    [...blocks].map(([num, blockText]) => [num, extractFiles(boundedFilesValue(blockText))])
+  );
+
+  const findings = [];
+  for (const [waveNum, taskNums] of waves) {
+    for (const a of taskNums) {
+      const aFiles = filesByTask.get(a);
+      if (!aFiles || aFiles.size === 0) continue;
+      for (const b of taskNums) {
+        if (b === a) continue;
+        // Exclude B's own **Files:** field from the searched text -- B naming its own files is not
+        // coupling. Search only B's brief prose. Both bText (bounded at the first "## " heading, so
+        // a plan-level section is never scanned as the last task's own brief prose) and bFilesValue
+        // (additionally bounded at the first blank line) flow through the same two helpers aFiles
+        // uses above, so the editor and referencer sides agree on where a task's block really ends.
+        const bText = cutAtPlanLevel(blocks.get(b) ?? "");
+        const bFilesValue = boundedFilesValue(bText);
+        const bProse = bFilesValue ? bText.replace(bFilesValue, "") : bText;
+        for (const file of aFiles) {
+          if (mentions(bFilesValue, file)) continue; // a literal overlap is wave-disjointness-check's job
+          if (mentions(bProse, file) && !isOverridden(b, file, a))
+            findings.push(`Wave ${waveNum} -- Task ${b} references ${file}, which Task ${a} edits in the same wave -- add a dependency or record a "Content-coupling override" with a reason`);
+        }
       }
     }
   }
+
+  return { findings, ok: "ok -- no same-wave brief cross-references found", notes: [] };
 }
 
-if (violations.length > 0) {
-  for (const v of violations)
-    console.error(`content-coupling-check: Wave ${v.wave} -- Task ${v.b} references ${v.file}, which Task ${v.a} edits in the same wave -- add a dependency or record a "Content-coupling override" with a reason`);
-  process.exit(1);
+function main() {
+  const planPath = process.argv[2];
+  if (!planPath) {
+    console.error("usage: node scripts/content-coupling-check.mjs <plan-file>");
+    process.exit(1);
+  }
+  if (!existsSync(planPath)) {
+    console.error(`content-coupling-check: plan file not found: ${planPath}`);
+    process.exit(1);
+  }
+
+  const { findings, ok } = contentCouplingLeg(readFileSync(planPath, "utf8"), { planPath });
+  if (findings.length > 0) {
+    for (const f of findings) console.error(`content-coupling-check: ${f}`);
+    process.exit(1);
+  }
+  console.log(`content-coupling-check: ${ok}`);
+  process.exit(0);
 }
-console.log("content-coupling-check: ok -- no same-wave brief cross-references found");
-process.exit(0);
+
+if (isMain(import.meta.url, process.argv[1])) main();

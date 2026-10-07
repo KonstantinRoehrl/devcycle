@@ -15,3 +15,5 @@
 {"kind":"reconcile-reply","runId":"0f1e2d3c4b5a6978","pr":"134","commentId":"555","replyHash":"9xk2"}
 {"kind":"reconcile-resolve","runId":"0f1e2d3c4b5a6978","pr":"134","threadId":"PRRT_kwDOabc123"}
 {"kind":"review-writeback","runId":"0f1e2d3c4b5a6978","pr":"159","event":"COMMENT","filed":3,"degraded":1}
+{"kind":"agent-depth","runId":"0f1e2d3c4b5a6978","stage":"planning","agentType":"devcycle:task-reviewer","agentId":"a27cbd72da7b3b62f","model":"claude-sonnet-5-5","tokens":152340,"toolUses":14,"durationMs":91215,"depth":"warn","ts":"2026-08-07T10:40:00Z"}
+{"kind":"event","runId":"0f1e2d3c4b5a6978","event":"gate-ran","stage":"planning","result":"pass","culprit":null,"ts":"2026-08-07T10:06:00Z"}

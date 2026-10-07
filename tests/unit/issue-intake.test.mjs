@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, readdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { intake, isCulpritBracketTitle } from "../../scripts/issue-intake.mjs";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
@@ -112,4 +113,15 @@ test("redaction scrubs BOTH title and body, and body carries no injected header 
 test("issue-intake never carries a field-flagged body= write", () => {
   const src = readFileSync(join(root, "scripts", "issue-intake.mjs"), "utf8");
   assert.doesNotMatch(src, /-(?:f|F|-field|-raw-field)\s+["']?body=/);
+});
+
+test("an unwritable scratch dir keeps the originals instead of failing intake (#184)", () => {
+  const issues = [fixture("issue-44-multibug.json")];
+  const dir = makeTempDir("issue-intake");
+  const notADir = join(dir, "file");
+  writeFileSync(notADir, "x");
+  const r = intake({ repo: "o/r", ghRunner: fakeGh(issues), redactRunner: noRedact, scratchDir: join(notADir, "scratch") });
+  assert.equal(r.available, true);
+  assert.equal(r.issues.length, 1);
+  assert.equal(r.issues[0].title, issues[0].title);
 });

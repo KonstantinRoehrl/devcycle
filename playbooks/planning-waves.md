@@ -106,22 +106,30 @@ fixing what it finds inline as you go; no re-review pass.
 4. **Factual-claim accuracy:** every load-bearing plan-authored claim — file/section targets,
    locked "must show no changes" regions, verification greps, counts — was checked by running
    the proving command/grep and citing its result, or is marked an assumption; never stated as
-   bare fact (`references/evidence.md` § Authored claims). Its mechanized
-   backstop: run `node "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <plan-path>` —
-   a blocking lint that flags an unguarded `path.ext:line` reference or a bare count claim,
-   cleared by a `(verified: <cmd>)` or `(assumption)` marker on the same or an adjacent line.
+   bare fact (`references/evidence.md` § Authored claims). Its mechanized backstop is item 8's
+   `authoredClaims` leg — a blocking lint that flags an unguarded `path.ext:line` reference or a
+   bare count claim, cleared by a `(verified: <cmd>)` or `(assumption)` marker on the same or an
+   adjacent line.
 5. **No count-only enumeration:** never cite an enumeration by count alone ("all four guardrails");
    one that more than one task reproduces belongs in Global Constraints, verbatim in every brief.
 6. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
-7. **Pasted-code lint:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/lint-plan-code-blocks.mjs" <plan-path>`
-   over the plan just written and fix any JS/mjs code block it flags before a task brief carries it
-   forward. Passing the path is what makes this gate non-vacuous: invoked bare it sweeps two
-   directories the plan need not be in.
-8. **Brief completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/brief-completeness-check.mjs" <plan-path>` — every task carries Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, the Dispatch Map lists every task, and no Files block omits a budget fixture its own edits trip (item 12's join, run here so the first scripted gate already names it). Fix any gap it reports.
-9. **Blast-radius completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/blast-radius-check.mjs" <plan-path>` — it hard-fails on any referencer (test or non-test) of a task's changed file that is in no Files block. Add each flagged file to the right task's Files block, or record an explicit override — a `- Blast-radius override: <changed-file> [→ <referencer>] — <reason>` line (em-dash before the reason; a reasonless override is a hard error), e.g. referenced only in a comment.
-10. **Content-coupling completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/content-coupling-check.mjs" <plan-path>` — it flags a same-wave task whose brief names a file another same-wave task edits (a coupling the wave-disjointness check cannot see), cleared by a dependency or a `- Content-coupling override: Task B → <file> (Task A) — <reason>` line.
-11. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch.
-12. **Budget-fixture completeness:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/budget-fixture-check.mjs" <plan-path>` — it hard-fails when a task's Files touch a budgeted surface (`playbooks/`, `commands/`, `agents/`, `references/` markdown) without also touching the matching budget fixture(s) — `references/` markdown matches the context budget as well as the surface one, because a playbook's context budget counts the bytes of every reference it cites — or touch or need a fixture without `docs/decisions/README.md`, which holds its `budget:` lines. Add the missing file to that task's Files block, or record an explicit override — a `- Budget-fixture override: <surface-or-fixture> — <reason>` line (em-dash before the reason; a reasonless override is a hard error).
+7. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch.
+8. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path>` — one command,
+   seven legs, compact on success: pasted JS/mjs code blocks parse (`codeBlocks`); every task carries
+   Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints and the Dispatch Map
+   lists every task (`briefCompleteness`); every referencer of a changed file, test or not, sits in some
+   Files block (`blastRadius`); no same-wave task's brief names a file another same-wave task edits
+   (`contentCoupling`); a task touching a budgeted surface (`playbooks/`, `commands/`, `agents/`,
+   `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md`, which holds
+   their `budget:` lines — `references/` markdown matches the context budget as well, because a
+   playbook's context budget counts every reference it cites (`budgetFixtures`); no two same-wave tasks
+   list the same file (`waveDisjointness`); and item 4's claims (`authoredClaims`). A plan with no
+   `## Dispatch Map` fails before any leg runs. Three findings clear by an explicit override line
+   instead of a fix, each reasonless form a hard error: `- Blast-radius override: <changed-file>
+   [→ <referencer>] — <reason>` (e.g. referenced only in a comment), `- Content-coupling override:
+   Task B → <file> (Task A) — <reason>` (or a real dependency), and `- Budget-fixture override:
+   <surface-or-fixture> — <reason>`. A non-zero exit is a stop, resolved by fixing the plan or recording
+   an override — never by handing off around it.
 
 ## The three per-task declaration lines
 
@@ -148,15 +156,9 @@ The plan ends with a `## Dispatch Map` grouping tasks into waves — `- Wave 1: 
 only dependency-ready, file-disjoint tasks: never place two tasks touching the same file in one
 wave, even if both declare `none`. Execution dispatches by readiness from this map, never by written
 order. That map, the plan header, and the per-task blocks are the whole contract
-`playbooks/executing-waves.md` consumes. Before handing the plan off, run
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/wave-disjointness-check.mjs" <plan-path>` and
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/content-coupling-check.mjs" <plan-path>` -- the first only
-catches a literal Files-block overlap within one wave; the second catches the harder case of two
-same-wave tasks coupled only because one's brief names a file the other edits.
-
-A non-zero exit from self-review items 8, 9, 10, or 12, or from the authored-claims backstop in
-item 4, is a stop, resolved by fixing the plan (or, for blast-radius and budget-fixture, recording
-an override) — never by handing off around it.
+`playbooks/executing-waves.md` consumes. Self-review item 8's plan gate checks both a literal
+Files-block overlap within one wave and the harder case of two same-wave tasks coupled only because
+one's brief names a file the other edits.
 
 ## Reuse before rebuild
 

@@ -8,9 +8,9 @@
 // fail on the first scripted gate a planner runs, not later inside validate.mjs.
 // See playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
-import { pathToFileURL } from "node:url";
 import { taskBlocks, taskFileMap, normalizeFileToken } from "./task-files.mjs";
 import { DECISIONS_DOC } from "./doc-paths.mjs";
+import { isMain } from "./is-main.mjs";
 
 // Surface dirs mirror scripts/validate.mjs check 9 (SURFACE = playbooks, commands, agents,
 // references). Keep this list in sync with validate.mjs.
@@ -89,6 +89,26 @@ export function budgetFixtureGaps(planText) {
   return gaps;
 }
 
+// One text in, the gate's result out: `findings` and `notes` carry no `budget-fixture-check: `
+// prefix, so a caller composing several legs adds its own. A plan with no task blocks is a parse
+// failure, not a plan with no budgeted surfaces -- matching blast-radius-check.mjs's own guard.
+export function budgetFixturesLeg(planText, { planPath }) {
+  const ok = "ok -- every budgeted surface edit carries its matching fixture or an override";
+  if (taskBlocks(planText).length === 0) {
+    return { findings: [`no "### Task N" blocks found in ${planPath}`], ok, notes: [] };
+  }
+  let gaps;
+  try {
+    gaps = budgetFixtureGaps(planText);
+  } catch (e) {
+    return { findings: [e.message], ok, notes: [] };
+  }
+  const findings = gaps.map(
+    ({ task, file, fixture }) => `Task ${task} edits ${file} but its Files omit ${fixture} — ${gapRemedy(fixture)}`,
+  );
+  return { findings, ok, notes: [] };
+}
+
 function main() {
   const [, , planPath] = process.argv;
   if (!planPath) {
@@ -100,30 +120,13 @@ function main() {
     process.exit(1);
   }
 
-  const text = readFileSync(planPath, "utf8");
-  // A plan that yields no tasks is a parse failure, not a plan with no budgeted surfaces --
-  // matching blast-radius-check.mjs's own guard.
-  if (taskBlocks(text).length === 0) {
-    console.error(`budget-fixture-check: no "### Task N" blocks found in ${planPath}`);
+  const { findings, ok } = budgetFixturesLeg(readFileSync(planPath, "utf8"), { planPath });
+  if (findings.length > 0) {
+    for (const f of findings) console.error(`budget-fixture-check: ${f}`);
     process.exit(1);
   }
-
-  let gaps;
-  try {
-    gaps = budgetFixtureGaps(text);
-  } catch (e) {
-    console.error(`budget-fixture-check: ${e.message}`);
-    process.exit(1);
-  }
-
-  if (gaps.length > 0) {
-    for (const { task, file, fixture } of gaps) {
-      console.error(`budget-fixture-check: Task ${task} edits ${file} but its Files omit ${fixture} — ${gapRemedy(fixture)}`);
-    }
-    process.exit(1);
-  }
-  console.log("budget-fixture-check: ok -- every budgeted surface edit carries its matching fixture or an override");
+  console.log(`budget-fixture-check: ${ok}`);
   process.exit(0);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
+if (isMain(import.meta.url, process.argv[1])) main();

@@ -2452,9 +2452,9 @@ test("complianceIssueBody: an inherited-model draft body screens clean through r
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
-test("COMPLIANCE_TYPES names exactly the four emitComplianceCandidates types", () => {
+test("COMPLIANCE_TYPES names exactly the five emitComplianceCandidates types", () => {
   assert.deepEqual([...COMPLIANCE_TYPES].sort(),
-    ["general-purpose-search", "inherited-model", "main-thread-browser", "missing-workload"]);
+    ["general-purpose-search", "inherited-model", "main-thread-browser", "missing-workload", "sensor-inactive"]);
 });
 
 // FIX A: the compliance-type constant is now load-bearing, not just documentation. Three
@@ -2619,12 +2619,11 @@ test("resolveDepth: an exact model carries no provisional marker", () => {
   assert.equal("windowProvisionalAs" in r, false);
 });
 
-test("resolveDepth: a model with no priced family refuses, naming the file that fixes it", () => {
+test("resolveDepth: a model with no priced family is measured against an assumed window, labelled", () => {
   const { root, cwd } = depthFixture("sess-5568", [turnWithUsage("claude-mythos-9", usage(1, 2, 3, 4))]);
-  assert.throws(
-    () => resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-5568", CLAUDE_DOCTOR_PROJECTS: root }, cwd),
-    /claude-mythos-9 is not in the pricing table \(scripts\/pricing\.mjs\)/,
-  );
+  const r = resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-5568", CLAUDE_DOCTOR_PROJECTS: root }, cwd);
+  assert.equal(r.window, 1_000_000);
+  assert.equal(r.windowAssumed, true);
 });
 
 test("resolveDepth: the last usage record wins and a torn trailing line is skipped", () => {

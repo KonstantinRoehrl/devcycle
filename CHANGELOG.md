@@ -1,5 +1,36 @@
 # Changelog
 
+**Every subagent's context depth is now recorded.** A new `SubagentStop` hook,
+`hooks/dispatch-sensor.mjs`, writes one `agent-depth` run-record row for each subagent that a
+cycle's own sessions run, when it finishes: its final context depth, model, tool uses and
+duration, marked `warn` above 150k tokens and `breach` above 200k. A breach also records a
+`depth-breach` event. The hook only observes — it never blocks a subagent and always exits 0.
+These rows are their own record kind, separate from `dispatch`, so implementer dispatches are not
+counted twice.
+
+**The depth gate has its own probe.** The depth gate now runs `scripts/depth-probe.mjs`, which
+reads one transcript's last usage record, instead of loading all of `doctor.mjs` to do the same
+(`doctor.mjs --depth` still works). A model id that does not parse as a priced family version in
+`scripts/pricing.mjs` is now measured against an assumed 1M window and labelled as assumed, instead
+of being refused; wrapped ids (`[1m]`, Bedrock, Vertex) resolve to their model's window.
+
+**Doctor reports agent depth per stage.** The doctor report gains an
+`### Agent depth by stage (observed)` table — dispatches, median and maximum depth, and warn and
+breach counts per stage — and a `sensor-inactive` finding when a run's planning stage produced a
+plan but recorded no depth rows, which means the dispatch-sensor hook was not running.
+
+**One plan gate.** Planning's self-review now runs a single command, `scripts/plan-check.mjs`, in
+place of seven separate gate scripts (code blocks, brief completeness, blast radius, content
+coupling, budget fixtures, wave disjointness and authored claims). It fails closed: a plan with no
+`## Dispatch Map` is a finding, not a pass. On success it prints one line, plus a note count for
+each check that has notes, and while a cycle is running it records a `gate-ran` event with its
+pass or fail result. Each gate script still runs on its own.
+
+**Fixes.** The budget-fixture gate (`scripts/budget-fixture-check.mjs`) now runs its check when
+started through a symlinked path, such as the plugin cache or macOS's `/var`, where before it
+silently skipped it (#147). Issue intake keeps the issues it fetched when its scratch directory
+cannot be written, instead of failing (#184).
+
 ## 0.22.1 — 2026-10-03
 
 - fix(config): route every knob through one resolver, land the maintenance store write path, price the 5.5 models, and cut the per-stage read closure

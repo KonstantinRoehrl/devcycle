@@ -5,7 +5,7 @@
 // and runs no promotion `- verify:` check unless invoked with --run-checks.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -22,8 +22,11 @@ import { atomicWrite } from "./atomic-write.mjs";
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 import { eachRecord } from "./jsonl.mjs";
+import { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth, depthLine } from "./depth-probe.mjs";
 import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, withInferredNote, unpricedMediansNote } from "./doctor-format.mjs";
 import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
+
+export { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth };
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // docs/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -43,8 +46,8 @@ const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
 // in every repo except this one — the failure this constant exists to prevent.
 export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
 
-// The four compliance-candidate slugs emitComplianceCandidates can produce — the single source of
-// truth for all three consumers, made structurally load-bearing so adding a fifth type here (and
+// The compliance-candidate slugs emitComplianceCandidates can produce — the single source of
+// truth for all three consumers, made structurally load-bearing so adding a new type here (and
 // nowhere else) either derives automatically or fails loudly, instead of needing four parallel edits:
 //   - the emitter routes every candidate's `type` through complianceType() below, so a literal that
 //     drifts from this array throws at emit time rather than producing an unroutable candidate;
@@ -53,6 +56,7 @@ export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
 //     so a new type can't be routable/emittable without also getting a title.
 export const COMPLIANCE_TYPES = [
   "inherited-model", "missing-workload", "main-thread-browser", "general-purpose-search",
+  "sensor-inactive",
 ];
 const COMPLIANCE_TYPE_SET = new Set(COMPLIANCE_TYPES);
 
@@ -138,10 +142,6 @@ export function extractPluginVersion(record) {
   return m ? m[1] : null;
 }
 
-// Records Claude Code writes for its own placeholders (session-limit notices and the like).
-// Every counter on them is zero, so they are skipped outright rather than reported unpriced.
-export const SYNTHETIC_MODEL = "<synthetic>";
-
 // Tool calls that dispatch a subagent; a call with no explicit model inherits the caller's.
 const DISPATCH_TOOLS = new Set(["Task", "Agent"]);
 
@@ -200,10 +200,6 @@ export function isDevcycleSession(records) {
     }
   }
   return false;
-}
-
-export function contextDepth(usage) {
-  return (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
 }
 
 // A 1h cache write costs 2.00x the input price, a 5m write 1.25x. Named once, beside the other
@@ -273,12 +269,12 @@ export function costBand(records) {
     const u = r.message?.usage ?? r.usage ?? {};
     const model = r.message?.model ?? r.model;
     const p = priceFor(model);
-    // An unpriced model must not throw on `p.in` (costUSD guards the same way with `if (!p)` at
-    // :88, resolveDepth with `?.` at :166) and must not enter the band's numerator OR its
-    // totalTokens denominator — leaving it in the denominator while it prices at nothing would
-    // understate cost-per-token by exactly the unpriced share, the same plausible-and-wrong shape
-    // the /1e6 fix above corrects. `costBand` has no reference to the per-session `unpriced` tally
-    // (`:458`) to bump — the real partition happens one level up, in Step 5.
+    // An unpriced model must not throw on `p.in` (costUSD guards the same way with `if (!p)`) and
+    // must not enter the band's numerator OR its totalTokens denominator — leaving it in the
+    // denominator while it prices at nothing would understate cost-per-token by exactly the
+    // unpriced share, the same plausible-and-wrong shape the /1e6 fix above corrects. `costBand`
+    // has no reference to the per-session `unpriced` tally (`:458`) to bump — the real partition
+    // happens one level up, in Step 5.
     if (!p) continue;
     const h1 = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
     const m5 = u.cache_creation?.ephemeral_5m_input_tokens ?? 0;
@@ -321,64 +317,6 @@ export function depthBand(depth) {
   return "300k+";
 }
 
-// Fractions of the running model's context window. The underlying measurement is absolute —
-// cost per 1k output tokens bottoms at 15.1k in the 100-150k band and climbs to 40.7k past
-// 300k — taken on 1M-window sessions, so these fractions are those absolutes divided by 1M.
-// Expressing them as fractions is a deliberate approximation that lets them adapt to smaller
-// windows; cache-read cost actually scales with absolute tokens, not with the fraction used.
-// Doctor's own per-model band data is what should confirm or correct them once smaller-window
-// sessions have been measured.
-const OVER_BUDGET = 0.15;
-const HARD_STOP = 0.2;
-
-export function budgetBand(depth, window) {
-  const f = depth / window;
-  if (f >= HARD_STOP) return "hard-stop";
-  if (f >= OVER_BUDGET) return "over-budget";
-  return "ok";
-}
-
-// CLAUDE_DOCTOR_PROJECTS overrides the transcript root; it exists so the probe is testable
-// without writing into the real ~/.claude. It defaults to ~/.claude/projects.
-export function resolveDepth(env, cwd) {
-  const id = env.CLAUDE_CODE_SESSION_ID;
-  if (!id) throw new Error("CLAUDE_CODE_SESSION_ID is not set — cannot identify this session");
-  const root = env.CLAUDE_DOCTOR_PROJECTS || join(homedir(), ".claude", "projects");
-
-  // 1. cwd slug, 2. a filename search for a session whose cwd moved after it started.
-  const direct = join(root, cwd.replaceAll("/", "-"), `${id}.jsonl`);
-  const file = existsSync(direct)
-    ? direct
-    : (findTranscriptFiles(root) ?? []).find((f) => basename(f) === `${id}.jsonl`);
-  if (!file) throw new Error(`no transcript found for session ${id} under ${root}`);
-
-  let last = null;
-  // The "usage" substring is a cheap pre-filter: most transcript lines are not assistant turns with a
-  // usage block, and a rejected line costs no parse. eachRecord streams the file in chunks, so no
-  // whole-file string is held however long the session is. A torn trailing line (transcripts are
-  // appended live) fails to parse and is skipped by the reader.
-  eachRecord(
-    file,
-    (r) => {
-      if (r.message?.usage && r.message.model && r.message.model !== SYNTHETIC_MODEL) last = r.message;
-    },
-    { lineFilter: (line) => line.includes('"usage"') },
-  );
-  if (!last) throw new Error(`no usage record in ${basename(file)} — nothing to measure`);
-
-  const depth = contextDepth(last.usage);
-  const exact = priceFor(last.model);
-  const provisional = exact ? null : provisionalPriceFor(last.model);
-  const window = (exact ?? provisional?.price)?.window;
-  if (!window)
-    throw new Error(`model ${last.model} is not in the pricing table (scripts/pricing.mjs) — no window to measure against`);
-  return {
-    depth, model: last.model, window,
-    ...(provisional ? { windowProvisionalAs: provisional.basedOn } : {}),
-    fraction: depth / window, band: budgetBand(depth, window),
-  };
-}
-
 export function median(numbers) {
   if (!numbers.length) return 0;
   const sorted = [...numbers].sort((a, b) => a - b);
@@ -407,6 +345,8 @@ export const STANDALONE_TAGS = new Set([
 // The release that introduced the run record (CHANGELOG.md 0.13.0); a session from before it
 // legitimately has none.
 export const RUN_RECORD_SINCE = "0.13.0";
+// The first release that ships hooks/dispatch-sensor.mjs (assumption: the next minor); older runs cannot have agent-depth rows.
+export const DEPTH_SENSOR_SINCE = "0.23.0";
 // Why a forward-filled session has no run record: a standalone command mints none by design, a
 // session from before 0.13.0 predates the record, and anything else expected one and is missing it.
 export function splitReason({ firstTag = null, pluginVersion = null } = {}) {
@@ -840,6 +780,16 @@ export function emitComplianceCandidates(turns, record) {
     out.push({ type: complianceType("missing-workload"), commits: missingCommits.length,
       requestKind: record.triage.requestKind, sessions_sampled: 1 });
 
+  // C5: planning produced a plan (planned tasks recorded) but no agent-depth row names the stage —
+  // the dispatch-sensor hook was not loaded or missed, which must not read as "no dispatches".
+  // Decided per run, not per window (readRunRecords' planningRuns): planning and execution always
+  // run in different sessions, so no one window holds both the stage and the planned task count.
+  for (const run of record.planningRuns ?? []) {
+    const sensorShipped = run.pluginVersion && compareVersions(run.pluginVersion, DEPTH_SENSOR_SINCE) >= 0;
+    if (sensorShipped && run.plannedTaskCount > 0 && run.planningDepthRows === 0)
+      out.push({ type: complianceType("sensor-inactive"), stage: "planning", plannedTasks: run.plannedTaskCount, sessions_sampled: 1 });
+  }
+
   return out;
 }
 
@@ -1003,21 +953,29 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         } else if (o.kind === "session") {
           current = o.sessionHash;
           if (!windows.has(current))
-            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [] });
+            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [], agentDepths: [] });
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
         else if (o.kind === "event") { if (current) windows.get(current).events.push(o); }
         else if (o.kind === "workload") { if (current) windows.get(current).workloads.push(o); }
         else if (o.kind === "lens-cost") { if (current) windows.get(current).lensCosts.push(o); }
+        else if (o.kind === "agent-depth") { if (current) windows.get(current).agentDepths.push(o); }
         else if (o.kind === "commit") { if (current) windows.get(current).commits.push(o); }
         else if (o.kind === "triage") { triage = { requestKind: o.requestKind, entryStage: o.entryStage }; }
       }
+      // sensor-inactive is decided per run (see emitComplianceCandidates' C5); the run's summary
+      // rides on its first planning window only, so the candidate fires at most once per run.
+      const runWindows = [...windows.values()];
+      const planningWindow = [...windows].find(([, w]) => w.stages.some((s) => s.stage === "planning"))?.[0];
+      const planningRun = { runId, pluginVersion,
+        plannedTaskCount: runWindows.flatMap((w) => w.workloads).at(-1)?.plannedTaskCount ?? 0,
+        planningDepthRows: runWindows.flatMap((w) => w.agentDepths).filter((r) => r.stage === "planning").length };
       for (const [h, w] of windows) {
         // The run's workload is the last workload line written for the session (a rerun overwrites
         // an earlier estimate); null when the run wrote none (GC3 — workload-unknown, not zero).
         const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, triage, ...w,
-          workload: w.workloads.at(-1) ?? null };
+          workload: w.workloads.at(-1) ?? null, planningRuns: h === planningWindow ? [planningRun] : [] };
         const prior = bySession.get(h);
         bySession.set(h, prior
           ? { ...rec,
@@ -1028,6 +986,8 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
               workloads: [...prior.workloads, ...rec.workloads],
               lensCosts: [...prior.lensCosts, ...rec.lensCosts],
               commits: [...prior.commits, ...rec.commits],
+              agentDepths: [...prior.agentDepths, ...rec.agentDepths],
+              planningRuns: [...prior.planningRuns, ...rec.planningRuns],
               triage: rec.triage ?? prior.triage ?? null,
               workload: rec.workload ?? prior.workload ?? null }
           : rec);
@@ -1288,6 +1248,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     costByStage,
     costByAgentType,
     costByLens,
+    agentDepths: record?.agentDepths ?? [],
     bandCounts,
     startupFloor,
     carryWeighted,
@@ -1425,6 +1386,8 @@ export function complianceCandidatesOf(summaries) {
       out.push({ ...cand, count: sum("count"), total: sum("total") });
     } else if (g.type === "missing-workload") {
       out.push({ ...cand, commits: sum("commits"), requestKind: g.members[0].requestKind });
+    } else if (g.type === "sensor-inactive") {
+      out.push({ ...cand, stage: "planning", plannedTasks: sum("plannedTasks") });
     }
   }
   const inh = out.find((c) => c.type === "inherited-model");
@@ -1466,6 +1429,8 @@ export function formatComplianceCandidate(c) {
   }
   if (c.type === "missing-workload")
     return `CANDIDATE: missing-workload commits=${c.commits} requestKind=${c.requestKind} sessions=${c.sessions_sampled}${span} — reached execution and committed but recorded no workload (collection gap — the commit-sensor hook should have written it)`;
+  if (c.type === "sensor-inactive")
+    return `CANDIDATE: sensor-inactive stage=${c.stage} plannedTasks=${c.plannedTasks} sessions=${c.sessions_sampled}${span} — a planning stage produced a plan but recorded no agent-depth rows (is the dispatch-sensor hook loaded?)`;
   return `CANDIDATE: general-purpose-search count=${c.count}/${c.total} sessions=${c.sessions_sampled}${span}`;
 }
 
@@ -1622,27 +1587,6 @@ export function formatReport(summaries) {
     );
   }
   return lines.join("\n");
-}
-
-// Recursively collects .jsonl transcript files under dir. Returns null when dir is simply
-// not there (missing, or a path that is not a directory).
-export function findTranscriptFiles(dir) {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch (err) {
-    // Same rule as readRecords below: an absent path is "nothing here", but a permissions
-    // or I/O failure is a real fault and must not read as a directory holding no transcripts.
-    if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
-    return null;
-  }
-  const files = [];
-  for (const e of entries) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) files.push(...(findTranscriptFiles(p) ?? []));
-    else if (e.isFile() && e.name.endsWith(".jsonl")) files.push(p);
-  }
-  return files;
 }
 
 // <slug>/<session>/subagents/agent-<id>.jsonl -> <session>; <slug>/<session>.jsonl -> <session>.
@@ -1852,13 +1796,7 @@ function main() {
       console.error(`doctor: ${e.message}`);
       process.exit(1);
     }
-    if (args.json) {
-      console.log(JSON.stringify(r));
-    } else {
-      const pct = (r.fraction * 100).toFixed(1);
-      const assumed = r.windowProvisionalAs ? `, window assumed from ${r.windowProvisionalAs}` : "";
-      console.log(`depth: ${r.depth} tokens (${pct}% of ${r.window}, model ${r.model}${assumed}) — band: ${r.band}`);
-    }
+    console.log(args.json ? JSON.stringify(r) : depthLine(r));
     return;
   }
   let result;
@@ -1990,6 +1928,7 @@ export function impactScores(record, costByStage) {
   const all = journalEvents(record);
   const byKey = new Map();
   for (const e of all) {
+    if (e.event === "gate-ran") continue; // a neutral marker that a gate ran, not friction
     const key = impactKey(e);
     if (!byKey.has(key))
       byKey.set(key, { key, event: e.event, stage: e.stage, frequency: 0, impact: 0, measurable: true });
@@ -2356,6 +2295,24 @@ export function lensCostTable(summaries) {
     .sort((a, b) => b.total - a.total || byName(a.lens, b.lens));
 }
 
+export function agentDepthTable(summaries) {
+  const byStage = new Map();
+  for (const s of summaries)
+    for (const r of s.agentDepths ?? []) {
+      if (!byStage.has(r.stage)) byStage.set(r.stage, []);
+      byStage.get(r.stage).push(r);
+    }
+  return [...byStage.entries()]
+    .map(([stage, rows]) => ({
+      stage, count: rows.length,
+      p50: median(rows.map((r) => r.tokens)),
+      max: Math.max(...rows.map((r) => r.tokens)),
+      warns: rows.filter((r) => r.depth === "warn").length,
+      breaches: rows.filter((r) => r.depth === "breach").length,
+    }))
+    .sort((a, b) => b.max - a.max || byName(a.stage, b.stage));
+}
+
 // A key is named by its culprit slug only when every session that recorded the key named the
 // same single slug. A key two sessions blamed differently is reported by key rather than by
 // picking one of them and printing a name the corpus does not agree on.
@@ -2674,6 +2631,9 @@ const GLOSSES = {
   "cost-by-lens":
     "What each maintenance lens cost, straight off the lens-cost run records — the split to read " +
     "when a maintain pass looks dear.",
+  "agent-depth":
+    "How deep each subagent ran, per stage, from the agent-depth rows the dispatch-sensor hook writes — " +
+    "warn above 150k tokens, breach above 200k.",
   culprits:
     "Recurring problems, priced. The dollar figure is what each one actually cost you, summed " +
     "over every occurrence — not a severity guess. The Δ and Trend are per-session (derived), so " +
@@ -3030,6 +2990,13 @@ export function renderReport(summaries, ctx) {
     "no per-lens cost recorded (maintain passes emit lens-cost records)",
   ));
   L.push("", "_Sourced from lens-cost run records; workload-independent (maintenance emits no workload record)._");
+
+  section("### Agent depth by stage (observed)", "agent-depth");
+  L.push(...markdownTable(
+    ["Stage", "Dispatches", "p50 depth", "Max depth", "Warn (150–200k)", "Breach (>200k)"],
+    agentDepthTable(summaries).map((r) => [r.stage, r.count, r.p50, r.max, r.warns, r.breaches]),
+    "no agent-depth records (the dispatch-sensor hook writes one per finished subagent)",
+  ));
 
   // The raw observed outcome family (spec C3): one row per run carrying a quality signal, its
   // raw verdicts/counts straight off the run records. conformancePass is null exactly when no
@@ -3577,6 +3544,7 @@ export class NoComplianceCandidateError extends Error {
 export const COMPLIANCE_TITLES = {
   "inherited-model": "subagent dispatches inherit the caller's model instead of naming one",
   "missing-workload": "a committing cycle recorded no workload (collection gap)",
+  "sensor-inactive": "a planning stage produced a plan but recorded no agent depth (sensor gap)",
   "main-thread-browser": "the coordinator drove a browser on the main thread",
   "general-purpose-search": "a general-purpose agent used where a scoped search would do",
 };

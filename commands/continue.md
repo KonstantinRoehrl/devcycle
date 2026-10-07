@@ -103,7 +103,7 @@ the user's recollection contradicts the files, follow the files and say so.
 **Depth check first.** Before resuming any stage, run
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth
+node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs"
 ```
 
 If it reports `over-budget` or `hard-stop`, say so and STOP: report the depth and the band,
