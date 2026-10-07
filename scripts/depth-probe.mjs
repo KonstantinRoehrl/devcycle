@@ -2,13 +2,13 @@
 // The context-depth probe: one transcript's last usage record measured against the observed model's
 // window. The depth gate calls this file directly so it no longer loads doctor's import closure;
 // `doctor.mjs --depth` stays as an adapter over the same functions.
-import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
-import { priceFor, provisionalPriceFor } from "./pricing.mjs";
+import { PRICING, priceFor, provisionalPriceFor } from "./pricing.mjs";
 import { eachRecord } from "./jsonl.mjs";
+import { isMain } from "./is-main.mjs";
 
 // Records Claude Code writes for its own placeholders (session-limit notices and the like).
 // Every counter on them is zero, so they are skipped outright rather than reported unpriced.
@@ -59,11 +59,19 @@ export function findTranscriptFiles(dir) {
   return files;
 }
 
+// The families pricing.mjs prices, read off its ids (`claude-<family>-...`). Matched against any
+// segment of a model id, so the older `claude-3-5-sonnet-...` naming still finds its family.
+const PRICED_FAMILIES = new Set(Object.keys(PRICING.models).map((id) => id.split("-")[1]));
+
+// Null when no window is knowable: an older member of a priced family (Sonnet 4.5, Opus 4.1) ran a
+// smaller window than its newest sibling and pricing.mjs records none for it, so the assumed 1M
+// would read its depth several times too shallow.
 export function windowFor(model) {
   const exact = priceFor(model);
   if (exact) return { window: exact.window };
   const provisional = provisionalPriceFor(model);
   if (provisional) return { window: provisional.price.window, windowProvisionalAs: provisional.basedOn };
+  if (typeof model === "string" && model.split("-").some((segment) => PRICED_FAMILIES.has(segment))) return null;
   return { window: ASSUMED_WINDOW, windowAssumed: true };
 }
 
@@ -108,6 +116,11 @@ export function resolveTranscript(env, cwd, { agentId } = {}) {
 
 const measured = (depth, model) => {
   const w = windowFor(model);
+  // An unknown depth is never evidence of a shallow one: fail the probe rather than band it.
+  if (!w) {
+    throw new Error(`no context window known for ${model} (older than every priced model of its family; ` +
+      `add it to scripts/pricing.mjs) — ${depth} tokens, band unknown`);
+  }
   return { depth, model, ...w, fraction: depth / w.window, band: budgetBand(depth, w.window) };
 };
 
@@ -155,5 +168,4 @@ function main(argv) {
   console.log(json ? JSON.stringify(r) : depthLine(r));
 }
 
-// #147: compare real paths, so a symlinked entry (the plugin cache, macOS /var) still runs main.
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) main(process.argv.slice(2));
+if (isMain(import.meta.url, process.argv[1])) main(process.argv.slice(2));

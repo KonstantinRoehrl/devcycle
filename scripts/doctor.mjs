@@ -782,11 +782,13 @@ export function emitComplianceCandidates(turns, record) {
 
   // C5: planning produced a plan (planned tasks recorded) but no agent-depth row names the stage —
   // the dispatch-sensor hook was not loaded or missed, which must not read as "no dispatches".
-  const planned = record.workload?.plannedTaskCount ?? 0;
-  const planningRan = (record.stages ?? []).some((s) => s.stage === "planning");
-  const sensorShipped = record.pluginVersion && compareVersions(record.pluginVersion, DEPTH_SENSOR_SINCE) >= 0;
-  if (sensorShipped && planningRan && planned > 0 && !(record.agentDepths ?? []).some((r) => r.stage === "planning"))
-    out.push({ type: complianceType("sensor-inactive"), stage: "planning", plannedTasks: planned, sessions_sampled: 1 });
+  // Decided per run, not per window (readRunRecords' planningRuns): planning and execution always
+  // run in different sessions, so no one window holds both the stage and the planned task count.
+  for (const run of record.planningRuns ?? []) {
+    const sensorShipped = run.pluginVersion && compareVersions(run.pluginVersion, DEPTH_SENSOR_SINCE) >= 0;
+    if (sensorShipped && run.plannedTaskCount > 0 && run.planningDepthRows === 0)
+      out.push({ type: complianceType("sensor-inactive"), stage: "planning", plannedTasks: run.plannedTaskCount, sessions_sampled: 1 });
+  }
 
   return out;
 }
@@ -962,11 +964,18 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         else if (o.kind === "commit") { if (current) windows.get(current).commits.push(o); }
         else if (o.kind === "triage") { triage = { requestKind: o.requestKind, entryStage: o.entryStage }; }
       }
+      // sensor-inactive is decided per run (see emitComplianceCandidates' C5); the run's summary
+      // rides on its first planning window only, so the candidate fires at most once per run.
+      const runWindows = [...windows.values()];
+      const planningWindow = [...windows].find(([, w]) => w.stages.some((s) => s.stage === "planning"))?.[0];
+      const planningRun = { runId, pluginVersion,
+        plannedTaskCount: runWindows.flatMap((w) => w.workloads).at(-1)?.plannedTaskCount ?? 0,
+        planningDepthRows: runWindows.flatMap((w) => w.agentDepths).filter((r) => r.stage === "planning").length };
       for (const [h, w] of windows) {
         // The run's workload is the last workload line written for the session (a rerun overwrites
         // an earlier estimate); null when the run wrote none (GC3 — workload-unknown, not zero).
         const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, triage, ...w,
-          workload: w.workloads.at(-1) ?? null };
+          workload: w.workloads.at(-1) ?? null, planningRuns: h === planningWindow ? [planningRun] : [] };
         const prior = bySession.get(h);
         bySession.set(h, prior
           ? { ...rec,
@@ -978,6 +987,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
               lensCosts: [...prior.lensCosts, ...rec.lensCosts],
               commits: [...prior.commits, ...rec.commits],
               agentDepths: [...prior.agentDepths, ...rec.agentDepths],
+              planningRuns: [...prior.planningRuns, ...rec.planningRuns],
               triage: rec.triage ?? prior.triage ?? null,
               workload: rec.workload ?? prior.workload ?? null }
           : rec);
@@ -2983,7 +2993,7 @@ export function renderReport(summaries, ctx) {
 
   section("### Agent depth by stage (observed)", "agent-depth");
   L.push(...markdownTable(
-    ["Stage", "Dispatches", "p50 depth", "Max depth", "Warn (>150k)", "Breach (>200k)"],
+    ["Stage", "Dispatches", "p50 depth", "Max depth", "Warn (150–200k)", "Breach (>200k)"],
     agentDepthTable(summaries).map((r) => [r.stage, r.count, r.p50, r.max, r.warns, r.breaches]),
     "no agent-depth records (the dispatch-sensor hook writes one per finished subagent)",
   ));

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { transcriptStats, resolveDepth, windowFor, depthLine, ASSUMED_WINDOW } from "../../scripts/depth-probe.mjs";
 
@@ -36,6 +37,24 @@ test("transcriptStats: a transcript with no usage record is null", () => {
 
 test("windowFor: an unpriced model is measured against an assumed window and says so", () => {
   assert.deepEqual(windowFor("claude-mythos-9"), { window: ASSUMED_WINDOW, windowAssumed: true });
+});
+
+// Sonnet 4.5 and Opus 4.1 ran a 200k window: measured against the assumed 1M, 190k would read as
+// 19% (over-budget) instead of 95% of the window. An unknown window must stay unknown.
+test("windowFor: an older member of a priced family has no knowable window, never the assumed one", () => {
+  assert.equal(windowFor("claude-sonnet-4-5-20250929"), null);
+  assert.equal(windowFor("claude-opus-4-1-20250805"), null);
+  assert.equal(windowFor("claude-3-5-sonnet-20241022"), null);
+});
+
+test("cli: an older model of a priced family exits 1 with its depth unbanded", () => {
+  const dir = makeTempDir("depth-probe");
+  const file = join(dir, "t.jsonl");
+  writeJsonl(file, [assistant("claude-sonnet-4-5-20250929", usage(90000, 0, 100000, 9), "2026-10-07T07:00:00Z")]);
+  const r = spawnSync(process.execPath, [SCRIPT, "--transcript", file], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /^depth-probe: no context window known for claude-sonnet-4-5-20250929 .*190000 tokens/);
 });
 
 test("resolveDepth: --agent resolves <session>/subagents/agent-<id>.jsonl under the cwd slug", () => {
@@ -74,4 +93,13 @@ test("cli: a --transcript that does not exist says so, not that it holds no usag
   const r = spawnSync(process.execPath, [SCRIPT, "--transcript", missing], { encoding: "utf8" });
   assert.equal(r.status, 1);
   assert.equal(r.stderr, `depth-probe: transcript not found: ${missing}\n`);
+});
+
+// doctor.mjs and hooks/dispatch-sensor.mjs import this module, so its main-entry gate runs under
+// any argv[1] — including one that names no file.
+test("import: an entry path that does not exist does not throw", () => {
+  const r = spawnSync(process.execPath,
+    ["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(SCRIPT).href)})`, "no-such-entry"],
+    { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
 });

@@ -39,15 +39,31 @@ test("agentDepthTable: count, p50, max, warns and breaches per stage", () => {
   ]);
 });
 
-test("sensor-inactive: a planning stage that produced a plan but no agent-depth rows is flagged", () => {
+// Planning and execution never share a session window — a Clear + /devcycle:continue sits between
+// them — so the planning stage and the run's workload line land in different windows of one run.
+const RUN_LINE = { kind: "run", runId: RUN, schemaVersion: 1, pluginVersion: "0.23.0", repoSlug: "repo-00000000", startedAt: "2026-10-07T07:00:00Z" };
+const PLANNING = { kind: "stage", runId: RUN, stage: "planning", startedAt: "2026-10-07T07:00:00Z", endedAt: "2026-10-07T08:00:00Z" };
+const WORKLOAD = { kind: "workload", runId: RUN, plannedTaskCount: 9 };
+const sessionLine = (sessionHash) => ({ kind: "session", runId: RUN, sessionHash });
+const sensorInactive = (lines) => [...readRunRecords(runsDir(lines)).values()]
+  .flatMap((rec) => emitComplianceCandidates([], rec)).filter((c) => c.type === "sensor-inactive");
+
+test("sensor-inactive: a run whose planning produced a plan but no agent-depth rows is flagged once", () => {
   assert.ok(COMPLIANCE_TYPES.includes("sensor-inactive"));
-  const base = { pluginVersion: "0.23.0", stages: [{ stage: "planning" }], workload: { plannedTaskCount: 9 }, commits: [], dispatches: [] };
-  const [c] = emitComplianceCandidates([], { ...base, agentDepths: [] }).filter((x) => x.type === "sensor-inactive");
-  assert.deepEqual(c, { type: "sensor-inactive", stage: "planning", plannedTasks: 9, sessions_sampled: 1 });
-  assert.deepEqual(emitComplianceCandidates([], { ...base, agentDepths: [row("planning", 1, "ok")] }).filter((x) => x.type === "sensor-inactive"), []);
-  assert.deepEqual(emitComplianceCandidates([], { ...base, pluginVersion: "0.22.1", agentDepths: [] }).filter((x) => x.type === "sensor-inactive"), []);
-  const [cohort] = complianceCandidatesOf([{ id: "s1", pluginVersion: "0.23.0", complianceCandidates: [c] }]);
+  const candidates = sensorInactive([RUN_LINE, sessionLine("hA"), PLANNING, sessionLine("hB"), WORKLOAD]);
+  assert.deepEqual(candidates, [{ type: "sensor-inactive", stage: "planning", plannedTasks: 9, sessions_sampled: 1 }]);
+  const [cohort] = complianceCandidatesOf([{ id: "s1", pluginVersion: "0.23.0", complianceCandidates: candidates }]);
   assert.match(formatComplianceCandidate(cohort), /^CANDIDATE: sensor-inactive stage=planning plannedTasks=9 sessions=1/);
+});
+
+test("sensor-inactive: a planning agent-depth row in either window of the run clears it", () => {
+  assert.deepEqual(sensorInactive([RUN_LINE, sessionLine("hA"), PLANNING, row("planning", 1, "ok"), sessionLine("hB"), WORKLOAD]), []);
+  assert.deepEqual(sensorInactive([RUN_LINE, sessionLine("hA"), PLANNING, sessionLine("hB"), WORKLOAD, row("planning", 1, "ok")]), []);
+});
+
+test("sensor-inactive: silent for a run predating the sensor, or one that planned no tasks", () => {
+  assert.deepEqual(sensorInactive([{ ...RUN_LINE, pluginVersion: "0.22.1" }, sessionLine("hA"), PLANNING, sessionLine("hB"), WORKLOAD]), []);
+  assert.deepEqual(sensorInactive([RUN_LINE, sessionLine("hA"), PLANNING, sessionLine("hB")]), []);
 });
 
 test("impactScores: a gate-ran event is a neutral marker, never an impact row", () => {
@@ -77,7 +93,7 @@ test("renderReport: the agent-depth section tables run-record rows per stage, an
   const ctx = { repo: "devcycle", today: "2026-10-07", scope: "every devcycle-tagged session" };
 
   const withRows = agentDepthSection(renderReport([summarizeSession(SESSION, [turn], readRunRecords(dir))], ctx));
-  assert.match(withRows, /\| Stage \| Dispatches \| p50 depth \| Max depth \| Warn \(>150k\) \| Breach \(>200k\) \|/);
+  assert.match(withRows, /\| Stage \| Dispatches \| p50 depth \| Max depth \| Warn \(150–200k\) \| Breach \(>200k\) \|/);
   assert.match(withRows, /\| planning \| 2 \| 125545\.5 \| 210000 \| 0 \| 1 \|/);
   assert.match(withRows, /agent-depth rows the dispatch-sensor hook writes/);
 
