@@ -18,6 +18,13 @@ contributor's `.claude/` also holds untracked worktree checkouts and local setti
 `scripts/self-dev-check.mjs` compares only git-tracked files on the repo side of every shipped
 top-level directory.
 
+**Budgets:** `playbooks/profiling-sessions.md` 46850 → 46866 (+16 bytes, the `mod-inactive` slug in
+its issue-drafting list of Compliance candidates).
+
+```text
+budget: context-budget.json playbooks/profiling-sessions.md 46866
+```
+
 ## 2026-10-07 — planning context safety, Plan A: the depth gate gets its own probe, the plan gates become one
 
 **Decision:** the depth gate runs `scripts/depth-probe.mjs` directly instead of `doctor.mjs --depth`
