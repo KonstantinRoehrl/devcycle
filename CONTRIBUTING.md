@@ -156,7 +156,8 @@ does not record.
 Writing a new `scripts/*.mjs`? Reuse `doctor.mjs`'s exported helpers
 (`findTranscriptFiles`, `owningSession`, `readRecords`, `inWindow`) for corpus enumeration,
 project-path escaping, and missing/unreadable-directory handling rather than
-reimplementing them.
+reimplementing them. A report table's text — a dollar figure, a delta, a direction line — comes
+from `scripts/doctor-format.mjs`, a leaf that imports nothing from the repo.
 
 `plugin.json`'s `userConfig` descriptions are one of the five hand-kept copies of the config
 knobs that `references/config.md` § The knob roster enumerates — the other four are that

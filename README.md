@@ -170,7 +170,9 @@ plugin ships. Start there.
   [`CONTRIBUTING.md`](CONTRIBUTING.md). `scripts/doctor.mjs` re-measures devcycle's own token
   profile from a local Claude Code session corpus, which is how the cost claims are kept honest
   rather than assumed; it reads each run's workload from records the `hooks/workload-sensor.mjs`
-  commit-sensor writes on every commit, not from a single finish-stage step.
+  commit-sensor writes on every commit, not from a single finish-stage step. Every `/devcycle:doctor`
+  cost-analysis reply carries a per-version and per-stage overview, rendered by
+  `scripts/doctor-overview.mjs` from the same tables as the full report.
 - Developing devcycle itself: `scripts/self-dev-check.mjs` guards the case where the repo under
   work *is* this plugin's own source, so the pipeline runs from the installed copy while the
   deliverable belongs in the repo. `/devcycle:cycle` records what the installed copy holds when the

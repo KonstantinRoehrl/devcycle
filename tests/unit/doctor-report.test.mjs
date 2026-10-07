@@ -17,11 +17,13 @@ import {
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
   changelogEntry, regressionAttribution, excludedNote, formatReport,
+  cohortTable, inferredUnknownDollars, overviewFor,
   COMPLIANCE_TYPES, UNPRICED_MODEL_SLUG, NoUnpricedModelError, unpricedModelIssueBody,
 } from "../../scripts/doctor.mjs";
 import { verify, releaseDates, defaultRunCheck, installedVersion } from "../../scripts/verification.mjs";
 import { readPolicy } from "../../scripts/reinforcement-policy.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
+import { usd } from "../../scripts/doctor-format.mjs";
 
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
@@ -818,7 +820,7 @@ test("the section order is fixed", () => {
   const out = renderReport([sum()], ctx());
   const order = [
     "# Doctor Report", "## Read this first", "## At a glance", "## Highlights",
-    "## Workload (observed)", "## Cost by version",
+    "## Overview", "## Trend summary", "## Workload (observed)", "## Cost by version",
     "## Cost by stage", "### Cost by stage (this window)", "## Outcome (observed)",
     "## Your culprits", "### Compliance",
     "## Your wins", "## Cost anomalies", "## Previously promoted — did it hold",
@@ -1193,7 +1195,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "- 1 session(s) still in flight (newest record < 30 min old) — in-flight sessions have only part of their cost recorded",
     // Cost by version — the whole row, out to its last cell: a needle that stopped at the depth
     // column still matched after the Quality and Shipped columns were deleted.
-    `| 0.12.0 (inferred: 3 requests on a model with no exact price excluded) | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | +36.4% | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
+    `| 0.12.0 (inferred: 3 requests on a model with no exact price excluded) | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | not compared (⚠ unpriced) | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
     // Cost by stage, across versions and within this window
     "| execution | $10.00 (n=3) | $5.00 (n=4) | down | 3% |",
     "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
@@ -1222,7 +1224,7 @@ test("every legacy line-class still has a home in the rendered report", () => {
     `| panel | 7 | $178.00 | $15.00 | ${COVERAGE_QUALITY_TEXT} |`,
     `| 0.12.0 (inferred: 3 requests on a model with no exact price excluded) | 4 | $145.00 | $15.00 | 40000 | ${COVERAGE_QUALITY_TEXT} |`,
     // No session in this fixture carries a runId, so no run projection exists to score (#127).
-    "Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)",
+    "Direction of travel: undetermined (no matched cohort spans two versions with n>=3)",
     "session 22222221 — turns 20 (main 15, subagent 5), depth median 40000 max 60000, cost $15.00, " +
       "models [claude-opus-5], tools [Read:2], quality: unavailable (no run record) " +
       "[stage costs inferred — forward-filled, no run record]",
@@ -1297,7 +1299,8 @@ test("the rendered report states the corpus direction of travel, under the cohor
     run("a", "0.11.0", 10), run("b", "0.11.0", 10), run("c", "0.11.0", 10),
     run("d", "0.12.0", 5), run("e", "0.12.0", 5), run("f", "0.12.0", 5),
   ], ctx());
-  const directionAt = out.indexOf("Direction of travel:");
+  // The Overview states the direction first; the appendix line this test is about is the last one.
+  const directionAt = out.lastIndexOf("Direction of travel:");
   assert.ok(directionAt !== -1, "the shipped report states no direction of travel");
   const line = out.slice(directionAt, out.indexOf("\n", directionAt));
   assert.match(line, /Direction of travel: down \(-50\.0% median cost, .+, 0\.11\.0→0\.12\.0\)/);
@@ -1313,7 +1316,8 @@ test("one known version is insufficient data, never a flat trend", () => {
     costUSD: 1, workload: wl,
   });
   const out = renderReport([run("a"), run("b"), run("c")], ctx());
-  assert.ok(out.includes("Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)"));
+  assert.ok(out.includes("Direction of travel: undetermined (no matched cohort spans two versions with n>=3)"));
+  assert.ok(!out.includes("Direction of travel: insufficient data"));
 });
 
 test("an in-flight session cannot set the direction of travel", () => {
@@ -1329,7 +1333,7 @@ test("an in-flight session cannot set the direction of travel", () => {
     run("d", "0.12.0", 5), run("e", "0.12.0", 5),
     run("f", "0.12.0", 90, { inFlight: true }),
   ], ctx());
-  assert.ok(out.includes("Direction of travel: insufficient data (no matched cohort spans two versions with n>=3)"));
+  assert.ok(out.includes("Direction of travel: undetermined (no matched cohort spans two versions with n>=3)"));
 });
 
 test("direction of travel normalizes and never anchors on an n<3 endpoint (#127)", () => {
@@ -2283,4 +2287,262 @@ test("the playbook states the doctor Drafted: marker form, and it parses", () =>
   assert.ok(literal, "playbooks/profiling-sessions.md no longer states the doctor Drafted: marker form");
   const filled = literal.replace("<slug>", "unpriced-model").replace("<title>", "A model is not priced");
   assert.deepEqual(parseDraftedMarkers(filled), [{ slug: "unpriced-model", title: "A model is not priced" }]);
+});
+
+// --- the overview every reply carries (#302) ---
+
+// The unpriced rule is implemented once, in deltaAgainstPrevious, and both the Cost-by-version table and
+// the overview read it. Every row below is hand-built, so a table's inputs sit in the test that pins it.
+const unpricedModel = { "some-unpriced-model": 3 };
+const trio = (version, over = {}) => ["a", "b", "c"].map((id) => sum({ id: `${version}${id}`, pluginVersion: version, ...over }));
+
+test("a version×profile row and a cohort row carry the count of requests left out for want of a price", () => {
+  const summaries = [...trio("0.11.0"), ...trio("0.12.0"), sum({ id: "x", pluginVersion: "0.12.0", unpriced: unpricedModel })];
+  assert.deepEqual(versionProfileTable(summaries).map((r) => r.excluded), [0, 3]);
+  assert.deepEqual(cohortTable(summaries).map((r) => r.excluded), [0, 3]);
+});
+
+test("a delta against or from a row with unpriced requests is withheld, ahead of the sample-size rule", () => {
+  const unpricedNew = versionProfileTable([...trio("0.11.0"), ...trio("0.12.0", { unpriced: unpricedModel })]);
+  assert.deepEqual(unpricedNew[1].delta, { state: "not-compared", pct: null, reason: "unpriced" });
+  const unpricedOld = versionProfileTable([...trio("0.11.0", { unpriced: unpricedModel }), ...trio("0.12.0")]);
+  assert.deepEqual(unpricedOld[1].delta, { state: "not-compared", pct: null, reason: "unpriced" });
+  // Two sessions is also low confidence, which is the older reason: unpriced is the one named.
+  const thin = versionProfileTable([...trio("0.11.0"), sum({ id: "t1", pluginVersion: "0.12.0", unpriced: unpricedModel })]);
+  assert.deepEqual(thin[1].delta, { state: "not-compared", pct: null, reason: "unpriced" });
+  // A clean pair is compared as before, and the first row of a profile stays first seen.
+  const clean = versionProfileTable([...trio("0.11.0"), ...trio("0.12.0")]);
+  assert.equal(clean[0].delta.state, "first-seen");
+  assert.equal(clean[1].delta.state, "compared");
+  assert.deepEqual(versionProfileTable([...trio("0.11.0", { unpriced: unpricedModel })])[0].delta, { state: "first-seen", pct: null });
+});
+
+test("the culprit table, whose rows carry no unpriced count, is not affected by the unpriced rule", () => {
+  const rows = culpritTable([...trio("0.11.0", { unpriced: unpricedModel }), ...trio("0.12.0", { unpriced: unpricedModel })], VOCAB);
+  assert.ok(rows.every((r) => r.delta.reason === undefined));
+});
+
+// The issue draft quotes the Δ and the median the Cost-by-version table renders, so a cohort whose
+// requests include an unpriced model must reach a filed issue as "not compared" with its median
+// qualified the way the table qualifies the row, never as a bare percentage or a bare dollar figure.
+test("the issue draft quotes a cohort with unpriced requests as not compared, with its median qualified", () => {
+  const older = [1, 2, 3].map((n) => sum({ id: `o${n}`, pluginVersion: "0.0.1", costUSD: 2, costByStage: { execution: 2 } }));
+  const newer = [1, 2, 3].map((n) => sum({
+    id: `s${n}`, pluginVersion: DRAFT_VERSION, costUSD: 4, costByStage: { execution: 4 }, unpriced: unpricedModel,
+    impact: [{ key: "gate-fail:execution", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
+    culpritsByKey: { "gate-fail:execution": ["partial-evidence-capture"] },
+  }));
+  const summaries = [...older, ...newer];
+  const tables = { versionProfile: versionProfileTable(summaries), culprits: culpritTable(summaries, VOCAB) };
+  const row = tables.versionProfile.find((r) => r.version === DRAFT_VERSION && r.profile === "thorough");
+  assert.deepEqual(row.delta, { state: "not-compared", pct: null, reason: "unpriced" });
+  const d = issueBody("partial-evidence-capture", summaries, tables, repoShape(process.cwd()));
+  assert.ok(d.body.includes("- Δ vs previous: not compared (⚠ unpriced)"), "the draft quotes a delta the report withholds");
+
+  // The median line carries the same `inferred` text the report's Version cell carries for this row.
+  const medianLine = (body) => body.split("\n").find((l) => l.startsWith("- Median $/cycle:"));
+  assert.ok(row.inferred, "the fixture cohort carries no unpriced qualifier, so nothing below would be checked");
+  const report = renderReport(summaries, ctx());
+  assert.ok(
+    report.slice(report.indexOf("## Cost by version"), report.indexOf("## Cost by stage"))
+      .includes(`${DRAFT_VERSION} (inferred: ${row.inferred})`),
+    "the report no longer qualifies this row, so the draft has nothing to match",
+  );
+  assert.equal(medianLine(d.body), `- Median $/cycle: ${usd(row.medianCostPerCycle)} (inferred: ${row.inferred})`);
+
+  // A fully priced cohort's median line stays bare.
+  const pricedTables = draftTables();
+  const pricedRow = pricedTables.versionProfile.find((r) => r.version === DRAFT_VERSION && r.profile === "thorough");
+  assert.equal(pricedRow.inferred, null);
+  const priced = issueBody("partial-evidence-capture", draftSummaries, pricedTables, repoShape(process.cwd()));
+  assert.equal(medianLine(priced.body), `- Median $/cycle: ${usd(pricedRow.medianCostPerCycle)}`);
+});
+
+test("inferredUnknownDollars counts a forward-filled session whole and a record session's unattributed dollars once", () => {
+  assert.equal(inferredUnknownDollars([
+    sum({ id: "a", attributionSource: "forward-filled", costByStage: { "entry (stage unknown)": 3, execution: 2 } }),
+    sum({ id: "b", attributionSource: "record", costByStage: { execution: 4, unattributed: 1 } }),
+    sum({ id: "c", costByStage: { execution: 7 } }),
+  ]), 6);
+  // A forward-filled session can carry an unattributed bucket too; counting it whole counts that once.
+  assert.equal(inferredUnknownDollars([
+    sum({ id: "a", attributionSource: "forward-filled", costByStage: { "entry (stage unknown)": 3, unattributed: 1 } }),
+  ]), 4);
+  assert.equal(inferredUnknownDollars([]), 0);
+});
+
+const overviewSection = (out) => out.slice(out.indexOf("## Overview"), out.indexOf("## Trend summary"));
+const trendSection = (out) => out.slice(out.indexOf("## Trend summary"), out.indexOf("## Workload (observed)"));
+// The cells of one markdown table in a section, row by row, from the row after its separator.
+const tableRows = (section, firstHeader) => {
+  const lines = section.split("\n");
+  const start = lines.findIndex((l) => l.startsWith(`| ${firstHeader} |`));
+  assert.ok(start !== -1, `no table headed ${firstHeader}`);
+  const rows = [];
+  for (let i = start + 2; i < lines.length && lines[i].startsWith("| "); i++) rows.push(lines[i].slice(2, -2).split(" | "));
+  return rows;
+};
+
+test("the Overview and the Trend summary follow Highlights and precede Workload, on every report", () => {
+  for (const summaries of [[], [sum()], COVERAGE_CORPUS]) {
+    const out = renderReport(summaries, ctx());
+    const at = (needle) => out.indexOf(needle);
+    assert.ok(at("<!-- devcycle:highlights -->") < at("## Overview"), "the Overview does not follow Highlights");
+    assert.ok(at("## Overview") < at("## Trend summary"));
+    assert.ok(at("## Trend summary") < at("## Workload (observed)"), "the Trend summary does not precede Workload");
+  }
+});
+
+test("the Overview states the corpus direction in the same words as the appendix line", () => {
+  const out = renderReport(COVERAGE_CORPUS, ctx());
+  const line = "Direction of travel: undetermined (no matched cohort spans two versions with n>=3)";
+  assert.ok(overviewSection(out).includes(line), "the Overview carries no direction line");
+  assert.ok(out.indexOf(line, out.indexOf("### Total cost by version")) !== -1, "the appendix lost its direction line");
+});
+
+test("a version with unpriced requests reads ⚠ and not compared in the Overview and in Cost by version alike", () => {
+  const out = renderReport(COVERAGE_CORPUS, ctx());
+  const row = tableRows(overviewSection(out), "Version").find((cells) => cells[0].includes("0.12.0"));
+  assert.equal(row[0], "⚠ 0.12.0");
+  assert.equal(row[5], "not compared (⚠ unpriced)");
+  assert.ok(row.slice(2, 4).every((cell) => cell.endsWith("⚠")), "the Total and Median cells carry no ⚠");
+  assert.ok(!/-100\.0%/.test(overviewSection(out)));
+  assert.match(out, /\| 0\.12\.0 \(inferred: [^|]+\| thorough \| [^\n]*\| not compared \(⚠ unpriced\) \| execution \|/);
+  assert.match(trendSection(out), /Trust: ⚠ Δ withheld for 0\.12\.0/);
+});
+
+test("an in-flight session is in no overview figure and is named in the reconciliation line", () => {
+  const out = renderReport([sum({ id: "a", costUSD: 1 }), sum({ id: "b", costUSD: 4, costByStage: { execution: 4 }, inFlight: true })], ctx());
+  assert.match(overviewSection(out), /Total sums to \$1\.00, the settled sessions' spend\. 1 in-flight session \(\$4\.00\) is not in these tables/);
+});
+
+// A settled corpus with no stage left unattributed: two versions of three sessions, one session whose
+// version cannot be read, and a stage that exists only in that session.
+const CROSS_CHECK_CORPUS = [
+  ...["a", "b", "c"].map((id) => sum({ id: `o${id}`, pluginVersion: "0.11.0", costUSD: 10, costByStage: { execution: 8, planning: 2 } })),
+  ...["a", "b", "c"].map((id) => sum({ id: `n${id}`, pluginVersion: "0.12.0", costUSD: 12, costByStage: { execution: 6, planning: 6 } })),
+  sum({ id: "u", pluginVersion: "unknown", costUSD: 5, costByStage: { "entry (stage unknown)": 5 } }),
+];
+
+test("every number the Overview prints is a number the report's own tables carry", () => {
+  const out = renderReport(CROSS_CHECK_CORPUS, ctx());
+  const json = buildJsonReport(CROSS_CHECK_CORPUS, ctx());
+  const section = overviewSection(out);
+
+  const versionRows = tableRows(section, "Version");
+  assert.equal(versionRows.length, json.version_cohorts.length);
+  for (const c of json.version_cohorts) {
+    const row = versionRows.find((cells) => cells[0] === (c.version === "unknown" ? "no version detectable" : c.version));
+    assert.ok(row, `no overview row for ${c.version}`);
+    assert.equal(row[1].split(" ")[0], String(c.sessions));
+    assert.equal(row[2], usd(c.total));
+    assert.equal(row[3], usd(c.medianPerSession));
+  }
+  const profile = json.version_profile_cohorts.find((r) => r.version === "0.12.0");
+  assert.equal(versionRows.find((cells) => cells[0] === "0.12.0")[4], usd(profile.medianCostPerCycle));
+
+  const stageRows = tableRows(section, "Stage");
+  for (const w of json.stage_window) {
+    const row = stageRows.find((cells) => cells[0] === w.stage);
+    assert.equal(row[1], usd(w.total));
+    assert.equal(row[2], `${w.pctOfWindow.toFixed(1)}%`);
+  }
+  // Each stage's version medians are the bullet beneath the table, in the report's version order.
+  const bulletOf = (stage) => section.split("\n").find((l) => l.startsWith(`- ${stage}: `));
+  const bulletEntries = json.stage_by_version.rows.map((r) => json.stage_by_version.versions.flatMap((v) => {
+    const cell = r.byVersion[v];
+    return cell ? [`${v} ${usd(cell.median)} (n=${cell.n})`] : [];
+  }));
+  // Vacuity guard: at least one stage has a cell, or the bullet assertions below compare empty lists.
+  assert.ok(bulletEntries.some((entries) => entries.length > 0), "no stage in the corpus has a version cell");
+  json.stage_by_version.rows.forEach((r, i) => {
+    const cells = stageRows.find((cells) => cells[0] === r.stage);
+    assert.equal(cells.length, 4, "the stage table is wider than four columns");
+    assert.equal(bulletOf(r.stage), `- ${r.stage}: ${bulletEntries[i].length ? bulletEntries[i].join(" · ") : "—"}`);
+    assert.equal(cells.at(-1), r.trend);
+  });
+
+  // The two Total columns and the stated total are one figure.
+  const dollars = (cell) => Number(cell.replace(/[^0-9.]/g, ""));
+  const total = json.overview.reconciliation.settledTotal;
+  assert.ok(Math.abs(versionRows.reduce((n, cells) => n + dollars(cells[2]), 0) - total) < 0.01);
+  assert.ok(Math.abs(stageRows.reduce((n, cells) => n + dollars(cells[1]), 0) - total) < 0.01);
+  assert.equal(total, json.stage_window.reduce((n, r) => n + r.total, 0));
+});
+
+test("--json's overview pre-renders the two blocks exactly as the markdown report carries them", () => {
+  const out = renderReport(CROSS_CHECK_CORPUS, ctx());
+  const { overview } = buildJsonReport(CROSS_CHECK_CORPUS, ctx());
+  assert.ok(out.includes(overview.markdown.overview));
+  assert.ok(out.includes(overview.markdown.trendSummary));
+  assert.ok(overview.markdown.overview.startsWith("## Overview\n"));
+  assert.ok(overview.markdown.trendSummary.startsWith("## Trend summary\n"));
+});
+
+test("--json carries the overview first, and every key the report had still has its name", () => {
+  const json = buildJsonReport([sum()], ctx());
+  assert.equal(Object.keys(json)[0], "overview");
+  for (const key of [
+    "pricesAsOf", "sessions", "candidates", "version_cohorts", "review_depth_cohorts", "direction_of_travel",
+    "inFlight", "cost_band", "version_profile_cohorts", "stage_by_version", "stage_window", "culprits", "wins",
+    "outer_loop", "verification", "compiled_knowledge", "cycles", "revert_skipped",
+  ]) assert.ok(key in json, `the report lost its ${key} key`);
+  assert.deepEqual(
+    Object.keys(json.overview),
+    ["scope", "bands", "reconciliation", "versions", "stages", "summary", "markdown"],
+  );
+  assert.deepEqual(Object.keys(json.overview.markdown), ["overview", "trendSummary"]);
+  assert.equal(json.overview.scope, "every devcycle-tagged session");
+  assert.equal(overviewFor([sum()]).scope, null);
+});
+
+test("the Overview names the spend no version column holds, in words that are not the report's own excluded-table line", () => {
+  const out = renderReport([sum({ id: "a" }), sum({ id: "b", pluginVersion: "unknown" })], ctx());
+  assert.match(overviewSection(out), /of settled spend\) sits in sessions with no detectable version/);
+  assert.ok(!overviewSection(out).includes("Excluded from this table"));
+  // A corpus with every version known has nothing to say here, and the report's clean-report rule holds.
+  assert.ok(!overviewSection(renderReport([sum()], ctx())).includes("sits in sessions with no detectable version"));
+  assert.ok(!renderReport([sum()], ctx()).includes("Excluded from this table"));
+});
+
+test("the Sessions cell covers every profile while $/cycle and the Δ are the main profile's", () => {
+  const corpus = [
+    ...["a", "b", "c"].map((id) => sum({ id: `t${id}`, pluginVersion: "0.11.0", profile: "thorough", costUSD: 6, costByStage: { execution: 6 } })),
+    sum({ id: "l1", pluginVersion: "0.11.0", profile: "lean", costUSD: 2, costByStage: { execution: 2 } }),
+    ...["a", "b", "c"].map((id) => sum({ id: `u${id}`, pluginVersion: "0.12.0", profile: "thorough", costUSD: 9, costByStage: { execution: 9 } })),
+  ];
+  const out = renderReport(corpus, ctx());
+  const json = buildJsonReport(corpus, ctx());
+  const section = overviewSection(out);
+  const row = tableRows(section, "Version").find((cells) => cells[0] === "0.11.0");
+  assert.equal(row[1], String(json.version_cohorts.find((c) => c.version === "0.11.0").sessions));
+  assert.equal(row[1], "4");
+  const thorough = json.version_profile_cohorts.find((r) => r.version === "0.11.0" && r.profile === "thorough");
+  assert.equal(row[4], usd(thorough.medianCostPerCycle));
+  assert.match(section, /Median \$\/cycle and Δ are the thorough profile's\. Other profiles: lean \(1 cycle, 1 session\)\./);
+  const newer = tableRows(section, "Version").find((cells) => cells[0] === "0.12.0");
+  const newerRow = json.version_profile_cohorts.find((r) => r.version === "0.12.0");
+  assert.equal(newer[5], `+${newerRow.delta.pct.toFixed(1)}%`);
+});
+
+test("the playbook names the two overview headings the report emits and the --json keys that carry them", () => {
+  const playbook = readFileSync(new URL("../../playbooks/profiling-sessions.md", import.meta.url), "utf8");
+  const out = renderReport([sum()], ctx());
+  for (const heading of ["## Overview", "## Trend summary"]) {
+    assert.ok(out.includes(`\n${heading}\n`), `renderReport no longer emits ${heading}`);
+    assert.ok(playbook.includes(`\`${heading}\``), `the playbook does not name ${heading}`);
+  }
+  const { overview } = buildJsonReport([sum()], ctx());
+  for (const key of Object.keys(overview.markdown))
+    assert.ok(playbook.includes(`overview.markdown.${key}`), `the playbook does not name overview.markdown.${key}`);
+});
+
+test("the playbook states the reply order: Highlights, the Overview, the findings, the relocated Trend summary, then Actionability", () => {
+  const playbook = readFileSync(new URL("../../playbooks/profiling-sessions.md", import.meta.url), "utf8");
+  // The sentence wraps in the source; compare it as prose.
+  const prose = playbook.replace(/\s+/g, " ");
+  assert.ok(prose.includes(
+    "The reply runs Highlights, the Overview, the ranked findings and systemic recommendations, the Trend " +
+      "summary — relocated here verbatim from its place in the report — then the Actionability question.",
+  ), "the playbook no longer states the reply order");
 });

@@ -15,9 +15,8 @@ invocations:
   references in `<path>` against `docs/configuration/config-changelog.md`.
 - `--json` for machine output; `--depth` for the bare depth probe.
 
-The report opens with an `At a glance` TL;DR — workload-adjusted, matched-cohort cost movement
-across the recency band — and the Cost-by-version table adds derived `$/main-turn`, `$/sub-turn`,
-and turns-per-task columns alongside the raw `$/cycle`.
+Every cost-analysis reply carries the per-version and per-stage overview and a closing trend
+summary (`--depth` and `drift` print neither); the playbook owns what they contain.
 
 Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/profiling-sessions.md`. It starts no cycle and writes no state file.
 

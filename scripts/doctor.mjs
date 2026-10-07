@@ -22,6 +22,8 @@ import { atomicWrite } from "./atomic-write.mjs";
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 import { eachRecord } from "./jsonl.mjs";
+import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, withInferredNote, unpricedMediansNote } from "./doctor-format.mjs";
+import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // docs/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -584,6 +586,7 @@ export function cohortTable(summaries) {
       medianPerSession: median(c.dollars),
       medianDepth: c.depths.length ? median(c.depths) : null,
       quality: aggregateQuality(c.qualities),
+      excluded: c.excluded,
       inferred: [version === "unknown" ? "no version detectable" : null, excludedNote(c.excluded)]
         .filter(Boolean).join("; ") || null,
     };
@@ -1334,8 +1337,6 @@ const DEPTH_DISCLOSURE =
   "Depth bands are a fraction of the model's context window, not an absolute token count: " +
   "the same depth reads as a different band on a different model.";
 
-const usd = (n) => "$" + (n >= 1 ? n.toFixed(2) : n.toFixed(4));
-
 // QC4/QC5: absent, not zero — a record-less run's "0 review rounds" would read as flawless work
 // rather than as no data, so the missing case renders its own label instead of a zero figure.
 function qualityText(q) {
@@ -1586,13 +1587,7 @@ export function formatReport(summaries) {
     );
   lines.push("", "Per-version cohorts:");
   const direction = corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight)));
-  lines.push(
-    direction.direction === "insufficient-data"
-      ? `direction of travel: insufficient data (${direction.reason})`
-      : `direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})` +
-        `${direction.inferred ? ` (inferred: ${direction.inferred})` : ""}`
-  );
+  lines.push(directionLine(direction));
   for (const r of cohortTable(summaries))
     lines.push(
       `  ${r.version.padEnd(10)} n=${String(r.sessions).padStart(3)}  ` +
@@ -1688,6 +1683,7 @@ function mergeCounts(target, source) {
 // derivable from summaries alone.
 export function buildJsonReport(summaries, ctx = {}) {
   return {
+    overview: overviewFor(summaries, ctx.scope ?? null),
     pricesAsOf: PRICING.asOf,
     sessions: summaries.map((s) => ({
       ...s,
@@ -1915,9 +1911,12 @@ function main() {
   }
   const ctx = reportContext(args, result);
   if (args.json) {
+    // overview first: a consumer that truncates a long reply keeps it, where a key after the
+    // per-session rows would be cut off on a real corpus.
+    const { overview, ...rest } = buildJsonReport(result.sessions, ctx);
     console.log(
       JSON.stringify(
-        { window: result.window, totals: result.totals, ...buildJsonReport(result.sessions, ctx) },
+        { overview, window: result.window, totals: result.totals, ...rest },
         null,
         2,
       ),
@@ -2102,6 +2101,9 @@ function deltaAgainstPrevious(rows, index, valueOf) {
   const previous = rows.slice(0, index).reverse()
     .find((r) => r.version !== "unknown" && r.profile === row.profile);
   if (!previous) return { state: "first-seen", pct: null };
+  // A side with requests on an unpriced model is not the whole of its cost, so no move against it
+  // is a measurement. Checked before the sample-size rule: unpriced is the more useful reason.
+  if (row.excluded > 0 || previous.excluded > 0) return { state: "not-compared", pct: null, reason: "unpriced" };
   if (row.lowConfidence || previous.lowConfidence) return { state: "not-compared", pct: null };
   const before = valueOf(previous), now = valueOf(row);
   // A division that cannot be taken is not a 0% change, and an unmeasurable side is not a zero.
@@ -2232,6 +2234,7 @@ export function versionProfileTable(summaries, promotions = []) {
         stageTotals.set(stage, (stageTotals.get(stage) ?? 0) + dollars);
     const priciest = [...stageTotals.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
     const depths = g.members.map((s) => s.medianDepth).filter((d) => typeof d === "number");
+    const excluded = g.members.reduce((n, s) => n + excludedRequestsOf(s), 0);
     // Decomposed $/turn (issue #114): a blended $/turn hides whether the money went to the main
     // thread or its subagents, and conflates the two turn populations. main dollars are the
     // agent-type-keyed "main" cost; everything else the session cost is sub-thread. Each rate is
@@ -2262,7 +2265,8 @@ export function versionProfileTable(summaries, promotions = []) {
       medianDepth: depths.length ? median(depths) : null,
       quality: aggregateQuality(g.members.map((s) => s.quality ?? null)),
       lowConfidence: g.members.length < MIN_COHORT,
-      inferred: excludedNote(g.members.reduce((n, s) => n + excludedRequestsOf(s), 0)),
+      excluded,
+      inferred: excludedNote(excluded),
       // A promotion that named no culprit contributes nothing rather than a blank entry — which
       // is every record on disk until Phase 3 teaches recordPromotion to write the field.
       shipped: [...new Set(promotions
@@ -2651,6 +2655,10 @@ const GLOSSES = {
     "Workload-adjusted, matched-cohort cost movement across the recency band (derived) — like-for-" +
     "like runs only, so session length or count can't masquerade as a cost change.",
   highlights: "The three things worth knowing before reading any table.",
+  overview:
+    "Cost per plugin version and per stage over settled sessions, in one place — how cost moved " +
+    "across releases and where it goes.",
+  "trend-summary": "Where cost is heading and how far to trust it, in three lines — every figure is the Overview's own.",
   "workload-observed":
     "The raw work each run did — files changed, changed lines, planned tasks, waves — straight " +
     "off the run's workload record (observed, never derived). A run with no workload record is " +
@@ -2713,42 +2721,70 @@ const GLOSSES = {
     "One line per session, so any figure above can be traced back to the sessions that produced it.",
 };
 
+// A section's heading, its one-line gloss and the blank lines around them. One owner, so the
+// report's own sections and the two blocks --json pre-renders cannot word a heading differently.
+function sectionLines(heading, glossKey) {
+  const gloss = GLOSSES[glossKey];
+  if (gloss === undefined) throw new Error(`missing gloss for ${glossKey}`);
+  return [heading, "", `*${gloss}*`, ""];
+}
+
+// What a session cost, as its stage buckets add up: the figure every stage table is built from.
+const sessionDollars = (s) => Object.values(s.costByStage ?? {}).reduce((a, b) => a + b, 0);
+
+// Dollars in sessions whose stage is a guess: every forward-filled session (the only producer of
+// "entry (stage unknown)" and "resumed (stage unknown)") plus the "unattributed" dollars of the
+// sessions attributed from a run record. Each dollar is counted once.
+export function inferredUnknownDollars(summaries) {
+  return summaries.reduce(
+    (n, s) => n + (s.attributionSource === "forward-filled" ? sessionDollars(s) : s.costByStage?.unattributed ?? 0),
+    0,
+  );
+}
+
+// What the overview is built from: the tables this report already builds, every one over the
+// SAME settled sessions. cohortTable, versionProfileTable and stageByVersionTable drop in-flight
+// sessions on their own but stageWindowTable does not, and /devcycle:doctor always runs inside a
+// session newer than the in-flight threshold — so feeding all four the settled set is what makes
+// the stage Total column and the version Total column the same figure.
+export function overviewInput(summaries, scope) {
+  const settled = summaries.filter((s) => !s.inFlight);
+  const inFlight = summaries.filter((s) => s.inFlight);
+  return {
+    scope,
+    cohorts: cohortTable(settled),
+    profileRows: versionProfileTable(settled),
+    stageByVersion: stageByVersionTable(settled),
+    stageWindow: stageWindowTable(settled, null),
+    direction: corpusDirectionOfTravel(runAggregates(settled)),
+    shares: { inferredUnknownDollars: inferredUnknownDollars(settled) },
+    inFlight: { sessions: inFlight.length, dollars: inFlight.reduce((n, s) => n + sessionDollars(s), 0) },
+    bands: { flatBandPct: FLAT_BAND_PCT, minTrendN: MIN_TREND_N, minCohort: MIN_COHORT },
+  };
+}
+
+// The overview object plus its two sections pre-rendered, heading and gloss included. The markdown
+// report prints the blocks as they are and --json carries them, so a reply built from either is
+// the same bytes — nothing downstream rebuilds a figure.
+export function overviewFor(summaries, scope = null) {
+  const overview = buildOverview(overviewInput(summaries, scope));
+  return {
+    ...overview,
+    markdown: {
+      overview: [...sectionLines("## Overview", "overview"), ...renderOverview(overview)].join("\n"),
+      trendSummary: [...sectionLines("## Trend summary", "trend-summary"), ...renderTrendSummary(overview)].join("\n"),
+    },
+  };
+}
+
 // Rendered in place of the two sections the playbook owns. playbooks/profiling-sessions.md
 // replaces exactly these two lines when it persists the report and changes nothing else, so the
 // template stays wholly script-owned and the playbook writes only prose.
 const HIGHLIGHTS_ANCHOR = "<!-- devcycle:highlights -->";
 const FINDINGS_ANCHOR = "<!-- devcycle:findings -->";
 
-// An absent value renders as an em dash, never as a blank cell a reader would take for a zero.
-const markdownCell = (v) => (v === null || v === undefined || v === "" ? "—" : String(v));
-
-// Every table renders its header row and separator even with nothing in it, and says why it is
-// empty — an empty table with no explanation reads as a clean bill of health (QC3).
-function markdownTable(headers, rows, whyEmpty) {
-  const out = [
-    `| ${headers.join(" | ")} |`,
-    `| ${headers.map(() => "---").join(" | ")} |`,
-    ...rows.map((r) => `| ${r.map(markdownCell).join(" | ")} |`),
-  ];
-  if (!rows.length) out.push("", `_No rows: ${whyEmpty}._`);
-  return out;
-}
-
-// deltaAgainstPrevious' three states, rendered. A comparison that could not be taken names its
-// reason; it never falls back to 0%, which would read as a version that changed nothing.
-const deltaText = (d) =>
-  d.state === "compared"
-    ? `${d.pct >= 0 ? "+" : ""}${d.pct.toFixed(1)}%`
-    : d.state === "first-seen" ? "first seen" : "not compared";
-
 // An impact nobody could price is labelled, never rendered as $0.00.
 const impactText = (v) => (v === null || v === undefined ? "unmeasurable" : usd(v));
-
-// The Sessions cell of a version×profile row. One owner for two render sites: the issue draft
-// quotes the same row this table renders, and a cohort the report declines to stand behind must
-// not be quoted as a bare number in an issue filed from it.
-const cohortSessionsText = (r) =>
-  r.lowConfidence ? `${r.sessions} (low confidence: n<${MIN_COHORT})` : String(r.sessions);
 
 // Cost anomalies are ranked by the money at stake. A candidate carrying no dollar figure ranks
 // last rather than being sorted as if it had been measured at zero.
@@ -2834,11 +2870,7 @@ export function renderReport(summaries, ctx) {
     compiledKnowledge: compiled = null, verification = null,
   } = ctx ?? {};
   const L = [];
-  const section = (heading, glossKey) => {
-    const gloss = GLOSSES[glossKey];
-    if (gloss === undefined) throw new Error(`missing gloss for ${glossKey}`);
-    L.push("", heading, "", `*${gloss}*`, "");
-  };
+  const section = (heading, glossKey) => L.push("", ...sectionLines(heading, glossKey));
   const agg = aggregate(summaries);
   const candidates = emitCandidates(summaries);
   // The run-level, workload-adjusted view (issue #114): run aggregates over the settled corpus,
@@ -2900,6 +2932,10 @@ export function renderReport(summaries, ctx) {
   section("## Highlights", "highlights");
   L.push(HIGHLIGHTS_ANCHOR);
 
+  // Both blocks are script-rendered end to end; playbooks/profiling-sessions.md carries them as they are.
+  const overview = overviewFor(summaries, scope);
+  L.push("", overview.markdown.overview, "", overview.markdown.trendSummary);
+
   // The raw observed workload family (spec C3): one row per run that wrote a workload record,
   // its raw counts straight off that record. Runs with no workload record have nothing to
   // observe and drop out (changedLines is null exactly when no record was joined — GC3).
@@ -2928,9 +2964,9 @@ export function renderReport(summaries, ctx) {
       "$/main-turn (derived)", "$/sub-turn (derived)", "Turns/task (derived)", "Δ vs previous (derived)",
       "Priciest stage (derived)", "Median depth (derived)", "Quality (derived)", "Shipped (observed)"],
     versionProfileTable(summaries, promotions).map((r) => [
-      r.inferred ? `${r.version} (inferred: ${r.inferred})` : r.version,
+      withInferredNote(r.version, r),
       r.profile,
-      cohortSessionsText(r),
+      cohortSessionsText(r, MIN_COHORT),
       r.cycles,
       usd(r.medianCostPerCycle),
       r.dollarsPerMainTurn === null ? null : usd(r.dollarsPerMainTurn),
@@ -2963,11 +2999,7 @@ export function renderReport(summaries, ctx) {
     "the share of the stage's settled dollars whose stage was inferred from the transcript rather " +
     "than read off a run record._");
   if (stageTrend.excludedVersions.length)
-    L.push(
-      "",
-      `_Medians for ${stageTrend.excludedVersions.join(", ")} leave out requests on a model with no ` +
-        "exact price (inferred) — compare across them with care._",
-    );
+    L.push("", unpricedMediansNote(stageTrend.excludedVersions));
   // stageByVersionTable drops the undetectable-version cohort from every column and every trend,
   // because "unknown" cannot sit on a version axis — right, but silent, and an omission nobody
   // names reads as a clean bill of health. cohortTable is the sibling that keeps that bucket,
@@ -3177,14 +3209,7 @@ export function renderReport(summaries, ctx) {
     "no settled sessions in this corpus",
   ));
   const direction = corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight)));
-  L.push(
-    "",
-    direction.direction === "insufficient-data"
-      ? `Direction of travel: insufficient data (${direction.reason})`
-      : `Direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})` +
-        `${direction.inferred ? ` (inferred: ${direction.inferred})` : ""}`,
-  );
+  L.push("", directionLine(direction));
 
   section("### Per-session detail", "appendix-per-session-detail");
   L.push(...sessionDetailLines(summaries));
@@ -3514,15 +3539,15 @@ export function issueBody(slug, summaries, tables, shape) {
       ? events.map(([k, n]) => `- ${k} ×${n}`)
       : ["- none recorded for this culprit"]),
     "",
-    // The cohort figures carry the same qualifier the report's Cost-by-version table carries for
-    // this row, so a two-session cohort cannot be quoted bare in an issue filed from a report
-    // that declines to stand behind it.
+    // Each figure the report's Cost-by-version table qualifies for this row is qualified here too:
+    // the Sessions count for low confidence, the median and the Δ for unpriced requests. A cohort
+    // the report declines to stand behind is never quoted as a bare number in an issue filed from it.
     row ? "Cohort, as the report renders it:" : "Cohort: unavailable (no settled cohort row for this culprit)",
     ...(row
       ? [
-          `- Sessions: ${cohortSessionsText(row)}`,
+          `- Sessions: ${cohortSessionsText(row, MIN_COHORT)}`,
           `- Cycles: ${row.cycles}`,
-          `- Median $/cycle: ${usd(row.medianCostPerCycle)}`,
+          `- Median $/cycle: ${withInferredNote(usd(row.medianCostPerCycle), row)}`,
           `- Priciest stage: ${row.priciestStage ?? "unrecorded"}`,
           `- Δ vs previous: ${deltaText(row.delta)}`,
         ]
