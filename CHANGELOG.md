@@ -22,14 +22,12 @@ place of seven separate gate scripts (code blocks, brief completeness, blast rad
 coupling, budget fixtures, wave disjointness and authored claims). It fails closed: a plan with no
 `## Dispatch Map` is a finding, not a pass. On success it prints one line, plus a note count for
 each check that has notes, and while a cycle is running it records a `gate-ran` event with its
-pass or fail result. Each gate script still runs on
-its own.
+pass or fail result. Each gate script still runs on its own.
 
 **Fixes.** The budget-fixture gate (`scripts/budget-fixture-check.mjs`) now runs its check when
 started through a symlinked path, such as the plugin cache or macOS's `/var`, where before it
-silently skipped it (#147). Issue
-intake keeps the issues it fetched when its scratch directory cannot be written, instead of
-failing (#184).
+silently skipped it (#147). Issue intake keeps the issues it fetched when its scratch directory
+cannot be written, instead of failing (#184).
 
 ## 0.22.1 — 2026-10-03
 

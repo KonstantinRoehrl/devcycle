@@ -20,9 +20,8 @@ per finished subagent — final context depth, model, tool uses, duration — ma
 and `breach` above 200k, and a breach also appends a `depth-breach` event. It only observes: it
 never blocks and always exits 0. It is the one hook allowed to read something larger than its input:
 beyond the state file it reads only the single transcript `agent_transcript_path` names, because the
-depth is nowhere else; `SubagentStop`
-is the one event that reports a background dispatch's finish — its Agent `PostToolUse` fires at
-launch with no counts (`docs/platform-notes.md` § (i)). This
+depth is nowhere else; `SubagentStop` is the one event that reports a background dispatch's finish —
+its Agent `PostToolUse` fires at launch with no counts (`docs/platform-notes.md` § (i)). This
 supersedes the 2026-09-05 entry's "third hook".
 
 **Budgets:** every context budget below falls by the 3 bytes the shorter probe command saves in

@@ -172,10 +172,10 @@ plugin ships. Start there.
   rather than assumed; it reads each run's workload from records the `hooks/workload-sensor.mjs`
   commit-sensor writes on every commit, not from a single finish-stage step, and reports agent
   depth per stage from the per-subagent depth rows `hooks/dispatch-sensor.mjs` writes whenever a
-  subagent finishes during a cycle. The depth gate runs `scripts/depth-probe.mjs`, which measures one transcript
-  without loading doctor. Every `/devcycle:doctor`
-  cost-analysis reply carries a per-version and per-stage overview, rendered by
-  `scripts/doctor-overview.mjs` from the same tables as the full report.
+  subagent finishes during a cycle. The depth gate runs `scripts/depth-probe.mjs`, which
+  measures one transcript without loading doctor. Every `/devcycle:doctor` cost-analysis reply
+  carries a per-version and per-stage overview, rendered by `scripts/doctor-overview.mjs` from
+  the same tables as the full report.
 - Developing devcycle itself: `scripts/self-dev-check.mjs` guards the case where the repo under
   work *is* this plugin's own source, so the pipeline runs from the installed copy while the
   deliverable belongs in the repo. `/devcycle:cycle` records what the installed copy holds when the

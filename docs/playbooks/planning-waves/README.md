@@ -26,8 +26,8 @@ playbook always keeps regardless: the executor named in the plan header is alway
 
 Once the plan is drafted, planning runs its own eight-item self-review — spec coverage,
 placeholder scan, type consistency, factual-claim accuracy, no count-only enumeration,
-mirrored-file parity, the plan gate, and a manual assumed-tooling cross-check — fixing what it
-finds inline, with no separate re-review pass. The plan gate is one command,
+mirrored-file parity, a manual assumed-tooling cross-check, and the plan gate last — fixing what
+it finds inline, with no separate re-review pass. The plan gate is one command,
 `scripts/plan-check.mjs`, running seven legs over the plan: `codeBlocks` (pasted JS/mjs code
 blocks parse), `briefCompleteness` (every task carries its required fields and the Dispatch Map
 lists every task), `blastRadius` (every referencer of a changed file, test or not, sits in some
@@ -62,7 +62,7 @@ policy and whether the plan's path is git-ignored.
 ```mermaid
 ---
 title: planning-waves — from feasibility gate to the Dispatch Map
-accDescr: Playbook-internal flowchart of the planning stage, from the feasibility gate's GO/NO-GO verdict through quality-constraint derivation, task cutting to the twin goals of parallelism and minimal context, the eight-item self-review gate, the Dispatch Map, and the handoff to execution.
+accDescr: Playbook-internal flowchart of the planning stage, from the feasibility gate's GO/NO-GO verdict through quality-constraint derivation, task cutting to the twin goals of parallelism and minimal context, the Dispatch Map, the eight-item self-review ending in the plan gate, and the handoff to execution.
 ---
 flowchart TD
     FEAS{"Feasibility gate — GO or NO-GO?"}:::stage
@@ -70,11 +70,11 @@ flowchart TD
     FEAS -->|GO| QC("Derive Quality Constraints from the criteria catalog, filtered to scope"):::stage
     QC --> CUT("Cut tasks to twin goals: maximize parallelism, minimize each brief's context"):::stage
     CUT --> TASK("Each task gets Files · Interfaces · Dependencies · Evidence class · Quality constraints · Lessons"):::stage
-    TASK --> SELFREVIEW("Eight-item self-review, fixed inline as it goes"):::stage
-    SELFREVIEW --> GATE{"plan-check.mjs clean (seven legs)?"}:::stage
-    GATE -->|no| SELFREVIEW
-    GATE -->|yes| MAP[("Dispatch Map — tasks grouped into file-disjoint waves")]:::structural
-    MAP --> HANDOFF("Handoff — state.md set to stage: execution, plan path recorded"):::stage
+    TASK --> MAP[("Dispatch Map — tasks grouped into file-disjoint waves")]:::structural
+    MAP --> SELFREVIEW("Self-review items 1–7, fixed inline as it goes"):::stage
+    SELFREVIEW --> GATE{"Item 8, last — plan-check.mjs clean (seven legs)?"}:::stage
+    GATE -->|"no — fix the plan or record an override"| SELFREVIEW
+    GATE -->|yes| HANDOFF("Handoff — state.md set to stage: execution, plan path recorded"):::stage
 
     classDef stage fill:#EEEDFE,stroke:#534AB7,color:#3C3489;
     classDef tool fill:#E1F5EE,stroke:#0F6E56,color:#085041,stroke-dasharray:5 5;
