@@ -5,7 +5,7 @@
 // and runs no promotion `- verify:` check unless invoked with --run-checks.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -22,8 +22,11 @@ import { atomicWrite } from "./atomic-write.mjs";
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 import { eachRecord } from "./jsonl.mjs";
+import { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth, depthLine } from "./depth-probe.mjs";
 import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, withInferredNote, unpricedMediansNote } from "./doctor-format.mjs";
 import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
+
+export { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth };
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // docs/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -138,10 +141,6 @@ export function extractPluginVersion(record) {
   return m ? m[1] : null;
 }
 
-// Records Claude Code writes for its own placeholders (session-limit notices and the like).
-// Every counter on them is zero, so they are skipped outright rather than reported unpriced.
-export const SYNTHETIC_MODEL = "<synthetic>";
-
 // Tool calls that dispatch a subagent; a call with no explicit model inherits the caller's.
 const DISPATCH_TOOLS = new Set(["Task", "Agent"]);
 
@@ -200,10 +199,6 @@ export function isDevcycleSession(records) {
     }
   }
   return false;
-}
-
-export function contextDepth(usage) {
-  return (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
 }
 
 // A 1h cache write costs 2.00x the input price, a 5m write 1.25x. Named once, beside the other
@@ -273,8 +268,8 @@ export function costBand(records) {
     const u = r.message?.usage ?? r.usage ?? {};
     const model = r.message?.model ?? r.model;
     const p = priceFor(model);
-    // An unpriced model must not throw on `p.in` (costUSD guards the same way with `if (!p)` at
-    // :88, resolveDepth with `?.` at :166) and must not enter the band's numerator OR its
+    // An unpriced model must not throw on `p.in` (costUSD guards the same way with `if (!p)`) and
+    // must not enter the band's numerator OR its
     // totalTokens denominator — leaving it in the denominator while it prices at nothing would
     // understate cost-per-token by exactly the unpriced share, the same plausible-and-wrong shape
     // the /1e6 fix above corrects. `costBand` has no reference to the per-session `unpriced` tally
@@ -319,64 +314,6 @@ export const BAND_LABELS = [...BANDS.map(([, label]) => label), "300k+"];
 export function depthBand(depth) {
   for (const [ceiling, label] of BANDS) if (depth < ceiling) return label;
   return "300k+";
-}
-
-// Fractions of the running model's context window. The underlying measurement is absolute —
-// cost per 1k output tokens bottoms at 15.1k in the 100-150k band and climbs to 40.7k past
-// 300k — taken on 1M-window sessions, so these fractions are those absolutes divided by 1M.
-// Expressing them as fractions is a deliberate approximation that lets them adapt to smaller
-// windows; cache-read cost actually scales with absolute tokens, not with the fraction used.
-// Doctor's own per-model band data is what should confirm or correct them once smaller-window
-// sessions have been measured.
-const OVER_BUDGET = 0.15;
-const HARD_STOP = 0.2;
-
-export function budgetBand(depth, window) {
-  const f = depth / window;
-  if (f >= HARD_STOP) return "hard-stop";
-  if (f >= OVER_BUDGET) return "over-budget";
-  return "ok";
-}
-
-// CLAUDE_DOCTOR_PROJECTS overrides the transcript root; it exists so the probe is testable
-// without writing into the real ~/.claude. It defaults to ~/.claude/projects.
-export function resolveDepth(env, cwd) {
-  const id = env.CLAUDE_CODE_SESSION_ID;
-  if (!id) throw new Error("CLAUDE_CODE_SESSION_ID is not set — cannot identify this session");
-  const root = env.CLAUDE_DOCTOR_PROJECTS || join(homedir(), ".claude", "projects");
-
-  // 1. cwd slug, 2. a filename search for a session whose cwd moved after it started.
-  const direct = join(root, cwd.replaceAll("/", "-"), `${id}.jsonl`);
-  const file = existsSync(direct)
-    ? direct
-    : (findTranscriptFiles(root) ?? []).find((f) => basename(f) === `${id}.jsonl`);
-  if (!file) throw new Error(`no transcript found for session ${id} under ${root}`);
-
-  let last = null;
-  // The "usage" substring is a cheap pre-filter: most transcript lines are not assistant turns with a
-  // usage block, and a rejected line costs no parse. eachRecord streams the file in chunks, so no
-  // whole-file string is held however long the session is. A torn trailing line (transcripts are
-  // appended live) fails to parse and is skipped by the reader.
-  eachRecord(
-    file,
-    (r) => {
-      if (r.message?.usage && r.message.model && r.message.model !== SYNTHETIC_MODEL) last = r.message;
-    },
-    { lineFilter: (line) => line.includes('"usage"') },
-  );
-  if (!last) throw new Error(`no usage record in ${basename(file)} — nothing to measure`);
-
-  const depth = contextDepth(last.usage);
-  const exact = priceFor(last.model);
-  const provisional = exact ? null : provisionalPriceFor(last.model);
-  const window = (exact ?? provisional?.price)?.window;
-  if (!window)
-    throw new Error(`model ${last.model} is not in the pricing table (scripts/pricing.mjs) — no window to measure against`);
-  return {
-    depth, model: last.model, window,
-    ...(provisional ? { windowProvisionalAs: provisional.basedOn } : {}),
-    fraction: depth / window, band: budgetBand(depth, window),
-  };
 }
 
 export function median(numbers) {
@@ -1624,27 +1561,6 @@ export function formatReport(summaries) {
   return lines.join("\n");
 }
 
-// Recursively collects .jsonl transcript files under dir. Returns null when dir is simply
-// not there (missing, or a path that is not a directory).
-export function findTranscriptFiles(dir) {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch (err) {
-    // Same rule as readRecords below: an absent path is "nothing here", but a permissions
-    // or I/O failure is a real fault and must not read as a directory holding no transcripts.
-    if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
-    return null;
-  }
-  const files = [];
-  for (const e of entries) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) files.push(...(findTranscriptFiles(p) ?? []));
-    else if (e.isFile() && e.name.endsWith(".jsonl")) files.push(p);
-  }
-  return files;
-}
-
 // <slug>/<session>/subagents/agent-<id>.jsonl -> <session>; <slug>/<session>.jsonl -> <session>.
 export function owningSession(file) {
   const parts = file.split(sep);
@@ -1852,13 +1768,7 @@ function main() {
       console.error(`doctor: ${e.message}`);
       process.exit(1);
     }
-    if (args.json) {
-      console.log(JSON.stringify(r));
-    } else {
-      const pct = (r.fraction * 100).toFixed(1);
-      const assumed = r.windowProvisionalAs ? `, window assumed from ${r.windowProvisionalAs}` : "";
-      console.log(`depth: ${r.depth} tokens (${pct}% of ${r.window}, model ${r.model}${assumed}) — band: ${r.band}`);
-    }
+    console.log(args.json ? JSON.stringify(r) : depthLine(r));
     return;
   }
   let result;

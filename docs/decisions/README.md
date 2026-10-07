@@ -5,6 +5,30 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-07 — planning context safety, Plan A: the depth gate gets its own probe, the plan gates become one
+
+**Decision:** the depth gate runs `scripts/depth-probe.mjs` directly instead of `doctor.mjs --depth`
+(which stays, as an adapter), and an unpriced model is measured against an assumed 1M window,
+labelled, instead of refused. Budgets move by the measured amounts below; nothing is offset.
+
+**Why:** the gate loaded doctor's whole import closure to read one usage record, and a refusal on a
+brand-new model blinded the gate exactly when it is least trusted.
+
+**Budgets:** every context budget below falls by the 3 bytes the shorter probe command saves in
+`references/delegation.md`: `playbooks/executing-waves.md` 103391 → 103388,
+`playbooks/finishing-the-cycle.md` 53027 → 53024, `playbooks/learning-from-sessions.md` 60715 → 60712,
+`playbooks/planning-waves.md` 68653 → 68650, `playbooks/receiving-review.md` 107511 → 107508,
+`playbooks/reviewing-code.md` 90759 → 90756, `playbooks/reviewing-the-branch.md` 54490 → 54487,
+`playbooks/scoping-the-request.md` 26641 → 26638, `playbooks/sweeping-mechanical-changes.md`
+80628 → 80625, `playbooks/taking-the-fast-path.md` 73753 → 73750, `playbooks/verifying-on-device.md`
+50014 → 50011 and `playbooks/writing-the-findings-document.md` 65477 → 65474;
+`playbooks/maintaining-the-repo.md` 63222 → 63216 (−3 more for its own inline gate command); and
+`playbooks/profiling-sessions.md` 46852 → 46831 (−3, plus 18 bytes of slack it already carried).
+No value rose, so no `budget:` line is added.
+
+**Supersedes:** the depth probe's refusal of a model with no priced family, which shipped with the
+2026-10-02 unpriced-models change (#301) without an entry of its own.
+
 ## 2026-10-04 — doctor overview: the profiling playbook states the reply contract, and its budget grows by it
 
 **Decision:** `playbooks/profiling-sessions.md` gains a section on how a cost-analysis reply carries

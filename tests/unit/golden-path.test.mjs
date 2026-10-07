@@ -608,7 +608,7 @@ test("harvested: delegation/coordinator-duties — the duty list is closed and t
 
 test("harvested: delegation/depth-gate — depth is measured by the probe, and an unknown depth is never a shallow one", () => {
   const d = read("references/delegation.md");
-  assert.ok(d.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth'), "the depth probe command is gone");
+  assert.ok(d.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs"'), "the depth probe command is gone");
   assert.match(d, /over budget at ≥15% of the window, hard stop at ≥20%/);
   assert.match(d, /An unknown depth is never evidence of a shallow one/);
   assert.ok(read("references/handoff.md").includes("Context depth: unknown (<the probe's one-line reason>)"), "no unknown-depth field shape");
