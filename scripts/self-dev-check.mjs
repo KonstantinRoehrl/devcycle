@@ -91,11 +91,20 @@ function snapshot(pluginRoot) {
 
 const fileDigest = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 
+// What git tracks under one top-level entry of the repo, or null when git cannot answer (not a
+// checkout, no git) — the caller then walks the directory as it always did.
+function trackedFiles(repoRoot, name) {
+  const result = spawnSync("git", ["-C", repoRoot, "ls-files", "-z", "--", name], { encoding: "utf8" });
+  return result.status === 0 ? result.stdout.split("\0").filter(Boolean) : null;
+}
+
 // The repo side of the preflight comparison, restricted to the top-level entries the plugin
 // actually ships. Hashing the whole repo instead would walk `.git` and every local artifact
 // directory — paths no install ever contained, reported as divergence, at minutes of I/O.
 // Symlinks are skipped rather than followed, exactly as tree-hash.mjs walks the plugin side.
-function repoCounterpart(pluginRoot, repoRoot) {
+// A shipped directory's repo side is what git tracks in it: .claude/ ships the instructions file,
+// while a contributor's .claude/ also holds untracked worktree checkouts and local settings.
+export function repoCounterpart(pluginRoot, repoRoot) {
   const files = {};
   for (const name of readdirSync(pluginRoot).sort()) {
     if (isHostRuntime(name)) continue; // the host's runtime state, which no repo is expected to carry
@@ -107,9 +116,16 @@ function repoCounterpart(pluginRoot, repoRoot) {
       continue; // absent from the repo: the comparison reports it as installed-copy-only
     }
     if (stat.isSymbolicLink()) continue;
-    if (stat.isDirectory())
-      for (const [path, digest] of Object.entries(hashTree(abs).files)) files[`${name}/${path}`] = digest;
-    else if (stat.isFile()) files[name] = fileDigest(abs);
+    if (stat.isDirectory()) {
+      const tracked = trackedFiles(repoRoot, name);
+      if (!tracked) for (const [path, digest] of Object.entries(hashTree(abs).files)) files[`${name}/${path}`] = digest;
+      else
+        for (const path of tracked) {
+          const file = join(repoRoot, path);
+          // Tracked but deleted in the working tree: absent from the repo, as the walk would say.
+          if (existsSync(file) && lstatSync(file).isFile()) files[path] = fileDigest(file);
+        }
+    } else if (stat.isFile()) files[name] = fileDigest(abs);
   }
   return files;
 }

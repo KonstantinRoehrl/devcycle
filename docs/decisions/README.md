@@ -5,6 +5,19 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-07 — Fifth hook-like component: the function-hook module
+
+**Instructions file:** devcycle's own agent instructions move from the root `CLAUDE.md` to
+`.claude/CLAUDE.md`, which Claude Code also reads as project instructions. Claude Code's plugin
+validator warns that a `CLAUDE.md` at the plugin root is not loaded as project context, and
+`--strict` turns that warning into a failure of both `claude plugin validate . --strict` and
+`claude plugin validate .claude-plugin/plugin.json --strict`, the two checks the CI loader gate
+runs. The three records whose `affected-files` named the root path now name `.claude/CLAUDE.md`, so
+lesson matching keeps firing. `.claude/` thereby becomes a directory the plugin ships, and a
+contributor's `.claude/` also holds untracked worktree checkouts and local settings, so
+`scripts/self-dev-check.mjs` compares only git-tracked files on the repo side of every shipped
+top-level directory.
+
 ## 2026-10-07 — planning context safety, Plan A: the depth gate gets its own probe, the plan gates become one
 
 **Decision:** the depth gate runs `scripts/depth-probe.mjs` directly instead of `doctor.mjs --depth`

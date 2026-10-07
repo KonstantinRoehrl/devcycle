@@ -2,7 +2,7 @@
 - promotion-type: doc-edit
 - cluster-signature: novel:tmpdir-sandbox-blocks-mkdtemp|7 occurrences|session <redacted-session>
 - files-touched: docs/devcycle/lessons.md
-- affected-files: CONTRIBUTING.md, CLAUDE.md, playbooks/executing-waves.md
+- affected-files: CONTRIBUTING.md, .claude/CLAUDE.md, playbooks/executing-waves.md
 - landed: 2026-09-03
 - commit: 
 - plugin-version: 0.18.2
