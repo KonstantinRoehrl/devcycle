@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.23.0 — 2026-10-07
+
+- feat(doctor): record subagent context depth, gate plans with one plan-check, and print overview tables in every doctor reply
+
 **Every subagent's context depth is now recorded.** A new `SubagentStop` hook,
 `hooks/dispatch-sensor.mjs`, writes one `agent-depth` run-record row for each subagent that a
 cycle's own sessions run, when it finishes: its final context depth, model, tool uses and
