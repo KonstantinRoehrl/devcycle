@@ -46,8 +46,8 @@ const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
 // in every repo except this one — the failure this constant exists to prevent.
 export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
 
-// The four compliance-candidate slugs emitComplianceCandidates can produce — the single source of
-// truth for all three consumers, made structurally load-bearing so adding a fifth type here (and
+// The compliance-candidate slugs emitComplianceCandidates can produce — the single source of
+// truth for all three consumers, made structurally load-bearing so adding a new type here (and
 // nowhere else) either derives automatically or fails loudly, instead of needing four parallel edits:
 //   - the emitter routes every candidate's `type` through complianceType() below, so a literal that
 //     drifts from this array throws at emit time rather than producing an unroutable candidate;
@@ -56,6 +56,7 @@ export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
 //     so a new type can't be routable/emittable without also getting a title.
 export const COMPLIANCE_TYPES = [
   "inherited-model", "missing-workload", "main-thread-browser", "general-purpose-search",
+  "sensor-inactive",
 ];
 const COMPLIANCE_TYPE_SET = new Set(COMPLIANCE_TYPES);
 
@@ -344,6 +345,8 @@ export const STANDALONE_TAGS = new Set([
 // The release that introduced the run record (CHANGELOG.md 0.13.0); a session from before it
 // legitimately has none.
 export const RUN_RECORD_SINCE = "0.13.0";
+// The first release that ships hooks/dispatch-sensor.mjs (assumption: the next minor); older runs cannot have agent-depth rows.
+export const DEPTH_SENSOR_SINCE = "0.23.0";
 // Why a forward-filled session has no run record: a standalone command mints none by design, a
 // session from before 0.13.0 predates the record, and anything else expected one and is missing it.
 export function splitReason({ firstTag = null, pluginVersion = null } = {}) {
@@ -777,6 +780,14 @@ export function emitComplianceCandidates(turns, record) {
     out.push({ type: complianceType("missing-workload"), commits: missingCommits.length,
       requestKind: record.triage.requestKind, sessions_sampled: 1 });
 
+  // C5: planning produced a plan (planned tasks recorded) but no agent-depth row names the stage —
+  // the dispatch-sensor hook was not loaded or missed, which must not read as "no dispatches".
+  const planned = record.workload?.plannedTaskCount ?? 0;
+  const planningRan = (record.stages ?? []).some((s) => s.stage === "planning");
+  const sensorShipped = record.pluginVersion && compareVersions(record.pluginVersion, DEPTH_SENSOR_SINCE) >= 0;
+  if (sensorShipped && planningRan && planned > 0 && !(record.agentDepths ?? []).some((r) => r.stage === "planning"))
+    out.push({ type: complianceType("sensor-inactive"), stage: "planning", plannedTasks: planned, sessions_sampled: 1 });
+
   return out;
 }
 
@@ -940,13 +951,14 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         } else if (o.kind === "session") {
           current = o.sessionHash;
           if (!windows.has(current))
-            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [] });
+            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [], agentDepths: [] });
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
         else if (o.kind === "event") { if (current) windows.get(current).events.push(o); }
         else if (o.kind === "workload") { if (current) windows.get(current).workloads.push(o); }
         else if (o.kind === "lens-cost") { if (current) windows.get(current).lensCosts.push(o); }
+        else if (o.kind === "agent-depth") { if (current) windows.get(current).agentDepths.push(o); }
         else if (o.kind === "commit") { if (current) windows.get(current).commits.push(o); }
         else if (o.kind === "triage") { triage = { requestKind: o.requestKind, entryStage: o.entryStage }; }
       }
@@ -965,6 +977,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
               workloads: [...prior.workloads, ...rec.workloads],
               lensCosts: [...prior.lensCosts, ...rec.lensCosts],
               commits: [...prior.commits, ...rec.commits],
+              agentDepths: [...prior.agentDepths, ...rec.agentDepths],
               triage: rec.triage ?? prior.triage ?? null,
               workload: rec.workload ?? prior.workload ?? null }
           : rec);
@@ -1225,6 +1238,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     costByStage,
     costByAgentType,
     costByLens,
+    agentDepths: record?.agentDepths ?? [],
     bandCounts,
     startupFloor,
     carryWeighted,
@@ -1362,6 +1376,8 @@ export function complianceCandidatesOf(summaries) {
       out.push({ ...cand, count: sum("count"), total: sum("total") });
     } else if (g.type === "missing-workload") {
       out.push({ ...cand, commits: sum("commits"), requestKind: g.members[0].requestKind });
+    } else if (g.type === "sensor-inactive") {
+      out.push({ ...cand, stage: "planning", plannedTasks: sum("plannedTasks") });
     }
   }
   const inh = out.find((c) => c.type === "inherited-model");
@@ -1403,6 +1419,8 @@ export function formatComplianceCandidate(c) {
   }
   if (c.type === "missing-workload")
     return `CANDIDATE: missing-workload commits=${c.commits} requestKind=${c.requestKind} sessions=${c.sessions_sampled}${span} — reached execution and committed but recorded no workload (collection gap — the commit-sensor hook should have written it)`;
+  if (c.type === "sensor-inactive")
+    return `CANDIDATE: sensor-inactive stage=${c.stage} plannedTasks=${c.plannedTasks} sessions=${c.sessions_sampled}${span} — a planning stage produced a plan but recorded no agent-depth rows (is the dispatch-sensor hook loaded?)`;
   return `CANDIDATE: general-purpose-search count=${c.count}/${c.total} sessions=${c.sessions_sampled}${span}`;
 }
 
@@ -1900,6 +1918,7 @@ export function impactScores(record, costByStage) {
   const all = journalEvents(record);
   const byKey = new Map();
   for (const e of all) {
+    if (e.event === "gate-ran") continue; // a neutral marker that a gate ran, not friction
     const key = impactKey(e);
     if (!byKey.has(key))
       byKey.set(key, { key, event: e.event, stage: e.stage, frequency: 0, impact: 0, measurable: true });
@@ -2266,6 +2285,24 @@ export function lensCostTable(summaries) {
     .sort((a, b) => b.total - a.total || byName(a.lens, b.lens));
 }
 
+export function agentDepthTable(summaries) {
+  const byStage = new Map();
+  for (const s of summaries)
+    for (const r of s.agentDepths ?? []) {
+      if (!byStage.has(r.stage)) byStage.set(r.stage, []);
+      byStage.get(r.stage).push(r);
+    }
+  return [...byStage.entries()]
+    .map(([stage, rows]) => ({
+      stage, count: rows.length,
+      p50: median(rows.map((r) => r.tokens)),
+      max: Math.max(...rows.map((r) => r.tokens)),
+      warns: rows.filter((r) => r.depth === "warn").length,
+      breaches: rows.filter((r) => r.depth === "breach").length,
+    }))
+    .sort((a, b) => b.max - a.max || byName(a.stage, b.stage));
+}
+
 // A key is named by its culprit slug only when every session that recorded the key named the
 // same single slug. A key two sessions blamed differently is reported by key rather than by
 // picking one of them and printing a name the corpus does not agree on.
@@ -2584,6 +2621,9 @@ const GLOSSES = {
   "cost-by-lens":
     "What each maintenance lens cost, straight off the lens-cost run records — the split to read " +
     "when a maintain pass looks dear.",
+  "agent-depth":
+    "How deep each subagent ran, per stage, from the agent-depth rows the dispatch-sensor hook writes — " +
+    "warn above 150k tokens, breach above 200k.",
   culprits:
     "Recurring problems, priced. The dollar figure is what each one actually cost you, summed " +
     "over every occurrence — not a severity guess. The Δ and Trend are per-session (derived), so " +
@@ -2940,6 +2980,13 @@ export function renderReport(summaries, ctx) {
     "no per-lens cost recorded (maintain passes emit lens-cost records)",
   ));
   L.push("", "_Sourced from lens-cost run records; workload-independent (maintenance emits no workload record)._");
+
+  section("### Agent depth by stage (observed)", "agent-depth");
+  L.push(...markdownTable(
+    ["Stage", "Dispatches", "p50 depth", "Max depth", "Warn (>150k)", "Breach (>200k)"],
+    agentDepthTable(summaries).map((r) => [r.stage, r.count, r.p50, r.max, r.warns, r.breaches]),
+    "no agent-depth records (the dispatch-sensor hook writes one per finished subagent)",
+  ));
 
   // The raw observed outcome family (spec C3): one row per run carrying a quality signal, its
   // raw verdicts/counts straight off the run records. conformancePass is null exactly when no
@@ -3487,6 +3534,7 @@ export class NoComplianceCandidateError extends Error {
 export const COMPLIANCE_TITLES = {
   "inherited-model": "subagent dispatches inherit the caller's model instead of naming one",
   "missing-workload": "a committing cycle recorded no workload (collection gap)",
+  "sensor-inactive": "a planning stage produced a plan but recorded no agent depth (sensor gap)",
   "main-thread-browser": "the coordinator drove a browser on the main thread",
   "general-purpose-search": "a general-purpose agent used where a scoped search would do",
 };
