@@ -38,7 +38,14 @@ export function planCheck(planText, { planPath, repoRoot, only }) {
   const findings = [];
   const notes = [];
   for (const leg of legs) {
-    const r = LEGS[leg](planText, { planPath, repoRoot });
+    // A leg that throws (e.g. a dangling symlink under the repo root) fails as that leg's finding,
+    // so the other legs still report and the gate-ran record is still written.
+    let r;
+    try {
+      r = LEGS[leg](planText, { planPath, repoRoot });
+    } catch (err) {
+      r = { findings: [`crashed — ${err.message}`] };
+    }
     for (const text of r.notes ?? []) notes.push({ leg, text });
     for (const text of r.findings) findings.push({ leg, text });
   }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -80,7 +80,7 @@ test("with a run in .devcycle/state.md, each run appends one gate-ran event with
   assert.deepEqual(events.map((e) => [e.event, e.stage, e.result]), [["gate-ran", "planning", "fail"]]);
 });
 
-function overrideRepo() {
+function referencerRepo() {
   const repo = realpathSync(makeTempDir("plan-check-repo"));
   writeInto(repo, "lib/use.mjs", 'import data from "./a.txt";\n');
   return repo;
@@ -90,7 +90,7 @@ const COUNT_LINE = /^plan-check: blastRadius: 1 note\(s\) — rerun with --verbo
 const NOTE_LINE = /^plan-check: blastRadius: override -- lib\/use\.mjs references src\/a\.txt, cleared: /m;
 
 test("a passing run summarizes each leg's notes as one count line", () => {
-  const r = run(plan(task(1, ["src/a.txt"]) + OVERRIDE + task(2, ["src/b.txt"])), { repo: overrideRepo() });
+  const r = run(plan(task(1, ["src/a.txt"]) + OVERRIDE + task(2, ["src/b.txt"])), { repo: referencerRepo() });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, COUNT_LINE);
   assert.doesNotMatch(r.stderr, /override --/);
@@ -98,14 +98,14 @@ test("a passing run summarizes each leg's notes as one count line", () => {
 });
 
 test("--verbose lists every note on a passing run", () => {
-  const r = run(plan(task(1, ["src/a.txt"]) + OVERRIDE + task(2, ["src/b.txt"])), { repo: overrideRepo(), args: ["--verbose"] });
+  const r = run(plan(task(1, ["src/a.txt"]) + OVERRIDE + task(2, ["src/b.txt"])), { repo: referencerRepo(), args: ["--verbose"] });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, NOTE_LINE);
   assert.doesNotMatch(r.stderr, COUNT_LINE);
 });
 
 test("a failing run lists every note without --verbose", () => {
-  const r = run(plan(task(1, ["src/a.txt"]) + OVERRIDE + task(2, ["src/a.txt"])), { repo: overrideRepo() });
+  const r = run(plan(task(1, ["src/a.txt"]) + OVERRIDE + task(2, ["src/a.txt"])), { repo: referencerRepo() });
   assert.equal(r.status, 1);
   assert.match(r.stderr, NOTE_LINE);
   assert.doesNotMatch(r.stderr, COUNT_LINE);
@@ -116,4 +116,46 @@ test("an unknown flag is a usage error that names --verbose", () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /unknown flag "--bogus"/);
   assert.match(r.stderr, /--verbose/);
+});
+
+// The leg names on every "plan-check: <leg>: …" line a failing run printed.
+const reportingLegs = (stderr) => new Set([...stderr.matchAll(/^plan-check: (\w+): /gm)].map((m) => m[1]));
+
+const withProse = (n, files, prose) => task(n, files).replace("- [ ] step", `- [ ] ${prose}`);
+
+// One minimal plan per leg that trips that leg and no other, so a leg swapped for a no-op fails here.
+const TRIPS = {
+  codeBlocks: () => run(plan(task(1, ["src/a.txt"]) + "```js\nconst = ;\n```\n\n" + task(2, ["src/b.txt"]))),
+  briefCompleteness: () => run(plan(task(1, ["src/a.txt"]).replace("**Quality constraints:** none\n", "") + task(2, ["src/b.txt"]))),
+  blastRadius: () => run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])), { repo: referencerRepo() }),
+  contentCoupling: () => run(plan(task(1, ["src/a.txt"]) + withProse(2, ["src/b.txt"], "copy the header out of src/a.txt"))),
+  budgetFixtures: () => run(plan(task(1, ["playbooks/x.md"]) + task(2, ["src/b.txt"]))),
+  waveDisjointness: () => run(plan(task(1, ["src/a.txt"]) + task(2, ["src/a.txt"]))),
+  authoredClaims: () => run(plan(task(1, ["src/a.txt"]) + withProse(2, ["src/b.txt"], "touch 3 files"))),
+};
+
+for (const [leg, trip] of Object.entries(TRIPS)) {
+  test(`a plan that trips only ${leg} fails with a finding attributed to ${leg}`, () => {
+    const r = trip();
+    assert.equal(r.status, 1, r.stdout);
+    assert.deepEqual([...reportingLegs(r.stderr)], [leg], r.stderr);
+  });
+}
+
+test("a leg that throws becomes that leg's finding: the other legs still report and gate-ran records fail", () => {
+  const repo = makeRepo();
+  writeInto(repo, ".devcycle/state.md", "# devcycle state\n- stage: planning\n- run: 00000000000000c3\n");
+  // A dangling interpreter link (a .venv after a Homebrew upgrade) makes blastRadius's walk throw.
+  mkdirSync(join(repo, ".venv", "bin"), { recursive: true });
+  symlinkSync(join(repo, "gone", "python3"), join(repo, ".venv", "bin", "python"));
+  const runsDir = makeTempDir("plan-check-runs");
+  const r = run(plan(task(1, ["src/a.txt"]) + task(2, ["src/a.txt"])), { repo, env: { DEVCYCLE_RUNS_DIR: runsDir } });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^plan-check: blastRadius: crashed — ENOENT/m);
+  assert.match(r.stderr, /^plan-check: waveDisjointness: Wave 1 -- Task 1 and Task 2 both list src\/a\.txt/m);
+  assert.doesNotMatch(r.stderr, /^\s+at /m, "no raw stack trace");
+  const dir = join(runsDir, repoSlug(gitToplevel(repo)));
+  const events = readdirSync(dir).flatMap((f) => readFileSync(join(dir, f), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)))
+    .filter((o) => o.kind === "event");
+  assert.deepEqual(events.map((e) => [e.event, e.result]), [["gate-ran", "fail"]]);
 });
