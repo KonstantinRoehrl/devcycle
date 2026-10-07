@@ -47,6 +47,42 @@ test("windowFor: an older member of a priced family has no knowable window, neve
   assert.equal(windowFor("claude-3-5-sonnet-20241022"), null);
 });
 
+test("windowFor: every current canonical id resolves to its priced or provisional window", () => {
+  assert.deepEqual(windowFor("claude-opus-5-5"), { window: 1_000_000 });
+  assert.deepEqual(windowFor("claude-fable-5-1"), { window: 1_000_000 });
+  assert.deepEqual(windowFor("claude-sonnet-5-5"), { window: 1_000_000 });
+  assert.deepEqual(windowFor("claude-haiku-4-5-20251001"), { window: 200_000 });
+  assert.deepEqual(windowFor("claude-haiku-4-5"), { window: 200_000, windowProvisionalAs: "claude-haiku-4-5-20251001" });
+  assert.deepEqual(windowFor("claude-opus-6"), { window: 1_000_000, windowProvisionalAs: "claude-opus-5-5" });
+});
+
+// Hosting platforms and Claude Code wrap the id they report; the wrapped model is still the priced one.
+test("windowFor: a wrapped id of a priced model resolves to that model's window", () => {
+  assert.deepEqual(windowFor("claude-opus-5-5[1m]"), { window: 1_000_000 });
+  assert.deepEqual(windowFor("us.anthropic.claude-opus-5-5-v1:0"), { window: 1_000_000 });
+  assert.deepEqual(windowFor("claude-opus-5-5@20260901"), { window: 1_000_000 });
+  assert.equal(windowFor("us.anthropic.claude-sonnet-4-5-20250929-v1:0"), null);
+});
+
+test("windowFor: an id that does not parse as a family and version falls back to the assumed window", () => {
+  assert.deepEqual(windowFor("claude-opus-6-preview"), { window: ASSUMED_WINDOW, windowAssumed: true });
+});
+
+// A dated snapshot of a priced version is that version: its window is known, not unknown.
+test("windowFor: a dated snapshot of a priced version takes that version's window", () => {
+  assert.deepEqual(windowFor("claude-opus-4-8-20260101"), { window: 1_000_000, windowProvisionalAs: "claude-opus-4-8" });
+});
+
+test("cli: an unpriced version between two priced ones is not called older than every priced model", () => {
+  const dir = makeTempDir("depth-probe");
+  const file = join(dir, "t.jsonl");
+  writeJsonl(file, [assistant("claude-opus-5-1", usage(10, 0, 0, 1), "2026-10-07T07:00:00Z")]);
+  const r = spawnSync(process.execPath, [SCRIPT, "--transcript", file], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "depth-probe: no context window known for claude-opus-5-1 (not priced, and older than its " +
+    "family's newest priced model; add it to scripts/pricing.mjs) — 10 tokens, band unknown\n");
+});
+
 test("cli: an older model of a priced family exits 1 with its depth unbanded", () => {
   const dir = makeTempDir("depth-probe");
   const file = join(dir, "t.jsonl");

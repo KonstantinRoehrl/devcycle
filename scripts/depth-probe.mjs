@@ -6,7 +6,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
-import { PRICING, priceFor, provisionalPriceFor } from "./pricing.mjs";
+import { PRICING, parseModelId, priceFor, provisionalPriceFor } from "./pricing.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { isMain } from "./is-main.mjs";
 
@@ -59,19 +59,38 @@ export function findTranscriptFiles(dir) {
   return files;
 }
 
-// The families pricing.mjs prices, read off its ids (`claude-<family>-...`). Matched against any
-// segment of a model id, so the older `claude-3-5-sonnet-...` naming still finds its family.
-const PRICED_FAMILIES = new Set(Object.keys(PRICING.models).map((id) => id.split("-")[1]));
+// The id pricing.mjs would key the model under: strips the wrappers a host reports around it
+// (Claude Code's `[1m]`, Bedrock's `<region>.anthropic.` prefix and `-v<n>:<n>` suffix, Vertex's
+// `@<date>`) and reorders the older `claude-3-5-sonnet-...` naming to family-first.
+function canonicalModelId(model) {
+  return model
+    .replace(/\[1m\]$/i, "")
+    .replace(/^(?:[a-z]+\.)?anthropic\./, "")
+    .replace(/-v\d+:\d+$/, "")
+    .replace(/@\d{8}$/, "")
+    .replace(/^claude-(\d+(?:-\d+)*)-(opus|sonnet|haiku)(-\d{8})?$/, "claude-$2-$1$3");
+}
 
-// Null when no window is knowable: an older member of a priced family (Sonnet 4.5, Opus 4.1) ran a
-// smaller window than its newest sibling and pricing.mjs records none for it, so the assumed 1M
-// would read its depth several times too shallow.
+const PRICED_VERSIONS = Object.keys(PRICING.models).map((id) => ({ id, ...parseModelId(id) })).filter((p) => p.family);
+const sameVersion = (a, b) => a.family === b.family && a.version.join("-") === b.version.join("-");
+
+// Null when no window is knowable: an unpriced version older than its family's newest priced one
+// (Sonnet 4.5, Opus 4.1) may have run a smaller window than that sibling, so the assumed 1M would
+// read its depth several times too shallow. An id that does not parse is assumed, not unknown.
 export function windowFor(model) {
-  const exact = priceFor(model);
+  const id = typeof model === "string" ? canonicalModelId(model) : model;
+  const exact = priceFor(id);
   if (exact) return { window: exact.window };
-  const provisional = provisionalPriceFor(model);
+  const provisional = provisionalPriceFor(id);
   if (provisional) return { window: provisional.price.window, windowProvisionalAs: provisional.basedOn };
-  if (typeof model === "string" && model.split("-").some((segment) => PRICED_FAMILIES.has(segment))) return null;
+  const parsed = typeof id === "string" ? parseModelId(id) : null;
+  if (parsed) {
+    // A dated snapshot of a priced version is that version.
+    const snapshotOf = PRICED_VERSIONS.find((p) => sameVersion(p, parsed));
+    if (snapshotOf) return { window: PRICING.models[snapshotOf.id].window, windowProvisionalAs: snapshotOf.id };
+    // provisionalPriceFor declines a parsed id of a priced family only when it is older.
+    if (PRICED_VERSIONS.some((p) => p.family === parsed.family)) return null;
+  }
   return { window: ASSUMED_WINDOW, windowAssumed: true };
 }
 
@@ -118,8 +137,8 @@ const measured = (depth, model) => {
   const w = windowFor(model);
   // An unknown depth is never evidence of a shallow one: fail the probe rather than band it.
   if (!w) {
-    throw new Error(`no context window known for ${model} (older than every priced model of its family; ` +
-      `add it to scripts/pricing.mjs) — ${depth} tokens, band unknown`);
+    throw new Error(`no context window known for ${model} (not priced, and older than its ` +
+      `family's newest priced model; add it to scripts/pricing.mjs) — ${depth} tokens, band unknown`);
   }
   return { depth, model, ...w, fraction: depth / w.window, band: budgetBand(depth, w.window) };
 };

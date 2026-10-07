@@ -8,9 +8,10 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 ## 2026-10-07 — planning context safety, Plan A: the depth gate gets its own probe, the plan gates become one
 
 **Decision:** the depth gate runs `scripts/depth-probe.mjs` directly instead of `doctor.mjs --depth`
-(which stays, as an adapter), and a model with no priced family is measured against an assumed 1M
-window, labelled, instead of refused; an older model of a priced family still fails the probe, its
-depth unknown. Budgets move by the measured amounts below; nothing is offset.
+(which stays, as an adapter), and a model id that does not parse as a priced family version is
+measured against an assumed 1M window, labelled, instead of refused; an unpriced version older than
+its family's newest priced model still fails the probe, its depth unknown. Budgets move by the
+measured amounts below; nothing is offset.
 
 **Why:** the gate loaded doctor's whole import closure to read one usage record, and a refusal on a
 brand-new model blinded the gate exactly when it is least trusted.

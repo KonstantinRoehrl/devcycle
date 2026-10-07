@@ -10,8 +10,9 @@ counted twice.
 
 **The depth gate has its own probe.** The depth gate now runs `scripts/depth-probe.mjs`, which
 reads one transcript's last usage record, instead of loading all of `doctor.mjs` to do the same
-(`doctor.mjs --depth` still works). A model with no priced family in `scripts/pricing.mjs` is now
-measured against an assumed 1M window and labelled as assumed, instead of being refused.
+(`doctor.mjs --depth` still works). A model id that does not parse as a priced family version in
+`scripts/pricing.mjs` is now measured against an assumed 1M window and labelled as assumed, instead
+of being refused; wrapped ids (`[1m]`, Bedrock, Vertex) resolve to their model's window.
 
 **Doctor reports agent depth per stage.** The doctor report gains an
 `### Agent depth by stage (observed)` table — dispatches, median and maximum depth, and warn and
