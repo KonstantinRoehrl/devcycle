@@ -481,3 +481,25 @@ test("makeLogger tags every line with its engine's name", () => {
 // makeLogger's `fatal` calls process.exit(1), so it is not callable in-process.
 // Its exit code and stderr shape are pinned end to end by the fatal test in
 // tests/unit/mechanical-sweep.test.mjs.
+
+test("claudeStructured marks its claude child as devcycle's own; run() leaves every other child's environment alone", async () => {
+  const envLog = join(makeTempDir("devcycle-agent-cli-env-"), "env.json");
+  const bin = makeFakeBin(
+    "claude",
+    `
+const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(envLog)}, JSON.stringify({ nested: process.env.DEVCYCLE_NESTED_RUN ?? null }));
+process.stdout.write(JSON.stringify({ is_error: false, structured_output: { ok: true } }));
+`
+  );
+  await withPath(isolatedPath([bin]), () =>
+    claudeStructured({
+      prompt: "p", tools: "Read", schema: { type: "object" }, cwd: makeTempDir("devcycle-agent-cli-cwd-"),
+      attempts: 1, errors: { agent: "test agent", output: "test", cap: 100 },
+    })
+  );
+  assert.deepEqual(JSON.parse(readFileSync(envLog, "utf8")), { nested: "1" });
+
+  const plain = await run(process.execPath, ["-e", "process.stdout.write(String(process.env.DEVCYCLE_NESTED_RUN ?? 'unset'))"]);
+  assert.equal(plain.stdout, "unset");
+});
