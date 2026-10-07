@@ -38,8 +38,12 @@ supersedes the 2026-09-05 entry's "third hook".
 Doctor's `sensor-inactive` finding then raised `playbooks/profiling-sessions.md` 46831 → 46850 (+19
 bytes, the slug named in its issue-drafting list). Collapsing the planning self-review into one gate
 moves `playbooks/planning-waves.md` 68650 → 67353 (−1297 bytes) and `surfaceTotal` 5725 → 5726
-(+1 line: the plan-gate item is wrapped, where four of the five items it replaces were each one long
-line).
+(the playbook +2 lines, absorbing the 1 line of slack the baseline carried). Documenting the
+`agent-depth` kind and the `depth-breach` and `gate-ran` events in `references/ledger.md` § The run
+record then adds 471 bytes to the four playbooks whose cited references include it —
+`playbooks/executing-waves.md` 103388 → 103859, `playbooks/receiving-review.md` 107508 → 107979,
+`playbooks/sweeping-mechanical-changes.md` 80625 → 81096 and `playbooks/taking-the-fast-path.md`
+73750 → 74221 — and its one new table row moves `surfaceTotal` 5726 → 5727.
 
 **Plan gate:** planning's scripted self-review checks become one command, `scripts/plan-check.mjs`,
 running seven legs in order — `codeBlocks`, `briefCompleteness`, `blastRadius`, `contentCoupling`,
@@ -54,8 +58,12 @@ its `pass` or `fail` result (A-M6, L27).
 (#301).
 
 ```text
-budget: surface-budget.json surfaceTotal 5726
+budget: surface-budget.json surfaceTotal 5727
 budget: context-budget.json playbooks/profiling-sessions.md 46850
+budget: context-budget.json playbooks/executing-waves.md 103859
+budget: context-budget.json playbooks/receiving-review.md 107979
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 81096
+budget: context-budget.json playbooks/taking-the-fast-path.md 74221
 ```
 
 ## 2026-10-04 — doctor overview: the profiling playbook states the reply contract, and its budget grows by it
