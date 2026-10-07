@@ -191,7 +191,7 @@ A repo-wide multi-lens pass is the unbounded fan-out shape that has historically
   own concurrency limit (`VERIFY_CONCURRENCY` in `workflows/review-panel.js`), and are **not**
   counted against this pass ceiling;
 - a **hard stop at the ≥20% context-depth band** `delegation.md` already defines
-  (`node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth`); on a hard stop the coverage statement
+  (`node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs"`); on a hard stop the coverage statement
   names the unswept remainder;
 - every dispatch resolves its model per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`; the
   history inspector routes to the fast tier.

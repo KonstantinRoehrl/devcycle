@@ -1,0 +1,14 @@
+# Grep docs and comments for the old name when a task replaces a mechanism
+- promotion-type: doc-edit
+- cluster-signature: novel:replaced-mechanism-leaves-stale-name-in-docs-and-comments|8 occurrences|6 sessions
+- files-touched: docs/devcycle/lessons.md
+- affected-files: docs/devcycle/lessons.md
+- landed: 2026-10-07
+- commit: 
+- plugin-version: 0.22.1
+- sourced-from-memory: false
+- culprit-id: novel:replaced-mechanism-leaves-stale-name-in-docs-and-comments
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases: 

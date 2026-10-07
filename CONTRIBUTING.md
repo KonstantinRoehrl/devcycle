@@ -96,7 +96,7 @@ node scripts/citation-grammar.mjs     # the citation grammar's worklist (back-ed
 node scripts/context-report.mjs       # per command and playbook: refs-only and all-hops closure words; --diff <ref> lists citations that lost their prefix — local
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
 gitleaks git --no-banner --redact     # credentials, over the full history — CI
-node scripts/doctor.mjs               # token/context profile; --depth is the context gate's probe — local only
+node scripts/doctor.mjs               # token/context profile; --depth adapts scripts/depth-probe.mjs, the context gate's probe — local only
 ```
 
 Pass the test files as a glob, exactly as above and as CI does: a bare `tests/unit/` directory
@@ -156,7 +156,8 @@ does not record.
 Writing a new `scripts/*.mjs`? Reuse `doctor.mjs`'s exported helpers
 (`findTranscriptFiles`, `owningSession`, `readRecords`, `inWindow`) for corpus enumeration,
 project-path escaping, and missing/unreadable-directory handling rather than
-reimplementing them.
+reimplementing them. A report table's text — a dollar figure, a delta, a direction line — comes
+from `scripts/doctor-format.mjs`, a leaf that imports nothing from the repo.
 
 `plugin.json`'s `userConfig` descriptions are one of the five hand-kept copies of the config
 knobs that `references/config.md` § The knob roster enumerates — the other four are that

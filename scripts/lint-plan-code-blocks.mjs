@@ -13,33 +13,13 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { makeTempDir } from "./temp-dir.mjs";
+import { isMain } from "./is-main.mjs";
 
-const args = process.argv.slice(2);
 const USAGE =
   "lint-plan-code-blocks: usage: lint-plan-code-blocks.mjs <plan-path> | [--dir <root>]";
 const die = (msg) => { console.error(msg); process.exit(1); };
 
 const KNOWN_FLAGS = { "--dir": "value" };
-let root = null;
-let explicitPath = null;
-try {
-  // The only script here that legitimately takes a positional, so it is the only one that opts
-  // out of cli-flags.mjs's default refusal of bare tokens.
-  const { flags, positionals } = parseFlags(args, KNOWN_FLAGS, { allowPositionals: true });
-  if (positionals.length > 1) die(`${USAGE}\nlint-plan-code-blocks: unexpected extra argument "${positionals[1]}"`);
-  root = requireValue(flags, "--dir") ?? null;
-  explicitPath = positionals[0] ?? null;
-} catch (err) {
-  // A flag whose value is missing, or that was never read at all, is a usage error, never a
-  // silently absent flag.
-  die(`${USAGE}\nlint-plan-code-blocks: ${err.message}`);
-}
-// The two name different targets; preferring one silently is the defect class this gate exists
-// to catch, so the combination is refused rather than resolved.
-if (explicitPath !== null && root !== null)
-  die(`${USAGE}\nlint-plan-code-blocks: a plan path and --dir name different targets — pass one`);
-if (root === null) root = process.cwd();
-
 const SCAN_DIRS = ["docs/superpowers/plans", "docs/superpowers/specs"];
 const LINTED_LANGS = new Set(["js", "javascript", "mjs"]);
 // Non-greedy match between paired ```lang\n fences and a line-starting closing ```: plan
@@ -53,39 +33,11 @@ function mdFiles(dir) {
     .map((name) => join(dir, name));
 }
 
-let files;
-if (explicitPath !== null) {
-  // Handed a target and unable to read it: a gate that was pointed at something and found
-  // nothing has not passed.
-  if (!existsSync(explicitPath))
-    die(`lint-plan-code-blocks: ${explicitPath}: no such file`);
-  // existsSync is equally true for a directory and for a file this process may not open, and
-  // both reach readFileSync below, where they throw a raw Node stack trace that reads as a
-  // broken tool rather than a failed gate. Refuse them here in the same path-naming style.
-  if (!statSync(explicitPath).isFile())
-    die(`lint-plan-code-blocks: ${explicitPath}: not a file`);
-  try {
-    accessSync(explicitPath, constants.R_OK);
-  } catch {
-    die(`lint-plan-code-blocks: ${explicitPath}: not readable`);
-  }
-  files = [explicitPath];
-} else {
-  files = SCAN_DIRS.flatMap((d) => mdFiles(join(root, d)));
-  if (files.length === 0) {
-    // The scan dirs are gitignored and normally absent; a discovery sweep that finds nothing
-    // is the expected case, not a failure. Only an explicit target makes emptiness an error.
-    console.log(`lint-plan-code-blocks: no plan/spec files found under ${root}`);
-    process.exit(0);
-  }
-}
-
-const failures = [];
-
-for (const file of files) {
-  const text = readFileSync(file, "utf8");
+// `findings` carry their own `${planPath}: ` locator and no script prefix; the CLI prints them bare.
+export function codeBlocksLeg(planText, { planPath }) {
+  const findings = [];
   let blockNum = 0;
-  for (const match of text.matchAll(FENCE_RE)) {
+  for (const match of planText.matchAll(FENCE_RE)) {
     const lang = match[1].toLowerCase();
     const code = match[2];
     if (!LINTED_LANGS.has(lang)) continue;
@@ -97,18 +49,75 @@ for (const file of files) {
       const result = spawnSync(process.execPath, ["--check", tmpFile], { encoding: "utf8" });
       if (result.status !== 0) {
         const firstLine = (result.stderr ?? "").split("\n").find((l) => l.trim() !== "") ?? "(no output)";
-        failures.push(`${file}: block ${blockNum} -- ${firstLine}`);
+        findings.push(`${planPath}: block ${blockNum} -- ${firstLine}`);
       }
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   }
+  return { findings, ok: "ok", notes: [] };
 }
 
-if (failures.length > 0) {
-  for (const f of failures) console.error(f);
-  process.exit(1);
+function main() {
+  const args = process.argv.slice(2);
+  let root = null;
+  let explicitPath = null;
+  try {
+    // The only script here that legitimately takes a positional, so it is the only one that opts
+    // out of cli-flags.mjs's default refusal of bare tokens.
+    const { flags, positionals } = parseFlags(args, KNOWN_FLAGS, { allowPositionals: true });
+    if (positionals.length > 1) die(`${USAGE}\nlint-plan-code-blocks: unexpected extra argument "${positionals[1]}"`);
+    root = requireValue(flags, "--dir") ?? null;
+    explicitPath = positionals[0] ?? null;
+  } catch (err) {
+    // A flag whose value is missing, or that was never read at all, is a usage error, never a
+    // silently absent flag.
+    die(`${USAGE}\nlint-plan-code-blocks: ${err.message}`);
+  }
+  // The two name different targets; preferring one silently is the defect class this gate exists
+  // to catch, so the combination is refused rather than resolved.
+  if (explicitPath !== null && root !== null)
+    die(`${USAGE}\nlint-plan-code-blocks: a plan path and --dir name different targets — pass one`);
+  if (root === null) root = process.cwd();
+
+  let files;
+  if (explicitPath !== null) {
+    // Handed a target and unable to read it: a gate that was pointed at something and found
+    // nothing has not passed.
+    if (!existsSync(explicitPath))
+      die(`lint-plan-code-blocks: ${explicitPath}: no such file`);
+    // existsSync is equally true for a directory and for a file this process may not open, and
+    // both reach readFileSync below, where they throw a raw Node stack trace that reads as a
+    // broken tool rather than a failed gate. Refuse them here in the same path-naming style.
+    if (!statSync(explicitPath).isFile())
+      die(`lint-plan-code-blocks: ${explicitPath}: not a file`);
+    try {
+      accessSync(explicitPath, constants.R_OK);
+    } catch {
+      die(`lint-plan-code-blocks: ${explicitPath}: not readable`);
+    }
+    files = [explicitPath];
+  } else {
+    files = SCAN_DIRS.flatMap((d) => mdFiles(join(root, d)));
+    if (files.length === 0) {
+      // The scan dirs are gitignored and normally absent; a discovery sweep that finds nothing
+      // is the expected case, not a failure. Only an explicit target makes emptiness an error.
+      console.log(`lint-plan-code-blocks: no plan/spec files found under ${root}`);
+      process.exit(0);
+    }
+  }
+
+  const failures = files.flatMap(
+    (file) => codeBlocksLeg(readFileSync(file, "utf8"), { planPath: file }).findings,
+  );
+
+  if (failures.length > 0) {
+    for (const f of failures) console.error(f);
+    process.exit(1);
+  }
+
+  console.log("lint-plan-code-blocks: ok");
+  process.exit(0);
 }
 
-console.log("lint-plan-code-blocks: ok");
-process.exit(0);
+if (isMain(import.meta.url, process.argv[1])) main();

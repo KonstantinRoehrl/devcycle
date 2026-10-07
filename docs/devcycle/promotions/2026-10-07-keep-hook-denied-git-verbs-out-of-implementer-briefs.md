@@ -1,0 +1,14 @@
+# Keep hook-denied git verbs out of implementer briefs
+- promotion-type: doc-edit
+- cluster-signature: novel:hook-denied-git-verbs-in-dispatch-briefs|4 occurrences|2 sessions
+- files-touched: docs/devcycle/lessons.md
+- affected-files: docs/devcycle/lessons.md
+- landed: 2026-10-07
+- commit: 
+- plugin-version: 0.22.1
+- sourced-from-memory: true
+- culprit-id: novel:hook-denied-git-verbs-in-dispatch-briefs
+- rung: r2
+- audience: repo-devs
+- verify: journal-recurrence
+- aliases: 

@@ -2,7 +2,7 @@
 // against synthetic transcripts. No real session transcript is ever read.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, chmodSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, appendFileSync, rmSync, copyFileSync, chmodSync, readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,8 +20,10 @@ import {
   renderReport, complianceIssueBody, COMPLIANCE_TYPES, NoComplianceCandidateError,
   formatComplianceCandidate, parseDraftedMarkers, complianceType, COMPLIANCE_TITLES,
   ENTRY_TAGS, PLAYBOOK_STAGE, stageSignal, splitReason, provisionalCostUSD, excludedRequestsOf, excludedNote, stageByVersionTable,
+  owningSession, readRecords, inWindow, summarizeCorpus, groupFilesBySession, issueDraftLines, unpricedModelIssueBody, repoShape, UNPRICED_MODEL_SLUG,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
+import { usd } from "../../scripts/doctor-format.mjs";
 
 const SCRIPT = new URL("../../scripts/doctor.mjs", import.meta.url).pathname;
 
@@ -1172,38 +1174,83 @@ test("doctor.mjs exports its transcript-walk helpers", async () => {
     assert.equal(typeof m[name], "function", `${name} must be exported`);
 });
 
+// The static import closure of `entry` under `scriptsDir`: every module reachable through a
+// double-quoted relative `from "./x.mjs"` (imports, re-exports and multi-line import lists all end
+// in that form). It is a text walk, which is sound only while the closure has no dynamic
+// `import(` and no comment spelling out an import; the test below the helper pins the first, and a
+// stray comment merely copies one module too many.
+function importClosure(scriptsDir, entry) {
+  const seen = new Set();
+  const visit = (name) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    const text = readFileSync(join(scriptsDir, name), "utf8");
+    for (const m of text.matchAll(/from "\.\/([^"]+\.mjs)"/g)) visit(m[1]);
+  };
+  visit(entry);
+  return [...seen].sort();
+}
+
+const SCRIPTS_DIR = new URL("../../scripts/", import.meta.url).pathname;
+
+test("importClosure follows imports, re-exports and cycles, and each module once", () => {
+  const dir = makeTempDir("doctor-closure-");
+  try {
+    writeFileSync(join(dir, "a.mjs"), 'import { x } from "./b.mjs";\nimport os from "node:os";\n');
+    writeFileSync(join(dir, "b.mjs"), 'import {\n  y,\n} from "./c.mjs";\nimport { a } from "./a.mjs";\n');
+    writeFileSync(join(dir, "c.mjs"), 'export { z } from "./d.mjs";\n');
+    writeFileSync(join(dir, "d.mjs"), "export const z = 1;\n");
+    writeFileSync(join(dir, "unrelated.mjs"), "export const u = 1;\n");
+    assert.deepEqual(importClosure(dir, "a.mjs"), ["a.mjs", "b.mjs", "c.mjs", "d.mjs"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor.mjs's import closure has no dynamic import and no side-effect-only or single-quoted import", () => {
+  // importClosure reads only `from "./x.mjs"`; a module loaded any other way would be missing from
+  // the copy installDoctor builds, and --drift would fail with a module-not-found stack.
+  for (const name of importClosure(SCRIPTS_DIR, "doctor.mjs")) {
+    const text = readFileSync(join(SCRIPTS_DIR, name), "utf8");
+    assert.doesNotMatch(text, /\bimport\(/, `${name} imports dynamically`);
+    assert.doesNotMatch(text, /^import ["']/m, `${name} has a side-effect-only import`);
+    assert.doesNotMatch(text, /from '\.\//, `${name} imports with single quotes`);
+  }
+});
+
 // Installs a runnable copy of doctor.mjs at <dir>/scripts/, so the copy's own location —
 // not the working directory — is what its changelog resolution has to work from. `changelog`
-// null means the tree ships no docs/configuration/config-changelog.md at all.
-function installDoctor(changelog) {
+// null means the tree ships no docs/configuration/config-changelog.md at all. The copy is
+// doctor.mjs's whole static import closure, computed rather than listed: a hand list went stale
+// each time doctor.mjs gained a module, and a copy missing one cannot be loaded at all (#236).
+function installDoctor(changelog, scriptsDir = SCRIPTS_DIR) {
   // realpath: on macOS the temp dir is a symlink, and Node resolves an ESM entry point to its
   // real path — so an unresolved path would make the script's own `is this the entry point`
   // check fail and main() would never run.
   const dir = realpathSync(makeTempDir("doctor-install-"));
   mkdirSync(join(dir, "scripts"), { recursive: true });
-  // promotions.mjs travels with it: doctor.mjs imports readPromotions from it to name what each
-  // version shipped, so a copy without it cannot be loaded at all. This list is doctor.mjs's whole
-  // load-time import closure — a copy missing any of it cannot be loaded, so --drift would report a
-  // module-not-found stack rather than the doctor: diagnostic these tests pin. doctor → verification
-  // → {journal → run-record → {stamp, git-identity}, semver}, plus pricing, promotions, cli-flags
-  // and jsonl (readRecords' streaming reader). run-record.mjs re-exports gitToplevel from
-  // git-identity.mjs, so that module is now part of the closure too. promotions.mjs imports
-  // fieldText from md-field.mjs, so md-field.mjs is in the closure too. verification.mjs reads the
-  // severity-weighting policy via reinforcement-policy.mjs, so that module is in the closure too.
-  // verification.mjs imports lessonKind and isConsolidated from lessons.mjs, so lessons.mjs is in
-  // the closure too.
-  for (const name of [
-    "doctor.mjs", "atomic-write.mjs", "pricing.mjs", "promotions.mjs", "cli-flags.mjs",
-    "jsonl.mjs", "verification.mjs", "reinforcement-policy.mjs", "journal.mjs", "semver.mjs", "run-record.mjs", "stamp.mjs",
-    "git-identity.mjs", "md-field.mjs", "lessons.mjs",
-  ])
-    copyFileSync(new URL(`../../scripts/${name}`, import.meta.url).pathname, join(dir, "scripts", name));
+  for (const name of importClosure(scriptsDir, "doctor.mjs"))
+    copyFileSync(join(scriptsDir, name), join(dir, "scripts", name));
   if (changelog !== null) {
     mkdirSync(join(dir, "docs", "configuration"), { recursive: true });
     writeFileSync(join(dir, "docs", "configuration", "config-changelog.md"), changelog, "utf8");
   }
   return dir;
 }
+
+test("installDoctor copies a module that doctor.mjs imports and no list names", () => {
+  const source = makeTempDir("doctor-fresh-source-");
+  let dir;
+  try {
+    writeFileSync(join(source, "doctor.mjs"), 'import { fresh } from "./fresh-module.mjs";\n');
+    writeFileSync(join(source, "fresh-module.mjs"), "export const fresh = 1;\n");
+    dir = installDoctor(null, source);
+    assert.ok(existsSync(join(dir, "scripts", "fresh-module.mjs")), "the freshly imported module was not copied");
+  } finally {
+    rmSync(source, { recursive: true, force: true });
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 const yamlChangelog = (...records) => ["# Config changelog", "", "```yaml", ...records, "```", ""].join("\n");
 
@@ -2405,9 +2452,9 @@ test("complianceIssueBody: an inherited-model draft body screens clean through r
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
-test("COMPLIANCE_TYPES names exactly the four emitComplianceCandidates types", () => {
+test("COMPLIANCE_TYPES names exactly the five emitComplianceCandidates types", () => {
   assert.deepEqual([...COMPLIANCE_TYPES].sort(),
-    ["general-purpose-search", "inherited-model", "main-thread-browser", "missing-workload"]);
+    ["general-purpose-search", "inherited-model", "main-thread-browser", "missing-workload", "sensor-inactive"]);
 });
 
 // FIX A: the compliance-type constant is now load-bearing, not just documentation. Three
@@ -2572,12 +2619,33 @@ test("resolveDepth: an exact model carries no provisional marker", () => {
   assert.equal("windowProvisionalAs" in r, false);
 });
 
-test("resolveDepth: a model with no priced family refuses, naming the file that fixes it", () => {
+test("resolveDepth: a model with no priced family is measured against an assumed window, labelled", () => {
   const { root, cwd } = depthFixture("sess-5568", [turnWithUsage("claude-mythos-9", usage(1, 2, 3, 4))]);
-  assert.throws(
-    () => resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-5568", CLAUDE_DOCTOR_PROJECTS: root }, cwd),
-    /claude-mythos-9 is not in the pricing table \(scripts\/pricing\.mjs\)/,
+  const r = resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-5568", CLAUDE_DOCTOR_PROJECTS: root }, cwd);
+  assert.equal(r.window, 1_000_000);
+  assert.equal(r.windowAssumed, true);
+});
+
+test("resolveDepth: the last usage record wins and a torn trailing line is skipped", () => {
+  const { root, cwd, slug } = depthFixture("sess-5570", [
+    turnWithUsage("claude-opus-5", usage(10, 20, 30, 5)),
+    turnWithUsage("claude-opus-5", usage(100, 200, 300, 5)),
+    { type: "user", message: { content: "a later line that carries no usage" } },
+  ]);
+  // A transcript is appended live, so its last line may be cut mid-record. This one contains "usage",
+  // so it passes the cheap substring filter and reaches the parser, which must skip it.
+  appendFileSync(
+    join(slug, "sess-5570.jsonl"),
+    '{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":9999',
   );
+  try {
+    const r = resolveDepth({ CLAUDE_CODE_SESSION_ID: "sess-5570", CLAUDE_DOCTOR_PROJECTS: root }, cwd);
+    assert.equal(r.depth, 600, "the last complete usage record (100+200+300) must win");
+    assert.equal(r.model, "claude-opus-5");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("cli: --depth names the family a provisional window was assumed from", () => {
@@ -2677,4 +2745,471 @@ test("stageByVersionTable: names the versions whose medians leave out excluded r
     withExcluded({ id: "a2", pluginVersion: "0.22.0" }, { "claude-mythos-9": 3 }),
   ]);
   assert.deepEqual(t.excludedVersions, ["0.22.0"]);
+});
+
+// --- corpus streaming: output must equal the pre-change whole-corpus pass ---
+
+const STREAM_SINCE = "2026-07-10T00:00:00.000Z";
+const STREAM_UNTIL = "2026-07-20T00:00:00.000Z";
+
+// sess-aaaa: devcycle, a main transcript plus a subagent transcript, plus one unpriced-model turn.
+// sess-bbbb: devcycle, previous window only. sess-cccc: not devcycle. sess-dddd: devcycle, straddles
+// the --since boundary. sess-eeee: devcycle, before both windows. Timestamps are fixed and --until is
+// pinned, because an unpinned previous window is relative to Date.now().
+function streamCorpusDir() {
+  const dir = makeTempDir("doctor-stream-");
+  const proj = join(dir, "-stream-project");
+  mkdirSync(join(proj, "sess-aaaa", "subagents"), { recursive: true });
+  const write = (rel, records) =>
+    writeFileSync(join(proj, rel), records.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  const t = (sessionId, timestamp, over = {}) => turn({ sessionId, timestamp, ...over });
+  write("sess-aaaa.jsonl", [
+    t("sess-aaaa", "2026-07-12T10:00:00.000Z", { attributionSkill: "devcycle:cycle" }),
+    t("sess-aaaa", "2026-07-13T10:00:00.000Z"),
+    t("sess-aaaa", "2026-07-13T11:00:00.000Z", {
+      message: { model: "claude-mythos-9", usage: usage(10, 100, 1000, 20) },
+    }),
+  ]);
+  write(join("sess-aaaa", "subagents", "agent-1.jsonl"), [
+    t("sess-aaaa", "2026-07-12T10:30:00.000Z", { isSidechain: true }),
+  ]);
+  write("sess-bbbb.jsonl", [
+    t("sess-bbbb", "2026-07-05T10:00:00.000Z", { attributionSkill: "devcycle:cycle" }),
+    t("sess-bbbb", "2026-07-06T10:00:00.000Z"),
+  ]);
+  write("sess-cccc.jsonl", [t("sess-cccc", "2026-07-12T10:00:00.000Z", { attributionSkill: "graphify" })]);
+  write("sess-dddd.jsonl", [
+    t("sess-dddd", "2026-07-08T10:00:00.000Z", { attributionSkill: "devcycle:cycle" }),
+    t("sess-dddd", "2026-07-15T10:00:00.000Z"),
+  ]);
+  write("sess-eeee.jsonl", [t("sess-eeee", "2026-06-01T10:00:00.000Z", { attributionSkill: "devcycle:cycle" })]);
+  return dir;
+}
+
+// The pre-change algorithm, kept here as the oracle: buffer every record of the corpus per owning
+// session, then summarize each window over that map.
+function wholeCorpusReference(files, args) {
+  const groups = new Map();
+  for (const file of files) {
+    const key = owningSession(file);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(...readRecords(file));
+  }
+  const window = (since, until) => {
+    const out = [];
+    for (const [key, records] of groups) {
+      if (!args.all && !isDevcycleSession(records)) continue;
+      const windowed = records.filter((r) => inWindow(r.timestamp, since, until));
+      if (windowed.length === 0) continue;
+      const sessionId = records.find((r) => r.sessionId)?.sessionId ?? key;
+      out.push(summarizeSession(sessionId, windowed, new Map()));
+    }
+    return out;
+  };
+  let previousSessions = null;
+  if (args.since) {
+    const sinceMs = new Date(args.since).getTime();
+    const span = new Date(args.until).getTime() - sinceMs;
+    previousSessions = window(new Date(sinceMs - span).toISOString(), args.since);
+  }
+  return { sessions: window(args.since, args.until), previousSessions };
+}
+
+const streamIsolation = () => {
+  const runsDir = makeTempDir("doctor-runs-");
+  const outDir = makeTempDir("doctor-out-");
+  const cwd = makeTempDir("doctor-cwd-");
+  return {
+    env: { DEVCYCLE_RUNS_DIR: runsDir, DEVCYCLE_DOCTOR_DIR: outDir },
+    cwd,
+    cleanup: () => {
+      for (const dir of [runsDir, outDir, cwd]) rmSync(dir, { recursive: true, force: true });
+    },
+  };
+};
+
+test("groupFilesBySession keys a subagent transcript to its owning session and holds paths only", () => {
+  const files = [
+    join("/p", "-proj", "sess-a.jsonl"),
+    join("/p", "-proj", "sess-a", "subagents", "agent-1.jsonl"),
+    join("/p", "-proj", "sess-b.jsonl"),
+  ];
+  const groups = groupFilesBySession(files);
+  assert.deepEqual([...groups.keys()], ["sess-a", "sess-b"]);
+  assert.deepEqual(groups.get("sess-a"), [files[0], files[1]]);
+  assert.deepEqual(groups.get("sess-b"), [files[2]]);
+});
+
+for (const [name, flags, expectedCurrent, expectPrevious] of [
+  ["default", [], 4, false],
+  ["--all", ["--all"], 5, false],
+  ["--since", ["--since", STREAM_SINCE, "--until", STREAM_UNTIL], 2, true],
+  ["--all --since", ["--all", "--since", STREAM_SINCE, "--until", STREAM_UNTIL], 3, true],
+]) {
+  test(`summarizeCorpus equals the whole-corpus pass: ${name}`, () => {
+    const dir = streamCorpusDir();
+    try {
+      const args = parseArgs(["--dir", dir, ...flags]);
+      const files = findTranscriptFiles(dir);
+      const expected = wholeCorpusReference(files, args);
+      // Vacuity guards: the fixture must actually exercise membership, the subagent merge and the
+      // straddling session, or equality of two empty-ish results would prove nothing.
+      assert.equal(expected.sessions.length, expectedCurrent);
+      assert.equal(expected.previousSessions !== null, expectPrevious);
+      if (expectPrevious) assert.equal(expected.previousSessions.length, 2);
+      assert.deepEqual(summarizeCorpus(files, args, new Map()), expected);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const [name, flags, expectedSessions] of [
+  ["default", [], 4],
+  ["--all", ["--all"], 5],
+  ["--since", ["--since", STREAM_SINCE, "--until", STREAM_UNTIL], 2],
+]) {
+  test(`cli --json: per-session output equals the whole-corpus reference's report sessions: ${name}`, () => {
+    const dir = streamCorpusDir();
+    const { env, cwd, cleanup } = streamIsolation();
+    try {
+      const res = run(["--dir", dir, "--json", ...flags], env, cwd);
+      assert.equal(res.status, 0, res.stderr);
+      const byId = (list) => [...list].sort((a, b) => a.id.localeCompare(b.id));
+      const args = parseArgs(["--dir", dir, ...flags]);
+      const expected = buildJsonReport(wholeCorpusReference(findTranscriptFiles(dir), args).sessions).sessions;
+      assert.equal(expected.length, expectedSessions);
+      assert.deepEqual(byId(JSON.parse(res.stdout).sessions), byId(JSON.parse(JSON.stringify(expected))));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+}
+
+test("cli --issue-body unpriced-model: the draft equals the one built from the whole-corpus reference", () => {
+  const dir = streamCorpusDir();
+  const { env, cwd, cleanup } = streamIsolation();
+  try {
+    const res = run(["--dir", dir, "--issue-body", UNPRICED_MODEL_SLUG], env, cwd);
+    assert.equal(res.status, 0, res.stderr);
+    const args = parseArgs(["--dir", dir]);
+    const reference = wholeCorpusReference(findTranscriptFiles(dir), args);
+    const draft = unpricedModelIssueBody(reference.sessions, repoShape(cwd));
+    assert.equal(res.stdout, issueDraftLines(draft).join("\n") + "\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  }
+});
+
+// --- the regression itself: a corpus larger than the heap, each session small ---
+
+// 250 sessions x 130 turns x ~1 KB of content is about 40 MB on disk. Calibrated while planning:
+// the whole-corpus pass aborted on it at every cap from 16 to 40 MB with --since.
+function writeHeapCorpus(dir, { sessions = 250, turnsPerSession = 130, padBytes = 1000 } = {}) {
+  const proj = join(dir, "-heap-project");
+  mkdirSync(proj, { recursive: true });
+  const pad = "x".repeat(padBytes);
+  for (let s = 0; s < sessions; s += 1) {
+    const sessionId = `sess-${String(s).padStart(12, "0")}`;
+    const lines = [];
+    for (let i = 0; i < turnsPerSession; i += 1) {
+      lines.push(JSON.stringify(turn({
+        sessionId,
+        timestamp: `2026-07-20T10:${String(i % 60).padStart(2, "0")}:00.000Z`,
+        attributionSkill: i === 0 ? "devcycle:cycle" : undefined,
+        message: { model: "claude-opus-5", usage: usage(10, 100, 1000, 20), content: [{ type: "text", text: pad }] },
+      })));
+    }
+    writeFileSync(join(proj, `${sessionId}.jsonl`), lines.join("\n") + "\n");
+  }
+}
+
+const HEAP_CAP_MB = 24;
+
+test("doctor completes at a small heap over a corpus larger than the heap", () => {
+  const dir = makeTempDir("doctor-heap-");
+  const { env, cwd, cleanup } = streamIsolation();
+  try {
+    writeHeapCorpus(dir);
+    const res = spawnSync(
+      process.execPath,
+      [`--max-old-space-size=${HEAP_CAP_MB}`, SCRIPT, "--dir", dir, "--since", "2026-07-01", "--json"],
+      // Stdout is ignored: a --json run over this corpus is far past spawnSync's default 1 MB buffer.
+      { cwd, stdio: ["ignore", "ignore", "pipe"], encoding: "utf8",
+        env: { ...process.env, CLAUDE_CODE_SESSION_ID: "", PATH: "", ...env } },
+    );
+    // An out-of-memory abort is { status: null, signal: "SIGABRT" } under spawnSync, not 134.
+    assert.equal(res.signal, null, `aborted by ${res.signal} at a ${HEAP_CAP_MB} MB heap`);
+    assert.equal(res.status, 0, res.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  }
+});
+
+// --- the overview, end to end through the CLI (#302) ---
+
+// Two plugin versions of three settled sessions each, one session whose version and stage cannot be
+// read, and one session written a minute ago, which is still in flight. A turn that reads a
+// playbook under .../devcycle/devcycle/<version>/ carries both signals at once: the stage
+// (the playbook's) and the plugin version (the path's).
+function overviewCorpusDir({ unpricedInNewest = false } = {}) {
+  const dir = makeTempDir("doctor-overview-");
+  const proj = join(dir, "-overview-project");
+  mkdirSync(proj, { recursive: true });
+  const read = (version) => ({
+    type: "tool_use", name: "Read",
+    input: { file_path: `/h/.claude/plugins/cache/devcycle/devcycle/${version}/playbooks/executing-waves.md` },
+  });
+  const session = (id, version, day, model = "claude-opus-5") => {
+    const lines = [
+      turn({ sessionId: id, timestamp: day, attributionSkill: "devcycle:cycle",
+        message: { model, usage: usage(10, 100, 1000, 20), content: version ? [read(version)] : [] } }),
+      turn({ sessionId: id, timestamp: day.replace("T10", "T11"), message: { model, usage: usage(10, 100, 1000, 20) } }),
+    ];
+    writeFileSync(join(proj, `${id}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  };
+  ["a", "b", "c"].forEach((x, i) => session(`sess-old-${x}`, "0.1.0", `2026-07-0${i + 1}T10:00:00.000Z`));
+  ["a", "b", "c"].forEach((x, i) => session(`sess-new-${x}`, "0.2.0", `2026-07-1${i + 1}T10:00:00.000Z`));
+  session("sess-nover", null, "2026-07-20T10:00:00.000Z");
+  session("sess-live", "0.2.0", new Date(Date.now() - 60_000).toISOString().replace(/\.\d+Z$/, ".000Z"));
+  if (unpricedInNewest) session("sess-unpriced", "0.2.0", "2026-07-14T10:00:00.000Z", "claude-mythos-9");
+  return dir;
+}
+
+const overviewRun = (flags, options) => {
+  const dir = overviewCorpusDir(options);
+  const { env, cwd, cleanup } = streamIsolation();
+  const res = run(["--dir", dir, ...flags], env, cwd);
+  rmSync(dir, { recursive: true, force: true });
+  cleanup();
+  return res;
+};
+
+const headingsInOrder = (stdout) =>
+  ["## Highlights", "## Overview", "## Trend summary", "## Workload (observed)"].map((h) => stdout.indexOf(h));
+
+// The Overview's own text, from its heading to the next section's. The full report's appendix
+// repeats the same figures in its own tables, so an assertion read off the whole output can be
+// satisfied by an appendix row while the Overview prints something else.
+const overviewOf = (stdout) => {
+  const start = stdout.indexOf("## Overview\n");
+  assert.ok(start !== -1, "no ## Overview heading in the output");
+  const next = stdout.indexOf("\n## ", start);
+  const section = stdout.slice(start, next === -1 ? undefined : next);
+  assert.ok(section.includes("| Version |"), `the Overview section is empty: ${section}`);
+  return section;
+};
+
+for (const [name, flags] of [
+  ["a default run", []],
+  ["a windowed run", ["--since", "2026-07-01"]],
+  ["a run over every transcript", ["--all"]],
+]) {
+  test(`cli: ${name} prints the Overview and the Trend summary between Highlights and Workload`, () => {
+    const res = overviewRun(flags);
+    assert.equal(res.status, 0, res.stderr);
+    const at = headingsInOrder(res.stdout);
+    assert.ok(at.every((p) => p !== -1), `a heading is missing: ${at}`);
+    assert.deepEqual(at, [...at].sort((a, b) => a - b), "the headings are out of order");
+    // Three sessions meet the cohort minimum, so the Sessions cell is the bare count.
+    assert.match(overviewOf(res.stdout), /^\| 0\.1\.0 \| 3 \| /m);
+    assert.match(res.stdout, /^- Trust: /m);
+  });
+}
+
+test("cli: the Overview marks a Sessions cell below the cohort minimum and leaves one at it bare", () => {
+  // From 2026-07-02 the window drops one 0.1.0 session: 0.1.0 has two sessions, 0.2.0 three.
+  const flags = ["--since", "2026-07-02"];
+  const { overview } = JSON.parse(overviewRun([...flags, "--json"]).stdout);
+  const sessionsOf = (version) => overview.versions.rows.find((r) => r.version === version)?.sessions;
+  const { minCohort } = overview.bands;
+  // Vacuity guard: the two rows have to straddle the minimum, or neither side of it is tested.
+  assert.equal(sessionsOf("0.1.0"), minCohort - 1);
+  assert.equal(sessionsOf("0.2.0"), minCohort);
+  const res = overviewRun(flags);
+  assert.equal(res.status, 0, res.stderr);
+  const section = overviewOf(res.stdout);
+  assert.match(section, new RegExp(`^\\| 0\\.1\\.0 \\| ${minCohort - 1} \\(low n\\) \\| `, "m"));
+  assert.match(section, new RegExp(`^\\| 0\\.2\\.0 \\| ${minCohort} \\| `, "m"));
+});
+
+test("cli: a run with no findings still prints the Overview and the Trend summary", () => {
+  const flags = ["--since", "2026-07-01"];
+  const json = JSON.parse(overviewRun([...flags, "--json"]).stdout);
+  // Vacuity guard: the fixture has to be a zero-findings corpus, or this test is the default run again.
+  assert.equal(json.candidates.length, 0, `the fixture raised candidates: ${JSON.stringify(json.candidates)}`);
+  const res = overviewRun(flags);
+  assert.equal(res.status, 0, res.stderr);
+  assert.ok(headingsInOrder(res.stdout).every((p) => p !== -1));
+});
+
+test("cli: --depth and --drift print neither the Overview nor the Trend summary", () => {
+  const cwd = makeTempDir("doctor-cwd-");
+  writeFileSync(join(cwd, "CLAUDE.md"), "profile: standard\n", "utf8");
+  try {
+    const drift = run(["--drift", join(cwd, "CLAUDE.md")], { CLAUDE_PLUGIN_ROOT: "" }, cwd);
+    assert.equal(drift.status, 0, drift.stderr);
+    assert.doesNotMatch(drift.stdout, /## Overview|## Trend summary/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+  const { root, cwd: depthCwd } = depthFixture("sess-7777", [turnWithUsage("claude-opus-5", usage(0, 0, 152_340, 10))]);
+  try {
+    const res = run(["--depth"], { CLAUDE_CODE_SESSION_ID: "sess-7777", CLAUDE_DOCTOR_PROJECTS: root }, depthCwd);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /^depth: 152340 tokens/);
+    assert.doesNotMatch(res.stdout, /## Overview|## Trend summary/);
+  } finally {
+    for (const d of [root, depthCwd]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// The top-level keys of --json before the overview was added (commit 66dbb21's main() and
+// buildJsonReport).
+const PRE_OVERVIEW_JSON_KEYS = [
+  "window", "totals", "pricesAsOf", "sessions", "candidates", "version_cohorts", "review_depth_cohorts",
+  "direction_of_travel", "inFlight", "cost_band", "version_profile_cohorts", "stage_by_version", "stage_window",
+  "culprits", "wins", "outer_loop", "verification", "compiled_knowledge", "cycles", "revert_skipped",
+];
+
+test("cli --json: the overview comes first, every earlier key survives, it reconciles with the totals, and carries the blocks the markdown run prints", () => {
+  const dir = overviewCorpusDir({ unpricedInNewest: true });
+  const { env, cwd, cleanup } = streamIsolation();
+  try {
+    const json = run(["--dir", dir, "--json"], env, cwd);
+    const markdown = run(["--dir", dir], env, cwd);
+    assert.equal(json.status, 0, json.stderr);
+    const out = JSON.parse(json.stdout);
+    assert.equal(Object.keys(out)[0], "overview");
+    // Every top-level key --json carried before the overview existed is still there, and the
+    // overview is the only key added: window and totals come from main(), the rest from
+    // buildJsonReport, so a test of buildJsonReport alone cannot see the first two go missing.
+    assert.deepEqual(Object.keys(out).sort(), ["overview", ...PRE_OVERVIEW_JSON_KEYS].sort());
+    // The two rows that changed shape: every version_cohorts row counts the requests it left
+    // out, and a Δ withheld for unpriced requests says so in version_profile_cohorts too.
+    assert.ok(out.version_cohorts.length > 0, "no version_cohorts rows to check");
+    for (const row of out.version_cohorts) assert.equal(typeof row.excluded, "number", `${row.version} has no excluded count`);
+    assert.ok(out.version_cohorts.find((r) => r.version === "0.2.0").excluded > 0);
+    const newestProfileRow = out.version_profile_cohorts.find((r) => r.version === "0.2.0");
+    assert.ok(newestProfileRow, "no version_profile_cohorts row for 0.2.0");
+    assert.equal(newestProfileRow.delta.reason, "unpriced");
+    const { reconciliation } = out.overview;
+    assert.equal(reconciliation.inFlightSessions, 1);
+    assert.ok(Math.abs(reconciliation.settledTotal + reconciliation.inFlightDollars - out.totals.costUSD) < 1e-3,
+      `${reconciliation.settledTotal} + ${reconciliation.inFlightDollars} != ${out.totals.costUSD}`);
+    // The unpriced session sits in the newest version: flagged, and its delta withheld.
+    const newest = out.overview.versions.rows.find((r) => r.version === "0.2.0");
+    assert.equal(newest.unpriced, true);
+    assert.equal(newest.delta.reason, "unpriced");
+    assert.ok(markdown.stdout.includes(out.overview.markdown.overview));
+    assert.ok(markdown.stdout.includes(out.overview.markdown.trendSummary));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  }
+});
+
+test("cli: an in-flight forward-filled session is in neither the Overview's inferred-stage share nor its direction line", () => {
+  const dir = overviewCorpusDir();
+  const { env, cwd, cleanup } = streamIsolation();
+  try {
+    // One run per session, all in one matched cohort and none with a stage window, so every
+    // session stays forward-filled. Settled, 0.1.0 has three runs and 0.2.0 two: no direction.
+    // The in-flight session is 0.2.0's third run, the one that would make a direction readable.
+    const repo = join(env.DEVCYCLE_RUNS_DIR, "overview-repo");
+    mkdirSync(repo);
+    [
+      ["sess-old-a", "0.1.0"], ["sess-old-b", "0.1.0"], ["sess-old-c", "0.1.0"],
+      ["sess-new-a", "0.2.0"], ["sess-new-b", "0.2.0"], ["sess-live", "0.2.0"],
+    ].forEach(([sessionId, pluginVersion], i) => {
+      const runId = String(i + 1).padStart(16, "0");
+      writeFileSync(join(repo, `${runId}.jsonl`), [
+        { kind: "run", runId, schemaVersion: 1, pluginVersion, profile: "standard", knobs: {} },
+        { kind: "session", runId, sessionHash: createHash("sha256").update(sessionId).digest("hex") },
+        { kind: "workload", runId, requestKind: "feature", insertions: 120, deletions: 30 },
+      ].map((o) => JSON.stringify(o)).join("\n") + "\n");
+    });
+    const json = run(["--dir", dir, "--json"], env, cwd);
+    const markdown = run(["--dir", dir], env, cwd);
+    assert.equal(json.status, 0, json.stderr);
+    assert.equal(markdown.status, 0, markdown.stderr);
+    const out = JSON.parse(json.stdout);
+
+    // Vacuity guards: the in-flight session is forward-filled, has spend, and is a run that
+    // would turn the direction from undetermined into a reading if it were counted.
+    const live = out.sessions.filter((s) => s.inFlight);
+    assert.equal(live.length, 1);
+    assert.equal(live[0].attribution.source, "forward-filled");
+    assert.ok(live[0].runId && live[0].workload, "the in-flight session is not a run");
+    const { settledTotal, inFlightDollars } = out.overview.reconciliation;
+    assert.ok(inFlightDollars > 0, "the in-flight session has no spend to leak");
+    assert.notEqual(corpusDirectionOfTravel(runAggregates(out.sessions)).direction, "insufficient-data");
+    assert.ok(out.sessions.filter((s) => !s.inFlight).every((s) => s.attribution.source === "forward-filled"),
+      "a settled session has a recorded stage, so the inferred share is not the whole settled spend");
+
+    const section = overviewOf(markdown.stdout);
+    assert.match(section, /^Direction of travel: undetermined \(/m);
+    assert.ok(section.includes(`- Inferred or unknown stage: ${usd(settledTotal)} (100.0% of settled spend)`),
+      `the inferred share counts more than the settled spend: ${section}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  }
+});
+
+// Four versions, each placed so one of the report's bands decides what the Overview prints: 0.1.0
+// and 0.2.0 at 14 turns a session and 0.3.0 at 15 climb 7.1% (past the 5% flat band, inside a 10%
+// one), and 0.4.0 has two sessions (under a cohort minimum and trend gate of 3, at a gate of 2).
+// Every turn is the same priced playbook read, so a session's cost is its turn count times one turn.
+function bandsCorpusDir() {
+  const dir = makeTempDir("doctor-overview-bands-");
+  const proj = join(dir, "-overview-project");
+  mkdirSync(proj, { recursive: true });
+  const playbook = (version) => ({ file_path: `/h/.claude/plugins/cache/devcycle/devcycle/${version}/playbooks/executing-waves.md` });
+  [["0.1.0", 3, 14], ["0.2.0", 3, 14], ["0.3.0", 3, 15], ["0.4.0", 2, 15]].forEach(([version, sessions, turns], v) => {
+    for (let s = 0; s < sessions; s++) {
+      const sessionId = `sess-${version}-${s}`;
+      const lines = Array.from({ length: turns }, (_, t) => toolTurn("Read", playbook(version), {
+        sessionId, attributionSkill: "devcycle:cycle",
+        timestamp: `2026-07-${String(v * 5 + s + 1).padStart(2, "0")}T10:${String(t).padStart(2, "0")}:00.000Z`,
+      }));
+      writeFileSync(join(proj, `${sessionId}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    }
+  });
+  return dir;
+}
+
+test("cli: the Overview's low-n marks and rising note follow the report's own bands", () => {
+  const dir = bandsCorpusDir();
+  const { env, cwd, cleanup } = streamIsolation();
+  try {
+    const json = run(["--dir", dir, "--json"], env, cwd);
+    const markdown = run(["--dir", dir], env, cwd);
+    assert.equal(json.status, 0, json.stderr);
+    assert.equal(markdown.status, 0, markdown.stderr);
+    const out = JSON.parse(json.stdout);
+
+    // Vacuity guards: the report's own trend calls the stage up, its climb over the reliable cells sits
+    // between a 5% and a 10% band, and 0.4.0 is two sessions with a two-session stage cell.
+    const execution = out.stage_by_version.rows.find((r) => r.stage === "execution");
+    assert.ok(execution, `no execution stage: ${JSON.stringify(out.stage_by_version.rows)}`);
+    assert.equal(execution.trend, "up");
+    const climb = ((execution.byVersion["0.3.0"].median - execution.byVersion["0.1.0"].median) /
+      execution.byVersion["0.1.0"].median) * 100;
+    assert.ok(climb > 5 && climb <= 10, `the climb is ${climb}%`);
+    assert.equal(execution.byVersion["0.4.0"].n, 2);
+    assert.equal(out.version_cohorts.find((c) => c.version === "0.4.0").sessions, 2);
+
+    const section = overviewOf(markdown.stdout);
+    assert.match(section, /^\| 0\.4\.0 \| 2 \(low n\) \| /m);
+    assert.match(section, /^\| execution \| \$[\d.]+ \| [\d.]+% \| up \|$/m);
+    assert.match(section, /^- execution: .*0\.3\.0 \$[\d.]+ \(n=3\) · 0\.4\.0 \$[\d.]+ \(n=2, low n\)$/m);
+    assert.match(section, /^- Steadily rising: execution$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  }
 });

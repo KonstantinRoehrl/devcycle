@@ -29,7 +29,7 @@ machinery a command loads by path.
 | [`/devcycle:review`](../commands/review.md) | Reviews a branch, the whole repository, or a named file set against criteria you confirm, and writes a ranked findings document; on a branch with an open PR, can opt in to filing those findings back onto it. Standalone. |
 | [`/devcycle:verify`](../commands/verify.md) | Walks an on-device checklist derived from a branch's diff — verification for code this session did not write. Standalone. |
 | [`/devcycle:learn`](../commands/learn.md) | Mines this repo's sessions and memory for recurring patterns and proposes doc and skill edits for confirmation; its report carries a per-period ledger netting recorded win savings against culprit cost, and a routing advisory comparing measured cost per accepted task against the cheapest cell that clears its minimum-dispatch floor, across the models this repo dispatched to. Standalone. |
-| [`/devcycle:doctor`](../commands/doctor.md) | Profiles token cost, context depth, model routing, and agent startup cost across devcycle sessions. Standalone. |
+| [`/devcycle:doctor`](../commands/doctor.md) | Profiles token cost, context depth, model routing, and agent startup cost across devcycle sessions; every cost-analysis reply carries a per-version and per-stage overview. Standalone. |
 | [`/devcycle:onboard`](../commands/onboard.md) | Bootstraps tier-2 setup: detects real build/test/lint commands, scaffolds `CLAUDE.md`, and proposes a permission allowlist. Standalone. |
 | [`/devcycle:maintain`](../commands/maintain.md) | Assesses a repository's longitudinal health — how its abstractions and history trend over time — and writes a ranked findings document. Read-only, standalone. |
 | [`/devcycle:reconcile`](../commands/reconcile.md) | The respond arm of the review write-back path: triages a PR's review comments into fixes and consent-gated replies that disclose Claude Code authorship, then resolves the threads it closed from its side. |
@@ -52,7 +52,7 @@ directly.
 | [`taking-the-fast-path`](playbooks/taking-the-fast-path/README.md) | Mini-cycle for confirmed-trivial requests. |
 | [`sweeping-mechanical-changes`](playbooks/sweeping-mechanical-changes/README.md) | Triage-confirmed bulk sweep behind a blast-radius gate. |
 | [`learning-from-sessions`](playbooks/learning-from-sessions/README.md) | Observe, propose, confirm, land: mines transcripts and memory for durable changes. |
-| [`profiling-sessions`](playbooks/profiling-sessions/README.md) | Runs and interprets the token, context, routing, and startup-cost analyzer; models the price table lacks are excluded from dollar figures and reported apart. |
+| [`profiling-sessions`](playbooks/profiling-sessions/README.md) | Runs and interprets the token, context, routing, and startup-cost analyzer; carries its script-rendered overview and trend summary into every cost-analysis reply; models the price table lacks are excluded from dollar figures and reported apart. |
 | [`onboarding-a-repo`](playbooks/onboarding-a-repo/README.md) | Detects a repo's real build/test/lint commands and scaffolds its setup. |
 | [`maintaining-the-repo`](playbooks/maintaining-the-repo/README.md) | The longitudinal-health engine behind `/devcycle:maintain`. |
 | [`receiving-review`](playbooks/receiving-review/README.md) | The respond arm of the review write-back path: the standalone reconcile stage that triages a PR's review comments into fixes and consent-gated replies that disclose Claude Code authorship, then resolves the threads it closed from its side. |
@@ -70,17 +70,21 @@ run locally.
 | [`workflows/lib/agent-cli.js`](../workflows/lib/agent-cli.js) | The subprocess layer both workflow engines share to drive `claude` in print mode. |
 | [`scripts/self-dev-check.mjs`](../scripts/self-dev-check.mjs) | The self-development landing guard, inert unless the repo under work is this plugin's own source: `--preflight` records what the installed copy holds when a run starts and reports how far it has drifted from the repo, `--assert` fails the finish stage when an expected deliverable is absent from the branch or the installed copy was written to during the run, and `--plugin-digest` mints the run record's content-based plugin identifier. |
 | [`scripts/tree-hash.mjs`](../scripts/tree-hash.mjs) | Content identity for a directory tree — the per-file hashes and rolling digest both the landing guard and the run record's plugin identifier read, independent of any version string or VCS state. |
+| [`scripts/depth-probe.mjs`](../scripts/depth-probe.mjs) | The depth gate's probe: measures one transcript's last usage record against the running model's context window and prints its depth band; `--agent <id>` measures a subagent's transcript instead of the session's. A model id that names no priced model or family version (after unwrapping `[1m]`, Bedrock and Vertex forms) is measured against an assumed 1M window, labelled as assumed; an unpriced version older than its family's newest priced model has no known window, so its band is reported unknown and the probe exits 1. |
+| [`scripts/plan-check.mjs`](../scripts/plan-check.mjs) | Planning's one plan gate: seven legs over the plan file, fail-closed on a missing `## Dispatch Map`, one compact line on success (plus a note count per leg that has notes); while a run is active it appends a `gate-ran` run-record event carrying `pass` or `fail`. |
 | [`bin/devcycle-root`](../bin/devcycle-root) | Prints this plugin's installed root. Claude Code puts `<plugin>/bin` on PATH, so plugin scripts named `"$(devcycle-root)/scripts/<name>.mjs"` resolve from any shell — including a dispatched subagent's, where `${CLAUDE_PLUGIN_ROOT}` is empty. Quote the substitution as shown, or a plugin root containing a space is word-split. |
 
 ## Hooks
 
-The hooks the plugin ships. No command loads them; each fires on a matched tool call.
+The hooks the plugin ships. No command loads them; each fires on a matched tool call, or — the
+dispatch-sensor — when a subagent stops.
 
 | Hook | What it does |
 | --- | --- |
 | [`hooks/block-main-thread-browser.mjs`](../hooks/block-main-thread-browser.mjs) | Registered on `PreToolUse` over `mcp__claude-in-chrome__.*`, it denies any browser tool call whose origin is not the `on-device-driver` subagent — the main thread included — so the coordinator cannot drive the browser at its own context depth ([`decisions/`](decisions/README.md), 2026-08-20). |
 | [`hooks/block-destructive-git.mjs`](../hooks/block-destructive-git.mjs) | Registered on `PreToolUse` over `Bash`. For a guarded dispatch origin (`task-reviewer`, `red-team-reviewer`, `implementer`) it denies destructive or ambiguous git subcommands (`checkout`/`reset`/`restore`/`clean`/`stash`/…), allowing only inspection commands and `git add -N`; on the main thread it denies `git stash` while a `.devcycle/state.md` at or above the call's `cwd` reports a stage other than `done` — `list`/`show` are excepted only when written plainly, because a stash behind a wrapper or a command substitution is denied on ambiguity. The structural backstop for the never-revert-a-sibling ban (#165, #235). |
 | [`hooks/workload-sensor.mjs`](../hooks/workload-sensor.mjs) | Registered on `PostToolUse` over `Bash`, it re-derives the run's `workload` record from `.devcycle/state.md` and git on each HEAD-advancing commit in an active cycle, so workload collection never depends on the finish stage running ([`playbooks/finishing-the-cycle/`](playbooks/finishing-the-cycle/README.md)). |
+| [`hooks/dispatch-sensor.mjs`](../hooks/dispatch-sensor.mjs) | Registered on `SubagentStop`, it appends one `agent-depth` run-record row per finished subagent whose session joined the active cycle's run — final context depth, model, tool uses, duration — marking `warn` above 150k and `breach` above 200k (with a `depth-breach` event). Observe-only: never blocks, always exits 0. |
 
 ## Agents
 

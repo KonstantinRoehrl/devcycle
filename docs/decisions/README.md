@@ -5,6 +5,95 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-07 — planning context safety, Plan A: the depth gate gets its own probe, the plan gates become one
+
+**Decision:** the depth gate runs `scripts/depth-probe.mjs` directly instead of `doctor.mjs --depth`
+(which stays, as an adapter), and a model id that does not parse as a priced family version is
+measured against an assumed 1M window, labelled, instead of refused; an unpriced version older than
+its family's newest priced model still fails the probe, its depth unknown. Budgets move by the
+measured amounts below; nothing is offset.
+
+**Why:** the gate loaded doctor's whole import closure to read one usage record, and a refusal on a
+brand-new model blinded the gate exactly when it is least trusted.
+
+**Fourth hook:** the plugin ships `hooks/dispatch-sensor.mjs`, registered in `hooks/hooks.json` on
+`SubagentStop` (D15). While `.devcycle/state.md` names a run it appends one `agent-depth` record
+per finished subagent of a session with a `session` row in that run — final context depth, model,
+tool uses, duration — marked `warn` above 150k and `breach` above 200k, and a breach also appends a
+`depth-breach` event. It only observes: it never blocks and always exits 0. It is the one hook
+allowed to read something larger than its input: beyond the state file and the run record it reads
+only the single transcript `agent_transcript_path` names, because the depth is nowhere else;
+`SubagentStop` is the one event that reports a background dispatch's finish — its Agent
+`PostToolUse` fires at launch with no counts (`docs/platform-notes.md` § (i)). This supersedes the
+2026-09-05 entry's "third hook".
+
+**Budgets:** every context budget below falls by the 3 bytes the shorter probe command saves in
+`references/delegation.md`: `playbooks/executing-waves.md` 103391 → 103388,
+`playbooks/finishing-the-cycle.md` 53027 → 53024, `playbooks/learning-from-sessions.md` 60715 → 60712,
+`playbooks/planning-waves.md` 68653 → 68650, `playbooks/receiving-review.md` 107511 → 107508,
+`playbooks/reviewing-code.md` 90759 → 90756, `playbooks/reviewing-the-branch.md` 54490 → 54487,
+`playbooks/scoping-the-request.md` 26641 → 26638, `playbooks/sweeping-mechanical-changes.md`
+80628 → 80625, `playbooks/taking-the-fast-path.md` 73753 → 73750, `playbooks/verifying-on-device.md`
+50014 → 50011 and `playbooks/writing-the-findings-document.md` 65477 → 65474;
+`playbooks/maintaining-the-repo.md` 63222 → 63216 (−3 more for its own inline gate command); and
+`playbooks/profiling-sessions.md` 46852 → 46831 (−3, plus 18 bytes of slack it already carried).
+Doctor's `sensor-inactive` finding then raised `playbooks/profiling-sessions.md` 46831 → 46850 (+19
+bytes, the slug named in its issue-drafting list). Collapsing the planning self-review into one gate
+moves `playbooks/planning-waves.md` 68650 → 67353 (−1297 bytes) and `surfaceTotal` 5725 → 5726
+(the playbook +2 lines, absorbing the 1 line of slack the baseline carried). Documenting the
+`agent-depth` kind and the `depth-breach` and `gate-ran` events in `references/ledger.md` § The run
+record then adds 471 bytes to the four playbooks whose cited references include it —
+`playbooks/executing-waves.md` 103388 → 103859, `playbooks/receiving-review.md` 107508 → 107979,
+`playbooks/sweeping-mechanical-changes.md` 80625 → 81096 and `playbooks/taking-the-fast-path.md`
+73750 → 74221 — and its one new table row moves `surfaceTotal` 5726 → 5727. Limiting that row to a
+session with a `session` row in the run then adds 35 bytes to the same four — 103859 → 103894,
+107979 → 108014, 81096 → 81131 and 74221 → 74256.
+
+**Plan gate:** planning's scripted self-review checks become one command, `scripts/plan-check.mjs`,
+running seven legs in order — `codeBlocks`, `briefCompleteness`, `blastRadius`, `contentCoupling`,
+`budgetFixtures`, `waveDisjointness`, `authoredClaims` — each still exported by the script that
+serves it standalone. It fails closed: a plan with no `## Dispatch Map` is a finding before any leg
+runs (M16), where two legs used to report it as "cannot verify" and pass. On success it prints one
+line, and while `.devcycle/state.md` names a run, every invocation appends a `gate-ran` event with
+its `pass` or `fail` result (A-M6, L27).
+
+**Supersedes:** the depth probe's refusal of a model with no priced family, recorded by the
+2026-10-02 entry "unpriced models: per-model cache reads, provisional prices only for newer models"
+(#301).
+
+```text
+budget: surface-budget.json surfaceTotal 5727
+budget: context-budget.json playbooks/profiling-sessions.md 46850
+budget: context-budget.json playbooks/executing-waves.md 103894
+budget: context-budget.json playbooks/receiving-review.md 108014
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 81131
+budget: context-budget.json playbooks/taking-the-fast-path.md 74256
+```
+
+## 2026-10-04 — doctor overview: the profiling playbook states the reply contract, and its budget grows by it
+
+**Decision:** `playbooks/profiling-sessions.md` gains a section on how a cost-analysis reply carries
+the two script-rendered blocks `## Overview` and `## Trend summary` — byte for byte, with the Trend
+summary last — and its direction-of-travel paragraph now says "undetermined" is a direction the
+Highlights may state. `commands/doctor.md` loses the report-column detail it restated and says only
+that every cost-analysis reply carries the overview, because the playbook owns what the report
+contains. The playbook's context budget and the surface total are raised by the growth; nothing is
+offset.
+
+**Why:** the reply contract is the playbook's to state, and the user reads the overview in the reply.
+A net-zero rewrite would have to delete text this change does not touch: the verdict glossary of the
+promotion scoreboard or the two-gate issue procedure.
+
+**Budgets:** `surfaceTotal` 5713 → 5725 (the playbook +13 lines, the command −1) and
+`playbooks/profiling-sessions.md` 45948 → 46852 (+904 bytes).
+
+**Supersedes:** nothing.
+
+```text
+budget: surface-budget.json surfaceTotal 5725
+budget: context-budget.json playbooks/profiling-sessions.md 46852
+```
+
 ## 2026-10-03 — branch-review fix: step-level reads where a demoted owner was the only route
 
 **Decision:** the steps that execute an owner the citation-grammar pass demoted carry their own

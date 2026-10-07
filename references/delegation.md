@@ -42,7 +42,7 @@ A third counter is measured rather than estimated: **context depth**, which a ru
 reads off its own transcript —
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --depth
+node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs"
 ```
 
 — which prints the depth, the fraction of the running model's context window, and the band:

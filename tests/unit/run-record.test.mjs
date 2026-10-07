@@ -685,3 +685,42 @@ test("dispatch: agentId is accepted and optional", () => {
     "a record naming its subagent transcript validates");
   assert.ok(!(sub.required ?? []).includes("agentId"), "agentId must stay optional");
 });
+
+function newRun(runs, repo) {
+  return run(["new", "--repo", repo, "--plugin-version", "0.23.0", "--plugin-sha", "ded29c6", "--profile", "lean"], runs).stdout.trim();
+}
+const lastLine = (repo, runId) => JSON.parse(readFileSync(recordPath(repo, runId), "utf8").trim().split("\n").at(-1));
+
+test("append: an agent-depth row coerces its counts and stamps ts", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-depth");
+  const r = run(["append", "--run", runId, "--repo", "/tmp/demo-depth", "--kind", "agent-depth", "--stage", "planning",
+    "--agentType", "Explore", "--agentId", "a27cbd72da7b3b62f", "--model", "claude-sonnet-5-5",
+    "--tokens", "41091", "--toolUses", "12", "--durationMs", "75398", "--depth", "ok"], runs);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const line = lastLine("/tmp/demo-depth", runId);
+  assert.strictEqual(line.kind, "agent-depth");
+  assert.strictEqual(line.tokens, 41091);
+  assert.strictEqual(line.toolUses, 12);
+  assert.strictEqual(line.durationMs, 75398);
+  assert.match(line.ts, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("append: an agent-depth row with an unknown depth value is refused", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-depth2");
+  const r = run(["append", "--run", runId, "--repo", "/tmp/demo-depth2", "--kind", "agent-depth", "--stage", "planning",
+    "--agentType", "Explore", "--model", "claude-sonnet-5-5", "--tokens", "1", "--depth", "deep"], runs);
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /"depth" value "deep" is not one of/);
+});
+
+test("append: gate-ran and depth-breach are event values, and gate-ran carries a result", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-gate");
+  const ev = (...extra) => run(["append", "--run", runId, "--repo", "/tmp/demo-gate", "--kind", "event", "--stage", "planning", ...extra], runs);
+  assert.strictEqual(ev("--event", "gate-ran", "--result", "fail").status, 0);
+  assert.strictEqual(lastLine("/tmp/demo-gate", runId).result, "fail");
+  assert.strictEqual(ev("--event", "depth-breach").status, 0);
+  assert.notStrictEqual(ev("--event", "gate-ran", "--result", "maybe").status, 0);
+});

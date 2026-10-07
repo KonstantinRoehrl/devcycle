@@ -162,7 +162,7 @@ function main() {
   const toplevel = flags.repo ?? gitToplevel(process.cwd());
   const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex",
     "filesChanged", "filesCreated", "filesDeleted", "insertions", "deletions",
-    "plannedTaskCount", "waveCount", "filed", "degraded"]);
+    "plannedTaskCount", "waveCount", "filed", "degraded", "tokens", "toolUses", "durationMs"]);
   const floatFields = new Set(["cost"]);
 
   if (sub === "new") {
@@ -190,7 +190,7 @@ function main() {
     }
     for (const [k, v] of Object.entries(objects)) obj[k] = v;
     if (Object.keys(knobs).length) obj.knobs = knobs;
-    if (obj.kind === "event" && obj.ts === undefined)
+    if ((obj.kind === "event" || obj.kind === "agent-depth") && obj.ts === undefined)
       obj.ts = now();
     writeLine(toplevel, runId, obj);
   } else if (sub === "workload") {

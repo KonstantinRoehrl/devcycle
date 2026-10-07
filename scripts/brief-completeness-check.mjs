@@ -7,18 +7,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import { taskBlocks, parseDispatchMap, filesFieldValue } from "./task-files.mjs";
 import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
+import { isMain } from "./is-main.mjs";
 
-const planPath = process.argv[2];
-if (!planPath) {
-  console.error("usage: node scripts/brief-completeness-check.mjs <plan-file>");
-  process.exit(1);
-}
-if (!existsSync(planPath)) {
-  console.error(`brief-completeness-check: plan file not found: ${planPath}`);
-  process.exit(1);
-}
-
-const text = readFileSync(planPath, "utf8");
 const REQUIRED_FIELDS = ["Files", "Interfaces", "Dependencies", "Evidence", "Quality constraints"];
 const VALID_EVIDENCE_CLASSES = ["red-green", "green-green", "convention"];
 
@@ -34,53 +24,77 @@ function readField(block, field) {
   return field === "Files" ? filesFieldValue(block) : fieldValue(block, field);
 }
 
-const errors = [];
-const blocks = taskBlocks(text);
-if (blocks.length === 0) {
-  console.error(`brief-completeness-check: no "### Task N" blocks found in ${planPath}`);
-  process.exit(1);
-}
-
-for (const { num, text: block } of blocks) {
-  for (const field of REQUIRED_FIELDS) {
-    const val = readField(block, field);
-    if (val === null) errors.push(`Task ${num}: missing **${field}:** field`);
-    else if (val === "") errors.push(`Task ${num}: **${field}:** field is empty`);
+export function briefCompletenessLeg(planText, { planPath }, { includeBudgetFixtures = true } = {}) {
+  const errors = [];
+  const blocks = taskBlocks(planText);
+  if (blocks.length === 0) {
+    return { findings: [`no "### Task N" blocks found in ${planPath}`], ok: "", notes: [] };
   }
-  const evidence = fieldValue(block, "Evidence");
-  if (evidence) {
-    const evidenceClass = evidence.split(/\s+/)[0];
-    if (!VALID_EVIDENCE_CLASSES.includes(evidenceClass)) {
-      errors.push(`Task ${num}: **Evidence:** does not name a valid class (${VALID_EVIDENCE_CLASSES.join(" | ")})`);
+
+  for (const { num, text: block } of blocks) {
+    for (const field of REQUIRED_FIELDS) {
+      const val = readField(block, field);
+      if (val === null) errors.push(`Task ${num}: missing **${field}:** field`);
+      else if (val === "") errors.push(`Task ${num}: **${field}:** field is empty`);
+    }
+    const evidence = fieldValue(block, "Evidence");
+    if (evidence) {
+      const evidenceClass = evidence.split(/\s+/)[0];
+      if (!VALID_EVIDENCE_CLASSES.includes(evidenceClass)) {
+        errors.push(`Task ${num}: **Evidence:** does not name a valid class (${VALID_EVIDENCE_CLASSES.join(" | ")})`);
+      }
     }
   }
-}
 
-// An incomplete Files block is not only a missing field: a brief that mandates doc growth but
-// never lists the baseline fixture that growth trips hands the implementer a validate.mjs
-// failure the brief itself caused. budget-fixture-check.mjs owns which baselines a path sits
-// under -- deciding it here too is the drift duplication-check.mjs exists to stop.
-try {
-  for (const { task, file, fixture } of budgetFixtureGaps(text)) {
-    errors.push(`Task ${task}: **Files:** edits ${file} but omits ${fixture} — ${gapRemedy(fixture)}`);
+  // An incomplete Files block is not only a missing field: a brief that mandates doc growth but
+  // never lists the baseline fixture that growth trips hands the implementer a validate.mjs
+  // failure the brief itself caused. budget-fixture-check.mjs owns which baselines a path sits
+  // under -- deciding it here too is the drift duplication-check.mjs exists to stop.
+  if (includeBudgetFixtures) {
+    try {
+      for (const { task, file, fixture } of budgetFixtureGaps(planText)) {
+        errors.push(`Task ${task}: **Files:** edits ${file} but omits ${fixture} — ${gapRemedy(fixture)}`);
+      }
+    } catch (e) {
+      errors.push(e.message);
+    }
   }
-} catch (e) {
-  errors.push(e.message);
-}
 
-const waves = parseDispatchMap(text);
-if (waves === null) {
-  errors.push('missing "## Dispatch Map" section');
-} else {
-  const mapped = new Set([...waves.values()].flat());
-  for (const { num } of blocks) {
-    if (!mapped.has(num)) errors.push(`Task ${num}: not listed in the ## Dispatch Map`);
+  const waves = parseDispatchMap(planText);
+  if (waves === null) {
+    errors.push('missing "## Dispatch Map" section');
+  } else {
+    const mapped = new Set([...waves.values()].flat());
+    for (const { num } of blocks) {
+      if (!mapped.has(num)) errors.push(`Task ${num}: not listed in the ## Dispatch Map`);
+    }
   }
+
+  return {
+    findings: errors,
+    ok: `ok -- ${blocks.length} task(s), all required fields present`,
+    notes: [],
+  };
 }
 
-if (errors.length > 0) {
-  for (const e of errors) console.error(`brief-completeness-check: ${e}`);
-  process.exit(1);
+function main() {
+  const planPath = process.argv[2];
+  if (!planPath) {
+    console.error("usage: node scripts/brief-completeness-check.mjs <plan-file>");
+    process.exit(1);
+  }
+  if (!existsSync(planPath)) {
+    console.error(`brief-completeness-check: plan file not found: ${planPath}`);
+    process.exit(1);
+  }
+
+  const { findings, ok } = briefCompletenessLeg(readFileSync(planPath, "utf8"), { planPath });
+  if (findings.length > 0) {
+    for (const f of findings) console.error(`brief-completeness-check: ${f}`);
+    process.exit(1);
+  }
+  console.log(`brief-completeness-check: ${ok}`);
+  process.exit(0);
 }
-console.log(`brief-completeness-check: ok -- ${blocks.length} task(s), all required fields present`);
-process.exit(0);
+
+if (isMain(import.meta.url, process.argv[1])) main();

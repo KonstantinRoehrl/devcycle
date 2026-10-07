@@ -5,7 +5,7 @@
 // and runs no promotion `- verify:` check unless invoked with --run-checks.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -22,6 +22,11 @@ import { atomicWrite } from "./atomic-write.mjs";
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 import { eachRecord } from "./jsonl.mjs";
+import { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth, depthLine } from "./depth-probe.mjs";
+import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, withInferredNote, unpricedMediansNote } from "./doctor-format.mjs";
+import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
+
+export { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth };
 
 // The plugin root, derived from this script's own location (scripts/ is a sibling of
 // docs/). `CLAUDE_PLUGIN_ROOT` is substituted into command and playbook *text* but is
@@ -41,8 +46,8 @@ const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
 // in every repo except this one — the failure this constant exists to prevent.
 export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
 
-// The four compliance-candidate slugs emitComplianceCandidates can produce — the single source of
-// truth for all three consumers, made structurally load-bearing so adding a fifth type here (and
+// The compliance-candidate slugs emitComplianceCandidates can produce — the single source of
+// truth for all three consumers, made structurally load-bearing so adding a new type here (and
 // nowhere else) either derives automatically or fails loudly, instead of needing four parallel edits:
 //   - the emitter routes every candidate's `type` through complianceType() below, so a literal that
 //     drifts from this array throws at emit time rather than producing an unroutable candidate;
@@ -51,6 +56,7 @@ export const DEVCYCLE_UPSTREAM = "KonstantinRoehrl/devcycle";
 //     so a new type can't be routable/emittable without also getting a title.
 export const COMPLIANCE_TYPES = [
   "inherited-model", "missing-workload", "main-thread-browser", "general-purpose-search",
+  "sensor-inactive",
 ];
 const COMPLIANCE_TYPE_SET = new Set(COMPLIANCE_TYPES);
 
@@ -136,10 +142,6 @@ export function extractPluginVersion(record) {
   return m ? m[1] : null;
 }
 
-// Records Claude Code writes for its own placeholders (session-limit notices and the like).
-// Every counter on them is zero, so they are skipped outright rather than reported unpriced.
-export const SYNTHETIC_MODEL = "<synthetic>";
-
 // Tool calls that dispatch a subagent; a call with no explicit model inherits the caller's.
 const DISPATCH_TOOLS = new Set(["Task", "Agent"]);
 
@@ -198,10 +200,6 @@ export function isDevcycleSession(records) {
     }
   }
   return false;
-}
-
-export function contextDepth(usage) {
-  return (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
 }
 
 // A 1h cache write costs 2.00x the input price, a 5m write 1.25x. Named once, beside the other
@@ -271,12 +269,12 @@ export function costBand(records) {
     const u = r.message?.usage ?? r.usage ?? {};
     const model = r.message?.model ?? r.model;
     const p = priceFor(model);
-    // An unpriced model must not throw on `p.in` (costUSD guards the same way with `if (!p)` at
-    // :88, resolveDepth with `?.` at :166) and must not enter the band's numerator OR its
-    // totalTokens denominator — leaving it in the denominator while it prices at nothing would
-    // understate cost-per-token by exactly the unpriced share, the same plausible-and-wrong shape
-    // the /1e6 fix above corrects. `costBand` has no reference to the per-session `unpriced` tally
-    // (`:458`) to bump — the real partition happens one level up, in Step 5.
+    // An unpriced model must not throw on `p.in` (costUSD guards the same way with `if (!p)`) and
+    // must not enter the band's numerator OR its totalTokens denominator — leaving it in the
+    // denominator while it prices at nothing would understate cost-per-token by exactly the
+    // unpriced share, the same plausible-and-wrong shape the /1e6 fix above corrects. `costBand`
+    // has no reference to the per-session `unpriced` tally (`:458`) to bump — the real partition
+    // happens one level up, in Step 5.
     if (!p) continue;
     const h1 = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
     const m5 = u.cache_creation?.ephemeral_5m_input_tokens ?? 0;
@@ -319,63 +317,6 @@ export function depthBand(depth) {
   return "300k+";
 }
 
-// Fractions of the running model's context window. The underlying measurement is absolute —
-// cost per 1k output tokens bottoms at 15.1k in the 100-150k band and climbs to 40.7k past
-// 300k — taken on 1M-window sessions, so these fractions are those absolutes divided by 1M.
-// Expressing them as fractions is a deliberate approximation that lets them adapt to smaller
-// windows; cache-read cost actually scales with absolute tokens, not with the fraction used.
-// Doctor's own per-model band data is what should confirm or correct them once smaller-window
-// sessions have been measured.
-const OVER_BUDGET = 0.15;
-const HARD_STOP = 0.2;
-
-export function budgetBand(depth, window) {
-  const f = depth / window;
-  if (f >= HARD_STOP) return "hard-stop";
-  if (f >= OVER_BUDGET) return "over-budget";
-  return "ok";
-}
-
-// CLAUDE_DOCTOR_PROJECTS overrides the transcript root; it exists so the probe is testable
-// without writing into the real ~/.claude. It defaults to ~/.claude/projects.
-export function resolveDepth(env, cwd) {
-  const id = env.CLAUDE_CODE_SESSION_ID;
-  if (!id) throw new Error("CLAUDE_CODE_SESSION_ID is not set — cannot identify this session");
-  const root = env.CLAUDE_DOCTOR_PROJECTS || join(homedir(), ".claude", "projects");
-
-  // 1. cwd slug, 2. a filename search for a session whose cwd moved after it started.
-  const direct = join(root, cwd.replaceAll("/", "-"), `${id}.jsonl`);
-  const file = existsSync(direct)
-    ? direct
-    : (findTranscriptFiles(root) ?? []).find((f) => basename(f) === `${id}.jsonl`);
-  if (!file) throw new Error(`no transcript found for session ${id} under ${root}`);
-
-  let last = null;
-  for (const line of readFileSync(file, "utf8").split("\n")) {
-    if (!line.includes('"usage"')) continue;
-    let r;
-    try {
-      r = JSON.parse(line);
-    } catch {
-      continue; // transcripts are appended live; a torn trailing line is normal
-    }
-    if (r.message?.usage && r.message.model && r.message.model !== SYNTHETIC_MODEL) last = r.message;
-  }
-  if (!last) throw new Error(`no usage record in ${basename(file)} — nothing to measure`);
-
-  const depth = contextDepth(last.usage);
-  const exact = priceFor(last.model);
-  const provisional = exact ? null : provisionalPriceFor(last.model);
-  const window = (exact ?? provisional?.price)?.window;
-  if (!window)
-    throw new Error(`model ${last.model} is not in the pricing table (scripts/pricing.mjs) — no window to measure against`);
-  return {
-    depth, model: last.model, window,
-    ...(provisional ? { windowProvisionalAs: provisional.basedOn } : {}),
-    fraction: depth / window, band: budgetBand(depth, window),
-  };
-}
-
 export function median(numbers) {
   if (!numbers.length) return 0;
   const sorted = [...numbers].sort((a, b) => a - b);
@@ -404,6 +345,8 @@ export const STANDALONE_TAGS = new Set([
 // The release that introduced the run record (CHANGELOG.md 0.13.0); a session from before it
 // legitimately has none.
 export const RUN_RECORD_SINCE = "0.13.0";
+// The first release that ships hooks/dispatch-sensor.mjs (assumption: the next minor); older runs cannot have agent-depth rows.
+export const DEPTH_SENSOR_SINCE = "0.23.0";
 // Why a forward-filled session has no run record: a standalone command mints none by design, a
 // session from before 0.13.0 predates the record, and anything else expected one and is missing it.
 export function splitReason({ firstTag = null, pluginVersion = null } = {}) {
@@ -583,6 +526,7 @@ export function cohortTable(summaries) {
       medianPerSession: median(c.dollars),
       medianDepth: c.depths.length ? median(c.depths) : null,
       quality: aggregateQuality(c.qualities),
+      excluded: c.excluded,
       inferred: [version === "unknown" ? "no version detectable" : null, excludedNote(c.excluded)]
         .filter(Boolean).join("; ") || null,
     };
@@ -836,6 +780,16 @@ export function emitComplianceCandidates(turns, record) {
     out.push({ type: complianceType("missing-workload"), commits: missingCommits.length,
       requestKind: record.triage.requestKind, sessions_sampled: 1 });
 
+  // C5: planning produced a plan (planned tasks recorded) but no agent-depth row names the stage —
+  // the dispatch-sensor hook was not loaded or missed, which must not read as "no dispatches".
+  // Decided per run, not per window (readRunRecords' planningRuns): planning and execution always
+  // run in different sessions, so no one window holds both the stage and the planned task count.
+  for (const run of record.planningRuns ?? []) {
+    const sensorShipped = run.pluginVersion && compareVersions(run.pluginVersion, DEPTH_SENSOR_SINCE) >= 0;
+    if (sensorShipped && run.plannedTaskCount > 0 && run.planningDepthRows === 0)
+      out.push({ type: complianceType("sensor-inactive"), stage: "planning", plannedTasks: run.plannedTaskCount, sessions_sampled: 1 });
+  }
+
   return out;
 }
 
@@ -999,21 +953,29 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         } else if (o.kind === "session") {
           current = o.sessionHash;
           if (!windows.has(current))
-            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [] });
+            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [], agentDepths: [] });
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
         else if (o.kind === "event") { if (current) windows.get(current).events.push(o); }
         else if (o.kind === "workload") { if (current) windows.get(current).workloads.push(o); }
         else if (o.kind === "lens-cost") { if (current) windows.get(current).lensCosts.push(o); }
+        else if (o.kind === "agent-depth") { if (current) windows.get(current).agentDepths.push(o); }
         else if (o.kind === "commit") { if (current) windows.get(current).commits.push(o); }
         else if (o.kind === "triage") { triage = { requestKind: o.requestKind, entryStage: o.entryStage }; }
       }
+      // sensor-inactive is decided per run (see emitComplianceCandidates' C5); the run's summary
+      // rides on its first planning window only, so the candidate fires at most once per run.
+      const runWindows = [...windows.values()];
+      const planningWindow = [...windows].find(([, w]) => w.stages.some((s) => s.stage === "planning"))?.[0];
+      const planningRun = { runId, pluginVersion,
+        plannedTaskCount: runWindows.flatMap((w) => w.workloads).at(-1)?.plannedTaskCount ?? 0,
+        planningDepthRows: runWindows.flatMap((w) => w.agentDepths).filter((r) => r.stage === "planning").length };
       for (const [h, w] of windows) {
         // The run's workload is the last workload line written for the session (a rerun overwrites
         // an earlier estimate); null when the run wrote none (GC3 — workload-unknown, not zero).
         const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, triage, ...w,
-          workload: w.workloads.at(-1) ?? null };
+          workload: w.workloads.at(-1) ?? null, planningRuns: h === planningWindow ? [planningRun] : [] };
         const prior = bySession.get(h);
         bySession.set(h, prior
           ? { ...rec,
@@ -1024,6 +986,8 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
               workloads: [...prior.workloads, ...rec.workloads],
               lensCosts: [...prior.lensCosts, ...rec.lensCosts],
               commits: [...prior.commits, ...rec.commits],
+              agentDepths: [...prior.agentDepths, ...rec.agentDepths],
+              planningRuns: [...prior.planningRuns, ...rec.planningRuns],
               triage: rec.triage ?? prior.triage ?? null,
               workload: rec.workload ?? prior.workload ?? null }
           : rec);
@@ -1284,6 +1248,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     costByStage,
     costByAgentType,
     costByLens,
+    agentDepths: record?.agentDepths ?? [],
     bandCounts,
     startupFloor,
     carryWeighted,
@@ -1332,8 +1297,6 @@ const IN_FLIGHT_NOTE =
 const DEPTH_DISCLOSURE =
   "Depth bands are a fraction of the model's context window, not an absolute token count: " +
   "the same depth reads as a different band on a different model.";
-
-const usd = (n) => "$" + (n >= 1 ? n.toFixed(2) : n.toFixed(4));
 
 // QC4/QC5: absent, not zero — a record-less run's "0 review rounds" would read as flawless work
 // rather than as no data, so the missing case renders its own label instead of a zero figure.
@@ -1423,6 +1386,8 @@ export function complianceCandidatesOf(summaries) {
       out.push({ ...cand, count: sum("count"), total: sum("total") });
     } else if (g.type === "missing-workload") {
       out.push({ ...cand, commits: sum("commits"), requestKind: g.members[0].requestKind });
+    } else if (g.type === "sensor-inactive") {
+      out.push({ ...cand, stage: "planning", plannedTasks: sum("plannedTasks") });
     }
   }
   const inh = out.find((c) => c.type === "inherited-model");
@@ -1464,6 +1429,8 @@ export function formatComplianceCandidate(c) {
   }
   if (c.type === "missing-workload")
     return `CANDIDATE: missing-workload commits=${c.commits} requestKind=${c.requestKind} sessions=${c.sessions_sampled}${span} — reached execution and committed but recorded no workload (collection gap — the commit-sensor hook should have written it)`;
+  if (c.type === "sensor-inactive")
+    return `CANDIDATE: sensor-inactive stage=${c.stage} plannedTasks=${c.plannedTasks} sessions=${c.sessions_sampled}${span} — a planning stage produced a plan but recorded no agent-depth rows (is the dispatch-sensor hook loaded?)`;
   return `CANDIDATE: general-purpose-search count=${c.count}/${c.total} sessions=${c.sessions_sampled}${span}`;
 }
 
@@ -1585,13 +1552,7 @@ export function formatReport(summaries) {
     );
   lines.push("", "Per-version cohorts:");
   const direction = corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight)));
-  lines.push(
-    direction.direction === "insufficient-data"
-      ? `direction of travel: insufficient data (${direction.reason})`
-      : `direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})` +
-        `${direction.inferred ? ` (inferred: ${direction.inferred})` : ""}`
-  );
+  lines.push(directionLine(direction));
   for (const r of cohortTable(summaries))
     lines.push(
       `  ${r.version.padEnd(10)} n=${String(r.sessions).padStart(3)}  ` +
@@ -1626,27 +1587,6 @@ export function formatReport(summaries) {
     );
   }
   return lines.join("\n");
-}
-
-// Recursively collects .jsonl transcript files under dir. Returns null when dir is simply
-// not there (missing, or a path that is not a directory).
-export function findTranscriptFiles(dir) {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch (err) {
-    // Same rule as readRecords below: an absent path is "nothing here", but a permissions
-    // or I/O failure is a real fault and must not read as a directory holding no transcripts.
-    if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
-    return null;
-  }
-  const files = [];
-  for (const e of entries) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) files.push(...(findTranscriptFiles(p) ?? []));
-    else if (e.isFile() && e.name.endsWith(".jsonl")) files.push(p);
-  }
-  return files;
 }
 
 // <slug>/<session>/subagents/agent-<id>.jsonl -> <session>; <slug>/<session>.jsonl -> <session>.
@@ -1687,6 +1627,7 @@ function mergeCounts(target, source) {
 // derivable from summaries alone.
 export function buildJsonReport(summaries, ctx = {}) {
   return {
+    overview: overviewFor(summaries, ctx.scope ?? null),
     pricesAsOf: PRICING.asOf,
     sessions: summaries.map((s) => ({
       ...s,
@@ -1726,23 +1667,62 @@ export function buildJsonReport(summaries, ctx = {}) {
   };
 }
 
-// One window's worth of summaries. The current window and the preceding one differ only in
-// their bounds: same membership rule, same skip of a session with nothing inside the window,
-// same session-id resolution. They share this helper because the report subtracts one window
-// from the other and calls the difference a trend — two copies that drifted apart would be
-// measuring two different corpora and reporting the gap between them as a change in cost.
-function summarizeWindow(groups, since, until, args, runRecords) {
-  const out = [];
-  for (const [key, records] of groups) {
-    // Membership is a session-level property, so it is decided over every record;
-    // the window then narrows only what gets measured.
-    if (!args.all && !isDevcycleSession(records)) continue;
-    const windowed = records.filter((r) => inWindow(r.timestamp, since, until));
-    if (windowed.length === 0) continue;
-    const sessionId = records.find((r) => r.sessionId)?.sessionId ?? key;
-    out.push(summarizeSession(sessionId, windowed, runRecords));
+// A session's own transcript and its subagents' transcripts are one session's records, so the group
+// key is the owning session. Paths only: nothing is read here, which is what lets the caller hold one
+// session's records at a time instead of the whole corpus.
+export function groupFilesBySession(files) {
+  const groups = new Map();
+  for (const file of files) {
+    const key = owningSession(file);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(file);
   }
-  return out;
+  return groups;
+}
+
+// One session's summary per requested window, from a single read of its files. `windows` is a list of
+// { since, until }; the result is aligned with it, with null where the session contributes nothing.
+// The records are unreachable once this returns, so peak memory tracks the largest session.
+export function summarizeSessionGroup(key, files, windows, args, runRecords) {
+  const records = [];
+  // A visitor push, not records.push(...array): a spread passes every record as an argument, and a
+  // very large transcript exceeds the call-stack argument limit.
+  for (const file of files) eachRecord(file, (r) => { records.push(r); });
+  // Membership is a session-level property, so it is decided over every record; the window then
+  // narrows only what gets measured.
+  if (!args.all && !isDevcycleSession(records)) return windows.map(() => null);
+  const sessionId = records.find((r) => r.sessionId)?.sessionId ?? key;
+  return windows.map(({ since, until }) => {
+    const windowed = records.filter((r) => inWindow(r.timestamp, since, until));
+    return windowed.length === 0 ? null : summarizeSession(sessionId, windowed, runRecords);
+  });
+}
+
+// The current window and the preceding one differ only in their bounds: same membership rule, same
+// skip of a session with nothing inside the window, same session-id resolution. They share
+// summarizeSessionGroup because the report subtracts one window from the other and calls the
+// difference a trend — two copies that drifted apart would be measuring two different corpora and
+// reporting the gap between them as a change in cost. The preceding window has to be summarized
+// separately: `inWindow` filters records before summarizeSession ever sees them, so its cost is not
+// recoverable from `sessions` at any granularity. Only built when a window was requested — `null`
+// rather than `[]`, because "no window to compare against" is not "the previous window was empty",
+// and the tables render those two differently.
+export function summarizeCorpus(files, args, runRecords) {
+  const windows = [{ since: args.since, until: args.until }];
+  if (args.since) {
+    const untilMs = args.until ? new Date(args.until).getTime() : Date.now();
+    const sinceMs = new Date(args.since).getTime();
+    const span = untilMs - sinceMs;
+    windows.push({ since: new Date(sinceMs - span).toISOString(), until: args.since });
+  }
+  const sessions = [];
+  const previousSessions = args.since ? [] : null;
+  for (const [key, groupFiles] of groupFilesBySession(files)) {
+    const [current, previous] = summarizeSessionGroup(key, groupFiles, windows, args, runRecords);
+    if (current) sessions.push(current);
+    if (previous) previousSessions.push(previous);
+  }
+  return { sessions, previousSessions };
 }
 
 function run(args) {
@@ -1750,30 +1730,8 @@ function run(args) {
   if (files === null) return { ok: false, reasons: [`directory not found: ${args.dir}`] };
   if (files.length === 0) return { ok: false, reasons: [`no readable session files under ${args.dir}`] };
 
-  // A session's own transcript and its subagents' transcripts are one session's records.
-  const groups = new Map();
-  for (const file of files) {
-    const key = owningSession(file);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(...readRecords(file));
-  }
-
   const runRecords = readRunRecords();
-  const sessions = summarizeWindow(groups, args.since, args.until, args, runRecords);
-
-  // The preceding window has to be summarized separately: `inWindow` filters records before
-  // summarizeSession ever sees them, so the preceding window's cost is not recoverable from
-  // `sessions` at any granularity. Only built when a window was actually requested — `null`
-  // rather than `[]`, because "no window to compare against" is not "the previous window was
-  // empty", and the tables render those two differently.
-  let previousSessions = null;
-  if (args.since) {
-    const untilMs = args.until ? new Date(args.until).getTime() : Date.now();
-    const sinceMs = new Date(args.since).getTime();
-    const span = untilMs - sinceMs;
-    const prevSince = new Date(sinceMs - span).toISOString();
-    previousSessions = summarizeWindow(groups, prevSince, args.since, args, runRecords);
-  }
+  const { sessions, previousSessions } = summarizeCorpus(files, args, runRecords);
 
   const totals = { turns: 0, mainTurns: 0, subagentTurns: 0, costUSD: 0, tools: {}, models: {} };
   for (const s of sessions) {
@@ -1838,13 +1796,7 @@ function main() {
       console.error(`doctor: ${e.message}`);
       process.exit(1);
     }
-    if (args.json) {
-      console.log(JSON.stringify(r));
-    } else {
-      const pct = (r.fraction * 100).toFixed(1);
-      const assumed = r.windowProvisionalAs ? `, window assumed from ${r.windowProvisionalAs}` : "";
-      console.log(`depth: ${r.depth} tokens (${pct}% of ${r.window}, model ${r.model}${assumed}) — band: ${r.band}`);
-    }
+    console.log(args.json ? JSON.stringify(r) : depthLine(r));
     return;
   }
   let result;
@@ -1897,9 +1849,12 @@ function main() {
   }
   const ctx = reportContext(args, result);
   if (args.json) {
+    // overview first: a consumer that truncates a long reply keeps it, where a key after the
+    // per-session rows would be cut off on a real corpus.
+    const { overview, ...rest } = buildJsonReport(result.sessions, ctx);
     console.log(
       JSON.stringify(
-        { window: result.window, totals: result.totals, ...buildJsonReport(result.sessions, ctx) },
+        { overview, window: result.window, totals: result.totals, ...rest },
         null,
         2,
       ),
@@ -1973,6 +1928,7 @@ export function impactScores(record, costByStage) {
   const all = journalEvents(record);
   const byKey = new Map();
   for (const e of all) {
+    if (e.event === "gate-ran") continue; // a neutral marker that a gate ran, not friction
     const key = impactKey(e);
     if (!byKey.has(key))
       byKey.set(key, { key, event: e.event, stage: e.stage, frequency: 0, impact: 0, measurable: true });
@@ -2084,6 +2040,9 @@ function deltaAgainstPrevious(rows, index, valueOf) {
   const previous = rows.slice(0, index).reverse()
     .find((r) => r.version !== "unknown" && r.profile === row.profile);
   if (!previous) return { state: "first-seen", pct: null };
+  // A side with requests on an unpriced model is not the whole of its cost, so no move against it
+  // is a measurement. Checked before the sample-size rule: unpriced is the more useful reason.
+  if (row.excluded > 0 || previous.excluded > 0) return { state: "not-compared", pct: null, reason: "unpriced" };
   if (row.lowConfidence || previous.lowConfidence) return { state: "not-compared", pct: null };
   const before = valueOf(previous), now = valueOf(row);
   // A division that cannot be taken is not a 0% change, and an unmeasurable side is not a zero.
@@ -2214,6 +2173,7 @@ export function versionProfileTable(summaries, promotions = []) {
         stageTotals.set(stage, (stageTotals.get(stage) ?? 0) + dollars);
     const priciest = [...stageTotals.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
     const depths = g.members.map((s) => s.medianDepth).filter((d) => typeof d === "number");
+    const excluded = g.members.reduce((n, s) => n + excludedRequestsOf(s), 0);
     // Decomposed $/turn (issue #114): a blended $/turn hides whether the money went to the main
     // thread or its subagents, and conflates the two turn populations. main dollars are the
     // agent-type-keyed "main" cost; everything else the session cost is sub-thread. Each rate is
@@ -2244,7 +2204,8 @@ export function versionProfileTable(summaries, promotions = []) {
       medianDepth: depths.length ? median(depths) : null,
       quality: aggregateQuality(g.members.map((s) => s.quality ?? null)),
       lowConfidence: g.members.length < MIN_COHORT,
-      inferred: excludedNote(g.members.reduce((n, s) => n + excludedRequestsOf(s), 0)),
+      excluded,
+      inferred: excludedNote(excluded),
       // A promotion that named no culprit contributes nothing rather than a blank entry — which
       // is every record on disk until Phase 3 teaches recordPromotion to write the field.
       shipped: [...new Set(promotions
@@ -2332,6 +2293,24 @@ export function lensCostTable(summaries) {
   return [...totals.entries()]
     .map(([lens, total]) => ({ lens, total }))
     .sort((a, b) => b.total - a.total || byName(a.lens, b.lens));
+}
+
+export function agentDepthTable(summaries) {
+  const byStage = new Map();
+  for (const s of summaries)
+    for (const r of s.agentDepths ?? []) {
+      if (!byStage.has(r.stage)) byStage.set(r.stage, []);
+      byStage.get(r.stage).push(r);
+    }
+  return [...byStage.entries()]
+    .map(([stage, rows]) => ({
+      stage, count: rows.length,
+      p50: median(rows.map((r) => r.tokens)),
+      max: Math.max(...rows.map((r) => r.tokens)),
+      warns: rows.filter((r) => r.depth === "warn").length,
+      breaches: rows.filter((r) => r.depth === "breach").length,
+    }))
+    .sort((a, b) => b.max - a.max || byName(a.stage, b.stage));
 }
 
 // A key is named by its culprit slug only when every session that recorded the key named the
@@ -2633,6 +2612,10 @@ const GLOSSES = {
     "Workload-adjusted, matched-cohort cost movement across the recency band (derived) — like-for-" +
     "like runs only, so session length or count can't masquerade as a cost change.",
   highlights: "The three things worth knowing before reading any table.",
+  overview:
+    "Cost per plugin version and per stage over settled sessions, in one place — how cost moved " +
+    "across releases and where it goes.",
+  "trend-summary": "Where cost is heading and how far to trust it, in three lines — every figure is the Overview's own.",
   "workload-observed":
     "The raw work each run did — files changed, changed lines, planned tasks, waves — straight " +
     "off the run's workload record (observed, never derived). A run with no workload record is " +
@@ -2648,6 +2631,9 @@ const GLOSSES = {
   "cost-by-lens":
     "What each maintenance lens cost, straight off the lens-cost run records — the split to read " +
     "when a maintain pass looks dear.",
+  "agent-depth":
+    "How deep each subagent ran, per stage, from the agent-depth rows the dispatch-sensor hook writes — " +
+    "warn above 150k tokens, breach above 200k.",
   culprits:
     "Recurring problems, priced. The dollar figure is what each one actually cost you, summed " +
     "over every occurrence — not a severity guess. The Δ and Trend are per-session (derived), so " +
@@ -2695,42 +2681,70 @@ const GLOSSES = {
     "One line per session, so any figure above can be traced back to the sessions that produced it.",
 };
 
+// A section's heading, its one-line gloss and the blank lines around them. One owner, so the
+// report's own sections and the two blocks --json pre-renders cannot word a heading differently.
+function sectionLines(heading, glossKey) {
+  const gloss = GLOSSES[glossKey];
+  if (gloss === undefined) throw new Error(`missing gloss for ${glossKey}`);
+  return [heading, "", `*${gloss}*`, ""];
+}
+
+// What a session cost, as its stage buckets add up: the figure every stage table is built from.
+const sessionDollars = (s) => Object.values(s.costByStage ?? {}).reduce((a, b) => a + b, 0);
+
+// Dollars in sessions whose stage is a guess: every forward-filled session (the only producer of
+// "entry (stage unknown)" and "resumed (stage unknown)") plus the "unattributed" dollars of the
+// sessions attributed from a run record. Each dollar is counted once.
+export function inferredUnknownDollars(summaries) {
+  return summaries.reduce(
+    (n, s) => n + (s.attributionSource === "forward-filled" ? sessionDollars(s) : s.costByStage?.unattributed ?? 0),
+    0,
+  );
+}
+
+// What the overview is built from: the tables this report already builds, every one over the
+// SAME settled sessions. cohortTable, versionProfileTable and stageByVersionTable drop in-flight
+// sessions on their own but stageWindowTable does not, and /devcycle:doctor always runs inside a
+// session newer than the in-flight threshold — so feeding all four the settled set is what makes
+// the stage Total column and the version Total column the same figure.
+export function overviewInput(summaries, scope) {
+  const settled = summaries.filter((s) => !s.inFlight);
+  const inFlight = summaries.filter((s) => s.inFlight);
+  return {
+    scope,
+    cohorts: cohortTable(settled),
+    profileRows: versionProfileTable(settled),
+    stageByVersion: stageByVersionTable(settled),
+    stageWindow: stageWindowTable(settled, null),
+    direction: corpusDirectionOfTravel(runAggregates(settled)),
+    shares: { inferredUnknownDollars: inferredUnknownDollars(settled) },
+    inFlight: { sessions: inFlight.length, dollars: inFlight.reduce((n, s) => n + sessionDollars(s), 0) },
+    bands: { flatBandPct: FLAT_BAND_PCT, minTrendN: MIN_TREND_N, minCohort: MIN_COHORT },
+  };
+}
+
+// The overview object plus its two sections pre-rendered, heading and gloss included. The markdown
+// report prints the blocks as they are and --json carries them, so a reply built from either is
+// the same bytes — nothing downstream rebuilds a figure.
+export function overviewFor(summaries, scope = null) {
+  const overview = buildOverview(overviewInput(summaries, scope));
+  return {
+    ...overview,
+    markdown: {
+      overview: [...sectionLines("## Overview", "overview"), ...renderOverview(overview)].join("\n"),
+      trendSummary: [...sectionLines("## Trend summary", "trend-summary"), ...renderTrendSummary(overview)].join("\n"),
+    },
+  };
+}
+
 // Rendered in place of the two sections the playbook owns. playbooks/profiling-sessions.md
 // replaces exactly these two lines when it persists the report and changes nothing else, so the
 // template stays wholly script-owned and the playbook writes only prose.
 const HIGHLIGHTS_ANCHOR = "<!-- devcycle:highlights -->";
 const FINDINGS_ANCHOR = "<!-- devcycle:findings -->";
 
-// An absent value renders as an em dash, never as a blank cell a reader would take for a zero.
-const markdownCell = (v) => (v === null || v === undefined || v === "" ? "—" : String(v));
-
-// Every table renders its header row and separator even with nothing in it, and says why it is
-// empty — an empty table with no explanation reads as a clean bill of health (QC3).
-function markdownTable(headers, rows, whyEmpty) {
-  const out = [
-    `| ${headers.join(" | ")} |`,
-    `| ${headers.map(() => "---").join(" | ")} |`,
-    ...rows.map((r) => `| ${r.map(markdownCell).join(" | ")} |`),
-  ];
-  if (!rows.length) out.push("", `_No rows: ${whyEmpty}._`);
-  return out;
-}
-
-// deltaAgainstPrevious' three states, rendered. A comparison that could not be taken names its
-// reason; it never falls back to 0%, which would read as a version that changed nothing.
-const deltaText = (d) =>
-  d.state === "compared"
-    ? `${d.pct >= 0 ? "+" : ""}${d.pct.toFixed(1)}%`
-    : d.state === "first-seen" ? "first seen" : "not compared";
-
 // An impact nobody could price is labelled, never rendered as $0.00.
 const impactText = (v) => (v === null || v === undefined ? "unmeasurable" : usd(v));
-
-// The Sessions cell of a version×profile row. One owner for two render sites: the issue draft
-// quotes the same row this table renders, and a cohort the report declines to stand behind must
-// not be quoted as a bare number in an issue filed from it.
-const cohortSessionsText = (r) =>
-  r.lowConfidence ? `${r.sessions} (low confidence: n<${MIN_COHORT})` : String(r.sessions);
 
 // Cost anomalies are ranked by the money at stake. A candidate carrying no dollar figure ranks
 // last rather than being sorted as if it had been measured at zero.
@@ -2816,11 +2830,7 @@ export function renderReport(summaries, ctx) {
     compiledKnowledge: compiled = null, verification = null,
   } = ctx ?? {};
   const L = [];
-  const section = (heading, glossKey) => {
-    const gloss = GLOSSES[glossKey];
-    if (gloss === undefined) throw new Error(`missing gloss for ${glossKey}`);
-    L.push("", heading, "", `*${gloss}*`, "");
-  };
+  const section = (heading, glossKey) => L.push("", ...sectionLines(heading, glossKey));
   const agg = aggregate(summaries);
   const candidates = emitCandidates(summaries);
   // The run-level, workload-adjusted view (issue #114): run aggregates over the settled corpus,
@@ -2882,6 +2892,10 @@ export function renderReport(summaries, ctx) {
   section("## Highlights", "highlights");
   L.push(HIGHLIGHTS_ANCHOR);
 
+  // Both blocks are script-rendered end to end; playbooks/profiling-sessions.md carries them as they are.
+  const overview = overviewFor(summaries, scope);
+  L.push("", overview.markdown.overview, "", overview.markdown.trendSummary);
+
   // The raw observed workload family (spec C3): one row per run that wrote a workload record,
   // its raw counts straight off that record. Runs with no workload record have nothing to
   // observe and drop out (changedLines is null exactly when no record was joined — GC3).
@@ -2910,9 +2924,9 @@ export function renderReport(summaries, ctx) {
       "$/main-turn (derived)", "$/sub-turn (derived)", "Turns/task (derived)", "Δ vs previous (derived)",
       "Priciest stage (derived)", "Median depth (derived)", "Quality (derived)", "Shipped (observed)"],
     versionProfileTable(summaries, promotions).map((r) => [
-      r.inferred ? `${r.version} (inferred: ${r.inferred})` : r.version,
+      withInferredNote(r.version, r),
       r.profile,
-      cohortSessionsText(r),
+      cohortSessionsText(r, MIN_COHORT),
       r.cycles,
       usd(r.medianCostPerCycle),
       r.dollarsPerMainTurn === null ? null : usd(r.dollarsPerMainTurn),
@@ -2945,11 +2959,7 @@ export function renderReport(summaries, ctx) {
     "the share of the stage's settled dollars whose stage was inferred from the transcript rather " +
     "than read off a run record._");
   if (stageTrend.excludedVersions.length)
-    L.push(
-      "",
-      `_Medians for ${stageTrend.excludedVersions.join(", ")} leave out requests on a model with no ` +
-        "exact price (inferred) — compare across them with care._",
-    );
+    L.push("", unpricedMediansNote(stageTrend.excludedVersions));
   // stageByVersionTable drops the undetectable-version cohort from every column and every trend,
   // because "unknown" cannot sit on a version axis — right, but silent, and an omission nobody
   // names reads as a clean bill of health. cohortTable is the sibling that keeps that bucket,
@@ -2980,6 +2990,13 @@ export function renderReport(summaries, ctx) {
     "no per-lens cost recorded (maintain passes emit lens-cost records)",
   ));
   L.push("", "_Sourced from lens-cost run records; workload-independent (maintenance emits no workload record)._");
+
+  section("### Agent depth by stage (observed)", "agent-depth");
+  L.push(...markdownTable(
+    ["Stage", "Dispatches", "p50 depth", "Max depth", "Warn (150–200k)", "Breach (>200k)"],
+    agentDepthTable(summaries).map((r) => [r.stage, r.count, r.p50, r.max, r.warns, r.breaches]),
+    "no agent-depth records (the dispatch-sensor hook writes one per finished subagent)",
+  ));
 
   // The raw observed outcome family (spec C3): one row per run carrying a quality signal, its
   // raw verdicts/counts straight off the run records. conformancePass is null exactly when no
@@ -3159,14 +3176,7 @@ export function renderReport(summaries, ctx) {
     "no settled sessions in this corpus",
   ));
   const direction = corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight)));
-  L.push(
-    "",
-    direction.direction === "insufficient-data"
-      ? `Direction of travel: insufficient data (${direction.reason})`
-      : `Direction of travel: ${direction.direction} (${direction.deltaPct.toFixed(1)}% median ` +
-        `cost, ${direction.matchKey}, ${direction.from}→${direction.to})` +
-        `${direction.inferred ? ` (inferred: ${direction.inferred})` : ""}`,
-  );
+  L.push("", directionLine(direction));
 
   section("### Per-session detail", "appendix-per-session-detail");
   L.push(...sessionDetailLines(summaries));
@@ -3496,15 +3506,15 @@ export function issueBody(slug, summaries, tables, shape) {
       ? events.map(([k, n]) => `- ${k} ×${n}`)
       : ["- none recorded for this culprit"]),
     "",
-    // The cohort figures carry the same qualifier the report's Cost-by-version table carries for
-    // this row, so a two-session cohort cannot be quoted bare in an issue filed from a report
-    // that declines to stand behind it.
+    // Each figure the report's Cost-by-version table qualifies for this row is qualified here too:
+    // the Sessions count for low confidence, the median and the Δ for unpriced requests. A cohort
+    // the report declines to stand behind is never quoted as a bare number in an issue filed from it.
     row ? "Cohort, as the report renders it:" : "Cohort: unavailable (no settled cohort row for this culprit)",
     ...(row
       ? [
-          `- Sessions: ${cohortSessionsText(row)}`,
+          `- Sessions: ${cohortSessionsText(row, MIN_COHORT)}`,
           `- Cycles: ${row.cycles}`,
-          `- Median $/cycle: ${usd(row.medianCostPerCycle)}`,
+          `- Median $/cycle: ${withInferredNote(usd(row.medianCostPerCycle), row)}`,
           `- Priciest stage: ${row.priciestStage ?? "unrecorded"}`,
           `- Δ vs previous: ${deltaText(row.delta)}`,
         ]
@@ -3534,6 +3544,7 @@ export class NoComplianceCandidateError extends Error {
 export const COMPLIANCE_TITLES = {
   "inherited-model": "subagent dispatches inherit the caller's model instead of naming one",
   "missing-workload": "a committing cycle recorded no workload (collection gap)",
+  "sensor-inactive": "a planning stage produced a plan but recorded no agent depth (sensor gap)",
   "main-thread-browser": "the coordinator drove a browser on the main thread",
   "general-purpose-search": "a general-purpose agent used where a scoped search would do",
 };

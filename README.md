@@ -170,15 +170,21 @@ plugin ships. Start there.
   [`CONTRIBUTING.md`](CONTRIBUTING.md). `scripts/doctor.mjs` re-measures devcycle's own token
   profile from a local Claude Code session corpus, which is how the cost claims are kept honest
   rather than assumed; it reads each run's workload from records the `hooks/workload-sensor.mjs`
-  commit-sensor writes on every commit, not from a single finish-stage step.
+  commit-sensor writes on every commit, not from a single finish-stage step, and reports agent
+  depth per stage from the per-subagent depth rows `hooks/dispatch-sensor.mjs` writes whenever a
+  cycle's own session sees a subagent finish. The depth gate runs `scripts/depth-probe.mjs`, which
+  measures one transcript without loading doctor. Every `/devcycle:doctor` cost-analysis reply
+  carries a per-version and per-stage overview, rendered by `scripts/doctor-overview.mjs` from
+  the same tables as the full report.
 - Developing devcycle itself: `scripts/self-dev-check.mjs` guards the case where the repo under
   work *is* this plugin's own source, so the pipeline runs from the installed copy while the
   deliverable belongs in the repo. `/devcycle:cycle` records what the installed copy holds when the
   run starts — by content hash, via `scripts/tree-hash.mjs` — and the finish stage fails when an
   expected deliverable is absent from the branch or the installed copy was written to during the
   run. It is inert in every other repo.
-- The evidence-and-verification contract's gates: planning runs `scripts/budget-fixture-check.mjs`
-  and `scripts/authored-claims-check.mjs` in its self-review, and `/devcycle:cycle` runs
+- The evidence-and-verification contract's gates: planning runs `scripts/plan-check.mjs` in its
+  self-review — one fail-closed gate over seven legs, including the budget-fixture and
+  authored-claims checks — and `/devcycle:cycle` runs
   `scripts/contract-staleness-check.mjs` as an advisory preflight that warns when a cached plugin's
   contract predates the target repo's. A host repo can declare its whole-gate checks in the
   required-checks manifest `tests/fixtures/required-gate-checks.json` — a committed JSON array of

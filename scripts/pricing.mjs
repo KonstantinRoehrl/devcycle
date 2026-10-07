@@ -46,7 +46,7 @@ export function cacheReadDollars(tokens, price) {
 // non-numeric suffix, a family the table does not price) does not parse and gets no fallback.
 const MODEL_ID = /^claude-(opus|sonnet|haiku|fable)-(\d+(?:-\d+)*?)(?:-\d{8})?$/;
 
-function parseModelId(id) {
+export function parseModelId(id) {
   const m = MODEL_ID.exec(id);
   if (!m) return null;
   const version = m[2].split("-").map(Number);
