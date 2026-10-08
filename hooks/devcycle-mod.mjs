@@ -149,7 +149,8 @@ async function updateMeter(st, $, e) {
   meter.calls += 1;
   if (e.tool === "Read" && typeof e.file_path === "string") meter.files.add(e.file_path);
   meter.shown = true;
-  await $.ui.status(`devcycle · ${meter.stage} · calls ${meter.calls}/~${STAGE_TOOL_CALLS} · ` +
+  // Claude Code labels a plugin's status entry with the plugin's name, so the text leaves it out.
+  await $.ui.status(`${meter.stage} · calls ${meter.calls}/~${STAGE_TOOL_CALLS} · ` +
     `files ${meter.files.size}/~${STAGE_FILES_READ} · ctx ${meter.percent ?? "–"}%`);
 }
 

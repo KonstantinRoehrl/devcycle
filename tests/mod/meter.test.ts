@@ -3,7 +3,7 @@ import { SESSION_APPEND, bash, engine, joinedChecks, joinsOnAppend, mainCall, se
 import type { World } from './harness.ts';
 
 const text = (stage: string, calls: number, files: number, ctx = '–') =>
-  `devcycle · ${stage} · calls ${calls}/~30 · files ${files}/~15 · ctx ${ctx}%`;
+  `${stage} · calls ${calls}/~30 · files ${files}/~15 · ctx ${ctx}%`;
 
 test('counts main-loop calls and distinct files read, and shows them with the stage', async ($, on) => {
   const seen = session(on, { surfaces: ['terminal'] });
