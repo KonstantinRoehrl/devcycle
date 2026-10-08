@@ -500,6 +500,14 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { ok: 
   );
   assert.deepEqual(JSON.parse(readFileSync(envLog, "utf8")), { nested: "1" });
 
-  const plain = await run(process.execPath, ["-e", "process.stdout.write(String(process.env.DEVCYCLE_NESTED_RUN ?? 'unset'))"]);
-  assert.equal(plain.stdout, "unset");
+  // run() passes this process's environment through, so the runner's own marker (a test run from
+  // inside a claudeStructured child carries one) comes off for the call and goes back after it.
+  const inherited = process.env.DEVCYCLE_NESTED_RUN;
+  delete process.env.DEVCYCLE_NESTED_RUN;
+  try {
+    const plain = await run(process.execPath, ["-e", "process.stdout.write(String(process.env.DEVCYCLE_NESTED_RUN ?? 'unset'))"]);
+    assert.equal(plain.stdout, "unset");
+  } finally {
+    if (inherited !== undefined) process.env.DEVCYCLE_NESTED_RUN = inherited;
+  }
 });
