@@ -1,5 +1,6 @@
 import { test, expect } from 'claude-code/testing';
-import { engine, mainCall, session, spawn, stateText, step } from './harness.ts';
+import { SESSION_APPEND, bash, engine, joinedChecks, joinsOnAppend, mainCall, session, spawn, stateText, step } from './harness.ts';
+import type { World } from './harness.ts';
 
 const text = (stage: string, calls: number, files: number, ctx = '–') =>
   `devcycle · ${stage} · calls ${calls}/~30 · files ${files}/~15 · ctx ${ctx}%`;
@@ -71,6 +72,39 @@ test('the status line is cleared once when the run stops being active', async ($
 
 test('a state file created during the turn shows the meter from the next main-loop call', async ($, on) => {
   const world: { surfaces: string[]; cwd: string; state: string | null } = { surfaces: ['terminal'], cwd: '/repo', state: null };
+  const seen = session(on, world);
+  engine(on);
+  await $.turn.start({ text: 'go', turnId: 'm1' });
+  await mainCall($, '/repo/a.md');
+  world.state = stateText();
+  await mainCall($, '/repo/b.md');
+  expect(seen.status).toEqual([text('execution', 1, 1)]);
+});
+
+test('a fresh cycle writes its state file before joining: the session append shows the meter on that call', async ($, on) => {
+  const world: World = { surfaces: ['terminal'], cwd: '/repo', state: null, joined: false };
+  const seen = session(on, world);
+  engine(on, joinsOnAppend(world));
+  await $.turn.start({ text: 'go', turnId: 'm1' });
+  world.state = stateText('brainstorm');
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.devcycle/state.md', content: world.state } as never);
+  await bash($, SESSION_APPEND);
+  expect([joinedChecks(seen), seen.status]).toEqual([2, [text('brainstorm', 1, 0)]]);
+});
+
+test('a resumed cycle joins with no state-file write: the session append shows the meter on that call', async ($, on) => {
+  const world: World = { surfaces: ['terminal'], joined: false };
+  const seen = session(on, world);
+  engine(on, joinsOnAppend(world));
+  await $.turn.start({ text: 'continue', turnId: 'm1' });
+  await mainCall($, '/repo/a.md');
+  await bash($, SESSION_APPEND);
+  await mainCall($, '/repo/b.md');
+  expect([joinedChecks(seen), seen.status]).toEqual([2, [text('execution', 1, 0), text('execution', 2, 1)]]);
+});
+
+test('in a subdirectory session, a state file appearing at the repo root shows the meter', async ($, on) => {
+  const world: World = { surfaces: ['terminal'], cwd: '/repo/src', state: null };
   const seen = session(on, world);
   engine(on);
   await $.turn.start({ text: 'go', turnId: 'm1' });

@@ -43,8 +43,9 @@ only run-record rows of ids, counts and enum values.
 **Scope guards:** it does nothing below Claude Code 2.1.287, in the `claude -p` children devcycle's
 workflows spawn (`workflows/lib/agent-cli.js` sets `DEVCYCLE_NESTED_RUN=1` for those alone), or in a
 session that has not joined an active run. The run and the joined answer are re-derived on every
-main-loop turn, whenever the state file changes, and — because `/devcycle:continue` appends the
-session's row mid-turn — at every subagent spawn while the session is not yet joined (a 2026-10-07
+main-loop turn, whenever the state file changes or appears at the repo root, and — because
+`/devcycle:cycle` and `/devcycle:continue` append the session's row mid-turn — after the main-loop
+Bash call that appends it and at every subagent spawn while the session is not yet joined (a 2026-10-07
 amendment from the plan review: one Node check per spawn, only until joined); only a positive
 joined answer is cached, and the version and the child marker are read once per module load.
 

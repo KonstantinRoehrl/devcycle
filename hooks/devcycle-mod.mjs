@@ -42,7 +42,12 @@ function atLeastFloor(base) {
 }
 
 const stateFileIn = (dir) => `${dir === "/" ? "" : dir}/${STATE_REL}`;
+// A worktree's `.git` is a file, so only its existence is asked.
+const gitIn = (dir) => `${dir === "/" ? "" : dir}/.git`;
 const parentOf = (dir) => dir.slice(0, dir.lastIndexOf("/")) || "/";
+// A session joins a run by appending its session row from a main-loop Bash call (commands/cycle.md,
+// commands/continue.md), which leaves the state file untouched.
+const appendsSessionRow = (e) => e.tool === "Bash" && typeof e.command === "string" && e.command.includes("--kind session");
 
 // A subagent's per-turn counters. Its identity survives a reset, because a continued agent
 // (SendMessage, a resume) keeps its agentId.
@@ -64,12 +69,18 @@ async function resolveScope(st, $) {
   if (!(await st.versionOk) || !(await st.notNested)) return INERT;
   const cwd = await $.session.cwd();
   let stateFile = null;
+  let root = null;
   for (let dir = cwd, i = 0; i < MAX_WALK && !stateFile; i++) {
     if (await $.fs.exists(stateFileIn(dir))) stateFile = stateFileIn(dir);
-    else if (parentOf(dir) === dir) break;
-    else dir = parentOf(dir);
+    else {
+      if (root === null && (await $.fs.exists(gitIn(dir)))) root = dir;
+      if (parentOf(dir) === dir) break;
+      dir = parentOf(dir);
+    }
   }
-  if (!stateFile) return { active: false, stateFile: null, cwd };
+  // A cycle writes its state file at the repo root (references/resume.md § The state file), so with
+  // none found yet that is where one appears; the cwd's own candidate covers a directory outside git.
+  if (!stateFile) return { active: false, stateFile: null, candidates: [...new Set([root ?? cwd, cwd])].map(stateFileIn) };
   const { mtimeMs } = await $.fs.stat(stateFile);
   const run = activeRun(await $.fs.read(stateFile));
   if (!run) return { active: false, stateFile, mtimeMs };
@@ -106,17 +117,20 @@ function entry(st, agentId) {
 }
 
 // One stat per main-loop tool call: a cycle's start, a stage advance or a finished cycle writes the
-// state file.
+// state file. A session-row append while inactive asks the joined question again, once, right then.
 async function afterMainLoopCall(st, $, e) {
-  if (await stateFileChanged($, await current(st, $))) refresh(st, $);
+  const seen = await current(st, $);
+  if ((appendsSessionRow(e) && !seen.active) || (await stateFileChanged($, seen))) refresh(st, $);
   await updateMeter(st, $, e);
 }
 
 // A state file that appeared or disappeared changed as much as a rewritten one. With none known, only
-// the cwd's own candidate is checked, so outside a devcycle repo each call costs one exists.
+// the repo root's and the cwd's candidates are checked, so outside a devcycle run each call costs at
+// most two exists.
 async function stateFileChanged($, seen) {
   if (seen.stateFile) return (await $.fs.stat(seen.stateFile).then((s) => s.mtimeMs, () => null)) !== seen.mtimeMs;
-  return seen.cwd !== undefined && (await $.fs.exists(stateFileIn(seen.cwd)));
+  for (const candidate of seen.candidates ?? []) if (await $.fs.exists(candidate)) return true;
+  return false;
 }
 
 // The stage meter: in an interactive session, the coordinator's stage budget on the status line

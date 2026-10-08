@@ -1,5 +1,6 @@
 import { test, expect } from 'claude-code/testing';
-import { appended, complete, engine, joinedChecks, mainCall, session, spawn, stateText, step } from './harness.ts';
+import { SESSION_APPEND, appended, bash, complete, engine, joinedChecks, joinsOnAppend, mainCall, session, spawn, stateText, step } from './harness.ts';
+import type { World } from './harness.ts';
 
 async function oneSubagentTurn($: any) {
   await spawn($);
@@ -56,6 +57,40 @@ test('a join that lands mid-turn is seen at the next spawn; once joined, a spawn
   await step($, 'a2');
   await complete($, 'a2');
   expect([joinedChecks(seen), appended(seen).length]).toEqual([2, 2]);
+});
+
+test('only a Bash call appending a session row asks the joined question mid-turn, and only until the session has joined', async ($, on) => {
+  const world: World = { joined: false };
+  const seen = session(on, world);
+  engine(on, joinsOnAppend(world));
+  await $.turn.start({ text: 'go', turnId: 'm1' });
+  await bash($, 'git status --short');
+  await bash($, 'node scripts/run-record.mjs append --run 00000000000000a1 --kind event --event x');
+  await mainCall($);
+  expect(joinedChecks(seen)).toBe(1);
+  await bash($, SESSION_APPEND);
+  await bash($, SESSION_APPEND);
+  expect(joinedChecks(seen)).toBe(2);
+});
+
+test('outside a devcycle run a main-loop call costs one exists per state-file candidate: the repo root\'s and the cwd\'s', async ($, on) => {
+  const world: World = { cwd: '/repo/src', state: null };
+  const seen = session(on, world);
+  engine(on);
+  await $.turn.start({ text: 'go', turnId: 'm1' });
+  await mainCall($);
+  const before = seen.exists.length;
+  await mainCall($);
+  await bash($, 'ls');
+  expect(seen.exists.slice(before)).toEqual(['/repo/.devcycle/state.md', '/repo/src/.devcycle/state.md',
+    '/repo/.devcycle/state.md', '/repo/src/.devcycle/state.md']);
+  world.root = null;
+  world.cwd = '/elsewhere';
+  await $.turn.start({ text: 'again', turnId: 'm2' });
+  await mainCall($);
+  const outside = seen.exists.length;
+  await mainCall($);
+  expect(seen.exists.slice(outside)).toEqual(['/elsewhere/.devcycle/state.md']);
 });
 
 test('a negative joined answer is asked again on the next turn.start; a positive one is cached', async ($, on) => {

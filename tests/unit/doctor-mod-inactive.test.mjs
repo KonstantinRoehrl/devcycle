@@ -79,12 +79,15 @@ test("COLLECTION GAP: names only the causes for the direction the run disagrees 
   assert.match(depthOnly, /\(1 only in agent-depth, 0 only in agent-trace;/);
   assert.match(depthOnly, /Only in agent-depth:/);
   assert.doesNotMatch(depthOnly, /Only in agent-trace:/);
+  assert.match(depthOnly, /a module reload between the subagent's last step and its completion discarded the module's record of it, so nothing was flushed/);
+  assert.doesNotMatch(depthOnly, /saw none of that subagent's steps/, "a reloaded module did see the steps; it lost them");
 
   const traceOnly = report([RUN_LINE, sessionLine(hash), depthRow("a1"), traceRow("a1"), traceRow("a2")])
     .split("\n").find((l) => l.includes("COLLECTION GAP — run"));
   assert.match(traceOnly, /\(0 only in agent-depth, 1 only in agent-trace;/);
   assert.match(traceOnly, /Only in agent-trace:/);
   assert.doesNotMatch(traceOnly, /Only in agent-depth:/);
+  assert.doesNotMatch(traceOnly, /module reload/);
   assert.doesNotMatch(traceOnly, /or wrote its row without an agentId/, "the run has no agentId-less agent-depth row, so that cause is not offered");
 });
 

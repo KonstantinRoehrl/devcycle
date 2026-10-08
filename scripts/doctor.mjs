@@ -2903,8 +2903,9 @@ export function renderReport(summaries, ctx) {
       `agent-depth row(s) without an agentId left out).` +
       (gap.onlyInDepth > 0
         ? " Only in agent-depth: the dispatch sensor recorded the subagent's stop but the hooks module wrote no trace " +
-          "for it — its unawaited trace append was lost (the sink failed, timed out or was killed), or the module saw " +
-          "none of that subagent's steps while it read the run as active."
+          "for it — its unawaited trace append was lost (the sink failed, timed out or was killed), a module reload " +
+          "between the subagent's last step and its completion discarded the module's record of it, so nothing was " +
+          "flushed, or none of that subagent's steps ran while the module read the run as active."
         : "") +
       (gap.onlyInTrace > 0
         ? " Only in agent-trace: the hooks module traced a subagent the dispatch sensor wrote no row for — the sensor " +
