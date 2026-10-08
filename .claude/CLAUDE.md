@@ -20,6 +20,7 @@ under Node. The pinned Node version is in `.nvmrc`.
 - `node scripts/temp-dir-check.mjs` — fails on any temp directory created outside
   `scripts/temp-dir.mjs`'s `makeTempDir`, which is what owns removing it again
 - `node --test tests/unit/*.test.mjs`
+- `claude plugin test .` — the hooks module's TypeScript tests under `tests/mod/`, run from the repo root; CI runs it on both pinned Claude Code versions
 - `node scripts/doctor.mjs` (local only)
 - `node scripts/find-state-files.mjs` — enumerates every `.devcycle/state.md` for `/devcycle:continue`'s resume discovery; Node-walks the tree so the gitignored `.devcycle/` can't hide a state file
 

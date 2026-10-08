@@ -44,7 +44,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --walkthroughModel '${user_config.walkthroughModel}' \
   --learnStalenessSessions '${user_config.learnStalenessSessions}' \
   --learnStalenessDays '${user_config.learnStalenessDays}' \
-  --learnSessionCap '${user_config.learnSessionCap}'
+  --learnSessionCap '${user_config.learnSessionCap}' \
+  --subagentBudget '${user_config.subagentBudget}'
 ```
 
 2. **First-run test.** Only when the state file's `configured:` reads `no` **and** the `explicit:`
@@ -61,7 +62,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
    plugin.json version> --plugin-sha <node "${CLAUDE_PLUGIN_ROOT}/scripts/self-dev-check.mjs"
    --plugin-digest> --profile <profile> --knob gitPolicy=<value> --knob reviewDepth=<value>
    --knob crossModelReview=<value> --knob onDeviceGate=<value> --knob implementerModel=<value>
-   --knob taskReviewerModel=<value> --knob branchReviewModel=<value> --knob walkthroughModel=<value>`,
+   --knob taskReviewerModel=<value> --knob branchReviewModel=<value> --knob walkthroughModel=<value>
+   --knob subagentBudget=<value>`,
    every value read off the `knobs:` line, its id on the `run:` row. That content digest is the
    plugin identifier, and not `git rev-parse` because the installed plugin is not a git checkout:
    the git form answers about an unrelated enclosing repository, or fails outright. Then:

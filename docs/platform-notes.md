@@ -404,3 +404,53 @@ only when the input's `session_id` — Claude Code's common hook-input field, as
 parent session's `$CLAUDE_CODE_SESSION_ID` — has a `session` row in the run, which is unverified
 until the on-device check: if the id differs, every row is silently dropped, and doctor's
 `sensor-inactive` candidate is what surfaces it.
+
+## (j) The hooks module: what a function hook sees and does
+
+**What was tried.** Spikes on 2026-10-07 in the session scratchpad, outside the repo, against the
+installed Claude Code (2.1.292) and an npm-installed 2.1.287: scratch plugins whose `hooks/hooks.json`
+carried a `hooks` object and a `modules` array together, a plain `.mjs` module registering function
+hooks, and `tests/mod/*.test.ts` files run by `claude plugin test .` from the plugin root (`CI=true`,
+stdin from `/dev/null`, no `ANTHROPIC_API_KEY`, `HOME` an empty directory); capability spikes in live
+sessions logging what each event carried; and the typings bundled with the CLI's plugin-authoring
+skill for the rest.
+
+**Exact result.**
+
+- A `hooks.json` may hold `hooks` and `modules` together; `modules` is an array with exactly one
+  path. Claude Code 2.1.271 and 2.1.292 both load it and run both kinds (SP1).
+- `agentId` (bare lowercase hex) is on `tool.call`, `turn.step` and `turn.complete` for subagent
+  loops and absent on the main loop; the `agent.spawn` result's `agentId` is the same id (SP2).
+- `agent.spawn`'s `subagentType` is namespaced for plugin agents, `<plugin>:<name>` (SP3).
+- `turn.step`, an async generator, yields per-request `usage` (input, output, cache read, cache
+  creation) and `model`; `usage` may be `null` (SP2; the typings).
+- `session.measure` fires for the main thread with an optional `context.percent` from 0 to 100 (SP2).
+- Rewriting `text` on a `tool.call` result does not reach the model; appending to the result's
+  `context` (a `string[]`) reaches a subagent's model. `{ deny }` on a subagent's `tool.call` reaches
+  its model, which stops and reports the refusal (capability spikes).
+- `$.session.version()` resolves `{ version, base, builtAt }`; `$.session.id()` and
+  `$.session.cwd()` resolve Promises; `$.env.get` reads an environment variable named by a string
+  literal; `CLAUDE_PLUGIN_ROOT` is not in a module's environment, and `import.meta.url` is the
+  module's file URL; `$.process.run(['node', …], { stdin })` works; `$.fs.ancestors` accepts only
+  `.md` names (capability spikes; the typings).
+- `claude plugin test .` needs no auth and no network on 2.1.287 or 2.1.292, skips dot-directories
+  and `node_modules`, exits 1 when a test fails, and hands a test's `options` to `register` as its
+  `userConfig`; a module may import a sibling ES module by relative path, and a test a helper `.ts`.
+- `claude plugin validate <path> --strict` lists a module's hooks, its gating hooks with or without
+  `.catch`, and the engine calls it makes, as facts rather than warnings; a `CLAUDE.md` at the plugin
+  root is a warning, which `--strict` fails.
+- The loader refuses a module, under `claude plugin test`, `claude plugin validate` and a session
+  alike, on two rules the bundled `reference.md` does not state (2.1.287, 2.1.292, 2.1.293): `$` may
+  be passed only to a function declared at the top of the file — "$ is passed to "refresh", which is
+  not a function declared at the top of this file" — and an event may be registered only once
+  without a matcher — "on("tool.call") is registered twice without a matcher". A module keeps its
+  per-load state in one object its `register` creates and hands to top-level helpers, and serves
+  every behaviour on an event from one hook.
+
+**Consequence.** `hooks/devcycle-mod.mjs` is a plain `.mjs` under `modules`, imports only node-free
+leaves, derives its sink's path from `import.meta.url`, attaches its budget note to `context`, and
+stays inert below 2.1.287, the first release of the API it is written against. devcycle's own
+instructions file lives at `.claude/CLAUDE.md`. CI runs both strict validations and `claude plugin
+test .` on 2.1.287 and 2.1.292. Whether `allowManagedModsOnly` refuses the whole `hooks.json` or
+only its `modules` cannot be checked without managed settings; doctor's `mod-inactive` candidate
+reports the effect either way.

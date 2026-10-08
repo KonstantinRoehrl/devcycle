@@ -73,6 +73,7 @@ separately dispatched context.
 
 ```
 devcycle/                (public GitHub repo)
+├── .claude/CLAUDE.md                 # instructions for an agent working on devcycle's own source
 ├── .claude-plugin/
 │   ├── plugin.json               # name, version (bump per release), dependency on superpowers
 │   │                             # userConfig (see §7)
@@ -113,12 +114,16 @@ devcycle/                (public GitHub repo)
 │   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
 │                                 # origin the browser guard below permits
 ├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05, 2026-10-07)
-│   ├── hooks.json                # registers the guards on PreToolUse (browser + destructive-git), the commit-sensor on PostToolUse and the depth-sensor on SubagentStop
+│   ├── hooks.json                # registers the guards on PreToolUse (browser + destructive-git), the commit-sensor on PostToolUse, the depth-sensor on SubagentStop, and the hooks module under modules
 │   ├── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
 │   ├── block-destructive-git.mjs      # denies destructive git from a guarded dispatch, and git stash on the main thread mid-cycle (#165, #235)
 │   ├── lib/find-state-file.mjs        # the bounded .devcycle/state.md walk the git guard and both sensors key off
+│   ├── lib/run-scope.mjs              # which state file names an active run — node-free, shared by the depth-sensor and the hooks module
+│   ├── lib/run-context.mjs            # state file → active run → joined session, for the depth-sensor and the module's sink
 │   ├── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
-│   └── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent
+│   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent
+│   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter
+│   └── mod-sink.mjs              # the module's Node side: the joined check and agent-trace writes
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
 ├── scripts/                      # L4 — validate.mjs, doctor.mjs, dream.mjs, the checkers, bump-version.mjs
 ├── workflows/                    # L4
@@ -239,7 +244,8 @@ gated by `userConfig.crossModelReview`.
   "walkthroughModel": "auto | <model id>",
   "learnStalenessSessions": 5,
   "learnStalenessDays": 14,
-  "learnSessionCap": 100
+  "learnSessionCap": 100,
+  "subagentBudget": "off | warn | enforce"
 }
 ```
 
@@ -286,6 +292,10 @@ gated by `userConfig.crossModelReview`.
   whole-root scan did), and the read counters `readSessions` / `readFiles` (resolution and
   ownership, including this knob's floor, in `references/config.md` § Learn staleness).
 - Once encoded, corresponding personal memories (e.g. never-local-merge-to-dev) are deleted.
+- `subagentBudget` (added 2026-10-07) is the hooks module's limiter tier: `warn`, the default,
+  adds a budget note to a subagent's next tool result once it passes 15% of its context window,
+  then to every fifth one; `enforce` also refuses reads at 20%; `off` does neither. A fork or a
+  teammate is never limited. It is profile-independent, so it takes no `auto`.
 
 ---
 
@@ -321,12 +331,13 @@ gated by `userConfig.crossModelReview`.
   `devcycle:red-team-reviewer`, `devcycle:on-device-driver`, `devcycle:history-inspector`. The plugin id is not decoration:
   the harness passes `<plugin>:<name>` as a subagent's `agent_type`, which is the spelling the
   browser guard's allowlist must carry (`docs/platform-notes.md` § (e)).
-- Hooks: four — two guards, `block-main-thread-browser` and `block-destructive-git`, named for
+- Hooks: four settings hooks and one hooks module — two guards, `block-main-thread-browser` and `block-destructive-git`, named for
   what they deny rather than whom they guard (the git guard was `block-reviewer-git-write` until it
   grew past reviewers, #235); and two sensors, `workload-sensor` and `dispatch-sensor`, named for
   what they watch rather than for the record they write. They are the only surface components not
   loaded by a command: each fires on a matched tool call, or when a subagent stops, instead
-  (`docs/README.md` § Hooks).
+  (`docs/README.md` § Hooks). The hooks module, `devcycle-mod`, is named for the plugin it serves
+  rather than one behaviour, since it observes, bounds and displays; its Node side is `mod-sink`.
 
 ## 15. Compaction — the reference layer, profiles, and the audit stage (added 2026-07-26)
 

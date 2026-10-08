@@ -39,7 +39,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --walkthroughModel '${user_config.walkthroughModel}' \
   --learnStalenessSessions '${user_config.learnStalenessSessions}' \
   --learnStalenessDays '${user_config.learnStalenessDays}' \
-  --learnSessionCap '${user_config.learnSessionCap}'
+  --learnSessionCap '${user_config.learnSessionCap}' \
+  --subagentBudget '${user_config.subagentBudget}'
 ```
 
 Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/maintaining-the-repo.md`. It starts no cycle, writes no state

@@ -1,5 +1,16 @@
 # Changelog
 
+A hooks module, `hooks/devcycle-mod.mjs`, joins the four settings hooks (Claude Code 2.1.287 or
+later). In a session that joined the active run it writes one `agent-trace` run-record row per
+finished subagent turn through its Node sink, `hooks/mod-sink.mjs`; adds a budget note to a
+subagent's next tool result once it passes 15% of its context window, then to every fifth one,
+and under the new `subagentBudget: enforce` refuses reads at 20%; and shows the coordinator's
+stage budget on the status line.
+Doctor's new `mod-inactive` candidate and a COLLECTION GAP line catch a module that did not run.
+CI's plugin-load job now runs on Claude Code 2.1.287 and 2.1.292, validates the marketplace and
+the plugin manifest, and runs the module's tests with `claude plugin test`. devcycle's own
+instructions file moved to `.claude/CLAUDE.md`.
+
 ## 0.23.0 — 2026-10-07
 
 - feat(doctor): record subagent context depth, gate plans with one plan-check, and print overview tables in every doctor reply

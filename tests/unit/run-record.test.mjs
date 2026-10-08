@@ -724,3 +724,73 @@ test("append: gate-ran and depth-breach are event values, and gate-ran carries a
   assert.strictEqual(ev("--event", "depth-breach").status, 0);
   assert.notStrictEqual(ev("--event", "gate-ran", "--result", "maybe").status, 0);
 });
+
+const TRACE = {
+  kind: "agent-trace", runId: "0f1e2d3c4b5a6978", stage: "execution", agentId: "a27cbd72da7b3b62f",
+  agentType: "devcycle:implementer", requestedModel: null, resolvedModel: "claude-sonnet-5-5", parentAgentId: null,
+  background: false, fork: false, steps: 14, peakDepth: 152340, window: 1000000, windowAssumed: false,
+  peakBand: "over-budget", toolResultChars: 48211, warned: 1, refused: 0, reason: "answer", isAborted: false,
+  ts: "2026-10-07T10:40:30Z",
+};
+const expectedTrace = (runId) => {
+  const { ts: _ts, ...fields } = TRACE;
+  return { ...fields, runId };
+};
+const traceSub = () =>
+  subSchemaFor(JSON.parse(readFileSync(join(REPO_ROOT, "tests/fixtures/run-record.schema.json"), "utf8")), "agent-trace");
+
+test("validate: null passes only where the property admits it, and a boolean field takes only a boolean", () => {
+  const sub = traceSub();
+  assert.deepEqual(validate(TRACE, sub), []);
+  assert.deepEqual(validate({ ...TRACE, window: null, peakBand: null, agentType: null, resolvedModel: null }, sub), []);
+  assert.match(validate({ ...TRACE, reason: null }, sub).join("; "), /"reason" value "null" is not one of/);
+  assert.match(validate({ ...TRACE, fork: "false" }, sub).join("; "), /"fork" must be a boolean/);
+  assert.match(validate({ ...TRACE, window: 1.5 }, sub).join("; "), /"window" must be an integer/);
+});
+
+test("append: an agent-trace row coerces counts and booleans, writes null where the schema admits it, and stamps ts", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-trace");
+  const r = run(["append", "--run", runId, "--repo", "/tmp/demo-trace", "--kind", "agent-trace", "--stage", "execution",
+    "--agentId", "a27cbd72da7b3b62f", "--agentType", "devcycle:implementer", "--requestedModel", "null",
+    "--resolvedModel", "claude-sonnet-5-5", "--parentAgentId", "null", "--background", "false", "--fork", "false",
+    "--steps", "14", "--peakDepth", "152340", "--window", "1000000", "--windowAssumed", "false",
+    "--peakBand", "over-budget", "--toolResultChars", "48211", "--warned", "1", "--refused", "0",
+    "--reason", "answer", "--isAborted", "false"], runs);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const { ts, ...line } = lastLine("/tmp/demo-trace", runId);
+  assert.match(ts, /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual(line, expectedTrace(runId));
+});
+
+test("append: an agent-trace row with no known window carries null window and band", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-trace-nowin");
+  const r = run(["append", "--run", runId, "--repo", "/tmp/demo-trace-nowin", "--kind", "agent-trace", "--stage", "planning",
+    "--agentId", "b1", "--agentType", "null", "--requestedModel", "null", "--resolvedModel", "null", "--parentAgentId", "null",
+    "--background", "true", "--fork", "false", "--steps", "0", "--peakDepth", "0", "--window", "null",
+    "--windowAssumed", "false", "--peakBand", "null", "--toolResultChars", "0", "--warned", "0", "--refused", "0",
+    "--reason", "aborted", "--isAborted", "true"], runs);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const line = lastLine("/tmp/demo-trace-nowin", runId);
+  assert.equal(line.window, null);
+  assert.equal(line.peakBand, null);
+  assert.equal(line.agentType, null);
+  assert.equal(line.background, true);
+  assert.equal(line.isAborted, true);
+});
+
+test("append: null is refused where the schema does not admit it, and a non-boolean flag is refused", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-trace-bad");
+  const base = ["append", "--run", runId, "--repo", "/tmp/demo-trace-bad", "--kind", "agent-trace", "--stage", "planning",
+    "--agentId", "b1", "--agentType", "null", "--requestedModel", "null", "--resolvedModel", "null", "--parentAgentId", "null",
+    "--background", "false", "--steps", "0", "--peakDepth", "0", "--window", "null", "--windowAssumed", "false",
+    "--peakBand", "null", "--toolResultChars", "0", "--warned", "0", "--refused", "0", "--isAborted", "false"];
+  const nullReason = run([...base, "--fork", "false", "--reason", "null"], runs);
+  assert.notStrictEqual(nullReason.status, 0);
+  assert.match(nullReason.stderr, /"reason" value "null" is not one of/);
+  const maybeFork = run([...base, "--fork", "maybe", "--reason", "answer"], runs);
+  assert.notStrictEqual(maybeFork.status, 0);
+  assert.match(maybeFork.stderr, /"fork" must be a boolean/);
+});

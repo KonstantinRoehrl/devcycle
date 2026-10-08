@@ -67,7 +67,7 @@ jobs:
         run: node scripts/duplication-check.mjs
       - name: Check that temp directories are created through the self-cleaning helper
         run: node scripts/temp-dir-check.mjs
-      - name: Workflow script tests (stubbed CLIs — no model call, no API key)
+      - name: Unit tests (node --test, stubbed CLIs — no model call, no API key)
         run: node --test tests/unit/*.test.mjs
       - name: Secret scan — full history
         env:
@@ -83,26 +83,33 @@ jobs:
           tar -xzf "$asset" gitleaks
           ./gitleaks git --no-banner --redact --exit-code 1 .
   plugin-load:
-    name: Plugin loads under Claude Code's real validator
+    name: Plugin loads under Claude Code ${{ matrix.cli }}'s real validator and its hooks module passes its tests
     # scripts/validate.mjs is a HOMEGROWN approximation of the plugin loader — it only rejects
     # the loader-failure classes we thought to encode. A userConfig `"type": "integer"` slipped
     # past it in 0.17.0 and the plugin failed to load on update. This job runs Claude Code's
-    # ACTUAL validator against the manifest, so a manifest the real loader would reject fails CI
-    # here instead of after a release ships. It gates all three surfaces at once: every PR, the
-    # pre-merge check `Prepare release` calls (prepare-release.yml -> validate), and the
-    # pre-publish check `Release` calls (bump-version.yml -> validate) — both `uses:` this
+    # ACTUAL validator, on the marketplace (.) and on the plugin manifest, and the hooks module's
+    # TypeScript tests (tests/mod/) through `claude plugin test`, so what the real loader would
+    # reject fails CI here instead of after a release ships. It gates all three surfaces at once:
+    # every PR, the pre-merge check `Prepare release` calls (prepare-release.yml -> validate), and
+    # the pre-publish check `Release` calls (bump-version.yml -> validate) — both `uses:` this
     # workflow, and a reusable-workflow call is green only if all its jobs are.
-    # The validator needs no ANTHROPIC_API_KEY, no network, and no model call.
-    # Pin maintenance: bump CLAUDE_CLI_VERSION by hand (there is no package.json for Dependabot
-    # to track a global CLI). A bump to a version that adds a new validator warning reddens this
-    # job first under --strict — which is the intended early-warning, not a regression.
-    # The pin is also the plugin's minimum supported CLI: 2.1.271 is the first release whose
-    # validator accepts `userConfig.<knob>.options` (2.1.270 and earlier reject the key; see
-    # docs/platform-notes.md § (g)), so CI proves the manifest loads on the oldest CLI we claim.
+    # None of it needs an ANTHROPIC_API_KEY or a model call.
+    # Two pins, both exact, both blocking, both bumped by hand (there is no package.json for
+    # Dependabot to track a global CLI):
+    #   - 2.1.287 is the FLOOR, the oldest Claude Code devcycle supports: the first release of the
+    #     hooks-module API hooks/devcycle-mod.mjs is written against (docs/platform-notes.md § (j)).
+    #     The earlier floor, 2.1.271, was the first validator to accept `userConfig.<knob>.options`
+    #     (§ (g)). Raising the floor is a decision for docs/decisions/README.md, not a pin bump.
+    #   - 2.1.292 is the CURRENT pin: a bump that adds a validator warning reddens this job under
+    #     --strict first, which is the intended early warning, not a regression.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        cli: ["2.1.287", "2.1.292"]
     env:
-      CLAUDE_CLI_VERSION: 2.1.271
+      CLAUDE_CLI_VERSION: ${{ matrix.cli }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,12 +128,20 @@ jobs:
         # integrity for the pin. The package runs a postinstall that fetches platform binaries,
         # so --ignore-scripts is not usable.
         run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}"
-      - name: Validate the plugin against the real loader
-        # --strict fails on warnings too. CI=true + stdin from /dev/null keep it non-interactive
-        # so a first-run prompt can never block the runner.
+      # --strict fails on warnings too. CI=true + stdin from /dev/null keep every step below
+      # non-interactive so a first-run prompt can never block the runner.
+      - name: Validate the marketplace against the real loader
         env:
           CI: "true"
         run: claude plugin validate . --strict < /dev/null
+      - name: Validate the plugin manifest against the real loader
+        env:
+          CI: "true"
+        run: claude plugin validate .claude-plugin/plugin.json --strict < /dev/null
+      - name: Run the hooks module's tests
+        env:
+          CI: "true"
+        run: claude plugin test . < /dev/null
   pr-title:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04

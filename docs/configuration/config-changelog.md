@@ -139,6 +139,12 @@ marker with the version the change lands in, since only the release computes tha
   key: onDeviceGate
   values: [auto, human-required, auto-ok]
   note: "manifest declares options, not a new key and no new value: /plugin configure offers the existing set as a pick-list with auto preselected instead of a blank text field"
+- version: "unreleased"
+  change: added
+  key: subagentBudget
+  default: warn
+  values: [off, warn, enforce]
+  note: "the hooks module's subagent limiter tier; profile-independent, so it takes no auto"
 ```
 
 ## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)

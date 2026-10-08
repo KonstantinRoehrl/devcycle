@@ -16,6 +16,7 @@ import { PLAYBOOK_STAGE } from "../../scripts/doctor.mjs";
 import { ROSTER } from "../../scripts/resolve-knobs.mjs";
 import { closure } from "../../scripts/context-closure.mjs";
 import { sentences } from "../../scripts/citation-grammar.mjs";
+import { STAGE_TOOL_CALLS, STAGE_FILES_READ } from "../../scripts/depth-bands.mjs";
 
 const root = process.cwd();
 const read = (p) => readFileSync(join(root, p), "utf8");
@@ -2054,6 +2055,14 @@ test("the browser guard is named by DESIGN.md's blueprint and the hub's inventor
   );
 });
 
+test("hooks.json loads the hooks module, and the hub's Hooks table carries a row for it and for its sink", () => {
+  assert.deepEqual(JSON.parse(read("hooks/hooks.json")).modules, ["./devcycle-mod.mjs"],
+    "hooks/hooks.json's modules must name hooks/devcycle-mod.mjs");
+  const hubRows = tableRows(read("docs/README.md"));
+  for (const f of ["hooks/devcycle-mod.mjs", "hooks/mod-sink.mjs"])
+    assert.ok(hubRows.some((row) => row.includes(`(../${f})`)), `docs/README.md's Hooks table must carry a row for ${f}`);
+});
+
 // #165/#235 git guard: the same tie the browser guard has, so a guarded-agent rename fails the
 // suite instead of silently leaving a guarded origin unmatched. The GUARDED list must be exactly the
 // three guarded agents' frontmatter names and their <plugin>:-namespaced forms.
@@ -2267,4 +2276,12 @@ test("learn step 3 gates its commit ask on the doc-tracking policy alone, never 
     "step 3 dropped the ignore check — it must still keep a vetoed path out of the commit");
   assert.match(rest, /\bnever (?:cancels|gates|suppresses|skips)\b/,
     "step 3 never says a veto leaves the ask standing, so the conjunction can silently come back");
+});
+
+// The stage meter displays these counters, so the numbers it shows must be the ones the reference
+// states.
+test("the stage-budget constants are the counters references/delegation.md § The stage budget states", () => {
+  const section = read("references/delegation.md").split("## The stage budget")[1]?.split(/\n## /)[0] ?? "";
+  assert.match(section, new RegExp(`\\*\\*~${STAGE_TOOL_CALLS} tool calls\\*\\*`), "the tool-call counter drifted");
+  assert.match(section, new RegExp(`\\*\\*~${STAGE_FILES_READ} files read\\*\\*`), "the files-read counter drifted");
 });

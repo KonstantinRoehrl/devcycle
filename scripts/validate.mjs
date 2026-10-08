@@ -987,6 +987,9 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     carries type: "command", every matcher is non-empty and compiles (or is the documented "*"
   //     literal), and every ${CLAUDE_PLUGIN_ROOT} path resolves — the JSON analogue of check 4;
   //     WHICH tools a given hook must cover is policy, asserted in tests/unit/golden-path.test.mjs.
+  //     It also holds the document to the two top-level keys Claude Code reads — hooks, and modules
+  //     naming the one hooks module — because an unknown key, like a misspelt modules, loads nothing
+  //     and says nothing.
   //     The `hooksParsed` flag follows check 9's baseline pattern: a document that failed to parse
   //     must report that and stop, never fall through and leave the registration unchecked at exit 0.
   const hooksDir = join(root, "hooks");
@@ -1003,6 +1006,24 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     } catch (e) {
       hooksParsed = false;
       fail(`hooks/hooks.json: not valid JSON — ${e.message}`);
+    }
+    if (hooksParsed && hooksDoc && typeof hooksDoc === "object" && !Array.isArray(hooksDoc)) {
+      for (const key of Object.keys(hooksDoc))
+        if (key !== "hooks" && key !== "modules")
+          fail(`hooks/hooks.json: unknown top-level key "${key}" — Claude Code reads only "hooks" and "modules"`);
+      if ("modules" in hooksDoc) {
+        const mods = hooksDoc.modules;
+        if (!Array.isArray(mods) || mods.length !== 1 || typeof mods[0] !== "string")
+          fail(`hooks/hooks.json: "modules" must be an array of exactly one path string, got ${JSON.stringify(mods)}`);
+        else {
+          const rel = relative(hooksDir, join(hooksDir, mods[0]));
+          const target = join(hooksDir, rel);
+          if (mods[0].startsWith("/") || rel === "" || rel.startsWith(".."))
+            fail(`hooks/hooks.json: modules[0] "${mods[0]}" must be a relative path inside hooks/`);
+          else if (!existsSync(target) || !statSync(target).isFile())
+            fail(`hooks/hooks.json: modules[0] "${mods[0]}" names no file in hooks/ — the module never loads`);
+        }
+      }
     }
     const events = hooksDoc?.hooks;
     if (hooksParsed && (typeof events !== "object" || events === null || Array.isArray(events)))

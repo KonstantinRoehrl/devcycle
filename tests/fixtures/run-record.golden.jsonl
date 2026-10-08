@@ -17,3 +17,4 @@
 {"kind":"review-writeback","runId":"0f1e2d3c4b5a6978","pr":"159","event":"COMMENT","filed":3,"degraded":1}
 {"kind":"agent-depth","runId":"0f1e2d3c4b5a6978","stage":"planning","agentType":"devcycle:task-reviewer","agentId":"a27cbd72da7b3b62f","model":"claude-sonnet-5-5","tokens":152340,"toolUses":14,"durationMs":91215,"depth":"warn","ts":"2026-08-07T10:40:00Z"}
 {"kind":"event","runId":"0f1e2d3c4b5a6978","event":"gate-ran","stage":"planning","result":"pass","culprit":null,"ts":"2026-08-07T10:06:00Z"}
+{"kind":"agent-trace","runId":"0f1e2d3c4b5a6978","stage":"planning","agentId":"a27cbd72da7b3b62f","agentType":"devcycle:task-reviewer","requestedModel":null,"resolvedModel":"claude-sonnet-5-5","parentAgentId":null,"background":false,"fork":false,"steps":14,"peakDepth":152340,"window":1000000,"windowAssumed":false,"peakBand":"over-budget","toolResultChars":48211,"warned":1,"refused":0,"reason":"answer","isAborted":false,"ts":"2026-08-07T10:40:30Z"}

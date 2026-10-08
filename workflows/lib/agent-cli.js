@@ -78,10 +78,10 @@ function killGroup(child) {
 // its report and then hangs). Never rejects:
 // transport failures come back on the resolved value as { spawnError } or { timedOut } so callers
 // branch on them instead of catching.
-function run(cmd, args, { cwd, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = {}) {
+function run(cmd, args, { cwd, env, timeoutMs, maxBufferBytes = 10 * 1024 * 1024 } = {}) {
   return new Promise((resolve) => {
     hookSignals();
-    const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], detached: true });
+    const child = spawn(cmd, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], detached: true });
     live.add(child);
     let stdout = "";
     let stderr = "";
@@ -167,7 +167,9 @@ async function claudeStructured({ prompt, tools, schema, model, cwd, permissionM
   argv.push(prompt);
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const res = await run("claude", argv, { cwd });
+    // Marks the child as devcycle's own `claude -p`, where the hooks module (hooks/devcycle-mod.mjs)
+    // stays inert; codex and /bin/sh children go through run() without it.
+    const res = await run("claude", argv, { cwd, env: { ...process.env, DEVCYCLE_NESTED_RUN: "1" } });
     if (res.spawnError) return { ok: false, error: `claude CLI not runnable: ${res.stderr}` };
     if (res.timedOut) {
       if (attempt === attempts) return { ok: false, error: `${errors.agent} timed out` };

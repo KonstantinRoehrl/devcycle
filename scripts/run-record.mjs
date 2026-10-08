@@ -65,6 +65,10 @@ function schemaFor(kind) {
   return subSchemaFor(JSON.parse(readFileSync(SCHEMA_PATH, "utf8")), kind);
 }
 
+const typesOf = (prop) => [prop.type ?? []].flat();
+// Explicit null is a value only where the schema says so: a nullable type, or null in the enum.
+export const admitsNull = (prop) => typesOf(prop).includes("null") || (prop.enum ?? []).includes(null);
+
 // Validates at write time so a malformed line never reaches the file. CI's check 13 guards the
 // declared shape; this guards every real append.
 export function validate(obj, sub) {
@@ -77,14 +81,17 @@ export function validate(obj, sub) {
       errors.push(`field "${key}" is not declared for kind "${obj.kind}"`);
       continue;
     }
+    if (value === null && admitsNull(prop)) continue;
     if (prop.enum && !prop.enum.includes(value))
       errors.push(`"${key}" value "${value}" is not one of ${prop.enum.join(" | ")}`);
     if (prop.const !== undefined && value !== prop.const)
       errors.push(`"${key}" must be ${JSON.stringify(prop.const)}`);
     if (prop.pattern && !new RegExp(prop.pattern).test(String(value)))
       errors.push(`"${key}" does not match ${prop.pattern}`);
-    if (prop.type === "integer" && !Number.isInteger(value))
+    if (typesOf(prop).includes("integer") && !Number.isInteger(value))
       errors.push(`"${key}" must be an integer`);
+    if (typesOf(prop).includes("boolean") && typeof value !== "boolean")
+      errors.push(`"${key}" must be a boolean`);
     if (prop.minimum !== undefined && Number(value) < prop.minimum)
       errors.push(`"${key}" must be >= ${prop.minimum}, got ${value}`);
   }
@@ -162,8 +169,10 @@ function main() {
   const toplevel = flags.repo ?? gitToplevel(process.cwd());
   const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex",
     "filesChanged", "filesCreated", "filesDeleted", "insertions", "deletions",
-    "plannedTaskCount", "waveCount", "filed", "degraded", "tokens", "toolUses", "durationMs"]);
+    "plannedTaskCount", "waveCount", "filed", "degraded", "tokens", "toolUses", "durationMs",
+    "steps", "peakDepth", "window", "toolResultChars", "warned", "refused"]);
   const floatFields = new Set(["cost"]);
+  const boolFields = new Set(["background", "fork", "windowAssumed", "isAborted"]);
 
   if (sub === "new") {
     const runId = randomBytes(8).toString("hex");
@@ -183,14 +192,17 @@ function main() {
     const runId = flags.run;
     if (!runId) die("append requires --run <runId>");
     const obj = { kind: flags.kind, runId };
+    const sub = schemaFor(flags.kind);
     for (const [k, v] of Object.entries(flags)) {
       if (k === "run" || k === "kind" || k === "repo") continue;
       if (k === "sessionId") obj.sessionHash = hashSession(v);
+      else if (v === "null" && sub?.properties?.[k] && admitsNull(sub.properties[k])) obj[k] = null;
+      else if (boolFields.has(k)) obj[k] = v === "true" ? true : v === "false" ? false : v;
       else obj[k] = intFields.has(k) || floatFields.has(k) ? Number(v) : v;
     }
     for (const [k, v] of Object.entries(objects)) obj[k] = v;
     if (Object.keys(knobs).length) obj.knobs = knobs;
-    if ((obj.kind === "event" || obj.kind === "agent-depth") && obj.ts === undefined)
+    if (["event", "agent-depth", "agent-trace"].includes(obj.kind) && obj.ts === undefined)
       obj.ts = now();
     writeLine(toplevel, runId, obj);
   } else if (sub === "workload") {

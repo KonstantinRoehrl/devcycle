@@ -66,7 +66,9 @@ Only a command's own text has `${user_config.KEY}` substituted, so every entry c
 configuration step (`/devcycle:continue` only once its ownership check and `resume-check` have
 passed) and prints one `knobs:` line; each stage reads its values from that line. Inside a
 cycle the state file keeps a `- knobs:` copy, and `/devcycle:continue` asks before applying a
-value you changed mid-cycle; a "keep" holds until you change the value again. Values are
+value you changed mid-cycle; a "keep" holds until you change the value again. The exception is
+`subagentBudget`: the hooks module reads its global value, never the cycle's copy, so
+`/devcycle:continue` does not ask about it and a "keep" cannot hold it. Values are
 global, as `/plugin configure` stores them: a repo's old `configured:` values are shown once as a
 drift notice, never applied, then dropped from the state file.
 [`references/config.md`](../../references/config.md) § Knob channel owns the details.
@@ -92,10 +94,11 @@ and silently runs every knob at its fallback. [`docs/platform-notes.md`](../plat
 | `learnStalenessSessions` | Unmined sessions since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer `0` or more (`0` nudges every cycle) | `5` |
 | `learnStalenessDays` | Days since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer `0` or more (`0` nudges every cycle) | `14` |
 | `learnSessionCap` | How many sessions one `/devcycle:learn` run may mine | integer `1` or more (`0` is refused, not a no-op run) | `100` |
+| `subagentBudget` | What devcycle's hooks module does with a subagent past its context budget | `off` / `warn` / `enforce` | `warn` (from 15% of its window, a note on its next tool result and every fifth after; `enforce` also refuses reads at 20%) |
 
 ## Other options
 
-The remaining twelve knobs above are secondary to `profile` — most runs never touch them.
+The remaining thirteen knobs above are secondary to `profile` — most runs never touch them.
 
 **`gitPolicy`** is the pipeline's blast radius: `local-commits-only` means it only ever
 commits on a local branch and hands it to you (never pushes); `push-allowed` lets it push

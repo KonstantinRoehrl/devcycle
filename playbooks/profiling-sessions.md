@@ -168,10 +168,10 @@ to draft. For each finding it chose:
 1. Take the draft from the script, never hand-composed:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --issue-body <slug>`. The slug may name a culprit
    (drafting a `[culprit:<slug>]` issue) OR a Compliance candidate — `inherited-model`,
-   `missing-workload`, `main-thread-browser`, `general-purpose-search`, `sensor-inactive` — drafting a
-   `[compliance:<slug>]` issue from the same section the report renders, OR `unpriced-model` —
-   drafting a `[doctor:unpriced-model]` issue for the models the report names as unpriced or
-   provisionally priced. Its `repo:` line names the
+   `missing-workload`, `main-thread-browser`, `general-purpose-search`, `sensor-inactive`,
+   `mod-inactive` — drafting a `[compliance:<slug>]` issue from the same section the report renders,
+   OR `unpriced-model` — drafting a `[doctor:unpriced-model]` issue for the models the report names
+   as unpriced or provisionally priced. Its `repo:` line names the
    repo every command below targets — read the slug from there, never from this file.
 2. Screen it before anyone sees it: write it to a file, then run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`. A draft that fails

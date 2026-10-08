@@ -2452,9 +2452,9 @@ test("complianceIssueBody: an inherited-model draft body screens clean through r
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
-test("COMPLIANCE_TYPES names exactly the five emitComplianceCandidates types", () => {
+test("COMPLIANCE_TYPES names exactly the six emitComplianceCandidates types", () => {
   assert.deepEqual([...COMPLIANCE_TYPES].sort(),
-    ["general-purpose-search", "inherited-model", "main-thread-browser", "missing-workload", "sensor-inactive"]);
+    ["general-purpose-search", "inherited-model", "main-thread-browser", "missing-workload", "mod-inactive", "sensor-inactive"]);
 });
 
 // FIX A: the compliance-type constant is now load-bearing, not just documentation. Three
