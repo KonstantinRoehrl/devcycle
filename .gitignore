@@ -9,6 +9,9 @@ graphify-out/
 # Claude Code lays its hooks-module type declarations beside a module loaded from a --plugin-dir
 # checkout, at every load; they are the CLI's, not this repo's.
 .claude-plugin/types/
+# A contributor's .claude/ holds Claude Code's local settings and worktree checkouts, so only
+# devcycle's own instructions file in it is tracked. A repo-local .claude/skills/ that should be
+# tracked later needs its own negation line here, like that file's.
 .claude/*
 !.claude/CLAUDE.md
 

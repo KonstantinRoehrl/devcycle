@@ -90,25 +90,42 @@ stage-budget sentence in `references/delegation.md`; +1, the agent-trace row in
 `playbooks/reviewing-code.md` 91047 → 91238, `playbooks/reviewing-the-branch.md` 54778 → 54969,
 `playbooks/scoping-the-request.md` 26638 → 26829, `playbooks/verifying-on-device.md` 50302 → 50493
 and `playbooks/writing-the-findings-document.md` 65474 → 65665.
+Branch review then corrects both references and the resume gate, raising the runtime surface 5743 →
+5745 (+2 lines: +1, `references/delegation.md`'s stage-budget sentence now says what each
+`subagentBudget` tier does and that only the human sees the stage meter; +1,
+`commands/continue.md`'s knob-change step says `--compare` never lists `subagentBudget`). Every
+playbook whose closure cites both references grows by 156 bytes (+96, `references/delegation.md`;
++60, the sentence in `references/config.md` naming the `live` roster mark that keeps the knob out of
+`--compare`): `playbooks/executing-waves.md` 104658 → 104814, `playbooks/finishing-the-cycle.md`
+53506 → 53662, `playbooks/learning-from-sessions.md` 61194 → 61350,
+`playbooks/maintaining-the-repo.md` 63698 → 63854, `playbooks/planning-waves.md` 67835 → 67991,
+`playbooks/receiving-review.md` 108778 → 108934, `playbooks/reviewing-code.md` 91238 → 91394,
+`playbooks/reviewing-the-branch.md` 54969 → 55125 and `playbooks/verifying-on-device.md` 50493 →
+50649. Every playbook whose closure cites only `references/delegation.md` grows by 96 bytes:
+`playbooks/profiling-sessions.md` 47057 → 47153, `playbooks/scoping-the-request.md` 26829 → 26925,
+`playbooks/sweeping-mechanical-changes.md` 81604 → 81700, `playbooks/taking-the-fast-path.md` 74729
+→ 74825 and `playbooks/writing-the-findings-document.md` 65665 → 65761.
+`playbooks/onboarding-a-repo.md`, which cites only `references/config.md`, grows by 60 bytes, 29388
+→ 29448.
 
 ```text
-budget: context-budget.json playbooks/profiling-sessions.md 47057
-budget: surface-budget.json surfaceTotal 5743
+budget: context-budget.json playbooks/profiling-sessions.md 47153
+budget: surface-budget.json surfaceTotal 5745
 budget: surface-budget.json commandMax 174
-budget: context-budget.json playbooks/executing-waves.md 104658
-budget: context-budget.json playbooks/finishing-the-cycle.md 53506
-budget: context-budget.json playbooks/learning-from-sessions.md 61194
-budget: context-budget.json playbooks/maintaining-the-repo.md 63698
-budget: context-budget.json playbooks/onboarding-a-repo.md 29388
-budget: context-budget.json playbooks/planning-waves.md 67835
-budget: context-budget.json playbooks/receiving-review.md 108778
-budget: context-budget.json playbooks/reviewing-code.md 91238
-budget: context-budget.json playbooks/reviewing-the-branch.md 54969
-budget: context-budget.json playbooks/verifying-on-device.md 50493
-budget: context-budget.json playbooks/scoping-the-request.md 26829
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 81604
-budget: context-budget.json playbooks/taking-the-fast-path.md 74729
-budget: context-budget.json playbooks/writing-the-findings-document.md 65665
+budget: context-budget.json playbooks/executing-waves.md 104814
+budget: context-budget.json playbooks/finishing-the-cycle.md 53662
+budget: context-budget.json playbooks/learning-from-sessions.md 61350
+budget: context-budget.json playbooks/maintaining-the-repo.md 63854
+budget: context-budget.json playbooks/onboarding-a-repo.md 29448
+budget: context-budget.json playbooks/planning-waves.md 67991
+budget: context-budget.json playbooks/receiving-review.md 108934
+budget: context-budget.json playbooks/reviewing-code.md 91394
+budget: context-budget.json playbooks/reviewing-the-branch.md 55125
+budget: context-budget.json playbooks/verifying-on-device.md 50649
+budget: context-budget.json playbooks/scoping-the-request.md 26925
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 81700
+budget: context-budget.json playbooks/taking-the-fast-path.md 74825
+budget: context-budget.json playbooks/writing-the-findings-document.md 65761
 ```
 
 ## 2026-10-07 — planning context safety, Plan A: the depth gate gets its own probe, the plan gates become one

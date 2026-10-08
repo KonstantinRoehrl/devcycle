@@ -12,6 +12,8 @@ import { parsePool } from "./model-pool.mjs";
 const profileRow = (lean, standard, thorough) => ({ lean, standard, thorough });
 
 // Roster order is references/config.md § The knob roster's order, and the order `knobs:` prints in.
+// A `live` knob's reader takes the global value itself rather than the `knobs:` line
+// (references/config.md § Knob channel), so a cycle cannot keep an older value of it.
 export const ROSTER = [
   { key: "profile", kind: "enum", values: ["lean", "standard", "thorough"], fallback: "standard" },
   { key: "gitPolicy", kind: "enum", values: ["local-commits-only", "push-allowed", "open-pr"], fallback: "local-commits-only" },
@@ -26,7 +28,7 @@ export const ROSTER = [
   { key: "learnStalenessSessions", kind: "count", min: 0, fallback: "5" },
   { key: "learnStalenessDays", kind: "count", min: 0, fallback: "14" },
   { key: "learnSessionCap", kind: "count", min: 1, fallback: "100" },
-  { key: "subagentBudget", kind: "enum", values: ["off", "warn", "enforce"], fallback: "warn" },
+  { key: "subagentBudget", kind: "enum", values: ["off", "warn", "enforce"], fallback: "warn", live: true },
 ];
 
 const ROSTER_KEYS = new Set(ROSTER.map(({ key }) => key));
@@ -114,11 +116,12 @@ export function parseRecordedLine(line) {
 }
 
 // A recorded `auto` on a knob whose resolution never prints `auto` -- every knob but the four
-// `*Model` ones -- says "let the profile govern", not a value, so it is no difference.
+// `*Model` ones -- says "let the profile govern", not a value, so it is no difference. A live knob
+// is never a difference: keeping its recorded value would change nothing its reader does.
 export function compareKnobs(recorded, knobs) {
   const changes = [];
   for (const entry of ROSTER) {
-    if (!Object.hasOwn(recorded, entry.key)) continue;
+    if (entry.live || !Object.hasOwn(recorded, entry.key)) continue;
     const old = recorded[entry.key];
     if (old === "auto" && entry.kind !== "model") continue;
     const comparable = entry.kind === "model" && old !== "auto" ? parsePool(old).entries.join(",") : old;

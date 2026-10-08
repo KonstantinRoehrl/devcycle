@@ -96,8 +96,11 @@ Requires Claude Code 2.1.287 or later — earlier releases reject the manifest's
 **What the hooks module can see.** Besides its settings hooks, devcycle ships a hooks module
 (`hooks/devcycle-mod.mjs`) that Claude Code runs in-process: it sees your sessions' prompts, tool
 calls and tool results, it is not sandboxed, and `claude plugin validate <plugin directory>` lists
-every hook it registers and every engine call it makes. It acts only in a session that joined an
-active devcycle run, and what it writes are run-record rows of ids, counts and enum values.
+every hook it registers and every engine call it makes. In every session it looks for a
+`.devcycle/state.md` in the working directory or a parent; where that file names an active run, it
+runs a short Node check (`node hooks/mod-sink.mjs check-joined`) to learn whether this session
+joined the run. Beyond that it acts only in a session that joined an active devcycle run, and what
+it writes are run-record rows of ids, counts and enum values.
 
 For the on-device verification stage's automatic checks, also install the claude-in-chrome
 plugin — Claude Code's integration with your own Chrome (without it, every checklist item

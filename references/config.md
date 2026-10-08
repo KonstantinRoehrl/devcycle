@@ -57,7 +57,7 @@ loads, never in a file a stage opens with Read — so knobs reach stages through
   depth — are looked up in § The profile under the `knobs:` line's `profile`. The one value read
   elsewhere is `subagentBudget`: the hooks module (`hooks/devcycle-mod.mjs`) takes it from the
   `options` Claude Code hands its `register`, never from the `knobs:` line, which still prints it
-  for the state file.
+  for the state file. Its `ROSTER` entry is `live`, so `--compare` leaves it out.
 - **Drift notice.** Values are global, as `/plugin configure` stores them — there is no per-repo
   value. Where the state file's `configured:` line records a KEY=VALUE list, `/devcycle:cycle`
   and `/devcycle:continue` rerun their final resolver invocation with

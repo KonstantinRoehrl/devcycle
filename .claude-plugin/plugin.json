@@ -128,7 +128,7 @@
         "warn",
         "enforce"
       ],
-      "description": "What devcycle's hooks module does when a subagent of a devcycle run goes past its context budget. One of: off (nothing), warn (adds a budget note to the subagent's tool results from 15% of its context window), enforce (also refuses Read, Grep, Glob, WebFetch and WebSearch at 20%; never Write, Edit or Bash, and never a fork or a teammate). Profile-independent. Default: warn."
+      "description": "What devcycle's hooks module does when a subagent of a devcycle run goes past its context budget. One of: off (nothing), warn (once the subagent passes 15% of its context window, adds a budget note to its next tool result and then to every fifth one), enforce (warn, and also refuses Read, Grep, Glob, WebFetch and WebSearch at 20%; never Write, Edit or Bash). A fork or a teammate is never limited. Profile-independent. Default: warn."
     }
   }
 }

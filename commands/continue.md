@@ -67,11 +67,12 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
 
    When the state file carries a `- knobs:` line, rerun that command with `--compare '<that
    line>'` appended. No output → proceed. Any output (`key: old → new` lines) → show it and ask
-   ONE question, the knob-change question, unless a `- knobs-declined:` row skips it:
-   **apply for the rest of this cycle**, rewriting `- knobs:` from the fresh line, or **keep this
-   cycle's values**, leaving `- knobs:` as it is. Whatever the comparison printed, update the
-   `knobs-declined:`/`knobs-changed:` rows and record an apply as
-   `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file specifies. A state
+   ONE question, the knob-change question, unless a `- knobs-declined:` row skips it: **apply for
+   the rest of this cycle**, rewriting `- knobs:` from the fresh line, or **keep this cycle's
+   values**, leaving `- knobs:` as it is. The comparison never prints `subagentBudget`: the hooks
+   module reads its global value, not `- knobs:`, so a keep could not hold it (§ Knob channel).
+   Whatever the comparison printed, update the `knobs-declined:`/`knobs-changed:` rows and record
+   an apply as `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file specifies. A state
    file with no `- knobs:` line gets one written from the fresh line without asking. Then the
    drift notice, per § Knob channel.
 3. Read only what this stage's resume needs: the state file always and, beyond it —

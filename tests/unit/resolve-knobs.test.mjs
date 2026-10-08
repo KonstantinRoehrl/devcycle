@@ -159,6 +159,13 @@ test("compare skips a recorded auto on a profile-governed knob but not on a *Mod
   assert.deepEqual(compareKnobs({ reviewDepth: "auto", implementerModel: "auto" }, knobs), [{ key: "implementerModel", old: "auto", new: "claude-x" }]);
 });
 
+test("compare leaves out a live knob, whose reader takes the global value and never the knobs: line", () => {
+  const { knobs } = resolveKnobs(with_({ gitPolicy: "open-pr", subagentBudget: "enforce" }));
+  assert.deepEqual(compareKnobs({ subagentBudget: "warn" }, knobs), []);
+  assert.deepEqual(compareKnobs({ subagentBudget: "warn", gitPolicy: "local-commits-only" }, knobs), [{ key: "gitPolicy", old: "local-commits-only", new: "open-pr" }]);
+  assert.deepEqual(ROSTER.filter((e) => e.live).map(({ key }) => key), ["subagentBudget"]);
+});
+
 test("the resolver's profile rows match config.md's profile matrix", () => {
   const config = readFileSync("references/config.md", "utf8");
   const row = (label) => {
@@ -204,6 +211,16 @@ test("cli: --compare prints only the differing keys, and nothing on agreement", 
   assert.equal(differ.stdout, "gitPolicy: local-commits-only → open-pr\n");
   const agree = cli([...argv(raw), "--compare", "knobs: gitPolicy=open-pr"]);
   assert.equal(agree.stdout, "");
+});
+
+test("cli: --compare prints nothing for a subagentBudget-only difference, but still prints a non-live knob's", () => {
+  const raw = with_({ subagentBudget: "enforce" });
+  const liveOnly = cli([...argv(raw), "--compare", "- knobs: profile=standard subagentBudget=warn"]);
+  assert.equal(liveOnly.status, 0, liveOnly.stderr);
+  assert.equal(liveOnly.stdout, "");
+  const mixed = cli([...argv(raw), "--compare", "- knobs: profile=lean subagentBudget=warn"]);
+  assert.equal(mixed.status, 0, mixed.stderr);
+  assert.equal(mixed.stdout, "profile: lean → standard\n");
 });
 
 test("cli: --compare against the resolver's own printed line reports nothing", () => {
