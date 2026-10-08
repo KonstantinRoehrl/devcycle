@@ -76,8 +76,11 @@ run locally.
 
 ## Hooks
 
-The hooks the plugin ships. No command loads them; each fires on a matched tool call, or — the
-dispatch-sensor — when a subagent stops.
+The hooks the plugin ships: four settings hooks registered by event in `hooks/hooks.json`, and one
+hooks module listed under its `modules`, which Claude Code loads in-process. No command loads them;
+each settings hook fires on a matched tool call or — the dispatch-sensor — when a subagent stops,
+and the module's function hooks run on the turns, tool calls and subagents of a session that joined
+an active run.
 
 | Hook | What it does |
 | --- | --- |
@@ -85,6 +88,8 @@ dispatch-sensor — when a subagent stops.
 | [`hooks/block-destructive-git.mjs`](../hooks/block-destructive-git.mjs) | Registered on `PreToolUse` over `Bash`. For a guarded dispatch origin (`task-reviewer`, `red-team-reviewer`, `implementer`) it denies destructive or ambiguous git subcommands (`checkout`/`reset`/`restore`/`clean`/`stash`/…), allowing only inspection commands and `git add -N`; on the main thread it denies `git stash` while a `.devcycle/state.md` at or above the call's `cwd` reports a stage other than `done` — `list`/`show` are excepted only when written plainly, because a stash behind a wrapper or a command substitution is denied on ambiguity. The structural backstop for the never-revert-a-sibling ban (#165, #235). |
 | [`hooks/workload-sensor.mjs`](../hooks/workload-sensor.mjs) | Registered on `PostToolUse` over `Bash`, it re-derives the run's `workload` record from `.devcycle/state.md` and git on each HEAD-advancing commit in an active cycle, so workload collection never depends on the finish stage running ([`playbooks/finishing-the-cycle/`](playbooks/finishing-the-cycle/README.md)). |
 | [`hooks/dispatch-sensor.mjs`](../hooks/dispatch-sensor.mjs) | Registered on `SubagentStop`, it appends one `agent-depth` run-record row per finished subagent whose session joined the active cycle's run — final context depth, model, tool uses, duration — marking `warn` above 150k and `breach` above 200k (with a `depth-breach` event). Observe-only: never blocks, always exits 0. |
+| [`hooks/devcycle-mod.mjs`](../hooks/devcycle-mod.mjs) | The hooks module, listed under `modules` in `hooks/hooks.json` and loaded in-process (Claude Code 2.1.287 or later). In a session that joined the active run it writes one `agent-trace` run-record row per finished subagent turn — peak context depth against the model's window, tool-result characters, the limiter's counts — through `hooks/mod-sink.mjs`; from 15% of a subagent's window it adds a budget note to that subagent's tool results, and under `subagentBudget: enforce` refuses `Read`/`Grep`/`Glob`/`WebFetch`/`WebSearch` at 20%; in an interactive session the status line shows the stage budget. It runs without Node, passes every call through when it fails, and does nothing below 2.1.287, in devcycle's own `claude -p` children, or outside a joined run ([`decisions/`](decisions/README.md), 2026-10-07). |
+| [`hooks/mod-sink.mjs`](../hooks/mod-sink.mjs) | The hooks module's Node side, which the module spawns: `check-joined` answers whether this session joined the active run, and `append` writes one `agent-trace` row carrying the stage at the subagent's stop. Always exits 0. |
 
 ## Agents
 

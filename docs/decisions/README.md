@@ -7,6 +7,51 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 
 ## 2026-10-07 — Fifth hook-like component: the function-hook module
 
+**Decision:** the plugin ships a fifth hook-like component beside the four settings hooks: a hooks
+module, `hooks/devcycle-mod.mjs`, listed under `modules` in `hooks/hooks.json` and loaded by Claude
+Code in-process, with its Node side in `hooks/mod-sink.mjs`.
+
+**What it observes:** in a session that joined the active run, every subagent from its first step —
+per-request context depth against the model's window, steps, tool-result characters — and on each
+finished subagent turn one `agent-trace` run-record row under that subagent's agentId, written
+during the cycle rather than once at its end. In an interactive session it shows the coordinator's
+stage budget on the status line, reset at every stage change.
+
+**Tiers:** `subagentBudget` sets the limiter. `warn`, the default, adds a budget note to a bounded
+subagent's tool results from 15% of its context window, on the first crossing and then on every
+fifth result; `enforce` also refuses `Read`, `Grep`, `Glob`, `WebFetch` and `WebSearch` at 20%, never
+`Write`, `Edit` or `Bash`; `off` does neither. A fork or a teammate is never bounded. The note rides
+the tool result's own `context`, errored or not, never the system prompt.
+
+**Fail-open:** every non-streaming hook is registered with `.catch(($, e, next) => next(e))`, so a
+failing hook passes the call through — the budget is a soft rule, and a broken guard must not stall
+a cycle — and every hook that is not answering for itself returns `next`'s result, spread and
+extended, because the settings hooks sit beneath it in one chain.
+
+**Cross-check:** `hooks/dispatch-sensor.mjs` stays the owner of the per-dispatch facts and the
+collector that survives `allowManagedModsOnly` and `--bare`; the module records only what it alone
+can see, under the same agentId. Doctor's `mod-inactive` candidate flags a run on a module-shipping
+version with `agent-depth` rows and no `agent-trace` rows, and a COLLECTION GAP line names a run
+whose two kinds disagree on their distinct agentIds, so a missing collector is surfaced, never read
+as zero.
+
+**Trust delta:** a settings hook is a separate process that sees its own input; the module runs
+inside Claude Code and sees prompts, tool calls and their results. It is not sandboxed, and
+`claude plugin validate` lists every hook it registers and every engine call it makes. It writes
+only run-record rows of ids, counts and enum values.
+
+**Scope guards:** it does nothing below Claude Code 2.1.287, in the `claude -p` children devcycle's
+workflows spawn (`workflows/lib/agent-cli.js` sets `DEVCYCLE_NESTED_RUN=1` for those alone), or in a
+session that has not joined an active run. The run and the joined answer are re-derived on every
+main-loop turn, whenever the state file changes, and — because `/devcycle:continue` appends the
+session's row mid-turn — at every subagent spawn while the session is not yet joined (a 2026-10-07
+amendment from the plan review: one Node check per spawn, only until joined); only a positive
+joined answer is cached, and the version and the child marker are read once per module load.
+
+**Version floor:** devcycle's minimum Claude Code becomes 2.1.287, the first release of the
+hooks-module API the module is written against (`docs/platform-notes.md` § (j)); CI's loader gate
+runs on that floor and on the current pin, 2.1.292.
+
 **Instructions file:** devcycle's own agent instructions move from the root `CLAUDE.md` to
 `.claude/CLAUDE.md`, which Claude Code also reads as project instructions. Claude Code's plugin
 validator warns that a `CLAUDE.md` at the plugin root is not loaded as project context, and
@@ -31,21 +76,39 @@ every playbook whose closure cites it: `playbooks/executing-waves.md` 103894 →
 `playbooks/receiving-review.md` 108014 → 108305, `playbooks/reviewing-code.md` 90756 → 91047,
 `playbooks/reviewing-the-branch.md` 54487 → 54778 and `playbooks/verifying-on-device.md`
 50011 → 50302 (+291 bytes each).
+The hooks-module documentation raises the runtime surface again, 5740 → 5743 (+3 lines: +2, the
+stage-budget sentence in `references/delegation.md`; +1, the agent-trace row in
+`references/ledger.md`). Every playbook whose closure cites both references grows by 473 bytes
+(+191, the stage-budget sentence in `references/delegation.md`; +282, the agent-trace row in
+`references/ledger.md`): `playbooks/executing-waves.md` 104185 → 104658,
+`playbooks/receiving-review.md` 108305 → 108778, `playbooks/sweeping-mechanical-changes.md` 81131 →
+81604 and `playbooks/taking-the-fast-path.md` 74256 → 74729. Every playbook whose closure cites only
+`references/delegation.md` grows by 191 bytes (+191, the stage-budget sentence in
+`references/delegation.md`): `playbooks/finishing-the-cycle.md` 53315 → 53506,
+`playbooks/learning-from-sessions.md` 61003 → 61194, `playbooks/maintaining-the-repo.md` 63507 →
+63698, `playbooks/planning-waves.md` 67644 → 67835, `playbooks/profiling-sessions.md` 46866 → 47057,
+`playbooks/reviewing-code.md` 91047 → 91238, `playbooks/reviewing-the-branch.md` 54778 → 54969,
+`playbooks/scoping-the-request.md` 26638 → 26829, `playbooks/verifying-on-device.md` 50302 → 50493
+and `playbooks/writing-the-findings-document.md` 65474 → 65665.
 
 ```text
-budget: context-budget.json playbooks/profiling-sessions.md 46866
-budget: surface-budget.json surfaceTotal 5740
+budget: context-budget.json playbooks/profiling-sessions.md 47057
+budget: surface-budget.json surfaceTotal 5743
 budget: surface-budget.json commandMax 174
-budget: context-budget.json playbooks/executing-waves.md 104185
-budget: context-budget.json playbooks/finishing-the-cycle.md 53315
-budget: context-budget.json playbooks/learning-from-sessions.md 61003
-budget: context-budget.json playbooks/maintaining-the-repo.md 63507
+budget: context-budget.json playbooks/executing-waves.md 104658
+budget: context-budget.json playbooks/finishing-the-cycle.md 53506
+budget: context-budget.json playbooks/learning-from-sessions.md 61194
+budget: context-budget.json playbooks/maintaining-the-repo.md 63698
 budget: context-budget.json playbooks/onboarding-a-repo.md 29388
-budget: context-budget.json playbooks/planning-waves.md 67644
-budget: context-budget.json playbooks/receiving-review.md 108305
-budget: context-budget.json playbooks/reviewing-code.md 91047
-budget: context-budget.json playbooks/reviewing-the-branch.md 54778
-budget: context-budget.json playbooks/verifying-on-device.md 50302
+budget: context-budget.json playbooks/planning-waves.md 67835
+budget: context-budget.json playbooks/receiving-review.md 108778
+budget: context-budget.json playbooks/reviewing-code.md 91238
+budget: context-budget.json playbooks/reviewing-the-branch.md 54969
+budget: context-budget.json playbooks/verifying-on-device.md 50493
+budget: context-budget.json playbooks/scoping-the-request.md 26829
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 81604
+budget: context-budget.json playbooks/taking-the-fast-path.md 74729
+budget: context-budget.json playbooks/writing-the-findings-document.md 65665
 ```
 
 ## 2026-10-07 — planning context safety, Plan A: the depth gate gets its own probe, the plan gates become one

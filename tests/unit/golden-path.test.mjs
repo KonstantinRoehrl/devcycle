@@ -2055,6 +2055,14 @@ test("the browser guard is named by DESIGN.md's blueprint and the hub's inventor
   );
 });
 
+test("hooks.json loads the hooks module, and the hub's Hooks table carries a row for it and for its sink", () => {
+  assert.deepEqual(JSON.parse(read("hooks/hooks.json")).modules, ["./devcycle-mod.mjs"],
+    "hooks/hooks.json's modules must name hooks/devcycle-mod.mjs");
+  const hubRows = tableRows(read("docs/README.md"));
+  for (const f of ["hooks/devcycle-mod.mjs", "hooks/mod-sink.mjs"])
+    assert.ok(hubRows.some((row) => row.includes(`(../${f})`)), `docs/README.md's Hooks table must carry a row for ${f}`);
+});
+
 // #165/#235 git guard: the same tie the browser guard has, so a guarded-agent rename fails the
 // suite instead of silently leaving a guarded origin unmatched. The GUARDED list must be exactly the
 // three guarded agents' frontmatter names and their <plugin>:-namespaced forms.

@@ -90,7 +90,14 @@ devcycle depends on the [superpowers] plugin. Installing devcycle installs it
 automatically from the official Claude Code plugin directory; afterwards
 `claude plugin list` shows both `devcycle` and `superpowers` as enabled.
 
-Requires Claude Code 2.1.271 or later — earlier releases reject the manifest's `userConfig` pick-lists.
+Requires Claude Code 2.1.287 or later — earlier releases reject the manifest's `userConfig` pick-lists
+(before 2.1.271) or run an earlier hooks-module API, under which devcycle's hooks module stays off.
+
+**What the hooks module can see.** Besides its settings hooks, devcycle ships a hooks module
+(`hooks/devcycle-mod.mjs`) that Claude Code runs in-process: it sees your sessions' prompts, tool
+calls and tool results, it is not sandboxed, and `claude plugin validate <plugin directory>` lists
+every hook it registers and every engine call it makes. It acts only in a session that joined an
+active devcycle run, and what it writes are run-record rows of ids, counts and enum values.
 
 For the on-device verification stage's automatic checks, also install the claude-in-chrome
 plugin — Claude Code's integration with your own Chrome (without it, every checklist item
@@ -172,7 +179,9 @@ plugin ships. Start there.
   rather than assumed; it reads each run's workload from records the `hooks/workload-sensor.mjs`
   commit-sensor writes on every commit, not from a single finish-stage step, and reports agent
   depth per stage from the per-subagent depth rows `hooks/dispatch-sensor.mjs` writes whenever a
-  cycle's own session sees a subagent finish. The depth gate runs `scripts/depth-probe.mjs`, which
+  cycle's own session sees a subagent finish. The hooks module (`hooks/devcycle-mod.mjs`) adds an
+  `agent-trace` row per finished subagent turn, which doctor cross-checks against those depth rows.
+  The depth gate runs `scripts/depth-probe.mjs`, which
   measures one transcript without loading doctor. Every `/devcycle:doctor` cost-analysis reply
   carries a per-version and per-stage overview, rendered by `scripts/doctor-overview.mjs` from
   the same tables as the full report.

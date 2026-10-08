@@ -36,7 +36,9 @@ Within one stage, the coordinator is **over budget** once either counter trips:
 
 File reads are themselves tool calls, so the read counter binds first in a read-heavy stage.
 Over budget means two things: delegate whatever work remains that is not a duty above, and
-stop at the next boundary rather than continuing through it.
+stop at the next boundary rather than continuing through it. In an interactive session the
+hooks module's stage meter shows both counters on the status line, and subagents are bounded
+separately by its limiter, whose tier is the `subagentBudget` knob.
 
 A third counter is measured rather than estimated: **context depth**, which a running session
 reads off its own transcript —
