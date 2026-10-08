@@ -2894,11 +2894,23 @@ export function renderReport(summaries, ctx) {
       `they are absent from ## Workload (observed) and every matched-cohort comparison below. This is ` +
       `under-collection, not absence of work (see ### Compliance → missing-workload). Cycles on plugin ` +
       `versions predating the commit-sensor hook legitimately carry no band and are not counted here.`);
+  // A gap run has agent-trace rows, so the module loaded and mod-inactive cannot fire for it: the
+  // causes named are the ones each direction's collector can actually miss.
   for (const gap of summaries.flatMap((s) => s.traceGaps ?? []))
     L.push("",
       `> ⚠ COLLECTION GAP — run ${gap.runId}: agent-depth and agent-trace disagree on which subagents ran ` +
       `(${gap.onlyInDepth} only in agent-depth, ${gap.onlyInTrace} only in agent-trace; ${gap.depthRowsWithoutId} ` +
-      `agent-depth row(s) without an agentId left out). One collector missed a subagent — see ### Compliance → mod-inactive for the causes.`);
+      `agent-depth row(s) without an agentId left out).` +
+      (gap.onlyInDepth > 0
+        ? " Only in agent-depth: the dispatch sensor recorded the subagent's stop but the hooks module wrote no trace " +
+          "for it — its unawaited trace append was lost (the sink failed, timed out or was killed), or the module saw " +
+          "none of that subagent's steps while it read the run as active."
+        : "") +
+      (gap.onlyInTrace > 0
+        ? " Only in agent-trace: the hooks module traced a subagent the dispatch sensor wrote no row for — the sensor " +
+          "could not read model usage from the subagent's transcript, or its append failed or timed out" +
+          (gap.depthRowsWithoutId > 0 ? ", or wrote its row without an agentId." : ".")
+        : ""));
 
   section("## At a glance", "ataglance");
   const pctText = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);

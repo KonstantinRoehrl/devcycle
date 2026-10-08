@@ -66,6 +66,26 @@ test("COLLECTION GAP: a run whose two kinds disagree on distinct agentIds gets o
   const gaps = out.split("\n").filter((l) => l.includes("COLLECTION GAP — run"));
   assert.equal(gaps.length, 1);
   assert.match(gaps[0], new RegExp(`run ${RUN}: agent-depth and agent-trace disagree on which subagents ran \\(1 only in agent-depth, 1 only in agent-trace; 1 agent-depth row\\(s\\) without an agentId left out\\)`));
+  // The run has agent-trace rows, so the module loaded: mod-inactive cannot fire for it and is no place to send the reader.
+  assert.doesNotMatch(gaps[0], /mod-inactive/);
+  assert.match(gaps[0], /Only in agent-depth: the dispatch sensor recorded the subagent's stop but the hooks module wrote no trace for it/);
+  assert.match(gaps[0], /Only in agent-trace: the hooks module traced a subagent the dispatch sensor wrote no row for/);
+  assert.match(gaps[0], /or wrote its row without an agentId/);
+});
+
+test("COLLECTION GAP: names only the causes for the direction the run disagrees in", () => {
+  const depthOnly = report([RUN_LINE, sessionLine(hash), depthRow("a1"), depthRow("a2"), traceRow("a1")])
+    .split("\n").find((l) => l.includes("COLLECTION GAP — run"));
+  assert.match(depthOnly, /\(1 only in agent-depth, 0 only in agent-trace;/);
+  assert.match(depthOnly, /Only in agent-depth:/);
+  assert.doesNotMatch(depthOnly, /Only in agent-trace:/);
+
+  const traceOnly = report([RUN_LINE, sessionLine(hash), depthRow("a1"), traceRow("a1"), traceRow("a2")])
+    .split("\n").find((l) => l.includes("COLLECTION GAP — run"));
+  assert.match(traceOnly, /\(0 only in agent-depth, 1 only in agent-trace;/);
+  assert.match(traceOnly, /Only in agent-trace:/);
+  assert.doesNotMatch(traceOnly, /Only in agent-depth:/);
+  assert.doesNotMatch(traceOnly, /or wrote its row without an agentId/, "the run has no agentId-less agent-depth row, so that cause is not offered");
 });
 
 test("COLLECTION GAP: none when the distinct agentIds agree, a continued agent's second trace row included", () => {
