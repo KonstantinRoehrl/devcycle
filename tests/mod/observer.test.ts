@@ -20,9 +20,9 @@ test('spawn, steps and complete start one agent-trace flush through the sink wit
   expect(appended(seen)).toEqual([{ run: RUN, session: 'session-a', cwd: '/repo/src', record: RECORD }]);
 });
 
-test('an agent first seen at its first step is tracked anyway, with null enrichment', async ($, on) => {
+test('a listed agent first seen at its first step (its spawn lost to a reload) is tracked anyway, with null enrichment', async ($, on) => {
   const seen = session(on);
-  engine(on, { usage: () => usage(20_000) });
+  engine(on, { usage: () => usage(20_000), listed: ['b2'] });
   await $.turn.start({ text: 'go', turnId: 'm1' });
   await step($, 'b2');
   await complete($, 'b2');
@@ -83,6 +83,17 @@ test('a continued agent writes another record under the same agentId, its counte
   await complete($, 'a1');
   const records = appended(seen).map((e) => e.record);
   expect(records.map((r) => [r.agentId, r.agentType, r.steps])).toEqual([['a1', 'devcycle:implementer', 2], ['a1', 'devcycle:implementer', 1]]);
+});
+
+test('an engine fork (compaction, memory), never spawned and listed nowhere, is not traced; the list is asked once', async ($, on) => {
+  const seen = session(on);
+  const asked = engine(on, { usage: () => usage(20_000) });
+  await $.turn.start({ text: 'go', turnId: 'm1' });
+  await step($, 'c1', 0);
+  await $.tool.call({ tool: 'Read', file_path: '/repo/a.md', agentId: 'c1' });
+  await step($, 'c1', 1);
+  await complete($, 'c1');
+  expect([appended(seen), asked.listCalls]).toEqual([[], 1]);
 });
 
 test('main-loop steps and completions write nothing', async ($, on) => {

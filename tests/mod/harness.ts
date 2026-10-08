@@ -1,6 +1,7 @@
 // Doubles for the hooks module's tests: the session ops the module calls, read from a mutable
 // `world` so a test can change the state file, the joined answer or the clock between turns, and the
-// engine's answers beneath every hook. Register both before the test's first call on `$`.
+// engine's answers beneath every hook. Register both before the test's first call on `$`. A missing
+// state file (`state: null`) is one `fs.stat` rejects, as the engine's does.
 export const RUN = '00000000000000a1';
 // A 200k window: over budget from 30k, hard stop from 40k.
 export const HAIKU = 'claude-haiku-4-5-20251001';
@@ -9,8 +10,8 @@ export const usage = (depth: number, model = HAIKU) =>
   ({ input_tokens: depth, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model });
 
 export type World = {
-  base?: string; nested?: string; state?: string | null; joined?: boolean; mtime?: number;
-  statThrows?: boolean; surfaces?: string[]; hangAppend?: boolean;
+  base?: string; nested?: string; cwd?: string; state?: string | null; joined?: boolean; mtime?: number;
+  statusThrows?: boolean; surfaces?: string[]; hangAppend?: boolean;
 };
 export type Run = { argv: string[]; init?: { stdin?: string } };
 export type Seen = { runs: Run[]; status: (string | undefined)[]; versionReads: number };
@@ -24,16 +25,20 @@ export function session(on: any, world: World = {}): Seen {
     return { value: { version: v, base: v } };
   });
   on('env.get', (_$: unknown, e: { name: string }) => ({ value: e.name === 'DEVCYCLE_NESTED_RUN' ? world.nested : undefined }));
-  on('session.cwd', () => ({ value: '/repo/src' }));
+  on('session.cwd', () => ({ value: world.cwd ?? '/repo/src' }));
   on('session.id', () => ({ value: 'session-a' }));
   on('session.surfaces', () => ({ value: world.surfaces ?? [] }));
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: state() !== null && e.path === '/repo/.devcycle/state.md' }));
   on('fs.read', () => ({ value: state() ?? '' }));
   on('fs.stat', () => {
-    if (world.statThrows) throw new Error('state file gone');
+    if (state() === null) throw new Error('ENOENT: no such file or directory');
     return { value: { kind: 'file', size: 1, mtimeMs: world.mtime ?? 1, isLink: false } };
   });
-  on('ui.status', (_$: unknown, e: { text: string | undefined }) => (seen.status.push(e.text), { value: undefined }));
+  on('ui.status', (_$: unknown, e: { text: string | undefined }) => {
+    if (world.statusThrows) throw new Error('status line unavailable');
+    seen.status.push(e.text);
+    return { value: undefined };
+  });
   on('process.run', (_$: unknown, e: Run) => {
     seen.runs.push(e);
     if (e.argv[2] === 'append' && world.hangAppend) return new Promise(() => {});
@@ -45,12 +50,24 @@ export function session(on: any, world: World = {}): Seen {
 
 export type Engine = {
   usage?: (index: number, agentId?: string) => ReturnType<typeof usage> | null; toolText?: string; toolError?: boolean;
+  listed?: string[];
 };
 
 // The bottom of every chain: a spawned agent's id is its `description`, so a test names its agents.
+// `$.agent.list()` names every spawned agent and the `listed` ones, which stand for agents whose
+// spawn a module reload lost; any other id is an engine fork's, which no list names.
 export function engine(on: any, eng: Engine = {}) {
   const text = eng.toolText ?? 'body';
-  on('agent.spawn', (_$: unknown, e: { description: string }) => ({ model: HAIKU, agentId: e.description }));
+  const listed = new Set(eng.listed ?? []);
+  const asked = { listCalls: 0 };
+  on('agent.spawn', (_$: unknown, e: { description: string }) => {
+    listed.add(e.description);
+    return { model: HAIKU, agentId: e.description };
+  });
+  on('agent.list', () => {
+    asked.listCalls += 1;
+    return { value: [...listed].map((id) => ({ id, description: id, type: 'devcycle:implementer', status: 'running' })) };
+  });
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }));
   on('turn.step', async function* (_$: unknown, e: { turnId: string; index: number; agentId?: string }) {
     const u = eng.usage ? eng.usage(e.index, e.agentId) : usage(10_000);
@@ -61,6 +78,7 @@ export function engine(on: any, eng: Engine = {}) {
   on('tool.call', () => (eng.toolError ? { isError: true, result: text, text } : { result: { text }, text }));
   on('session.measure', (_$: unknown, e: { changed: unknown[] }) => ({ changed: e.changed }));
   on('session.end', (_$: unknown, e: { sessionId: string }) => ({ sessionId: e.sessionId }));
+  return asked;
 }
 
 export const spawn = ($: any, extra: Record<string, unknown> = {}) => $.agent.spawn({

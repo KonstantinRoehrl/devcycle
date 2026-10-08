@@ -69,6 +69,28 @@ test('the status line is cleared once when the run stops being active', async ($
   expect(seen.status).toEqual([text('execution', 1, 1), undefined]);
 });
 
+test('a state file created during the turn shows the meter from the next main-loop call', async ($, on) => {
+  const world: { surfaces: string[]; cwd: string; state: string | null } = { surfaces: ['terminal'], cwd: '/repo', state: null };
+  const seen = session(on, world);
+  engine(on);
+  await $.turn.start({ text: 'go', turnId: 'm1' });
+  await mainCall($, '/repo/a.md');
+  world.state = stateText();
+  await mainCall($, '/repo/b.md');
+  expect(seen.status).toEqual([text('execution', 1, 1)]);
+});
+
+test('a state file deleted mid-turn clears the status line', async ($, on) => {
+  const world: { surfaces: string[]; state?: string | null } = { surfaces: ['terminal'] };
+  const seen = session(on, world);
+  engine(on);
+  await $.turn.start({ text: 'go', turnId: 'm1' });
+  await mainCall($);
+  world.state = null;
+  await mainCall($);
+  expect(seen.status).toEqual([text('execution', 1, 1), undefined]);
+});
+
 test('the meter never refuses a call', async ($, on) => {
   session(on, { surfaces: ['terminal'] });
   engine(on);

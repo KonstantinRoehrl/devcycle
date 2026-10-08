@@ -14,9 +14,10 @@ test("activeRun: a run id that is not 16 lowercase hex, a stage outside the whit
   assert.equal(RUN_ID.test("00000000000000a1"), true);
 });
 
-test("STAGES is the run record's stage enum, in schema order", () => {
+test("STAGES is the run record's stage enum, in schema order, for both agent-depth and agent-trace", () => {
   const schema = JSON.parse(readFileSync(new URL("../fixtures/run-record.schema.json", import.meta.url), "utf8"));
-  assert.deepEqual([...STAGES], schema.oneOf.find((s) => s.title === "agent-depth").properties.stage.enum);
+  for (const kind of ["agent-depth", "agent-trace"])
+    assert.deepEqual([...STAGES], schema.oneOf.find((s) => s.title === kind).properties.stage.enum, kind);
 });
 
 test("run-scope imports md-field-core and nothing else — the hooks module, which has no Node, loads it", () => {

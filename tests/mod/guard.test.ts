@@ -115,12 +115,12 @@ test('a state-file change seen after a main-loop tool call re-derives the scope 
 });
 
 test('a tool.call hook that throws after next passes the tool result through', async ($, on) => {
-  const world = { statThrows: false };
+  const world = { surfaces: ['terminal'], statusThrows: false };
   session(on, world);
   engine(on, { toolText: 'still here' });
   await $.turn.start({ text: 'go', turnId: 'm1' });
   await mainCall($);
-  world.statThrows = true;
+  world.statusThrows = true;
   const result = await mainCall($);
   expect(result.text).toBe('still here');
 });

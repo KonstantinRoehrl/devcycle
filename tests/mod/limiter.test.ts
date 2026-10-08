@@ -122,6 +122,15 @@ test('forks and teammates are never bounded', { options: { subagentBudget: 'enfo
   }
 });
 
+test('an engine fork, never spawned and listed nowhere, is never bounded', { options: { subagentBudget: 'enforce' } }, async ($, on) => {
+  session(on);
+  engine(on, { usage: () => usage(44_000) });
+  await $.turn.start({ text: 'go', turnId: 'm1' });
+  await step($, 'c1');
+  const r: any = await $.tool.call({ tool: 'Read', file_path: '/repo/a.md', agentId: 'c1' });
+  expect([r.deny, r.text, r.context]).toEqual([undefined, 'body', undefined]);
+});
+
 test('off: nothing is attached and nothing refused', { options: { subagentBudget: 'off' } }, async ($, on) => {
   const seen = session(on);
   engine(on, { usage: () => usage(44_000) });

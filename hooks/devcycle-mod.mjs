@@ -1,6 +1,8 @@
 // devcycle's hooks module, loaded in-process from hooks/hooks.json's `modules`. In a session that
 // joined the active devcycle run it observes each subagent and writes one agent-trace run-record row
-// per finished subagent turn, under the agentId hooks/dispatch-sensor.mjs keys its agent-depth row by.
+// per finished subagent turn, under the agentId hooks/dispatch-sensor.mjs keys its agent-depth row by;
+// it bounds a subagent's context by the subagentBudget tier, and shows the coordinator's stage budget
+// on the status line. The engine's own forks (compaction, memory) are neither traced nor bounded.
 // It runs without Node — nothing it imports may import a node: module, call require or import
 // dynamically — so the state file's run, the joined-run check and the run-record write go through
 // hooks/mod-sink.mjs, which it spawns. Settings hooks sit beneath it in one chain, so every hook that
@@ -67,7 +69,7 @@ async function resolveScope(st, $) {
     else if (parentOf(dir) === dir) break;
     else dir = parentOf(dir);
   }
-  if (!stateFile) return INERT;
+  if (!stateFile) return { active: false, stateFile: null, cwd };
   const { mtimeMs } = await $.fs.stat(stateFile);
   const run = activeRun(await $.fs.read(stateFile));
   if (!run) return { active: false, stateFile, mtimeMs };
@@ -96,18 +98,25 @@ async function active(st, $) {
 function entry(st, agentId) {
   let a = st.agents.get(agentId);
   if (!a) {
-    a = { tracked: false, agentType: null, requestedModel: null, resolvedModel: null, parentAgentId: null,
-      background: false, fork: false, isTeammate: false, ...turnCounters() };
+    a = { tracked: false, engineFork: false, agentType: null, requestedModel: null, resolvedModel: null,
+      parentAgentId: null, background: false, fork: false, isTeammate: false, ...turnCounters() };
     st.agents.set(agentId, a);
   }
   return a;
 }
 
-// One stat per main-loop tool call: a stage advance or a finished cycle rewrites the state file.
+// One stat per main-loop tool call: a cycle's start, a stage advance or a finished cycle writes the
+// state file.
 async function afterMainLoopCall(st, $, e) {
-  const seen = await current(st, $);
-  if (seen.stateFile && (await $.fs.stat(seen.stateFile)).mtimeMs !== seen.mtimeMs) refresh(st, $);
+  if (await stateFileChanged($, await current(st, $))) refresh(st, $);
   await updateMeter(st, $, e);
+}
+
+// A state file that appeared or disappeared changed as much as a rewritten one. With none known, only
+// the cwd's own candidate is checked, so outside a devcycle repo each call costs one exists.
+async function stateFileChanged($, seen) {
+  if (seen.stateFile) return (await $.fs.stat(seen.stateFile).then((s) => s.mtimeMs, () => null)) !== seen.mtimeMs;
+  return seen.cwd !== undefined && (await $.fs.exists(stateFileIn(seen.cwd)));
 }
 
 // The stage meter: in an interactive session, the coordinator's stage budget on the status line
@@ -168,6 +177,17 @@ async function subagentToolCall(st, $, e, next) {
   return { ...result, context: [...(result.context ?? []), budgetNote(at.fraction)] };
 }
 
+// Whether a loop is a subagent's or a teammate's. One with no spawn on record counts only when
+// `$.agent.list()` names it, as it does an agent whose spawn a module reload lost and never the
+// engine's own forks; the list is asked once per such loop.
+async function subagentLoop(st, $, agentId) {
+  const known = st.agents.get(agentId);
+  if (known) return !known.engineFork;
+  const listed = (await $.agent.list()).some((agent) => agent.id === agentId);
+  entry(st, agentId).engineFork = !listed;
+  return listed;
+}
+
 function flush($, seen, agentId, a, e) {
   const w = a.model ? windowFor(a.model) : null;
   const record = {
@@ -225,7 +245,7 @@ export function register(on, options) {
     for await (const chunk of stepping) yield chunk;
     const result = await stepping.result;
     try {
-      if (e.agentId !== undefined && (await active(st, $))) {
+      if (e.agentId !== undefined && (await active(st, $)) && (await subagentLoop(st, $, e.agentId))) {
         const a = entry(st, e.agentId);
         a.tracked = true;
         const depth = contextDepth(result.usage);
