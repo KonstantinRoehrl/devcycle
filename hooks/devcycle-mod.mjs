@@ -8,7 +8,7 @@
 // when it fails. Claude Code's loader refuses the module unless `$` reaches only functions declared
 // at the top of this file and each event is registered once, so every helper below takes the
 // per-load state, `st`, as an argument, and one tool.call hook serves every behaviour.
-import { HARD_STOP, OVER_BUDGET, budgetBand, contextDepth, windowFor } from "../scripts/depth-bands.mjs";
+import { HARD_STOP, OVER_BUDGET, STAGE_FILES_READ, STAGE_TOOL_CALLS, budgetBand, contextDepth, windowFor } from "../scripts/depth-bands.mjs";
 import { activeRun } from "./lib/run-scope.mjs";
 
 // The first Claude Code whose hooks-module API this module is written against; below it the
@@ -49,9 +49,11 @@ const turnCounters = () => ({ steps: 0, peakDepth: 0, lastDepth: null, model: nu
 // Everything one load of the module knows. `joinedKey` is "<session id> <run id>" once the sink
 // answered joined; a negative answer is never cached. `scope` is the promise active() answers from.
 // `tier` is the subagentBudget value Claude Code hands register; anything else reads as warn.
+// `meter` is the stage meter's counters for the stage it last displayed.
 function newState(options) {
   return { versionOk: null, notNested: null, joinedKey: null, scope: null, agents: new Map(),
-    tier: TIERS.includes(options?.subagentBudget) ? options.subagentBudget : "warn" };
+    tier: TIERS.includes(options?.subagentBudget) ? options.subagentBudget : "warn",
+    meter: { stage: null, calls: 0, files: new Set(), percent: null, shown: false } };
 }
 
 async function resolveScope(st, $) {
@@ -102,9 +104,30 @@ function entry(st, agentId) {
 }
 
 // One stat per main-loop tool call: a stage advance or a finished cycle rewrites the state file.
-async function afterMainLoopCall(st, $) {
+async function afterMainLoopCall(st, $, e) {
   const seen = await current(st, $);
   if (seen.stateFile && (await $.fs.stat(seen.stateFile)).mtimeMs !== seen.mtimeMs) refresh(st, $);
+  await updateMeter(st, $, e);
+}
+
+// The stage meter: in an interactive session, the coordinator's stage budget on the status line
+// (references/delegation.md § The stage budget). It only displays; it never refuses a call.
+async function updateMeter(st, $, e) {
+  const meter = st.meter;
+  const now = await current(st, $);
+  if (!now.active || (await $.session.surfaces()).length === 0) {
+    if (meter.shown) {
+      meter.shown = false;
+      await $.ui.status(undefined);
+    }
+    return;
+  }
+  if (now.stage !== meter.stage) Object.assign(meter, { stage: now.stage, calls: 0, files: new Set() });
+  meter.calls += 1;
+  if (e.tool === "Read" && typeof e.file_path === "string") meter.files.add(e.file_path);
+  meter.shown = true;
+  await $.ui.status(`devcycle · ${meter.stage} · calls ${meter.calls}/~${STAGE_TOOL_CALLS} · ` +
+    `files ${meter.files.size}/~${STAGE_FILES_READ} · ctx ${meter.percent ?? "–"}%`);
 }
 
 async function mainLoopToolCall(st, $, e, next) {
@@ -230,6 +253,12 @@ export function register(on, options) {
       if (seen.active) flush($, seen, e.agentId, a, e);
       Object.assign(a, turnCounters());
     }
+    return result;
+  }).catch(($, e, next) => next(e));
+
+  on("session.measure", async ($, e, next) => {
+    const result = await next(e);
+    if (typeof e.context?.percent === "number") st.meter.percent = Math.round(e.context.percent);
     return result;
   }).catch(($, e, next) => next(e));
 }
