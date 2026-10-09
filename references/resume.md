@@ -46,8 +46,9 @@ cycle appends to the same record rather than starting a second one.
 state file that has no `knobs:` line yet write it; every other stage rewrite carries it forward
 unchanged, like `kind:` and `plan-counts:`. `configured:` is carried forward the
 same way; the next section owns its forms.
-Two optional rows sit outside the template. Only `/devcycle:continue`'s knob comparison and the
-knob-change question it gates write or drop them; every other rewrite carries them forward, and
+Three optional rows sit outside the template. Only `/devcycle:continue`'s knob comparison and the
+knob-change question it gates write or drop the two `knobs-` rows, and only the opt-in gate at
+planning's close writes `drive:`; every other rewrite carries all three forward, and
 `/devcycle:cycle`'s `stage: done` reuse resets them with the rest.
 
 - `- knobs-declined: <a fresh knobs: line's values>` — global values the user chose not to apply.
@@ -63,6 +64,11 @@ knob-change question it gates write or drop them; every other rewrite carries th
   sweep) never has one: neither is appended to. Once it exists, an apply appends a `task=config
   event=user-decision` line per `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` instead, outcome
   `knobs changed mid-cycle: <the compare lines joined by "; ">`, ref `.devcycle/state.md`.
+- `- drive: auto model=<id> opted=<stamp>` — the user chose unattended execution at
+  `playbooks/planning-waves.md` § Handoff; an agent writes it only as that answer's direct result
+  (`docs/decisions/README.md`, 2026-10-08 — Unattended execution). `<id>` is the opting-in
+  session's model as the depth probe reads it. Absent means manual: `scripts/drive-execution.mjs`
+  refuses to start, and `/devcycle:continue --drive` stops `not-opted-in`.
 
 `updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`
 taken when the field is written — never a narrated or estimated time.

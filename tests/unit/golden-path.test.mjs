@@ -886,6 +886,30 @@ test("harvested: planning-waves/quality-constraints — the two constraint secti
   assert.match(t, /Each task then carries a `\*\*Quality constraints:\*\*` line/);
 });
 
+test("planning-waves/opt-in-gate — one question with three answers; the drive row is written and the plan committed before any driver starts", () => {
+  const t = read("playbooks/planning-waves.md");
+  const handoff = t.slice(t.indexOf("## Handoff — required final output"));
+  assert.match(handoff, /Ask one AskUserQuestion/);
+  for (const option of ["Walk the waves manually", "Unattended — start it now", "Unattended — I'll start it myself"])
+    assert.ok(handoff.includes(`**${option}**`), `the opt-in gate lost its option: ${option}`);
+  assert.ok(handoff.includes('scripts/drive-execution.mjs" --check-sandbox` prints\n`{"sandboxed":false}`'), "start-now is no longer gated on the sandbox probe");
+  assert.ok(handoff.includes("- drive: auto model=<id> opted=<stamp>"), "the drive row's shape changed");
+  assert.match(handoff, /scripts\/depth-probe\.mjs" --json`\n\s+prints, never from self-report/);
+  const launch = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md --model <id> --detach';
+  assert.ok(handoff.includes(launch), "the detached launch changed");
+  assert.doesNotMatch(handoff, /nohup/, "a nohup launch stays in the caller's session, where its hangup reaches the driver");
+  assert.ok(handoff.indexOf("Rewrite the state file in full") < handoff.indexOf(launch), "the driver can start before the state names execution");
+  // The plan commit happens before any driver exists: a driver's first session commits too, and the
+  // two would race on the index.
+  assert.ok(handoff.indexOf("Committing the saved plan is gated") < handoff.indexOf("**Opt-in gate (GO only).**"),
+    "the opt-in gate no longer follows the plan-commit paragraph its step 3 points to");
+  assert.match(handoff, /commit the saved plan as the paragraph above gates it, and only then start a driver/);
+  assert.match(handoff, /Write nothing to the ledger/);
+  const resume = read("references/resume.md");
+  assert.match(resume, /Three optional rows sit outside the template/);
+  assert.ok(resume.includes("- `- drive: auto model=<id> opted=<stamp>` — the user chose unattended execution"), "resume.md no longer documents the drive row");
+});
+
 test("harvested: reviewing-code/engine-delegation — one JSON argv, and exit 1 is the panel failing", () => {
   const t = read("playbooks/reviewing-code.md");
   assert.ok(t.includes('\'{"scope":{"ref":"<base>..<branch>"},"specPath":"<path>"'), "the panel argv shape changed");

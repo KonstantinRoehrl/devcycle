@@ -54,19 +54,25 @@ unattended-execution clause in references/handoff.md add 9 lines to the runtime 
 113517 → 114313, reviewing-the-branch 55125 → 55921, scoping-the-request 26925 → 27721,
 sweeping-mechanical-changes 87136 → 87932, taking-the-fast-path 80261 → 81057,
 verifying-on-device 50649 → 51445 and writing-the-findings-document 65761 → 66557.
+The opt-in gate and its `drive:` row: `surfaceTotal` 5851 → 5884 (+33, the opt-in gate in
+playbooks/planning-waves.md and the drive: row in references/resume.md); planning-waves
+68787 → 70936 (+2149, the opt-in gate in playbooks/planning-waves.md); receiving-review
+114313 → 114850 (+537, the drive: row in references/resume.md); sweeping-mechanical-changes
+87932 → 88469 (+537, the drive: row in references/resume.md); taking-the-fast-path
+81057 → 81594 (+537, the drive: row in references/resume.md).
 
 ```text
-budget: surface-budget.json surfaceTotal 5851
+budget: surface-budget.json surfaceTotal 5884
 budget: context-budget.json playbooks/executing-waves.md 95280
 budget: context-budget.json playbooks/finishing-the-cycle.md 54458
 budget: context-budget.json playbooks/learning-from-sessions.md 62203
 budget: context-budget.json playbooks/onboarding-a-repo.md 30301
-budget: context-budget.json playbooks/planning-waves.md 68787
-budget: context-budget.json playbooks/receiving-review.md 114313
+budget: context-budget.json playbooks/planning-waves.md 70936
+budget: context-budget.json playbooks/receiving-review.md 114850
 budget: context-budget.json playbooks/reviewing-the-branch.md 55921
 budget: context-budget.json playbooks/scoping-the-request.md 27721
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87932
-budget: context-budget.json playbooks/taking-the-fast-path.md 81057
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 88469
+budget: context-budget.json playbooks/taking-the-fast-path.md 81594
 budget: context-budget.json playbooks/verifying-on-device.md 51445
 budget: context-budget.json playbooks/writing-the-findings-document.md 66557
 ```
