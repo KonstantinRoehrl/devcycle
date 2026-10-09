@@ -42,6 +42,7 @@ const PLAN = [
 
 const entry = (task, event, outcome, ref = "none") => `- [2026-10-08T10:00:00Z] task=${task} event=${event} outcome=${outcome} ref=${ref}`;
 const committed = (task) => entry(task, "committed", "accepted", "abc1234");
+const positionOf = ({ task, position, next }) => ({ task, position, next });
 
 function cycle({ ledger = null, state = [], branch = "feat/x", root = null, planHeader = "docs/plan.md", plan = PLAN } = {}) {
   const repo = realpathSync(makeRepo());
@@ -111,7 +112,7 @@ test("a third intake bounce, missing report or missing findings is a decision fo
   }
   const c = cycle({ ledger: [committed(1), ...[1, 2, 3].map((n) =>
     entry(2, "review-verdict", "rejected (missing findings file)", `.devcycle/findings/2-round-${n}.md`))] });
-  assert.deepEqual(setup(c).tasks[1], { task: "2", position: "retry-cap", next: "needs-user" });
+  assert.deepEqual(positionOf(setup(c).tasks[1]), { task: "2", position: "retry-cap", next: "needs-user" });
 });
 
 test("an exhausted-unresolved loop is pending until a decision of that task names its loop id; drive and config decisions never clear it", () => {
@@ -119,14 +120,14 @@ test("an exhausted-unresolved loop is pending until a decision of that task name
   writeInto(c.repo, `.devcycle/findings/${reviewLoopId(2)}-status.md`, "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: none\n");
   let r = setup(c);
   assert.deepEqual(r.pendingDecision, { task: "2", loopId: "task-2-review" });
-  assert.deepEqual(r.tasks[1], { task: "2", position: "exhausted-unresolved", next: "needs-user" });
+  assert.deepEqual(positionOf(r.tasks[1]), { task: "2", position: "exhausted-unresolved", next: "needs-user" });
   appendFileSync(c.ledgerPath, entry("config", "user-decision", "knobs changed mid-cycle: task-2-review", ".devcycle/state.md") + "\n");
   appendFileSync(c.ledgerPath, entry("drive", "user-decision", "unattended (model=x) task-2-review", ".devcycle/state.md") + "\n");
   assert.deepEqual(setup(c).pendingDecision, { task: "2", loopId: "task-2-review" });
   appendFileSync(c.ledgerPath, entry(2, "user-decision", "carry the residue of task-2-review to an issue") + "\n");
   r = setup(c);
   assert.equal(r.pendingDecision, null);
-  assert.deepEqual(r.tasks[1], { task: "2", position: "user-decision", next: "follow-decision" });
+  assert.deepEqual(positionOf(r.tasks[1]), { task: "2", position: "user-decision", next: "follow-decision" });
 });
 
 test("the current wave is the first with uncommitted work; dispatchable tasks carry their brief inputs once their dependencies are committed", () => {
@@ -137,7 +138,7 @@ test("the current wave is the first with uncommitted work; dispatchable tasks ca
 
   const first = setup(cycle({ ledger: [committed(1)] }));
   assert.deepEqual([first.ok, first.action, first.wave, first.appended], [true, "resume", 1, []]);
-  assert.deepEqual(first.tasks, [{ task: "1", position: "committed", next: "done" }, { task: "2", position: "not-dispatched", next: "dispatch-implementer" }]);
+  assert.deepEqual(first.tasks.map(positionOf), [{ task: "1", position: "committed", next: "done" }, { task: "2", position: "not-dispatched", next: "dispatch-implementer" }]);
   assert.deepEqual(first.dispatchable, [{ task: "2", files: ["src/b.mjs", "tests/b.test.mjs"], evidence: "green-green (behavior-preserving)",
     evidenceClass: "green-green", testCmd: "node --test tests/b.test.mjs", dependencies: [], mapRow: { wave: 1, tasks: [1, 2] } }]);
 
@@ -148,6 +149,32 @@ test("the current wave is the first with uncommitted work; dispatchable tasks ca
 
   const done = setup(cycle({ ledger: [1, 2, 3].map(committed) }));
   assert.deepEqual([done.wave, done.tasks, done.dispatchable, done.pendingDecision], [null, [], [], null]);
+});
+
+// Steps 5 and 6 need a task's evidence class, test command and review round whatever step it resumes
+// at, not only when an implementer is next.
+test("every uncommitted task carries its brief inputs and the round its next review takes", () => {
+  const inputs = (t) => [t.task, t.next, t.evidenceClass, t.testCmd, t.reviewRound];
+  const round1 = entry(1, "review-round", "round 1");
+  const reviewing = setup(cycle({ ledger: [entry(1, "report-received", "complete"), round1,
+    entry(2, "review-round", "round 1"), entry(2, "review-verdict", "accepted")] }));
+  assert.deepEqual(reviewing.tasks.map(inputs), [
+    ["1", "redispatch-reviewer", "red-green", "node --test tests/a.test.mjs", 1],
+    ["2", "commit", "green-green", "node --test tests/b.test.mjs", 2],
+  ]);
+  assert.deepEqual(reviewing.tasks[0].files, ["src/a.mjs", "tests/a.test.mjs"]);
+  assert.equal(reviewing.tasks[1].evidence, "green-green (behavior-preserving)");
+  const missing = entry(1, "review-verdict", "rejected (missing findings file)");
+  const gateFail = entry(2, "review-verdict", "rejected (green gate: exit 1)");
+  const later = setup(cycle({ ledger: [round1, missing, entry(2, "review-round", "round 1"), entry(2, "review-verdict", "accepted"), gateFail,
+    entry(2, "report-received", "complete")] }));
+  assert.deepEqual(later.tasks.map(inputs), [
+    ["1", "redispatch-reviewer", "red-green", "node --test tests/a.test.mjs", 1],
+    ["2", "dispatch-reviewer", "green-green", "node --test tests/b.test.mjs", 2],
+  ], "a missing findings file keeps its round open; a green-gate rejection closes it");
+  const deferred = setup(cycle({ ledger: [committed(1), entry(2, "review-verdict", "deferred (concurrent sibling edits)")] }));
+  assert.deepEqual(deferred.tasks.map(inputs), [["1", "done", undefined, undefined, undefined],
+    ["2", "regate-after-quiesce", "green-green", "node --test tests/b.test.mjs", 1]]);
 });
 
 // playbooks/executing-waves.md § Wave formation: a task is ready once its dependencies are committed,

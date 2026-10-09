@@ -98,7 +98,7 @@ exit 2 or 3 a stop.
    `task-dispatch.mjs --role implementer --model-decision "<the routing decision>"` (a fix pass adds
    `--round <n>`) on stdin as a quoted heredoc (`<<'EOF'`) — one `node` call, nothing chained to it,
    no `$(…)` in its flags: the one form the git guard reads as data. It writes the brief file the
-   dispatch names and returns the implementer envelope `references/delegation.md` defines — never
+   dispatch names. The implementer returns the envelope `references/delegation.md` defines — never
    the report body — and that envelope's on-device count is what triggers the checklist below.
 4. **Intake.** `task-intake.mjs`, given the envelope's `report:` path and `status:` and the task
    notification's agent id as `--agent-id`, checks the report against its evidence class and lints
@@ -113,21 +113,23 @@ exit 2 or 3 a stop.
    defines; the reviewer writes its verdict block to `.devcycle/findings/<task-id>-round-<n>.md`
    itself (the dispatch supplies the path and round n).
    Give its brief to `task-dispatch.mjs --role reviewer --round <n>` the same way first; read the
-   verdict with `task-verdict.mjs --round <n> --findings <that path> --evidence-class <dispatchable[].evidenceClass>`.
+   verdict with `task-verdict.mjs --round <n> --findings <that path> --evidence-class <evidenceClass>`.
+   The wave setup's `tasks[]` gives each uncommitted task its `reviewRound`, `evidenceClass` and `testCmd`.
    `accepted` → step 6. `rejected` → the findings path back to the implementer (step 3), then the
    next round's review. `missing-findings` → re-dispatch the reviewer for the same round, no verdict
    acted on. `needs-user` → the user decides (driven: a `needs-user` stop).
-   Cap: 3 rounds per task; one round is one reviewer dispatch plus the implementer's fix pass. A
-   task that reaches round 3 without acceptance exits `exhausted-unresolved` — `task-verdict.mjs`
-   writes that status — and is surfaced to the user as a decision, never committed as if it had passed.
+   Cap: 3 rounds per task; one round is one reviewer dispatch plus the implementer's fix pass, and a
+   failed green gate rejects its round too. A task that reaches round 3 without a commit exits
+   `exhausted-unresolved` — `task-verdict.mjs` or `task-commit.mjs` writes that status — and is
+   surfaced to the user as a decision, never committed as if it had passed.
 6. **Green gate (REQUIRED, deterministic).** On acceptance, run `task-commit.mjs` with the plan,
    `--test-cmd "<the task's test command>"` and your subject, plus
    `--subset-cmd "<the task's file-scoped command>"` when the test command is the whole suite.
    It re-runs the test command itself and reads the exit status — never the implementer's word for
    it; a repo with no test suite passes its documented convention as the test command.
    On failure, acceptance is blocked: no commit, `gate-fail`, back to the implementer with the gate
-   evidence its ledger line names. `deferred` means a concurrent sibling's edit caused the red: call
-   it again once the wave quiesces.
+   evidence its ledger line names, then the next round's review; after round 3, `needs-user`.
+   `deferred` means a concurrent sibling's edit caused the red: call it again once the wave quiesces.
 7. **Branch re-check, then commit.** The same call re-runs
    `git rev-parse --abbrev-ref HEAD` against the recorded `branch:` line immediately before
    committing — `branch-mismatch` stops the run rather than committing to the wrong branch — then,

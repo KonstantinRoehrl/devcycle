@@ -172,7 +172,7 @@ and takes the generic rows.
 | `report-received outcome=blocked` | the implementer reported `status: blocked`: a user decision is pending (drive mode: stop `needs-user`) |
 | `review-round` (no verdict after it) | the reviewer's run may have died: re-dispatch it for that round |
 | `review-verdict outcome=accepted` | run the green gate, commit |
-| `review-verdict outcome=rejected` | re-dispatch the implementer with the findings — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet (findings, task body, applied-edits disclosure), never a sweep re-run |
+| `review-verdict outcome=rejected` or `rejected (green gate: …)` | re-dispatch the implementer with the findings or gate evidence — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet (findings, task body, applied-edits disclosure), never a sweep re-run; the next review is the next round |
 | `review-verdict outcome=rejected (missing findings file)` | re-dispatch the **reviewer** for that round, not the implementer |
 | `review-verdict outcome=deferred (concurrent sibling edits)` | re-run the green gate once the wave quiesces (`playbooks/executing-waves.md` step 6), not a re-dispatch |
 | `committed` | task done — move to the next task |

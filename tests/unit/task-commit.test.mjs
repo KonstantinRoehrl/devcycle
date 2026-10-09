@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -147,6 +147,43 @@ test("a Files path with glob characters is committed alone: a sibling it would m
   }
 });
 
+// After `git add -N`, git reports a work-tree rename as ` R <new>\0<old>\0`; a `git mv` stages it as
+// `R  <new>\0<old>\0`. Either way the task's change is the new path and the old one's deletion.
+test("a renamed Files path commits both sides: the new file and the old one's deletion", () => {
+  for (const [how, rename] of [
+    ["in the work tree", (fx) => {
+      renameSync(join(fx.dir, "src/a.txt"), join(fx.dir, "src/renamed.txt"));
+      git(fx, "add", "-N", "src/renamed.txt");
+    }],
+    ["in the index", (fx) => git(fx, "mv", "src/a.txt", "src/renamed.txt")],
+  ]) {
+    const fx = fixture();
+    try {
+      writeInto(fx.dir, "docs/plan.md", PLAN.replace("- Modify: src/a.txt", "- Modify: src/a.txt\n- Create: src/renamed.txt"));
+      rename(fx);
+      const { out } = commitTask(fx);
+      assert.equal(out.action, "committed", `${how}: ${JSON.stringify(out)}`);
+      assert.deepEqual(git(fx, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD").split("\n").sort(),
+        ["A\tsrc/renamed.txt", "D\tsrc/a.txt"], how);
+      assert.equal(git(fx, "status", "--porcelain", "--", "src"), "", `${how}: the rename is left half-committed`);
+    } finally {
+      cleanup(fx);
+    }
+  }
+});
+
+test("a Files path deleted in the index is committed as a deletion", () => {
+  const fx = fixture();
+  try {
+    git(fx, "rm", "-q", "src/a.txt");
+    const { out } = commitTask(fx);
+    assert.equal(out.action, "committed", JSON.stringify(out));
+    assert.equal(git(fx, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"), "D\tsrc/a.txt");
+  } finally {
+    cleanup(fx);
+  }
+});
+
 test("a crash between the commit and its ledger line: the re-run finds the trailer and only appends", () => {
   const fx = fixture();
   try {
@@ -200,6 +237,28 @@ test("a red gate on a clean tree is the task's own: gate-fail, no commit, culpri
     assert.equal(gateFail.culprit, "gate-caught-regression");
     assert.equal(gateFail.attributedBy, "coordinator");
     assert.ok(rows(fx).some((r) => r.kind === "verdict" && r.round === 1 && r.conformance === "fail" && r.evidenceClass === "red-green"));
+  } finally {
+    cleanup(fx);
+  }
+});
+
+// One review round is a reviewer dispatch plus the fix pass it triggers (references/loops.md); a red
+// gate after a round's acceptance rejects that round, so after round 3 no round is left.
+test("a red gate after round 3's acceptance exhausts the review loop: a user decision, never another fix", () => {
+  const fx = fixture();
+  try {
+    appendFileSync(join(fx.dir, ".devcycle/ledger.md"), [
+      "- [2026-01-01T00:02:00Z] task=1 event=review-round outcome=round 3 ref=none key=1/review-round/3/1",
+      "- [2026-01-01T00:03:00Z] task=1 event=review-verdict outcome=accepted ref=.devcycle/findings/1-round-3.md key=1/review-verdict/3/1",
+      "",
+    ].join("\n"));
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const { status, out } = commitTask(fx, { testCmd: "exit 1" });
+    assert.equal(status, 0);
+    assert.deepEqual([out.action, out.gate, out.loopId], ["needs-user", "fail", "task-1-review"]);
+    assert.match(ledgerLines(fx).at(-1), / outcome=rejected \(green gate: exit 1\) ref=\.devcycle\/evidence\/1-gate\.txt key=1\/review-verdict\/3\/2$/);
+    assert.equal(readFileSync(join(fx.dir, ".devcycle/findings/task-1-review-status.md"), "utf8"),
+      "status: exhausted-unresolved rounds: 3/3 residue: 1 carried-to: none\n");
   } finally {
     cleanup(fx);
   }

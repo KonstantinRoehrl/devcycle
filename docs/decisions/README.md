@@ -62,17 +62,17 @@ playbooks/planning-waves.md and the drive: row in references/resume.md); plannin
 81057 → 81594 (+537, the drive: row in references/resume.md).
 
 ```text
-budget: surface-budget.json surfaceTotal 5884
-budget: context-budget.json playbooks/executing-waves.md 95280
+budget: surface-budget.json surfaceTotal 5888
+budget: context-budget.json playbooks/executing-waves.md 95743
 budget: context-budget.json playbooks/finishing-the-cycle.md 54458
 budget: context-budget.json playbooks/learning-from-sessions.md 62203
 budget: context-budget.json playbooks/onboarding-a-repo.md 30301
 budget: context-budget.json playbooks/planning-waves.md 70936
-budget: context-budget.json playbooks/receiving-review.md 114850
+budget: context-budget.json playbooks/receiving-review.md 115175
 budget: context-budget.json playbooks/reviewing-the-branch.md 55921
 budget: context-budget.json playbooks/scoping-the-request.md 27721
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 88469
-budget: context-budget.json playbooks/taking-the-fast-path.md 81594
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 88794
+budget: context-budget.json playbooks/taking-the-fast-path.md 81919
 budget: context-budget.json playbooks/verifying-on-device.md 51445
 budget: context-budget.json playbooks/writing-the-findings-document.md 66557
 ```

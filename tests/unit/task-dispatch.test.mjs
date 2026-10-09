@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -61,6 +61,40 @@ test("a reviewer dispatch appends review-round for its round; a re-dispatch of t
   const again = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"]);
   assert.deepEqual([first.out.appended, again.out.appended], [["5/review-round/1/0"], ["5/review-round/1/1"]]);
   assert.match(ledgerLines(repo)[0], / task=5 event=review-round outcome=round 1 ref=\.devcycle\/briefs\/5-reviewer-round-1\.md key=5\/review-round\/1\/0$/);
+});
+
+// A verdict closes its round — the reviewer's, or the green gate's after an accept — so a findings
+// file at a closed round's path is spent, and the round cap counts every closed round.
+test("a reviewer dispatch takes the task's open round, else the one after its last verdict; any other round is refused", () => {
+  const repo = repoWithLedger();
+  const verdictLine = (round, retry, outcome) =>
+    `- [2026-10-08T10:00:00Z] task=5 event=review-verdict outcome=${outcome} ref=none key=5/review-verdict/${round}/${retry}\n`;
+  const reviewer = (round) => dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", String(round)]);
+  const refused = (round, expected) => {
+    const r = reviewer(round);
+    assert.equal(r.status, 2, `round ${round}: ${JSON.stringify(r.out)}`);
+    assert.match(r.out.error, new RegExp(`task 5's next review is round ${expected}, not ${round}`));
+  };
+  refused(2, 1);
+  assert.equal(reviewer(1).status, 0);
+  appendFileSync(join(repo, ".devcycle/ledger.md"), verdictLine(1, 0, "accepted"));
+  appendFileSync(join(repo, ".devcycle/ledger.md"), verdictLine(1, 1, "rejected (green gate: exit 1)"));
+  refused(1, 2);
+  refused(3, 2);
+  assert.equal(reviewer(2).status, 0);
+  appendFileSync(join(repo, ".devcycle/ledger.md"), verdictLine(2, 2, "rejected (missing findings file)"));
+  assert.equal(reviewer(2).status, 0, "a round whose findings file went missing stays open");
+  assert.equal(ledgerLines(repo).filter((l) => l.includes("event=review-round")).length, 3);
+});
+
+test("a reviewer dispatch moves a findings file already at its round's path aside, so the verdict read back is its own", () => {
+  const repo = repoWithLedger();
+  mkdirSync(join(repo, ".devcycle/findings"), { recursive: true });
+  writeFileSync(join(repo, ".devcycle/findings/5-round-1.md"), "Verdict: accept\n");
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(existsSync(join(repo, ".devcycle/findings/5-round-1.md")), false);
+  assert.equal(readFileSync(join(repo, ".devcycle/findings/5-round-1.stale-0.md"), "utf8"), "Verdict: accept\n");
 });
 
 test("a run that died before reaching the ledger is re-run at the same retry and leaves one line", () => {

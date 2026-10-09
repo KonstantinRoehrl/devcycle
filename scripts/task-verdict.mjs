@@ -4,7 +4,8 @@
 // ledger line, the `verdict` run-record row and, on needs-changes, the `review-reject` event row —
 // all against the round's `review-round` line, so a re-run after a crash adds nothing twice.
 // A rejected round 3 is the review loop's exhaustion: its status file is written per
-// references/loops.md and the task becomes a user decision (references/resume.md).
+// references/loops.md and the task becomes a user decision (references/resume.md). task-commit.mjs
+// writes the same status when the green gate rejects round 3's acceptance.
 // Contract: references/ledger.md § Task scripts.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -13,8 +14,8 @@ import { gitToplevel } from "./git-identity.mjs";
 import { isMain } from "./is-main.mjs";
 import { validateCulprit } from "./run-record.mjs";
 import {
-  UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, countFlag, latestKeyed, ledgerKey, nextRetry,
-  parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot,
+  MISSING_FINDINGS, UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, countFlag, latestKeyed, ledgerKey,
+  nextRetry, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot,
 } from "./task-ledger.mjs";
 
 const FLAGS = {
@@ -23,19 +24,20 @@ const FLAGS = {
 };
 const REQUIRED = ["--run", "--task", "--round", "--findings", "--evidence-class"];
 const EVIDENCE_CLASSES = new Set(["red-green", "green-green", "convention"]);
-const MISSING = "rejected (missing findings file)";
 const RETRY_CAP = 2;
-const ROUND_CAP = 3;
+export const ROUND_CAP = 3;
 // Blocking-ness is derived from severity (references/findings.md § Severity): critical and high block.
 const BLOCKING_RE = /^\s*\d+\.\s*\[(critical|high)\]/gim;
 
 // The verdict block's two header lines, tolerating the emphasis and code spans a markdown author
-// wraps them in; null when the file carries no usable verdict.
+// wraps them in, either case, and the `approved` / `accepted` a reviewer writes for accept; null when
+// the file carries no usable verdict.
 function parseVerdict(text) {
   const plain = text.replace(/[*`]/g, "");
-  const verdict = plain.match(/^\s*Verdict:\s*(accept|needs-changes)\s*$/m)?.[1];
-  if (!verdict) return null;
-  const culprit = plain.match(/^\s*Culprit:\s*(\S+)\s*$/m)?.[1] ?? null;
+  const word = plain.match(/^\s*Verdict:\s*(accept|accepted|approved|needs-changes)\s*$/im)?.[1].toLowerCase();
+  if (!word) return null;
+  const verdict = word === "needs-changes" ? word : "accept";
+  const culprit = plain.match(/^\s*Culprit:\s*(\S+)\s*$/im)?.[1] ?? null;
   if (verdict === "needs-changes" && (!culprit || validateCulprit(culprit).length)) return null;
   return { verdict, culprit: verdict === "accept" ? null : culprit, blocking: (text.match(BLOCKING_RE) ?? []).length };
 }
@@ -51,6 +53,16 @@ function verdictRetry(ledger, task, reviewRound) {
 }
 
 export const reviewLoopId = (task) => `task-${task}-review`;
+
+// references/loops.md § Where the status lives: the task's review loop ran out of rounds with
+// `residue` blocking items unresolved. Returns the loop id the user's decision names.
+export function exhaustReviewLoop(root, task, round, residue) {
+  const loopId = reviewLoopId(task);
+  mkdirSync(join(root, ".devcycle/findings"), { recursive: true });
+  atomicWrite(join(root, `.devcycle/findings/${loopId}-status.md`),
+    `status: exhausted-unresolved rounds: ${round}/${ROUND_CAP} residue: ${residue} carried-to: none\n`);
+  return loopId;
+}
 
 export function verdict(argv, cwd = process.cwd()) {
   const flags = taskFlags(argv, FLAGS, REQUIRED);
@@ -82,8 +94,8 @@ export function verdict(argv, cwd = process.cwd()) {
   const base = { task, round, retry, findingsPath: findingsRel };
 
   if (!parsed) {
-    ledgerLine(MISSING);
-    return retryCount(ledger, task, MISSING) > RETRY_CAP
+    ledgerLine(MISSING_FINDINGS);
+    return retryCount(ledger, task, MISSING_FINDINGS) > RETRY_CAP
       ? { ...base, action: "needs-user", reason: "retry cap: a third missing findings file", verdict: null, culprit: null, blocking: null, appended }
       : { ...base, action: "missing-findings", verdict: null, culprit: null, blocking: null, appended };
   }
@@ -105,10 +117,7 @@ export function verdict(argv, cwd = process.cwd()) {
   row("event", { event: "review-reject", stage: "execution", task, culprit: parsed.culprit, attributedBy: "coordinator", ts: line.stamp },
     ["event", "task", "ts"]);
   if (round < ROUND_CAP) return { ...result, action: "rejected" };
-  const loopId = reviewLoopId(task);
-  mkdirSync(join(root, ".devcycle/findings"), { recursive: true });
-  atomicWrite(join(root, `.devcycle/findings/${loopId}-status.md`),
-    `status: exhausted-unresolved rounds: ${round}/${ROUND_CAP} residue: ${parsed.blocking} carried-to: none\n`);
+  const loopId = exhaustReviewLoop(root, task, round, parsed.blocking);
   return { ...result, action: "needs-user", reason: "review loop exhausted-unresolved", loopId };
 }
 

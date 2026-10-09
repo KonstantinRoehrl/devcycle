@@ -2,9 +2,10 @@
 // /devcycle:continue's execution resume path in one call (spec 4.A.3): the ownership check and
 // resume-check, the knob comparison, the branch verdict, the depth probe and the drive status, then
 // every current-wave task's position per references/resume.md § Resuming a wave's per-task position
-// and the next implementer dispatches' brief inputs — one JSON object on stdout. It never appends
-// the run's session row: the hooks module (hooks/devcycle-mod.mjs) joins a session to its run only
-// when it sees that append as a main-loop Bash call of its own, so commands/continue.md keeps it so.
+// with its brief inputs until it is committed, and the next implementer dispatches — one JSON object
+// on stdout. It never appends the run's session row: the hooks module (hooks/devcycle-mod.mjs) joins
+// a session to its run only when it sees that append as a main-loop Bash call of its own, so
+// commands/continue.md keeps it so.
 import { readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -15,7 +16,7 @@ import { checkState } from "./resume-check.mjs";
 import { compareKnobs, parseRecordedLine } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
-import { parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
+import { nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
 import { reviewLoopId } from "./task-verdict.mjs";
 import { driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";
@@ -169,12 +170,23 @@ function wavePosition(root, plan, lines, ledgerPath) {
   if (!current) return { wave: null, tasks: [], dispatchable: [], pendingDecision: null };
   const [wave, nums] = current;
   const ready = (task) => dependenciesOf(blocks.get(task) ?? "").every((dep) => done.has(dep));
+  const filesOf = (task) => [...(files.get(Number(task)) ?? [])];
+  // What playbooks/executing-waves.md's per-task steps take from the plan. Every task still to commit
+  // carries them, so one resumed at a reviewer dispatch, the commit or a re-gate has its evidence class
+  // and test command too, with the round its next review takes.
+  const briefInputs = (task) => {
+    const block = blocks.get(task) ?? "";
+    const taskFiles = filesOf(task);
+    const evidence = fieldValue(block, "Evidence");
+    return { files: taskFiles, evidence, evidenceClass: evidence?.split(/\s+/)[0] ?? null, testCmd: testCommand(block, taskFiles) };
+  };
+  const withInputs = (task, position) => position.next === "done" ? { task, ...position }
+    : { task, ...position, ...briefInputs(task), reviewRound: nextReviewRound(byTask.get(task) ?? []) };
   // playbooks/executing-waves.md § Wave formation runs by readiness, never by written order: a later
   // Map wave's task whose dependencies are committed joins the current one's.
   const early = waves.filter(([w]) => w > wave).flatMap(([, n]) => n.map(String)).filter((task) => !done.has(task) && ready(task));
-  const tasks = [...nums.map(String), ...early].map((task) => ({ task, ...positions.get(task) }));
+  const tasks = [...nums.map(String), ...early].map((task) => withInputs(task, positions.get(task)));
   const rowOf = new Map(waves.flatMap(([w, n]) => n.map((num) => [String(num), { wave: w, tasks: n }])));
-  const filesOf = (task) => [...(files.get(Number(task)) ?? [])];
   // ...and never beside a task whose files overlap its own: an undispatched task waits while a task
   // in flight, or one picked before it, holds one of its files.
   const held = new Set(tasks.filter((t) => t.position !== "not-dispatched" && t.position !== "committed").flatMap((t) => filesOf(t.task)));
@@ -184,10 +196,7 @@ function wavePosition(root, plan, lines, ledgerPath) {
     const taskFiles = filesOf(task);
     if (position === "not-dispatched" && taskFiles.some((f) => held.has(f))) continue;
     for (const f of taskFiles) held.add(f);
-    const block = blocks.get(task) ?? "";
-    const evidence = fieldValue(block, "Evidence");
-    dispatchable.push({ task, files: taskFiles, evidence, evidenceClass: evidence?.split(/\s+/)[0] ?? null,
-      testCmd: testCommand(block, taskFiles), dependencies: dependenciesOf(block), mapRow: rowOf.get(task) });
+    dispatchable.push({ task, ...briefInputs(task), dependencies: dependenciesOf(blocks.get(task) ?? ""), mapRow: rowOf.get(task) });
   }
   const pending = tasks.find((t) => t.position === "exhausted-unresolved");
   return { wave, tasks, dispatchable, pendingDecision: pending ? { task: pending.task, loopId: reviewLoopId(pending.task) } : null };

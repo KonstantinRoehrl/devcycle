@@ -89,19 +89,43 @@ test("a later round's rejection with the same culprit still lands", () => {
   assert.equal(rows(f).filter((r) => r.kind === "event").length, 2);
 });
 
-test("a re-review after a green-gate line takes the next review-verdict retry, never the gate line's key", () => {
+// The green gate's rejection closes round 1, so the re-review after the fix is round 2 (task-dispatch
+// refuses round 1 again): round 1's accept is never read for it, even when round 2's reviewer dies.
+test("a re-review after a green-gate rejection is the next round, on the next review-verdict retry", () => {
   const f = fixture();
   writeInto(f.repo, ".devcycle/findings/5-round-1.md", ACCEPT);
   verdict(f);
   // task-commit.mjs's gate-fail line for round 1, keyed retry = nextRetry(.., "review-verdict") = 1.
   appendFileSync(ledgerPath(f),
     "- [2026-10-08T10:09:00Z] task=5 event=review-verdict outcome=rejected (green gate: exit 1) ref=.devcycle/evidence/5-gate.txt key=5/review-verdict/1/1\n");
-  appendFileSync(ledgerPath(f), reviewRoundLine(1, 1));
-  const again = verdict(f);
+  appendFileSync(ledgerPath(f), reviewRoundLine(2, 1));
+  const lost = verdict(f, 2);
+  assert.equal(lost.out.action, "missing-findings", "round 2's reviewer wrote nothing");
+  assert.deepEqual(lost.out.appended, ["5/review-verdict/2/2"]);
+  appendFileSync(ledgerPath(f), reviewRoundLine(2, 2));
+  writeInto(f.repo, ".devcycle/findings/5-round-2.md", ACCEPT);
+  const again = verdict(f, 2);
   assert.equal(again.out.action, "accepted");
-  assert.deepEqual(again.out.appended, ["5/review-verdict/1/2"]);
-  assert.match(ledgerTail(f), / event=review-verdict outcome=accepted ref=\.devcycle\/findings\/5-round-1\.md key=5\/review-verdict\/1\/2$/);
-  assert.deepEqual(verdict(f).out.appended, [], "a re-run after a crash reuses the written key");
+  assert.deepEqual(again.out.appended, ["5/review-verdict/2/3", "rr:verdict"]);
+  assert.match(ledgerTail(f), / event=review-verdict outcome=accepted ref=\.devcycle\/findings\/5-round-2\.md key=5\/review-verdict\/2\/3$/);
+  assert.deepEqual(verdict(f, 2).out.appended, [], "a re-run after a crash reuses the written key");
+});
+
+test("the verdict header reads in any case, approved and accepted read as accept; off-contract text is still no verdict", () => {
+  for (const [body, action] of [
+    ["verdict: accept\n", "accepted"],
+    ["**VERDICT:** Approved\n", "accepted"],
+    ["Verdict: accepted\n", "accepted"],
+    ["Verdict: Needs-Changes\nculprit: novel:missing-edge-case\n\n1. [high] the empty ledger is not handled\n", "rejected"],
+    ["Verdict: looks good\n", "missing-findings"],
+    ["Verdict: accept with nits\n", "missing-findings"],
+  ]) {
+    const f = fixture();
+    writeInto(f.repo, ".devcycle/findings/5-round-1.md", body);
+    const r = verdict(f);
+    assert.equal(r.out.action, action, JSON.stringify(body));
+    if (action !== "missing-findings") assert.equal(r.out.verdict, action === "accepted" ? "accept" : "needs-changes");
+  }
 });
 
 test("a missing, empty or malformed findings file re-dispatches the reviewer, with no verdict row", () => {

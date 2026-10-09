@@ -48,6 +48,7 @@ two logs never merge. One row per write site, not a restatement of `tests/fixtur
 | `dispatch` | once per implementer dispatch, at step 4 (report received) — never at step 3 (dispatch), since `endedAt`/`outcome`/round/retry are unknown until the envelope returns | `scripts/task-intake.mjs` |
 | `verdict` | once per review round, at step 5 (after `event=review-verdict`) — never at step 4, since `round`/`blockingCount`/`conformance` are unknown until review runs | `scripts/task-verdict.mjs`, `scripts/task-commit.mjs` |
 | `commit` | once per task commit, at step 7 | `scripts/task-commit.mjs` |
+| `drive` | once per driven session, at its end; read by `scripts/doctor.mjs` | `scripts/drive-execution.mjs` |
 | `triage` | once per cycle, right after the triage confirmation | `commands/cycle.md` |
 | `agent-depth` | once per finished subagent, on every `SubagentStop` from a session with a `session` row in the run `.devcycle/state.md` names — a kind of its own, separate from `dispatch`, so an implementer dispatch is never counted twice | `hooks/dispatch-sensor.mjs` |
 | `agent-trace` | once per finished subagent turn in a session with a `session` row in the run — the hooks module's view of that subagent, under the same agentId as its `agent-depth` row; a continued agent writes another | `hooks/devcycle-mod.mjs`, through `hooks/mod-sink.mjs` |
@@ -68,7 +69,8 @@ environment (3) error.
   `.devcycle/briefs/<id>-<role>[-round-<n>].md`, appends `dispatched` (`outcome=model <decision>`, the
   `references/model-routing.md` audit shape; `outcome=implementer retry <k>` without the flag)
   or `review-round` (`outcome=round <n>`) with that path as `ref=`, and keeps the dispatch's start
-  time for its `dispatch` row.
+  time for its `dispatch` row. A reviewer dispatch refuses any round but the task's next, and
+  first moves aside a findings file already at that round's path.
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-intake.mjs" --run <run-id> --task <id> --report <path> --status complete|blocked --agent-type <type> --model <id> --model-source explicit|inherited [--agent-id <id>]`
   once the implementer's envelope returns, against the task's latest `dispatched` line:
   `status: blocked` appends `report-received outcome=blocked` (action `needs-user`); a missing report,

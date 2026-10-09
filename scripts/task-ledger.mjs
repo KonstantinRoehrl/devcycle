@@ -30,6 +30,26 @@ export function parseLedgerLine(line) {
 
 const ledgerText = (ledgerPath) => (existsSync(ledgerPath) ? readFileSync(ledgerPath, "utf8") : "");
 const ledgerEntries = (ledgerPath) => ledgerText(ledgerPath).split("\n").map(parseLedgerLine).filter(Boolean);
+export const taskEntries = (ledgerPath, task) => ledgerEntries(ledgerPath).filter((e) => e.task === task);
+
+export const MISSING_FINDINGS = "rejected (missing findings file)";
+
+// The round a task's next reviewer dispatch takes, from its ledger lines in file order. A verdict —
+// the reviewer's, or the green gate's after an accept — closes its round, so the review after it is
+// the next round, on a findings path no earlier reviewer wrote; a missing findings file closes
+// nothing, and the same round is dispatched again. A line written before keys existed reads its
+// round from its `round <n>` outcome.
+export function nextReviewRound(entries) {
+  let round = 0;
+  let open = false;
+  for (const e of entries) {
+    if (e.event === "review-round") {
+      round = Number(e.key?.split("/")[2] ?? e.outcome.match(/^round (\d+)/)?.[1] ?? round + 1);
+      open = true;
+    } else if (e.event === "review-verdict" && !e.outcome.startsWith(MISSING_FINDINGS)) open = false;
+  }
+  return open ? round : round + 1;
+}
 
 // The retry index a key carries, or — for a line written before keys existed — its position among
 // the task's lines for that event, so an upgraded run still counts its earlier dispatches.

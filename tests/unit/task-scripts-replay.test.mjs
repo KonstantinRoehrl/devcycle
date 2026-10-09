@@ -216,6 +216,37 @@ test("SC4 replay: a green-gate failure blocks the commit and goes back to the im
   }
 });
 
+test("SC4 replay: after a green-gate failure the fix's review is the next round, so the accepted round's findings are never read again", () => {
+  const fx = fixture();
+  try {
+    acceptedTask(fx, "1", "src/a.txt");
+    assert.equal(commitTask(fx, "1", "exit 1").action, "gate-fail");
+    dispatchImplementer(fx, "1", 1);
+    const report = implement(fx, "1", "src/a.txt");
+    assert.equal(intake(fx, "1", report).action, "review");
+    const reused = spawnSync(process.execPath, [script("task-dispatch"), "--run", RUN, "--task", "1", "--role", "reviewer", "--round", "1"],
+      { cwd: fx.dir, env: fx.env, encoding: "utf8", input: "review brief\n" });
+    assert.equal(reused.status, 2, "the gate closed round 1: a re-review there is refused");
+    dispatchReviewer(fx, "1", 2);
+    assert.equal(review(fx, "1", 2, "missing").action, "missing-findings", "round 2's reviewer died without writing");
+    dispatchReviewer(fx, "1", 2);
+    assert.equal(review(fx, "1", 2, "accept").action, "accepted");
+    assert.equal(commitTask(fx, "1", "true").action, "committed");
+    assert.deepEqual(ledger(fx, "1").slice(4).map((l) => l.replace(/ ref=\S+$/, "")), [
+      "task=1 event=review-verdict outcome=rejected (green gate: exit 1)",
+      `task=1 event=dispatched outcome=model ${DECISION}`,
+      "task=1 event=report-received outcome=complete",
+      "task=1 event=review-round outcome=round 2",
+      "task=1 event=review-verdict outcome=rejected (missing findings file)",
+      "task=1 event=review-round outcome=round 2",
+      "task=1 event=review-verdict outcome=accepted",
+      "task=1 event=committed outcome=green gate passed",
+    ]);
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test("SC4 replay: a sibling-caused red is deferred, then the quiesced wave commits", () => {
   const fx = fixture();
   try {
