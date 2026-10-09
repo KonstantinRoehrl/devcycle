@@ -45,7 +45,7 @@
 // of these needs a shell-grade tokenizer, whose maintenance cost outweighs the evasion it stops for
 // this threat model; if the origins ever stop being cooperative, that trade is what to revisit.
 import { readFileSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute } from "node:path";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findStateFile } from "./lib/find-state-file.mjs";
 import { readLiveDriveLock } from "../scripts/drive-lock.mjs";
@@ -87,8 +87,8 @@ const deny = (reason) => {
 // or a malformed file → not in a cycle → allow. Everything else on the main thread stays
 // unguarded — the coordinator legitimately commits, switches branches and merges — unless a driver
 // holds the checkout (below).
+const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd();
 function activeCycleStage() {
-  const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd();
   const stateFile = findStateFile(cwd);
   if (!stateFile) return null;
   let stage;
@@ -99,12 +99,14 @@ const cycleStage = agentType === "" ? activeCycleStage() : null;
 // While a driver runs unattended execution here, it holds .devcycle/drive.lock beside the state
 // file, and the checkout is its: the main thread of every session in it — driven or the user's
 // own — may not move the branch or destroy the tree. A lock whose holder is gone changes nothing.
+// The holder comes back with `root`, the checkout it holds.
 function liveDriveLock() {
-  const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd();
   const stateFile = findStateFile(cwd);
   if (!stateFile) return null;
+  const root = dirname(dirname(stateFile));
   try {
-    return readLiveDriveLock(dirname(dirname(stateFile)));
+    const holder = readLiveDriveLock(root);
+    return holder && { ...holder, root };
   } catch {
     return null;
   }
@@ -164,6 +166,24 @@ function normalizeHead(token) {
   const slash = t.lastIndexOf("/");
   return slash === -1 ? t : t.slice(slash + 1);
 }
+// An argument loses its quotes and a glued closing group the way a head does, but keeps its path:
+// `--exclude=/-n` is not `-n`.
+const normalizeArg = (token) => token.replace(/['"\\]/g, "").replace(/[)}]+$/, "");
+
+// git's global options that take the next word as their value (git.c's handle_options; each also
+// has a `--opt=<value>` spelling, which is one word).
+const GIT_VALUE_OPTIONS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env", "--attr-source"]);
+// Where a git segment's subcommand sits, past git's global options, and the `-C` dirs on the way.
+function gitSubcommand(tokens) {
+  const dirs = [];
+  let i = 1;
+  while (i < tokens.length && normalizeArg(tokens[i]).startsWith("-")) {
+    const option = normalizeArg(tokens[i]);
+    if (option === "-C") dirs.push(tokens[i + 1] ?? "");
+    i += GIT_VALUE_OPTIONS.has(option) ? 2 : 1;
+  }
+  return { i, dirs };
+}
 
 // A git segment is read-only iff its subcommand is confidently inspection-only.
 function gitSegmentIsReadOnly(tokens, i) {
@@ -197,17 +217,38 @@ function stashIsDestructive(tokens, i) {
 // coordinator can run that directly). Same normalizer, so a quoted or grouped spelling counts.
 const mentionsStash = (tokens) => tokens.some((t) => normalizeHead(t) === "stash");
 
-// Under a live driver lock: a checkout or switch that can move the branch (`checkout -- <paths>`
-// restores files and moves nothing), a hard reset, and a forced clean. Same normalizer as the stash
-// rule, so a quoted or grouped spelling counts.
+// Under a live driver lock: a checkout or switch that can move the branch (a checkout with paths
+// after `--` restores files and moves nothing), a hard reset, and a clean that is not a dry run —
+// `clean.requireForce` may be off in any config or through `-c`, so a missing `-f` proves nothing.
+// git's subcommands take any unambiguous prefix of a long option: `--har` is `--hard`.
+const isLongOption = (arg, name, minLength = 1) => arg.length >= 2 + minLength && `--${name}`.startsWith(arg);
+function cleanIsDryRun(options) {
+  let dryRun = false;
+  for (let k = 0; k < options.length; k += 1) {
+    const a = options[k];
+    if (/^-[qifdxX]*e$/.test(a) || isLongOption(a, "exclude")) k += 1; // the pattern is the next word
+    else if (/^-[qifdxX]*n/.test(a) || isLongOption(a, "dry-run")) dryRun = true;
+    else if (isLongOption(a, "no-dry-run", 4)) dryRun = false;
+  }
+  return dryRun;
+}
 function movesOrDestroys(tokens, i) {
   const sub = normalizeHead(tokens[i] ?? "");
-  const rest = tokens.slice(i + 1).map(normalizeHead);
+  const rest = tokens.slice(i + 1).map(normalizeArg);
+  const dashDash = rest.indexOf("--");
+  const options = dashDash === -1 ? rest : rest.slice(0, dashDash);
   if (sub === "switch") return true;
-  if (sub === "checkout") return rest[0] !== "--";
-  if (sub === "reset") return rest.includes("--hard");
-  if (sub === "clean") return rest.some((a) => a === "--force" || /^-[A-Za-z]*f/.test(a));
+  if (sub === "checkout") return dashDash === -1 || dashDash === rest.length - 1;
+  if (sub === "reset") return options.some((a) => isLongOption(a, "hard"));
+  if (sub === "clean") return !cleanIsDryRun(options);
   return false;
+}
+// `-C <dir>` runs git in another directory, each relative to the one before; a git sent outside
+// the checkout the driver holds cannot move its branch or touch its tree.
+function insideDriveRoot(dirs) {
+  const target = realPath(resolve(cwd, ...dirs.map(normalizeArg)));
+  const root = realPath(driveLock.root);
+  return target === root || target.startsWith(root + sep);
 }
 // Behind a wrapper or a substitution the subcommand is out of sight: any of these words in a command
 // that runs git is denied, the way the stash rule reads the word `stash`.
@@ -238,6 +279,10 @@ const driveDenyReason = () =>
 //   heredocs      — { start, end, quoted, top, segment }, [start, end) spanning the body and its
 //                   delimiter line;
 //   singleQuotes  — the [start, end) spans of the command line's single-quoted text;
+//   doubleQuotes  — the same for its double-quoted text;
+//   continuations — where a backslash-newline outside a substitution joins two lines into one, in
+//                   the command line or an unquoted heredoc body (the shell drops the pair; inside
+//                   single quotes, a comment or a quoted heredoc body it joins nothing);
 //   segments      — the command line's commands as { start, end, sep }, `sep` the operator that ends
 //                   each (`|`, `&&`, `;`, a newline, …; "" for the last);
 //   complex       — whether the text carries a `${…}` other than a plain `${NAME}`, a `((`, a `(`
@@ -254,6 +299,8 @@ function scanShell(text) {
   const substitutions = [];
   const heredocs = [];
   const singleQuotes = [];
+  const doubleQuotes = [];
+  const continuations = [];
   const segments = [];
   let complex = false;
   let pending = [];
@@ -301,11 +348,20 @@ function scanShell(text) {
     else return false;
     return true;
   }
+  function escaped() {
+    if (text[i + 1] === "\n" && nesting === 0) continuations.push(i);
+    i += 2;
+  }
   function doubleQuoted() {
+    const start = i;
     i += 1;
     while (i < text.length) {
-      if (text[i] === "\\") i += 2;
-      else if (text[i] === '"') { i += 1; return; }
+      if (text[i] === "\\") escaped();
+      else if (text[i] === '"') {
+        i += 1;
+        if (atTop()) doubleQuotes.push([start, i]);
+        return;
+      }
       else if (!dollarForm()) i += 1;
     }
     fail();
@@ -348,7 +404,7 @@ function scanShell(text) {
   function expandingBody(end) {
     inBody = true;
     while (i < end) {
-      if (text[i] === "\\") i += 2;
+      if (text[i] === "\\") escaped();
       else if (!dollarForm()) i += 1;
       if (i > end) fail();
     }
@@ -400,7 +456,7 @@ function scanShell(text) {
       const c = text[i];
       const word = wordStart;
       wordStart = false;
-      if (c === "\\") { i += 2; continue; }
+      if (c === "\\") { escaped(); continue; }
       if (closer === "`" && c === "`") { i += 1; return; }
       if (opener && c === opener) { depth += 1; i += 1; continue; }
       if (opener && c === closer) {
@@ -464,7 +520,7 @@ function scanShell(text) {
     throw e;
   }
   segments.push({ start: segmentStart, end: text.length, sep: "" });
-  return { substitutions, heredocs, singleQuotes, segments, complex };
+  return { substitutions, heredocs, singleQuotes, doubleQuotes, continuations, segments, complex };
 }
 
 // Shell reserved words that may precede a command inside one segment. They are neither a command
@@ -542,14 +598,8 @@ function classifySegments(text) {
       continue; // a wrapper with no git (e.g. `timeout 30 npm test`) is a non-git command → allow
     }
     if (head !== "git") continue; // non-git command (basename never `git`) → allowed
-    let i = 1; // skip git's own global options and -C <dir> / -c <cfg> to reach the subcommand
-    while (i < tokens.length) {
-      const t = tokens[i];
-      if (t === "-C" || t === "-c") { i += 2; continue; }
-      if (t.startsWith("-")) { i += 1; continue; }
-      break;
-    }
-    if (!guarded && driveLock !== null && movesOrDestroys(tokens, i)) return driveDenyReason();
+    const { i, dirs } = gitSubcommand(tokens);
+    if (!guarded && driveLock !== null && movesOrDestroys(tokens, i) && insideDriveRoot(dirs)) return driveDenyReason();
     const denied = guarded ? !gitSegmentIsReadOnly(tokens, i) : stashIsDestructive(tokens, i);
     if (denied)
       return denyReason(
@@ -599,12 +649,9 @@ function loneTaskDispatch(text, scan) {
   return !text.slice(only.start, only.end).includes(">") && isTaskDispatch(scannedTokens(text, only).tokens) ? only : null;
 }
 function gitIsInert(tokens) {
-  let i = 1;
-  while (i < tokens.length && tokens[i].startsWith("-")) {
-    const option = tokens[i];
-    if (option === "-c" || option.startsWith("--config-env") || option.startsWith("--exec-path")) return false;
-    i += option === "-C" ? 2 : 1;
-  }
+  const { i } = gitSubcommand(tokens);
+  const runsACommand = (option) => option === "-c" || option.startsWith("--config-env") || option.startsWith("--exec-path");
+  if (tokens.slice(1, i).map(normalizeArg).some(runsACommand)) return false;
   const sub = normalizeHead(tokens[i] ?? "");
   return READ_ONLY.has(sub) || sub === "add";
 }
@@ -646,20 +693,20 @@ function readOnlyAsData(text, scan, k) {
   return true;
 }
 
-// A substitution whose output only becomes arguments of a command that is neither git nor a
-// launcher, on a command that names no git, cannot run or assemble a git that the same command with
-// that output written out literally would not show the segment classifier — so on a guarded
-// dispatch it no longer trips the wire (#276: `git diff --stat -- f; echo "checked at $(date)"`).
-// The main thread keeps the wire over the whole command: there `git` and `stash` may sit on opposite
-// sides of a substitution (`$(which git) stash`, `git $(echo stash)`). A `complex` line keeps it too:
+// A substitution that names no git and whose output only becomes arguments of a command that is
+// neither git nor a launcher cannot run or assemble a git that the same command with that output
+// written out literally would not show the segment classifier — so it no longer trips the wire
+// (#276: `git diff --stat -- f; echo "checked at $(date)"`), whatever else that command's words
+// name: a driven session's `task-commit.mjs --test-cmd "TMPDIR=$(mktemp -d); node --test
+// tests/unit/block-destructive-git.test.mjs" --subject "…checkout…"` runs no git through it. Every
+// other substitution keeps the wire over the whole command, where git and its subcommand may sit on
+// opposite sides of it (`$(which git) stash`, `git $(echo stash)`). A `complex` line keeps it too:
 // there the scanner's view of where a substitution ends may not be the shell's. So does a command
 // that stores its arguments or input in a variable a later `git $x` would read.
 const SETS_VARIABLES = new Set(["read", "mapfile", "readarray", "declare", "typeset", "local", "export", "readonly", "let", "getopts", "vared"]);
 function harmlessSubstitution(text, scan, sub) {
   if (scan.complex || !sub.top || /\bgit\b/.test(sub.inner)) return false;
-  const segment = scan.segments[sub.segment];
-  if (/\bgit\b/.test(text.slice(segment.start, segment.end))) return false;
-  const { tokens, assigns } = scannedTokens(text, segment);
+  const { tokens, assigns } = scannedTokens(text, scan.segments[sub.segment]);
   if (assigns || !tokens.length || /[$`]/.test(tokens[0])) return false;
   const name = normalizeHead(tokens[0]);
   if (SETS_VARIABLES.has(name) || (name === "printf" && tokens.includes("-v"))) return false;
@@ -709,13 +756,30 @@ function verdict(text) {
     return classifySegments(text);
   }
   const inert = lineIsInert(text, scan);
-  const dataBodies = inert
-    ? scan.heredocs.filter((doc) => doc.quoted && readOnlyAsData(text, scan, doc.segment)).map((doc) => [doc.start, doc.end, ""])
-    : [];
+  const dataDocs = inert ? scan.heredocs.filter((doc) => doc.quoted && readOnlyAsData(text, scan, doc.segment)) : [];
+  const dataBodies = dataDocs.map((doc) => [doc.start, doc.end, ""]);
   const ignored = inert
     ? [...dataBodies, ...scan.singleQuotes.map(([start, end]) => [start, end, "''"])]
-    : guarded ? scan.substitutions.filter((sub) => harmlessSubstitution(text, scan, sub)).map((sub) => [sub.start, sub.end, ""]) : [];
-  return substitutionTripwire(replaceSpans(text, ignored)) ?? classifySegments(replaceSpans(text, dataBodies));
+    : scan.substitutions.filter((sub) => harmlessSubstitution(text, scan, sub)).map((sub) => [sub.start, sub.end, ""]);
+  const shellJoins = shellJoinSpans(text, scan, 0, (doc) => dataDocs.includes(doc));
+  return substitutionTripwire(replaceSpans(text, ignored)) ?? classifySegments(replaceSpans(text, [...dataBodies, ...shellJoins]));
+}
+
+// The segment classifier splits on raw separators; these spans make it end a command only where the
+// shell does: each line continuation joined and each separator inside quotes blanked (a substitution
+// in double quotes is the tripwire's to judge) — in the command line and in every heredoc body not
+// proven data, which a shell may yet run as a script.
+function shellJoinSpans(text, scan, offset, isData) {
+  const spans = scan.continuations.map((k) => [offset + k, offset + k + 2, ""]);
+  for (const [start, end] of [...scan.singleQuotes, ...scan.doubleQuotes])
+    for (let k = start; k < end; k += 1) if (/[;&|\n]/.test(text[k])) spans.push([offset + k, offset + k + 1, " "]);
+  for (const doc of scan.heredocs) {
+    if (!doc.top || isData(doc)) continue;
+    const bodyText = text.slice(doc.start, doc.end);
+    const body = scanShell(bodyText);
+    if (body) spans.push(...shellJoinSpans(bodyText, body, offset + doc.start, () => false));
+  }
+  return spans;
 }
 
 const reason = verdict(command);

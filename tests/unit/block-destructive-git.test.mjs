@@ -632,3 +632,84 @@ test("a live driver lock leaves a dispatch's verdicts unchanged", () => {
   assert.equal(decideRaw({ agent_type: IMPLEMENTER, cwd, tool_input: { command: "git status" } }).decision, "allow");
   assert.equal(decideRaw({ agent_type: IMPLEMENTER, cwd, tool_input: { command: "git checkout -- x" } }).decision, "deny");
 });
+
+// A trailing backslash joins two lines into one command, so the shell runs `git reset --hard` from
+// `git reset \⏎--hard`; splitting the text at the newline first read it as two harmless commands.
+// A backslash ending a comment or sitting inside single quotes joins nothing. A heredoc body a shell
+// runs is joined when that shell reads it, quoted or not.
+test("a backslash-continued destructive git is read as the one command the shell runs", () => {
+  const cwd = drivenDir({ live: true });
+  for (const cmd of ["git reset \\\n--hard", "git \\\n  -C . \\\n  checkout main", "git clean \\\n-fdx", "git checkout \\\nmain",
+    "git sw\\\nitch main", "# a note \\\ngit checkout main", "bash <<'EOF'\ngit reset \\\n--hard\nEOF", "bash <<EOF\ngit reset \\\n--hard\nEOF"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${JSON.stringify(cmd)}`);
+  for (const cmd of ["echo 'a \\\ngit checkout main'", "bash <<'EOF'\n# a note \\\ngit status\nEOF"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${JSON.stringify(cmd)}`);
+  const cycle = cycleDir(stateAt("execution"));
+  for (const cmd of ["git \\\nstash", "git \\\nstash drop", "git -C . \\\n  stash"])
+    assert.equal(decideMain(cycle, cmd), "deny", `expected deny for main-thread stash: ${JSON.stringify(cmd)}`);
+  assert.equal(decideMain(cycle, "git \\\nstash list"), "allow");
+});
+
+// The driven session commits through task-commit.mjs, whose `--test-cmd` takes the repo's
+// `TMPDIR=$(…)` form: a substitution that runs no git, feeding a command that is neither git nor a
+// launcher, beside a test path that contains "git" and a subject naming a drive word. Denying it
+// told the session to stop the driver it runs under. A substitution that runs git still trips the
+// wire, whichever side of it the drive word sits on.
+const TASK_COMMIT = "node \"${CLAUDE_PLUGIN_ROOT}/scripts/task-commit.mjs\" --task 3";
+test("main thread + a live driver lock: the driven session's own task-commit call is allowed", () => {
+  const cwd = drivenDir({ live: true });
+  for (const cmd of [
+    `${TASK_COMMIT} --test-cmd "export TMPDIR=$(mktemp -d); node --test tests/unit/block-destructive-git.test.mjs" --subject "fix(guard): deny checkout under a drive lock"`,
+    `${TASK_COMMIT} --test-cmd "export TMPDIR=$(cd \\"$(mktemp -d /tmp/dc-XXXX)\\" && pwd -P); node --test tests/unit/block-destructive-git.test.mjs" --subject "fix(guard): deny switch under a drive lock"`,
+    `${TASK_COMMIT} --test-cmd "export TMPDIR=$(mktemp -d); node --test tests/unit/task-commit.test.mjs" --subject "fix(commit): reset the git index on a refused commit"`,
+  ])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+  for (const cmd of [
+    `${TASK_COMMIT} --test-cmd "$(git checkout main)" --subject "x"`,
+    `${TASK_COMMIT} --test-cmd "$(git rev-parse HEAD)" --subject "fix(guard): deny checkout under a drive lock"`,
+    "echo $(mktemp -d); git $(echo checkout) main",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+});
+
+test("main thread in a cycle: a git-free substitution beside text that names stash is allowed", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  assert.equal(decideMain(cwd,
+    `${TASK_COMMIT} --test-cmd "export TMPDIR=$(mktemp -d); node --test tests/unit/block-destructive-git.test.mjs" --subject "fix(guard): deny git stash in a cycle"`), "allow");
+  for (const cmd of [`${TASK_COMMIT} --test-cmd "$(git stash)" --subject x`, "echo $(date); git $(echo stash)"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for main-thread stash: ${cmd}`);
+});
+
+// git takes the next word as the value of -C, -c, --git-dir, --work-tree, --namespace,
+// --super-prefix and --config-env; reading that value as the subcommand hid the real one. Its
+// subcommands accept any unambiguous prefix of a long option (`--har` is `--hard`), and a clean
+// deletes without -f whenever clean.requireForce is off, so only a dry run is not destructive.
+test("main thread + a live driver lock: git's separate-value options, abbreviations and an unforced clean are seen", () => {
+  const cwd = drivenDir({ live: true });
+  for (const cmd of ["git --git-dir .git checkout main", "git --work-tree . reset --hard", "git --namespace x switch main",
+    "git --super-prefix x/ checkout main", "git --config-env core.x=HOME clean -fd", "git reset --har", "git reset --h HEAD~1",
+    "git clean --forc -d", "git clean --f", "git -c clean.requireForce=false clean -dx", "git clean -dx", "git clean -f -e -n",
+    "git clean -fd -- -n", "git clean -n --no-dry-run -f", "git clean -fdx --exclude=/-n"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+  for (const cmd of ["git clean -n", "git clean -nd", "git clean -dn", "git clean --dry-run -fdx", "git clean --dry -f", "git reset --soft HEAD~1",
+    "git --git-dir .git log -1"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+  assert.equal(decideMain(cycleDir(stateAt("execution")), "git --git-dir .git stash"), "deny");
+  assert.equal(decide(REVIEWER, "git --git-dir .git status"), "allow");
+  assert.equal(decide(REVIEWER, "git --work-tree . checkout -- x"), "deny");
+});
+
+// A checkout with paths after `--` restores files whatever comes before it; `-C` pointing outside
+// the checkout the driver holds is another repository's business; a separator inside quotes ends
+// no command.
+test("main thread + a live driver lock: file restores, other repositories and quoted separators are allowed", () => {
+  const cwd = drivenDir({ live: true });
+  const other = cycleDir(null);
+  for (const cmd of ["git checkout -q -- f", "git checkout HEAD -- f", "git checkout main -- a b", `git -C ${other} checkout main`,
+    `git -C ${other} reset --hard`, "echo 'a; git checkout main'", "echo \"a; git reset --hard\"", "git commit -m 'wip; git switch main next'",
+    "echo 'a\ngit checkout main'", "bash <<'EOF'\necho 'a; git checkout main'\nEOF"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+  for (const cmd of ["git checkout main --", `git -C ${other} -C ${cwd} checkout main`, "git -C sub checkout main", `git -C ${cwd}/sub/.. switch main`,
+    "sh -c 'true; git checkout main'"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+});
