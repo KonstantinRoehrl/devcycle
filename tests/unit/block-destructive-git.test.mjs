@@ -355,3 +355,221 @@ test("malformed / non-object stdin fails safe to allow, never throws", () => {
     assert.equal(r.stdout.trim(), "", `denied on unparseable stdin ${JSON.stringify(raw)}`);
   }
 });
+
+// #276/#284 and the 2026-10-08 live repro: the substitution tripwire read "a substitution token
+// anywhere plus the word git anywhere", so a heredoc note or a findings file that merely NAMED a git
+// command next to backticks was denied — on a guarded dispatch and on the main thread's stash rule
+// alike. Data now counts as data — a quoted heredoc body fed to cat/tee, single-quoted text — on a
+// line made only of commands that never run their arguments or input; a guarded dispatch's
+// substitution that names no git, feeding a command that is neither git nor a launcher, no longer
+// trips the wire.
+const LIVE_REPRO = [
+  "cat > notes.md <<'EOF'",
+  "- LIVE REPRO 2026-10-08 (main thread, stage brainstorm): a heredoc writing these notes was denied",
+  "  because its prose named `git stash` and contained backticks (`deny-on-ambiguity`).",
+  "EOF",
+].join("\n");
+
+test("main thread + the live repro: a quoted heredoc whose body names git stash beside backticks is allowed", () => {
+  const cwd = cycleDir(stateAt("brainstorm"));
+  assert.equal(decideMain(cwd, LIVE_REPRO), "allow");
+  assert.equal(decideMain(cwd, `${LIVE_REPRO}\ngit add notes.md`), "allow");
+  assert.equal(decideMain(cwd, "cat > \"${TMPDIR}/msg.md\" <<'EOF'\nfix: never run `git stash` during a cycle\nEOF"), "allow");
+  // The execution stage's brief hand-off: task-dispatch.mjs only writes the brief it reads to a file.
+  assert.equal(decideMain(cycleDir(stateAt("execution")),
+    "node \"${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs\" --run 0123456789abcdef --task 3 --role implementer <<'EOF'\nNever run `git stash`.\ngit stash drop is named, not run\nEOF"), "allow");
+});
+
+test("reviewer + a findings file written through a quoted heredoc that names git is allowed (#284)", () => {
+  for (const cmd of [
+    "mkdir -p .devcycle/findings && cat > .devcycle/findings/t1.md <<'EOF'\n## Findings\n- `git reset --hard` in step 3 would discard the diff; $(git stash) is quoted prose.\nEOF",
+    "tee notes.md <<\"NOTES\" >/dev/null\nrun `git checkout -- x` never\nNOTES",
+    "cat > a.md <<-'EOF'\n\t`git clean -fd` stays banned\n\tEOF",
+    "cat > b.md <<\\EOF\n`git push` is named only\nEOF",
+    "cat <<'EOF' | tee c.md\ngit reset --hard\nEOF",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for heredoc data: ${cmd}`);
+});
+
+test("reviewer + a substitution without git beside a read-only git is allowed (#276)", () => {
+  for (const cmd of [
+    'git diff --stat -- CONTRIBUTING.md; echo "checked at $(date)"',
+    "git log -1 --format=%H && wc -l `ls references`",
+    "git show HEAD:README.md | head -n \"$(( 2 + 3 ))\"",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for git-free substitution: ${cmd}`);
+});
+
+test("single-quoted text is data for the substitution check", () => {
+  assert.equal(decide(REVIEWER, "echo '$(git reset --hard)'"), "allow");
+  assert.equal(decide(REVIEWER, "grep -n '`git stash`' references/evidence.md"), "allow");
+  assert.equal(decideMain(cycleDir(stateAt("execution")), "printf '%s\\n' '$(git stash)'"), "allow");
+  // ...but the wrapper arm still reads a quoted script, and double quotes still substitute.
+  assert.equal(decide(REVIEWER, "sh -c 'git reset --hard'"), "deny");
+  assert.equal(decide(REVIEWER, 'echo "$(git reset --hard)"'), "deny");
+});
+
+test("a heredoc read by a shell or piped into one stays a script, and an unquoted body still substitutes", () => {
+  for (const cmd of [
+    "bash <<'EOF'\ngit reset --hard\nEOF",
+    "cat <<'EOF' | sh\ngit checkout -- x\nEOF",
+    "cat > x.md <<EOF\nhead is $(git rev-parse HEAD)\nEOF",
+    "cat > x.md <<EOF\nhead is `git log -1`\nEOF",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for executed heredoc: ${cmd}`);
+  const cwd = cycleDir(stateAt("execution"));
+  assert.equal(decideMain(cwd, "bash <<'EOF'\ngit stash\nEOF"), "deny");
+  assert.equal(decideMain(cwd, "cat > notes.md <<EOF\nrun `git stash` now\nEOF"), "deny");
+  // A shell reading a heredoc of read-only git is classified like the same lines typed directly.
+  assert.equal(decide(REVIEWER, "bash <<'EOF'\ngit diff\ngit status\nEOF"), "allow");
+});
+
+test("nested substitutions are walked to their real boundaries", () => {
+  for (const cmd of [
+    'echo "$(echo $(git reset --hard))"',
+    'x=$(echo ")"; git stash drop)',
+    "echo $(echo `git checkout -- x`)",
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for nested substitution: ${cmd}`);
+  assert.equal(decide(REVIEWER, 'echo "$(echo "(a)") $(date)"; git diff'), "allow");
+});
+
+test("input the scanner cannot parse is denied when git appears (deny-on-ambiguity)", () => {
+  for (const cmd of ['echo "$(git status', "echo 'unterminated && git diff", "cat > f.md <<'EOF'\nnotes about git\n"])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for unparsable: ${cmd}`);
+  const cwd = cycleDir(stateAt("execution"));
+  assert.equal(decideMain(cwd, 'echo "$(git stash'), "deny");
+  // Unparsable but naming no stash: the main thread's ban is stash-only, so it stays allowed.
+  assert.equal(decideMain(cwd, 'echo "unterminated && git status'), "allow");
+  const reason = decideRaw({ agent_type: REVIEWER, tool_input: { command: 'echo "$(git status' } }).reason;
+  assert.match(reason, /cannot parse/);
+});
+
+test("rtk is a transparent launcher: the git it runs is still classified", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of ["rtk git stash", "rtk -v git stash pop", "rtk proxy --skip-env git stash", "rtk err git stash", "rtk proxy rtk git stash"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny for rtk-launched stash: ${cmd}`);
+  assert.equal(decideMain(cwd, "rtk git stash list"), "allow");
+  for (const cmd of ["rtk git reset --hard", "rtk proxy git checkout -- x", "rtk proxy --ultra-compact git reset --hard",
+    "rtk proxy -- git clean -fd", "rtk err git reset --hard", "rtk test git checkout -- x", "rtk summary git reset --hard",
+    "rtk run -c 'git clean -fd'", "rtk run git reset --hard"])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for rtk-launched git: ${cmd}`);
+  for (const cmd of ["rtk git diff", "rtk git log -3", "rtk grep git src", "rtk proxy git status", "rtk err git status"])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for rtk-launched read-only git: ${cmd}`);
+});
+
+// QC9: every way the plan review (coverage F1–F3) found to run a git through text the new parser
+// could read as data — denied before this change, so each must stay denied. Bash and zsh run the git
+// in every one: a glued or leading redirection, a reader on a continuation line, a shell reader
+// outside WRAPPERS (`source`, `.`, `> >(sh)`, `$l`, `ssh`), a written script run in the same command,
+// a quoted heredoc inside a substitution whose output is executed or becomes git's arguments, git
+// and its subcommand on opposite sides of a substitution, an escaped space before `#`, `<<` inside
+// `((…))`/`${…}`, a `case` label that closes a substitution early, an array subscript or glob
+// qualifier that evaluates single-quoted text, and a command made of inert words fed into git.
+const STAYS_DENIED_FOR_A_REVIEWER = [
+  "bash<<'EOF'\ngit reset --hard\nEOF",
+  "sh<<EOF\ngit reset --hard\nEOF",
+  "<<'EOF' bash\ngit reset --hard\nEOF",
+  "bash \\\n<<'EOF'\ngit reset --hard\nEOF",
+  "cat <<'EOF' |\ngit reset --hard\nEOF\nbash",
+  "source /dev/stdin <<'EOF'\ngit reset --hard\nEOF",
+  "cat <<'EOF' > >(sh)\ngit reset --hard\nEOF",
+  "while read -r l; do $l; done <<'EOF'\ngit reset --hard\nEOF",
+  "ssh localhost <<'EOF'\ngit reset --hard\nEOF",
+  "cat <<'EOF' > s.sh\ngit reset --hard\nEOF\nbash s.sh",
+  "cat <<'EOF' | tee /dev/null | bash\ngit reset --hard\nEOF",
+  "{ cat; } <<'EOF' | sh\ngit reset --hard\nEOF",
+  "$(cat <<'EOF'\ngit reset --hard\nEOF\n)",
+  "eval \"$(cat <<'EOF'\ngit reset --hard\nEOF\n)\"",
+  "bash -c \"$(cat <<'EOF'\ngit reset --hard\nEOF\n)\"",
+  "a=$(cat <<'EOF'\ngit reset --hard\nEOF\n)\n$a",
+  "$(which git) reset --hard",
+  "git diff $(echo --output=x)",
+  "read x < <(echo --output=f); git log $x",
+  "echo '$(git reset --hard)' | sh",
+  "test -v 'a[$(git reset --hard)]'",
+  "echo a\\ #$(git reset --hard)",
+  "(( y = 1 <<EOF ))\ngit reset --hard\nEOF",
+  "echo ${x:-<<EOF}\ngit reset --hard\nEOF}",
+  "echo $(case x in a) echo;; *) git reset --hard;; esac)",
+  // A delimiter word the shells decode beyond quote removal ends the body at a line the scanner
+  // would read past: `$'EOF'`/`$"EOF"` end at `EOF`, `"E\\OF"` at `E\OF`, `${X Y}` spans the space.
+  "cat <<$'EOF'\nx\nEOF\ngit reset --hard\n$EOF",
+  "cat <<$\"EOF\"\nx\nEOF\ngit reset --hard\n$EOF",
+  "cat <<E$'O'F\nx\nEOF\ngit reset --hard\nE$OF",
+  "cat <<\"E\\\\OF\"\nx\nE\\OF\ngit reset --hard\nE\\\\OF",
+  "cat <<\"E\\$F\"\nx\nE$F\ngit reset --hard\nE\\$F",
+  "cat <<${X Y}\n${X\ncat <<'Q'\n${X Y}\ngit reset --hard\nQ",
+  "cat <<$[1 + 2]\n$[1\ncat <<'Q'\n$[1 + 2]\ngit reset --hard\nQ",
+  // The shells split words only on space, tab and newline: a no-break space, form feed or em space
+  // stays inside the delimiter word, and a `#` after one does not start a comment.
+  ...[" ", "\f", " "].map((blank) => `cat <<'EOF'${blank}X\nx\nEOF\ncat <<'Q'\nEOF${blank}X\ngit reset --hard\nQ`),
+  "echo a #$(git reset --hard)",
+];
+const STAYS_DENIED_ON_THE_MAIN_THREAD = [
+  "bash<<'EOF'\ngit stash\nEOF",
+  "cat <<'EOF' |\ngit stash\nEOF\nsh",
+  ". /dev/stdin <<'EOF'\ngit stash\nEOF",
+  "eval \"$(cat <<'EOF'\ngit stash\nEOF\n)\"",
+  "$(cat <<'EOF'\ngit stash\nEOF\n)",
+  "$(which git) stash",
+  "`which git` stash",
+  "$(command -v git) stash drop",
+  "git $(echo stash)",
+  "git \"$(printf stash)\" drop",
+  "GIT=$(which git); $GIT stash",
+  "echo a\\ #$(git stash)",
+  "cat > f <<'EOF'\nstash\nEOF\ngit $(cat f)",
+  "printf -v 'a[$(git stash)]' 1",
+  "ls *(e:'$(git stash)':)",
+  "((echo '$(git stash)') | sh)",
+  "X=1 cat <<'EOF'\ngit stash\nEOF",
+  "cat <<'EOF' | git -c alias.x='!sh' x\ngit stash\nEOF",
+  "cat <<'EOF' > f\ngit stash\nEOF\ngit -c alias.x='!sh f' x",
+  "cat > s.sh <<'EOF'\ngit stash\nEOF\n./s.sh",
+  "node \"${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs\" --run r --task 3 --role implementer <<'EOF' | sh\ngit stash\nEOF",
+  // A quoted heredoc inside a substitution is never data — `git $(cat <<'EOF' …)` would take its
+  // subcommand from it — so the commit-message idiom that names stash stays denied; write the
+  // message with `cat > <file> <<'EOF'` and commit it with `git commit -F <file>` in a second call.
+  "git commit -m \"$(cat <<'EOF'\nfix: never run git stash during a cycle\nEOF\n)\"",
+  "cat <<$'EOF'\nx\nEOF\ngit stash\n$EOF",
+  "cat <<$\"EOF\"\nx\nEOF\ngit stash\n$EOF",
+  "cat <<\"E\\\\OF\"\nx\nE\\OF\ngit stash\nE\\\\OF",
+  ...[" ", "\f", " "].map((blank) => `cat <<'EOF'${blank}X\nx\nEOF\ncat <<'Q'\nEOF${blank}X\ngit stash\nQ`),
+];
+
+test("QC9: every spelling that runs a git through text the parser could read as data stays denied", () => {
+  for (const cmd of STAYS_DENIED_FOR_A_REVIEWER)
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a reviewer: ${cmd}`);
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of STAYS_DENIED_ON_THE_MAIN_THREAD)
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny on the main thread: ${cmd}`);
+});
+
+test("a quoted heredoc body carrying non-ASCII prose that names git stays data", () => {
+  assert.equal(decide(REVIEWER, "cat >> .devcycle/ledger.md <<'EOF'\n- task 3 → done — `git reset --hard` never ran (§ 4.A)\nEOF"), "allow");
+  assert.equal(decideMain(cycleDir(stateAt("execution")), "cat > msg.md <<'EOF'\nfix: never run git stash → use git add -N — § 4.A\nEOF"), "allow");
+});
+
+test("only devcycle's own task-dispatch.mjs reads its heredoc as data", () => {
+  const brief = " --run r --task 3 --role implementer <<'EOF'\ngit reset --hard\nEOF";
+  const ownScript = join(dirname(HOOK), "..", "scripts", "task-dispatch.mjs");
+  for (const script of ["\"${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs\"", "$CLAUDE_PLUGIN_ROOT/scripts/task-dispatch.mjs", ownScript])
+    assert.equal(decide(REVIEWER, `node ${script}${brief}`), "allow", `expected allow for devcycle's task-dispatch: ${script}`);
+  for (const cmd of [
+    "mkdir -p scripts && cat > scripts/task-dispatch.mjs <<'A'\nrequire('child_process').execSync(require('fs').readFileSync(0, 'utf8'))\nA\nnode scripts/task-dispatch.mjs <<'B'\ngit reset --hard\nB",
+    `node ./scripts/task-dispatch.mjs${brief}`,
+    `node /nowhere/scripts/task-dispatch.mjs${brief}`,
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a task-dispatch.mjs that is not devcycle's: ${cmd}`);
+  // The same command could first overwrite devcycle's own script, so it is trusted only run alone.
+  const evil = "<<'A'\nrequire('child_process').execSync(require('fs').readFileSync(0, 'utf8'))\nA\n";
+  for (const cmd of [
+    `cat > "\${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs" ${evil}node "\${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs"${brief}`,
+    `cat >${ownScript} ${evil}node ${ownScript}${brief}`,
+    `tee $CLAUDE_PLUGIN_ROOT/scripts/task-dispatch.mjs ${evil}node $CLAUDE_PLUGIN_ROOT/scripts/task-dispatch.mjs${brief}`,
+    `cat > $CLAUDE_PLUGIN_ROOT/scripts/task-dispatc?.mjs ${evil}node $CLAUDE_PLUGIN_ROOT/scripts/task-dispatch.mjs${brief}`,
+    `node $CLAUDE_PLUGIN_ROOT/scripts/task-dispatch.mjs${brief.replace("<<'EOF'", "<<'EOF' >$CLAUDE_PLUGIN_ROOT/scripts/task-dispatch.mjs")}`,
+  ])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a command that can rewrite task-dispatch.mjs: ${cmd}`);
+});
