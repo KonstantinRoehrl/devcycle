@@ -69,3 +69,17 @@ environment (3) error.
   `references/model-routing.md` audit shape; `outcome=implementer retry <k>` without the flag)
   or `review-round` (`outcome=round <n>`) with that path as `ref=`, and keeps the dispatch's start
   time for its `dispatch` row.
+- `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-intake.mjs" --run <run-id> --task <id> --report <path> --status complete|blocked --agent-type <type> --model <id> --model-source explicit|inherited [--agent-id <id>]`
+  once the implementer's envelope returns, against the task's latest `dispatched` line:
+  `status: blocked` appends `report-received outcome=blocked` (action `needs-user`); a missing report,
+  or one with no `- Evidence:` line, appends `outcome=rejected (missing report file)` (`missing-report`);
+  a report failing `authored-claims-check.mjs` or `evidence-completeness-check.mjs` appends
+  `outcome=rejected (intake bounce)` with its findings file as `ref=` (`bounce`); a clean one appends
+  `outcome=complete` (`review`). All but a missing report write the `dispatch` row.
+- `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-verdict.mjs" --run <run-id> --task <id> --round <n> --findings <path> --evidence-class red-green|green-green|convention`
+  once the reviewer's envelope returns, against that round's `review-round` line: a findings file
+  that is missing, empty or malformed (no `Verdict:`, or `needs-changes` without a valid `Culprit:`)
+  appends `review-verdict outcome=rejected (missing findings file)` (`missing-findings`); otherwise
+  `outcome=accepted` or `rejected`, the `verdict` row and, on `needs-changes`, the `review-reject`
+  event row (`accepted` / `rejected`). A rejected round 3 writes the exhausted-unresolved status
+  `references/resume.md` reads. Either script returns `needs-user` instead at a retry cap.

@@ -42,11 +42,11 @@ executing-waves shrink removes; the maintainer accepted that trade on 2026-10-08
 budget is what each session actually loads.
 
 ```text
-budget: surface-budget.json surfaceTotal 5765
-budget: context-budget.json playbooks/executing-waves.md 106290
-budget: context-budget.json playbooks/receiving-review.md 110410
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 83176
-budget: context-budget.json playbooks/taking-the-fast-path.md 76301
+budget: surface-budget.json surfaceTotal 5795
+budget: context-budget.json playbooks/executing-waves.md 109361
+budget: context-budget.json playbooks/receiving-review.md 113481
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 86247
+budget: context-budget.json playbooks/taking-the-fast-path.md 79372
 ```
 
 ## 2026-10-07 — Fifth hook-like component: the function-hook module
