@@ -23,8 +23,9 @@
 // #284), and `rtk` is a transparent launcher whose git is classified like any other.
 // Scope is git-only; non-git commands (tests, greps) are allowed. Three dispatch origins are guarded
 // by the allowlist — task-reviewer, red-team-reviewer and, since #235, implementer — and the main
-// thread (no agent_type) is guarded for `git stash` alone, only while a .devcycle/state.md above the
-// call's cwd reports a stage other than done. Every other origin is never guarded.
+// thread (no agent_type) is guarded for `git stash` while a .devcycle/state.md above the call's cwd
+// reports a stage other than done, and for a branch-moving or tree-destroying git while a live driver
+// lock sits beside that state file. Every other origin is never guarded.
 //
 // STATED BOUNDS (deliberately not covered). This is a proportionate backstop against a cooperative
 // dispatch running a plain destructive git, not a complete parser hardened against an adversary
@@ -44,9 +45,10 @@
 // of these needs a shell-grade tokenizer, whose maintenance cost outweighs the evasion it stops for
 // this threat model; if the origins ever stop being cooperative, that trade is what to revisit.
 import { readFileSync, realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findStateFile } from "./lib/find-state-file.mjs";
+import { readLiveDriveLock } from "../scripts/drive-lock.mjs";
 
 let input = {};
 try {
@@ -83,7 +85,8 @@ const deny = (reason) => {
 // (#235). The active cycle is read the way hooks/workload-sensor.mjs reads it: walk upward from the
 // hook input's cwd for .devcycle/state.md and take its stage: line. No state file, `stage: done`,
 // or a malformed file → not in a cycle → allow. Everything else on the main thread stays
-// unguarded: the coordinator legitimately commits, switches branches and merges.
+// unguarded — the coordinator legitimately commits, switches branches and merges — unless a driver
+// holds the checkout (below).
 function activeCycleStage() {
   const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd();
   const stateFile = findStateFile(cwd);
@@ -93,7 +96,21 @@ function activeCycleStage() {
   return stage && stage !== "done" ? stage : null;
 }
 const cycleStage = agentType === "" ? activeCycleStage() : null;
-if (!guarded && cycleStage === null) allow();
+// While a driver runs unattended execution here, it holds .devcycle/drive.lock beside the state
+// file, and the checkout is its: the main thread of every session in it — driven or the user's
+// own — may not move the branch or destroy the tree. A lock whose holder is gone changes nothing.
+function liveDriveLock() {
+  const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd();
+  const stateFile = findStateFile(cwd);
+  if (!stateFile) return null;
+  try {
+    return readLiveDriveLock(dirname(dirname(stateFile)));
+  } catch {
+    return null;
+  }
+}
+const driveLock = agentType === "" ? liveDriveLock() : null;
+if (!guarded && cycleStage === null && driveLock === null) allow();
 
 const command = typeof input.tool_input?.command === "string" ? input.tool_input.command : "";
 
@@ -179,6 +196,28 @@ function stashIsDestructive(tokens, i) {
 // token next to a git token is denied on ambiguity (`sh -c 'git stash list'` included — the
 // coordinator can run that directly). Same normalizer, so a quoted or grouped spelling counts.
 const mentionsStash = (tokens) => tokens.some((t) => normalizeHead(t) === "stash");
+
+// Under a live driver lock: a checkout or switch that can move the branch (`checkout -- <paths>`
+// restores files and moves nothing), a hard reset, and a forced clean. Same normalizer as the stash
+// rule, so a quoted or grouped spelling counts.
+function movesOrDestroys(tokens, i) {
+  const sub = normalizeHead(tokens[i] ?? "");
+  const rest = tokens.slice(i + 1).map(normalizeHead);
+  if (sub === "switch") return true;
+  if (sub === "checkout") return rest[0] !== "--";
+  if (sub === "reset") return rest.includes("--hard");
+  if (sub === "clean") return rest.some((a) => a === "--force" || /^-[A-Za-z]*f/.test(a));
+  return false;
+}
+// Behind a wrapper or a substitution the subcommand is out of sight: any of these words in a command
+// that runs git is denied, the way the stash rule reads the word `stash`.
+const DRIVE_WORDS = new Set(["checkout", "switch", "reset", "clean"]);
+const DRIVE_WORD = /\b(?:checkout|switch|reset|clean)\b/;
+const mentionsDriveWord = (tokens) => tokens.some((t) => DRIVE_WORDS.has(normalizeHead(t)));
+const driveDenyReason = () =>
+  `devcycle: a driver (pid ${driveLock.pid}, log ${driveLock.log}) is running unattended execution in this checkout — ` +
+  "the main thread may not move the branch or destroy the working tree while it runs. Stop the driver first " +
+  `(Ctrl-C in its terminal, or kill ${driveLock.pid}), or run git from your own terminal. command: ${command.slice(0, 200)}`;
 
 // A heredoc, a quote or a substitution decides whether a `git` in the text is RUN or only READ, and
 // the substitution tripwire used to tell neither apart: "a substitution token anywhere plus the word
@@ -493,6 +532,8 @@ function classifySegments(text) {
       // A wrapper's argument is often a quoted script (`sh -c 'git checkout -- x'`), so the naive
       // whitespace split leaves a quote character glued to the word (`'git`, `"git`), and a wrapper may
       // also name git by path — normalizeHead reduces every such spelling to `git` before comparing.
+      if (!guarded && driveLock !== null && tokens.slice(1).some((t) => normalizeHead(t) === "git") && mentionsDriveWord(tokens))
+        return driveDenyReason();
       if (tokens.slice(1).some((t) => normalizeHead(t) === "git") && (guarded || mentionsStash(tokens))) // git behind a wrapper we cannot see into
         return denyReason(
           "run git behind a shell wrapper (deny-on-ambiguity).",
@@ -508,6 +549,7 @@ function classifySegments(text) {
       if (t.startsWith("-")) { i += 1; continue; }
       break;
     }
+    if (!guarded && driveLock !== null && movesOrDestroys(tokens, i)) return driveDenyReason();
     const denied = guarded ? !gitSegmentIsReadOnly(tokens, i) : stashIsDestructive(tokens, i);
     if (denied)
       return denyReason(
@@ -644,6 +686,7 @@ function replaceSpans(text, spans) {
 const SUBSTITUTION_TOKEN = /`|\$\(|<\(|>\(|(?:^|\s)=\(/;
 function substitutionTripwire(text) {
   if (!SUBSTITUTION_TOKEN.test(text) || !/\bgit\b/.test(text)) return null;
+  if (!guarded && driveLock !== null && DRIVE_WORD.test(text)) return driveDenyReason();
   if (!guarded && !/\bstash\b/.test(text)) return null;
   return denyReason(
     "run git inside a command substitution (deny-on-ambiguity).",
@@ -657,6 +700,7 @@ function substitutionTripwire(text) {
 function verdict(text) {
   const scan = scanShell(text);
   if (!scan) {
+    if (!guarded && driveLock !== null && /\bgit\b/.test(text) && DRIVE_WORD.test(text)) return driveDenyReason();
     if (/\bgit\b/.test(text) && (guarded || /\bstash\b/.test(text)))
       return denyReason(
         "run git in a command the guard cannot parse — an unterminated quote, substitution or heredoc (deny-on-ambiguity).",

@@ -11,6 +11,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
+import { hostname } from "node:os";
+import { acquireDriveLock } from "../../scripts/drive-lock.mjs";
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "hooks", "block-destructive-git.mjs");
 
@@ -572,4 +574,61 @@ test("only devcycle's own task-dispatch.mjs reads its heredoc as data", () => {
     `node $CLAUDE_PLUGIN_ROOT/scripts/task-dispatch.mjs${brief.replace("<<'EOF'", "<<'EOF' >$CLAUDE_PLUGIN_ROOT/scripts/task-dispatch.mjs")}`,
   ])
     assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a command that can rewrite task-dispatch.mjs: ${cmd}`);
+});
+
+// A driver holding the checkout (spec 4.A.1): `live` takes the lock in this test process, alive for
+// every spawn below; otherwise the lock names this pid with a start time it never had — a stale lock
+// an earlier driver left behind.
+function drivenDir({ live }) {
+  const dir = cycleDir(stateAt("execution"));
+  const statePath = join(dir, ".devcycle", "state.md");
+  const logPath = join(dir, ".devcycle", "drive.log");
+  if (live) assert.equal(acquireDriveLock(dir, { statePath, logPath }).ok, true);
+  else writeFileSync(join(dir, ".devcycle", "drive.lock"),
+    JSON.stringify({ pid: process.pid, startTime: "Thu Jan  1 00:00:00 1970", hostname: hostname(), state: statePath, log: logPath }));
+  return dir;
+}
+
+const MOVES_OR_DESTROYS = ["git checkout main", "git checkout -b other", "git switch main", "git switch -c other",
+  "git reset --hard", "git reset --hard HEAD~1", "git clean -f", "git clean -fdx", "git clean --force",
+  "git -C . checkout dev", "cd sub && git checkout main", "(git switch main)", "sh -c 'git reset --hard'", "x=$(git checkout main)",
+  "rtk git checkout main", "rtk proxy --ultra-compact git switch main"];
+// The spellings the plan review found around the stash rule (coverage F1/F2), with a branch move in
+// place of the stash: git and its subcommand on opposite sides of a substitution, and git fed to a
+// shell through a heredoc that the parser must not read as data.
+const MOVES_BEHIND_A_SUBSTITUTION_OR_HEREDOC = ["$(which git) checkout main", "git $(echo switch) main",
+  "git \"$(printf checkout)\" main", "GIT=$(which git); $GIT reset --hard", "bash<<'EOF'\ngit checkout main\nEOF",
+  "cat <<'EOF' |\ngit switch main\nEOF\nsh", "eval \"$(cat <<'EOF'\ngit reset --hard\nEOF\n)\"", ". /dev/stdin <<'EOF'\ngit clean -fd\nEOF"];
+
+test("main thread + a live driver lock: moving the branch or destroying the tree is denied, and the reason says how to stop the driver", () => {
+  const cwd = drivenDir({ live: true });
+  for (const cmd of [...MOVES_OR_DESTROYS, ...MOVES_BEHIND_A_SUBSTITUTION_OR_HEREDOC, "echo $(git switch main"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+  const { reason } = decideRaw({ cwd, tool_input: { command: "git checkout main" } });
+  assert.match(reason, new RegExp(`^devcycle: a driver \\(pid ${process.pid}, log [^)]*drive\\.log\\) is running unattended execution in this checkout`));
+  assert.match(reason, /Stop the driver first/);
+});
+
+test("main thread + a live driver lock: reading, committing and restoring files stay allowed", () => {
+  const cwd = drivenDir({ live: true });
+  for (const cmd of ["git status", "git log --oneline -3", "git diff", "git add -A", "git commit -m x", "git checkout -- src/a.mjs",
+    "git clean -n", "npm test", "echo 'git checkout main'",
+    // A brief written through a quoted heredoc names git as data, substitution spelling included —
+    // whether cat writes it or task-dispatch.mjs takes it on stdin.
+    "cat > .devcycle/briefs/3-implementer.md <<'EOF'\nNever run `git checkout main` or $(git reset --hard).\nEOF",
+    "node \"${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs\" --run 0123456789abcdef --task 3 --role implementer <<'EOF'\ngit checkout main is banned; so is `git reset --hard`.\nEOF"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+});
+
+test("main thread + a stale driver lock changes nothing", () => {
+  const cwd = drivenDir({ live: false });
+  for (const cmd of [...MOVES_OR_DESTROYS, ...MOVES_BEHIND_A_SUBSTITUTION_OR_HEREDOC])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a stale lock: ${cmd}`);
+  assert.equal(decideMain(cwd, "git stash"), "deny", "the stash rule still holds");
+});
+
+test("a live driver lock leaves a dispatch's verdicts unchanged", () => {
+  const cwd = drivenDir({ live: true });
+  assert.equal(decideRaw({ agent_type: IMPLEMENTER, cwd, tool_input: { command: "git status" } }).decision, "allow");
+  assert.equal(decideRaw({ agent_type: IMPLEMENTER, cwd, tool_input: { command: "git checkout -- x" } }).decision, "deny");
 });
