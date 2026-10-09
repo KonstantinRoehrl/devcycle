@@ -28,7 +28,7 @@ test("acquire writes the holder, readLiveDriveLock returns it, release removes i
   const { statePath, logPath } = paths(dir);
   const r = acquireDriveLock(dir, { statePath, logPath });
   assert.equal(r.ok, true);
-  assert.deepEqual(r.lock, { pid: process.pid, startTime: processStartTime(process.pid), hostname: hostname(), state: statePath, log: logPath, tokenHash: null });
+  assert.deepEqual(r.lock, { pid: process.pid, startTime: processStartTime(process.pid), hostname: hostname(), state: statePath, log: logPath, tokenHash: null, machine: r.lock.machine });
   assert.deepEqual(readLiveDriveLock(dir), r.lock);
   assert.deepEqual(readdirSync(join(dir, ".devcycle")), ["drive.lock"], "the temp file the lock was linked from is gone");
   releaseDriveLock(dir, r.lock);
@@ -87,6 +87,27 @@ test("an unreadable lock file is stale; another host's lock counts as live", () 
   writeLock(remote, holder);
   assert.deepEqual(readLiveDriveLock(remote), holder);
   assert.deepEqual(acquireDriveLock(remote, paths(remote)), { ok: false, holder });
+});
+
+// macOS renames a host with the network it joins, so a lock a crash left before a reboot can carry
+// another hostname than this machine now reports; the machine id it also records does not drift.
+test("a dead holder on this machine is stale even after the hostname drifted; another machine's lock stays live", () => {
+  const probe = makeTempDir("drive-lock-");
+  const own = acquireDriveLock(probe, paths(probe));
+  releaseDriveLock(probe, own.lock);
+  assert.match(own.lock.machine ?? "", /^[0-9a-f]{64}$/, "the lock records no machine id");
+
+  const drifted = makeTempDir("drive-lock-");
+  writeLock(drifted, { ...staleHolder(), hostname: "renamed.invalid", machine: own.lock.machine });
+  assert.equal(readLiveDriveLock(drifted), null);
+  const r = acquireDriveLock(drifted, paths(drifted));
+  assert.equal(r.ok, true);
+  releaseDriveLock(drifted, r.lock);
+
+  const foreign = makeTempDir("drive-lock-");
+  const holder = { ...staleHolder(), machine: "f".repeat(64) };
+  writeLock(foreign, holder);
+  assert.deepEqual(readLiveDriveLock(foreign), holder, "a same-named host with another machine id is another machine");
 });
 
 test("release leaves a lock it does not own", () => {

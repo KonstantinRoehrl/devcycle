@@ -120,7 +120,8 @@ counts as the user at the wave → wave boundary and nowhere else (`docs/decisio
 2026-10-08 — Unattended execution): every wave still runs in a fresh session, and a driven session
 meets every other gate by stopping through `scripts/drive-signal.mjs`. An agent never opts in or
 starts a driver itself; from inside a Claude Code session the driver refuses any start but the
-opt-in gate's own.
+opt-in gate's own: from the session the `drive:` row's `session=` names, before any driven session
+has ended.
 
 **The hard-stop band overrides the table.** When the probe reports `hard-stop`, the boundary's
 context action is `Clear + /devcycle:continue` regardless of what the table's row says —

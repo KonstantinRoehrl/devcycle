@@ -5,7 +5,7 @@
 // 2026-10-08, D7). Every other gate stops it: a driven session writes .devcycle/drive-stop.json
 // through scripts/drive-signal.mjs, and the driver exits 4 with that reason. POSIX only: a signal
 // reaches a session through its process group.
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -15,11 +15,13 @@ import agentCli from "../workflows/lib/agent-cli.js";
 import { defaultBranches, isProtectedBranch } from "./branch-names.mjs";
 import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
-import { acquireDriveLock, driveTokenHash, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
+import { costUSD, provisionalCostUSD } from "./doctor.mjs";
+import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
 import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
 import { gitToplevel, hashSession, recordPath } from "./run-record.mjs";
 import { eachRecord } from "./jsonl.mjs";
+import { PRICING } from "./pricing.mjs";
 import { now } from "./stamp.mjs";
 import { parseDispatchMap, taskFileMap } from "./task-files.mjs";
 import { appendRunRecordOnce, parseLedgerLine } from "./task-ledger.mjs";
@@ -34,14 +36,18 @@ const STOP_REL = ".devcycle/drive-stop.json";
 const LEDGER_REL = ".devcycle/ledger.md";
 const RUN_ID = /^[0-9a-f]{16}$/;
 // The last of the three usage-limit signals, after a rejected rate_limit_event and the result
-// text: a session silent this long is taken to be held by a limit.
-const IDLE_LIMIT_MS = 30 * 60_000;
+// text: a session silent this long is taken to be held by a limit. DEVCYCLE_DRIVE_IDLE_MS shortens
+// it for tests.
+const IDLE_LIMIT_MS = Number(process.env.DEVCYCLE_DRIVE_IDLE_MS) || 30 * 60_000;
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
 const SIGNAL_GRACE_MS = 10_000;
 const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
 const MID_WAVE_LABEL = "Session ended mid-wave:";
 // The ledger events that mean a task moved: a session that adds lines but none of these is churn.
 const OUTCOME_EVENTS = new Set(["committed", "report-received", "review-verdict"]);
+// A request on a model with no price is charged as the dearest priced model, so an estimate never
+// falls short.
+const DEAREST_MODEL = Object.keys(PRICING.models).reduce((a, b) => (PRICING.models[b].out > PRICING.models[a].out ? b : a));
 
 const KNOWN_FLAGS = {
   "--state": "value",
@@ -97,6 +103,7 @@ function readState(statePath) {
     run: first("run"),
     opted: /^auto\b/.test(drive),
     model: drive.match(/\bmodel=(\S+)/)?.[1] ?? null,
+    session: drive.match(/\bsession=([0-9a-f]{64})\b/)?.[1] ?? null,
   };
 }
 
@@ -184,16 +191,22 @@ function optInUsed(root, run) {
   return used;
 }
 
-const heldBy = (h) => `a driver already runs for this checkout (pid ${h.pid}, log ${h.log}) — stop it, or wait for it to end`;
+const heldBy = (h) =>
+  `a driver already runs for this checkout (pid ${h.pid}, log ${h.log}) — stop it, or wait for it to end; ` +
+  `if pid ${h.pid} is no longer running (after a reboot, say), remove ${DRIVE_LOCK_REL}`;
+
+const sessionHashOf = (env) => (env.CLAUDE_CODE_SESSION_ID ? hashSession(env.CLAUDE_CODE_SESSION_ID) : null);
 
 function checkEnvironment(root, state, opts) {
   if (!state.opted) throw new Exit(3, "the state file has no `drive: auto` row — unattended execution is opted into at planning's close");
   if (state.stage !== "execution") throw new Exit(3, `the state is at stage ${state.stage}, not execution`);
   if (!RUN_ID.test(state.run ?? "")) throw new Exit(3, "the state file names no run id, so no drive record could be written");
   // An agent never starts a driver (D7). Inside a Claude Code session the one start allowed is the
-  // opt-in gate's start-now, which comes before any driven session has ended.
-  if (process.env.CLAUDECODE && optInUsed(root, state.run))
-    throw new Exit(3, "this cycle's opt-in is used, and a driver started from inside a Claude Code session would be an agent's start — start it from your own terminal");
+  // opt-in gate's start-now: from the session the drive row names as the one the user answered in,
+  // before any driven session has ended. A row naming no session admits none.
+  const gateSession = state.session !== null && sessionHashOf(process.env) === state.session;
+  if (process.env.CLAUDECODE && (!gateSession || optInUsed(root, state.run)))
+    throw new Exit(3, "inside a Claude Code session only the opt-in gate's start-now may start a driver, before its first session ends — start it from your own terminal");
   const model = opts.model ?? state.model;
   if (!model) throw new Exit(3, "no model: the drive row records none and --model is absent");
   const current = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -274,10 +287,39 @@ function stopSession(handle) {
   if (handle && handle.child.exitCode === null && handle.child.signalCode === null) killGroup(handle.child);
 }
 
-function finalize(s) {
+// Stream-json repeats a request's assistant event once per content block and reports its output
+// tokens before they are generated. So a request is priced once, with its output taken as no less
+// than half the characters it streamed: an over-count, which is the side a cap may err on.
+function estimateUsd(requests, sessionModel) {
+  let usd = 0;
+  for (const { usage, model = sessionModel, chars } of requests.values()) {
+    const priced = { ...usage, output_tokens: Math.max(usage.output_tokens ?? 0, Math.ceil(chars / 2)) };
+    usd += costUSD(priced, model) ?? provisionalCostUSD(priced, model)?.dollars ?? costUSD(priced, DEAREST_MODEL);
+  }
+  return usd;
+}
+
+function tallyRequest(requests, message) {
+  if (!message?.usage) return;
+  const key = message.id ?? Symbol("unnamed request");
+  const request = requests.get(key) ?? { usage: message.usage, model: message.model, chars: 0 };
+  request.chars += JSON.stringify(message.content ?? []).length;
+  requests.set(key, request);
+}
+
+// Only devcycle's own errors stop a session; an entry that names no plugin is counted, not guessed away.
+const devcycleErrors = (errors) =>
+  errors.filter((err) => {
+    const name = err?.plugin ?? err?.name;
+    return typeof name !== "string" || /^devcycle(@|$)/.test(name);
+  });
+
+function finalize(s, model) {
   const r = s.result;
   s.resultText = typeof r?.result === "string" ? r.result : "";
   s.costUsd = typeof r?.total_cost_usd === "number" ? r.total_cost_usd : null;
+  // A session killed or crashed before its result event still spent money.
+  s.spentUsd = s.costUsd ?? estimateUsd(s.requests, model);
   s.denials = Array.isArray(r?.permission_denials) ? r.permission_denials.length : 0;
   if (!s.limit && r?.is_error && USAGE_LIMIT_TEXT.test(s.resultText))
     s.limit = { resetAt: Number(s.resultText.match(/\|(\d{9,})\b/)?.[1]) || null };
@@ -285,7 +327,7 @@ function finalize(s) {
 }
 
 function runSession(ctx, bin, args, log, n) {
-  const s = { sessionId: null, environment: null, result: null, limit: null, tools: 0, depthTokens: null };
+  const s = { sessionId: null, environment: null, result: null, limit: null, silent: false, tools: 0, depthTokens: null, requests: new Map() };
   let seen = ledgerEntries(ctx.root, ctx.plan).length;
   return new Promise((settle) => {
     let handle;
@@ -293,7 +335,8 @@ function runSession(ctx, bin, args, log, n) {
     const armIdle = () => {
       clearTimeout(idle);
       idle = setTimeout(() => {
-        s.limit ??= { resetAt: null };
+        // After its result a session has nothing left to say: silence then is a slow exit, not a limit.
+        if (!s.result) s.silent = true;
         stopSession(handle);
       }, IDLE_LIMIT_MS);
     };
@@ -302,16 +345,19 @@ function runSession(ctx, bin, args, log, n) {
         s.sessionId = e.session_id ?? null;
         // `plugin_errors` is absent, not [], when there are none (docs/platform-notes.md § (k)).
         const loaded = (e.plugins ?? []).some((p) => p?.name === "devcycle");
-        const errors = e.plugin_errors ?? [];
+        const errors = devcycleErrors(e.plugin_errors ?? []);
         if (!loaded || errors.length) {
           s.environment = loaded
             ? `the driven session reports ${errors.length} plugin error(s)`
             : "devcycle is not loaded in the driven session";
           stopSession(handle);
         }
-      } else if (e.type === "assistant" && !e.parent_tool_use_id) {
-        s.tools += (e.message?.content ?? []).filter((c) => c?.type === "tool_use").length;
-        s.depthTokens = contextDepth(e.message?.usage) ?? s.depthTokens;
+      } else if (e.type === "assistant") {
+        tallyRequest(s.requests, e.message);
+        if (!e.parent_tool_use_id) {
+          s.tools += (e.message?.content ?? []).filter((c) => c?.type === "tool_use").length;
+          s.depthTokens = contextDepth(e.message?.usage) ?? s.depthTokens;
+        }
       } else if (e.type === "rate_limit_event" && e.rate_limit_info?.status === "rejected") {
         s.limit = { resetAt: e.rate_limit_info.resetsAt ?? null };
       } else if (e.type === "result") {
@@ -344,7 +390,7 @@ function runSession(ctx, bin, args, log, n) {
       clearTimeout(idle);
       ctx.session = null;
       if (code === null && signal === null) s.environment = `cannot run ${bin}: ${startError?.message ?? "it never started"}`;
-      settle(finalize(s));
+      settle(finalize(s, ctx.model));
     });
   });
 }
@@ -368,10 +414,15 @@ function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, inte
   if (s.environment) return verdict("environment", 3, s.environment);
   const stop = readStop(ctx.root);
   if (stop) return verdict("stopped", 4, `stopped for you — ${stop.reason}: ${stop.detail}`, { stopReason: stop.reason });
-  if (s.limit) {
-    const waitMs = s.limit.resetAt ? Math.max(s.limit.resetAt * 1000 - Date.now(), 1000) : DEFAULT_BACKOFF_MS;
-    if (waited + waitMs > opts.maxBackoffMs) return verdict("budget", 6, "usage limit: waiting it out would pass --max-backoff");
-    return verdict("budget", null, null, { waitMs });
+  if (s.limit || s.silent) {
+    // Silence with no usage-limit signal may be a limit — or a session that hangs every time, so it
+    // also counts as a stall.
+    const count = s.limit ? stalls : stalls + 1;
+    if (count >= opts.maxStalls)
+      return verdict("stalled", 5, `stalled: ${count} sessions in a row went silent with no usage-limit signal until the driver stopped them`, { stalls: count });
+    const waitMs = s.limit?.resetAt ? Math.max(s.limit.resetAt * 1000 - Date.now(), 1000) : DEFAULT_BACKOFF_MS;
+    if (waited + waitMs > opts.maxBackoffMs) return verdict("budget", 6, "usage limit: waiting it out would pass --max-backoff", { stalls: count });
+    return verdict("budget", null, null, { waitMs, stalls: count });
   }
   const crashed = s.result === null;
   if (readState(ctx.statePath).stage !== "execution") return verdict(crashed ? "error" : "handoff", null, null);
@@ -453,10 +504,21 @@ function sleep(trap, ms) {
   });
 }
 
+function isStdout(path) {
+  try {
+    const out = fstatSync(process.stdout.fd);
+    const file = statSync(path);
+    return out.dev === file.dev && out.ino === file.ino;
+  } catch {
+    return false;
+  }
+}
+
 function makeLog(root) {
-  // Started from a terminal the driver also keeps .devcycle/drive.log; started detached, its
-  // stdout already is that file.
-  const tee = process.stdout.isTTY ? join(root, LOG_REL) : null;
+  // The lock names .devcycle/drive.log as where to watch, so the driver always writes it; started
+  // detached, its stdout already is that file.
+  const path = join(root, LOG_REL);
+  const tee = isStdout(path) ? null : path;
   return (msg) => {
     const line = `[drive ${now()}] ${msg}\n`;
     process.stdout.write(line);
@@ -488,11 +550,11 @@ async function walk(ctx, opts, log, trap) {
     log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}`);
     const s = await runSession(ctx, opts.bin, sessionArgs(ctx, opts, spent), log, n);
     const after = progressOf(ledgerEntries(ctx.root, ctx.plan));
-    spent += s.costUsd ?? 0;
+    spent += s.spentUsd;
     const verdict = judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, interrupted: trap.interrupted });
     ({ stalls, churn } = verdict);
     writeRecord(ctx, s, { startedAt, before, after, waveAtStart, ...verdict }, n);
-    const cost = s.costUsd === null ? "" : `, $${s.costUsd.toFixed(2)}`;
+    const cost = s.costUsd !== null ? `, ${s.costUsd.toFixed(2)}` : s.spentUsd > 0 ? `, ~${s.spentUsd.toFixed(2)} estimated` : "";
     log(`session ${n} ended — ${verdict.exitReason}; ledger +${after.lines - before.lines}, commits +${after.committed - before.committed}${cost}`);
     if (verdict.message) log(verdict.message);
     if (verdict.code !== null) return verdict.code;
@@ -544,7 +606,8 @@ async function main(argv) {
     return 2;
   }
   if (opts.checkSandbox) {
-    console.log(JSON.stringify({ sandboxed: sandboxed() }));
+    // The opt-in gate asks this first, and writes sessionHash into the drive row on a start-now answer.
+    console.log(JSON.stringify({ sandboxed: sandboxed(), sessionHash: sessionHashOf(process.env) }));
     return 0;
   }
   try {

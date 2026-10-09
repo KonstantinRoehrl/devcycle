@@ -18,7 +18,7 @@ import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
 import { nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
 import { reviewLoopId } from "./task-verdict.mjs";
-import { driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
+import { DRIVE_LOCK_REL, driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";
 
 const NONE = new Set(["none", "<tbd>", ""]);
@@ -243,7 +243,8 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   if (checked.kind === "foreign") return stop("foreign-state", `its root: ${checked.recordedRoot} is not this checkout (${checked.actualRoot})`);
   if (!checked.ok) return stop("resume-check", checked.errors.join("; "));
   if (!drive && result.drive.lock)
-    return stop("driver-running", `a driver (pid ${result.drive.lock.pid}) is running this cycle; its log: ${result.drive.lock.log}`);
+    return stop("driver-running", `a driver (pid ${result.drive.lock.pid}) is running this cycle; its log: ${result.drive.lock.log}; ` +
+      `if pid ${result.drive.lock.pid} is no longer running (after a reboot, say), remove ${DRIVE_LOCK_REL}`);
   if (state.stage !== "execution") return stop("resume-check", `the state file is at stage ${state.stage}, not execution`);
 
   result.entryLines = checked.lines;

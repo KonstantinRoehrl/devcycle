@@ -48,7 +48,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findStateFile } from "./lib/find-state-file.mjs";
-import { readLiveDriveLock } from "../scripts/drive-lock.mjs";
+import { DRIVE_LOCK_REL, readLiveDriveLock } from "../scripts/drive-lock.mjs";
 
 let input = {};
 try {
@@ -258,7 +258,8 @@ const mentionsDriveWord = (tokens) => tokens.some((t) => DRIVE_WORDS.has(normali
 const driveDenyReason = () =>
   `devcycle: a driver (pid ${driveLock.pid}, log ${driveLock.log}) is running unattended execution in this checkout — ` +
   "the main thread may not move the branch or destroy the working tree while it runs. Stop the driver first " +
-  `(Ctrl-C in its terminal, or kill ${driveLock.pid}), or run git from your own terminal. command: ${command.slice(0, 200)}`;
+  `(Ctrl-C in its terminal, or kill ${driveLock.pid}), or run git from your own terminal; if pid ${driveLock.pid} is no ` +
+  `longer running (after a reboot, say), remove ${DRIVE_LOCK_REL}. command: ${command.slice(0, 200)}`;
 
 // A heredoc, a quote or a substitution decides whether a `git` in the text is RUN or only READ, and
 // the substitution tripwire used to tell neither apart: "a substitution token anywhere plus the word

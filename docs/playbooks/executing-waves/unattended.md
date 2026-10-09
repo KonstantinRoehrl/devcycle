@@ -4,7 +4,7 @@ devcycle normally stops after every wave of the execution stage and waits for yo
 and `/devcycle:continue`. Unattended execution hands those wave-to-wave stops — and nothing else —
 to a driver, `scripts/drive-execution.mjs`: it gives each wave the same fresh session a manual
 clear would, and it stops at the first thing that needs you. The decision behind it is recorded in
-[`docs/decisions/`](../../decisions/README.md) (2026-10-08, D7).
+[`docs/decisions/`](../../decisions/README.md) (2026-10-08 — Unattended execution).
 
 ## Opting in
 
@@ -13,22 +13,26 @@ answers:
 
 - **Walk the waves manually** — the stops stay yours, as before.
 - **Unattended — start it now** — the planning session settles the topic branch, records your
-  choice in `.devcycle/state.md` as `- drive: auto model=<id> opted=<stamp>` (the model that
-  session ran on), starts the driver detached from every terminal (`--detach`), prints its PID
-  and log path, and stops touching the working tree. Offered only when that session's Bash is not
-  sandboxed, because the driver writes under `~/.claude`.
-- **Unattended — I'll start it myself** — the same, except devcycle prints the command for your own
-  terminal: `node "<plugin root>/scripts/drive-execution.mjs" --state "<repo>/.devcycle/state.md"`.
+  choice in `.devcycle/state.md` as `- drive: auto model=<id> opted=<stamp> session=<hash>` (the
+  model that session ran on, and the hash of that session's id), starts the driver detached from
+  every terminal (`--detach`), prints its PID and log path, and stops touching the working tree.
+  Offered only when that session's Bash is not sandboxed, because the driver writes under
+  `~/.claude`.
+- **Unattended — I'll start it myself** — the same row without `session=`, and instead of starting
+  the driver devcycle prints the command for your own terminal:
+  `node "<plugin root>/scripts/drive-execution.mjs" --state "<repo>/.devcycle/state.md"`.
 
 Only that answer opts a cycle in. No agent opts in, starts a driver, or answers a gate for you.
 
 ## What the driver does
 
 1. **Pre-flight, fail closed** (exit 3 on any failure). It takes the lock `.devcycle/drive.lock`
-   (pid, process start time, host, state path, and the hash of a token it makes for this run),
-   reclaiming one whose process is gone or whose pid now belongs to a different process. It
-   requires the `drive: auto` row, `stage: execution` and a run id; inside a Claude Code session it
-   accepts only the opt-in gate's start-now, never a later start an agent could make; it requires
+   (pid, process start time, host, a hash of the machine's id, state path, and the hash of a token
+   it makes for this run), reclaiming one whose process is gone or whose pid now belongs to a
+   different process. It requires the `drive: auto` row, `stage: execution` and a run id; inside a
+   Claude Code session it accepts a start only from the session the row's `session=` names, and
+   only before the first driven session ends — the opt-in gate's start-now, never a later start an
+   agent could make; it requires
    the checkout to be on the state's recorded branch, a resolvable default branch, and the recorded
    branch to be neither the default branch nor an integration branch; refuses tracked changes outside the
    **Files** of the tasks in flight — the current wave's unfinished tasks and any later task the
@@ -47,10 +51,23 @@ Only that answer opts a cycle in. No agent opts in, starts a driver, or answers 
 3. **One record per session.** As each session ends the driver appends a `drive` row to the cycle's
    run record: ledger and commit counts before and after, cost, last context depth, guard denials,
    and why the session ended. `/devcycle:doctor` reports driven and manual runs as separate cohorts.
+   A session that ends without reporting its cost — killed, or crashed — records none; toward
+   `--max-usd` it is charged an estimate priced from the usage it streamed, rounded up.
 4. **The safety valve.** A driven session whose context reaches the hard-stop band — or whose
    depth probe loses the session for two task scripts in a row — finishes its in-flight tasks, dispatches nothing new, and ends with the handoff label
    `Session ended mid-wave: <k> of <n> tasks done (stage: execution)`; the driver starts the next
    session and the wave resumes where it stopped.
+
+## Usage limits and silent sessions
+
+A session that hits a usage limit says so in a rejected rate-limit event or in its result text; the
+driver then waits until the limit resets, or 5 minutes when no reset time is given, and starts the
+next session without counting a stall. A session that prints nothing for 30 minutes is stopped. If
+it had already finished — printed its result — that is only a slow exit and the session is judged
+like any other. If it had not, the silence may be a limit held without a word, so the driver waits
+5 minutes as for a limit, but the silence also counts as a stall: a session that hangs every time
+ends the driver after `--max-stalls` of them (exit 5) instead of being retried until
+`--max-backoff` runs out. All waiting together is capped by `--max-backoff` (exit 6).
 
 ## What it will not do
 
@@ -80,11 +97,14 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 ## Watching and stopping it
 
 - **Watch:** `tail -f .devcycle/drive.log` — a line when each session starts and ends, and one per
-  ledger event (dispatches, reviews, commits) as it lands.
+  ledger event (dispatches, reviews, commits) as it lands. Written however the driver was started.
 - **Stop:** `kill <PID>` (the PID the planning session printed; it is also in
   `.devcycle/drive.lock`), or Ctrl-C when it runs in your terminal. The driver stops the running
   session's whole process group, writes that session's record, releases the lock and exits 130. A
-  `kill -9` leaves the lock behind; the next driver reclaims it.
+  `kill -9`, crash or reboot leaves the lock behind; the next driver on the same machine reclaims
+  it, even when the host's name changed meanwhile. A lock written on another machine is never
+  reclaimed: the refusal names its pid and `.devcycle/drive.lock`, which you remove once you know
+  that driver is gone.
 - **Pick it up yourself** after any stop: run `/devcycle:continue` in a fresh session, which asks
   you the question the driver could not, or start the driver again once the cause is cleared.
 
@@ -94,13 +114,13 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 | --- | --- | --- |
 | `--state <path>` | required | The cycle's `.devcycle/state.md`. |
 | `--model <id>` | the `drive:` row's model | Runs every session on this model instead. |
-| `--max-usd <n>` | none | Total dollar cap across sessions; each session gets the remainder as `--max-budget-usd`. On a subscription plan the cost is an estimate. |
+| `--max-usd <n>` | none | Total dollar cap across sessions; each session gets the remainder as `--max-budget-usd`. On a subscription plan the cost is an estimate; a session that reports no cost is charged one priced from its streamed usage. |
 | `--max-stalls <n>` | 2 | Consecutive sessions that add no ledger line before the driver gives up (exit 5). |
 | `--max-churn <n>` | 3 | Consecutive sessions that add ledger lines but no report, verdict or commit before the driver gives up (exit 5). |
 | `--max-backoff <minutes>` | 360 | Total time it waits out usage limits before giving up (exit 6). |
 | `--detach` | off | Runs the pre-flight, then restarts the driver as a new session's leader writing to `.devcycle/drive.log`, prints `{"pid":<n>,"log":".devcycle/drive.log"}` and returns; closing the terminal does not stop it. |
 | `--dry-run` | off | Runs the pre-flight and prints the session command; starts nothing and takes no lock. |
-| `--check-sandbox` | off | Prints `{"sandboxed":false}` (or `true`) and exits — the planning gate asks this before offering to start it. |
+| `--check-sandbox` | off | Prints `{"sandboxed":false,"sessionHash":"<hash>"}` (`true` when sandboxed; the hash of the calling Claude Code session's id, or `null` outside one) and exits — the planning gate asks this before offering to start it, and writes the hash into the drive row on a start-now answer. |
 | `--claude <bin>` | `claude` | The CLI to run; tests point it at a stub. |
 
 ## Exit codes
@@ -110,8 +130,8 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 | 0 | Done: the state reached `branch-review`. Run `/clear`, then `/devcycle:continue` for branch review. |
 | 1 | Unexpected driver error, or the state left execution for a stage other than branch review. |
 | 2 | Usage error: an unknown flag, a missing `--state`, a malformed number. |
-| 3 | Environment: a pre-flight check failed — among them no resolvable default branch, or a start from inside a Claude Code session after the opt-in was used —, another driver holds the lock, or devcycle did not load in a session. The message names the check. |
+| 3 | Environment: a pre-flight check failed — among them no resolvable default branch, or a start from inside a Claude Code session other than the opt-in gate's start-now —, another driver holds the lock, or devcycle did not load in a session (another plugin's load errors do not count). The message names the check. |
 | 4 | Stopped for you: a session reached a gate. The reason and its detail are printed. |
-| 5 | Stalled: `--max-stalls` sessions in a row added no ledger line, or `--max-churn` sessions in a row added lines but no report, verdict or commit. The last session's final text is printed — usually the question it could not ask. |
+| 5 | Stalled: `--max-stalls` sessions in a row added no ledger line or went silent, or `--max-churn` sessions in a row added lines but no report, verdict or commit. The last session's final text is printed — usually the question it could not ask. |
 | 6 | Budget: `--max-usd` is spent, or a usage limit would outlast `--max-backoff`. |
 | 130 | Interrupted: the running session was stopped, its record written and the lock released. |

@@ -9,9 +9,12 @@
 // `pluginErrors`, `ledger` (lines appended after a `- [<stamp>] ` prefix), `stage` (rewrites the
 // state's `- stage:` row), `stop` ({ reason, detail } written as drive-stop.json), `rateLimitInSec`
 // (a rejected rate_limit_event resetting that many seconds from now), `result`, `isError`,
-// `costUsd`, `denials`, `hangMs` (wait before the result event), `noResult` (exit without a result
-// event, as a crashed session does), `noInit` (exit before even the init event, as a `claude` that
-// fails at startup does; exit code 1 unless `exitCode` says otherwise), `exitCode`.
+// `costUsd`, `denials`, `usage` (the assistant event's usage block), `messageId` and `repeat` (that
+// event's message id, and how many times it is streamed, as Claude Code streams one event per
+// content block), `hangMs` (wait before the result event), `hangAfterResultMs` (stay alive and silent
+// after it), `noResult` (exit without a result event, as a crashed session does), `noInit` (exit
+// before even the init event, as a `claude` that fails at startup does; exit code 1 unless
+// `exitCode` says otherwise), `exitCode`.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -49,11 +52,13 @@ if (step.stop)
   );
 if (step.rateLimitInSec !== undefined)
   emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: Math.floor(Date.now() / 1000) + step.rateLimitInSec } });
-emit({
-  type: "assistant",
-  parent_tool_use_id: null,
-  message: { content: [{ type: "tool_use", name: "Bash" }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 60000 } },
-});
+const usage = step.usage ?? { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 60000 };
+for (let i = 0; i < (step.repeat ?? 1); i++)
+  emit({
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: { ...(step.messageId ? { id: step.messageId } : {}), content: [{ type: "tool_use", name: "Bash" }], usage },
+  });
 
 const finish = () => {
   process.exitCode = step.exitCode ?? 0;
@@ -66,6 +71,7 @@ const finish = () => {
     total_cost_usd: step.costUsd ?? 0.01,
     permission_denials: Array.from({ length: step.denials ?? 0 }, () => ({ tool_name: "Bash" })),
   });
+  if (step.hangAfterResultMs) setTimeout(() => {}, step.hangAfterResultMs);
 };
 if (step.hangMs) setTimeout(finish, step.hangMs);
 else finish();

@@ -246,7 +246,7 @@ test("manual stops: another checkout's file, a stale file, a live driver on this
   withLock(c, (lock) => {
     const r = setup(c);
     assert.deepEqual([r.action, r.stopReason, r.drive.lock], ["stop", "driver-running", { pid: process.pid, log: lock.log }]);
-    assert.match(r.stopDetail, new RegExp(`pid ${process.pid}`));
+    assert.match(r.stopDetail, new RegExp(`; if pid ${process.pid} is no longer running \\(after a reboot, say\\), remove \\.devcycle/drive\\.lock$`));
   });
   withLock(c, () => assert.equal(setup(c).action, "resume"), join(c.repo, ".devcycle", "other-state.md"));
 });

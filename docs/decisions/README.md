@@ -35,11 +35,14 @@ continue" from widening into "an agent may continue".
 (wave→wave) for a cycle the user opted in, and leaves that gate's wording, every other boundary and
 every manual run as they are.
 
-**Budgets:** this cycle lowers the context budgets net — `playbooks/executing-waves.md` ends below
-its 0.23.0 value — while `surfaceTotal` rises net, because the task scripts' contracts, the drive
-mode in `commands/continue.md` and the opt-in gate add more runtime-surface lines than the
-executing-waves shrink removes; the maintainer accepted that trade on 2026-10-08, since the context
-budget is what each session actually loads. references/commit-convention.md § The task commit
+**Budgets:** `playbooks/executing-waves.md` ends below its 0.23.0 value (104814 → 95834 bytes),
+but the context budgets summed over all playbooks rise net (983585 → 1005228, +21643), mostly
+because receiving-review, sweeping-mechanical-changes and taking-the-fast-path each load 5631 bytes
+more from the expanded references/ledger.md and references/resume.md. `surfaceTotal` rises net too
+(5745 → 5894): the task scripts' contracts, the drive mode in `commands/continue.md` and the opt-in
+gate add more runtime-surface lines than the executing-waves shrink removes. The maintainer accepted
+both rises: what binds is executing-waves below its 0.23.0 value, with every risen entry carrying
+its own `budget:` line below. references/commit-convention.md § The task commit
 (task-commit.mjs's invocation and trailer) adds 11 lines to the runtime surface (5795 → 5806) and
 853 bytes to each playbook whose closure cites it: executing-waves, learning-from-sessions,
 onboarding-a-repo, sweeping-mechanical-changes and taking-the-fast-path. executing-waves.md
@@ -60,21 +63,25 @@ playbooks/planning-waves.md and the drive: row in references/resume.md); plannin
 114313 → 114850 (+537, the drive: row in references/resume.md); sweeping-mechanical-changes
 87932 → 88469 (+537, the drive: row in references/resume.md); taking-the-fast-path
 81057 → 81594 (+537, the drive: row in references/resume.md).
+The driver's `session=` rule: `surfaceTotal` 5888 → 5894 (+6); +91 bytes on each playbook whose
+closure cites references/handoff.md, and 186 more on planning-waves (its opt-in gate, 70936 → 71213)
+and on each that cites references/resume.md (receiving-review 115452, sweeping-mechanical-changes
+89071, taking-the-fast-path 82196).
 
 ```text
-budget: surface-budget.json surfaceTotal 5888
-budget: context-budget.json playbooks/executing-waves.md 95743
-budget: context-budget.json playbooks/finishing-the-cycle.md 54458
+budget: surface-budget.json surfaceTotal 5894
+budget: context-budget.json playbooks/executing-waves.md 95834
+budget: context-budget.json playbooks/finishing-the-cycle.md 54549
 budget: context-budget.json playbooks/learning-from-sessions.md 62203
 budget: context-budget.json playbooks/onboarding-a-repo.md 30301
-budget: context-budget.json playbooks/planning-waves.md 70936
-budget: context-budget.json playbooks/receiving-review.md 115175
-budget: context-budget.json playbooks/reviewing-the-branch.md 55921
-budget: context-budget.json playbooks/scoping-the-request.md 27721
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 88794
-budget: context-budget.json playbooks/taking-the-fast-path.md 81919
-budget: context-budget.json playbooks/verifying-on-device.md 51445
-budget: context-budget.json playbooks/writing-the-findings-document.md 66557
+budget: context-budget.json playbooks/planning-waves.md 71213
+budget: context-budget.json playbooks/receiving-review.md 115452
+budget: context-budget.json playbooks/reviewing-the-branch.md 56012
+budget: context-budget.json playbooks/scoping-the-request.md 27812
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 89071
+budget: context-budget.json playbooks/taking-the-fast-path.md 82196
+budget: context-budget.json playbooks/verifying-on-device.md 51536
+budget: context-budget.json playbooks/writing-the-findings-document.md 66648
 ```
 
 ## 2026-10-07 — Fifth hook-like component: the function-hook module

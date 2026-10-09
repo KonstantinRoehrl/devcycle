@@ -31,6 +31,21 @@ test("isLiveHolder: the same pid with a different start time is a reused pid, no
   assert.equal(isLiveHolder({ pid: deadPid(), startTime: "Mon Jan  1 00:00:00 1990" }), false);
 });
 
+// `ps -o lstart` derives a start time from the boot time, which a clock step shifts; a reading a
+// second or two off is still the same process, a larger gap is another one.
+test("isLiveHolder: a start time within two seconds of the recorded one is the same process", () => {
+  const lstart = (ms) => {
+    const [day, date, mon, year, time] = new Date(ms).toUTCString().replace(",", "").split(" ").filter(Boolean);
+    return `${day} ${mon} ${String(Number(date)).padStart(2)} ${time} ${year}`;
+  };
+  const started = Date.parse(`${processStartTime(process.pid)} UTC`);
+  assert.equal(lstart(started), processStartTime(process.pid), "the test's lstart format drifted from ps's");
+  assert.equal(isLiveHolder({ pid: process.pid, startTime: lstart(started + 1000) }), true);
+  assert.equal(isLiveHolder({ pid: process.pid, startTime: lstart(started - 2000) }), true);
+  assert.equal(isLiveHolder({ pid: process.pid, startTime: lstart(started + 5000) }), false);
+  assert.equal(isLiveHolder({ pid: process.pid, startTime: "not a date" }), false);
+});
+
 test("withFileLock: holds <target>.lock naming this process while fn runs, returns fn's value, removes it after", () => {
   const target = join(makeTempDir("file-lock-"), "ledger.md");
   const seen = withFileLock(target, () => JSON.parse(readFileSync(`${target}.lock`, "utf8")));

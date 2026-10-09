@@ -67,7 +67,9 @@ planning's close writes `drive:`; every other rewrite carries all three forward,
 - `- drive: auto model=<id> opted=<stamp>` — the user chose unattended execution at
   `playbooks/planning-waves.md` § Handoff; an agent writes it only as that answer's direct result
   (`docs/decisions/README.md`, 2026-10-08 — Unattended execution). `<id>` is the opting-in
-  session's model as the depth probe reads it. Absent means manual: `scripts/drive-execution.mjs`
+  session's model as the depth probe reads it. A start-now answer appends `session=<hash>` (the
+  `--check-sandbox` `sessionHash`): inside Claude Code the driver starts only from that session,
+  before the first driven session ends. No row means manual: `scripts/drive-execution.mjs`
   refuses to start, and `/devcycle:continue --drive` stops `not-opted-in`.
 
 `updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`

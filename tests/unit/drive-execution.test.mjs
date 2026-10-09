@@ -147,6 +147,8 @@ test("drives one fresh session per wave until the state reaches branch-review, w
   assert.match(r.records[0].sessionHash, /^[0-9a-f]{64}$/);
   assert.match(r.out, /task=1 event=committed/);
   assert.ok(!existsSync(lockPath(root)), "the lock outlived the driver");
+  // Started with stdout a pipe, not a terminal: the log the lock names is still written.
+  assert.match(readFileSync(join(root, ".devcycle", "drive.log"), "utf8"), /session 2 ended — handoff[\s\S]*execution is complete/);
 });
 
 test("each session is claude -p on the drive prompt with auto permissions, stream-json and an explicit model, and never sees DEVCYCLE_NESTED_RUN", async () => {
@@ -249,6 +251,22 @@ test("--max-usd caps the total and passes each session the remainder as --max-bu
   assert.equal(r.records.at(-1).exitReason, "budget");
 });
 
+// A session killed or crashed before its result event reports no cost; the driver prices the usage
+// it streamed instead, so the cap still holds. 300k uncached input tokens on claude-sonnet-5-5
+// ($2 per million) is $0.60 a session.
+test("a session that ends without a result event still counts toward --max-usd, priced from the usage it streamed", async () => {
+  const crashing = { ledger: [line(1, "dispatched")], noResult: true, exitCode: 1, usage: { input_tokens: 300_000 } };
+  const budgetOf = (c) => c.argv[c.argv.indexOf("--max-budget-usd") + 1];
+  const r = await drive(makeCycle(), [crashing], { flags: ["--max-usd", "1"] });
+  assert.equal(r.code, 6, r.out);
+  assert.deepEqual(r.calls.map(budgetOf), ["1.00", "0.40"]);
+  assert.match(r.out, /spent \$1\.20 of --max-usd 1/);
+  // One request streamed once per content block is priced once.
+  const repeated = await drive(makeCycle(), [{ ...crashing, messageId: "msg_1", repeat: 3 }], { flags: ["--max-usd", "1"] });
+  assert.equal(repeated.code, 6, repeated.out);
+  assert.deepEqual(repeated.calls.map(budgetOf), ["1.00", "0.40"]);
+});
+
 test("a usage limit waits for the reset and retries without counting a stall; past --max-backoff it exits 6", async () => {
   const waited = await drive(makeCycle(), [{ rateLimitInSec: 1 }, { ledger: DONE, stage: "branch-review" }], { flags: ["--max-stalls", "1"] });
   assert.equal(waited.code, 0, waited.out);
@@ -262,6 +280,29 @@ test("a usage limit waits for the reset and retries without counting a stall; pa
   const fromText = await drive(makeCycle(), [{ isError: true, result: `Claude AI usage limit reached|${resetAt}` }], { flags: ["--max-backoff", "1"] });
   assert.equal(fromText.code, 6, fromText.out);
   assert.equal(fromText.records[0].exitReason, "budget");
+});
+
+// DEVCYCLE_DRIVE_IDLE_MS shortens the 30-minute silence after which the driver stops a session.
+// Its clock runs from the spawn, and on a loaded machine the stub can take seconds to start (2.6 s
+// measured with 16 copies of this test at once), so the session that must reach its result first
+// gets about twice that. A session stopped before any result is judged the same however early it is
+// stopped, so those keep a short limit.
+test("a session silent past the idle limit after its result is no usage limit; one silent before any result counts as a stall", async () => {
+  const finished = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review", hangAfterResultMs: 60000 }],
+    { flags: ["--max-backoff", "0"], env: { DEVCYCLE_DRIVE_IDLE_MS: "5000" } });
+  assert.equal(finished.code, 0, finished.out);
+  assert.deepEqual(finished.records.map((x) => x.exitReason), ["handoff"]);
+
+  // Silence with no rate-limit signal may still be a limit, so it is waited out — and counted.
+  const env = { DEVCYCLE_DRIVE_IDLE_MS: "300" };
+  const waited = await drive(makeCycle(), [{ hangMs: 60000 }], { flags: ["--max-backoff", "0"], env });
+  assert.equal(waited.code, 6, waited.out);
+  assert.deepEqual(waited.records.map((x) => [x.exitReason, x.stallCount]), [["budget", 1]]);
+
+  const hung = await drive(makeCycle(), [{ ledger: [line(1, "dispatched")], hangMs: 60000 }], { flags: ["--max-backoff", "0", "--max-stalls", "1"], env });
+  assert.equal(hung.code, 5, hung.out);
+  assert.match(hung.out, /stalled: 1 sessions in a row went silent with no usage-limit signal/);
+  assert.deepEqual(hung.records.map((x) => [x.exitReason, x.stallCount]), [["stalled", 1]]);
 });
 
 test("SIGINT stops the running session, writes its record, releases the lock and exits 130", async () => {
@@ -314,7 +355,8 @@ test("--detach returns at once with the driver's pid, and the detached driver wa
   await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, 30000);
   assert.deepEqual(records(h).map((x) => x.exitReason), ["handoff", "handoff"]);
   assert.ok(!existsSync(lockPath(root)), "the detached driver left its lock behind");
-  assert.match(readFileSync(join(root, ".devcycle", "drive.log"), "utf8"), /execution is complete/);
+  assert.equal(readFileSync(join(root, ".devcycle", "drive.log"), "utf8").match(/execution is complete/g)?.length, 1,
+    "the detached driver's log lacks the line, or holds it twice");
 
   const refused = spawnSync(process.execPath, [DRIVER, "--state", join(makeCycle({ branch: "main" }), ".devcycle", "state.md"), "--claude", h.bin, "--detach"], { env: h.env, encoding: "utf8" });
   assert.equal(refused.status, 3, "a pre-flight refusal must reach the caller before anything detaches");
@@ -327,6 +369,8 @@ test("a second driver on a live lock exits 3, naming the running one, and leaves
   const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
   assert.equal(r.code, 3, r.out);
   assert.match(r.out, new RegExp(`pid ${process.pid}`));
+  assert.match(r.out, /\.devcycle\/drive\.lock/, "the refusal does not name the lock file");
+  assert.match(r.out, /no longer running[^\n]*remove/, "the refusal does not say how to clear a stale lock");
   assert.equal(r.calls.length, 0);
   assert.equal(readFileSync(lockPath(root), "utf8"), before);
 });
@@ -339,6 +383,10 @@ test("a session without devcycle loaded, with plugin errors, or a claude that ne
   const broken = await drive(makeCycle(), [{ pluginErrors: [{ plugin: "devcycle", error: "bad manifest" }] }]);
   assert.equal(broken.code, 3, broken.out);
   assert.match(broken.out, /plugin error/);
+  const qualified = await drive(makeCycle(), [{ pluginErrors: [{ plugin: "devcycle@devcycle", error: "bad manifest" }] }]);
+  assert.equal(qualified.code, 3, qualified.out);
+  const unrelated = await drive(makeCycle(), [{ pluginErrors: [{ plugin: "other-plugin", error: "bad manifest" }], ledger: DONE, stage: "branch-review" }]);
+  assert.equal(unrelated.code, 0, `another plugin's error stopped the driver: ${unrelated.out}`);
   const h = harness();
   const absent = spawnSync(process.execPath, [DRIVER, "--state", join(makeCycle(), ".devcycle", "state.md"), "--claude", join(h.runsDir, "no-such-claude")], { env: h.env, encoding: "utf8" });
   assert.equal(absent.status, 3, absent.stdout + absent.stderr);
@@ -364,19 +412,36 @@ test("pre-flight refuses the default branch, an integration branch, a branch oth
 });
 
 // D7: an agent never starts a driver. Inside Claude Code (CLAUDECODE set) the only start that passes
-// is the opt-in gate's start-now, before any driven session has ended and written its drive row.
-test("from inside a Claude Code session the driver starts only while the opt-in is unused", async () => {
-  const root = makeCycle();
+// is the opt-in gate's start-now: from the session the drive row names as the one the user answered
+// in, before any driven session has ended and written its drive row. A row that names no session —
+// the "I'll start it myself" answer — admits no start from inside Claude Code at all.
+test("from inside a Claude Code session only the session that opted in starts the driver, and only while the opt-in is unused", async () => {
+  const gate = "gate-session-id";
+  const sha256 = (s) => createHash("sha256").update(s).digest("hex");
+  const root = makeCycle({ drive: `- drive: auto model=${MODEL} opted=2026-10-08T00:00:00Z session=${sha256(gate)}` });
   const h = harness([{ stop: { reason: "needs-user", detail: "which branch?" } }]);
-  const preflight = (env) => spawnSync(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, "--dry-run"],
-    { cwd: root, env: { ...h.env, ...env }, encoding: "utf8" });
-  assert.equal(preflight({ CLAUDECODE: "1" }).status, 0, "the opt-in gate's start-now was refused");
+  const preflight = (env, at = root) => {
+    const r = spawnSync(process.execPath, [DRIVER, "--state", join(at, ".devcycle", "state.md"), "--claude", h.bin, "--dry-run"],
+      { cwd: at, env: { ...h.env, ...env }, encoding: "utf8" });
+    return { status: r.status, out: r.stdout + r.stderr };
+  };
+  const inSession = (id) => ({ CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: id });
+  assert.equal(preflight(inSession(gate)).status, 0, "the opt-in gate's start-now was refused");
+  for (const id of ["a-later-session", ""]) {
+    const agent = preflight(inSession(id));
+    assert.equal(agent.status, 3, `session ${JSON.stringify(id)}: ${agent.out}`);
+    assert.match(agent.out, /start it from your own terminal/);
+  }
   assert.equal((await startDriver(root, h).result()).code, 4, "the first driven session did not stop");
   assert.equal(records(h).length, 1);
-  const agent = preflight({ CLAUDECODE: "1" });
-  assert.equal(agent.status, 3, agent.stdout + agent.stderr);
-  assert.match(agent.stdout + agent.stderr, /start it from your own terminal/);
-  assert.equal(preflight({}).status, 0, "a start from the user's own terminal was refused");
+  const used = preflight(inSession(gate));
+  assert.equal(used.status, 3, used.out);
+  assert.match(used.out, /start it from your own terminal/);
+  assert.equal(preflight({ CLAUDE_CODE_SESSION_ID: "" }).status, 0, "a start from the user's own terminal was refused");
+
+  const self = makeCycle();
+  assert.equal(preflight(inSession(gate), self).status, 3, "a drive row naming no session admitted an in-session start");
+  assert.equal(preflight({ CLAUDE_CODE_SESSION_ID: "" }, self).status, 0);
 });
 
 test("pre-flight allows tracked edits inside the current wave's in-flight Files and untracked files, and refuses any other tracked change", () => {
@@ -431,7 +496,12 @@ test("--check-sandbox answers with JSON and touches no state; usage errors exit 
   const run = (args) => spawnSync(process.execPath, [DRIVER, ...args], { env: h.env, encoding: "utf8" });
   const probe = run(["--check-sandbox"]);
   assert.equal(probe.status, 0, probe.stderr);
-  assert.deepEqual(JSON.parse(probe.stdout), { sandboxed: false });
+  assert.equal(JSON.parse(probe.stdout).sandboxed, false);
+  // The planning gate copies sessionHash into the drive row it writes on a start-now answer.
+  const inSession = spawnSync(process.execPath, [DRIVER, "--check-sandbox"], { env: { ...h.env, CLAUDE_CODE_SESSION_ID: "gate-session-id" }, encoding: "utf8" });
+  assert.deepEqual(JSON.parse(inSession.stdout), { sandboxed: false, sessionHash: createHash("sha256").update("gate-session-id").digest("hex") });
+  const outside = spawnSync(process.execPath, [DRIVER, "--check-sandbox"], { env: { ...h.env, CLAUDE_CODE_SESSION_ID: "" }, encoding: "utf8" });
+  assert.deepEqual(JSON.parse(outside.stdout), { sandboxed: false, sessionHash: null });
   for (const args of [[], ["--state"], ["--state", "x", "--bogus"], ["--state", "x", "--max-stalls", "0"], ["--state", "x", "--max-usd", "abc"]])
     assert.equal(run(args).status, 2, `expected a usage error for ${JSON.stringify(args)}`);
 });

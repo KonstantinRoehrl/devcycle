@@ -607,6 +607,7 @@ test("main thread + a live driver lock: moving the branch or destroying the tree
   const { reason } = decideRaw({ cwd, tool_input: { command: "git checkout main" } });
   assert.match(reason, new RegExp(`^devcycle: a driver \\(pid ${process.pid}, log [^)]*drive\\.log\\) is running unattended execution in this checkout`));
   assert.match(reason, /Stop the driver first/);
+  assert.match(reason, new RegExp(`if pid ${process.pid} is no longer running \\(after a reboot, say\\), remove \\.devcycle/drive\\.lock\\. command: git checkout main$`));
 });
 
 test("main thread + a live driver lock: reading, committing and restoring files stay allowed", () => {

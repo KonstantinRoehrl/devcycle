@@ -137,7 +137,7 @@ probe, and prints one JSON object. Every gate stays this command's; it reads the
 
 Then announce the position from `tasks` (each task's `position` and `next`) and continue through
 `entryLines` as § Resume says, past its depth check; the entered playbook takes the wave's
-positions and the `dispatchable` tasks' brief inputs from this object.
+positions and every uncommitted task's brief inputs from this object.
 
 ## Announce the derived position
 

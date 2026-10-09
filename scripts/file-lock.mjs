@@ -16,9 +16,16 @@ export function processStartTime(pid) {
   return started || null;
 }
 
+// `ps` derives a start time from the boot time, which a clock step moves, so one process can read a
+// second or two apart between two calls; a pid reused by a later process starts further off than that.
+const START_TOLERANCE_MS = 2000;
+const startedAt = (lstart) => Date.parse(`${lstart} UTC`);
+
 export function isLiveHolder(holder) {
   const started = processStartTime(holder.pid);
-  return started !== null && started === holder.startTime;
+  if (started === null) return false;
+  const gap = Math.abs(startedAt(started) - startedAt(holder.startTime));
+  return started === holder.startTime || gap <= START_TOLERANCE_MS;
 }
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);

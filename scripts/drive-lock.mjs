@@ -1,6 +1,6 @@
 // The unattended-execution driver's claim on a checkout (spec 4.B.5): .devcycle/drive.lock beside
 // the state file names the driver process, the state file it drives, its log and the hash of the
-// token it hands its sessions. `toplevel` is that checkout's root, the directory holding the state
+// token it hands its sessions, and the machine it runs on. `toplevel` is that checkout's root, the directory holding the state
 // file's .devcycle/. One driver holds it at a time; a holder whose process is gone, or whose pid now
 // belongs to a process started at another time, is stale and reclaimed. /devcycle:continue (through
 // wave-setup.mjs) and the git guard only ask whether a live driver holds it.
@@ -8,6 +8,7 @@ import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { hostname } from "node:os";
+import { spawnSync } from "node:child_process";
 import { isLiveHolder, processStartTime } from "./file-lock.mjs";
 
 export const DRIVE_LOCK_REL = ".devcycle/drive.lock";
@@ -38,9 +39,36 @@ function parseHolder(raw) {
   }
 }
 
-// Another host's process cannot be asked about, so its lock counts as live: reclaiming it is the
+// macOS renames a host with the network it joins, so a lock a crash left before a reboot can name
+// another host than this machine now does. The lock also names the machine by an id that survives
+// that — systemd's machine-id, or the Mac's platform UUID — kept only as a hash like the token.
+function readMachineId() {
+  for (const path of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
+    const id = readRaw(path)?.trim();
+    if (id) return id;
+  }
+  if (process.platform !== "darwin") return null;
+  const ioreg = spawnSync("ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"], { encoding: "utf8" });
+  return ioreg.stdout?.match(/"IOPlatformUUID" = "([^"]+)"/)?.[1] ?? null;
+}
+
+let machine;
+function machineId() {
+  if (machine === undefined) {
+    const id = readMachineId();
+    machine = id ? createHash("sha256").update(id).digest("hex") : null;
+  }
+  return machine;
+}
+
+// The machine id decides when both sides have one; a lock written without it falls back to the
+// hostname.
+const onThisMachine = (holder) =>
+  typeof holder.machine === "string" && machineId() ? holder.machine === machineId() : holder.hostname === hostname();
+
+// Another machine's process cannot be asked about, so its lock counts as live: reclaiming it is the
 // user's call, never a guess.
-const isLive = (holder) => holder !== null && (holder.hostname !== hostname() || isLiveHolder(holder));
+const isLive = (holder) => holder !== null && (!onThisMachine(holder) || isLiveHolder(holder));
 
 // Creates `path` holding `content` only when nothing is there. Linking a complete temp file into
 // place is as exclusive as O_EXCL, and the file never exists empty: an empty lock would read as
@@ -66,7 +94,7 @@ function publish(path, content) {
 // holds the reclaim.
 function reclaim(path, staleRaw, self) {
   const mutex = `${path}.reclaim`;
-  if (!publish(mutex, JSON.stringify({ pid: self.pid, startTime: self.startTime, hostname: self.hostname }) + "\n")) {
+  if (!publish(mutex, JSON.stringify({ pid: self.pid, startTime: self.startTime, hostname: self.hostname, machine: self.machine }) + "\n")) {
     const raw = readRaw(mutex);
     if (raw === null) return true;
     // A reclaimer killed inside these few calls leaves the mutex behind. Clearing it would reopen
@@ -87,7 +115,7 @@ export function acquireDriveLock(toplevel, { statePath, logPath, tokenHash = nul
   const path = lockPath(toplevel);
   const startTime = processStartTime(process.pid);
   if (startTime === null) throw new Error("drive-lock: cannot read this process's start time");
-  const lock = { pid: process.pid, startTime, hostname: hostname(), state: statePath, log: logPath, tokenHash };
+  const lock = { pid: process.pid, startTime, hostname: hostname(), state: statePath, log: logPath, tokenHash, machine: machineId() };
   const content = JSON.stringify(lock) + "\n";
   mkdirSync(dirname(path), { recursive: true });
   const deadline = Date.now() + RECLAIM_WAIT_MS;
