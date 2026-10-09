@@ -98,7 +98,7 @@ export function validate(obj, sub) {
   return errors;
 }
 
-function writeLine(toplevel, runId, obj) {
+export function writeLine(toplevel, runId, obj) {
   const sub = schemaFor(obj.kind);
   if (!sub) die(`unknown kind "${obj.kind}"`);
   const errors = [...validate(obj, sub), ...validateCulprit(obj.culprit)];
