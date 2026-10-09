@@ -45,7 +45,7 @@ budget is what each session actually loads. references/commit-convention.md § T
 onboarding-a-repo, sweeping-mechanical-changes and taking-the-fast-path.
 
 ```text
-budget: surface-budget.json surfaceTotal 5806
+budget: surface-budget.json surfaceTotal 5830
 budget: context-budget.json playbooks/executing-waves.md 110214
 budget: context-budget.json playbooks/learning-from-sessions.md 62203
 budget: context-budget.json playbooks/onboarding-a-repo.md 30301

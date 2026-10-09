@@ -15,6 +15,7 @@ import { atomicWrite } from "./atomic-write.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { gitToplevel, recordPath, validateCulprit } from "./run-record.mjs";
 import { isMain } from "./is-main.mjs";
+import { INTEGRATION_BRANCHES, defaultBranches } from "./branch-names.mjs";
 import {
   UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, latestKeyed, ledgerKey, nextRetry, parseLedgerLine,
   runTaskScript, taskFlags, workTreeRoot,
@@ -25,9 +26,6 @@ const TRAILER_KEY = "Devcycle-Task";
 const TRAILER_LINE = /^[A-Za-z][A-Za-z0-9-]*: \S/;
 const GATE_FAIL_PREFIX = "rejected (green gate:";
 const DEFERRED_OUTCOME = "deferred (concurrent sibling edits)";
-// The cut-points references/branch.md names (§ Committing's integration branches, the default
-// branch) — used only when the state file's branch line has no `(cut from <base> at <sha>)`.
-const CUT_POINTS = ["dev", "develop", "development", "integration", "main", "master"];
 const FLAGS = {
   "--run": "value", "--task": "value", "--plan": "value", "--test-cmd": "value", "--subject": "value",
   "--subset-cmd": "value", "--culprit": "value", "--trailers": "value", "--ledger": "value",
@@ -92,7 +90,10 @@ function recordedBranch(stateText) {
 // picks it.
 function sinceCut(cwd, cut) {
   if (cut) return [`${cut}..HEAD`];
-  const exclude = ["refs/remotes/origin/HEAD", ...CUT_POINTS.flatMap((n) => [`refs/heads/${n}`, `refs/remotes/origin/${n}`])]
+  // No recorded cut: exclude every cut-point references/branch.md names (§ Committing's integration
+  // branches and the default branch, each candidate when it is unresolved).
+  const cutPoints = new Set([...INTEGRATION_BRANCHES, ...defaultBranches(cwd), "main", "master"]);
+  const exclude = ["refs/remotes/origin/HEAD", ...[...cutPoints].flatMap((n) => [`refs/heads/${n}`, `refs/remotes/origin/${n}`])]
     .filter((ref) => git(cwd, ["rev-parse", "--verify", "--quiet", ref]).status === 0);
   return exclude.length ? ["HEAD", "--not", ...exclude] : ["HEAD"];
 }

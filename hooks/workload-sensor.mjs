@@ -10,6 +10,7 @@ import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { findStateFile } from "./lib/find-state-file.mjs";
+import { INTEGRATION_BRANCHES } from "../scripts/branch-names.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("../scripts/run-record.mjs", import.meta.url));
 // Every post-planning, commit-bearing stage. A HEAD-advancing coordinator commit can land in any
@@ -51,11 +52,6 @@ function parseState(text) {
     planned: planned ? planned[1] : "0", waves: waves ? waves[1] : "0",
   };
 }
-
-// The integration branches a topic branch may be cut from, in the order references/branch.md
-// § Committing lists them. That file owns the list; this is its runtime spelling, which prose
-// cannot hand a hook.
-const INTEGRATION_BRANCHES = ["dev", "develop", "development", "integration"];
 
 // The base to measure against when the branch line carries no `(cut from <base> at <sha>)`
 // annotation. references/branch.md § "Deriving a branch's file set" → Base owns the rule this

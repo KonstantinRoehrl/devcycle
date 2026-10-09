@@ -969,11 +969,12 @@ test("check 13 rule 2 fails when the schema declares a field no surface file's r
 });
 
 test("check 13 rule 2 fails when no surface instruction names --knob for the knobs field, and passes once commands/cycle.md does", () => {
-  // Failing half: a surface stripped of every --knob mention must not be waved through.
+  // Failing half: a surface whose every --knob became a longer flag that merely starts with it
+  // (--knobs, wave-setup.mjs's flag) must not be waved through. Same byte count, so no budget trips.
   const failDir = makeTempDir("validate13e-fail-");
   cpSync(REPO_ROOT, failDir, { recursive: true, filter: (s) => !s.includes("/.git/") });
   const cyclePath = join(failDir, "commands/cycle.md");
-  writeFileSync(cyclePath, readFileSync(cyclePath, "utf8").replaceAll("--knob ", ""));
+  writeFileSync(cyclePath, readFileSync(cyclePath, "utf8").replaceAll("--knob ", "--knobs"));
   const rFail = spawnSync(process.execPath, [join(failDir, "scripts/validate.mjs")], { cwd: failDir, encoding: "utf8" });
   assert.notStrictEqual(rFail.status, 0);
   assert.match(rFail.stdout + rFail.stderr, /knobs/);

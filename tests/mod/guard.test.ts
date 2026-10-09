@@ -159,3 +159,21 @@ test('a tool.call hook that throws after next passes the tool result through', a
   const result = await mainCall($);
   expect(result.text).toBe('still here');
 });
+
+// commands/continue.md § Execution resume runs scripts/wave-setup.mjs and then the session append as
+// two main-loop Bash calls. hooks/devcycle-mod.mjs joins on the second alone; folding the append
+// into the first would leave a resumed execution session untraced and its subagents unbudgeted.
+test('a continue resume at stage execution joins on its own session append, never on the wave-setup call', async ($, on) => {
+  const world: World = { joined: false };
+  const seen = session(on, world);
+  engine(on, joinsOnAppend(world));
+  await $.turn.start({ text: '/devcycle:continue', turnId: 'm1' });
+  await bash($, "node scripts/wave-setup.mjs --state /repo/.devcycle/state.md --knobs 'knobs: profile=standard'");
+  await oneSubagentTurn($);
+  expect([joinedChecks(seen), appended(seen).length]).toEqual([2, 0]);
+  await bash($, SESSION_APPEND);
+  await spawn($, { description: 'a2' });
+  await step($, 'a2');
+  await complete($, 'a2');
+  expect([joinedChecks(seen), appended(seen).length]).toEqual([3, 1]);
+});

@@ -29,6 +29,8 @@ record's `event` row for its fields.
    still name it before resuming. If the script reports none, say so plainly ("no devcycle
    state file found in this repo — there is no in-flight cycle to resume") and offer
    `/devcycle:cycle <description>` to start one. Stop there.
+   A chosen file at `stage: execution` resumes through § Execution resume below, in place of
+   steps 2–4 and § Resume's depth check.
 2. Run the ownership check on the chosen file before trusting anything in it, per
    `${CLAUDE_PLUGIN_ROOT}/references/resume.md`. A `root:` mismatch stops the
    resume and goes to the user; it is never resolved silently. Once it passes, append this
@@ -76,7 +78,6 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
    file with no `- knobs:` line gets one written from the fresh line without asking. Then the
    drift notice, per § Knob channel.
 3. Read only what this stage's resume needs: the state file always and, beyond it —
-   - `execution`: the ledger it names (`.devcycle/ledger.md`) and the plan's Dispatch Map;
    - `planning` with a plan awaiting approval: the plan;
    - `brainstorm`, or `planning` with a spec under approval: the spec;
    - `on-device`: the checklist;
@@ -89,8 +90,31 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
    `${CLAUDE_PLUGIN_ROOT}/references/branch.md` only when no topic branch was
    ever recorded. **The mismatch rule that file defers to is this command's
    own:** when the current branch differs from the recorded one, tell the user
-   and ask before switching; never switch branches silently. During execution,
-   never re-dispatch a task the ledger records as committed.
+   and ask before switching; never switch branches silently.
+
+## Execution resume
+
+At `stage: execution` one script does steps 2–4 and § Resume's depth check. Run step 2b's
+resolver command first, unchanged (it reads no state file), then
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/wave-setup.mjs" --state <the chosen state file> --knobs '<the knobs: line it printed>'`.
+It runs the ownership check, `resume-check`, the knob comparison, the branch check and the depth
+probe, and prints one JSON object. Every gate stays this command's; it reads their inputs there:
+
+- `action: "stop"` → report `stopDetail` and stop. `foreign-state` and `resume-check` go to the
+  user as steps 2 and 2a say; `driver-running` means a driver owns this cycle: name its
+  `drive.lock.pid` and `drive.lock.log`, and never resume.
+- Otherwise append this session's row as its own Bash call, never folded into another command —
+  the hooks module joins a session to its run only on a main-loop call carrying `--kind session`:
+  `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append --run <state.run> --kind session --sessionId "$CLAUDE_CODE_SESSION_ID"`.
+- `knobDrift` lines with `state.knobsDeclined` false → step 2b's knob-change question;
+  `state.knobsLine` null → write `- knobs:` from the fresh line, as step 2b says.
+- `branch.verdict` `switch-needed` or `integration` → step 4's rules.
+- `depth.band` `over-budget` or `hard-stop` → § Resume's depth rule; `unknown` → proceed.
+- `pendingDecision` → that task's `exhausted-unresolved` loop goes to the user as a decision.
+
+Then announce the position from `tasks` (each task's `position` and `next`) and continue through
+`entryLines` as § Resume says, past its depth check; the entered playbook takes the wave's
+positions and the `dispatchable` tasks' brief inputs from this object.
 
 ## Announce the derived position
 

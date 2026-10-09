@@ -2208,13 +2208,13 @@ test("every entry command except doctor resolves knobs through the identical ful
   }
 });
 
-test("C6: the workload sensor's integration-branch list matches the prose that owns it", () => {
-  // references/branch.md § Committing owns that list; hooks/workload-sensor.mjs carries its only
-  // runtime spelling, because prose cannot be handed to a hook. Parsed and compared the way C3
+test("C6: the shared integration-branch list matches the prose that owns it", () => {
+  // references/branch.md § Committing owns that list; scripts/branch-names.mjs carries its only
+  // runtime spelling, which hooks/workload-sensor.mjs, scripts/wave-setup.mjs and scripts/task-commit.mjs import. Parsed and compared the way C3
   // leg 1 parses dream.mjs's SUBCOMMANDS, so a name added on one side and not the other fails
   // here instead of silently narrowing which cut-points a cycle can be measured against.
-  const block = read("hooks/workload-sensor.mjs").match(/const INTEGRATION_BRANCHES = \[([\s\S]*?)\];/);
-  assert.ok(block, "INTEGRATION_BRANCHES array not found in hooks/workload-sensor.mjs");
+  const block = read("scripts/branch-names.mjs").match(/const INTEGRATION_BRANCHES = \[([\s\S]*?)\];/);
+  assert.ok(block, "INTEGRATION_BRANCHES array not found in scripts/branch-names.mjs");
   const runtime = [...block[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
   const sentence = read("references/branch.md")
     .match(/on an integration branch — ([\s\S]*?)or one the user names/);
@@ -2222,8 +2222,12 @@ test("C6: the workload sensor's integration-branch list matches the prose that o
   const owned = [...sentence[1].matchAll(/`([a-z-]+)`/g)].map((m) => m[1]);
   assert.ok(owned.length >= 4, `expected the full prose list, got ${owned.length}`);
   assert.deepEqual(runtime, owned,
-    "hooks/workload-sensor.mjs's INTEGRATION_BRANCHES must spell exactly the branches " +
-      "references/branch.md § Committing names — the hook is that prose's only runtime copy");
+    "scripts/branch-names.mjs's INTEGRATION_BRANCHES must spell exactly the branches " +
+      "references/branch.md § Committing names — it is that prose's only runtime copy");
+  const copies = ["scripts", "hooks", "workflows"]
+    .flatMap((dir) => readdirSync(join(root, dir), { recursive: true }).filter((n) => /\.m?js$/.test(n)).map((n) => `${dir}/${n}`))
+    .filter((p) => p !== "scripts/branch-names.mjs" && read(p).includes('"development"'));
+  assert.deepEqual(copies, [], "a runtime file spells the integration-branch list instead of importing scripts/branch-names.mjs");
 });
 
 test("cycle.md writes the kind line and appends a triage record after triage", () => {
