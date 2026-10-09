@@ -39,14 +39,19 @@ every manual run as they are.
 its 0.23.0 value — while `surfaceTotal` rises net, because the task scripts' contracts, the drive
 mode in `commands/continue.md` and the opt-in gate add more runtime-surface lines than the
 executing-waves shrink removes; the maintainer accepted that trade on 2026-10-08, since the context
-budget is what each session actually loads.
+budget is what each session actually loads. references/commit-convention.md § The task commit
+(task-commit.mjs's invocation and trailer) adds 11 lines to the runtime surface (5795 → 5806) and
+853 bytes to each playbook whose closure cites it: executing-waves, learning-from-sessions,
+onboarding-a-repo, sweeping-mechanical-changes and taking-the-fast-path.
 
 ```text
-budget: surface-budget.json surfaceTotal 5795
-budget: context-budget.json playbooks/executing-waves.md 109361
+budget: surface-budget.json surfaceTotal 5806
+budget: context-budget.json playbooks/executing-waves.md 110214
+budget: context-budget.json playbooks/learning-from-sessions.md 62203
+budget: context-budget.json playbooks/onboarding-a-repo.md 30301
 budget: context-budget.json playbooks/receiving-review.md 113481
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 86247
-budget: context-budget.json playbooks/taking-the-fast-path.md 79372
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87100
+budget: context-budget.json playbooks/taking-the-fast-path.md 80225
 ```
 
 ## 2026-10-07 — Fifth hook-like component: the function-hook module

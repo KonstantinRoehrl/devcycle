@@ -54,3 +54,14 @@ The pathspec names source files and nothing else: evidence files under
 (README), so naming an ignored, untracked evidence path in a pathspec aborts the whole
 commit with "pathspec did not match any file known to git". Evidence files are
 working-tree artifacts a reviewer reads from the checkout, not history.
+
+## The task commit
+
+`playbooks/executing-waves.md` commits each accepted task, green gate included, with
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/task-commit.mjs" --run <id> --task <id> --plan <path> --test-cmd "<cmd>" --subject "<subject>" [--subset-cmd "<cmd>"] [--trailers "<Key: value lines>"]`.
+It commits the task's changed `**Files:**` under § Scoping the commit with the subject as given, and
+adds `Devcycle-Task: <run-id>/<task-id>` to git's trailer block after any `--trailers` the convention
+carries, such as `Co-Authored-By:`. A trailer, because the subject is the repo's convention; the run
+id, because task numbers repeat across cycles on one branch. A re-run that finds a commit since the
+branch cut carrying the trailer and touching only the task's files appends the ledger and run-record
+lines it still lacks instead of committing again.
