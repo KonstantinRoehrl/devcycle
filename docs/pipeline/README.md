@@ -206,7 +206,49 @@ produced them is not needed again. On re-entry `/devcycle:continue` locates that
 `scripts/find-state-files.mjs`, a Node walk that consults no gitignore — so the gitignored
 `.devcycle/` directory cannot hide a state file from it the way it can from an ad-hoc
 `find`/`rg` search. Compacting is deliberately not one of the options: it leaves
-the expensive part of a context behind, where clearing actually returns it.
+the expensive part of a context behind, where clearing actually returns it. Between execution's
+waves you can hand those stops to a driver instead — next section.
+
+### Unattended execution
+
+Opt in at planning's close and `scripts/drive-execution.mjs` takes over the one stop that repeats
+inside execution: the clear between waves. It starts a fresh `claude -p` session per wave — the
+session `/clear` plus `/devcycle:continue` would give you — and ends at the branch-review handoff,
+at the first gate that needs you, or at a stall or a cap. Branch review, on-device verification and
+finish stay yours. How to run, watch and stop it:
+[`docs/playbooks/executing-waves/unattended.md`](../playbooks/executing-waves/unattended.md).
+
+```mermaid
+---
+title: unattended execution — the driver loop
+accDescr: Flowchart of the execution driver. After the user opts in at planning's close, a fail-closed pre-flight runs; then, while the state is at execution, the driver starts one fresh claude -p session per wave, records it, and ends on a stop the session signalled, a usage limit past its cap, too many sessions in a row without ledger progress, or the dollar cap, succeeding only when the state reaches branch review.
+---
+flowchart TD
+    OPT(["opt-in at planning's close<br/>drive: auto in state.md"]):::tool
+    OPT --> PRE{"pre-flight — lock · drive row · stage · topic branch · default branch known<br/>clean tree outside in-flight Files · model window · no sandbox · not an agent's start"}:::stage
+    PRE -->|"a check fails"| E3(["exit 3"]):::tool
+    PRE -->|passes| STAGE{"state at stage: execution?"}:::stage
+    STAGE -->|"branch-review"| E0(["exit 0 — ready for branch review"]):::tool
+    STAGE -->|yes| SESSION("fresh claude -p session<br/>/devcycle:continue --drive · one wave"):::stage
+    SESSION --> REC[("one drive run-record row")]:::structural
+    REC -->|"devcycle not loaded"| E3
+    REC --> STOPQ{"drive-stop.json written?"}:::stage
+    STOPQ -->|yes| E4(["exit 4 — reason printed"]):::tool
+    STOPQ -->|no| LIMIT{"usage limit?"}:::stage
+    LIMIT -->|"wait within --max-backoff"| STAGE
+    LIMIT -->|"cap reached"| E6(["exit 6"]):::tool
+    LIMIT -->|no| PROG{"ledger progress?"}:::stage
+    PROG -->|"no line --max-stalls in a row, or no report, verdict or commit --max-churn in a row"| E5(["exit 5 — last result printed"]):::tool
+    PROG -->|"within --max-usd"| STAGE
+    PROG -->|"--max-usd spent"| E6
+
+    classDef stage fill:#EEEDFE,stroke:#534AB7,color:#3C3489;
+    classDef tool fill:#E1F5EE,stroke:#0F6E56,color:#085041,stroke-dasharray:5 5;
+    classDef structural fill:#F1EFE8,stroke:#5F5E5A,color:#444441;
+```
+
+A signal (Ctrl-C, `kill`) stops the running session, writes its record, releases the lock and exits
+130.
 
 ### What the coordinator does itself
 

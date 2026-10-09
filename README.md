@@ -129,6 +129,10 @@ The pipeline pauses between stages by design: it stops at most stage boundaries 
 run `/clear` and then `/devcycle:continue`, so a cycle plays out as several short sessions
 rather than one long one.
 
+Execution can also walk its waves without you: at planning's close devcycle asks whether to run
+them unattended, and a driver then gives each wave a fresh session and stops at the first thing
+that needs you — see [running execution unattended](docs/playbooks/executing-waves/unattended.md).
+
 **Add `.devcycle/` to the target repo's `.gitignore`** — none of it belongs in git history.
 What devcycle attempts to commit *outside* that directory is `docTrackingPolicy`'s call.
 
