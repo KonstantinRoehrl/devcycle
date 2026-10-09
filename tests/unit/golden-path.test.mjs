@@ -2320,3 +2320,27 @@ test("the stage-budget constants are the counters references/delegation.md § Th
   assert.match(section, new RegExp(`\\*\\*~${STAGE_TOOL_CALLS} tool calls\\*\\*`), "the tool-call counter drifted");
   assert.match(section, new RegExp(`\\*\\*~${STAGE_FILES_READ} files read\\*\\*`), "the files-read counter drifted");
 });
+
+// Spec § 8 "Opt-in integrity": an agent never opts a cycle into drive mode. The `drive:` state row
+// is written only by the opt-in gate at planning's close (references/resume.md documents it), and the
+// opt-in ledger line only by the first driven session, in continue.md's drive mode. No script,
+// workflow or hook writes either.
+test("opt-in integrity: only the opt-in gate writes the drive: row, only the first driven session the opt-in ledger line", () => {
+  const ROW = "- drive: auto model=";
+  const LINE = "outcome=unattended (model=";
+  const rowSites = surfaceFiles().filter((p) => read(p).includes(ROW));
+  assert.deepEqual(rowSites.filter((p) => !["playbooks/planning-waves.md", "references/resume.md"].includes(p)), [],
+    "a surface other than the opt-in gate writes the drive: row");
+  const lineSites = surfaceFiles().filter((p) => read(p).includes(LINE));
+  assert.deepEqual(lineSites.filter((p) => !["references/ledger.md", "references/resume.md"].includes(p)), ["commands/continue.md"],
+    "the opt-in ledger line must be written by commands/continue.md's drive mode and nowhere else");
+  const writes = sentences(read("commands/continue.md")).filter((s) => s.text.includes(LINE));
+  assert.equal(writes.length, 1, "commands/continue.md writes the opt-in ledger line in more than one place");
+  assert.match(writes[0].text, /first driven session/, "the opt-in ledger line is no longer scoped to the first driven session");
+  assert.match(writes[0].text, /drive\.optInLogged/, "the first driven session is no longer keyed on wave-setup's drive.optInLogged");
+  for (const dir of ["scripts", "workflows", "hooks"])
+    for (const name of readdirSync(join(root, dir), { recursive: true }).filter((n) => /\.m?js$/.test(n))) {
+      const text = read(`${dir}/${name}`);
+      assert.ok(!text.includes(ROW) && !text.includes(LINE), `${dir}/${name} writes the drive: row or the opt-in ledger line`);
+    }
+});

@@ -15,6 +15,29 @@ is every gate of the stage it resumes: an Other answer at any of them appends
 `user-correction-at-gate` to that run; read `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` § The run
 record's `event` row for its fields.
 
+## Drive mode
+
+A trailing `ARGUMENTS: --drive <state-path>` line means a driver process started this session;
+without that line, skip this section. In drive mode:
+
+- The state file is `<state-path>`: no enumeration, no "which one" question. Take § Execution
+  resume with `--drive` added to its `wave-setup.mjs` call; that call stops `no-driver` unless a
+  live driver lock names this state file and this session carries that driver's token, and
+  `not-opted-in` without its `drive: auto` row. On `no-driver`, report `stopDetail` and end the
+  session without signalling: `drive-stop.json` belongs to a driver this session does not have.
+- Every ask becomes a stop, never asked and never answered:
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-signal.mjs" <reason> --detail '<the question or failed check: one line, no ; & | $( or backtick>' --state <state-path>`,
+  then end the session. A `wave-setup.mjs` stop passes its `stopReason`; a later gate passes
+  `branch`, `sweep-fallback`, `scope-change` or `needs-user` (an `exhausted-unresolved` loop, an
+  implementer `status: blocked`, a retry cap, a refused commit — `task-commit.mjs`
+  `nothing-to-commit` or `commit-failed` —, a human-required step a `note:` names, an upstream
+  escalation at `thorough`), and any other gate passes `needs-user` with the question as its detail.
+- In the first driven session, the one whose `drive.optInLogged` is false, append
+  `- [<stamp>] task=drive event=user-decision outcome=unattended (model=<drive.model>) ref=.devcycle/state.md`
+  to the ledger right after executing-waves' pre-flight writes its preamble, before any dispatch.
+- At a wave boundary, or at the stage end (`stage: branch-review`), once the handoff block is
+  emitted, end the session and never enter the next stage: in headless mode, ending it is the clear.
+
 ## Re-derive position from files
 
 1. Enumerate every resumable cycle by running

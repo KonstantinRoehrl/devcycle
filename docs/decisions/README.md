@@ -50,7 +50,7 @@ references/loops.md. The run-record table's writer cells in references/ledger.md
 receiving-review, sweeping-mechanical-changes and taking-the-fast-path.
 
 ```text
-budget: surface-budget.json surfaceTotal 5819
+budget: surface-budget.json surfaceTotal 5842
 budget: context-budget.json playbooks/executing-waves.md 94484
 budget: context-budget.json playbooks/learning-from-sessions.md 62203
 budget: context-budget.json playbooks/onboarding-a-repo.md 30301
