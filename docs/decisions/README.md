@@ -5,6 +5,45 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-08 — Unattended execution: a driver the user started is the user at the wave→wave gate only
+
+**Decision:** execution may run unattended, wave after wave, under a driver process the user starts,
+which runs one fresh headless session per wave and stops for the user at every other gate. Four
+rules bound it:
+- **The opt-in is the user's act.** It is the user's answer at the planning→execution gate, given
+  before the first driven session; nothing else opts a cycle in.
+- **The driver stands in for the user at one gate.** A driver the user started after opting in
+  counts as the user at the **wave→wave** await gate of `references/handoff.md` — the `/clear` and
+  `/devcycle:continue` it would otherwise wait for — and at no other gate.
+- **Every wave still gets a fresh session.** The driver ends each session at its wave boundary and
+  starts the next wave in a new one, so the 2026-07-31 decision below (the context reset is binding
+  at every boundary) is unchanged: the reset still happens, only the keystroke that triggers it moves
+  to the driver.
+- **An agent never acts for the user.** An agent can never opt a cycle in, start a driver on its own
+  initiative, or override a gate. Every other gate a driven session reaches — a user decision, a
+  failed check, a needed confirmation — stops the run and hands it back to the user.
+
+**Why:** execution already runs one wave per session — 67 of 69 measured execution sessions on
+versions 0.20 and later did, a median of four per execution stage — so every boundary waits on a
+`/clear` + `/devcycle:continue` round trip that carries no judgment once the user has chosen, at
+planning's close, to let the waves run. Letting a process the user started supply that keystroke
+keeps the reset the 2026-07-31 numbers justify, while everything that does need judgment stays a
+stop. Writing the bound down before any drive-mode code lands is what keeps "the driver may
+continue" from widening into "an agent may continue".
+
+**Supersedes:** nothing. It narrows how the 2026-07-31 await gate is satisfied at one boundary
+(wave→wave) for a cycle the user opted in, and leaves that gate's wording, every other boundary and
+every manual run as they are.
+
+**Budgets:** this cycle lowers the context budgets net — `playbooks/executing-waves.md` ends below
+its 0.23.0 value — while `surfaceTotal` rises net, because the task scripts' contracts, the drive
+mode in `commands/continue.md` and the opt-in gate add more runtime-surface lines than the
+executing-waves shrink removes; the maintainer accepted that trade on 2026-10-08, since the context
+budget is what each session actually loads.
+
+```text
+```
+
 ## 2026-10-07 — Fifth hook-like component: the function-hook module
 
 **Decision:** the plugin ships a fifth hook-like component beside the four settings hooks: a hooks
