@@ -27,6 +27,9 @@ appended line per event, all four fields REQUIRED, exactly this shape:
 
 The leading `[<ISO-8601 UTC>]` bracket is the output of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`,
 taken when the entry is appended — never a narrated or estimated time.
+A task script (§ Task scripts) appends one more token after `ref=`, `key=<id>/<event>/<round>/<retry>`:
+`<round>` is the review round (0 before the first), `<retry>` the dispatch's retry index for that
+task. A line without it stays valid, and a reader that does not know it ignores it.
 
 After any compaction or resume, trust the ledger and `git log` over conversation memory.
 
@@ -49,3 +52,20 @@ two logs never merge. One row per write site, not a restatement of `tests/fixtur
 | `agent-depth` | once per finished subagent, on every `SubagentStop` from a session with a `session` row in the run `.devcycle/state.md` names — a kind of its own, separate from `dispatch`, so an implementer dispatch is never counted twice | `hooks/dispatch-sensor.mjs` |
 | `agent-trace` | once per finished subagent turn in a session with a `session` row in the run — the hooks module's view of that subagent, under the same agentId as its `agent-depth` row; a continued agent writes another | `hooks/devcycle-mod.mjs`, through `hooks/mod-sink.mjs` |
 | `event` | `gate-fail` / `gate-pass-clean` / `gate-deferred-foreign-change` once per green-gate run, at step 6 (`gate-deferred-foreign-change` when the whole-suite red is deferred to a concurrent sibling, per `playbooks/executing-waves.md` step 6 and `scripts/foreign-change-check.mjs`); `review-reject` once per `needs-changes` verdict, at step 5, carrying that verdict's `Culprit` slug and `--attributedBy coordinator`; `user-correction-at-gate` at any AskUserQuestion the user answers via "Other", carrying `--culprit <the nearest culprits.json slug, else novel:<slug>> --attributedBy coordinator` chosen by the coordinator from what the correction was about — the stage and the slug only, never the typed text; `depth-breach` alongside every `agent-depth` row marked `breach`; `gate-ran` once per `scripts/plan-check.mjs` run, carrying `result: pass|fail`. **A gate appends it exactly when a run record exists at that moment.** Everything else follows: a run-bearing command's stages append (`commands/cycle.md` mints the record, `commands/continue.md` resumes it), a standalone command's gates have no run to append to, a gate reached before the mint has none yet, and a surface reachable both ways appends only on the entry where the run exists — so a run carrying no `user-correction-at-gate` event says nothing about gates outside that boundary | `playbooks/executing-waves.md`, and every in-cycle surface that asks; `hooks/dispatch-sensor.mjs` (`depth-breach`); `scripts/plan-check.mjs` (`gate-ran`) |
+
+## Task scripts
+
+The execution stage's per-step writes, one script call each. A script appends a ledger line or a
+run-record row only while holding a `<file>.lock` next to its target — a lock whose holder's pid is
+gone or reused is reclaimed — and skips a line whose key, or a row whose identifying fields, already
+exist, so a re-run after a crash adds nothing twice while the next round or retry still appends.
+Each prints one JSON object (`ok`, `action`, `appended` — the keys it wrote and `rr:<kind>` per
+run-record row — and the session's `depthBand`) and exits non-zero only on a usage (2) or
+environment (3) error.
+
+- `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs" --run <run-id> --task <id> --role implementer|reviewer [--round <n>] [--model-decision "<decision>"]`,
+  the brief on stdin, immediately before each dispatch: writes it to
+  `.devcycle/briefs/<id>-<role>[-round-<n>].md`, appends `dispatched` (`outcome=model <decision>`, the
+  `references/model-routing.md` audit shape; `outcome=implementer retry <k>` without the flag)
+  or `review-round` (`outcome=round <n>`) with that path as `ref=`, and keeps the dispatch's start
+  time for its `dispatch` row.
