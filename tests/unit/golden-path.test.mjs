@@ -744,7 +744,7 @@ test("harvested: executing-waves/green-gate-discipline — the gate is the coord
   assert.match(read("agents/implementer.md"), /NEVER run `git commit`, stage a commit, or push/);
 });
 
-test("harvested: executing-waves/handoff-block-shape — seven fields, and only two sanctioned first-field labels", () => {
+test("harvested: executing-waves/handoff-block-shape — seven fields, and only three sanctioned first-field labels", () => {
   const t = read("references/handoff.md");
   // Derive the template rows rather than hardcoding, so the test tracks its owner.
   const block = t.match(/```markdown\n## Handoff\n([\s\S]*?)```/)?.[1] ?? "";
@@ -759,9 +759,10 @@ test("harvested: executing-waves/handoff-block-shape — seven fields, and only 
   assert.notEqual(dropped, block, "the Context depth row wording changed — this discrimination check tests nothing");
   const droppedLabels = [...dropped.matchAll(/^- ([^:]+):/gm)].map((m) => m[1]);
   assert.equal(droppedLabels.length, 6, "removing a template row must reduce the derived label count");
-  // The two sanctioned first-field labels and the Compaction-hint shape stay pinned.
+  // The three sanctioned first-field labels and the Compaction-hint shape stay pinned.
   assert.match(t, /Wave completed: <n> of\s+<m> \(stage: execution\)/);
-  assert.match(t, /these are the\s+only two sanctioned first-field labels/);
+  assert.ok(t.includes("`Session ended mid-wave: <k> of <n> tasks done (stage: execution)`"), "the safety valve's mid-wave label changed");
+  assert.match(t, /these are the\s+only three sanctioned first-field labels/);
   assert.match(t, /Compaction hint: Keep <X>\. Drop <Y>\./);
 });
 

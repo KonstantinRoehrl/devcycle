@@ -47,16 +47,28 @@ through the task scripts lowers the runtime surface 5830 → 5819 (−11 lines) 
 playbooks/executing-waves.md's context 110214 → 94484 (−15730 bytes): the per-step bookkeeping
 moved into scripts/task-*.mjs and the playbook no longer loads references/resume.md or
 references/loops.md. The run-record table's writer cells in references/ledger.md add 36 bytes to
-receiving-review, sweeping-mechanical-changes and taking-the-fast-path.
+receiving-review, sweeping-mechanical-changes and taking-the-fast-path. The mid-wave label and the
+unattended-execution clause in references/handoff.md add 9 lines to the runtime surface
+(5842 → 5851) and 796 bytes to each playbook whose closure cites it: executing-waves
+94484 → 95280, finishing-the-cycle 53662 → 54458, planning-waves 67991 → 68787, receiving-review
+113517 → 114313, reviewing-the-branch 55125 → 55921, scoping-the-request 26925 → 27721,
+sweeping-mechanical-changes 87136 → 87932, taking-the-fast-path 80261 → 81057,
+verifying-on-device 50649 → 51445 and writing-the-findings-document 65761 → 66557.
 
 ```text
-budget: surface-budget.json surfaceTotal 5842
-budget: context-budget.json playbooks/executing-waves.md 94484
+budget: surface-budget.json surfaceTotal 5851
+budget: context-budget.json playbooks/executing-waves.md 95280
+budget: context-budget.json playbooks/finishing-the-cycle.md 54458
 budget: context-budget.json playbooks/learning-from-sessions.md 62203
 budget: context-budget.json playbooks/onboarding-a-repo.md 30301
-budget: context-budget.json playbooks/receiving-review.md 113517
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87136
-budget: context-budget.json playbooks/taking-the-fast-path.md 80261
+budget: context-budget.json playbooks/planning-waves.md 68787
+budget: context-budget.json playbooks/receiving-review.md 114313
+budget: context-budget.json playbooks/reviewing-the-branch.md 55921
+budget: context-budget.json playbooks/scoping-the-request.md 27721
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87932
+budget: context-budget.json playbooks/taking-the-fast-path.md 81057
+budget: context-budget.json playbooks/verifying-on-device.md 51445
+budget: context-budget.json playbooks/writing-the-findings-document.md 66557
 ```
 
 ## 2026-10-07 — Fifth hook-like component: the function-hook module
