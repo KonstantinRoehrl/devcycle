@@ -511,3 +511,84 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { ok: 
     if (inherited !== undefined) process.env.DEVCYCLE_NESTED_RUN = inherited;
   }
 });
+
+// Execution drive (spec 4.B.5): the driver runs one `claude -p` session for as long as a wave takes
+// and reads its stream-json as it arrives, so it needs a spawn with no timeout, no output cap and no
+// signal handlers of its own — the driver forwards SIGINT/SIGTERM/SIGHUP itself, through killGroup.
+test("spawnStreaming streams stdout and stderr line by line, flushes a final partial line, and resolves with the exit status", async () => {
+  const out = [];
+  const err = [];
+  const { child, done } = agentCli.spawnStreaming(
+    process.execPath,
+    ["-e", 'process.stdout.write("a\\nb\\n"); process.stderr.write("e1\\n"); process.stdout.write("tail"); process.exitCode = 3;'],
+    { onStdoutLine: (line) => out.push(line), onStderrLine: (line) => err.push(line) }
+  );
+  assert.ok(Number.isInteger(child.pid) && child.pid > 0, "the child handle is returned at once");
+  assert.deepEqual(await done, { code: 3, signal: null });
+  assert.deepEqual(out, ["a", "b", "tail"]);
+  assert.deepEqual(err, ["e1"]);
+});
+
+test("spawnStreaming passes the caller's env through untouched — it never marks a child as a nested run", async () => {
+  const env = { ...process.env, DEVCYCLE_DRIVE_PROBE: "seen" };
+  delete env.DEVCYCLE_NESTED_RUN;
+  const out = [];
+  const { done } = agentCli.spawnStreaming(
+    process.execPath,
+    ["-e", 'console.log(process.env.DEVCYCLE_DRIVE_PROBE, process.env.DEVCYCLE_NESTED_RUN ?? "unset")'],
+    { env, onStdoutLine: (line) => out.push(line) }
+  );
+  await done;
+  assert.deepEqual(out, ["seen unset"]);
+});
+
+test("spawnStreaming has no output cap and no timeout", async () => {
+  // 12 MiB is past run()'s 10 MiB default cap; the clamp turns any timer the call might arm into
+  // 50ms, so a hidden timeout would kill the child long before its 300ms sleep ends.
+  let chars = 0;
+  let lines = 0;
+  const res = await withShortAgentTimeout(50, async () => {
+    const { done } = agentCli.spawnStreaming(
+      process.execPath,
+      ["-e", 'const row = "x".repeat(1023) + "\\n"; for (let i = 0; i < 12 * 1024; i++) process.stdout.write(row); setTimeout(() => console.log("late"), 300);'],
+      { onStdoutLine: (line) => { chars += line.length; lines += 1; } }
+    );
+    return done;
+  });
+  assert.deepEqual(res, { code: 0, signal: null });
+  assert.equal(lines, 12 * 1024 + 1);
+  assert.equal(chars, 12 * 1024 * 1023 + "late".length);
+});
+
+test("spawnStreaming installs no signal handlers", async () => {
+  const counts = () => ["SIGINT", "SIGTERM", "SIGHUP"].map((sig) => process.listenerCount(sig));
+  const before = counts();
+  const { done } = agentCli.spawnStreaming(process.execPath, ["-e", ""]);
+  assert.deepEqual(counts(), before);
+  await done;
+  assert.deepEqual(counts(), before);
+});
+
+test("spawnStreaming's child leads its own process group, and the exported killGroup ends it with its grandchild", async () => {
+  const child = `
+const { spawn } = require("node:child_process");
+const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], { stdio: "inherit" });
+process.stdout.write(String(g.pid) + "\\n");
+setTimeout(() => {}, 10000);
+`;
+  let grandchild = 0;
+  const { child: leader, done } = agentCli.spawnStreaming(process.execPath, ["-e", child], {
+    onStdoutLine: (line) => {
+      grandchild = Number(line);
+      agentCli.killGroup(leader);
+    },
+  });
+  assert.deepEqual(await done, { code: null, signal: "SIGKILL" });
+  assert.ok(Number.isInteger(grandchild) && grandchild > 0, "the grandchild's pid must arrive as a streamed line");
+  assert.equal(await waitForExit(grandchild, 1000), true, "the grandchild must die with the group");
+});
+
+test("spawnStreaming resolves a binary that cannot start as code and signal both null", async () => {
+  const { done } = agentCli.spawnStreaming("devcycle-no-such-binary", []);
+  assert.deepEqual(await done, { code: null, signal: null });
+});
