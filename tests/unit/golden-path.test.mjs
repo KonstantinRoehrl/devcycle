@@ -738,8 +738,8 @@ test("harvested: executing-waves/file-backed-evidence — the evidence paths, re
 test("harvested: executing-waves/green-gate-discipline — the gate is the coordinator's, and implementers never commit", () => {
   const t = read("playbooks/executing-waves.md");
   assert.match(t, /\*\*Green gate \(REQUIRED, deterministic\)\.\*\*/);
-  assert.match(t, /re-run the task's test command\s+yourself and read the exit status/);
-  assert.ok(t.includes("event=review-verdict outcome=rejected (green gate: <symptom>)"), "the rejection ledger shape changed");
+  assert.match(t, /re-runs the test command itself and reads the exit status — never the implementer's word/);
+  assert.ok(read("scripts/task-commit.mjs").includes('"rejected (green gate:"'), "the gate's rejection ledger shape changed");
   assert.match(t, /The dispatch prompt must NEVER\s+instruct the implementer to commit, stage, or push/);
   assert.match(read("agents/implementer.md"), /NEVER run `git commit`, stage a commit, or push/);
 });
@@ -786,12 +786,39 @@ test("harvested: executing-waves/return-envelopes — a dispatch returns counts 
   assert.match(t, /opens a report or findings file only when a decision needs content the\s+envelope cannot carry/);
 });
 
+// V20: at `thorough` the upstream overlay is loaded, and three of its statements would otherwise
+// override devcycle's wave stop, user decisions and ledger format. The quotes are pinned so a
+// reword of the delta cannot drop the statement it overrides; the memo cites their source.
+test("thorough deltas: the wave stop, user decisions and the ledger format win over the upstream overlay", () => {
+  const waves = read("playbooks/executing-waves.md");
+  const deltas = waves.match(/\n- Its tail does NOT apply[\s\S]*?\n\n/)?.[0];
+  assert.ok(deltas, "executing-waves.md has no thorough delta list");
+  assert.ok(deltas.includes('"Execute all tasks from the plan without stopping" yields to the wave boundary'));
+  assert.ok(deltas.includes('"Rulings, not stalls" does not apply'));
+  assert.match(deltas, /no `Ruling:` line is ever written/);
+  assert.match(deltas, /Pre-Flight Plan Review[\s\S]*?a `needs-user` stop/);
+  assert.match(deltas, /exhausted-unresolved[\s\S]*?a `needs-user` stop/);
+  const memo = read("docs/comparisons/executing-waves.md");
+  assert.match(memo, /superpowers 6\.4\.2/);
+  for (const quote of ["Execute all tasks from the plan without stopping", "Rulings, not stalls", "Ruling: <what you decided>"])
+    assert.ok(memo.includes(quote), `the comparison memo no longer cites upstream's "${quote}"`);
+});
+
+test("the drive-mode safety valve ends the session mid-wave at hard-stop with the sanctioned label", () => {
+  const valve = read("playbooks/executing-waves.md").match(/\*\*Safety valve\.\*\*[\s\S]*?\n\n/)?.[0];
+  assert.ok(valve, "executing-waves.md has no safety valve");
+  assert.match(valve, /after every\s+task script/);
+  assert.match(valve, /`hard-stop`, dispatch no new task, finish the tasks in flight/);
+  assert.ok(valve.includes("`Session ended mid-wave: <k> of <n> tasks done (stage: execution)`"));
+  assert.match(valve, /Two task scripts in a row reporting `unknown` count as `hard-stop`/);
+});
+
 test("harvested: task-reviewer/owns-its-findings-file — the reviewer has Write and persists its own findings", () => {
   const a = read("agents/task-reviewer.md");
   assert.match(a, /^tools:.*\bWrite\b/m, "task-reviewer must grant Write to persist its findings file");
   assert.match(a, /\.devcycle\/findings\/<task-id>-round-<n>\.md/);
   const e = read("playbooks/executing-waves.md");
-  assert.match(e, /confirms the findings file exists .* before logging `event=review-verdict`/i);
+  assert.match(e, /`missing-findings` → re-dispatch the reviewer for the same round, no verdict\s+acted on/);
 });
 
 test("harvested: fast-path/mini-cycle — the fast path keeps its evidence files and its one-reviewer floor", () => {
@@ -964,12 +991,14 @@ test("harvested: verifying-on-device/no-script-checkoff — only a structural ch
   assert.match(v, /\*\*ONE question per checklist item, never batched\*\*/);
 });
 
-test("the green gate step instructs both journal appends", () => {
-  const text = read("playbooks/executing-waves.md");
-  assert.match(text, /--kind event --event\s+gate-fail/,
-    "a failing green gate must append a gate-fail event");
-  assert.match(text, /--event gate-pass-clean/,
-    "a clean green gate must append a gate-pass-clean event");
+test("the green gate step runs the script that journals both gate outcomes", () => {
+  const gate = read("playbooks/executing-waves.md").match(/\*\*Green gate \(REQUIRED, deterministic\)\.\*\*[\s\S]*?\n7\. /)?.[0] ?? "";
+  assert.match(gate, /run `task-commit\.mjs`/, "the green gate step must run task-commit.mjs");
+  assert.match(read("references/commit-convention.md"), /node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/task-commit\.mjs"/,
+    "task-commit.mjs's invocation lives in references/commit-convention.md § The task commit");
+  const commit = read("scripts/task-commit.mjs");
+  assert.ok(commit.includes('event: "gate-fail"'), "a failing green gate must append a gate-fail event");
+  assert.ok(commit.includes('event: "gate-pass-clean"'), "a clean green gate must append a gate-pass-clean event");
 });
 
 test("the run-record write-site table declares the event kind", () => {
@@ -981,15 +1010,17 @@ test("the run-record write-site table declares the event kind", () => {
 
 test("every rejecting writer journals a culprit, and the boundary sentences name their enums", () => {
   const waves = read("playbooks/executing-waves.md");
-  assert.match(waves, /--kind event --event review-reject --stage execution --task <task-id> --culprit <the reviewer envelope's culprit> --attributedBy coordinator/,
-    "step 5 must journal review-reject with the culprit the reviewer envelope carries");
+  assert.match(read("scripts/task-verdict.mjs"), /review-reject/,
+    "step 5's verdict script must journal review-reject with the culprit the findings carry");
   assert.match(read("references/delegation.md"), /^culprit: <slug> \| none$/m,
     "the reviewer envelope must carry the slug, or step 5 has no data path to it");
-  assert.match(waves, /--event gate-fail --stage execution --task <task-id> --culprit <slug> --attributedBy coordinator/,
+  const commit = read("scripts/task-commit.mjs");
+  assert.ok(commit.includes('event: "gate-fail"') && commit.includes('attributedBy: "coordinator"') && /\bculprit\b/.test(commit),
     "step 6's gate-fail must carry a culprit");
-  assert.match(waves, /gate-caught-regression/, "step 6 must name the fallback slug for a gate the reviewer did not reject");
-  assert.match(waves, /`complete\|blocked\|rejected`/, "step 4 must name the dispatch outcome enum");
-  assert.match(waves, /modelSource/, "step 4 must name modelSource");
+  assert.match(commit, /gate-caught-regression/, "step 6 must name the fallback slug for a gate the reviewer did not reject");
+  assert.match(waves, /`task-intake\.mjs`/, "step 4 must run task-intake.mjs");
+  assert.match(read("references/ledger.md"), /--model-source explicit\|inherited/, "task-intake's flags must pass the dispatch's modelSource");
+  assert.match(read("scripts/task-intake.mjs"), /modelSource/, "step 4's intake script must write modelSource");
   assert.match(read("references/evidence.md"), /Culprit: <slug>/, "the needs-changes verdict block must carry a Culprit line");
   assert.match(read("agents/task-reviewer.md"), /Culprit: <slug>/, "the reviewer's output contract must name the Culprit line");
   const row = read("references/ledger.md").split("\n").find((l) => l.startsWith("| `event` |"));

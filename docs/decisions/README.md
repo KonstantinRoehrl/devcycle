@@ -42,16 +42,21 @@ executing-waves shrink removes; the maintainer accepted that trade on 2026-10-08
 budget is what each session actually loads. references/commit-convention.md § The task commit
 (task-commit.mjs's invocation and trailer) adds 11 lines to the runtime surface (5795 → 5806) and
 853 bytes to each playbook whose closure cites it: executing-waves, learning-from-sessions,
-onboarding-a-repo, sweeping-mechanical-changes and taking-the-fast-path.
+onboarding-a-repo, sweeping-mechanical-changes and taking-the-fast-path. executing-waves.md
+through the task scripts lowers the runtime surface 5830 → 5819 (−11 lines) and
+playbooks/executing-waves.md's context 110214 → 94484 (−15730 bytes): the per-step bookkeeping
+moved into scripts/task-*.mjs and the playbook no longer loads references/resume.md or
+references/loops.md. The run-record table's writer cells in references/ledger.md add 36 bytes to
+receiving-review, sweeping-mechanical-changes and taking-the-fast-path.
 
 ```text
-budget: surface-budget.json surfaceTotal 5830
-budget: context-budget.json playbooks/executing-waves.md 110214
+budget: surface-budget.json surfaceTotal 5819
+budget: context-budget.json playbooks/executing-waves.md 94484
 budget: context-budget.json playbooks/learning-from-sessions.md 62203
 budget: context-budget.json playbooks/onboarding-a-repo.md 30301
-budget: context-budget.json playbooks/receiving-review.md 113481
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87100
-budget: context-budget.json playbooks/taking-the-fast-path.md 80225
+budget: context-budget.json playbooks/receiving-review.md 113517
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87136
+budget: context-budget.json playbooks/taking-the-fast-path.md 80261
 ```
 
 ## 2026-10-07 — Fifth hook-like component: the function-hook module
