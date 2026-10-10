@@ -623,8 +623,12 @@ test("main thread + a live driver lock: reading, committing and restoring files 
 
 test("main thread + a stale driver lock changes nothing", () => {
   const cwd = drivenDir({ live: false });
-  for (const cmd of [...MOVES_OR_DESTROYS, ...MOVES_BEHIND_A_SUBSTITUTION_OR_HEREDOC])
+  // The cycle's stash rule cannot read these subcommands, so they may be stash: denied by that rule.
+  const unreadable = ["git $(echo switch) main", "git \"$(printf checkout)\" main"];
+  for (const cmd of [...MOVES_OR_DESTROYS, ...MOVES_BEHIND_A_SUBSTITUTION_OR_HEREDOC].filter((cmd) => !unreadable.includes(cmd)))
     assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a stale lock: ${cmd}`);
+  for (const cmd of unreadable)
+    assert.match(decideRaw({ cwd, tool_input: { command: cmd } }).reason, /^devcycle: main thread may not run git stash/);
   assert.equal(decideMain(cwd, "git stash"), "deny", "the stash rule still holds");
 });
 
@@ -713,4 +717,110 @@ test("main thread + a live driver lock: file restores, other repositories and qu
   for (const cmd of ["git checkout main --", `git -C ${other} -C ${cwd} checkout main`, "git -C sub checkout main", `git -C ${cwd}/sub/.. switch main`,
     "sh -c 'true; git checkout main'"])
     assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+});
+
+// Single-quoted text runs nothing where it sits; it is checked as the commands it would be wherever
+// it may be run later. The driven session's task-commit call with a single-quoted `--test-cmd` runs
+// no git through its quoted substitution, so it must not be told to stop its own driver.
+test("main thread + a live driver lock: a single-quoted --test-cmd is checked as the commands it runs", () => {
+  const cwd = drivenDir({ live: true });
+  for (const cmd of [
+    `${TASK_COMMIT} --test-cmd 'export TMPDIR=$(mktemp -d); node --test tests/unit/block-destructive-git.test.mjs' --subject "fix(guard): deny checkout under a drive lock"`,
+    `${TASK_COMMIT} --test-cmd 'export TMPDIR=$(mktemp -d); node --test tests/unit/task-commit.test.mjs' --subject "fix(commit): reset the git index on a refused commit"`,
+  ])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+  for (const cmd of [
+    `${TASK_COMMIT} --test-cmd '$(git checkout main)' --subject x`,
+    `${TASK_COMMIT} --test-cmd 'export T=$(git rev-parse HEAD)' --subject "fix(guard): deny checkout under a drive lock"`,
+    `${TASK_COMMIT} --test-cmd 'git $(echo checkout) main' --subject x`,
+    "trap 'git $(echo reset) --hard' EXIT",
+    "echo 'git $(echo checkout) main' | sh",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+  assert.equal(decideMain(cycleDir(stateAt("execution")), `${TASK_COMMIT} --test-cmd '$(git stash)' --subject x`), "deny");
+  // A guarded dispatch keeps deny-on-ambiguity over single-quoted substitutions: trap runs its text.
+  for (const cmd of ["trap '$(cat s)' EXIT; git status", "node x.mjs '$(cat s)'; git status"])
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a reviewer: ${cmd}`);
+});
+
+// Quoted text handed to something that runs it as code is read as code: a separator inside it ends
+// a command there, so the git after one is judged like any launched git.
+test("main thread + a live driver lock: a git in quoted text that find, script, ssh or an interpreter runs is denied", () => {
+  const cwd = drivenDir({ live: true });
+  for (const cmd of [
+    "find . -exec sh -c 'true; git checkout main' +",
+    "find . -name x -execdir git checkout main \\;",
+    "find . -ok git reset --hard {} \\;",
+    "script -q /dev/null sh -c 'true; git checkout main'",
+    "ssh localhost \"cd /x; git reset --hard\"",
+    "ssh localhost git checkout main",
+    "perl -e 'system(\"true; git checkout main\")'",
+    "perl -e 'system(\"git reset --hard\")'",
+    "python3 -c 'import os; os.system(\"git switch main\")'",
+    "ruby -e 'system(\"git clean -fdx\")'",
+    "node -e 'require(\"child_process\").execSync(\"git reset --hard\")'",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+  for (const cmd of ["find . -name '*.md' -exec grep -l 'git checkout' {} +", "find . -name git", "node -e 'console.log(1)'",
+    "ssh localhost ls", "perl -ne 'print if /checkout/' notes.md", "node --test tests/unit/block-destructive-git.test.mjs"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+  const cycle = cycleDir(stateAt("execution"));
+  for (const cmd of ["find . -exec git stash \\;", "node -e 'require(\"child_process\").execSync(\"git stash\")'", "ssh localhost git stash"])
+    assert.equal(decideMain(cycle, cmd), "deny", `expected deny for main-thread stash: ${cmd}`);
+});
+
+// A git whose subcommand is not written out — a substitution or variable supplies it, or xargs feeds
+// git its whole argv — may be any subcommand, so under a lock (and, for stash, during a cycle) it is
+// denied rather than read as harmless; so is a reset or clean whose options the shell fills in. An
+// argument the shell fills in elsewhere hides nothing.
+test("main thread + a live driver lock: a git subcommand the guard cannot read is denied, naming why", () => {
+  const cwd = drivenDir({ live: true });
+  for (const cmd of ["echo $(echo reset) > s; git $(cat s) --hard", "git $SUB --hard", "git \"$(cat s)\" main",
+    "echo $(echo checkout) main | xargs git", "echo checkout main | xargs git", "sh -c 'git $(cat s) --hard'",
+    "git reset $(cat opts)", "git reset $OPTS HEAD~1", "git clean -n $(cat opts)"])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+  assert.match(decideRaw({ cwd, tool_input: { command: "echo checkout main | xargs git" } }).reason, /cannot read/);
+  for (const cmd of ["git status", "git log -1 $(cat ref)", "git diff $(git merge-base HEAD main)", "git ls-files | xargs git log -1",
+    "git add $(cat files)", "git reset HEAD~1 -- $FILES"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+  const cycle = cycleDir(stateAt("execution"));
+  for (const cmd of ["echo $(echo stash) > s; git $(cat s)", "echo stash | xargs git", "git $SUB drop"])
+    assert.equal(decideMain(cycle, cmd), "deny", `expected deny for main-thread stash: ${cmd}`);
+  assert.match(decideRaw({ cwd: cycle, tool_input: { command: "git $SUB drop" } }).reason, /cannot read/);
+  for (const cmd of ["git log -1 $(cat ref)", "git ls-files | xargs git log -1"])
+    assert.equal(decideMain(cycle, cmd), "allow", `expected allow on the main thread: ${cmd}`);
+});
+
+// `-C` sends git elsewhere, but `--git-dir`, `--work-tree`, GIT_DIR and GIT_WORK_TREE can send it
+// back: the checkout git acts on is resolved from all of them before the lock's root is compared.
+test("main thread + a live driver lock: --git-dir, --work-tree, GIT_DIR and GIT_WORK_TREE pointing at the locked checkout are seen", () => {
+  const cwd = drivenDir({ live: true });
+  const other = cycleDir(null);
+  for (const cmd of [`git -C ${other} --git-dir=${cwd}/.git checkout main`, `git -C ${other} --git-dir ${cwd}/.git switch main`,
+    `git -C ${other} --work-tree=${cwd} reset --hard`, `GIT_DIR=${cwd}/.git git -C ${other} checkout main`,
+    `GIT_WORK_TREE=${cwd} git -C ${other} clean -fdx`, `export GIT_DIR=${cwd}/.git; git -C ${other} checkout main`,
+    `git -C ${other} -C $D checkout main`, `git -C ${other} --git-dir=$D/.git checkout main`,
+    // A work tree elsewhere still moves the branch of the git dir found above the checkout.
+    `git --work-tree=${other} reset --hard`, `GIT_WORK_TREE=${other} git checkout main`])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+  for (const cmd of [`git -C ${other} --git-dir=${other}/.git checkout main`, `GIT_DIR=${other}/.git git -C ${other} checkout main`,
+    `git -C ${other} --work-tree=. reset --hard`, `git --work-tree=${other} --git-dir=${other}/.git checkout main`])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+});
+
+// An unquoted heredoc body read by cat or tee is data apart from its expansions: prose naming git and
+// a drive word or stash, beside a substitution that runs no git, writes a file and runs nothing.
+test("an unquoted heredoc body fed to cat is data apart from a substitution that runs git", () => {
+  const cycle = cycleDir(stateAt("execution"));
+  for (const cmd of ["cat > notes.md <<EOF\nscratch at $(mktemp -d); never run git stash here\nEOF",
+    "cat > notes.md <<EOF\ngit stash is banned during a cycle\nEOF",
+    "cat <<EOF | tee notes.md\nmade $(date) — git stash drop is named only\nEOF"])
+    assert.equal(decideMain(cycle, cmd), "allow", `expected allow on the main thread: ${cmd}`);
+  for (const cmd of ["cat > notes.md <<EOF\nrun $(git stash) now\nEOF", "bash <<EOF\n$(mktemp -d)\ngit stash\nEOF",
+    "cat <<EOF | sh\nx $(date)\ngit stash\nEOF", "X=1 cat <<EOF\n$(date) git stash\nEOF"])
+    assert.equal(decideMain(cycle, cmd), "deny", `expected deny on the main thread: ${cmd}`);
+  const cwd = drivenDir({ live: true });
+  assert.equal(decideMain(cwd, "cat > b.md <<EOF\ndir $(mktemp -d): git checkout main is banned\nEOF"), "allow");
+  assert.equal(decide(REVIEWER, "cat > f.md <<EOF\nat $(date): \\`git reset --hard\\` is banned\nEOF"), "allow");
+  assert.equal(decide(REVIEWER, "cat > f.md <<EOF\nhead $(git rev-parse HEAD)\nEOF"), "deny");
 });
