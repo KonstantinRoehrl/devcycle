@@ -273,7 +273,8 @@ export function taskCommit(argv, cwd = process.cwd()) {
     const round = latestKeyed(ctx.ledgerPath, args.task, "review-round")?.round ?? 0;
     // A red gate rejects the round its reviewer accepted, so it counts toward the review loop's cap;
     // past it, the red gate is the one item left unresolved. The status goes before the gate's line,
-    // so a crash between them leaves the user's decision pending, never one more fix round.
+    // so that line never stands without it as one more fix round; a crash between them leaves the
+    // accept to gate again.
     const loopId = gate.gate === "fail" && round >= ROUND_CAP ? exhaustReviewLoop(root, args.task, round, 1) : null;
     const appended = recordGate(ctx, gate, evidenceRef, round);
     if (gate.gate === "deferred") return result("deferred", { gate: "deferred", appended });

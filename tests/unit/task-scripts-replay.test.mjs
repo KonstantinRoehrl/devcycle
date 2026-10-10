@@ -340,3 +340,27 @@ test("SC4 replay: a missing findings file re-dispatches the reviewer — one rev
     fx.cleanup();
   }
 });
+
+// Task ids restart every cycle, and the exhausted-unresolved status file is keyed by task id alone: an
+// earlier cycle in this checkout whose task 1 ran its review loop out must not hold up this cycle's.
+test("SC4 replay: an earlier cycle's exhausted review loop of the same task number does not hold up this cycle's commit", () => {
+  const fx = fixture();
+  try {
+    const ledgerPath = join(fx.dir, ".devcycle/ledger.md");
+    const preamble = readFileSync(ledgerPath, "utf8");
+    dispatchImplementer(fx, "1");
+    for (const round of [1, 2, 3]) {
+      if (round > 1) dispatchImplementer(fx, "1", round - 1);
+      assert.equal(intake(fx, "1", implement(fx, "1", "src/a.txt")).action, "review");
+      dispatchReviewer(fx, "1", round);
+      assert.equal(review(fx, "1", round, "needs-changes").action, round < 3 ? "rejected" : "needs-user");
+    }
+    // The next cycle's execution stage writes the ledger slot afresh; the findings stay behind, since
+    // finishing only offers to delete them.
+    writeInto(fx.dir, ".devcycle/ledger.md", preamble);
+    acceptedTask(fx, "1", "src/a.txt");
+    assert.equal(commitTask(fx, "1", "true").action, "committed");
+  } finally {
+    fx.cleanup();
+  }
+});

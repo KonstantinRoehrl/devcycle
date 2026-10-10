@@ -42,6 +42,8 @@ const PLAN = [
 
 const entry = (task, event, outcome, ref = "none") => `- [2026-10-08T10:00:00Z] task=${task} event=${event} outcome=${outcome} ref=${ref}`;
 const committed = (task) => entry(task, "committed", "accepted", "abc1234");
+// A line as the task scripts write it, with the idempotency key that carries its round.
+const keyed = (task, event, outcome, round, retry, ref = "none") => `${entry(task, event, outcome, ref)} key=${task}/${event}/${round}/${retry}`;
 const positionOf = ({ task, position, next }) => ({ task, position, next });
 
 function cycle({ ledger = null, state = [], branch = "feat/x", root = null, planHeader = "docs/plan.md", plan = PLAN } = {}) {
@@ -116,7 +118,7 @@ test("a third intake bounce, missing report or missing findings is a decision fo
 });
 
 test("an exhausted-unresolved loop is pending until a decision of that task names its loop id; drive and config decisions never clear it", () => {
-  const c = cycle({ ledger: [committed(1), entry(2, "review-verdict", "rejected (needs-changes)")] });
+  const c = cycle({ ledger: [committed(1), keyed(2, "review-verdict", "rejected", 3, 2, ".devcycle/findings/2-round-3.md")] });
   writeInto(c.repo, `.devcycle/findings/${reviewLoopId(2)}-status.md`, "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: none\n");
   let r = setup(c);
   assert.deepEqual(r.pendingDecision, { task: "2", loopId: "task-2-review" });
@@ -133,20 +135,35 @@ test("an exhausted-unresolved loop is pending until a decision of that task name
 // The status file carries no time, but every exhaustion is a rejection line in the ledger: one after
 // the latest decision naming the loop is an exhaustion that decision never saw.
 test("a review loop exhausted again after the user's decision is pending again; a missing findings file is no exhaustion", () => {
-  const c = cycle({ ledger: [committed(1), entry(2, "review-verdict", "rejected", ".devcycle/findings/2-round-3.md"),
+  const c = cycle({ ledger: [committed(1), keyed(2, "review-verdict", "rejected", 3, 2, ".devcycle/findings/2-round-3.md"),
     entry(2, "user-decision", "one more round for task-2-review")] });
   writeInto(c.repo, `.devcycle/findings/${reviewLoopId(2)}-status.md`, "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: none\n");
   appendFileSync(c.ledgerPath, [
-    entry(2, "review-round", "round 4"),
-    entry(2, "review-verdict", "rejected (missing findings file)", ".devcycle/findings/2-round-4.md"),
-    entry(2, "review-round", "round 4"),
-    entry(2, "review-verdict", "accepted", ".devcycle/findings/2-round-4.md"),
+    keyed(2, "review-round", "round 4", 4, 3),
+    keyed(2, "review-verdict", "rejected (missing findings file)", 4, 3, ".devcycle/findings/2-round-4.md"),
+    keyed(2, "review-round", "round 4", 4, 4),
+    keyed(2, "review-verdict", "accepted", 4, 4, ".devcycle/findings/2-round-4.md"),
   ].join("\n") + "\n");
   assert.equal(setup(c).pendingDecision, null);
-  appendFileSync(c.ledgerPath, entry(2, "review-verdict", "rejected (green gate: exit 1)", ".devcycle/evidence/2-gate.txt") + "\n");
+  appendFileSync(c.ledgerPath, keyed(2, "review-verdict", "rejected (green gate: exit 1)", 4, 5, ".devcycle/evidence/2-gate.txt") + "\n");
   const r = setup(c);
   assert.deepEqual(r.pendingDecision, { task: "2", loopId: "task-2-review" });
   assert.deepEqual(positionOf(r.tasks[1]), { task: "2", position: "exhausted-unresolved", next: "needs-user" });
+});
+
+// Task ids restart every cycle and the status file is keyed by task id alone, so one a same-numbered
+// task of an earlier cycle left stands for no rejection in this cycle's ledger: no decision is pending.
+test("an exhausted-unresolved status with no rejection past the round cap in this cycle's ledger is an earlier cycle's", () => {
+  for (const [line, position, next] of [
+    [keyed(2, "review-verdict", "accepted", 1, 0, ".devcycle/findings/2-round-1.md"), "accepted", "commit"],
+    [keyed(2, "review-verdict", "rejected", 2, 1, ".devcycle/findings/2-round-2.md"), "rejected", "fix"],
+  ]) {
+    const c = cycle({ ledger: [committed(1), line] });
+    writeInto(c.repo, `.devcycle/findings/${reviewLoopId(2)}-status.md`, "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: none\n");
+    const r = setup(c);
+    assert.equal(r.pendingDecision, null, position);
+    assert.deepEqual(positionOf(r.tasks[1]), { task: "2", position, next });
+  }
 });
 
 test("the current wave is the first with uncommitted work; dispatchable tasks carry their brief inputs once their dependencies are committed", () => {

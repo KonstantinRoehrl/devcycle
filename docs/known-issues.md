@@ -108,10 +108,20 @@ cheap tells a reboot from a clone that booted earlier. When no driver runs, remo
 `playbooks/executing-waves.md` routes exit 2 to a stop, so a coordinator that passes the wrong
 `--round` ends a driven session instead of dispatching again for the round the error names. The same
 holds for `task-verdict.mjs` refusing a round whose verdict was already acted on, and for
-`task-commit.mjs` refusing a task whose accept a red gate since rejected. It fails safe:
+`task-commit.mjs` refusing a task with no open accept (`references/commit-convention.md` § The task
+commit). It fails safe:
 `/devcycle:continue` resumes with `wave-setup.mjs`'s `reviewRound`. The fix is for `task-dispatch.mjs`
 to return an exit-0 `wrong-round` action naming the expected round, which the playbook routes to
 re-slicing the reviewer brief for that round.
+
+### A crash between a round-3 rejection's status file and its ledger line re-reviews the round (low)
+
+`scripts/task-verdict.mjs` writes `task-<id>-review-status.md` and then the round-3 rejection's
+ledger line. The status file counts only for a rejection this cycle's ledger holds, because task ids
+restart every cycle and an earlier cycle's file must not block this one, so a crash between the two
+writes resumes as an undecided round: the round-3 reviewer is dispatched again, or the gate re-runs
+after a round-3 accept, instead of the decision going straight to the user. It fails safe. Nothing
+on disk tells that crash from a stale file an earlier cycle left.
 
 ### The runtime resolves the default branch without `gh` (low)
 

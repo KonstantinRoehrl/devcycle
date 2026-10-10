@@ -190,8 +190,9 @@ file)` each allow two retries per task: the third such line for the task is a pe
 `.devcycle/findings/task-<id>-review-status.md` (`references/loops.md` § Where the status lives).
 While that file reads `exhausted-unresolved` and no `user-decision` line of that task (`task=drive`
 and `task=config` lines never count) naming `task-<id>-review` in `outcome=` follows its latest
-`review-verdict` rejection (a missing findings file is none), the task's position is that pending
-decision, whatever its last ledger event: present it to the user (drive mode: stop `needs-user`).
+round-3-or-later `review-verdict` rejection in this cycle's ledger (a missing findings file is none;
+with none, the file is an earlier cycle's), the task's position is that pending decision, whatever
+its last ledger event: present it to the user (drive mode: stop `needs-user`).
 
 ## Review acceptance is never inferable from git
 

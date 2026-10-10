@@ -31,18 +31,34 @@ const OWN_OUTCOMES = new Set(["accepted", "rejected", MISSING_FINDINGS]);
 // Blocking-ness is derived from severity (references/findings.md § Severity): critical and high block.
 const BLOCKING_RE = /^\s*\d+\.\s*\[(critical|high)\]/i;
 
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+// Whether `line` is a fence marker that closes the block the `open` marker began.
+const closesFence = (line, open) => {
+  const marker = line.match(FENCE_RE)?.[1];
+  return Boolean(marker) && marker[0] === open[0] && marker.length >= open.length;
+};
+
 // The lines outside fenced code blocks: inside one, a reviewer quotes a verdict or a finding without
 // giving it.
 function unfencedLines(text) {
   let fence = null;
   return text.split("\n").filter((line) => {
-    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)?.[1];
-    if (marker && (!fence || (marker[0] === fence[0] && marker.length >= fence.length))) {
-      fence = fence ? null : marker;
+    if (fence ? closesFence(line, fence) : FENCE_RE.test(line)) {
+      fence = fence ? null : line.match(FENCE_RE)[1];
       return false;
     }
     return !fence;
   });
+}
+
+// A file that is one fenced block and nothing else — references/evidence.md's verdict shape copied
+// with its fence — is read as the block's text.
+function unwrapWholeFence(text) {
+  const lines = text.replace(/^\s*\n/, "").trimEnd().split("\n");
+  const open = lines[0].match(FENCE_RE)?.[1];
+  const inner = lines.slice(1, -1);
+  const whole = open && lines.length > 1 && closesFence(lines.at(-1), open) && !inner.some((line) => closesFence(line, open));
+  return whole ? inner.join("\n") : text;
 }
 
 // The verdict block's two header lines, tolerating the emphasis and code spans a markdown author
@@ -50,7 +66,7 @@ function unfencedLines(text) {
 // the file carries no usable verdict — none, two that disagree, a needs-changes without a valid
 // culprit, or an accept that lists a blocking finding.
 function parseVerdict(text) {
-  const lines = unfencedLines(text);
+  const lines = unfencedLines(unwrapWholeFence(text));
   const plain = lines.map((line) => line.replace(/[*`]/g, ""));
   const verdicts = new Set(plain.flatMap((line) => {
     const word = line.match(/^\s*Verdict:\s*(accept|accepted|approved|needs-changes)\s*$/i)?.[1].toLowerCase();
@@ -73,11 +89,13 @@ function linesSince(ledger, task, reviewRound) {
 }
 
 // task-commit.mjs's green-gate lines share the `review-verdict` key space, so a reviewer's verdict
-// takes the task's next review-verdict retry rather than its review-round's. A crash re-run finds
-// the verdict line already written after its own review-round line and reuses that key.
-function verdictRetry(ledger, task, later) {
-  const written = later.find((e) => e.event === "review-verdict" && e.key);
-  return written ? Number(written.key.split("/")[3]) : nextRetry(ledger, task, "review-verdict");
+// takes the task's next review-verdict retry rather than its review-round's. A crash re-run finds its
+// outcome already the round's latest line and reuses that key; a file that reads otherwise now — one
+// that turned up after the round logged it missing — gets a line of its own, so the ledger ends on
+// what this run reports.
+function verdictRetry(ledger, task, later, outcome) {
+  const written = later.findLast((e) => e.event === "review-verdict" && e.key);
+  return written?.outcome === outcome ? Number(written.key.split("/")[3]) : nextRetry(ledger, task, "review-verdict");
 }
 
 export const reviewLoopId = (task) => `task-${task}-review`;
@@ -92,12 +110,15 @@ export function exhaustReviewLoop(root, task, round, residue) {
   return loopId;
 }
 
-const exhausts = (e) => e.event === "review-verdict" && e.outcome.startsWith("rejected") && !e.outcome.startsWith(MISSING_FINDINGS);
+// A rejection — the reviewer's or the green gate's, never a missing findings file — at or past the
+// round cap: the line each exhaustion of the loop writes right after its status file.
+const exhausts = (e) => e.event === "review-verdict" && e.outcome.startsWith("rejected") &&
+  !e.outcome.startsWith(MISSING_FINDINGS) && Number(e.key?.split("/")[2]) >= ROUND_CAP;
 
 // references/resume.md § Exhausted-unresolved: the loop id while the task's review loop waits on the
-// user, else null. `entries` are the task's ledger lines in file order. The status file carries no
-// time, but a decision on the loop comes past the round cap, so any rejection after the latest one is
-// an exhaustion that decision never saw.
+// user, else null. `entries` are the task's ledger lines of this cycle, in file order. The status file
+// is keyed by a task id every cycle reuses and carries no time, so it counts only for an exhaustion
+// this ledger holds, and only while no decision on the loop follows the latest one.
 export function pendingReviewLoop(root, task, entries) {
   const loopId = reviewLoopId(task);
   let status;
@@ -108,7 +129,7 @@ export function pendingReviewLoop(root, task, entries) {
   }
   if (!/^status:\s*exhausted-unresolved\b/m.test(status)) return null;
   const decided = entries.findLastIndex((e) => e.event === "user-decision" && e.outcome.includes(loopId));
-  return decided < 0 || entries.slice(decided + 1).some(exhausts) ? loopId : null;
+  return entries.findLastIndex(exhausts) > decided ? loopId : null;
 }
 
 export function verdict(argv, cwd = process.cwd()) {
@@ -133,32 +154,32 @@ export function verdict(argv, cwd = process.cwd()) {
   const closing = later.find((e) => !(e.event === "review-verdict" && OWN_OUTCOMES.has(e.outcome)));
   if (closing)
     throw new UsageError(`round ${round} of task ${task} is closed: its verdict was acted on (${closing.event} ${closing.outcome})`);
-  const retry = verdictRetry(ledger, task, later);
   const findingsRel = relative(root, resolve(cwd, flags["--findings"]));
   const findingsAbs = join(root, findingsRel);
   const parsed = existsSync(findingsAbs) ? parseVerdict(readFileSync(findingsAbs, "utf8")) : null;
+  const accepted = parsed?.verdict === "accept";
+  const outcome = !parsed ? MISSING_FINDINGS : accepted ? "accepted" : "rejected";
+  const retry = verdictRetry(ledger, task, later, outcome);
 
   const appended = [];
-  const key = ledgerKey({ task, event: "review-verdict", round, retry });
-  const ledgerLine = (outcome) => {
+  const ledgerLine = () => {
     const r = appendLedgerLine(ledger, { task, event: "review-verdict", outcome, ref: findingsRel, round, retry });
-    if (r.appended) appended.push(key);
+    if (r.appended) appended.push(ledgerKey({ task, event: "review-verdict", round, retry }));
     return parseLedgerLine(r.line);
   };
   const base = { task, round, retry, findingsPath: findingsRel };
 
   if (!parsed) {
-    ledgerLine(MISSING_FINDINGS);
+    ledgerLine();
     return retryCount(ledger, task, MISSING_FINDINGS) > RETRY_CAP
       ? { ...base, action: "needs-user", reason: "retry cap: a third missing findings file", verdict: null, culprit: null, blocking: null, appended }
       : { ...base, action: "missing-findings", verdict: null, culprit: null, blocking: null, appended };
   }
 
-  const accepted = parsed.verdict === "accept";
-  // The status goes first, so a crash before the rejection's line leaves the user's decision pending,
-  // never a rejected round 3 that reads as one more fix to make.
+  // The status goes first, so a rejected round 3 never stands in the ledger without it — a line that
+  // would read as one more fix to make. A crash between the two leaves the round to read again.
   const loopId = !accepted && round >= ROUND_CAP ? exhaustReviewLoop(root, task, round, parsed.blocking) : null;
-  const line = ledgerLine(accepted ? "accepted" : "rejected");
+  const line = ledgerLine();
   const toplevel = gitToplevel(root);
   const row = (kind, fields, matchKeys) => {
     if (appendRunRecordOnce({ toplevel, run, kind, fields, matchKeys }).appended) appended.push(`rr:${kind}`);

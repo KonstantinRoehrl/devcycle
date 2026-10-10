@@ -364,7 +364,11 @@ test("a commit is refused unless the task's latest verdict is an open accept: no
 test("a review loop whose exhausted-unresolved status awaits the user is a user decision before any gate or commit", () => {
   const fx = fixture();
   try {
-    acceptRound(fx, 3, 1, 1);
+    appendFileSync(join(fx.dir, ".devcycle/ledger.md"), [
+      "- [2026-01-01T00:02:00Z] task=1 event=review-round outcome=round 3 ref=none key=1/review-round/3/1",
+      "- [2026-01-01T00:03:00Z] task=1 event=review-verdict outcome=rejected ref=.devcycle/findings/1-round-3.md key=1/review-verdict/3/1",
+      "",
+    ].join("\n"));
     writeInto(fx.dir, ".devcycle/findings/task-1-review-status.md", "status: exhausted-unresolved rounds: 3/3 residue: 1 carried-to: none\n");
     writeInto(fx.dir, "src/a.txt", "a1\n");
     const before = head(fx);
@@ -373,6 +377,19 @@ test("a review loop whose exhausted-unresolved status awaits the user is a user 
     assert.deepEqual([out.action, out.loopId], ["needs-user", "task-1-review"]);
     assert.equal(existsSync(join(fx.dir, "gate-ran")), false, "the gate is not run");
     assert.equal(head(fx), before);
+  } finally {
+    cleanup(fx);
+  }
+});
+
+// Task ids restart every cycle and the status file is keyed by task id alone: one a same-numbered task
+// of an earlier cycle left behind stands for no rejection in this cycle's ledger.
+test("an exhausted-unresolved status no rejection in this cycle's ledger wrote does not hold up the commit", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, ".devcycle/findings/task-1-review-status.md", "status: exhausted-unresolved rounds: 3/3 residue: 1 carried-to: none\n");
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    assert.equal(commitTask(fx).out.action, "committed");
   } finally {
     cleanup(fx);
   }
@@ -395,8 +412,8 @@ test("the user's decision on an exhausted review loop, after its rejected round 
   }
 });
 
-// The status goes before the gate-fail line: a crash between them must leave a pending user decision,
-// never a ledger that reads as a rejected round with a fix round still to go.
+// The status goes before the gate-fail line: a crash between them must never leave a ledger that reads
+// as a rejected round with a fix round still to go.
 test("a round-3 red gate whose status cannot be written appends no gate-fail line", () => {
   const fx = fixture();
   try {

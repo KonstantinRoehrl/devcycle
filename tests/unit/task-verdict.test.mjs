@@ -111,6 +111,24 @@ test("a re-review after a green-gate rejection is the next round, on the next re
   assert.deepEqual(verdict(f, 2).out.appended, [], "a re-run after a crash reuses the written key");
 });
 
+// The script's reply and its ledger agree: a findings file that turns up after its round was logged
+// missing is read as that round's verdict on the next review-verdict retry, not on the missing line's.
+test("a findings file read after the round logged it missing appends its own verdict line", () => {
+  const f = fixture();
+  assert.equal(verdict(f).out.action, "missing-findings");
+  writeInto(f.repo, ".devcycle/findings/5-round-1.md", ACCEPT);
+  const late = verdict(f);
+  assert.equal(late.out.action, "accepted");
+  assert.deepEqual(late.out.appended, ["5/review-verdict/1/1", "rr:verdict"]);
+  assert.match(ledgerTail(f), / event=review-verdict outcome=accepted ref=\.devcycle\/findings\/5-round-1\.md key=5\/review-verdict\/1\/1$/);
+  assert.deepEqual(verdict(f).out.appended, [], "a re-run after a crash reuses the accept's key");
+  rmSync(join(f.repo, ".devcycle/findings/5-round-1.md"));
+  assert.deepEqual(verdict(f).out.appended, ["5/review-verdict/1/2"], "the file gone again is a line of its own");
+  writeInto(f.repo, ".devcycle/findings/5-round-1.md", ACCEPT);
+  assert.deepEqual(verdict(f).out.appended, ["5/review-verdict/1/3"], "and so is its return");
+  assert.match(ledgerTail(f), / outcome=accepted .* key=5\/review-verdict\/1\/3$/);
+});
+
 test("the verdict header reads in any case, approved and accepted read as accept; off-contract text is still no verdict", () => {
   for (const [body, action] of [
     ["verdict: accept\n", "accepted"],
@@ -143,6 +161,24 @@ test("the verdict is read from the file's own verdict lines: a quote in a fenced
     assert.equal(r.out.action, action, name);
     if (action === "rejected") assert.deepEqual([r.out.culprit, r.out.blocking], ["novel:missing-edge-case", 2], name);
     if (action === "accepted") assert.equal(r.out.blocking, 0, `${name}: a fenced finding is not one`);
+  }
+});
+
+// references/evidence.md shows the verdict shape inside a fenced block, so a reviewer may copy it fence
+// and all: a file that is that one block is its text, and a fence inside it is still a quote.
+test("a findings file that is one fenced block and nothing else is read as the block's text", () => {
+  for (const [name, body, action] of [
+    ["a fenced accept", "```markdown\nVerdict: accept\n\n1. [low] a naming nit\n```\n", "accepted"],
+    ["a fenced needs-changes with blank lines around it", `\n\`\`\`markdown\n${REJECT}\`\`\`\n\n`, "rejected"],
+    ["a quote fenced inside the block", `\`\`\`\`markdown\n\`\`\`\nVerdict: accept\n\`\`\`\n${REJECT}\`\`\`\`\n`, "rejected"],
+    ["two fenced blocks", "```\nVerdict: accept\n```\n```\nVerdict: accept\n```\n", "missing-findings"],
+    ["a fenced block after text", `the template:\n\`\`\`markdown\nVerdict: accept\n\`\`\`\n`, "missing-findings"],
+  ]) {
+    const f = fixture();
+    writeInto(f.repo, ".devcycle/findings/5-round-1.md", body);
+    const r = verdict(f);
+    assert.equal(r.out.action, action, name);
+    if (action === "rejected") assert.deepEqual([r.out.culprit, r.out.blocking], ["novel:missing-edge-case", 2], name);
   }
 });
 
@@ -207,8 +243,8 @@ test("a rejected round 3 writes the exhausted-unresolved status and becomes a us
     "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: none\n");
 });
 
-// The status goes before the rejection's ledger line: a crash between them must leave a pending user
-// decision, never a ledger that reads as a rejected round with a fix round still to go.
+// The status goes before the rejection's ledger line: a crash between them must never leave a ledger
+// that reads as a rejected round with a fix round still to go.
 test("a round-3 rejection whose status cannot be written appends no rejection line, so the re-run finishes it", () => {
   const f = fixture(3);
   writeInto(f.repo, ".devcycle/findings/5-round-3.md", REJECT);

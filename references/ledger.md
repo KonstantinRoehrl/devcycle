@@ -78,8 +78,8 @@ run-record row — and `depthBand`) and exits non-zero only on a usage (2) or en
   `outcome=complete` (`review`). All but a missing report write the `dispatch` row.
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-verdict.mjs" --run <run-id> --task <id> --round <n> --findings <path> --evidence-class red-green|green-green|convention`
   once the reviewer's envelope returns, against that round's `review-round` line (exit 2 once a later
-  task line not its own, a red gate's say, acted on it): a findings file missing, empty or malformed
-  (no unfenced `Verdict:` or two that disagree, `needs-changes` lacking a valid `Culprit:`, `accept`
+  task line it did not write acted on it): a findings file missing, empty or malformed (no `Verdict:`
+  outside a fenced quote or two that disagree, `needs-changes` lacking a valid `Culprit:`, `accept`
   with a critical or high finding) appends `review-verdict outcome=rejected (missing findings file)`
   (`missing-findings`); else `outcome=accepted` or `rejected`, the `verdict` row and, on
   `needs-changes`, the `review-reject` event row (`accepted` / `rejected`). A rejected round 3 writes

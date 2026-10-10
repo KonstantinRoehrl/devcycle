@@ -66,7 +66,9 @@ playbooks/planning-waves.md and the drive: row in references/resume.md); plannin
 The driver's `session=` rule: `surfaceTotal` 5888 → 5894 (+6); +91 bytes on each playbook whose
 closure cites references/handoff.md, and 186 more on planning-waves (its opt-in gate, 70936 → 71213)
 and on each that cites references/resume.md (receiving-review 115452, sweeping-mechanical-changes
-89071, taking-the-fast-path 82196).
+89071, taking-the-fast-path 82196). The stale review-status rule in references/resume.md (an
+earlier cycle's status file never counts): receiving-review 115452 → 115529 (+77);
+sweeping-mechanical-changes 89071 → 89135 and taking-the-fast-path 82196 → 82260 (+64 each).
 
 ```text
 budget: surface-budget.json surfaceTotal 5894
@@ -75,11 +77,11 @@ budget: context-budget.json playbooks/finishing-the-cycle.md 54549
 budget: context-budget.json playbooks/learning-from-sessions.md 62203
 budget: context-budget.json playbooks/onboarding-a-repo.md 30301
 budget: context-budget.json playbooks/planning-waves.md 71213
-budget: context-budget.json playbooks/receiving-review.md 115452
+budget: context-budget.json playbooks/receiving-review.md 115529
 budget: context-budget.json playbooks/reviewing-the-branch.md 56012
 budget: context-budget.json playbooks/scoping-the-request.md 27812
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 89071
-budget: context-budget.json playbooks/taking-the-fast-path.md 82196
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 89135
+budget: context-budget.json playbooks/taking-the-fast-path.md 82260
 budget: context-budget.json playbooks/verifying-on-device.md 51536
 budget: context-budget.json playbooks/writing-the-findings-document.md 66648
 ```
