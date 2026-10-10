@@ -46,7 +46,8 @@
 // metacharacter glued flush against a neighbour (`f(){`), and a git OBFUSCATED by a backslash or
 // quote INSIDE a substitution (`` `gi\t reset` ``, `$(g\it reset)`) — the substitution detector is a
 // raw-text `\bgit\b` tripwire, so it sees the plain spelling but not the broken-up one — and a script
-// or git configuration that a heredoc writes and git itself then runs (an alias, `core.pager`), or
+// or git configuration that a heredoc writes and git itself then runs (an alias, `core.pager`), a
+// script that `echo`/`printf` writes and a shell then runs (`echo 'git reset --hard' > s; sh s`), or
 // devcycle's own task-dispatch.mjs rewritten before the call that feeds it a brief, which the Write
 // tool or a second Bash call could write just as well. Closing any
 // of these needs a shell-grade tokenizer, whose maintenance cost outweighs the evasion it stops for

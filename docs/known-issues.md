@@ -143,3 +143,19 @@ substitution (`trap '$(cat s)' EXIT`), so on the main thread it can move the bra
 holds the checkout. It is left rather than fixed because the launcher list is a bounded denylist: no
 finite list names every program that runs its arguments. Stop the driver before scripting git
 through such a launcher.
+
+### A script that `echo` or `printf` writes and a shell then runs is not judged (low)
+
+`echo 'git reset --hard' > s; sh s` is allowed in every origin, while the heredoc spelling of the same
+script (`cat <<'EOF' > s.sh … bash s.sh`) is denied: the guard reads a heredoc body as commands but
+has no detector for a script that another command writes to a file. It is one of the hook header's
+stated bounds — the Write tool or a second Bash call could write the script just as well — so a
+cooperative dispatch is the line of defence there.
+
+### Pointing `core.worktree` back at the locked checkout from another repo is allowed (low)
+
+Under a driver's lock, `git -C OTHER -c core.worktree=ROOT checkout -f main` is allowed: the guard
+judges which checkout a git touches by its `-C`/`--git-dir`/`--work-tree` options and does not read a
+`core.worktree` set through `-c`, so this spelling can move the locked checkout's files while the
+driver runs. It is unchanged since the lock rule landed. Stop the driver before running git against
+another repository with a `core.worktree` override.
