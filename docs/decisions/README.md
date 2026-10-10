@@ -5,6 +5,28 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-10 — Closures stop creeping back up
+
+**Decision:** the two files sitting exactly at their line ceilings get headroom by deletion and
+compression, never by moving text into another file: `commands/cycle.md` 174 → 164 lines and
+`playbooks/learning-from-sessions.md` 320 → 310. The ceilings (`commandMax` 174, `playbookMax`
+320) stay. `scripts/validate.mjs` check 9 now prints a notice on stdout, never a failure, for a
+command or playbook within `NEAR_CEILING_LINES` (5) lines of its ceiling, so growth toward a
+ceiling is visible before an edit fails on it.
+
+**Why:** a file at its ceiling turns any edit that adds a line into a baseline raise, which is how
+ceilings creep. `cycle.md` lost a paragraph restating the `profile`'s engine choice, which
+`references/config.md` owns, plus re-wraps; `learning-from-sessions.md` lost clauses restating what
+its Modes section already states and a historical note, plus re-wraps. The playbook's refs-only
+closure falls 62130 → 61727 bytes and `surfaceTotal` 5911 → 5891.
+
+**Supersedes:** nothing; check 9's failures are unchanged.
+
+```text
+budget: surface-budget.json surfaceTotal 5891
+budget: context-budget.json playbooks/learning-from-sessions.md 61727
+```
+
 ## 2026-10-10 — Section-scoped reads: a step loads only the section it executes
 
 **Decision:** a citation may name one `##` section of a reference instead of the whole file, as

@@ -76,6 +76,9 @@ export function docsSubdirTrackingErrors(repoRoot) {
 }
 
 const DESCRIPTION_BUDGET_TOTAL = 6000; // chars; source: docs/platform-notes.md
+// Check 9 prints a notice, never a failure, for a command or playbook this many lines or fewer
+// under its ceiling, so the next edit's growth is seen before it fails.
+const NEAR_CEILING_LINES = 5;
 
 if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const root = process.cwd();
@@ -502,6 +505,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     return text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
   };
   let surfaceLines = 0;
+  const nearCeilingNotices = [];
   for (const p of surface) {
     const n = lines(p), r = rel(p);
     surfaceLines += n;
@@ -509,6 +513,10 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       fail(`${r}: ${n} lines > ${budgets.commandMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
     if (budgetsParsed && Number.isInteger(budgets.playbookMax) && r.startsWith("playbooks/") && n > budgets.playbookMax)
       fail(`${r}: ${n} lines > ${budgets.playbookMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
+    const key = r.startsWith("commands/") ? "commandMax" : r.startsWith("playbooks/") ? "playbookMax" : null;
+    const max = key && budgetsParsed ? budgets[key] : undefined;
+    if (Number.isInteger(max) && n <= max && max - n < NEAR_CEILING_LINES)
+      nearCeilingNotices.push(`validate: notice: ${r}: ${n} lines, within ${NEAR_CEILING_LINES} of the ${key} ceiling ${max}`);
   }
   if (budgetsParsed && Number.isInteger(budgets.surfaceTotal) && surfaceLines > budgets.surfaceTotal)
     fail(
@@ -1210,6 +1218,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     for (const r of contextRows)
       console.log(`  ${r.path}  refs-only ${r.bytes}/${r.limit} B  all-hops ${r.allHops.files.length} files, ${r.allHops.words} words`);
   }
+
+  for (const notice of nearCeilingNotices) console.log(notice);
 
   if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
   console.log("validate: ok");

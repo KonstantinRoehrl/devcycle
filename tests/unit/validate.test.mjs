@@ -690,6 +690,34 @@ test("budget check: a playbook over 150 lines fails", () => {
   assert.doesNotMatch(stderr, /runtime surface/); // the per-file arm fired, not the total arm
 });
 
+// Writes one padding playbook of `count` lines with a context-budget entry generous enough never
+// to fire, re-recording the decisions log so check 28 accepts the new entry.
+const padPlaybook = (dir, count) => {
+  writeInto(dir, "playbooks/padding-things.md", "x\n".repeat(count));
+  writeInto(
+    dir,
+    CONTEXT_PATH,
+    JSON.stringify({ "playbooks/demoing-things.md": 999999, "playbooks/padding-things.md": 999999 }, null, 2) + "\n"
+  );
+  recordBudgets(dir);
+};
+
+test("budget check: a playbook within 5 lines of playbookMax passes with a notice", () => {
+  const dir = makePluginFixture();
+  padPlaybook(dir, 154 - 2);
+  const { status, stdout } = runValidate(dir);
+  assert.equal(status, 0, stdout);
+  assert.match(stdout, /validate: notice: playbooks\/.+: \d+ lines, within 5 of the playbookMax ceiling/);
+});
+
+test("budget check: a playbook 5 lines under playbookMax prints no notice", () => {
+  const dir = makePluginFixture();
+  padPlaybook(dir, 154 - 5);
+  const { status, stdout } = runValidate(dir);
+  assert.equal(status, 0, stdout);
+  assert.doesNotMatch(stdout, /validate: notice:/);
+});
+
 // --- check 10: no agent pins a model ---
 
 test("agent check: a model: pin in agent frontmatter fails", () => {
