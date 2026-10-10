@@ -24,13 +24,30 @@ under Node. The pinned Node version is in `.nvmrc`.
 - `node scripts/doctor.mjs` (local only)
 - `node scripts/find-state-files.mjs` — enumerates every `.devcycle/state.md` for `/devcycle:continue`'s resume discovery; Node-walks the tree so the gitignored `.devcycle/` can't hide a state file
 
+## Done means
+
+Every gate in `CONTRIBUTING.md` § Before opening a PR passes. A single test file runs as
+`node --test tests/unit/<name>.test.mjs`. `scripts/citation-grammar.mjs` and
+`scripts/context-report.mjs` are local worklist and report tools; the rules they surface are
+gated by `scripts/validate.mjs` (its citation-grammar and closure-budget checks).
+
+## Rules that fail late
+
+- A `${CLAUDE_PLUGIN_ROOT}`-prefixed path is a read; a bare path names an owner —
+  `references/README.md` § Citation grammar.
+- One owner per concept: move a rule, don't copy it — `CONTRIBUTING.md` § One owner per concept.
+- Line and closure ceilings live in `tests/fixtures/*budget*.json` and rise only with a
+  `docs/decisions/README.md` entry naming the new figure (`scripts/validate.mjs` check 28).
+- `docs/devcycle/promotions/` and `docs/devcycle/maintenance-findings/` are ledgers written by
+  `/devcycle:learn` and `/devcycle:maintain` — not hand-edited, not read wholesale.
+
 ## Before you trust a doc
 
 Docs here have been wrong before — content read from a stale cache looked authoritative
 and wasn't. Verify a doc's claim against the live repo directly: `commands/`, `playbooks/`,
 `references/`, and `docs/README.md`.
 
-## Structure changes and doc changes move together (§0.5)
+## Structure changes and doc changes move together
 
 A code or structure change here is not done until `README.md`, the relevant `docs/` page,
 and the hub index reflect it — in the same change, not a follow-up.
