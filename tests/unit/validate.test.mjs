@@ -57,6 +57,16 @@ const playbook = (dir, body) => writeInto(dir, "playbooks/demoing-things.md", FI
 // own heading so it never widens check 23's window around a dispatch.
 const readSection = (name) => `\n## Inputs\n\nRead \`\${CLAUDE_PLUGIN_ROOT}/references/${name}\` first.\n`;
 
+// Check 15 holds every entry point (command or playbook) to a context-budget entry, so a test that
+// adds one gives it an entry generous enough never to fire, and re-records the decisions log so
+// check 28 accepts it.
+const budgetEntryPoints = (dir, ...paths) => {
+  const context = JSON.parse(readFileSync(join(dir, CONTEXT_PATH), "utf8"));
+  for (const p of paths) context[p] = 999999;
+  writeInto(dir, CONTEXT_PATH, JSON.stringify(context, null, 2) + "\n");
+  recordBudgets(dir);
+};
+
 // The stage enum lives in commands/cycle.md; checks that consult it need it present, and check 27
 // holds the stage table to it.
 const withStageEnum = (dir) => {
@@ -482,6 +492,7 @@ test("consequence parity: a description naming its own consequence passes", () =
   const dir = makePluginFixture();
   writeInto(dir, ROUTING_PATH, routing("| review code | `review` | read-only | yes |\n"));
   writeInto(dir, "commands/review.md", '---\ndescription: "Review a branch. Read-only, starts no cycle."\n---\n');
+  budgetEntryPoints(dir, "commands/review.md");
   ok(runValidate(dir));
 });
 
@@ -496,6 +507,7 @@ test("consequence parity: a description naming no consequence passes", () => {
   const dir = makePluginFixture();
   writeInto(dir, ROUTING_PATH, routing("| review code | `review` | read-only | yes |\n"));
   writeInto(dir, "commands/review.md", '---\ndescription: "Review a branch. Standalone: no cycle is started."\n---\n');
+  budgetEntryPoints(dir, "commands/review.md");
   ok(runValidate(dir));
 });
 
@@ -654,10 +666,10 @@ test("budget check: a command over 100 lines fails", () => {
 // Pads the surface with `count` gerund-named playbooks of 100 lines each — each
 // one under the 150-line per-file ceiling, so only the total arm can fire.
 // Each padding playbook also gets a context-budget entry, generous enough never to fire:
-// check 15 requires every playbook to declare one, and these exist to move the line total. The
+// check 15 requires every entry point to declare one, and these exist to move the line total. The
 // decisions log records the new entries, so check 28 does not fail them either.
 const padSurface = (dir, count) => {
-  const context = { "playbooks/demoing-things.md": 999999 };
+  const context = { "playbooks/demoing-things.md": 999999, "commands/cycle.md": 999999 };
   for (let i = 0; i < count; i++) {
     writeInto(dir, `playbooks/padding-${i}.md`, "x\n".repeat(100));
     context[`playbooks/padding-${i}.md`] = 999999;
@@ -691,15 +703,10 @@ test("budget check: a playbook over 150 lines fails", () => {
 });
 
 // Writes one padding playbook of `count` lines with a context-budget entry generous enough never
-// to fire, re-recording the decisions log so check 28 accepts the new entry.
+// to fire.
 const padPlaybook = (dir, count) => {
   writeInto(dir, "playbooks/padding-things.md", "x\n".repeat(count));
-  writeInto(
-    dir,
-    CONTEXT_PATH,
-    JSON.stringify({ "playbooks/demoing-things.md": 999999, "playbooks/padding-things.md": 999999 }, null, 2) + "\n"
-  );
-  recordBudgets(dir);
+  budgetEntryPoints(dir, "playbooks/padding-things.md");
 };
 
 test("budget check: a playbook within 5 lines of playbookMax passes with a notice", () => {
@@ -1234,14 +1241,49 @@ test("context budget: growth past a playbook's baseline fails and names both num
   assert.match(stderr, /raise the baseline in this same commit/);
 });
 
-test("context budget: a baseline entry for a playbook that no longer exists fails", () => {
+test("context budget: a command missing from the baseline fails — commands are entry points too", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": 999999 }, null, 2) + "\n");
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(
+    stderr,
+    /commands\/.+: no entry in tests\/fixtures\/context-budget\.json — an entry point must declare its context budget/
+  );
+});
+
+test("context budget: growth past a command's baseline fails and names both numbers", () => {
   const dir = makePluginFixture();
   writeInto(
     dir,
     CONTEXT_PATH,
-    JSON.stringify({ "playbooks/demoing-things.md": 999999, "playbooks/gone-away.md": 10 }, null, 2) + "\n"
+    JSON.stringify({ "playbooks/demoing-things.md": 999999, "commands/cycle.md": 1 }, null, 2) + "\n"
   );
-  assert.match(runValidate(dir).stderr, /playbooks\/gone-away\.md.*no such playbook/);
+  recordBudgets(dir);
+  const { status, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(
+    stderr,
+    /commands\/cycle\.md: \d+ bytes > baseline 1 \(tests\/fixtures\/context-budget\.json, entry point plus its cited references\) — raise the baseline in this same commit/
+  );
+});
+
+test("context budget: a baseline entry for an entry point that no longer exists fails, naming the retire line", () => {
+  const dir = makePluginFixture();
+  writeInto(
+    dir,
+    CONTEXT_PATH,
+    JSON.stringify(
+      { "playbooks/demoing-things.md": 999999, "commands/cycle.md": 999999, "playbooks/gone-away.md": 10 },
+      null,
+      2
+    ) + "\n"
+  );
+  recordBudgets(dir);
+  assert.match(
+    runValidate(dir).stderr,
+    /context-budget\.json: entry "playbooks\/gone-away\.md" names no such entry point — remove it with a "budget: context-budget\.json playbooks\/gone-away\.md retired" line, or restore the file/
+  );
 });
 
 test("context budget: the total counts a cited reference, and counts it once when two cite each other", () => {
@@ -1257,19 +1299,27 @@ test("context budget: the total counts a cited reference, and counts it once whe
   const playbookBytes = Buffer.byteLength(readFileSync(join(dir, "playbooks/demoing-things.md"), "utf8"));
   const alphaBytes = Buffer.byteLength(readFileSync(join(dir, "references/alpha.md"), "utf8"));
   const betaBytes = Buffer.byteLength(readFileSync(join(dir, "references/beta.md"), "utf8"));
-  writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": playbookBytes + alphaBytes + betaBytes }, null, 2) + "\n");
+  writeInto(
+    dir,
+    CONTEXT_PATH,
+    JSON.stringify({ "playbooks/demoing-things.md": playbookBytes + alphaBytes + betaBytes, "commands/cycle.md": 999999 }, null, 2) + "\n"
+  );
   const res = runValidate(dir);
   assert.equal(res.status, 0, res.stderr);
 });
 
-test("context budget: validate reports each playbook's all-hops figure and never fails on it", () => {
+test("context budget: validate reports each entry point's all-hops figure and never fails on it", () => {
   const dir = makePluginFixture();
   writeInto(dir, "playbooks/showing-things.md", "# Showing things\n\nA second fixture playbook.\n");
   playbook(dir, "Read `${CLAUDE_PLUGIN_ROOT}/playbooks/showing-things.md` next.\n");
   writeInto(
     dir,
     CONTEXT_PATH,
-    JSON.stringify({ "playbooks/demoing-things.md": 999999, "playbooks/showing-things.md": 999999 }, null, 2) + "\n"
+    JSON.stringify(
+      { "playbooks/demoing-things.md": 999999, "playbooks/showing-things.md": 999999, "commands/cycle.md": 999999 },
+      null,
+      2
+    ) + "\n"
   );
   recordBudgets(dir);
   const res = runValidate(dir);
@@ -1325,7 +1375,8 @@ test("command ceiling: a tenth command fails", () => {
 
 const TIERS_PATH = "references/model-tiers.json";
 const tiers = (dir, value) => writeInto(dir, TIERS_PATH, JSON.stringify(value, null, 2) + "\n");
-const withContext = (dir) => writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": 999999 }, null, 2) + "\n");
+const withContext = (dir) =>
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": 999999, "commands/cycle.md": 999999 }, null, 2) + "\n");
 
 test("model tiers: a missing table fails", () => {
   const dir = makePluginFixture();
@@ -2048,6 +2099,7 @@ test("continue discovery guard: passes when continue.md invokes find-state-files
   writeInto(dir, ROUTING_PATH, routing("| resume a cycle (fixture) | `continue` | read-only | yes |\n"));
   writeInto(dir, "commands/continue.md", CONTINUE_FM + "Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/find-state-files.mjs` to enumerate.\n");
   writeInto(dir, "scripts/find-state-files.mjs", "// stub for the guard\n");
+  budgetEntryPoints(dir, "commands/continue.md");
   ok(runValidate(dir));
 });
 
@@ -2385,7 +2437,8 @@ test("budget decisions: a fixture above its newest budget line fails", () => {
       `budget: surface-budget.json surfaceTotal ${budget.surfaceTotal - 1}\n` +
       `budget: surface-budget.json commandMax ${budget.commandMax}\n` +
       `budget: surface-budget.json playbookMax ${budget.playbookMax}\n` +
-      "budget: context-budget.json playbooks/demoing-things.md 999999\n```\n"
+      "budget: context-budget.json playbooks/demoing-things.md 999999\n" +
+      "budget: context-budget.json commands/cycle.md 999999\n```\n"
   );
   failsWith(runValidate(dir), /surface-budget\.json: surfaceTotal is \d+, above the newest recorded figure/);
 });

@@ -130,12 +130,13 @@ export function makePluginFixture() {
     "tests/fixtures/surface-budget.json",
     JSON.stringify({ surfaceTotal: 3620, commandMax: 104, playbookMax: 154 }, null, 2) + "\n"
   );
-  // Check 15 reads each stage's context budget from a committed baseline, so every fixture tree
-  // ships one; the tests that exercise the check overwrite it.
+  // Check 15 reads each entry point's context budget from a committed baseline, so every fixture
+  // tree ships one covering its playbook and every command; the tests that exercise the check
+  // overwrite it.
   writeInto(
     dir,
     "tests/fixtures/context-budget.json",
-    JSON.stringify({ "playbooks/demoing-things.md": 999999 }, null, 2) + "\n"
+    JSON.stringify({ "playbooks/demoing-things.md": 999999, "commands/cycle.md": 999999 }, null, 2) + "\n"
   );
   // Check 28 holds both baselines to the decisions log's `budget:` lines, so every fixture tree
   // ships a log recording exactly the figures above.

@@ -12,7 +12,10 @@ compression, never by moving text into another file: `commands/cycle.md` 174 →
 `playbooks/learning-from-sessions.md` 320 → 310. The ceilings (`commandMax` 174, `playbookMax`
 320) stay. `scripts/validate.mjs` check 9 now prints a notice on stdout, never a failure, for a
 command or playbook within `NEAR_CEILING_LINES` (5) lines of its ceiling, so growth toward a
-ceiling is visible before an edit fails on it.
+ceiling is visible before an edit fails on it. Commands are now gated as entry points: check 15
+holds each `commands/*.md`, like each playbook, to a `tests/fixtures/context-budget.json` entry for
+its own bytes plus every reference it cites, set at today's measured refs-only figure, and
+`scripts/budget-fixture-check.mjs` requires that fixture for a command edit.
 
 **Why:** a file at its ceiling turns any edit that adds a line into a baseline raise, which is how
 ceilings creep. `cycle.md` lost a paragraph restating the `profile`'s engine choice, which
@@ -20,11 +23,20 @@ ceilings creep. `cycle.md` lost a paragraph restating the `profile`'s engine cho
 its Modes section already states and a historical note, plus re-wraps. The playbook's refs-only
 closure falls 62130 → 61727 bytes and `surfaceTotal` 5911 → 5891.
 
-**Supersedes:** nothing; check 9's failures are unchanged.
+**Supersedes:** check 15's playbook-only scope; check 9's failures are unchanged.
 
 ```text
 budget: surface-budget.json surfaceTotal 5891
 budget: context-budget.json playbooks/learning-from-sessions.md 61727
+budget: context-budget.json commands/continue.md 50265
+budget: context-budget.json commands/cycle.md 69365
+budget: context-budget.json commands/doctor.md 2161
+budget: context-budget.json commands/learn.md 16337
+budget: context-budget.json commands/maintain.md 17516
+budget: context-budget.json commands/onboard.md 16625
+budget: context-budget.json commands/reconcile.md 24062
+budget: context-budget.json commands/review.md 24692
+budget: context-budget.json commands/verify.md 23790
 ```
 
 ## 2026-10-10 — Section-scoped reads: a step loads only the section it executes

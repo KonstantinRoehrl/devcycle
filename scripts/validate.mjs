@@ -768,8 +768,9 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   }
 
   const contextRows = [];
-  // 15. Per-stage context budget: a playbook's own bytes plus every reference reachable from it
-  //     through ${CLAUDE_PLUGIN_ROOT} citations, against a committed baseline. Bytes, not lines:
+  // 15. Per-entry-point context budget: an entry point's (a command's or a playbook's) own bytes
+  //     plus every reference reachable from it through ${CLAUDE_PLUGIN_ROOT} citations, against a
+  //     committed baseline. Bytes, not lines:
   //     a context window is spent in bytes, and a long line costs what it costs. Growth is a
   //     reviewed decision, same rule as check 9. Citations are followed by
   //     scripts/context-closure.mjs, which context-report.mjs shares.
@@ -782,7 +783,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   // checks 17 and 18 execute at all. Check 28 reads both.
   let contextBaseline, contextParsed = false;
   if (!existsSync(contextFile)) {
-    fail(`${CONTEXT_BUDGET_PATH}: missing — no stage declares its context cost, so growth could not be reviewed`);
+    fail(`${CONTEXT_BUDGET_PATH}: missing — no entry point declares its context cost, so growth could not be reviewed`);
   } else {
     contextParsed = true;
     try {
@@ -793,16 +794,16 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
     if (contextParsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
       fail(
-        `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each playbook to its byte budget, ` +
+        `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each entry point to its byte budget, ` +
           `got ${JSON.stringify(contextBaseline)}`
       );
       contextParsed = false;
     }
     if (contextParsed) {
-      const playbookNames = namesIn("playbooks").map((f) => `playbooks/${f}`);
-      for (const p of playbookNames) {
+      const entryPoints = ["commands", "playbooks"].flatMap((d) => namesIn(d).map((f) => `${d}/${f}`));
+      for (const p of entryPoints) {
         if (!(p in contextBaseline)) {
-          fail(`${p}: no entry in ${CONTEXT_BUDGET_PATH} — a stage must declare its context budget`);
+          fail(`${p}: no entry in ${CONTEXT_BUDGET_PATH} — an entry point must declare its context budget`);
           continue;
         }
         const limit = contextBaseline[p];
@@ -814,13 +815,16 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         contextRows.push({ path: p, bytes, limit, allHops: closure(p, { follow: "all", root }) });
         if (bytes > limit)
           fail(
-            `${p}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, playbook plus its cited references) — ` +
+            `${p}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, entry point plus its cited references) — ` +
               `raise the baseline in this same commit if the growth is intended`
           );
       }
       for (const p of Object.keys(contextBaseline))
-        if (!playbookNames.includes(p))
-          fail(`${CONTEXT_BUDGET_PATH}: entry "${p}" names no such playbook — remove it or restore the file`);
+        if (!entryPoints.includes(p))
+          fail(
+            `${CONTEXT_BUDGET_PATH}: entry "${p}" names no such entry point — ` +
+              `remove it with a "budget: context-budget.json ${p} retired" line, or restore the file`
+          );
     }
   }
 
@@ -1210,7 +1214,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
   }
 
-  // L17: the all-hops closure follows playbook→playbook hops check 15 deliberately does not gate.
+  // L17: the all-hops closure follows the playbook and command hops check 15 deliberately does not gate.
   // Reported beside the gated figure so the hops stay visible without collapsing every budget
   // into one number.
   if (contextRows.length) {

@@ -1,4 +1,13 @@
 {
+  "commands/continue.md": 50265,
+  "commands/cycle.md": 69365,
+  "commands/doctor.md": 2161,
+  "commands/learn.md": 16337,
+  "commands/maintain.md": 17516,
+  "commands/onboard.md": 16625,
+  "commands/reconcile.md": 24062,
+  "commands/review.md": 24692,
+  "commands/verify.md": 23790,
   "playbooks/executing-waves.md": 96027,
   "playbooks/finishing-the-cycle.md": 45596,
   "playbooks/learning-from-sessions.md": 61727,

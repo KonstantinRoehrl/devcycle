@@ -158,6 +158,17 @@ test("fails when a task edits a budgeted surface file but omits the baseline fix
   assert.match(r.out, /Task 1: .*playbooks\/planning-waves\.md.*tests\/fixtures\/context-budget\.json/);
 });
 
+test("fails when a task edits a command but omits the context baseline every entry point declares", () => {
+  const r = run(
+    COMPLETE.replace(
+      "- Create: \`a.mjs\`",
+      "- Modify: \`commands/continue.md\`\n- Modify: \`tests/fixtures/surface-budget.json\`\n- Modify: \`docs/decisions/README.md\`",
+    ),
+  );
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: .*commands\/continue\.md.*tests\/fixtures\/context-budget\.json/);
+});
+
 test("passes once the surface edit lists both baseline fixtures and the decisions log that records them", () => {
   const r = run(
     SURFACE_EDIT.replace(

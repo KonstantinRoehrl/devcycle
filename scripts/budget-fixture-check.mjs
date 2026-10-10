@@ -18,10 +18,12 @@ const SURFACE_DIRS = ["playbooks/", "commands/", "agents/", "references/"];
 const SURFACE_BUDGET = "tests/fixtures/surface-budget.json";
 const CONTEXT_BUDGET = "tests/fixtures/context-budget.json";
 const isSurface = (f) => SURFACE_DIRS.some((d) => f.startsWith(d)) && f.endsWith(".md");
-const isPlaybook = (f) => f.startsWith("playbooks/") && f.endsWith(".md");
-// context-budget.json keys only playbooks, but validate.mjs check 15 charges each playbook for
-// the bytes of every reference it cites -- so editing a reference grows a budget no playbook in
-// the Files block appears to touch. That is the shape the recurring failure took.
+// context-budget.json keys every entry point -- each command and each playbook -- so editing one
+// grows its own budget.
+const isEntryPoint = (f) => (f.startsWith("commands/") || f.startsWith("playbooks/")) && f.endsWith(".md");
+// validate.mjs check 15 also charges each entry point for the bytes of every reference it cites --
+// so editing a reference grows a budget no entry point in the Files block appears to touch. That is
+// the shape the recurring failure took.
 const isReference = (f) => f.startsWith("references/") && f.endsWith(".md");
 
 // The join, in one place: which committed size baselines a tracked path sits under. A baseline is
@@ -30,7 +32,7 @@ const isReference = (f) => f.startsWith("references/") && f.endsWith(".md");
 function requiredFixtures(file) {
   const fixtures = [];
   if (isSurface(file)) fixtures.push(SURFACE_BUDGET);
-  if (isPlaybook(file) || isReference(file)) fixtures.push(CONTEXT_BUDGET);
+  if (isEntryPoint(file) || isReference(file)) fixtures.push(CONTEXT_BUDGET);
   if (file === SURFACE_BUDGET || file === CONTEXT_BUDGET) fixtures.push(DECISIONS_DOC);
   return fixtures;
 }

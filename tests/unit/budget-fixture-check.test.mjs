@@ -126,6 +126,22 @@ test("a reference edit needs context-budget.json too — a playbook's context bu
   assert.match(out, /tests\/fixtures\/context-budget\.json/);
 });
 
+const COMMAND_ONLY = `# Plan
+### Task 1: Tweak the resume command
+**Files:**
+- Modify: \`commands/x.md\`
+- Modify: \`tests/fixtures/surface-budget.json\`
+- Modify: \`docs/decisions/README.md\`
+## Dispatch Map
+- Wave 1: Task 1
+`;
+
+test("a command edit needs context-budget.json too — a command is an entry point with its own context budget", () => {
+  const { code, out } = run(COMMAND_ONLY);
+  assert.equal(code, 1);
+  assert.match(out, /Task 1 edits commands\/x\.md but its Files omit tests\/fixtures\/context-budget\.json/);
+});
+
 const FIXTURES_WITHOUT_LOG = PLAYBOOK_WITH_BOTH_FIXTURES.replace("- Modify: \`docs/decisions/README.md\`\n", "");
 
 test("a task that bumps the budget fixtures but omits the decisions log fails once, naming the log", () => {
