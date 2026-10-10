@@ -81,6 +81,10 @@ five rules: back-edge, owner-sentence, bare-read, bare-exists and reference-read
 `node scripts/context-report.mjs --diff <ref>` lists every citation that lost its prefix since
 `<ref>` and every file that left a closure — review it for over-demotion.
 
+A third form, the section read, loads one `##` section:
+`node scripts/read-section.mjs references/<file>.md <slug>` prints it. `references/README.md`
+§ Citation grammar owns when a citation may take it.
+
 ## Before opening a PR
 
 Run the validators and the unit suite locally. CI (`.github/workflows/validate.yml`)

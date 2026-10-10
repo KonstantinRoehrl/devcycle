@@ -15,6 +15,13 @@ const NAME = "[A-Za-z0-9._-]+";
 export const prefixedPattern = (dirs = GRAMMAR_DIRS) =>
   new RegExp(String.raw`\$\{CLAUDE_PLUGIN_ROOT\}\/((?:${dirs.join("|")})\/${NAME}\.md)`, "g");
 export const PREFIXED = prefixedPattern();
+// The section-read form: a step that needs one `##` section of a reference runs
+// `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/<file>.md <slug>` on one line.
+// Group 1 is the reference, group 2 the slug; only references are read by section.
+export const SECTION_READ = new RegExp(
+  String.raw`\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/read-section\.mjs"?[ \t]+(references\/${NAME}\.md)[ \t]+([a-z0-9_-]+)`,
+  "g"
+);
 const BACK_EDGE = prefixedPattern(["playbooks", "commands"]);
 // The lookbehind keeps a path inside a longer one (`docs/playbooks/…`, `tests/fixtures/references/…`)
 // and the prefixed form from counting as bare; a `<name>` placeholder never matches the name class.

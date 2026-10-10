@@ -14,6 +14,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, resolve, dirname } from "node:path";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { DESIGN_DOC } from "./doc-paths.mjs";
+import { slug } from "./md-sections.mjs";
 
 const DIRS = ["agents", "commands", "playbooks", "references"];
 const ROOT_FILES = [DESIGN_DOC, "CONTRIBUTING.md"];
@@ -67,9 +68,6 @@ try {
   abort(`cannot scan ${scanRoot}: ${e.message}`);
 }
 if (files.length === 0) abort(`no .md files under ${scanRoot} — nothing was checked`);
-
-// GitHub-style heading slug: lowercase, drop non-word (keep spaces/hyphens), spaces -> hyphens.
-const slug = (h) => h.toLowerCase().replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-");
 
 // Pass 1: per-file heading slugs (anchor checks) + the global §M-label definitions.
 const headingsByFile = new Map();

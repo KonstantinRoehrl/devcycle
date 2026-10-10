@@ -14,6 +14,7 @@ import {
   bareReadErrors,
   bareExistsErrors,
   referenceReadErrors,
+  SECTION_READ,
 } from "../../scripts/citation-grammar.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/citation-grammar.mjs", import.meta.url));
@@ -137,6 +138,14 @@ test("bare-exists: a bare path that names no file fails; longer paths and placeh
     "Docs at docs/playbooks/x.md and tests/fixtures/references/y.md; template references/<name>.md.\n" +
     "```\nreferences/also-gone.md\n```\n";
   assert.deepEqual(rules(bareExistsErrors("playbooks/p.md", text, exists)), ["bare-exists@1"]);
+});
+
+test("SECTION_READ: captures the reference and slug of a one-line section read, and only a reference's", () => {
+  const read = (text) => [...text.matchAll(SECTION_READ)].map((m) => [m[1], m[2]]);
+  const step = (path, sep = " ") => `run \`node "${P}/scripts/read-section.mjs" ${path}${sep}the-stage-budget\``;
+  assert.deepEqual(read(step("references/delegation.md")), [["references/delegation.md", "the-stage-budget"]]);
+  assert.deepEqual(read(step("playbooks/delegation.md")), []);
+  assert.deepEqual(read(step("references/delegation.md", "\n")), []);
 });
 
 test("reference-read: a reference only ever named bare has no consumer; a prefixed citation or a script consumes it", () => {
