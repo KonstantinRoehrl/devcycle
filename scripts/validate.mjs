@@ -10,7 +10,7 @@ import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run
 import { readPolicy } from "./reinforcement-policy.mjs";
 import { closure } from "./context-closure.mjs";
 import { ROSTER } from "./resolve-knobs.mjs";
-import { bareExistsErrors, grammarFiles, grammarHits, referenceReadErrors, SECTION_READ } from "./citation-grammar.mjs";
+import { bareExistsErrors, grammarFiles, grammarHits, referenceReaders, referenceReadErrors, SECTION_READ } from "./citation-grammar.mjs";
 import { sectionText } from "./md-sections.mjs";
 import { loadStages } from "./stage-entry.mjs";
 import { budgetDecisionErrors } from "./budget-decisions.mjs";
@@ -79,6 +79,9 @@ const DESCRIPTION_BUDGET_TOTAL = 6000; // chars; source: docs/platform-notes.md
 // Check 9 prints a notice, never a failure, for a command or playbook this many lines or fewer
 // under its ceiling, so the next edit's growth is seen before it fails.
 const NEAR_CEILING_LINES = 5;
+// Check 15 holds a reference this many surface files read to its own context-budget entry: its
+// bytes land in every reader's closure, so its growth is charged that many times over.
+const FAN_IN_THRESHOLD = 8;
 
 if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const root = process.cwd();
@@ -770,7 +773,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const contextRows = [];
   // 15. Per-entry-point context budget: an entry point's (a command's or a playbook's) own bytes
   //     plus every reference reachable from it through ${CLAUDE_PLUGIN_ROOT} citations, against a
-  //     committed baseline. Bytes, not lines:
+  //     committed baseline; and a high-fan-in reference's own bytes. Bytes, not lines:
   //     a context window is spent in bytes, and a long line costs what it costs. Growth is a
   //     reviewed decision, same rule as check 9. Citations are followed by
   //     scripts/context-closure.mjs, which context-report.mjs shares.
@@ -794,7 +797,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
     if (contextParsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
       fail(
-        `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each entry point to its byte budget, ` +
+        `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each entry point and each high-fan-in reference to its byte budget, ` +
           `got ${JSON.stringify(contextBaseline)}`
       );
       contextParsed = false;
@@ -819,10 +822,36 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
               `raise the baseline in this same commit if the growth is intended`
           );
       }
-      for (const p of Object.keys(contextBaseline))
-        if (!entryPoints.includes(p))
+      // A reference's entry gates its own bytes. It is required at FAN_IN_THRESHOLD readers and
+      // keeps gating below them, so a reference that loses readers cannot grow unreviewed.
+      const references = namesIn("references").map((f) => `references/${f}`);
+      const readers = referenceReaders(surface.map((p) => ({ rel: rel(p), text: readFileSync(p, "utf8") })));
+      for (const ref of references) {
+        const n = readers.get(ref)?.size ?? 0;
+        if (!(ref in contextBaseline)) {
+          if (n >= FAN_IN_THRESHOLD)
+            fail(
+              `${ref}: read by ${n} files (threshold ${FAN_IN_THRESHOLD}) and has no entry in ${CONTEXT_BUDGET_PATH} — ` +
+                `a high-fan-in reference declares its own byte budget`
+            );
+          continue;
+        }
+        const limit = contextBaseline[ref];
+        if (!Number.isInteger(limit)) {
+          fail(`${CONTEXT_BUDGET_PATH}: ${ref} must be an integer, got ${JSON.stringify(limit)}`);
+          continue;
+        }
+        const bytes = Buffer.byteLength(readFileSync(join(root, ref), "utf8"));
+        if (bytes > limit)
           fail(
-            `${CONTEXT_BUDGET_PATH}: entry "${p}" names no such entry point — ` +
+            `${ref}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, the reference's own bytes) — ` +
+              `raise the baseline in this same commit if the growth is intended`
+          );
+      }
+      for (const p of Object.keys(contextBaseline))
+        if (!entryPoints.includes(p) && !references.includes(p))
+          fail(
+            `${CONTEXT_BUDGET_PATH}: entry "${p}" names no such entry point or reference — ` +
               `remove it with a "budget: context-budget.json ${p} retired" line, or restore the file`
           );
     }
@@ -1218,7 +1247,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   // Reported beside the gated figure so the hops stay visible without collapsing every budget
   // into one number.
   if (contextRows.length) {
-    console.log("context (check 15 gates refs-only bytes; all-hops is reported, never gated):");
+    console.log("context (check 15 gates each entry point's refs-only bytes; all-hops is reported, never gated):");
     for (const r of contextRows)
       console.log(`  ${r.path}  refs-only ${r.bytes}/${r.limit} B  all-hops ${r.allHops.files.length} files, ${r.allHops.words} words`);
   }

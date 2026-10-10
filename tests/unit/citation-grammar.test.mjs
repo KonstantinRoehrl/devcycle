@@ -14,6 +14,7 @@ import {
   bareReadErrors,
   bareExistsErrors,
   referenceReadErrors,
+  referenceReaders,
   SECTION_READ,
 } from "../../scripts/citation-grammar.mjs";
 
@@ -174,6 +175,19 @@ test("reference-read: a section read of a reference consumes it", () => {
     scripts: [],
   });
   assert.deepEqual(hits, []);
+});
+
+test("referenceReaders: a prefixed and a section read count once per reader, and a reference never reads itself", () => {
+  const sectionRead = `\`node "${P}/scripts/read-section.mjs" references/a.md one\``;
+  const readers = referenceReaders([
+    { rel: "playbooks/p.md", text: `Read \`${P}/references/a.md\`, then \`${P}/references/a.md\` again.\n` },
+    { rel: "commands/c.md", text: `Run ${sectionRead} and read \`${P}/references/a.md\`.\n` },
+    { rel: "agents/r.md", text: `Run ${sectionRead}.\n` },
+    { rel: "references/a.md", text: `See \`${P}/references/a.md\`.\n` },
+    { rel: "references/b.md", text: `Read \`${P}/references/a.md\` and \`${P}/playbooks/p.md\`; references/c.md owns the rest.\n` },
+  ]);
+  assert.deepEqual([...readers.keys()], ["references/a.md"]);
+  assert.deepEqual([...readers.get("references/a.md")].sort(), ["agents/r.md", "commands/c.md", "playbooks/p.md", "references/b.md"]);
 });
 
 test("reference-read: a script consumes a reference only in code — a comment naming it does not count", () => {

@@ -15,7 +15,10 @@ command or playbook within `NEAR_CEILING_LINES` (5) lines of its ceiling, so gro
 ceiling is visible before an edit fails on it. Commands are now gated as entry points: check 15
 holds each `commands/*.md`, like each playbook, to a `tests/fixtures/context-budget.json` entry for
 its own bytes plus every reference it cites, set at today's measured refs-only figure, and
-`scripts/budget-fixture-check.mjs` requires that fixture for a command edit.
+`scripts/budget-fixture-check.mjs` requires that fixture for a command edit. A reference read by
+prefix or by section from `FAN_IN_THRESHOLD` (8) or more surface files must carry its own entry,
+gating only its own bytes, set at today's figure; an entry stays valid and keeps gating after the
+reference falls below the threshold.
 
 **Why:** a file at its ceiling turns any edit that adds a line into a baseline raise, which is how
 ceilings creep. `cycle.md` lost a paragraph restating the `profile`'s engine choice, which
@@ -37,6 +40,13 @@ budget: context-budget.json commands/onboard.md 16625
 budget: context-budget.json commands/reconcile.md 24062
 budget: context-budget.json commands/review.md 24692
 budget: context-budget.json commands/verify.md 23790
+budget: context-budget.json references/branch.md 6844
+budget: context-budget.json references/config.md 14019
+budget: context-budget.json references/delegation.md 10601
+budget: context-budget.json references/evidence.md 12059
+budget: context-budget.json references/handoff.md 9035
+budget: context-budget.json references/model-routing.md 9090
+budget: context-budget.json references/output.md 756
 ```
 
 ## 2026-10-10 — Section-scoped reads: a step loads only the section it executes

@@ -238,6 +238,22 @@ export function referenceReadErrors({ references, surface, scripts }) {
     .map((f) => hit(`references/${f}`, 0, "reference-read", `references/${f}: no consumer — no surface file reads it prefixed or by section and no script reads it`));
 }
 
+// Who reads each reference, for validate.mjs check 15's fan-in threshold: every reference a surface
+// file other than itself reads by prefix or by section, mapped to the set of its readers' paths.
+export function referenceReaders(surface) {
+  const readers = new Map();
+  for (const { rel, text } of surface) {
+    const prefixed = [...text.matchAll(PREFIXED)].map((m) => m[1]).filter((p) => p.startsWith("references/"));
+    const bySection = [...text.matchAll(SECTION_READ)].map((m) => m[1]);
+    for (const ref of [...prefixed, ...bySection]) {
+      if (ref === rel) continue;
+      if (!readers.has(ref)) readers.set(ref, new Set());
+      readers.get(ref).add(rel);
+    }
+  }
+  return readers;
+}
+
 export const grammarFiles = (root) =>
   GRAMMAR_DIRS.flatMap((d) =>
     existsSync(join(root, d)) ? readdirSync(join(root, d)).filter((f) => f.endsWith(".md")).map((f) => `${d}/${f}`) : []

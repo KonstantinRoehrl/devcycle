@@ -1282,7 +1282,7 @@ test("context budget: a baseline entry for an entry point that no longer exists 
   recordBudgets(dir);
   assert.match(
     runValidate(dir).stderr,
-    /context-budget\.json: entry "playbooks\/gone-away\.md" names no such entry point — remove it with a "budget: context-budget\.json playbooks\/gone-away\.md retired" line, or restore the file/
+    /context-budget\.json: entry "playbooks\/gone-away\.md" names no such entry point or reference — remove it with a "budget: context-budget\.json playbooks\/gone-away\.md retired" line, or restore the file/
   );
 });
 
@@ -1324,7 +1324,7 @@ test("context budget: validate reports each entry point's all-hops figure and ne
   recordBudgets(dir);
   const res = runValidate(dir);
   ok(res);
-  assert.match(res.stdout, /context \(check 15 gates refs-only bytes; all-hops is reported, never gated\):/);
+  assert.match(res.stdout, /context \(check 15 gates each entry point's refs-only bytes; all-hops is reported, never gated\):/);
   assert.match(res.stdout, /playbooks\/demoing-things\.md {2}refs-only \d+\/999999 B {2}all-hops 2 files, \d+ words/);
 });
 
@@ -1345,6 +1345,72 @@ test("context budget: a missing baseline file fails", () => {
   const dir = makePluginFixture();
   rmSync(join(dir, CONTEXT_PATH), { force: true });
   assert.match(runValidate(dir).stderr, /context-budget\.json: missing/);
+});
+
+// A reference read by `count` fixture playbooks, alternating a prefixed read and a section read,
+// each playbook with a never-firing entry-point budget. Returns the reference's own bytes.
+const HUB = "references/hub.md";
+const hubReadBy = (dir, count) => {
+  writeInto(dir, HUB, "# Hub\n\n## One\n\nA reference many playbooks read.\n");
+  writeInto(dir, "scripts/read-section.mjs", "// fixture script\n");
+  const readers = Array.from({ length: count }, (_, i) => `playbooks/reading-${i + 1}.md`);
+  readers.forEach((p, i) =>
+    writeInto(
+      dir,
+      p,
+      "# Reading\n\n" +
+        (i % 2
+          ? `Run \`node "\${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" ${HUB} one\` first.\n`
+          : `Read \`\${CLAUDE_PLUGIN_ROOT}/${HUB}\` first.\n`)
+    )
+  );
+  budgetEntryPoints(dir, ...readers);
+  return Buffer.byteLength(readFileSync(join(dir, HUB), "utf8"));
+};
+const budgetHub = (dir, limit) => {
+  const context = JSON.parse(readFileSync(join(dir, CONTEXT_PATH), "utf8"));
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ ...context, [HUB]: limit }, null, 2) + "\n");
+  recordBudgets(dir);
+};
+
+test("context budget: a reference read by 8 files with no entry fails, naming its reader count and the threshold", () => {
+  const dir = makePluginFixture();
+  hubReadBy(dir, 8);
+  failsWith(
+    runValidate(dir),
+    /references\/hub\.md: read by 8 files \(threshold 8\) and has no entry in tests\/fixtures\/context-budget\.json — a high-fan-in reference declares its own byte budget/
+  );
+});
+
+test("context budget: a high-fan-in reference's entry gates its own bytes, not its readers'", () => {
+  const dir = makePluginFixture();
+  const bytes = hubReadBy(dir, 8);
+  budgetHub(dir, bytes - 1);
+  failsWith(
+    runValidate(dir),
+    new RegExp(
+      `references/hub\\.md: ${bytes} bytes > baseline ${bytes - 1} \\(tests/fixtures/context-budget\\.json, the reference's own bytes\\) — raise the baseline in this same commit if the growth is intended`
+    )
+  );
+  budgetHub(dir, bytes);
+  ok(runValidate(dir));
+});
+
+test("context budget: a reference with 7 readers needs no entry, and an entry it carries stays valid", () => {
+  const dir = makePluginFixture();
+  hubReadBy(dir, 7);
+  ok(runValidate(dir));
+  budgetHub(dir, 999999);
+  ok(runValidate(dir));
+});
+
+test("context budget: an entry for a reference that no longer exists fails as stale, naming the retire line", () => {
+  const dir = makePluginFixture();
+  budgetHub(dir, 10);
+  failsWith(
+    runValidate(dir),
+    /context-budget\.json: entry "references\/hub\.md" names no such entry point or reference — remove it with a "budget: context-budget\.json references\/hub\.md retired" line, or restore the file/
+  );
 });
 
 // --- check 4, revisited: citations outside references/ resolve too ---

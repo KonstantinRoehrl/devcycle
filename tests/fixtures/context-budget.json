@@ -22,5 +22,12 @@
   "playbooks/sweeping-mechanical-changes.md": 81609,
   "playbooks/taking-the-fast-path.md": 46396,
   "playbooks/verifying-on-device.md": 42583,
-  "playbooks/writing-the-findings-document.md": 59799
+  "playbooks/writing-the-findings-document.md": 59799,
+  "references/branch.md": 6844,
+  "references/config.md": 14019,
+  "references/delegation.md": 10601,
+  "references/evidence.md": 12059,
+  "references/handoff.md": 9035,
+  "references/model-routing.md": 9090,
+  "references/output.md": 756
 }
