@@ -123,6 +123,18 @@ writes resumes as an undecided round: the round-3 reviewer is dispatched again, 
 after a round-3 accept, instead of the decision going straight to the user. It fails safe. Nothing
 on disk tells that crash from a stale file an earlier cycle left.
 
+### A fence line with an info string closes a fence, so a quoted accept can read as the verdict (low)
+
+`closesFence` in `scripts/task-verdict.mjs` takes any fence line of the opener's character and at
+least its length for a closer, info string or not, where CommonMark closes a fence only on a bare
+marker. So a findings file that is one fenced block holding a `needs-changes` verdict and a quoted
+```` ```text ```` block of the same fence length with `Verdict: accept` in it reads as accepted: the
+```` ```text ```` line ends the outer block and leaves the quoted accept outside any fence. It was
+found in the driver branch's last review round, where the shared fence rule could no longer be
+re-reviewed. A reviewer that fences its whole file with a longer marker than any quote
+inside it, or does not fence it, is read correctly; when a driven task is accepted against
+expectation, read its findings file.
+
 ### The runtime resolves the default branch without `gh` (low)
 
 `references/branch.md` asks `gh` for the default branch when `origin/HEAD` is unset; the scripts
@@ -133,6 +145,35 @@ so a resume never waits on the network. A repo with none of them gets no driver:
 exits 3 and names the fix.
 
 ## Git guard — `hooks/block-destructive-git.mjs`
+
+### A quoted assignment holding a space hides the git after it (medium)
+
+`X='a b' git stash`, `PAGER='less -R' git reset --hard` and, for a reviewer, the read-only-looking
+`GIT_EXTERNAL_DIFF='git stash;:' git diff` are allowed for reviewers and on the main thread, in a
+cycle and under a driver's lock. The guard splits a command into words on whitespace before it reads
+quotes (`segmentTokens`), so it drops `X='a` as an assignment and takes `b'` for the command; the git
+after it is never judged. It was found in the driver branch's last review round, where a quote-aware
+word split could no longer be re-reviewed. Until it is fixed, never put a quoted
+assignment containing a space in front of git.
+
+### Some spellings still hide a git or its subcommand (low)
+
+Each of these is allowed where its plain spelling is denied:
+
+- a redirection holding `&` or `|` between git and its subcommand — `git 2>&1 stash` in a cycle,
+  `git 2>&1 reset --hard` under a driver's lock: separators are split before redirections are
+  dropped, so the subcommand is read as a command of its own;
+- `$GIT` behind a launcher — `env $GIT stash`, `sudo $GIT reset --hard`, `echo stash | xargs $GIT`,
+  reviewers included: `$GIT` counts as git only as a command's first word;
+- launcher grammar the guard does not model — `xargs -I t git t` (the replace string sits inside the
+  word `git`), `strace --output f git $SUB` (only `-o` is known to take a value) and `env -a x git $X`;
+- a shell behind a recognised launcher at a pipe's end — `echo git stash | env sh`, `| sudo sh`,
+  `| timeout 5 sh`, reviewers included: only a bare shell or `xargs <shell>` there is read as
+  running its input.
+
+They were found in the driver branch's last review round; each fix is a grammar rule of its own that
+could no longer be re-reviewed. Write git and its subcommand plainly, and stop the driver before
+scripting git through a launcher.
 
 ### A launcher the guard does not recognise runs any git it is handed (low)
 

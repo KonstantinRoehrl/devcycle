@@ -488,12 +488,12 @@ function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, inte
   const counts = progressCounts(before, after, { stalls, churn }, Boolean(s.limit));
   const budgetSpent = () => verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, counts);
   const said = `The last session said:\n${s.resultText || "(no result)"}`;
+  const stalled = (how = "") => verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row added no ledger line beyond a dispatch${how}. ${said}`, counts);
   const churned = () => verdict("stalled", 5, `stalled: ${counts.churn} sessions in a row added ledger lines but no report, verdict or commit. ${said}`, counts);
   if (s.limit || s.silent) {
     // Silence with no usage-limit signal may be a limit — or a session that hangs every time, so it
     // also counts toward a stall or churn, as an ended session would.
-    if (counts.stalls >= opts.maxStalls)
-      return verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row went silent with no usage-limit signal until the driver stopped them`, counts);
+    if (counts.stalls >= opts.maxStalls) return stalled("; the last went silent with no usage-limit signal until the driver stopped it");
     if (counts.churn >= opts.maxChurn) return churned();
     if (overBudget) return budgetSpent();
     const waitMs = s.limit?.resetAt ? Math.max(s.limit.resetAt * 1000 - Date.now(), 1000) : DEFAULT_BACKOFF_MS;
@@ -502,7 +502,7 @@ function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, inte
   }
   const crashed = s.result === null;
   if (readState(ctx.statePath).stage !== "execution") return verdict(crashed ? "error" : "handoff", null, null);
-  if (counts.stalls >= opts.maxStalls) return verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row added no ledger line beyond a dispatch. ${said}`, counts);
+  if (counts.stalls >= opts.maxStalls) return stalled();
   if (counts.churn >= opts.maxChurn) return churned();
   const reason = crashed ? "error" : counts.stalls ? "stalled" : s.resultText.includes(MID_WAVE_LABEL) ? "valve" : "handoff";
   if (overBudget) return budgetSpent();

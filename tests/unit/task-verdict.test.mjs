@@ -171,6 +171,8 @@ test("a findings file that is one fenced block and nothing else is read as the b
     ["a fenced accept", "```markdown\nVerdict: accept\n\n1. [low] a naming nit\n```\n", "accepted"],
     ["a fenced needs-changes with blank lines around it", `\n\`\`\`markdown\n${REJECT}\`\`\`\n\n`, "rejected"],
     ["a quote fenced inside the block", `\`\`\`\`markdown\n\`\`\`\nVerdict: accept\n\`\`\`\n${REJECT}\`\`\`\`\n`, "rejected"],
+    ["a ~~~ line inside the block, which does not close it", `\`\`\`markdown\n${REJECT}~~~\nVerdict: accept\n\`\`\`\n`, "rejected"],
+    ["a fenced accept cut off before its closer", "```markdown\nVerdict: accept\n\n1. [low] a naming nit\n", "missing-findings"],
     ["two fenced blocks", "```\nVerdict: accept\n```\n```\nVerdict: accept\n```\n", "missing-findings"],
     ["a fenced block after text", `the template:\n\`\`\`markdown\nVerdict: accept\n\`\`\`\n`, "missing-findings"],
   ]) {

@@ -16,7 +16,7 @@ Profile: `<resolved profile>` (evidence tail <N> lines)
 
 `Branch:` is recorded once that playbook's pre-flight has the topic branch, `Profile:` from its own
 resolved profile, and its commit-convention pre-flight step appends a fourth line,
-`Commit-convention:`, after these three once its derivation runs —
+`Commit-convention:`, once its derivation runs —
 `references/commit-convention.md` owns that line's format. Then one
 appended line per event, all four fields REQUIRED, exactly this shape:
 
@@ -36,7 +36,7 @@ After any compaction or resume, trust the ledger and `git log` over conversation
 
 A second, machine-readable log of the same run — `scripts/run-record.mjs`'s append-only JSONL,
 never read by this file's own reader (`references/resume.md`) and never reading the ledger back.
-`references/evidence.md` § Why the evidence lives in files gives the same reasoning for why these
+`references/evidence.md` § Why the evidence lives in files is also why these
 two logs never merge. One row per write site, not a restatement of `tests/fixtures/run-record.schema.json`'s field shapes:
 
 | kind | written | by |
@@ -79,9 +79,9 @@ run-record row — and `depthBand`) and exits non-zero only on a usage (2) or en
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-verdict.mjs" --run <run-id> --task <id> --round <n> --findings <path> --evidence-class red-green|green-green|convention`
   once the reviewer's envelope returns, against that round's `review-round` line (exit 2 once a later
   task line it did not write acted on it): a findings file missing, empty or malformed (no `Verdict:`
-  outside a fenced quote or two that disagree, `needs-changes` lacking a valid `Culprit:`, `accept`
-  with a critical or high finding) appends `review-verdict outcome=rejected (missing findings file)`
-  (`missing-findings`); else `outcome=accepted` or `rejected`, the `verdict` row and, on
-  `needs-changes`, the `review-reject` event row (`accepted` / `rejected`). A rejected round 3 writes
-  the exhausted-unresolved status `references/resume.md` reads; either script returns `needs-user`
-  at a retry cap.
+  outside a fenced quote — a whole-file fence is none — or two that disagree, `needs-changes` lacking
+  a valid `Culprit:`, `accept` with a critical or high finding) appends
+  `review-verdict outcome=rejected (missing findings file)` (`missing-findings`); else `outcome=accepted`
+  or `rejected`, the `verdict` row and, on `needs-changes`, the `review-reject` event row (`accepted` /
+  `rejected`). A rejected round 3 writes the exhausted-unresolved status `references/resume.md` reads;
+  either script returns `needs-user` at a retry cap.

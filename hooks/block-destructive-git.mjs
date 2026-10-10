@@ -22,10 +22,11 @@
 // Only what the shell can RUN is judged: on a line made entirely of commands that never run their
 // arguments or input, a heredoc body fed to cat/tee (an unquoted one apart from a substitution
 // naming git) and single-quoted text are data (#276, #284); quoted text a launcher runs as shell, and
-// what a pipeline prints into a shell, is judged as the commands it holds; a launcher's own options
-// and operands are read past to the command it runs; a command word that is a substitution naming
-// git (`$(which git)`) or the variable `$GIT` is read as git; and `rtk` is a transparent launcher
-// whose git is classified like any other.
+// what a pipeline prints into a bare shell or `xargs <shell>` (not a shell behind another launcher),
+// is judged as the commands it holds; a launcher's own options and operands are read past to the
+// command it runs; a command word that is a substitution naming git (`$(which git)`) is read as git,
+// and so is the variable `$GIT` as a command's first word (not behind a launcher); and `rtk` is a
+// transparent launcher whose git is classified like any other.
 // Scope is git-only; non-git commands (tests, greps) are allowed. Three dispatch origins are guarded
 // by the allowlist — task-reviewer, red-team-reviewer and, since #235, implementer — and the main
 // thread (no agent_type) is guarded for `git stash` while a .devcycle/state.md above the call's cwd
@@ -658,8 +659,9 @@ function unwrapRtk(tokens) {
 // into two segments — `&&` is matched first so a logical-AND is never mis-split on its first `&`.
 const SEPARATORS = /(?:&&|\|\||;|\||&|\n)/;
 // A redirection is not an argument: `xargs git < s` hands git no word, and `git 2>/dev/null stash`
-// runs stash. Each is dropped with its target, the next word unless glued on (`<s`, `2>&1`); a process
-// substitution (`<(…)`) is not one.
+// runs stash. Each is dropped with its target, the next word unless glued on (`<s`, `2>/dev/null`); a
+// process substitution (`<(…)`) is not one. One holding `&` or `|` (`2>&1`, `&>f`, `>|f`) still splits
+// the segment as a separator first, so the words after it are read as a new command.
 const REDIRECTION = /^\d*(?:&>>|&>|<<<|<<-|<<|<>|<&|>&|>>|>\||<|>)(?!\()/;
 function withoutRedirections(tokens) {
   const kept = [];

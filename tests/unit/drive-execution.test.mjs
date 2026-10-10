@@ -56,9 +56,10 @@ function makeCycle({ branch = "feat/drive", stage = "execution", drive = `- driv
 // One isolated world per scenario: its own HOME (the sandbox probe writes under ~/.claude), runs dir,
 // scenario and call log, and a `claude` on PATH that is the stub. DEVCYCLE_NESTED_RUN and a stale
 // DEVCYCLE_DRIVE_TOKEN are set on purpose — the driver must strip the one and replace the other in
-// every session it starts. CLAUDECODE, which a suite run inside Claude Code inherits, is dropped:
-// only the test that is about it sets it.
-const { CLAUDECODE: _claudeCode, ...BASE_ENV } = process.env;
+// every session it starts. CLAUDECODE, which a suite run inside Claude Code inherits, and
+// CLAUDE_CONFIG_DIR, which would point the driver at the real transcripts, are dropped: only the
+// tests that are about them set them.
+const { CLAUDECODE: _claudeCode, CLAUDE_CONFIG_DIR: _configDir, ...BASE_ENV } = process.env;
 function harness(scenario = [], env = {}) {
   const dir = makeTempDir("devcycle-drive-test-");
   const home = join(dir, "home");
@@ -317,12 +318,15 @@ test("a session that ends without a result event is also charged its subagents' 
   assert.equal(fromConfig.code, 6, fromConfig.out);
   assert.deepEqual(calls(hm).map(budgetOf), ["1.00", "0.40"], "the transcripts under CLAUDE_CONFIG_DIR were not read");
 
+  // Both carry the request's 120 content blocks, the stub's 35-character one: 300k input tokens
+  // ($0.60) and 2,100 output tokens ($0.02, or $0.04 with the characters counted twice).
   const shared = makeCycle();
-  const sh2 = harness([{ ...crashing, usage: { input_tokens: 300_000 }, messageId: "msg_main" }], {});
-  transcriptsFor(join(sh2.env.HOME, ".claude", "projects"), shared, 3, { "<sid>.jsonl": [assistant("msg_main", { input_tokens: 300_000, output_tokens: 1 })] });
+  const sh2 = harness([{ ...crashing, usage: { input_tokens: 300_000 }, messageId: "msg_main", repeat: 120 }], {});
+  const sharedRequest = assistant("msg_main", { input_tokens: 300_000, output_tokens: 1 }, [{ type: "tool_use", name: "Bash" }]);
+  transcriptsFor(join(sh2.env.HOME, ".claude", "projects"), shared, 3, { "<sid>.jsonl": Array(120).fill(sharedRequest) });
   const once = await startDriver(shared, sh2, ["--max-usd", "1"]).result();
   assert.equal(once.code, 6, once.out);
-  assert.deepEqual(calls(sh2).map(budgetOf), ["1.00", "0.40"], "a request in both the stream and the transcript was priced twice");
+  assert.deepEqual(calls(sh2).map(budgetOf), ["1.00", "0.38"], "a request in both the stream and the transcript was priced twice");
 });
 
 test("a usage limit or a silent session still ends the driver once --max-usd is spent, instead of waiting", async () => {
@@ -375,8 +379,15 @@ test("a session silent past the idle limit after its result is no usage limit; o
   const hung = await drive(makeCycle(), [{ ledger: [line(1, "dispatched")], hangMs: 60000 }],
     { flags: ["--max-backoff", "0", "--max-stalls", "1"], env: { DEVCYCLE_DRIVE_IDLE_MS: "5000" } });
   assert.equal(hung.code, 5, hung.out);
-  assert.match(hung.out, /stalled: 1 sessions in a row went silent with no usage-limit signal/);
+  assert.match(hung.out, /stalled: 1 sessions in a row added no ledger line beyond a dispatch; the last went silent with no usage-limit signal/);
   assert.deepEqual(hung.records.map((x) => [x.exitReason, x.stallCount]), [["stalled", 1]]);
+
+  // A stall count built partly by a session that ended is not a run of silent sessions.
+  const mixed = await drive(makeCycle(), [{ ledger: [line(1, "dispatched")] }, { hangMs: 60000 }],
+    { flags: ["--max-backoff", "0", "--max-stalls", "2"], env: { DEVCYCLE_DRIVE_IDLE_MS: "5000" } });
+  assert.equal(mixed.code, 5, mixed.out);
+  assert.match(mixed.out, /stalled: 2 sessions in a row added no ledger line beyond a dispatch; the last went silent/);
+  assert.deepEqual(mixed.records.map((x) => [x.exitReason, x.stallCount]), [["stalled", 1], ["stalled", 2]]);
 });
 
 // A subagent can work for longer than the idle limit without its session printing a line, so a

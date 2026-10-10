@@ -72,8 +72,21 @@ const toolTurn = (name, input, over = {}) => turn({
 
 // --- pure helpers ---
 
+// Runs fn with CLAUDE_CONFIG_DIR set to dir, or unset when dir is undefined, then restores it.
+function withConfigDir(dir, fn) {
+  const saved = process.env.CLAUDE_CONFIG_DIR;
+  if (dir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+  else process.env.CLAUDE_CONFIG_DIR = dir;
+  try {
+    return fn();
+  } finally {
+    if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = saved;
+  }
+}
+
 test("parseArgs: defaults resolve the transcript dir under the home directory", () => {
-  const a = parseArgs([]);
+  const a = withConfigDir(undefined, () => parseArgs([]));
   assert.equal(a.json, false);
   assert.equal(a.since, null);
   assert.equal(a.until, null);
@@ -82,14 +95,8 @@ test("parseArgs: defaults resolve the transcript dir under the home directory", 
 
 // Only the default is resolved here; nothing under it is read.
 test("parseArgs: the default transcript dir is CLAUDE_CONFIG_DIR's projects when it is set", () => {
-  const saved = process.env.CLAUDE_CONFIG_DIR;
-  process.env.CLAUDE_CONFIG_DIR = join(tmpdir(), "claude-config-elsewhere");
-  try {
-    assert.equal(parseArgs([]).dir, join(tmpdir(), "claude-config-elsewhere", "projects"));
-  } finally {
-    if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-    else process.env.CLAUDE_CONFIG_DIR = saved;
-  }
+  const dir = join(tmpdir(), "claude-config-elsewhere");
+  assert.equal(withConfigDir(dir, () => parseArgs([]).dir), join(dir, "projects"));
 });
 
 test("parseArgs: every flag is read", () => {

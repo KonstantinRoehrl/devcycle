@@ -849,7 +849,8 @@ test("main thread: quoted text's words stay visible beside a substituted git, wh
   for (const cmd of ["$(which git) status", "$GIT log -1", "$(which git) --version"])
     assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
   const cycle = cycleDir(stateAt("execution"));
-  for (const cmd of ["echo '-c x.y=$(x) stash' > s; $(which git) $(cat s)", "$(which git) $(cat s)", "$GIT $SUB", "$GIT stash"])
+  for (const cmd of ["echo '-c x.y=$(x) stash' > s; $(which git) $(cat s)", "echo '$(x) -c a=b stash' > s; G=git; $G $(cat s)",
+    "$(which git) $(cat s)", "$GIT $SUB", "$GIT stash"])
     assert.equal(decideMain(cycle, cmd), "deny", `expected deny for main-thread stash: ${cmd}`);
   assert.equal(decideMain(cycle, "$GIT stash list"), "allow");
 });

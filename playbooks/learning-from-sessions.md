@@ -183,8 +183,8 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
 ## Confirm
 
 1. **Read the memory entries accumulated since `last-run:`** — `MEMORY.md` and its linked files under
-   `~/.claude/projects/<escaped-cwd>/memory/` (absolute cwd, every `/` replaced with `-`), filtered
-   by modification time where the memory system exposes it, or all of them on first run.
+   the manifest's `memoryDir`, filtered by modification time where the memory system exposes it,
+   or all of them on first run.
 2. **Check for devcycle config drift.** When the installed `plugin.json` `version` is newer than
    `last-reviewed-devcycle-version:`, run doctor's drift engine — never a second stale-key detector —
    against the user's global `CLAUDE.md` and any repo-level devcycle-wrapper skills:
