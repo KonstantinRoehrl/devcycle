@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -78,6 +78,13 @@ function commitTask(fx, { testCmd = "true", extra = [], cwd = fx.dir } = {}) {
   assert.notEqual(r.stdout, "", `no JSON object on stdout — stderr: ${r.stderr}`);
   return { status: r.status, stderr: r.stderr, out: JSON.parse(r.stdout) };
 }
+
+// A fix's re-review: the round's reviewer dispatch and its accept, keyed at the retries the scripts take.
+const acceptRound = (fx, round, roundRetry, verdictRetry) => appendFileSync(join(fx.dir, ".devcycle/ledger.md"), [
+  `- [2026-01-01T00:0${round + 2}:00Z] task=1 event=review-round outcome=round ${round} ref=none key=1/review-round/${round}/${roundRetry}`,
+  `- [2026-01-01T00:0${round + 3}:00Z] task=1 event=review-verdict outcome=accepted ref=.devcycle/findings/1-round-${round}.md key=1/review-verdict/${round}/${verdictRetry}`,
+  "",
+].join("\n"));
 
 const git = (fx, ...args) => sh("git", args, { cwd: fx.dir }).trim();
 const head = (fx) => git(fx, "rev-parse", "HEAD");
@@ -169,6 +176,23 @@ test("a renamed Files path commits both sides: the new file and the old one's de
     } finally {
       cleanup(fx);
     }
+  }
+});
+
+// `git mv` then deleting the new path reports `RD <new>\0<old>\0`: the rename's source is gone from the
+// index and its destination from the work tree, so the change the commit takes is the source's deletion.
+test("a renamed Files path whose new name is then deleted commits the old one's deletion", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "docs/plan.md", PLAN.replace("- Modify: src/a.txt", "- Modify: src/a.txt\n- Create: src/renamed.txt"));
+    git(fx, "mv", "src/a.txt", "src/renamed.txt");
+    rmSync(join(fx.dir, "src/renamed.txt"));
+    const { out } = commitTask(fx);
+    assert.equal(out.action, "committed", JSON.stringify(out));
+    assert.equal(git(fx, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"), "D\tsrc/a.txt");
+    assert.equal(git(fx, "status", "--porcelain", "--", "src"), "", "nothing of the rename is left behind");
+  } finally {
+    cleanup(fx);
   }
 });
 
@@ -303,10 +327,85 @@ test("gate rows a crash cut off after their ledger line are written by the task'
     writeInto(fx.dir, "src/a.txt", "a1\n");
     assert.equal(commitTask(fx, { testCmd: "exit 1" }).out.action, "gate-fail");
     writeFileSync(fx.record, rows(fx).filter((r) => r.conformance === "pass").map((r) => JSON.stringify(r) + "\n").join(""));
+    acceptRound(fx, 2, 1, 2);
     const { out } = commitTask(fx);
     assert.equal(out.action, "committed");
     assert.deepEqual(events(fx).sort(), ["gate-fail", "gate-pass-clean"]);
     assert.ok(rows(fx).some((r) => r.kind === "verdict" && r.conformance === "fail"));
+  } finally {
+    cleanup(fx);
+  }
+});
+
+// A red gate closes the round its reviewer accepted: whatever fixes the red has had no review yet.
+test("a commit is refused unless the task's latest verdict is an open accept: not after a red gate, not with no accept", () => {
+  for (const [name, arrange] of [
+    ["after a red gate", (fx) => assert.equal(commitTask(fx, { testCmd: "exit 1" }).out.action, "gate-fail")],
+    ["with no accept", (fx) => writeInto(fx.dir, ".devcycle/ledger.md",
+      readFileSync(join(fx.dir, ".devcycle/ledger.md"), "utf8").replace(/^.*event=review-verdict.*\n/m, ""))],
+  ]) {
+    const fx = fixture();
+    try {
+      writeInto(fx.dir, "src/a.txt", "a1\n");
+      arrange(fx);
+      const before = head(fx);
+      const linesBefore = ledgerLines(fx);
+      const { status, out } = commitTask(fx);
+      assert.equal(status, 2, `${name}: ${JSON.stringify(out)}`);
+      assert.match(out.error, /no open accept/, name);
+      assert.equal(head(fx), before, `${name}: no commit`);
+      assert.deepEqual(ledgerLines(fx), linesBefore, `${name}: nothing appended`);
+    } finally {
+      cleanup(fx);
+    }
+  }
+});
+
+test("a review loop whose exhausted-unresolved status awaits the user is a user decision before any gate or commit", () => {
+  const fx = fixture();
+  try {
+    acceptRound(fx, 3, 1, 1);
+    writeInto(fx.dir, ".devcycle/findings/task-1-review-status.md", "status: exhausted-unresolved rounds: 3/3 residue: 1 carried-to: none\n");
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const before = head(fx);
+    const { status, out } = commitTask(fx, { testCmd: "touch gate-ran" });
+    assert.equal(status, 0);
+    assert.deepEqual([out.action, out.loopId], ["needs-user", "task-1-review"]);
+    assert.equal(existsSync(join(fx.dir, "gate-ran")), false, "the gate is not run");
+    assert.equal(head(fx), before);
+  } finally {
+    cleanup(fx);
+  }
+});
+
+test("the user's decision on an exhausted review loop, after its rejected round 3, lets the task commit", () => {
+  const fx = fixture();
+  try {
+    appendFileSync(join(fx.dir, ".devcycle/ledger.md"), [
+      "- [2026-01-01T00:02:00Z] task=1 event=review-round outcome=round 3 ref=none key=1/review-round/3/1",
+      "- [2026-01-01T00:03:00Z] task=1 event=review-verdict outcome=rejected ref=.devcycle/findings/1-round-3.md key=1/review-verdict/3/1",
+      "- [2026-01-01T00:04:00Z] task=1 event=user-decision outcome=commit as it stands (task-1-review) ref=none",
+      "",
+    ].join("\n"));
+    writeInto(fx.dir, ".devcycle/findings/task-1-review-status.md", "status: exhausted-unresolved rounds: 3/3 residue: 1 carried-to: none\n");
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    assert.equal(commitTask(fx).out.action, "committed");
+  } finally {
+    cleanup(fx);
+  }
+});
+
+// The status goes before the gate-fail line: a crash between them must leave a pending user decision,
+// never a ledger that reads as a rejected round with a fix round still to go.
+test("a round-3 red gate whose status cannot be written appends no gate-fail line", () => {
+  const fx = fixture();
+  try {
+    acceptRound(fx, 3, 1, 1);
+    mkdirSync(join(fx.dir, ".devcycle/findings/task-1-review-status.md/blocker"), { recursive: true });
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const { status, out } = commitTask(fx, { testCmd: "exit 1" });
+    assert.equal(status, 3, JSON.stringify(out));
+    assert.ok(!ledgerLines(fx).some((l) => l.includes("green gate")), "no gate-fail line without its status");
   } finally {
     cleanup(fx);
   }

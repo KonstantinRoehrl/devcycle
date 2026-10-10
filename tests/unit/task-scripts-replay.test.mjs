@@ -247,6 +247,27 @@ test("SC4 replay: after a green-gate failure the fix's review is the next round,
   }
 });
 
+test("SC4 replay: after a green-gate failure neither the closed round's verdict nor a commit of the unreviewed fix goes through", () => {
+  const fx = fixture();
+  try {
+    acceptedTask(fx, "1", "src/a.txt");
+    assert.equal(commitTask(fx, "1", "exit 1").action, "gate-fail");
+    dispatchImplementer(fx, "1", 1);
+    assert.equal(intake(fx, "1", implement(fx, "1", "src/a.txt")).action, "review");
+    const head = sh("git", ["rev-parse", "HEAD"], { cwd: fx.dir }).trim();
+    const refused = (name, args) => {
+      const r = spawnSync(process.execPath, [script(name), "--run", RUN, "--task", "1", ...args], { cwd: fx.dir, env: fx.env, encoding: "utf8" });
+      assert.equal(r.status, 2, `${name}: ${r.stdout}`);
+    };
+    refused("task-verdict", ["--round", "1", "--findings", ".devcycle/findings/1-round-1.md", "--evidence-class", "red-green"]);
+    refused("task-commit", ["--plan", "docs/plan.md", "--test-cmd", "true", "--subject", "feat: land task 1"]);
+    assert.equal(sh("git", ["rev-parse", "HEAD"], { cwd: fx.dir }).trim(), head, "the unreviewed fix is not committed");
+    assert.equal(ledger(fx, "1").at(-1), `task=1 event=report-received outcome=complete ref=.devcycle/reports/1.md`);
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test("SC4 replay: a sibling-caused red is deferred, then the quiesced wave commits", () => {
   const fx = fixture();
   try {

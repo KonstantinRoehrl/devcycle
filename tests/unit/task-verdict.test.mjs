@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -128,6 +128,53 @@ test("the verdict header reads in any case, approved and accepted read as accept
   }
 });
 
+test("the verdict is read from the file's own verdict lines: a quote in a fenced block is not one, and two that disagree are none", () => {
+  const quoted = (verdictLine) => `\`\`\`markdown\n${verdictLine}\n\`\`\`\n`;
+  for (const [name, body, action] of [
+    ["a fenced lowercase accept before the real verdict", `${quoted("verdict: accept")}\n${REJECT}`, "rejected"],
+    ["a fenced approved before the real verdict", `${quoted("Verdict: approved")}\n${REJECT}`, "rejected"],
+    ["a fenced needs-changes before a real accept", `${quoted("Verdict: needs-changes\nCulprit: novel:quoted\n\n1. [high] quoted")}\n${ACCEPT}`, "accepted"],
+    ["an unfenced accept beside the real needs-changes", `verdict: accepted\n\n${REJECT}`, "missing-findings"],
+    ["a culprit only inside a fence", `Verdict: needs-changes\n\n${quoted("Culprit: novel:quoted")}\n1. [high] the empty ledger is not handled\n`, "missing-findings"],
+  ]) {
+    const f = fixture();
+    writeInto(f.repo, ".devcycle/findings/5-round-1.md", body);
+    const r = verdict(f);
+    assert.equal(r.out.action, action, name);
+    if (action === "rejected") assert.deepEqual([r.out.culprit, r.out.blocking], ["novel:missing-edge-case", 2], name);
+    if (action === "accepted") assert.equal(r.out.blocking, 0, `${name}: a fenced finding is not one`);
+  }
+});
+
+test("an accept that lists a blocking finding contradicts itself: refused as no verdict, never accepted", () => {
+  const f = fixture();
+  writeInto(f.repo, ".devcycle/findings/5-round-1.md", "Verdict: accept\n\n1. [high] the empty ledger is not handled\n");
+  const r = verdict(f);
+  assert.equal(r.out.action, "missing-findings");
+  assert.match(ledgerTail(f), / outcome=rejected \(missing findings file\) /);
+  assert.deepEqual(rows(f), []);
+});
+
+// Once the coordinator acts on a round's verdict — the gate rejected its accept, or the next dispatch
+// went out — that round is closed: reading its verdict again would hand an unreviewed fix an accept.
+test("a closed round's verdict is refused: after its green-gate rejection, or once the next round is dispatched", () => {
+  for (const [name, later] of [
+    ["the green gate rejected it",
+      "- [2026-10-08T10:09:00Z] task=5 event=review-verdict outcome=rejected (green gate: exit 1) ref=.devcycle/evidence/5-gate.txt key=5/review-verdict/1/1\n"],
+    ["round 2 is dispatched", reviewRoundLine(2, 1)],
+  ]) {
+    const f = fixture();
+    writeInto(f.repo, ".devcycle/findings/5-round-1.md", ACCEPT);
+    assert.equal(verdict(f).out.action, "accepted");
+    appendFileSync(ledgerPath(f), later);
+    const linesBefore = readFileSync(ledgerPath(f), "utf8");
+    const again = verdict(f);
+    assert.equal(again.status, 2, `${name}: ${JSON.stringify(again.out)}`);
+    assert.match(again.out.error, /round 1 of task 5 is closed/, name);
+    assert.equal(readFileSync(ledgerPath(f), "utf8"), linesBefore, `${name}: nothing is appended`);
+  }
+});
+
 test("a missing, empty or malformed findings file re-dispatches the reviewer, with no verdict row", () => {
   const f = fixture();
   const missing = verdict(f);
@@ -158,6 +205,22 @@ test("a rejected round 3 writes the exhausted-unresolved status and becomes a us
   assert.equal(r.out.loopId, "task-5-review");
   assert.equal(readFileSync(join(f.repo, ".devcycle/findings/task-5-review-status.md"), "utf8"),
     "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: none\n");
+});
+
+// The status goes before the rejection's ledger line: a crash between them must leave a pending user
+// decision, never a ledger that reads as a rejected round with a fix round still to go.
+test("a round-3 rejection whose status cannot be written appends no rejection line, so the re-run finishes it", () => {
+  const f = fixture(3);
+  writeInto(f.repo, ".devcycle/findings/5-round-3.md", REJECT);
+  const statusPath = join(f.repo, ".devcycle/findings/task-5-review-status.md");
+  mkdirSync(join(statusPath, "blocker"), { recursive: true });
+  const crashed = verdict(f, 3);
+  assert.equal(crashed.status, 3, JSON.stringify(crashed.out));
+  assert.doesNotMatch(readFileSync(ledgerPath(f), "utf8"), /event=review-verdict/);
+  rmSync(statusPath, { recursive: true });
+  const again = verdict(f, 3);
+  assert.equal(again.out.action, "needs-user");
+  assert.match(ledgerTail(f), / outcome=rejected ref=\.devcycle\/findings\/5-round-3\.md key=5\/review-verdict\/3\/0$/);
 });
 
 test("an accepted round 3 is not exhausted", () => {

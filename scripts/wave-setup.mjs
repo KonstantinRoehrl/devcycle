@@ -17,7 +17,7 @@ import { compareKnobs, parseRecordedLine } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
 import { nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
-import { reviewLoopId } from "./task-verdict.mjs";
+import { pendingReviewLoop, reviewLoopId } from "./task-verdict.mjs";
 import { DRIVE_LOCK_REL, driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";
 
@@ -73,19 +73,6 @@ function readLedger(ledgerPath, plan) {
   }
   if (!plan || text.match(/^Plan: `([^`]+)`/m)?.[1] !== plan) return [];
   return text.split("\n").map(parseLedgerLine).filter(Boolean);
-}
-
-function pendingLoop(root, task, lines) {
-  const loopId = reviewLoopId(task);
-  let status;
-  try {
-    status = readFileSync(join(root, ".devcycle", "findings", `${loopId}-status.md`), "utf8");
-  } catch {
-    return null;
-  }
-  if (!/^status:\s*exhausted-unresolved\b/m.test(status)) return null;
-  // Matched by id, never by order: the status file carries no timestamp.
-  return lines.some((l) => l.event === "user-decision" && l.outcome.includes(loopId)) ? null : loopId;
 }
 
 // The declaration forms playbooks/planning-waves.md allows — `none (…)`, `Task 2 (…)`, `Tasks 1+4
@@ -163,7 +150,7 @@ function wavePosition(root, plan, lines, ledgerPath) {
     for (const num of nums) {
       const task = String(num);
       const own = byTask.get(task) ?? [];
-      positions.set(task, taskPosition(own, { pendingLoop: pendingLoop(root, task, own), retries: (prefix) => retryCount(ledgerPath, task, prefix) }));
+      positions.set(task, taskPosition(own, { pendingLoop: pendingReviewLoop(root, task, own), retries: (prefix) => retryCount(ledgerPath, task, prefix) }));
     }
   const done = new Set([...positions].filter(([, p]) => p.position === "committed").map(([task]) => task));
   const current = waves.find(([, nums]) => nums.some((num) => !done.has(String(num))));

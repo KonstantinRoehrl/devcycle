@@ -130,6 +130,25 @@ test("an exhausted-unresolved loop is pending until a decision of that task name
   assert.deepEqual(positionOf(r.tasks[1]), { task: "2", position: "user-decision", next: "follow-decision" });
 });
 
+// The status file carries no time, but every exhaustion is a rejection line in the ledger: one after
+// the latest decision naming the loop is an exhaustion that decision never saw.
+test("a review loop exhausted again after the user's decision is pending again; a missing findings file is no exhaustion", () => {
+  const c = cycle({ ledger: [committed(1), entry(2, "review-verdict", "rejected", ".devcycle/findings/2-round-3.md"),
+    entry(2, "user-decision", "one more round for task-2-review")] });
+  writeInto(c.repo, `.devcycle/findings/${reviewLoopId(2)}-status.md`, "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: none\n");
+  appendFileSync(c.ledgerPath, [
+    entry(2, "review-round", "round 4"),
+    entry(2, "review-verdict", "rejected (missing findings file)", ".devcycle/findings/2-round-4.md"),
+    entry(2, "review-round", "round 4"),
+    entry(2, "review-verdict", "accepted", ".devcycle/findings/2-round-4.md"),
+  ].join("\n") + "\n");
+  assert.equal(setup(c).pendingDecision, null);
+  appendFileSync(c.ledgerPath, entry(2, "review-verdict", "rejected (green gate: exit 1)", ".devcycle/evidence/2-gate.txt") + "\n");
+  const r = setup(c);
+  assert.deepEqual(r.pendingDecision, { task: "2", loopId: "task-2-review" });
+  assert.deepEqual(positionOf(r.tasks[1]), { task: "2", position: "exhausted-unresolved", next: "needs-user" });
+});
+
 test("the current wave is the first with uncommitted work; dispatchable tasks carry their brief inputs once their dependencies are committed", () => {
   const fresh = setup(cycle());
   assert.equal(fresh.wave, 1);

@@ -16,10 +16,10 @@ import { eachRecord } from "./jsonl.mjs";
 import { gitToplevel, recordPath, validateCulprit } from "./run-record.mjs";
 import { isMain } from "./is-main.mjs";
 import { INTEGRATION_BRANCHES, defaultBranches } from "./branch-names.mjs";
-import { ROUND_CAP, exhaustReviewLoop } from "./task-verdict.mjs";
+import { ROUND_CAP, exhaustReviewLoop, pendingReviewLoop, reviewLoopId } from "./task-verdict.mjs";
 import {
-  UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, latestKeyed, ledgerKey, nextRetry, runTaskScript,
-  taskEntries, taskFlags, workTreeRoot,
+  MISSING_FINDINGS, UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, latestKeyed, ledgerKey, nextRetry,
+  runTaskScript, taskEntries, taskFlags, workTreeRoot,
 } from "./task-ledger.mjs";
 
 const FOREIGN_CHANGE_CHECK = fileURLToPath(new URL("./foreign-change-check.mjs", import.meta.url));
@@ -140,28 +140,32 @@ function writeGateEvidence(root, task, runs) {
   return rel;
 }
 
-// The task's changed Files, and those of them `git add` must take: all but a path already gone from
-// the index — a staged deletion, a staged rename's source — which `git add` refuses as matching
-// nothing. `-z` keeps paths verbatim; a rename's or copy's source path follows its entry as a field of
-// its own. Either status column may carry the R — X for a staged rename, Y for a work-tree one
-// `git add -N <new>` made visible — and a renamed-away Files path is a deletion the commit takes.
+// The task's changed Files the commit names, and those `git add` must take: all but a path already
+// gone from the index — a staged deletion, a staged rename's source — which `git add` refuses as
+// matching nothing. A path new to the index and since deleted from the work tree — added, renamed or
+// copied, then removed — is no change against HEAD: `git add` drops it from the index, after which
+// git knows it nowhere and a commit naming it fails. `-z` keeps paths verbatim; a rename's or copy's
+// source path follows its entry as a field of its own. Either status column may carry the R — X for a
+// staged rename, Y for a work-tree one `git add -N <new>` made visible — and a renamed-away Files path
+// is a deletion the commit takes.
 function changedTaskFiles(cwd, files) {
   const fields = gitOut(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...files]).split("\0");
   const changed = [];
   const toAdd = [];
-  const take = (path, inIndex) => {
+  const take = (path, { add = true, commit = true } = {}) => {
     if (!files.has(path)) return;
-    changed.push(path);
-    if (inIndex) toAdd.push(path);
+    if (commit) changed.push(path);
+    if (add) toAdd.push(path);
   };
   for (let i = 0; i < fields.length; i++) {
     const entry = fields[i];
     if (!entry) continue;
-    take(entry.slice(3), entry[0] !== "D");
-    if (!/[RC]/.test(entry.slice(0, 2))) continue;
+    const [x, y] = entry;
+    take(entry.slice(3), { add: x !== "D", commit: !(/[ARC]/.test(x) && y === "D") });
+    if (!/[RC]/.test(x + y)) continue;
     const source = fields[++i];
-    if (entry[1] === "R") take(source, true);
-    else if (entry[0] === "R") take(source, false);
+    if (y === "R") take(source);
+    else if (x === "R") take(source, { add: false });
   }
   return { changed, toAdd };
 }
@@ -201,14 +205,24 @@ function reconcileGateRows(ctx) {
   return appendRows(ctx, specs);
 }
 
-function recordGate(ctx, gate, evidenceRef) {
+function recordGate(ctx, gate, evidenceRef, round) {
   const { ledgerPath, task } = ctx;
-  const round = latestKeyed(ledgerPath, task, "review-round")?.round ?? 0;
   const retry = nextRetry(ledgerPath, task, "review-verdict");
   const outcome = gate.gate === "fail" ? `${GATE_FAIL_PREFIX} exit ${gate.status})` : DEFERRED_OUTCOME;
   const line = appendLedgerLine(ledgerPath, { task, event: "review-verdict", outcome, ref: evidenceRef, round, retry });
-  const appended = [...(line.appended ? [ledgerKey({ task, event: "review-verdict", round, retry })] : []), ...reconcileGateRows(ctx)];
-  return { round, appended };
+  return [...(line.appended ? [ledgerKey({ task, event: "review-verdict", round, retry })] : []), ...reconcileGateRows(ctx)];
+}
+
+// The verdict that keeps the task from its commit, or null. What commits is the reviewer's accept with
+// no red gate since — what fixes a red has had no review yet — or the user's decision on the task's
+// review loop after its latest verdict. A deferral or a missing findings file decides nothing.
+function unaccepted(entries, task) {
+  const at = entries.findLastIndex((e) =>
+    e.event === "review-verdict" && e.outcome !== DEFERRED_OUTCOME && !e.outcome.startsWith(MISSING_FINDINGS));
+  const verdict = entries[at]?.outcome ?? "none";
+  if (verdict.startsWith("accepted")) return null;
+  const decided = entries.findLastIndex((e) => e.event === "user-decision" && e.outcome.includes(reviewLoopId(task)));
+  return decided > at ? null : verdict;
 }
 
 function recordCommit(ctx, sha) {
@@ -244,18 +258,26 @@ export function taskCommit(argv, cwd = process.cwd()) {
 
   const found = findTaskCommit(root, sinceCut(root, branch.cut), `${args.run}/${args.task}`, files);
   if (found) return result("already-committed", { gate: "pass", sha: found, appended: recordCommit(ctx, found) });
+  const entries = taskEntries(ctx.ledgerPath, args.task);
+  const waiting = pendingReviewLoop(root, args.task, entries);
+  if (waiting) return result("needs-user", { reason: "review loop exhausted-unresolved", loopId: waiting, appended: [] });
+  const blocker = unaccepted(entries, args.task);
+  if (blocker)
+    throw new UsageError(`task ${args.task} has no open accept to commit (its latest verdict: ${blocker}) — a fix after a red gate needs the next round's review first`);
 
   const before = branchMismatch();
   if (before) return before;
   const gate = greenGate(root, { testCmd: args.testCmd, subsetCmd: args.subsetCmd, files: [...files] });
   const evidenceRef = writeGateEvidence(root, args.task, gate.runs);
   if (gate.gate !== "pass") {
-    const { round, appended } = recordGate(ctx, gate, evidenceRef);
-    if (gate.gate === "deferred") return result("deferred", { gate: "deferred", appended });
+    const round = latestKeyed(ctx.ledgerPath, args.task, "review-round")?.round ?? 0;
     // A red gate rejects the round its reviewer accepted, so it counts toward the review loop's cap;
-    // past it, the red gate is the one item left unresolved.
-    if (round < ROUND_CAP) return result("gate-fail", { gate: "fail", appended });
-    const loopId = exhaustReviewLoop(root, args.task, round, 1);
+    // past it, the red gate is the one item left unresolved. The status goes before the gate's line,
+    // so a crash between them leaves the user's decision pending, never one more fix round.
+    const loopId = gate.gate === "fail" && round >= ROUND_CAP ? exhaustReviewLoop(root, args.task, round, 1) : null;
+    const appended = recordGate(ctx, gate, evidenceRef, round);
+    if (gate.gate === "deferred") return result("deferred", { gate: "deferred", appended });
+    if (!loopId) return result("gate-fail", { gate: "fail", appended });
     return result("needs-user", { gate: "fail", reason: "review loop exhausted-unresolved", loopId, appended });
   }
 
