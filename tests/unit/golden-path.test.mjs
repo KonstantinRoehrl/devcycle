@@ -893,6 +893,7 @@ test("planning-waves/opt-in-gate — one question with three answers; the drive 
   for (const option of ["Walk the waves manually", "Unattended — start it now", "Unattended — I'll start it myself"])
     assert.ok(handoff.includes(`**${option}**`), `the opt-in gate lost its option: ${option}`);
   assert.ok(handoff.includes('scripts/drive-execution.mjs" --check-sandbox` prints\n`{"sandboxed":false}`'), "start-now is no longer gated on the sandbox probe");
+  assert.match(handoff, /non-null `sessionHash`/, "start-now is offered without a readable session id");
   assert.ok(handoff.includes("- drive: auto model=<id> opted=<stamp>"), "the drive row's shape changed");
   assert.match(handoff, /scripts\/depth-probe\.mjs" --json`\n\s+prints, never from self-report/);
   const launch = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md --model <id> --detach';

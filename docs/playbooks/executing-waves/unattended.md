@@ -96,8 +96,11 @@ time ends the driver after `--max-stalls` of them (exit 5) instead of being retr
 The driver commits as it goes, on the recorded topic branch. Do not switch branches, edit tracked
 files or commit in that checkout until it exits. While its lock is live, devcycle's git guard
 denies branch-moving and tree-destroying git (`switch`, `checkout` other than
-`checkout -- <paths>`, `reset --hard`, `clean -f`) on the main thread of every Claude Code session
-in that checkout, and a manual `/devcycle:continue` refuses to resume and names the running driver.
+`checkout -- <paths>`, `reset --hard`, a `clean` that is not a dry run) on the main thread of every
+Claude Code session in that checkout, including one sent back to it with `--git-dir`,
+`--work-tree`, `GIT_DIR` or `GIT_WORK_TREE`, and any git whose subcommand it cannot read (a
+substitution, a variable or `xargs git` supplies it); a manual `/devcycle:continue` refuses to
+resume and names the running driver.
 Your own terminal is not guarded. To work on something else meanwhile, use another worktree.
 
 ## Watching and stopping it

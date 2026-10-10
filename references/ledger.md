@@ -1,9 +1,8 @@
 # The ledger — where progress is written
 
-The single owner of the ledger's own *write* format: its preamble records and its per-event line.
-No existing reference fits — `references/resume.md` owns reading position back *out* of the
-ledger, `references/evidence.md` owns report and verdict shapes, and neither owns how the file
-itself is written, which `resume.md`, `references/handoff.md` and the stage playbooks all point at.
+The single owner of the ledger's *write* format: its preamble records and its per-event line, which
+`references/handoff.md` and the stage playbooks point at. `references/resume.md` owns reading
+position back *out* of it, `references/evidence.md` report and verdict shapes.
 
 Single source of truth for progress, at `.devcycle/ledger.md` — one ledger, never a second.
 `playbooks/executing-waves.md` creates the file, before any per-event line, with these three
@@ -61,8 +60,7 @@ run-record row only while holding a `<file>.lock` next to its target — a lock 
 gone or reused is reclaimed — and skips a line whose key, or a row whose identifying fields, already
 exist, so a re-run after a crash adds nothing twice while the next round or retry still appends.
 Each prints one JSON object (`ok`, `action`, `appended` — the keys it wrote and `rr:<kind>` per
-run-record row — and the session's `depthBand`) and exits non-zero only on a usage (2) or
-environment (3) error.
+run-record row — and `depthBand`) and exits non-zero only on a usage (2) or environment (3) error.
 
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs" --run <run-id> --task <id> --role implementer|reviewer [--round <n>] [--model-decision "<decision>"]`,
   the brief on stdin, immediately before each dispatch: writes it to
@@ -79,9 +77,11 @@ environment (3) error.
   `outcome=rejected (intake bounce)` with its findings file as `ref=` (`bounce`); a clean one appends
   `outcome=complete` (`review`). All but a missing report write the `dispatch` row.
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-verdict.mjs" --run <run-id> --task <id> --round <n> --findings <path> --evidence-class red-green|green-green|convention`
-  once the reviewer's envelope returns, against that round's `review-round` line: a findings file
-  that is missing, empty or malformed (no `Verdict:`, or `needs-changes` without a valid `Culprit:`)
-  appends `review-verdict outcome=rejected (missing findings file)` (`missing-findings`); otherwise
-  `outcome=accepted` or `rejected`, the `verdict` row and, on `needs-changes`, the `review-reject`
-  event row (`accepted` / `rejected`). A rejected round 3 writes the exhausted-unresolved status
-  `references/resume.md` reads. Either script returns `needs-user` instead at a retry cap.
+  once the reviewer's envelope returns, against that round's `review-round` line (exit 2 once a later
+  task line not its own, a red gate's say, acted on it): a findings file missing, empty or malformed
+  (no unfenced `Verdict:` or two that disagree, `needs-changes` lacking a valid `Culprit:`, `accept`
+  with a critical or high finding) appends `review-verdict outcome=rejected (missing findings file)`
+  (`missing-findings`); else `outcome=accepted` or `rejected`, the `verdict` row and, on
+  `needs-changes`, the `review-reject` event row (`accepted` / `rejected`). A rejected round 3 writes
+  the exhausted-unresolved status `references/resume.md` reads; either script returns `needs-user`
+  at a retry cap.

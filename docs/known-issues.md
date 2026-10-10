@@ -102,6 +102,17 @@ refuses, and the lock of a driver on a cloned VM that shares this machine's id a
 this machine last booted is taken for a reboot's and reclaimed. It is left rather than fixed because nothing
 cheap tells a reboot from a clone that booted earlier. When no driver runs, remove the lock by hand.
 
+### An off-by-one review round stops a driven session (low)
+
+`scripts/task-dispatch.mjs --role reviewer` refuses any round but the task's next with exit 2, and
+`playbooks/executing-waves.md` routes exit 2 to a stop, so a coordinator that passes the wrong
+`--round` ends a driven session instead of dispatching again for the round the error names. The same
+holds for `task-verdict.mjs` refusing a round whose verdict was already acted on, and for
+`task-commit.mjs` refusing a task whose accept a red gate since rejected. It fails safe:
+`/devcycle:continue` resumes with `wave-setup.mjs`'s `reviewRound`. The fix is for `task-dispatch.mjs`
+to return an exit-0 `wrong-round` action naming the expected round, which the playbook routes to
+re-slicing the reviewer brief for that round.
+
 ### The runtime resolves the default branch without `gh` (low)
 
 `references/branch.md` asks `gh` for the default branch when `origin/HEAD` is unset; the scripts
@@ -110,3 +121,15 @@ that run during execution (`defaultBranches` in `scripts/branch-names.mjs`, used
 treat every local branch among `git config init.defaultBranch`, `main` and `master` as the default,
 so a resume never waits on the network. A repo with none of them gets no driver: its pre-flight
 exits 3 and names the fix.
+
+## Git guard — `hooks/block-destructive-git.mjs`
+
+### A launcher the guard does not recognise runs any git it is handed (low)
+
+The guard judges a git behind a launcher only when the launcher is in its `WRAPPERS` set, is find's
+`-exec`, or is an interpreter given code with `-e`/`-c`. Any other launcher (`su -c`, `parallel`,
+`trap`) passes its git through, spelled out (`su -c 'git checkout main' me`) or read from a file by a
+substitution (`trap '$(cat s)' EXIT`), so on the main thread it can move the branch while a driver
+holds the checkout. It is left rather than fixed because the launcher list is a bounded denylist: no
+finite list names every program that runs its arguments. Stop the driver before scripting git
+through such a launcher.
