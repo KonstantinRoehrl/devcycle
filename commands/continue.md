@@ -12,8 +12,8 @@ recollection, including the user's.
 
 Every ask in this command is a gate on a live run record — the chosen state file's `run:` — and so
 is every gate of the stage it resumes: an Other answer at any of them appends
-`user-correction-at-gate` to that run; read `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` § The run
-record's `event` row for its fields.
+`user-correction-at-gate` to that run; its fields are the `event` row of the run record
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/ledger.md the-run-record` prints.
 
 ## Drive mode
 
@@ -69,8 +69,9 @@ without that line, skip this section. In drive mode:
    continuing on the stale record. On success it also prints the stage's `entry:` and `note:`
    lines; when the `note:` names a human-required step, re-walk that step on resume rather than
    assuming a stale `state.md` already cleared it.
-2b. Resolve knobs per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel — only now,
-   once the ownership check and `resume-check` have passed:
+2b. Resolve knobs per the knob channel
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/config.md knob-channel`
+   prints — only now, once the ownership check and `resume-check` have passed:
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \

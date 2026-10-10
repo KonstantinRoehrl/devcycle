@@ -61,9 +61,11 @@ planning's close writes `drive:`; every other rewrite carries all three forward,
   stamp; a second such apply leaves that row alone. This cycle's ledger exists once
   `.devcycle/ledger.md`'s `Plan:` header names the state file's `plan:` path. A ledger file whose
   header names another plan is a previous cycle's slot, and a `plan: none` cycle (fast path,
-  sweep) never has one: neither is appended to. Once it exists, an apply appends a `task=config
-  event=user-decision` line per `${CLAUDE_PLUGIN_ROOT}/references/ledger.md` instead, outcome
-  `knobs changed mid-cycle: <the compare lines joined by "; ">`, ref `.devcycle/state.md`.
+  sweep) never has one: neither is appended to. Once it exists, an apply instead appends a
+  `task=config event=user-decision` line in the shape
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/ledger.md the-event-line`
+  prints, outcome `knobs changed mid-cycle: <the compare lines joined by "; ">`, ref
+  `.devcycle/state.md`.
 - `- drive: auto model=<id> opted=<stamp>` — the user chose unattended execution at
   `playbooks/planning-waves.md` § Handoff; an agent writes it only as that answer's direct result
   (`docs/decisions/README.md`, 2026-10-08 — Unattended execution). `<id>` is the opting-in
