@@ -191,7 +191,8 @@ plugin ships. Start there.
   The depth gate runs `scripts/depth-probe.mjs`, which
   measures one transcript without loading doctor. Every `/devcycle:doctor` cost-analysis reply
   carries a per-version and per-stage overview, rendered by `scripts/doctor-overview.mjs` from
-  the same tables as the full report.
+  the same tables as the full report. A step that needs one section of a shared reference loads
+  only that section, through `scripts/read-section.mjs`.
 - Developing devcycle itself: `scripts/self-dev-check.mjs` guards the case where the repo under
   work *is* this plugin's own source, so the pipeline runs from the installed copy while the
   deliverable belongs in the repo. `/devcycle:cycle` records what the installed copy holds when the
