@@ -5,7 +5,7 @@
 // 2026-10-08, D7). Every other gate stops it: a driven session writes .devcycle/drive-stop.json
 // through scripts/drive-signal.mjs, and the driver exits 4 with that reason. POSIX only: a signal
 // reaches a session through its process group.
-import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -307,6 +307,45 @@ function tallyRequest(requests, message) {
   requests.set(key, request);
 }
 
+// <projects>/<slug>/<session>.jsonl and <projects>/<slug>/<session>/subagents/agent-<id>.jsonl. The
+// slug is found by the session id rather than derived from the checkout's path, whose escaping
+// is Claude Code's to change.
+function sessionTranscripts(sessionId) {
+  const projects = join(homedir(), ".claude", "projects");
+  const listing = (dir) => {
+    try {
+      return readdirSync(dir);
+    } catch {
+      return [];
+    }
+  };
+  const slug = listing(projects).find((p) => existsSync(join(projects, p, `${sessionId}.jsonl`)));
+  if (!slug) return [];
+  const agents = join(projects, slug, sessionId, "subagents");
+  return [join(projects, slug, `${sessionId}.jsonl`), ...listing(agents).filter((f) => f.endsWith(".jsonl")).map((f) => join(agents, f))];
+}
+
+// Claude Code appends these transcripts as a session runs, so they outlive a killed one, and they
+// hold what the stream lacks: each request's final output count, and any subagent request the
+// stream did not carry. A request is logged once per content block, its output growing.
+function tallyTranscripts(requests, sessionId) {
+  if (!/^[A-Za-z0-9-]+$/.test(sessionId ?? "")) return;
+  const visit = (r) => {
+    const message = r.type === "assistant" ? r.message : null;
+    if (!message?.usage || !message.id) return;
+    const known = requests.get(message.id);
+    if (!known) requests.set(message.id, { usage: message.usage, model: message.model, chars: 0 });
+    else if ((message.usage.output_tokens ?? 0) > (known.usage.output_tokens ?? 0)) known.usage = message.usage;
+  };
+  for (const file of sessionTranscripts(sessionId)) {
+    try {
+      eachRecord(file, visit, { lineFilter: (line) => line.includes('"usage"') });
+    } catch {
+      // An unreadable transcript leaves the estimate to the stream.
+    }
+  }
+}
+
 // Only devcycle's own errors stop a session; an entry that names no plugin is counted, not guessed away.
 const devcycleErrors = (errors) =>
   errors.filter((err) => {
@@ -319,6 +358,7 @@ function finalize(s, model) {
   s.resultText = typeof r?.result === "string" ? r.result : "";
   s.costUsd = typeof r?.total_cost_usd === "number" ? r.total_cost_usd : null;
   // A session killed or crashed before its result event still spent money.
+  if (s.costUsd === null) tallyTranscripts(s.requests, s.sessionId);
   s.spentUsd = s.costUsd ?? estimateUsd(s.requests, model);
   s.denials = Array.isArray(r?.permission_denials) ? r.permission_denials.length : 0;
   if (!s.limit && r?.is_error && USAGE_LIMIT_TEXT.test(s.resultText))
@@ -407,19 +447,24 @@ function readStop(root) {
 }
 
 // The evaluation order the driver promises: an interrupt, a broken environment, a stop the session
-// signalled, a usage limit, the stage leaving execution, then progress and the dollar cap.
+// signalled, a usage limit (its stall count, then the dollar cap, before any wait), the stage
+// leaving execution, then progress and the dollar cap.
 function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, interrupted }) {
   const verdict = (exitReason, code, message, extra = {}) => ({ exitReason, code, message, stalls, churn, ...extra });
   if (interrupted) return verdict("interrupted", 130, "interrupted — the session was stopped and the lock released");
   if (s.environment) return verdict("environment", 3, s.environment);
   const stop = readStop(ctx.root);
   if (stop) return verdict("stopped", 4, `stopped for you — ${stop.reason}: ${stop.detail}`, { stopReason: stop.reason });
+  const overBudget = opts.maxUsd !== undefined && spent >= opts.maxUsd;
+  const budgetSpent = (extra) => verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, extra);
   if (s.limit || s.silent) {
     // Silence with no usage-limit signal may be a limit — or a session that hangs every time, so it
-    // also counts as a stall.
-    const count = s.limit ? stalls : stalls + 1;
+    // also counts as a stall, unless a task committed first: a subagent can work silently for longer
+    // than the idle limit.
+    const count = after.committed > before.committed ? 0 : s.limit ? stalls : stalls + 1;
     if (count >= opts.maxStalls)
       return verdict("stalled", 5, `stalled: ${count} sessions in a row went silent with no usage-limit signal until the driver stopped them`, { stalls: count });
+    if (overBudget) return budgetSpent({ stalls: count });
     const waitMs = s.limit?.resetAt ? Math.max(s.limit.resetAt * 1000 - Date.now(), 1000) : DEFAULT_BACKOFF_MS;
     if (waited + waitMs > opts.maxBackoffMs) return verdict("budget", 6, "usage limit: waiting it out would pass --max-backoff", { stalls: count });
     return verdict("budget", null, null, { waitMs, stalls: count });
@@ -437,8 +482,7 @@ function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, inte
   if (churned >= opts.maxChurn)
     return verdict("stalled", 5, `stalled: ${churned} sessions in a row added ledger lines but no report, verdict or commit. ${said}`, counts);
   const reason = crashed ? "error" : !progressed ? "stalled" : s.resultText.includes(MID_WAVE_LABEL) ? "valve" : "handoff";
-  if (opts.maxUsd !== undefined && spent >= opts.maxUsd)
-    return verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, counts);
+  if (overBudget) return budgetSpent(counts);
   return verdict(reason, null, null, counts);
 }
 
@@ -554,7 +598,7 @@ async function walk(ctx, opts, log, trap) {
     const verdict = judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, interrupted: trap.interrupted });
     ({ stalls, churn } = verdict);
     writeRecord(ctx, s, { startedAt, before, after, waveAtStart, ...verdict }, n);
-    const cost = s.costUsd !== null ? `, ${s.costUsd.toFixed(2)}` : s.spentUsd > 0 ? `, ~${s.spentUsd.toFixed(2)} estimated` : "";
+    const cost = s.costUsd !== null ? `, $${s.costUsd.toFixed(2)}` : s.spentUsd > 0 ? `, ~$${s.spentUsd.toFixed(2)} estimated` : "";
     log(`session ${n} ended — ${verdict.exitReason}; ledger +${after.lines - before.lines}, commits +${after.committed - before.committed}${cost}`);
     if (verdict.message) log(verdict.message);
     if (verdict.code !== null) return verdict.code;

@@ -28,7 +28,8 @@ test("acquire writes the holder, readLiveDriveLock returns it, release removes i
   const { statePath, logPath } = paths(dir);
   const r = acquireDriveLock(dir, { statePath, logPath });
   assert.equal(r.ok, true);
-  assert.deepEqual(r.lock, { pid: process.pid, startTime: processStartTime(process.pid), hostname: hostname(), state: statePath, log: logPath, tokenHash: null, machine: r.lock.machine });
+  assert.deepEqual(r.lock, { pid: process.pid, startTime: processStartTime(process.pid), hostname: hostname(), state: statePath, log: logPath, tokenHash: null,
+    machine: r.lock.machine, boot: r.lock.boot, pidns: r.lock.pidns, ticks: r.lock.ticks });
   assert.deepEqual(readLiveDriveLock(dir), r.lock);
   assert.deepEqual(readdirSync(join(dir, ".devcycle")), ["drive.lock"], "the temp file the lock was linked from is gone");
   releaseDriveLock(dir, r.lock);
@@ -108,6 +109,54 @@ test("a dead holder on this machine is stale even after the hostname drifted; an
   const holder = { ...staleHolder(), machine: "f".repeat(64) };
   writeLock(foreign, holder);
   assert.deepEqual(readLiveDriveLock(foreign), holder, "a same-named host with another machine id is another machine");
+});
+
+const ownIdentity = () => {
+  const probe = makeTempDir("drive-lock-");
+  const { lock } = acquireDriveLock(probe, paths(probe));
+  releaseDriveLock(probe, lock);
+  return lock;
+};
+
+// Containers started from one image share its machine id, and every container on a host shares the
+// kernel's boot id, but a pid means nothing outside its own pid namespace.
+test("a holder in another pid namespace of this machine and boot counts as live, its pid unasked", () => {
+  const own = ownIdentity();
+  const dir = makeTempDir("drive-lock-");
+  const holder = { ...staleHolder(), machine: own.machine, boot: own.boot, pidns: "pid:[1]" };
+  writeLock(dir, holder);
+  assert.deepEqual(readLiveDriveLock(dir), holder);
+  assert.deepEqual(acquireDriveLock(dir, paths(dir)), { ok: false, holder });
+});
+
+// Another boot of the same machine id is this machine rebooted since, or a clone of it running
+// beside it. Only a process that started before this boot can belong to the former.
+test("a lock from another boot of this machine is stale when its process predates this boot, and live otherwise", () => {
+  const own = ownIdentity();
+  assert.match(own.boot ?? "", /^[0-9a-f]{64}$/, "the lock records no boot id");
+  const rebooted = makeTempDir("drive-lock-");
+  writeLock(rebooted, { ...staleHolder(), machine: own.machine, boot: "0".repeat(64) });
+  assert.equal(readLiveDriveLock(rebooted), null);
+  const r = acquireDriveLock(rebooted, paths(rebooted));
+  assert.equal(r.ok, true);
+  releaseDriveLock(rebooted, r.lock);
+
+  const clone = makeTempDir("drive-lock-");
+  const holder = { ...staleHolder(), startTime: processStartTime(process.pid), machine: own.machine, boot: "0".repeat(64) };
+  writeLock(clone, holder);
+  assert.deepEqual(readLiveDriveLock(clone), holder, "a process started during this boot, under another boot id, was asked about here");
+});
+
+// `ps` derives a Linux process's start from the wall clock, so a clock step moves it by however far
+// the clock stepped; the start in clock ticks since boot does not move.
+test("on Linux a live holder stays live across a clock step, and a reused pid is still stale", { skip: process.platform !== "linux" && "Linux only" }, () => {
+  const own = ownIdentity();
+  const stepped = makeTempDir("drive-lock-");
+  writeLock(stepped, { ...own, startTime: EPOCH });
+  assert.equal(readLiveDriveLock(stepped)?.pid, process.pid, "a clock step made the live holder read as stale");
+  const reused = makeTempDir("drive-lock-");
+  writeLock(reused, { ...own, ticks: String(Number(own.ticks) + 1) });
+  assert.equal(readLiveDriveLock(reused), null);
 });
 
 test("release leaves a lock it does not own", () => {

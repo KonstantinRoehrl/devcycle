@@ -265,6 +265,54 @@ test("a session that ends without a result event still counts toward --max-usd, 
   const repeated = await drive(makeCycle(), [{ ...crashing, messageId: "msg_1", repeat: 3 }], { flags: ["--max-usd", "1"] });
   assert.equal(repeated.code, 6, repeated.out);
   assert.deepEqual(repeated.calls.map(budgetOf), ["1.00", "0.40"]);
+  assert.match(repeated.out, /session 1 ended — [^\n]*, ~\$0\.60 estimated\n/);
+});
+
+// Claude Code writes a session's transcript, and each subagent's beside it under
+// <session id>/subagents/, as it goes, so both outlive a killed session; their usage is final where
+// the stream's is not. A request appears once per content block, its output growing, and a
+// transcript request the stream also carried is priced once. The stub's sessions are
+// stub-session-<n>.
+test("a session that ends without a result event is also charged its subagents' spend, read from the transcripts it left", async () => {
+  const budgetOf = (c) => c.argv[c.argv.indexOf("--max-budget-usd") + 1];
+  const assistant = (id, usage) => JSON.stringify({ type: "assistant", message: { id, model: MODEL, usage, content: [] } });
+  const transcriptsFor = (h, root, sessions, files) => {
+    const slug = join(h.env.HOME, ".claude", "projects", root.replace(/[^A-Za-z0-9]/g, "-"));
+    for (let n = 1; n <= sessions; n++)
+      for (const [rel, lines] of Object.entries(files))
+        writeInto(slug, rel.replace("<sid>", `stub-session-${n}`), lines.map((l) => l.replace("<sid>", `stub-session-${n}`)).join("\n") + "\n");
+  };
+  const crashing = { ledger: [line(1, "dispatched")], noResult: true, exitCode: 1, usage: { input_tokens: 1 } };
+  // 200k input tokens and 20k output on claude-sonnet-5-5 is $0.40 + $0.20.
+  const subagent = [assistant("<sid>-sub", { input_tokens: 200_000, output_tokens: 1 }), assistant("<sid>-sub", { input_tokens: 200_000, output_tokens: 20_000 })];
+  const root = makeCycle();
+  const h = harness([crashing], {});
+  transcriptsFor(h, root, 3, { "<sid>.jsonl": [], "<sid>/subagents/agent-a1.jsonl": subagent, "<sid>/subagents/agent-a1.meta.json": ["{}"] });
+  const r = await startDriver(root, h, ["--max-usd", "1"]).result();
+  assert.equal(r.code, 6, r.out);
+  assert.deepEqual(calls(h).map(budgetOf), ["1.00", "0.40"]);
+  assert.match(r.out, /spent \$1\.20 of --max-usd 1/);
+
+  const shared = makeCycle();
+  const sh2 = harness([{ ...crashing, usage: { input_tokens: 300_000 }, messageId: "msg_main" }], {});
+  transcriptsFor(sh2, shared, 3, { "<sid>.jsonl": [assistant("msg_main", { input_tokens: 300_000, output_tokens: 1 })] });
+  const once = await startDriver(shared, sh2, ["--max-usd", "1"]).result();
+  assert.equal(once.code, 6, once.out);
+  assert.deepEqual(calls(sh2).map(budgetOf), ["1.00", "0.40"], "a request in both the stream and the transcript was priced twice");
+});
+
+test("a usage limit or a silent session still ends the driver once --max-usd is spent, instead of waiting", async () => {
+  const limited = await drive(makeCycle(), [{ rateLimitInSec: 1, costUsd: 2 }, { ledger: DONE, stage: "branch-review" }], { flags: ["--max-usd", "1"] });
+  assert.equal(limited.code, 6, limited.out);
+  assert.equal(limited.calls.length, 1, "the driver waited out the limit with the cap already spent");
+  assert.match(limited.out, /spent \$2\.00 of --max-usd 1/);
+  assert.match(limited.out, /session 1 ended — budget; [^\n]*, \$2\.00\n/);
+
+  // The session must stream its usage before it is stopped, so it gets the slow-start allowance.
+  const silent = await drive(makeCycle(), [{ hangMs: 60000, usage: { input_tokens: 600_000 } }],
+    { flags: ["--max-usd", "1", "--max-backoff", "1"], env: { DEVCYCLE_DRIVE_IDLE_MS: "5000" } });
+  assert.equal(silent.code, 6, silent.out);
+  assert.match(silent.out, /spent \$1\.20 of --max-usd 1/);
 });
 
 test("a usage limit waits for the reset and retries without counting a stall; past --max-backoff it exits 6", async () => {
@@ -303,6 +351,17 @@ test("a session silent past the idle limit after its result is no usage limit; o
   assert.equal(hung.code, 5, hung.out);
   assert.match(hung.out, /stalled: 1 sessions in a row went silent with no usage-limit signal/);
   assert.deepEqual(hung.records.map((x) => [x.exitReason, x.stallCount]), [["stalled", 1]]);
+});
+
+// A subagent can work for longer than the idle limit without its session printing a line; a session
+// stopped like that after it committed a task made progress, so it is no stall. It is still waited
+// out as a possible limit. Like the session above, it must reach its ledger lines before the stop.
+test("a session stopped for silence after committing a task is not a stall", async () => {
+  const working = { ledger: [line(1, "dispatched"), DONE[0]], hangMs: 60000 };
+  const r = await drive(makeCycle(), [working], { flags: ["--max-backoff", "0", "--max-stalls", "1"], env: { DEVCYCLE_DRIVE_IDLE_MS: "5000" } });
+  assert.equal(r.code, 6, r.out);
+  assert.match(r.out, /waiting it out would pass --max-backoff/);
+  assert.deepEqual(r.records.map((x) => [x.exitReason, x.stallCount]), [["budget", 0]]);
 });
 
 test("SIGINT stops the running session, writes its record, releases the lock and exits 130", async () => {

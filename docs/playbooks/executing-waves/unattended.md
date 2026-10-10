@@ -17,7 +17,8 @@ answers:
   model that session ran on, and the hash of that session's id), starts the driver detached from
   every terminal (`--detach`), prints its PID and log path, and stops touching the working tree.
   Offered only when that session's Bash is not sandboxed, because the driver writes under
-  `~/.claude`.
+  `~/.claude`, and its session id can be read, because only that id lets the driver tell this
+  start from an agent's.
 - **Unattended — I'll start it myself** — the same row without `session=`, and instead of starting
   the driver devcycle prints the command for your own terminal:
   `node "<plugin root>/scripts/drive-execution.mjs" --state "<repo>/.devcycle/state.md"`.
@@ -27,9 +28,10 @@ Only that answer opts a cycle in. No agent opts in, starts a driver, or answers 
 ## What the driver does
 
 1. **Pre-flight, fail closed** (exit 3 on any failure). It takes the lock `.devcycle/drive.lock`
-   (pid, process start time, host, a hash of the machine's id, state path, and the hash of a token
-   it makes for this run), reclaiming one whose process is gone or whose pid now belongs to a
-   different process. It requires the `drive: auto` row, `stage: execution` and a run id; inside a
+   (pid, process start time, host, hashes of the machine's id and of its boot, on Linux the pid
+   namespace and the start in clock ticks since boot, state path, and the hash of a token it makes
+   for this run), reclaiming one whose process is gone or whose pid now belongs to a different
+   process. It requires the `drive: auto` row, `stage: execution` and a run id; inside a
    Claude Code session it accepts a start only from the session the row's `session=` names, and
    only before the first driven session ends — the opt-in gate's start-now, never a later start an
    agent could make; it requires
@@ -52,7 +54,9 @@ Only that answer opts a cycle in. No agent opts in, starts a driver, or answers 
    run record: ledger and commit counts before and after, cost, last context depth, guard denials,
    and why the session ended. `/devcycle:doctor` reports driven and manual runs as separate cohorts.
    A session that ends without reporting its cost — killed, or crashed — records none; toward
-   `--max-usd` it is charged an estimate priced from the usage it streamed, rounded up.
+   `--max-usd` it is charged an estimate: the requests it and its subagents made, read from the
+   stream and from the transcripts Claude Code keeps under `~/.claude/projects/`, each request's
+   output counted as no less than half the characters it streamed.
 4. **The safety valve.** A driven session whose context reaches the hard-stop band — or whose
    depth probe loses the session for two task scripts in a row — finishes its in-flight tasks, dispatches nothing new, and ends with the handoff label
    `Session ended mid-wave: <k> of <n> tasks done (stage: execution)`; the driver starts the next
@@ -65,9 +69,11 @@ driver then waits until the limit resets, or 5 minutes when no reset time is giv
 next session without counting a stall. A session that prints nothing for 30 minutes is stopped. If
 it had already finished — printed its result — that is only a slow exit and the session is judged
 like any other. If it had not, the silence may be a limit held without a word, so the driver waits
-5 minutes as for a limit, but the silence also counts as a stall: a session that hangs every time
-ends the driver after `--max-stalls` of them (exit 5) instead of being retried until
-`--max-backoff` runs out. All waiting together is capped by `--max-backoff` (exit 6).
+5 minutes as for a limit, but unless the session committed a task first — a subagent can work
+silently for longer than 30 minutes — the silence also counts as a stall: a session that hangs every
+time ends the driver after `--max-stalls` of them (exit 5) instead of being retried until
+`--max-backoff` runs out. All waiting together is capped by `--max-backoff` (exit 6), and a spent
+`--max-usd` ends the driver (exit 6) before any wait.
 
 ## What it will not do
 
@@ -102,9 +108,11 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
   `.devcycle/drive.lock`), or Ctrl-C when it runs in your terminal. The driver stops the running
   session's whole process group, writes that session's record, releases the lock and exits 130. A
   `kill -9`, crash or reboot leaves the lock behind; the next driver on the same machine reclaims
-  it, even when the host's name changed meanwhile. A lock written on another machine is never
-  reclaimed: the refusal names its pid and `.devcycle/drive.lock`, which you remove once you know
-  that driver is gone.
+  it, even when the host's name changed meanwhile. A lock the driver cannot check is never
+  reclaimed — one written on another machine, in another container (another pid namespace), or by
+  a cloned machine sharing this one's id whose driver started after this machine last booted: the
+  refusal names its pid and `.devcycle/drive.lock`, which you remove once you know that driver is
+  gone ([`docs/known-issues.md`](../../known-issues.md) has the cases this misjudges).
 - **Pick it up yourself** after any stop: run `/devcycle:continue` in a fresh session, which asks
   you the question the driver could not, or start the driver again once the cause is cleared.
 
@@ -114,7 +122,7 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 | --- | --- | --- |
 | `--state <path>` | required | The cycle's `.devcycle/state.md`. |
 | `--model <id>` | the `drive:` row's model | Runs every session on this model instead. |
-| `--max-usd <n>` | none | Total dollar cap across sessions; each session gets the remainder as `--max-budget-usd`. On a subscription plan the cost is an estimate; a session that reports no cost is charged one priced from its streamed usage. |
+| `--max-usd <n>` | none | Total dollar cap across sessions; each session gets the remainder as `--max-budget-usd`. On a subscription plan the cost is an estimate; a session that reports no cost is charged one priced from its streamed usage and its transcripts. |
 | `--max-stalls <n>` | 2 | Consecutive sessions that add no ledger line before the driver gives up (exit 5). |
 | `--max-churn <n>` | 3 | Consecutive sessions that add ledger lines but no report, verdict or commit before the driver gives up (exit 5). |
 | `--max-backoff <minutes>` | 360 | Total time it waits out usage limits before giving up (exit 6). |
@@ -132,6 +140,6 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 | 2 | Usage error: an unknown flag, a missing `--state`, a malformed number. |
 | 3 | Environment: a pre-flight check failed — among them no resolvable default branch, or a start from inside a Claude Code session other than the opt-in gate's start-now —, another driver holds the lock, or devcycle did not load in a session (another plugin's load errors do not count). The message names the check. |
 | 4 | Stopped for you: a session reached a gate. The reason and its detail are printed. |
-| 5 | Stalled: `--max-stalls` sessions in a row added no ledger line or went silent, or `--max-churn` sessions in a row added lines but no report, verdict or commit. The last session's final text is printed — usually the question it could not ask. |
+| 5 | Stalled: `--max-stalls` sessions in a row added no ledger line or went silent before committing a task, or `--max-churn` sessions in a row added lines but no report, verdict or commit. The last session's final text is printed — usually the question it could not ask. |
 | 6 | Budget: `--max-usd` is spent, or a usage limit would outlast `--max-backoff`. |
 | 130 | Interrupted: the running session was stopped, its record written and the lock released. |

@@ -196,8 +196,8 @@ contents; a subdirectory `references/config.md` § Doc tracking keeps local need
 options: **Walk the waves manually** (today's behaviour) · **Unattended — start it now** ·
 **Unattended — I'll start it myself**. Offer **Unattended — start it now** only when
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --check-sandbox` prints
-`{"sandboxed":false}` (plus a `sessionHash` for step 3); otherwise say that this session's
-sandbox keeps the driver from writing under `~/.claude`, and offer the other two. An Other answer
+`{"sandboxed":false}` and a non-null `sessionHash` (for step 3); else offer the other two, saying
+why: the sandbox blocks `~/.claude`, or this session's id is unreadable. An Other answer
 appends `user-correction-at-gate`; `references/ledger.md` owns the rule. Only the user's answer
 opts in (`docs/decisions/README.md`, 2026-10-08 — Unattended execution). On either unattended
 answer, in this order:

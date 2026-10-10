@@ -1,13 +1,14 @@
 // The unattended-execution driver's claim on a checkout (spec 4.B.5): .devcycle/drive.lock beside
 // the state file names the driver process, the state file it drives, its log and the hash of the
-// token it hands its sessions, and the machine it runs on. `toplevel` is that checkout's root, the directory holding the state
-// file's .devcycle/. One driver holds it at a time; a holder whose process is gone, or whose pid now
-// belongs to a process started at another time, is stale and reclaimed. /devcycle:continue (through
+// token it hands its sessions, and the machine, boot and pid namespace it runs in. `toplevel` is
+// that checkout's root, the directory holding the state file's .devcycle/. One driver holds it at a
+// time; a holder whose process is gone, or whose pid now belongs to a process started at another
+// time, is stale and reclaimed. /devcycle:continue (through
 // wave-setup.mjs) and the git guard only ask whether a live driver holds it.
-import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { hostname } from "node:os";
+import { hostname, uptime } from "node:os";
 import { spawnSync } from "node:child_process";
 import { isLiveHolder, processStartTime } from "./file-lock.mjs";
 
@@ -52,23 +53,63 @@ function readMachineId() {
   return ioreg.stdout?.match(/"IOPlatformUUID" = "([^"]+)"/)?.[1] ?? null;
 }
 
-let machine;
-function machineId() {
-  if (machine === undefined) {
-    const id = readMachineId();
-    machine = id ? createHash("sha256").update(id).digest("hex") : null;
-  }
-  return machine;
+// The kernel instance: each boot draws a new one, so a clone of this machine running beside it, with
+// the same machine id, has another.
+function readBootId() {
+  if (process.platform !== "darwin") return readRaw("/proc/sys/kernel/random/boot_id")?.trim() || null;
+  return spawnSync("sysctl", ["-n", "kern.bootsessionuuid"], { encoding: "utf8" }).stdout?.trim() || null;
 }
+
+// Linux only: containers on one kernel share its boot id, and those from one image its machine id,
+// but a pid names a process only inside its own pid namespace.
+function readPidNamespace() {
+  try {
+    return readlinkSync("/proc/self/ns/pid");
+  } catch {
+    return null;
+  }
+}
+
+// Linux only: when a process started, in clock ticks since boot (proc(5), field 22). `ps` derives its
+// start time from the wall clock, so a clock step moves that; nothing moves this.
+function startTicks(pid) {
+  const stat = readRaw(`/proc/${pid}/stat`);
+  // Field 2, the command name, is parenthesised and may itself hold spaces and parentheses.
+  return stat?.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
+}
+
+const hashed = (id) => (id ? createHash("sha256").update(id).digest("hex") : null);
+const once = (read) => {
+  let value;
+  return () => (value === undefined ? (value = read()) : value);
+};
+const machineId = once(() => hashed(readMachineId()));
+const bootId = once(() => hashed(readBootId()));
+const pidNamespace = once(readPidNamespace);
+
+const ownIdentity = (startTime) => ({
+  pid: process.pid, startTime, hostname: hostname(),
+  machine: machineId(), boot: bootId(), pidns: pidNamespace(), ticks: startTicks(process.pid),
+});
 
 // The machine id decides when both sides have one; a lock written without it falls back to the
 // hostname.
 const onThisMachine = (holder) =>
   typeof holder.machine === "string" && machineId() ? holder.machine === machineId() : holder.hostname === hostname();
 
-// Another machine's process cannot be asked about, so its lock counts as live: reclaiming it is the
-// user's call, never a guess.
-const isLive = (holder) => holder !== null && (!onThisMachine(holder) || isLiveHolder(holder));
+const startedBeforeThisBoot = (holder) => Date.parse(`${holder.startTime} UTC`) < Date.now() - uptime() * 1000;
+
+// A process this one cannot ask about — on another machine, in another pid namespace, or under
+// another boot of this machine id while this boot ran — counts as live: reclaiming its lock is the
+// user's call, never a guess. A process that started before this boot cannot have outlived it.
+function isLive(holder) {
+  if (holder === null) return false;
+  if (!onThisMachine(holder)) return true;
+  if (typeof holder.boot === "string" && holder.boot !== bootId()) return !startedBeforeThisBoot(holder);
+  if (typeof holder.pidns === "string" && holder.pidns !== pidNamespace()) return true;
+  if (typeof holder.ticks === "string") return startTicks(holder.pid) === holder.ticks;
+  return isLiveHolder(holder);
+}
 
 // Creates `path` holding `content` only when nothing is there. Linking a complete temp file into
 // place is as exclusive as O_EXCL, and the file never exists empty: an empty lock would read as
@@ -94,7 +135,7 @@ function publish(path, content) {
 // holds the reclaim.
 function reclaim(path, staleRaw, self) {
   const mutex = `${path}.reclaim`;
-  if (!publish(mutex, JSON.stringify({ pid: self.pid, startTime: self.startTime, hostname: self.hostname, machine: self.machine }) + "\n")) {
+  if (!publish(mutex, JSON.stringify(ownIdentity(self.startTime)) + "\n")) {
     const raw = readRaw(mutex);
     if (raw === null) return true;
     // A reclaimer killed inside these few calls leaves the mutex behind. Clearing it would reopen
@@ -115,7 +156,7 @@ export function acquireDriveLock(toplevel, { statePath, logPath, tokenHash = nul
   const path = lockPath(toplevel);
   const startTime = processStartTime(process.pid);
   if (startTime === null) throw new Error("drive-lock: cannot read this process's start time");
-  const lock = { pid: process.pid, startTime, hostname: hostname(), state: statePath, log: logPath, tokenHash, machine: machineId() };
+  const lock = { ...ownIdentity(startTime), state: statePath, log: logPath, tokenHash };
   const content = JSON.stringify(lock) + "\n";
   mkdirSync(dirname(path), { recursive: true });
   const deadline = Date.now() + RECLAIM_WAIT_MS;

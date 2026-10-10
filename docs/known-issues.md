@@ -92,6 +92,16 @@ leaves it behind, and every later start exits 1 with `drive-lock: a starter died
 left rather than fixed because guessing that the reclaimer is gone could let two drivers share a
 checkout. When no driver runs, remove both files by hand.
 
+### Some dead drivers' locks need removing by hand, and a clone's can be reclaimed (low)
+
+`scripts/drive-lock.mjs` asks about a lock's process only from the same machine id, boot and pid
+namespace; any other lock counts as live, except one from another boot of this machine id whose
+process started before this boot, which is taken for a lock a reboot left. So a driver that died
+inside a container that has since restarted (a new pid namespace) leaves a lock every later start
+refuses, and the lock of a driver on a cloned VM that shares this machine's id and started before
+this machine last booted is taken for a reboot's and reclaimed. It is left rather than fixed because nothing
+cheap tells a reboot from a clone that booted earlier. When no driver runs, remove the lock by hand.
+
 ### The runtime resolves the default branch without `gh` (low)
 
 `references/branch.md` asks `gh` for the default branch when `origin/HEAD` is unset; the scripts
