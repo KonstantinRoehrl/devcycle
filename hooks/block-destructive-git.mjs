@@ -21,15 +21,18 @@
 // like backticks and `$(` — that spec's rule is that a missed destructive command is not acceptable.
 // Only what the shell can RUN is judged: on a line made entirely of commands that never run their
 // arguments or input, a heredoc body fed to cat/tee (an unquoted one apart from a substitution
-// naming git) and single-quoted text are data (#276, #284); quoted text a launcher runs as shell is
-// judged as the commands it holds; and `rtk` is a transparent launcher whose git is classified like
-// any other.
+// naming git) and single-quoted text are data (#276, #284); quoted text a launcher runs as shell, and
+// what a pipeline prints into a shell, is judged as the commands it holds; a launcher's own options
+// and operands are read past to the command it runs; a command word that is a substitution naming
+// git (`$(which git)`) or the variable `$GIT` is read as git; and `rtk` is a transparent launcher
+// whose git is classified like any other.
 // Scope is git-only; non-git commands (tests, greps) are allowed. Three dispatch origins are guarded
 // by the allowlist — task-reviewer, red-team-reviewer and, since #235, implementer — and the main
 // thread (no agent_type) is guarded for `git stash` while a .devcycle/state.md above the call's cwd
 // reports a stage other than done, and for a branch-moving or tree-destroying git while a live driver
-// lock sits beside that state file; under either, a git whose subcommand it cannot read is denied.
-// Every other origin is never guarded.
+// lock sits beside that state file; under either, a git whose subcommand it cannot read is denied,
+// and under the lock so is a reset or clean whose options it cannot read. Every other origin is never
+// guarded.
 //
 // STATED BOUNDS (deliberately not covered). This is a proportionate backstop against a cooperative
 // dispatch running a plain destructive git, not a complete parser hardened against an adversary
@@ -283,20 +286,27 @@ function cleanIsDryRun(options) {
   }
   return dryRun;
 }
-// A reset or clean option the shell fills in may be `--hard` or `--no-dry-run`.
 function movesOrDestroys(tokens, i) {
   const sub = normalizeHead(tokens[i] ?? "");
-  const raw = tokens.slice(i + 1);
-  const rest = raw.map(normalizeArg);
+  const rest = tokens.slice(i + 1).map(normalizeArg);
   const dashDash = rest.indexOf("--");
   const options = dashDash === -1 ? rest : rest.slice(0, dashDash);
-  const unreadableOption = (dashDash === -1 ? raw : raw.slice(0, dashDash)).some((a) => !readableWord(a));
   if (sub === "switch") return true;
   if (sub === "checkout") return dashDash === -1 || dashDash === rest.length - 1;
-  if (sub === "reset") return unreadableOption || options.some((a) => isLongOption(a, "hard"));
-  if (sub === "clean") return unreadableOption || !cleanIsDryRun(options);
+  if (sub === "reset") return options.some((a) => isLongOption(a, "hard"));
+  if (sub === "clean") return !cleanIsDryRun(options);
   return false;
 }
+// A reset or clean option the shell fills in may be `--hard` or `--no-dry-run`.
+function fillsDestructiveOption(tokens, i) {
+  const sub = normalizeHead(tokens[i] ?? "");
+  if (sub !== "reset" && sub !== "clean") return false;
+  const raw = tokens.slice(i + 1);
+  const dashDash = raw.map(normalizeArg).indexOf("--");
+  return (dashDash === -1 ? raw : raw.slice(0, dashDash)).some((a) => !readableWord(a));
+}
+const unreadableOption = (sub) =>
+  `the guard cannot read git ${sub}'s options here (a substitution or a variable supplies one, and it may be \`${sub === "reset" ? "--hard" : "--no-dry-run"}\`)`;
 // `-C <dir>` runs git in another directory, each relative to the one before; a git sent outside
 // the checkout the driver holds cannot move its branch or touch its tree. `--git-dir`/GIT_DIR and
 // `--work-tree`/GIT_WORK_TREE (the option wins over the variable) can send it back, relative to
@@ -646,12 +656,25 @@ function unwrapRtk(tokens) {
 // (background operator) separates commands just as `;` does, so `true & git reset --hard` must split
 // into two segments — `&&` is matched first so a logical-AND is never mis-split on its first `&`.
 const SEPARATORS = /(?:&&|\|\||;|\||&|\n)/;
+// A redirection is not an argument: `xargs git < s` hands git no word, and `git 2>/dev/null stash`
+// runs stash. Each is dropped with its target, the next word unless glued on (`<s`, `2>&1`); a process
+// substitution (`<(…)`) is not one.
+const REDIRECTION = /^\d*(?:&>>|&>|<<<|<<-|<<|<>|<&|>&|>>|>\||<|>)(?!\()/;
+function withoutRedirections(tokens) {
+  const kept = [];
+  for (let k = 0; k < tokens.length; k += 1) {
+    const operator = REDIRECTION.exec(tokens[k])?.[0];
+    if (operator === undefined) kept.push(tokens[k]);
+    else if (operator === tokens[k]) k += 1;
+  }
+  return kept;
+}
 // stripLeading drops env-assignments, `{`/`(` grouping tokens and reserved words so the head is
 // the real command — `{ git reset; }`, `( git reset )` and `do git reset` must not hide the git.
 // (normalizeHead additionally strips a grouping char glued to the head, e.g. `(git`.)
 // The segment's command tokens, and the assignments in front of it (`GIT_DIR=… git …`).
 function segmentTokens(segment) {
-  const raw = segment.trim().split(/\s+/).filter(Boolean);
+  const raw = withoutRedirections(segment.trim().split(/\s+/).filter(Boolean));
   const tokens = stripLeading(raw);
   return { tokens: unwrapRtk(tokens), env: raw.slice(0, raw.length - tokens.length).filter((t) => ASSIGNMENT.test(t)) };
 }
@@ -673,20 +696,108 @@ function unreadableSubcommandReason() {
   return null;
 }
 
-// Where a launcher's words run git: the first `git` reached past nothing but options and values that
-// cannot name a command (`xargs -0 git`, `timeout 30 git`, `sh -c 'git`), else -1 — after a command
-// name, `git` is that command's argument (`xargs grep git`).
-function launchedGitAt(words) {
-  for (let k = 0; k < words.length; k += 1) {
-    if (normalizeHead(words[k]) === "git") return k;
+// What a launcher reads before the command it runs, per its man page: `values`, the short options
+// taking the next word as their value unless it is glued on (`-u me`, `-ume`); `long`, the long
+// options doing the same (`--signal KILL`; `--signal=KILL` is one word for any long option);
+// `commands` and `longCommands`, the options whose value is the command itself (`env -S 'git …'`,
+// `flock -c`); `optional`, short options whose value can only be glued on (xargs' `-i{}`);
+// `operands`, the words before the command (`timeout 30`, `flock f`, `ssh host`); `assignments`,
+// whether NAME=value words may come first. Every other option is a flag, as is every option of an
+// unlisted launcher.
+const SHELL_OPTIONS = { values: "oO", long: ["--rcfile", "--init-file"] };
+const LAUNCHER_OPTIONS = new Map([
+  ["sh", SHELL_OPTIONS], ["bash", SHELL_OPTIONS], ["zsh", SHELL_OPTIONS], ["dash", SHELL_OPTIONS],
+  ["xargs", { values: "EILnPsadJRS", optional: "eil", long: ["--arg-file", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--process-slot-var"] }],
+  ["env", { values: "uCP", commands: "S", long: ["--unset", "--chdir"], longCommands: ["--split-string"], assignments: true }],
+  ["exec", { values: "a" }],
+  ["nice", { values: "n", long: ["--adjustment"] }],
+  ["time", { values: "of", long: ["--output", "--format"] }],
+  ["timeout", { values: "sk", long: ["--signal", "--kill-after"], operands: 1 }],
+  ["watch", { values: "nq", long: ["--interval", "--equexit"] }],
+  ["sudo", { values: "aCcDghpRrTtUu", long: ["--user", "--group", "--host", "--prompt", "--close-from", "--chdir", "--chroot", "--role", "--type", "--command-timeout", "--other-user", "--login-class"], assignments: true }],
+  ["doas", { values: "uC" }],
+  ["chrt", { values: "TPD", long: ["--sched-runtime", "--sched-period", "--sched-deadline"], operands: 1 }],
+  ["taskset", { operands: 1 }],
+  ["ionice", { values: "cnpPu", long: ["--class", "--classdata", "--pid", "--pgid", "--uid"] }],
+  ["stdbuf", { values: "ioe", long: ["--input", "--output", "--error"] }],
+  ["unshare", { values: "RwSG", long: ["--root", "--wd", "--setuid", "--setgid", "--propagation", "--setgroups"] }],
+  ["caffeinate", { values: "tw" }],
+  ["flock", { values: "wE", commands: "c", long: ["--timeout", "--wait", "--conflict-exit-code"], longCommands: ["--command"], operands: 1 }],
+  ["strace", { values: "abeEIoOpPsSuUX" }],
+  ["ltrace", { values: "aADeFlnopsuwx" }],
+  ["proxychains", { values: "f" }], ["proxychains4", { values: "f" }],
+  ["arch", { values: "de", long: ["-arch"] }],
+  ["chroot", { values: "gGu", operands: 1 }],
+  ["runcon", { values: "urtl", operands: 1 }],
+  ["ssh", { values: "BbcDEeFIiJLlmOoPpQRSWw", operands: 1 }],
+  ["script", { values: "tEIOBTmo", commands: "c", operands: 1 }],
+]);
+// A word that can name a command; past the options, any other word (`'{`, a priority the grammar does
+// not know) is passed over on the way to it.
+const COMMAND_NAME = /^[A-Za-z_][\w.+-]*$/;
+// The command a launcher runs — empty when it runs none — and the options it was given (name →
+// value, "" for a flag). Among the operands and the words passed over, a `git` is the command.
+function launchedCommand(head, words) {
+  const { values = "", optional = "", commands = "", long = [], longCommands = [], operands = 0, assignments = false } = LAUNCHER_OPTIONS.get(head) ?? {};
+  const options = new Map();
+  let k = 0;
+  nextWord: while (k < words.length) {
     const word = normalizeArg(words[k]);
-    if (!word.startsWith("-") && /^[A-Za-z_][\w.+-]*$/.test(word)) return -1;
+    if (word === "--") { k += 1; break; }
+    if (assignments && ASSIGNMENT.test(word)) { k += 1; continue; }
+    if (!/^[-+]/.test(word)) break;
+    k += 1;
+    if (word.startsWith("--") || long.includes(word)) {
+      const eq = word.indexOf("=");
+      const [name, glued] = eq === -1 ? [word, undefined] : [word.slice(0, eq), word.slice(eq + 1)];
+      if (longCommands.includes(name)) return { command: glued === undefined ? words.slice(k) : [glued, ...words.slice(k)], options };
+      options.set(name, glued ?? (long.includes(name) ? normalizeArg(words[k++] ?? "") : ""));
+      continue;
+    }
+    for (let c = 1; c < word.length; c += 1) {
+      const letter = word[c];
+      const rest = word.slice(c + 1);
+      if (commands.includes(letter)) return { command: rest ? [rest, ...words.slice(k)] : words.slice(k), options };
+      if (values.includes(letter) || optional.includes(letter)) {
+        options.set(`-${letter}`, rest || (values.includes(letter) ? normalizeArg(words[k++] ?? "") : ""));
+        continue nextWord;
+      }
+      options.set(`-${letter}`, "");
+    }
   }
-  return -1;
+  for (let operand = 0; k < words.length && normalizeHead(words[k]) !== "git"; k += 1) {
+    if (operand < operands) operand += 1;
+    else if (COMMAND_NAME.test(normalizeArg(words[k]))) break;
+  }
+  return { command: words.slice(k), options };
+}
+// xargs runs its command with the words it reads appended, or put in place of its -I/-J string (`-i`
+// and `--replace` default to `{}`): each is XARGS_INPUT, a word the guard cannot read.
+const XARGS_INPUT = "$xargs_input";
+function xargsCommand({ command, options }) {
+  const replace = options.get("-I") || options.get("-J") ||
+    (options.has("-i") || options.has("--replace") ? options.get("-i") || options.get("--replace") || "{}" : "");
+  return replace ? command.map((word) => (word.includes(replace) ? XARGS_INPUT : word)) : [...command, XARGS_INPUT];
+}
+
+// A command word that is a substitution naming git (`$(which git)`, `` `command -v git` ``) or the
+// variable $GIT, double-quoted or not, runs git as surely as the word git itself. The whitespace
+// split leaves a substitution spread over several tokens; returns how many make up the word, or 0.
+function gitStandIn(tokens) {
+  if (/^\$\{?git\}?$/i.test(normalizeHead(tokens[0]))) return 1;
+  const quote = tokens[0].startsWith('"') ? '"' : "";
+  if (!/^(?:\$\(|`)/.test(tokens[0].slice(quote.length))) return 0;
+  const line = tokens.join(" ");
+  const sub = scanShell(line)?.substitutions.find((s) => s.top && s.start === quote.length);
+  const end = sub && sub.end + quote.length;
+  if (!sub || !/\bgit\b/.test(sub.inner) || line.slice(sub.end, end) !== quote || (end < line.length && line[end] !== " ")) return 0;
+  return line.slice(0, end).split(" ").length;
 }
 
 function classifyCommand(tokens, env) {
   if (!tokens.length) return null;
+  const standIn = gitStandIn(tokens);
+  if (standIn) return classifyCommand(["git", ...tokens.slice(standIn)], env);
   const head = normalizeHead(tokens[0]);
   if (head === "find") {
     for (const launched of findCommands(tokens)) {
@@ -702,17 +813,16 @@ function classifyCommand(tokens, env) {
     // also name git by path — normalizeHead reduces every such spelling to `git` before comparing.
     const words = code ? codeWords(tokens.slice(1)) : tokens.slice(1);
     if (!words.some((t) => normalizeHead(t) === "git")) return null; // e.g. `timeout 30 npm test` → allow
+    const launch = code ? null : launchedCommand(head, words);
+    // `command -v git` and `command -V git` say where git is and run nothing.
+    if (head === "command" && (launch.options.has("-v") || launch.options.has("-V"))) return null;
     if (!guarded && driveLock !== null && mentionsDriveWord(words)) return driveDenyReason();
     if (guarded || mentionsStash(words)) // git behind a wrapper we cannot see into
       return denyReason(
         "run git behind a shell wrapper (deny-on-ambiguity).",
         "a git behind a shell wrapper can hide one (deny-on-ambiguity)."
       );
-    const at = code ? -1 : launchedGitAt(words);
-    if (at === -1) return null;
-    const launched = words.slice(at);
-    const sub = launched[gitSubcommand(launched).i];
-    return sub === undefined || !readableWord(sub) ? unreadableSubcommandReason() : null;
+    return launch && classifyCommand(head === "xargs" ? xargsCommand(launch) : launch.command, []);
   }
   if (head !== "git") return null; // non-git command (basename never `git`) → allowed
   const { i, repo } = gitSubcommand(tokens);
@@ -720,7 +830,10 @@ function classifyCommand(tokens, env) {
     const reason = unreadableSubcommandReason();
     if (reason) return reason;
   }
-  if (!guarded && driveLock !== null && movesOrDestroys(tokens, i) && insideDriveRoot(repo, env)) return driveDenyReason();
+  if (!guarded && driveLock !== null) {
+    const why = movesOrDestroys(tokens, i) ? "" : fillsDestructiveOption(tokens, i) ? unreadableOption(normalizeHead(tokens[i])) : null;
+    if (why !== null && insideDriveRoot(repo, env)) return driveDenyReason(why);
+  }
   const denied = guarded ? !gitSegmentIsReadOnly(tokens, i) : stashIsDestructive(tokens, i);
   if (denied)
     return denyReason(
@@ -859,10 +972,36 @@ function shellRunSpans(text, scan) {
     return [tokens, ...findCommands(tokens)].some((command) => command.length > 0 && WRAPPERS.has(normalizeHead(command[0])));
   });
 }
+// A shell at the end of a pipeline runs what the commands before it print, so their words are its
+// script: each is judged as `sh` handed those words would be (`echo 'git stash' | sh`).
+const SHELLS = new Set(["sh", "bash", "zsh", "dash"]);
+function runsItsInput(tokens) {
+  const head = normalizeHead(tokens[0] ?? "");
+  return SHELLS.has(head) || (head === "xargs" && SHELLS.has(normalizeHead(launchedCommand(head, tokens.slice(1)).command[0] ?? "")));
+}
+function pipedIntoShell(text, scan) {
+  const commands = scan.segments.map((segment) => withoutRedirections(scannedTokens(text, segment).tokens));
+  let pipeline = [];
+  for (let j = 0; j < scan.segments.length; j += 1) {
+    if (!commands[j].length && scan.segments[j].sep === "\n" && pipeline.length) continue; // `… |⏎ sh`
+    pipeline.push(j);
+    if (PIPES.has(scan.segments[j].sep)) continue;
+    const reader = pipeline.findLastIndex((k) => runsItsInput(commands[k]));
+    for (const k of pipeline.slice(0, Math.max(reader, 0))) {
+      const reason = classifyCommand(["sh", ...commands[k].slice(1)], []);
+      if (reason) return reason;
+    }
+    pipeline = [];
+  }
+  return null;
+}
+
 // Single-quoted text substitutes nothing where it sits. On the main thread, handed to a command that
 // is neither git nor a launcher, it is held to the standard of the substitution it would become if
 // that command ran it: one naming no git there, inside text that is itself allowed as a command, is
-// data. A guarded dispatch keeps the wire over it: `trap '$(cat s)' EXIT` runs whatever s holds.
+// data — its substitution tokens no longer trip the wire, but its words still count, since a later
+// command may read them back (`echo '… reset --hard' > s; $(which git) $(cat s)`). A guarded dispatch
+// keeps the wire over it: `trap '$(cat s)' EXIT` runs whatever s holds.
 function singleQuotedIsData(text, scan, span) {
   if (guarded || scan.complex || text[span[0]] === "$") return false;
   const content = quotedContent(text, span);
@@ -891,9 +1030,11 @@ function replaceSpans(text, spans) {
 // so a git OBFUSCATED inside a substitution (`` `gi\t reset` ``, `$(g\it reset)`) is a stated bound
 // above, not caught.
 const SUBSTITUTION_TOKEN = /`|\$\(|<\(|>\(|(?:^|\s)=\(/;
+const SUBSTITUTION_TOKENS = /`|[$<>=]\(/g;
 function substitutionTripwire(text) {
   if (!SUBSTITUTION_TOKEN.test(text) || !/\bgit\b/.test(text)) return null;
-  if (!guarded && driveLock !== null && DRIVE_WORD.test(text)) return driveDenyReason();
+  if (!guarded && driveLock !== null && DRIVE_WORD.test(text))
+    return driveDenyReason("this command names `checkout`, `switch`, `reset` or `clean` beside a command substitution that may run git or fill in its arguments (deny-on-ambiguity)");
   if (!guarded && !/\bstash\b/.test(text)) return null;
   return denyReason(
     "run git inside a command substitution (deny-on-ambiguity).",
@@ -919,13 +1060,16 @@ function verdict(text) {
     const reason = verdict(quotedContent(text, span));
     if (reason) return reason;
   }
+  const piped = pipedIntoShell(text, scan);
+  if (piped) return piped;
   const inert = lineIsInert(text, scan);
   const dataDocs = inert ? scan.heredocs.filter((doc) => (doc.quoted || doc.top) && readOnlyAsData(text, scan, doc.segment)) : [];
   const dataBodies = dataDocs.map((doc) => [doc.start, doc.end, ""]);
   const ignored = inert
     ? [...dataBodies, ...scan.singleQuotes.map(([start, end]) => [start, end, "''"])]
     : [...scan.substitutions.filter((sub) => harmlessSubstitution(text, scan, sub)).map((sub) => [sub.start, sub.end, ""]),
-      ...scan.singleQuotes.filter((span) => singleQuotedIsData(text, scan, span)).map(([start, end]) => [start, end, "''"])];
+      ...scan.singleQuotes.filter((span) => singleQuotedIsData(text, scan, span))
+        .map(([start, end]) => [start, end, text.slice(start, end).replace(SUBSTITUTION_TOKENS, " ")])];
   const shellJoins = shellJoinSpans(text, scan, 0, (doc) => dataDocs.includes(doc));
   return substitutionTripwire(replaceSpans(text, ignored)) ?? classifySegments(replaceSpans(text, [...dataBodies, ...shellJoins]));
 }

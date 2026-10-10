@@ -735,6 +735,7 @@ test("main thread + a live driver lock: a single-quoted --test-cmd is checked as
     `${TASK_COMMIT} --test-cmd 'git $(echo checkout) main' --subject x`,
     "trap 'git $(echo reset) --hard' EXIT",
     "echo 'git $(echo checkout) main' | sh",
+    "echo 'git checkout main' | sh",
   ])
     assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
   assert.equal(decideMain(cycleDir(stateAt("execution")), `${TASK_COMMIT} --test-cmd '$(git stash)' --subject x`), "deny");
@@ -823,4 +824,99 @@ test("an unquoted heredoc body fed to cat is data apart from a substitution that
   assert.equal(decideMain(cwd, "cat > b.md <<EOF\ndir $(mktemp -d): git checkout main is banned\nEOF"), "allow");
   assert.equal(decide(REVIEWER, "cat > f.md <<EOF\nat $(date): \\`git reset --hard\\` is banned\nEOF"), "allow");
   assert.equal(decide(REVIEWER, "cat > f.md <<EOF\nhead $(git rev-parse HEAD)\nEOF"), "deny");
+});
+
+// Single-quoted text a non-launcher receives runs no substitution where it sits, but the words in it
+// are still what a later command may read back: `echo '… reset --hard' > s` followed by a git that
+// takes its arguments from s. Its substitution tokens stop counting; its words do not. A command word
+// that is a substitution naming git, or the variable $GIT, runs git as surely as the word itself.
+test("main thread: quoted text's words stay visible beside a substituted git, which is read as git", () => {
+  const cwd = drivenDir({ live: true });
+  for (const cmd of [
+    "echo '-c x.y=$(x) reset --hard' > s; $(which git) $(cat s)",
+    "echo '-c x.y=$(x) checkout main' > s; $(which git) $(cat s)",
+    "printf '%s' '-c x.y=$(x) checkout main' > s; $(echo git) $(cat s)",
+    "$(which git) $(cat s)",
+    "\"$(which git)\" $SUB",
+    "`command -v git` $SUB",
+    "$(command -v git) $SUB --hard",
+    "$GIT $(cat s)",
+    "${GIT} $SUB",
+    "$GIT checkout main",
+    "sudo $(which git) $SUB",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+  for (const cmd of ["$(which git) status", "$GIT log -1", "$(which git) --version"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+  const cycle = cycleDir(stateAt("execution"));
+  for (const cmd of ["echo '-c x.y=$(x) stash' > s; $(which git) $(cat s)", "$(which git) $(cat s)", "$GIT $SUB", "$GIT stash"])
+    assert.equal(decideMain(cycle, cmd), "deny", `expected deny for main-thread stash: ${cmd}`);
+  assert.equal(decideMain(cycle, "$GIT stash list"), "allow");
+});
+
+// A launcher's own options and operands come before the command it runs: `-E END`, `-I X`, `-s KILL`,
+// `-u me` and flock's lock file are values, not the command, so the git after them is still read.
+// xargs supplies git's argv from its input (or in place of its -I string), and a redirection is not an
+// argument, so the subcommand is unreadable there.
+test("main thread: a git behind a launcher's option values is still read", () => {
+  const cwd = drivenDir({ live: true });
+  for (const cmd of [
+    "xargs -E END git", "xargs -I X git X --hard", "xargs -a f git", "xargs -d '\\n' git", "xargs -n 2 git",
+    "xargs git < s", "xargs <s git", "timeout -s KILL 30 git $(cat s) --hard", "timeout --signal KILL 30 git $SUB",
+    "sudo -u me git $(cat s)", "sudo -u me timeout 5 git $SUB", "flock f git $SUB", "flock -w 5 f git $SUB",
+    "env -u FOO git $SUB", "env -C /tmp FOO=1 git $SUB", "nice -n 5 git $SUB", "ionice -c 2 -n 0 git $SUB",
+    "bash -o pipefail -c 'git $SUB'", "ssh -p 22 host git $SUB", "exec -a name git $SUB", "chrt -f 10 git $SUB",
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+  assert.match(decideRaw({ cwd, tool_input: { command: "xargs -I X git X --hard" } }).reason, /cannot read git's subcommand/);
+  for (const cmd of ["xargs grep git", "xargs -I X grep git X", "timeout 30 npm test", "flock f grep -n git $SUB",
+    "git ls-files | xargs -n 1 git log -1", "timeout -s KILL 30 git status", "bash script.sh $SUB"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+  const cycle = cycleDir(stateAt("execution"));
+  for (const cmd of ["xargs -E END git", "flock f git $SUB", "env -u FOO git $SUB"])
+    assert.equal(decideMain(cycle, cmd), "deny", `expected deny for main-thread stash: ${cmd}`);
+});
+
+// A git with no subcommand behind a launcher runs no subcommand to read, exactly as when it is typed
+// directly; `command -v git` and `command -V git` only say where git is.
+test("main thread: a launched git with no subcommand, and command -v git, are allowed", () => {
+  const launched = ["command -v git", "command -V git", "command -v git >/dev/null && echo ok", "timeout 5 git --version",
+    "env git --version", "nice git --help", "sudo git --version", "time git", "time git status"];
+  const cycle = cycleDir(stateAt("execution"));
+  const cwd = drivenDir({ live: true });
+  for (const cmd of launched) {
+    assert.equal(decideMain(cycle, cmd), "allow", `expected allow on the main thread: ${cmd}`);
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+  }
+  for (const cmd of ["command -v git", "command -V git"])
+    assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for a reviewer: ${cmd}`);
+  assert.equal(decide(REVIEWER, "timeout 5 git --version"), "deny", "a launched git stays denied for a reviewer");
+});
+
+// Text piped into a shell is the script that shell runs: what the commands before it in the pipeline
+// print is judged as the commands it holds, quoted or not.
+test("text piped into a shell is judged as the commands it holds", () => {
+  const piped = (git) => [`echo '${git}' | sh`, `printf '${git}' | sh`, `echo "${git}" | bash`, `echo ${git} | zsh`,
+    `printf '%s\\n' '${git}' | dash`, `echo '${git}' | tee f | sh`, `echo '${git}' | xargs -0 sh -c`];
+  for (const cmd of piped("git reset --hard"))
+    assert.equal(decide(REVIEWER, cmd), "deny", `expected deny for a reviewer: ${cmd}`);
+  const cwd = drivenDir({ live: true });
+  for (const cmd of piped("git checkout main"))
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+  const cycle = cycleDir(stateAt("execution"));
+  for (const cmd of piped("git stash"))
+    assert.equal(decideMain(cycle, cmd), "deny", `expected deny for main-thread stash: ${cmd}`);
+  for (const cmd of ["echo 'git status' | sh", "echo 'npm test' | bash", "echo 'git checkout main' | grep checkout", "echo 'git checkout main'"])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+  for (const cmd of ["echo 'git stash' | grep stash", "echo 'npm test' | sh"])
+    assert.equal(decideMain(cycle, cmd), "allow", `expected allow on the main thread: ${cmd}`);
+});
+
+// A reset or clean option the shell fills in is denied under a lock because the guard cannot read it,
+// and the reason says so rather than that the command moves the branch.
+test("main thread + a live driver lock: a shell-filled reset or clean option is denied, naming why", () => {
+  const cwd = drivenDir({ live: true });
+  assert.match(decideRaw({ cwd, tool_input: { command: "git reset $OPTS HEAD~1" } }).reason, /cannot read git reset's options/);
+  assert.match(decideRaw({ cwd, tool_input: { command: "git clean -n $OPTS" } }).reason, /cannot read git clean's options/);
+  assert.match(decideRaw({ cwd, tool_input: { command: "git reset $(cat opts)" } }).reason, /substitution/);
 });
