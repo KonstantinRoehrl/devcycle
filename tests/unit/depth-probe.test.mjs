@@ -104,6 +104,22 @@ test("resolveDepth: --agent resolves <session>/subagents/agent-<id>.jsonl under 
   assert.equal(r.band, "ok");
 });
 
+// HOME is a fresh directory too, so a probe that ignored CLAUDE_CONFIG_DIR finds nothing rather
+// than walking this machine's real transcripts.
+test("cli: the session's transcript is found under CLAUDE_CONFIG_DIR's projects when it is set", () => {
+  const config = makeTempDir("depth-probe-config");
+  const slug = join(config, "projects", "-elsewhere");
+  mkdirSync(slug, { recursive: true });
+  writeJsonl(join(slug, "sess-cfg.jsonl"), [assistant("claude-opus-5", usage(100, 200, 300, 5), "2026-10-07T07:00:00Z")]);
+  const { CLAUDE_DOCTOR_PROJECTS: _override, ...env } = process.env;
+  const r = spawnSync(process.execPath, [SCRIPT, "--json"], {
+    encoding: "utf8",
+    env: { ...env, HOME: makeTempDir("depth-probe-home"), CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_SESSION_ID: "sess-cfg" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).depth, 600);
+});
+
 test("depthLine: an assumed window is labelled with the file that would fix it", () => {
   const line = depthLine({ depth: 600, model: "claude-mythos-9", window: ASSUMED_WINDOW, windowAssumed: true, fraction: 0.0006, band: "ok" });
   assert.equal(line, "depth: 600 tokens (0.1% of 1000000, model claude-mythos-9, window assumed — model not in scripts/pricing.mjs) — band: ok");

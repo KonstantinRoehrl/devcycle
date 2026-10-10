@@ -557,6 +557,22 @@ test("memoryDir follows the escaped-cwd rule, not basename", () => {
   assert.match(m.memoryDir, /-srv-code-Programming-thing\/memory$/);
 });
 
+// With no CLAUDE_DREAM_PROJECTS override the transcripts and the memory store are Claude Code's,
+// under CLAUDE_CONFIG_DIR when it is set. HOME is a fresh directory so a run that ignored it reads
+// nothing real.
+test("cli: --plan reads sessions and names the memory store under CLAUDE_CONFIG_DIR when it is set", () => {
+  const root = repo();
+  const config = makeTempDir("dream-config-");
+  const slug = join(config, "projects", realpathSync(root).replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(slug, { recursive: true });
+  writeFileSync(join(slug, "s-config.jsonl"), JSON.stringify({ timestamp: "2026-08-10T00:00:00Z", type: "assistant", message: { content: [] } }) + "\n");
+  const res = run(["--plan"], root, { CLAUDE_DREAM_PROJECTS: "", CLAUDE_CONFIG_DIR: config, HOME: makeTempDir("dream-home-") });
+  assert.equal(res.status, 0, res.stderr);
+  const m = JSON.parse(res.stdout);
+  assert.deepEqual(m.sessions.map((s) => s.id), ["s-config"]);
+  assert.equal(m.memoryDir, join(slug, "memory"));
+});
+
 test("the manifest leaks no message text and no branch name", () => {
   const root = repo();
   const dir = makeTempDir("dream-secret-");

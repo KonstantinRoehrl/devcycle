@@ -15,6 +15,7 @@ import agentCli from "../workflows/lib/agent-cli.js";
 import { defaultBranches, isProtectedBranch } from "./branch-names.mjs";
 import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
+import { claudeProjectsDir } from "./depth-probe.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
 import { isMain } from "./is-main.mjs";
@@ -45,6 +46,9 @@ const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
 const MID_WAVE_LABEL = "Session ended mid-wave:";
 // The ledger events that mean a task moved: a session that adds lines but none of these is churn.
 const OUTCOME_EVENTS = new Set(["committed", "report-received", "review-verdict"]);
+// An implementer's and a reviewer's dispatch: a session whose only lines are these made no progress,
+// it sent work out and never saw it back.
+const DISPATCH_EVENTS = new Set(["dispatched", "review-round"]);
 // A request on a model with no price is charged as the dearest priced model, so an estimate never
 // falls short.
 const DEAREST_MODEL = Object.keys(PRICING.models).reduce((a, b) => (PRICING.models[b].out > PRICING.models[a].out ? b : a));
@@ -118,6 +122,7 @@ function ledgerEntries(root, plan) {
 
 const progressOf = (entries) => ({
   lines: entries.length,
+  advanced: entries.filter((e) => !DISPATCH_EVENTS.has(e.event)).length,
   committed: entries.filter((e) => e.event === "committed").length,
   outcomes: entries.filter((e) => OUTCOME_EVENTS.has(e.event)).length,
 });
@@ -289,7 +294,7 @@ function stopSession(handle) {
 
 // Stream-json repeats a request's assistant event once per content block and reports its output
 // tokens before they are generated. So a request is priced once, with its output taken as no less
-// than half the characters it streamed: an over-count, which is the side a cap may err on.
+// than half the characters it streamed or logged: an over-count, which is the side a cap may err on.
 function estimateUsd(requests, sessionModel) {
   let usd = 0;
   for (const { usage, model = sessionModel, chars } of requests.values()) {
@@ -299,10 +304,14 @@ function estimateUsd(requests, sessionModel) {
   return usd;
 }
 
+// A request seen more than once keeps the usage of whichever record counts more output.
+const moreOutput = (a, b) => ((b.output_tokens ?? 0) > (a.output_tokens ?? 0) ? b : a);
+
 function tallyRequest(requests, message) {
   if (!message?.usage) return;
   const key = message.id ?? Symbol("unnamed request");
   const request = requests.get(key) ?? { usage: message.usage, model: message.model, chars: 0 };
+  request.usage = moreOutput(request.usage, message.usage);
   request.chars += JSON.stringify(message.content ?? []).length;
   requests.set(key, request);
 }
@@ -311,7 +320,7 @@ function tallyRequest(requests, message) {
 // slug is found by the session id rather than derived from the checkout's path, whose escaping
 // is Claude Code's to change.
 function sessionTranscripts(sessionId) {
-  const projects = join(homedir(), ".claude", "projects");
+  const projects = claudeProjectsDir();
   const listing = (dir) => {
     try {
       return readdirSync(dir);
@@ -326,22 +335,30 @@ function sessionTranscripts(sessionId) {
 }
 
 // Claude Code appends these transcripts as a session runs, so they outlive a killed one, and they
-// hold what the stream lacks: each request's final output count, and any subagent request the
-// stream did not carry. A request is logged once per content block, its output growing.
+// hold what the stream lacks: the main session's final output counts, and any subagent request the
+// stream did not carry. A request is logged once per content block. A subagent's rows carry the
+// output count from before it generated anything (Claude Code 2.1.296), so, as for the stream, the
+// characters it logged are what floor its output.
 function tallyTranscripts(requests, sessionId) {
   if (!/^[A-Za-z0-9-]+$/.test(sessionId ?? "")) return;
+  const logged = new Map();
   const visit = (r) => {
-    const message = r.type === "assistant" ? r.message : null;
-    if (!message?.usage || !message.id) return;
-    const known = requests.get(message.id);
-    if (!known) requests.set(message.id, { usage: message.usage, model: message.model, chars: 0 });
-    else if ((message.usage.output_tokens ?? 0) > (known.usage.output_tokens ?? 0)) known.usage = message.usage;
+    if (r.type === "assistant" && r.message?.id) tallyRequest(logged, r.message);
   };
   for (const file of sessionTranscripts(sessionId)) {
     try {
       eachRecord(file, visit, { lineFilter: (line) => line.includes('"usage"') });
     } catch {
       // An unreadable transcript leaves the estimate to the stream.
+    }
+  }
+  // A request the stream carried too is priced once, on whichever record of it says more.
+  for (const [id, request] of logged) {
+    const known = requests.get(id);
+    if (!known) requests.set(id, request);
+    else {
+      known.usage = moreOutput(known.usage, request.usage);
+      known.chars = Math.max(known.chars, request.chars);
     }
   }
 }
@@ -446,9 +463,21 @@ function readStop(root) {
   }
 }
 
+// Progress, judged the same however a session ended: a ledger line beyond a dispatch resets the
+// stall count, and a report, verdict or commit the churn count too: churn is such lines but no task
+// outcome. A session a usage limit held adds to neither count.
+function progressCounts(before, after, { stalls, churn }, limited) {
+  const advanced = after.advanced > before.advanced;
+  const step = limited ? 0 : 1;
+  return {
+    stalls: advanced ? 0 : stalls + step,
+    churn: after.outcomes > before.outcomes ? 0 : advanced ? churn + step : churn,
+  };
+}
+
 // The evaluation order the driver promises: an interrupt, a broken environment, a stop the session
-// signalled, a usage limit (its stall count, then the dollar cap, before any wait), the stage
-// leaving execution, then progress and the dollar cap.
+// signalled, a usage limit (its stall and churn counts, then the dollar cap, before any wait), the
+// stage leaving execution, then progress and the dollar cap.
 function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, interrupted }) {
   const verdict = (exitReason, code, message, extra = {}) => ({ exitReason, code, message, stalls, churn, ...extra });
   if (interrupted) return verdict("interrupted", 130, "interrupted — the session was stopped and the lock released");
@@ -456,33 +485,27 @@ function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, inte
   const stop = readStop(ctx.root);
   if (stop) return verdict("stopped", 4, `stopped for you — ${stop.reason}: ${stop.detail}`, { stopReason: stop.reason });
   const overBudget = opts.maxUsd !== undefined && spent >= opts.maxUsd;
-  const budgetSpent = (extra) => verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, extra);
+  const counts = progressCounts(before, after, { stalls, churn }, Boolean(s.limit));
+  const budgetSpent = () => verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, counts);
+  const said = `The last session said:\n${s.resultText || "(no result)"}`;
+  const churned = () => verdict("stalled", 5, `stalled: ${counts.churn} sessions in a row added ledger lines but no report, verdict or commit. ${said}`, counts);
   if (s.limit || s.silent) {
     // Silence with no usage-limit signal may be a limit — or a session that hangs every time, so it
-    // also counts as a stall, unless a task committed first: a subagent can work silently for longer
-    // than the idle limit.
-    const count = after.committed > before.committed ? 0 : s.limit ? stalls : stalls + 1;
-    if (count >= opts.maxStalls)
-      return verdict("stalled", 5, `stalled: ${count} sessions in a row went silent with no usage-limit signal until the driver stopped them`, { stalls: count });
-    if (overBudget) return budgetSpent({ stalls: count });
+    // also counts toward a stall or churn, as an ended session would.
+    if (counts.stalls >= opts.maxStalls)
+      return verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row went silent with no usage-limit signal until the driver stopped them`, counts);
+    if (counts.churn >= opts.maxChurn) return churned();
+    if (overBudget) return budgetSpent();
     const waitMs = s.limit?.resetAt ? Math.max(s.limit.resetAt * 1000 - Date.now(), 1000) : DEFAULT_BACKOFF_MS;
-    if (waited + waitMs > opts.maxBackoffMs) return verdict("budget", 6, "usage limit: waiting it out would pass --max-backoff", { stalls: count });
-    return verdict("budget", null, null, { waitMs, stalls: count });
+    if (waited + waitMs > opts.maxBackoffMs) return verdict("budget", 6, "usage limit: waiting it out would pass --max-backoff", counts);
+    return verdict("budget", null, null, { waitMs, ...counts });
   }
   const crashed = s.result === null;
   if (readState(ctx.statePath).stage !== "execution") return verdict(crashed ? "error" : "handoff", null, null);
-  const progressed = after.lines > before.lines;
-  const count = progressed ? 0 : stalls + 1;
-  // Churn: lines but no task outcome — a dispatch re-appended by every session that dies before
-  // its implementer or reviewer reports. A session with no line at all leaves it to the stall count.
-  const churned = !progressed ? churn : after.outcomes > before.outcomes ? 0 : churn + 1;
-  const counts = { stalls: count, churn: churned };
-  const said = `The last session said:\n${s.resultText || "(no result)"}`;
-  if (count >= opts.maxStalls) return verdict("stalled", 5, `stalled: ${count} sessions in a row added no ledger line. ${said}`, counts);
-  if (churned >= opts.maxChurn)
-    return verdict("stalled", 5, `stalled: ${churned} sessions in a row added ledger lines but no report, verdict or commit. ${said}`, counts);
-  const reason = crashed ? "error" : !progressed ? "stalled" : s.resultText.includes(MID_WAVE_LABEL) ? "valve" : "handoff";
-  if (overBudget) return budgetSpent(counts);
+  if (counts.stalls >= opts.maxStalls) return verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row added no ledger line beyond a dispatch. ${said}`, counts);
+  if (counts.churn >= opts.maxChurn) return churned();
+  const reason = crashed ? "error" : counts.stalls ? "stalled" : s.resultText.includes(MID_WAVE_LABEL) ? "valve" : "handoff";
+  if (overBudget) return budgetSpent();
   return verdict(reason, null, null, counts);
 }
 

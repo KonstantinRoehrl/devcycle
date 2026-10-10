@@ -80,6 +80,18 @@ test("parseArgs: defaults resolve the transcript dir under the home directory", 
   assert.match(a.dir, /\.claude[/\\]projects$/);
 });
 
+// Only the default is resolved here; nothing under it is read.
+test("parseArgs: the default transcript dir is CLAUDE_CONFIG_DIR's projects when it is set", () => {
+  const saved = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = join(tmpdir(), "claude-config-elsewhere");
+  try {
+    assert.equal(parseArgs([]).dir, join(tmpdir(), "claude-config-elsewhere", "projects"));
+  } finally {
+    if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = saved;
+  }
+});
+
 test("parseArgs: every flag is read", () => {
   const a = parseArgs(["--dir", "/tmp/x", "--since", "2026-07-01", "--until", "2026-07-31", "--json"]);
   assert.deepEqual(a, { dir: "/tmp/x", since: "2026-07-01", until: "2026-07-31", json: true, all: false, depth: false, runChecks: false, drift: null, issueBody: null });

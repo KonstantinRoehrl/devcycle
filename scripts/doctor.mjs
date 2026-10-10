@@ -22,7 +22,7 @@ import { atomicWrite } from "./atomic-write.mjs";
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 import { eachRecord } from "./jsonl.mjs";
-import { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth, depthLine } from "./depth-probe.mjs";
+import { SYNTHETIC_MODEL, contextDepth, budgetBand, claudeProjectsDir, findTranscriptFiles, resolveDepth, depthLine } from "./depth-probe.mjs";
 import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, withInferredNote, unpricedMediansNote } from "./doctor-format.mjs";
 import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
 
@@ -168,7 +168,7 @@ export function parseArgs(argv) {
   // so only --dir and --drift take the parser's default "a path argument" wording.
   const valued = (name, noun) => requireValue(flags, name, noun) ?? null;
   return {
-    dir: requireValue(flags, "--dir") ?? join(homedir(), ".claude", "projects"),
+    dir: requireValue(flags, "--dir") ?? claudeProjectsDir(),
     since: valued("--since", "a date"),
     until: valued("--until", "a date"),
     json: "--json" in flags,

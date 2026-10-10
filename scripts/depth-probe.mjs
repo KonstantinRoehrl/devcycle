@@ -16,6 +16,12 @@ export { ASSUMED_WINDOW, budgetBand, contextDepth, windowFor };
 // Every counter on them is zero, so they are skipped outright rather than reported unpriced.
 export const SYNTHETIC_MODEL = "<synthetic>";
 
+// Where Claude Code keeps its session transcripts: <config home>/projects, the config home being
+// CLAUDE_CONFIG_DIR when set and ~/.claude otherwise.
+export function claudeProjectsDir(env = process.env) {
+  return join(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "projects");
+}
+
 // Recursively collects .jsonl transcript files under dir. Returns null when dir is simply
 // not there (missing, or a path that is not a directory).
 export function findTranscriptFiles(dir) {
@@ -61,11 +67,11 @@ export function transcriptStats(file) {
 }
 
 // CLAUDE_DOCTOR_PROJECTS overrides the transcript root; it exists so the probe is testable
-// without writing into the real ~/.claude. It defaults to ~/.claude/projects.
+// without writing into the real ~/.claude. It defaults to claudeProjectsDir.
 export function resolveTranscript(env, cwd, { agentId } = {}) {
   const id = env.CLAUDE_CODE_SESSION_ID;
   if (!id) throw new Error("CLAUDE_CODE_SESSION_ID is not set — cannot identify this session");
-  const root = env.CLAUDE_DOCTOR_PROJECTS || join(homedir(), ".claude", "projects");
+  const root = env.CLAUDE_DOCTOR_PROJECTS || claudeProjectsDir(env);
   const name = agentId ? `agent-${agentId}.jsonl` : `${id}.jsonl`;
 
   // 1. cwd slug, 2. a filename search for a session whose cwd moved after it started.

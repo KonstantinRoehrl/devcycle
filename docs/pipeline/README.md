@@ -238,7 +238,7 @@ flowchart TD
     LIMIT -->|"wait within --max-backoff"| STAGE
     LIMIT -->|"cap reached"| E6(["exit 6"]):::tool
     LIMIT -->|no| PROG{"ledger progress?"}:::stage
-    PROG -->|"no line --max-stalls in a row, or no report, verdict or commit --max-churn in a row"| E5(["exit 5 — last result printed"]):::tool
+    PROG -->|"no line beyond a dispatch --max-stalls in a row, or no report, verdict or commit --max-churn in a row"| E5(["exit 5 — last result printed"]):::tool
     PROG -->|"within --max-usd"| STAGE
     PROG -->|"--max-usd spent"| E6
 
