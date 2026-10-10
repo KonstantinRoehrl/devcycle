@@ -161,6 +161,21 @@ test("reference-read: a reference only ever named bare has no consumer; a prefix
   assert.match(hits[0].message, /no consumer/);
 });
 
+test("bare-read: a section read is a read, so it never fires; a genuine bare read beside it still does", () => {
+  const sectionRead = `Run \`node "${P}/scripts/read-section.mjs" references/a.md some-slug\``;
+  assert.deepEqual(bareReadErrors("playbooks/p.md", `${sectionRead} first.\n`), []);
+  assert.deepEqual(rules(bareReadErrors("playbooks/p.md", `${sectionRead} and read \`references/b.md\`.\n`)), ["bare-read@1"]);
+});
+
+test("reference-read: a section read of a reference consumes it", () => {
+  const hits = referenceReadErrors({
+    references: ["a.md"],
+    surface: [{ rel: "playbooks/p.md", text: `\`node "${P}/scripts/read-section.mjs" references/a.md one\`\n` }],
+    scripts: [],
+  });
+  assert.deepEqual(hits, []);
+});
+
 test("reference-read: a script consumes a reference only in code — a comment naming it does not count", () => {
   const hits = referenceReadErrors({
     references: ["commented.md", "blocked.md", "joined.md", "literal.md", "url.md", "after-url.md"],

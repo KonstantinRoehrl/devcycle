@@ -100,6 +100,22 @@ test("--diff lists one of two citations of a target losing its prefix, and not a
   }
 });
 
+test("--diff does not list a prefixed read converted to a section read of the same reference", () => {
+  const dir = makeRepo();
+  try {
+    seed(dir);
+    writeInto(dir, "references/a.md", "## One\n\na words\n");
+    writeInto(dir, "playbooks/a.md", `read \`${P}/references/a.md\` here\n`);
+    commitAll(dir, "seed");
+    writeInto(dir, "playbooks/a.md", `run \`node "${P}/scripts/read-section.mjs" references/a.md one\` here\n`);
+    const r = run(dir, "--json", "--diff", "HEAD");
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout).diff.lostPrefixes, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("text output names the totals and the diff sections", () => {
   const dir = makeRepo();
   try {

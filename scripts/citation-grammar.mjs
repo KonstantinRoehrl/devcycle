@@ -123,7 +123,10 @@ export function ownerSentenceErrors(rel, text) {
 
 export function bareReadErrors(rel, text) {
   return sentences(text)
-    .filter((s) => !has(PREFIXED, s.text) && has(BARE, s.text) && IMPERATIVE_READ.test(s.text))
+    .filter((s) => {
+      const t = s.text.replace(SECTION_READ, "");
+      return !has(PREFIXED, t) && has(BARE, t) && IMPERATIVE_READ.test(t);
+    })
     .map((s) => hit(rel, s.line, "bare-read", `a step that reads a file must prefix it: "${excerpt(s.text)}"`));
 }
 
@@ -229,9 +232,10 @@ export function referenceReadErrors({ references, surface, scripts }) {
     .filter((f) => {
       const own = `references/${f}`;
       const prefixed = `\${CLAUDE_PLUGIN_ROOT}/${own}`;
-      return !surface.some((s) => s.rel !== own && s.text.includes(prefixed)) && !consumers.some((script) => namesInCode(script, f));
+      const reads = (s) => s.text.includes(prefixed) || [...s.text.matchAll(SECTION_READ)].some((m) => m[1] === own);
+      return !surface.some((s) => s.rel !== own && reads(s)) && !consumers.some((script) => namesInCode(script, f));
     })
-    .map((f) => hit(`references/${f}`, 0, "reference-read", `references/${f}: no consumer — no surface file reads it prefixed and no script reads it`));
+    .map((f) => hit(`references/${f}`, 0, "reference-read", `references/${f}: no consumer — no surface file reads it prefixed or by section and no script reads it`));
 }
 
 export const grammarFiles = (root) =>

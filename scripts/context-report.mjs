@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { closure, diskReader } from "./context-closure.mjs";
-import { GRAMMAR_DIRS, PREFIXED } from "./citation-grammar.mjs";
+import { GRAMMAR_DIRS, PREFIXED, SECTION_READ } from "./citation-grammar.mjs";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 
 const listMd = (root, dir) =>
@@ -44,11 +44,11 @@ function gitReader(root, ref) {
 const PREFIX = "${CLAUDE_PLUGIN_ROOT}/";
 const citationLines = (text) =>
   (text ?? "").split("\n").map((l, i) => {
-    const rest = l.replace(PREFIXED, "");
+    const rest = l.replace(SECTION_READ, "").replace(PREFIXED, "");
     return {
       line: i + 1,
       key: l.replaceAll(PREFIX, "").replace(/\s+/g, " ").trim(),
-      prefixed: [...l.matchAll(PREFIXED)].map((m) => m[1]),
+      prefixed: [...[...l.matchAll(PREFIXED)].map((m) => m[1]), ...[...l.matchAll(SECTION_READ)].map((m) => m[1])],
       bare: (target) => rest.split(target).length - 1,
     };
   });
@@ -63,7 +63,8 @@ const overlap = (a, b) => {
 // same target is still a demotion. In order: a citation whose line is unchanged but for the prefix
 // is kept or demoted in place; one whose line was reworded pairs with the most similar line that
 // still names the target, prefixed or bare — a tie counts as bare — and is kept or lost there; a
-// citation no line names any more is lost at none.
+// citation no line names any more is lost at none. A section read of the same target keeps the
+// citation, as a prefixed read does.
 function lostCitations(file, beforeText, nowText) {
   const now = citationLines(nowText).map((l) => ({ ...l, bareTaken: new Map() }));
   const takePrefixed = (l, target) => {

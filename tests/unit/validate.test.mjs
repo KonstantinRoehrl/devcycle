@@ -1854,6 +1854,33 @@ test("4b control: a paragraph break is not a separator, so prose either side of 
   ok(runValidate(dir));
 });
 
+// --- check 4c: a section read names a shipped reference and a `##` section it has ---
+
+const sectionRead = (dir, target, slug) => {
+  writeInto(dir, "scripts/read-section.mjs", "// fixture script\n");
+  playbook(dir, `Run \`node "\${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" ${target} ${slug}\` first.\n`);
+};
+
+test("4c control: a section read of a shipped reference's `##` section passes, and consumes the reference", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");
+  sectionRead(dir, "references/handoff.md", "the-block-shape");
+  ok(runValidate(dir));
+});
+
+test("4c: a section read whose slug no heading of the reference has fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");
+  sectionRead(dir, "references/handoff.md", "nope");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /section read of references\/.+ names "nope", which no "## " heading/);
+});
+
+test("4c: a section read of a reference that does not ship fails", () => {
+  const dir = makePluginFixture();
+  sectionRead(dir, "references/missing.md", "one");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /section read of references\/missing\.md names no file in the plugin/);
+});
+
 // --- check 22: hooks/hooks.json registration ---
 
 const hooksFixture = (dir, doc, { withScript = true } = {}) => {

@@ -10,7 +10,8 @@ import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run
 import { readPolicy } from "./reinforcement-policy.mjs";
 import { closure } from "./context-closure.mjs";
 import { ROSTER } from "./resolve-knobs.mjs";
-import { bareExistsErrors, grammarFiles, grammarHits, referenceReadErrors } from "./citation-grammar.mjs";
+import { bareExistsErrors, grammarFiles, grammarHits, referenceReadErrors, SECTION_READ } from "./citation-grammar.mjs";
+import { sectionText } from "./md-sections.mjs";
 import { loadStages } from "./stage-entry.mjs";
 import { budgetDecisionErrors } from "./budget-decisions.mjs";
 import { DECISIONS_DOC } from "./doc-paths.mjs";
@@ -293,6 +294,16 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           `from the installed plugin, not this repo; use \${CLAUDE_PLUGIN_ROOT}/${target}`
       );
     }
+
+    // 4c. A section read names a reference that ships and a `##` section it has, so a heading rename
+    //     cannot leave a dangling read.
+    for (const [, file, wanted] of text.matchAll(SECTION_READ)) {
+      const abs = join(root, file);
+      if (!existsSync(abs) || !statSync(abs).isFile())
+        once(`section:${file}`, `${rel(p)}: section read of ${file} names no file in the plugin`);
+      else if (sectionText(readFileSync(abs, "utf8"), wanted) === null)
+        once(`section:${file}#${wanted}`, `${rel(p)}: section read of ${file} names "${wanted}", which no "## " heading of that file slugs to`);
+    }
   }
 
   // --- continue.md's resume discovery must stay hook-proof ---
@@ -511,8 +522,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       fail(`agents/${f}: frontmatter must not set model: — a pin defeats session-tier escalation`);
 
   // 11. Every reference has at least one consumer: a surface file that reads it — a prefixed
-  //     ${CLAUDE_PLUGIN_ROOT} citation, never a bare mention, which only names an owner — or a
-  //     script that reads it. A reference citing itself is not its own consumer, and
+  //     ${CLAUDE_PLUGIN_ROOT} citation or a section read, never a bare mention, which only names an
+  //     owner — or a script that reads it. A reference citing itself is not its own consumer, and
   //     references/README.md is the index, a consumer OF references, so it needs none.
   const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
   for (const h of referenceReadErrors({
