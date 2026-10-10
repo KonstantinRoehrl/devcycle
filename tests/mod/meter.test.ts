@@ -16,6 +16,16 @@ test('counts main-loop calls and distinct files read, and shows them with the st
   expect(seen.status.at(-1)).toBe(text('execution', 4, 2));
 });
 
+test('a read-section call counts as a read of that file', async ($, on) => {
+  const seen = session(on, { surfaces: ['terminal'] });
+  engine(on);
+  await $.turn.start({ text: 'go', turnId: 'm1' });
+  await bash($, 'node "/plugin/scripts/read-section.mjs" references/delegation.md the-stage-budget');
+  await bash($, 'node "/plugin/scripts/read-section.mjs" references/delegation.md return-envelopes');
+  await bash($, 'git status');
+  expect(seen.status.at(-1)).toBe(text('execution', 3, 1));
+});
+
 test('the context percent comes from session.measure', async ($, on) => {
   const seen = session(on, { surfaces: ['terminal'] });
   engine(on);

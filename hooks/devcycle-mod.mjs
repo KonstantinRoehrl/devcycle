@@ -133,6 +133,10 @@ async function stateFileChanged($, seen) {
   return false;
 }
 
+// A section read is a file read the meter must see too. The agent's command carries the expanded
+// plugin root, so this matches the script name rather than the ${CLAUDE_PLUGIN_ROOT} citation form.
+const SECTION_READ_CALL = /read-section\.mjs["']?\s+(references\/[A-Za-z0-9._-]+\.md)/g;
+
 // The stage meter: in an interactive session, the coordinator's stage budget on the status line
 // (references/delegation.md § The stage budget). It only displays; it never refuses a call.
 async function updateMeter(st, $, e) {
@@ -148,6 +152,8 @@ async function updateMeter(st, $, e) {
   if (now.stage !== meter.stage) Object.assign(meter, { stage: now.stage, calls: 0, files: new Set() });
   meter.calls += 1;
   if (e.tool === "Read" && typeof e.file_path === "string") meter.files.add(e.file_path);
+  if (e.tool === "Bash" && typeof e.command === "string")
+    for (const m of e.command.matchAll(SECTION_READ_CALL)) meter.files.add(m[1]);
   meter.shown = true;
   // Claude Code labels a plugin's status entry with the plugin's name, so the text leaves it out.
   await $.ui.status(`${meter.stage} · calls ${meter.calls}/~${STAGE_TOOL_CALLS} · ` +
