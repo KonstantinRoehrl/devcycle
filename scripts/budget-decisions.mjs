@@ -1,9 +1,9 @@
-// M10: a budget fixture never exceeds what the decisions log records. Each decision that sets a
+// M10: a budget fixture equals what the decisions log records. Each decision that sets a
 // budget carries one machine line per key, `budget: <fixture-basename> <key> <value>`; the log is
 // newest first, so the first line for a key is its recorded value. A key with no line counts as 0,
-// so a raise cannot land without a decision naming its exact figure — and no git history is needed,
-// so a shallow clone or a tarball checks the same way. `retired` closes a key whose fixture entry
-// was removed, because older entries are history and are never rewritten.
+// so neither a raise nor a cut can land without a decision naming its exact figure — and no git
+// history is needed, so a shallow clone or a tarball checks the same way. `retired` closes a key
+// whose fixture entry was removed, because older entries are history and are never rewritten.
 import { DECISIONS_DOC } from "./doc-paths.mjs";
 
 export const BUDGET_LINE = /^budget:\s+(\S+)\s+(\S+)\s+(\d+|retired)\s*$/;
@@ -51,6 +51,11 @@ export function budgetDecisionErrors({ fixtures, logText, logPath = DECISIONS_DO
           `tests/fixtures/${fixture}: ${name} is ${value}, above the ` +
             `${r && r.value !== "retired" ? `newest recorded figure ${allowed} (${logPath}:${r.line})` : "unrecorded 0"} — ` +
             `a raise needs a decision line "budget: ${fixture} ${name} ${value}" in ${logPath}`
+        );
+      else if (value < allowed)
+        out.push(
+          `tests/fixtures/${fixture}: ${name} is ${value}, below the newest recorded figure ${allowed} (${logPath}:${r.line}) — ` +
+            `a cut records its figure: add "budget: ${fixture} ${name} ${value}" in ${logPath}`
         );
     }
   return out;

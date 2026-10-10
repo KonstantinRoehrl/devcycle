@@ -18,8 +18,8 @@ const SURFACE_DIRS = ["playbooks/", "commands/", "agents/", "references/"];
 const SURFACE_BUDGET = "tests/fixtures/surface-budget.json";
 const CONTEXT_BUDGET = "tests/fixtures/context-budget.json";
 const isSurface = (f) => SURFACE_DIRS.some((d) => f.startsWith(d)) && f.endsWith(".md");
-// context-budget.json keys every entry point -- each command and each playbook -- so editing one
-// grows its own budget.
+// context-budget.json keys every entry point -- each command and each playbook -- and each
+// high-fan-in reference, so editing one grows its own budget.
 const isEntryPoint = (f) => (f.startsWith("commands/") || f.startsWith("playbooks/")) && f.endsWith(".md");
 // validate.mjs check 15 also charges each entry point for the bytes of every reference it cites --
 // so editing a reference grows a budget no entry point in the Files block appears to touch. That is
@@ -27,8 +27,9 @@ const isEntryPoint = (f) => (f.startsWith("commands/") || f.startsWith("playbook
 const isReference = (f) => f.startsWith("references/") && f.endsWith(".md");
 
 // The join, in one place: which committed size baselines a tracked path sits under. A baseline is
-// itself held by the decisions log -- validate.mjs check 28 fails a fixture value above its newest
-// `budget:` line -- so a fixture requires the log, and so does every edit that requires a fixture.
+// itself held by the decisions log -- validate.mjs check 28 fails a fixture value that differs from
+// its newest `budget:` line -- so a fixture requires the log, and so does every edit that requires
+// a fixture.
 function requiredFixtures(file) {
   const fixtures = [];
   if (isSurface(file)) fixtures.push(SURFACE_BUDGET);

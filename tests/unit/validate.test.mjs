@@ -8,7 +8,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { DECISIONS_DOC } from "../../scripts/doc-paths.mjs";
-import { makePluginFixture as makeBaseFixture, writeInto, runValidate, recordBudgets, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
+import { makePluginFixture as makeBaseFixture, writeInto, runValidate, recordBudgets, rebaseline, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
 import { recordStoreTrackingErrors, docsSubdirTrackingErrors } from "../../scripts/validate.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
@@ -58,13 +58,13 @@ const playbook = (dir, body) => writeInto(dir, "playbooks/demoing-things.md", FI
 const readSection = (name) => `\n## Inputs\n\nRead \`\${CLAUDE_PLUGIN_ROOT}/references/${name}\` first.\n`;
 
 // Check 15 holds every entry point (command or playbook) to a context-budget entry, so a test that
-// adds one gives it an entry generous enough never to fire, and re-records the decisions log so
-// check 28 accepts it.
+// adds one gives it an entry, and rebaseline sets every entry to its measured figure and re-records
+// the decisions log so neither check 15's ratchet nor check 28 fails it.
 const budgetEntryPoints = (dir, ...paths) => {
   const context = JSON.parse(readFileSync(join(dir, CONTEXT_PATH), "utf8"));
-  for (const p of paths) context[p] = 999999;
+  for (const p of paths) context[p] = 0;
   writeInto(dir, CONTEXT_PATH, JSON.stringify(context, null, 2) + "\n");
-  recordBudgets(dir);
+  rebaseline(dir);
 };
 
 // The stage enum lives in commands/cycle.md; checks that consult it need it present, and check 27
@@ -99,6 +99,7 @@ test("stage check: backticked stages in the enum pass, and unbackticked prose is
       "The `stage:` line records the stage to resume at.\n\n" +
       "The pipeline's last stage: resolve the effective git policy.\n"
   );
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -122,6 +123,7 @@ test("user_config check: a declared knob inside a command's resolver invocation 
     readFileSync(join(dir, "commands/cycle.md"), "utf8") +
       "\n```\nnode \"${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs\" \\\n  --profile '${user_config.profile}'\n```\n"
   );
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -319,6 +321,7 @@ test("devcycle: reference check: names resolving to an agent or a command all pa
     "Dispatch `devcycle:task-reviewer` with the `taskReviewerModel` per `references/config.md`, resume via `/devcycle:cycle`.\n" +
       readSection("config.md")
   );
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -348,6 +351,7 @@ test("devcycle: reference check: an anchor inside an HTML comment is exempt, the
   // has to resolve to an agent or a command.
   const dir = makePluginFixture();
   playbook(dir, "Replace `<!-- devcycle:highlights -->` with prose.\n");
+  rebaseline(dir);
   ok(runValidate(dir));
   playbook(dir, "Replace `<!-- devcycle:highlights -->` with prose, then run `devcycle:highlights`.\n");
   failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /devcycle:highlights/);
@@ -361,6 +365,7 @@ test("devcycle: reference check: the comment exemption is scoped to a bare ancho
   playbook(dir, "<!-- a note about devcycle:not-a-real-thing in passing -->\n");
   failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /devcycle:not-a-real-thing/);
   playbook(dir, "<!-- devcycle:highlights -->\n");
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -370,6 +375,7 @@ test("plugin-root check: a path that exists passes", () => {
   const dir = makePluginFixture();
   writeInto(dir, "references/handoff.md", "# Handoff\n\nThe block shape.\n");
   playbook(dir, "Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and follow it.\n");
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -385,6 +391,7 @@ test("handoff check: a playbook emitting a handoff block that names references/h
   const dir = makePluginFixture();
   writeInto(dir, "references/handoff.md", "# Handoff\n\nThe block shape.\n");
   playbook(dir, "Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and follow it.\n\n## Handoff\n\nEmit the block.\n");
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -414,6 +421,7 @@ test("handoff check: a playbook that states it emits no handoff block is not an 
   // all say this and reference nothing; a matcher on the bare phrase would fail them.
   const dir = makePluginFixture();
   playbook(dir, "This run starts no cycle and emits no handoff block.\n\nNeither mode emits a handoff block.\n");
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -665,17 +673,13 @@ test("budget check: a command over 100 lines fails", () => {
 
 // Pads the surface with `count` gerund-named playbooks of 100 lines each — each
 // one under the 150-line per-file ceiling, so only the total arm can fire.
-// Each padding playbook also gets a context-budget entry, generous enough never to fire:
-// check 15 requires every entry point to declare one, and these exist to move the line total. The
-// decisions log records the new entries, so check 28 does not fail them either.
+// Each padding playbook also gets a context-budget entry at its measured figure: check 15 requires
+// every entry point to declare one, and these exist to move the line total. The decisions log
+// records the new entries, so check 28 does not fail them either.
 const padSurface = (dir, count) => {
-  const context = { "playbooks/demoing-things.md": 999999, "commands/cycle.md": 999999 };
-  for (let i = 0; i < count; i++) {
-    writeInto(dir, `playbooks/padding-${i}.md`, "x\n".repeat(100));
-    context[`playbooks/padding-${i}.md`] = 999999;
-  }
-  writeInto(dir, CONTEXT_PATH, JSON.stringify(context, null, 2) + "\n");
-  recordBudgets(dir);
+  const padding = Array.from({ length: count }, (_, i) => `playbooks/padding-${i}.md`);
+  for (const p of padding) writeInto(dir, p, "x\n".repeat(100));
+  budgetEntryPoints(dir, ...padding);
 };
 
 test("budget check: a surface over 3500 lines in total fails", () => {
@@ -702,8 +706,7 @@ test("budget check: a playbook over 150 lines fails", () => {
   assert.doesNotMatch(stderr, /runtime surface/); // the per-file arm fired, not the total arm
 });
 
-// Writes one padding playbook of `count` lines with a context-budget entry generous enough never
-// to fire.
+// Writes one padding playbook of `count` lines with a context-budget entry at its measured figure.
 const padPlaybook = (dir, count) => {
   writeInto(dir, "playbooks/padding-things.md", "x\n".repeat(count));
   budgetEntryPoints(dir, "playbooks/padding-things.md");
@@ -1206,6 +1209,14 @@ test("budget baseline: a baseline that is not an object fails naming the shape, 
 // --- check 15: each stage's transitive context cost against a committed baseline ---
 
 const CONTEXT_PATH = "tests/fixtures/context-budget.json";
+const PLAYBOOK = "playbooks/demoing-things.md";
+// Sets the named context-budget entries and records them, leaving every other entry as it is.
+const budgetContext = (dir, entries) => {
+  const context = JSON.parse(readFileSync(join(dir, CONTEXT_PATH), "utf8"));
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ ...context, ...entries }, null, 2) + "\n");
+  recordBudgets(dir);
+};
+const fileBytes = (dir, rel) => Buffer.byteLength(readFileSync(join(dir, rel), "utf8"));
 
 test("context budget: a playbook missing from the baseline fails", () => {
   const dir = makePluginFixture();
@@ -1243,7 +1254,7 @@ test("context budget: growth past a playbook's baseline fails and names both num
 
 test("context budget: a command missing from the baseline fails — commands are entry points too", () => {
   const dir = makePluginFixture();
-  writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": 999999 }, null, 2) + "\n");
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ [PLAYBOOK]: fileBytes(dir, PLAYBOOK) }, null, 2) + "\n");
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
   assert.match(
@@ -1254,12 +1265,7 @@ test("context budget: a command missing from the baseline fails — commands are
 
 test("context budget: growth past a command's baseline fails and names both numbers", () => {
   const dir = makePluginFixture();
-  writeInto(
-    dir,
-    CONTEXT_PATH,
-    JSON.stringify({ "playbooks/demoing-things.md": 999999, "commands/cycle.md": 1 }, null, 2) + "\n"
-  );
-  recordBudgets(dir);
+  budgetContext(dir, { "commands/cycle.md": 1 });
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
   assert.match(
@@ -1270,16 +1276,7 @@ test("context budget: growth past a command's baseline fails and names both numb
 
 test("context budget: a baseline entry for an entry point that no longer exists fails, naming the retire line", () => {
   const dir = makePluginFixture();
-  writeInto(
-    dir,
-    CONTEXT_PATH,
-    JSON.stringify(
-      { "playbooks/demoing-things.md": 999999, "commands/cycle.md": 999999, "playbooks/gone-away.md": 10 },
-      null,
-      2
-    ) + "\n"
-  );
-  recordBudgets(dir);
+  budgetContext(dir, { "playbooks/gone-away.md": 10 });
   assert.match(
     runValidate(dir).stderr,
     /context-budget\.json: entry "playbooks\/gone-away\.md" names no such entry point or reference — remove it with a "budget: context-budget\.json playbooks\/gone-away\.md retired" line, or restore the file/
@@ -1299,33 +1296,19 @@ test("context budget: the total counts a cited reference, and counts it once whe
   const playbookBytes = Buffer.byteLength(readFileSync(join(dir, "playbooks/demoing-things.md"), "utf8"));
   const alphaBytes = Buffer.byteLength(readFileSync(join(dir, "references/alpha.md"), "utf8"));
   const betaBytes = Buffer.byteLength(readFileSync(join(dir, "references/beta.md"), "utf8"));
-  writeInto(
-    dir,
-    CONTEXT_PATH,
-    JSON.stringify({ "playbooks/demoing-things.md": playbookBytes + alphaBytes + betaBytes, "commands/cycle.md": 999999 }, null, 2) + "\n"
-  );
-  const res = runValidate(dir);
-  assert.equal(res.status, 0, res.stderr);
+  budgetContext(dir, { [PLAYBOOK]: playbookBytes + alphaBytes + betaBytes });
+  ok(runValidate(dir));
 });
 
 test("context budget: validate reports each entry point's all-hops figure and never fails on it", () => {
   const dir = makePluginFixture();
   writeInto(dir, "playbooks/showing-things.md", "# Showing things\n\nA second fixture playbook.\n");
   playbook(dir, "Read `${CLAUDE_PLUGIN_ROOT}/playbooks/showing-things.md` next.\n");
-  writeInto(
-    dir,
-    CONTEXT_PATH,
-    JSON.stringify(
-      { "playbooks/demoing-things.md": 999999, "playbooks/showing-things.md": 999999, "commands/cycle.md": 999999 },
-      null,
-      2
-    ) + "\n"
-  );
-  recordBudgets(dir);
+  budgetEntryPoints(dir, "playbooks/showing-things.md");
   const res = runValidate(dir);
   ok(res);
   assert.match(res.stdout, /context \(check 15 gates each entry point's refs-only bytes; all-hops is reported, never gated\):/);
-  assert.match(res.stdout, /playbooks\/demoing-things\.md {2}refs-only \d+\/999999 B {2}all-hops 2 files, \d+ words/);
+  assert.match(res.stdout, /playbooks\/demoing-things\.md {2}refs-only (\d+)\/\1 B {2}all-hops 2 files, \d+ words/);
 });
 
 test("context budget: one byte less than the transitive total fails, proving the closure is followed", () => {
@@ -1347,8 +1330,47 @@ test("context budget: a missing baseline file fails", () => {
   assert.match(runValidate(dir).stderr, /context-budget\.json: missing/);
 });
 
+// The ratchet: an entry sitting more than max(1%, 256 B) above its measured figure is a cut nobody
+// recorded, so the ceiling would let the bytes creep back unreviewed.
+test("context budget: an entry 300 B above a small closure fails the ratchet and prints the values to paste", () => {
+  const dir = makePluginFixture();
+  ok(runValidate(dir));
+  const bytes = fileBytes(dir, PLAYBOOK);
+  budgetContext(dir, { [PLAYBOOK]: bytes + 300 });
+  failsWith(
+    runValidate(dir),
+    new RegExp(
+      `playbooks/demoing-things\\.md: ${bytes} bytes, 300 below baseline ${bytes + 300} — past the ratchet margin of 256 B; lower the entry to ${bytes} and record it`
+    ),
+    /ratchet: set these in tests\/fixtures\/context-budget\.json and the decision entry's text block:/,
+    new RegExp(`^\\s*"playbooks/demoing-things\\.md": ${bytes},$`, "m"),
+    new RegExp(`^\\s*budget: context-budget\\.json playbooks/demoing-things\\.md ${bytes}$`, "m")
+  );
+});
+
+test("context budget: an entry 200 B above a small closure passes — the margin never drops below 256 B", () => {
+  const dir = makePluginFixture();
+  budgetContext(dir, { [PLAYBOOK]: fileBytes(dir, PLAYBOOK) + 200 });
+  ok(runValidate(dir));
+});
+
+test("context budget: past 25600 B the ratchet margin is 1% of the entry, not the 256 B floor", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/bulk.md", "# Bulk\n\n" + "x".repeat(40000) + "\n");
+  playbook(dir, "Read `${CLAUDE_PLUGIN_ROOT}/references/bulk.md` first.\n");
+  const bytes = fileBytes(dir, PLAYBOOK) + fileBytes(dir, "references/bulk.md");
+  budgetContext(dir, { [PLAYBOOK]: bytes + 350 });
+  ok(runValidate(dir));
+  const limit = bytes + 500;
+  budgetContext(dir, { [PLAYBOOK]: limit });
+  failsWith(
+    runValidate(dir),
+    new RegExp(`playbooks/demoing-things\\.md: ${bytes} bytes, 500 below baseline ${limit} — past the ratchet margin of ${Math.ceil(limit * 0.01)} B`)
+  );
+});
+
 // A reference read by `count` fixture playbooks, alternating a prefixed read and a section read,
-// each playbook with a never-firing entry-point budget. Returns the reference's own bytes.
+// each playbook with an entry-point budget at its measured figure. Returns the reference's own bytes.
 const HUB = "references/hub.md";
 const hubReadBy = (dir, count) => {
   writeInto(dir, HUB, "# Hub\n\n## One\n\nA reference many playbooks read.\n");
@@ -1396,12 +1418,25 @@ test("context budget: a high-fan-in reference's entry gates its own bytes, not i
   ok(runValidate(dir));
 });
 
-test("context budget: a reference with 7 readers needs no entry, and an entry it carries stays valid", () => {
+test("context budget: a reference with 7 readers needs no entry, and an entry it carries keeps gating", () => {
   const dir = makePluginFixture();
-  hubReadBy(dir, 7);
+  const bytes = hubReadBy(dir, 7);
   ok(runValidate(dir));
-  budgetHub(dir, 999999);
+  budgetHub(dir, bytes - 1);
+  failsWith(runValidate(dir), new RegExp(`references/hub\\.md: ${bytes} bytes > baseline ${bytes - 1}`));
+  budgetHub(dir, bytes);
   ok(runValidate(dir));
+});
+
+test("context budget: a reference's entry past the ratchet margin fails like an entry point's", () => {
+  const dir = makePluginFixture();
+  const bytes = hubReadBy(dir, 8);
+  budgetHub(dir, bytes + 300);
+  failsWith(
+    runValidate(dir),
+    new RegExp(`references/hub\\.md: ${bytes} bytes, 300 below baseline ${bytes + 300} — past the ratchet margin of 256 B`),
+    new RegExp(`^\\s*budget: context-budget\\.json references/hub\\.md ${bytes}$`, "m")
+  );
 });
 
 test("context budget: an entry for a reference that no longer exists fails as stale, naming the retire line", () => {
@@ -1423,6 +1458,7 @@ test("plugin-root check: a citation to a script path resolves too", () => {
   const dir = makePluginFixture();
   writeInto(dir, "scripts/thing.mjs", "// fixture script\n");
   playbook(dir, "Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/thing.mjs`.\n");
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -1441,8 +1477,6 @@ test("command ceiling: a tenth command fails", () => {
 
 const TIERS_PATH = "references/model-tiers.json";
 const tiers = (dir, value) => writeInto(dir, TIERS_PATH, JSON.stringify(value, null, 2) + "\n");
-const withContext = (dir) =>
-  writeInto(dir, CONTEXT_PATH, JSON.stringify({ "playbooks/demoing-things.md": 999999, "commands/cycle.md": 999999 }, null, 2) + "\n");
 
 test("model tiers: a missing table fails", () => {
   const dir = makePluginFixture();
@@ -1452,14 +1486,12 @@ test("model tiers: a missing table fails", () => {
 
 test("model tiers: a table that is JSON null fails instead of passing silently", () => {
   const dir = makePluginFixture();
-  withContext(dir);
   tiers(dir, null);
   assert.match(runValidate(dir).stderr, /model-tiers\.json: must be an array/);
 });
 
 test("model tiers: non-ascending ranks fail", () => {
   const dir = makePluginFixture();
-  withContext(dir);
   tiers(dir, [
     { family: "sonnet", rank: 2, match: "sonnet" },
     { family: "haiku", rank: 1, match: "haiku" },
@@ -1469,7 +1501,6 @@ test("model tiers: non-ascending ranks fail", () => {
 
 test("model tiers: duplicate ranks fail", () => {
   const dir = makePluginFixture();
-  withContext(dir);
   tiers(dir, [
     { family: "haiku", rank: 1, match: "haiku" },
     { family: "sonnet", rank: 1, match: "sonnet" },
@@ -1479,14 +1510,12 @@ test("model tiers: duplicate ranks fail", () => {
 
 test("model tiers: a match that is not a valid regular expression fails", () => {
   const dir = makePluginFixture();
-  withContext(dir);
   tiers(dir, [{ family: "haiku", rank: 1, match: "haiku(" }]);
   assert.match(runValidate(dir).stderr, /match .* is not a valid regular expression/);
 });
 
 test("model tiers: a duplicate family fails", () => {
   const dir = makePluginFixture();
-  withContext(dir);
   tiers(dir, [
     { family: "haiku", rank: 1, match: "haiku" },
     { family: "haiku", rank: 2, match: "haiku-2" },
@@ -1528,7 +1557,6 @@ test("model tiers: an empty table fails rather than ranking nothing", () => {
 
 test("model tiers: a well-formed table passes", () => {
   const dir = makePluginFixture();
-  withContext(dir);
   tiers(dir, [
     { family: "haiku", rank: 1, match: "haiku" },
     { family: "sonnet", rank: 2, match: "sonnet" },
@@ -1854,6 +1882,7 @@ test("4b: the ${CLAUDE_PLUGIN_ROOT} form passes", () => {
   const dir = makePluginFixture();
   writeInto(dir, "scripts/doctor.mjs", "// fixture script\n");
   playbook(dir, 'Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --lessons planning`.\n');
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -1909,12 +1938,14 @@ test("4b: a sentence-initial capitalised Node does not evade the check", () => {
 test("4b: a `\\`-continuation is deliberately NOT matched — it is indistinguishable from a GFM hard break", () => {
   const dir = makePluginFixture();
   playbook(dir, "```bash\nnode \\\n  scripts/doctor.mjs --lessons planning\n```\n");
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
 test("4b control: prose hard-breaking after the word node, ahead of a scripts/ path, stays clean", () => {
   const dir = makePluginFixture();
   playbook(dir, "- probe: the word node\\\nscripts/legacy-report.sh is unrelated tooling.\n");
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -1951,6 +1982,7 @@ test("4b control: the ${CLAUDE_PLUGIN_ROOT} form stays clean in both engine dire
       "Then `node ${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir .devcycle`.\n\n" +
       "Then `node ${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js`.\n"
   );
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -1990,12 +2022,14 @@ test("4b control: a hard-wrapped ${CLAUDE_PLUGIN_ROOT} invocation stays clean", 
   const dir = makePluginFixture();
   writeInto(dir, "scripts/doctor.mjs", "// fixture script\n");
   playbook(dir, "The completeness gate runs as `node\n${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs --lessons planning`.\n");
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
 test("4b control: a paragraph break is not a separator, so prose either side of it is not stapled into a hit", () => {
   const dir = makePluginFixture();
   playbook(dir, "The gate is dispatched with node\n\nscripts/doctor.mjs is the engine it names.\n");
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -2010,6 +2044,7 @@ test("4c control: a section read of a shipped reference's `##` section passes, a
   const dir = makePluginFixture();
   writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");
   sectionRead(dir, "references/handoff.md", "the-block-shape");
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -2258,6 +2293,7 @@ test("dispatch-governance check: a dispatch citing its *Model knob inline passes
       "   `taskReviewerModel` resolves per `references/config.md`, with the diff.\n" +
       readSection("config.md")
   );
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -2271,6 +2307,7 @@ test("dispatch-governance check: a dispatch citing references/model-routing.md p
       "1. **Fix.** Dispatch `devcycle:implementer` on the model `references/model-routing.md` resolves.\n" +
       readSection("model-routing.md")
   );
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -2282,6 +2319,7 @@ test("dispatch-governance check: a dispatch stating its tier inline passes", () 
     "## History\n\n" +
       "1. **History.** Dispatch `devcycle:history-inspector` at the **fast tier** within its window.\n"
   );
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -2311,6 +2349,7 @@ test("dispatch-governance check: a dispatch under a flowing (non-numbered) headi
       "When the app renders as a page, dispatch `devcycle:on-device-driver` to observe an item.\n" +
       readSection("config.md")
   );
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -2340,6 +2379,7 @@ test("dispatch-governance check: a reversed-phrasing dispatch (agent before disp
       "   `branchReviewModel` per `references/config.md` with the finding.\n" +
       readSection("config.md")
   );
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -2352,6 +2392,7 @@ test("dispatch-governance check: 'dispatched' and 'dispatching' do not trigger f
       "1. **Round 1.** Once the findings are dispatched, log the event.\n\n" +
       "2. **Fix.** When dispatching a task, ensure governance is cited.\n"
   );
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -2407,6 +2448,7 @@ test("grammar: a prefixed owner sentence fails, and the same sentence with a rea
   playbook(dir, "The rule `${CLAUDE_PLUGIN_ROOT}/references/thing.md` owns.\n");
   failsWith(runValidate(dir), /playbooks\/demoing-things\.md:\d+: owner-sentence:/);
   playbook(dir, "Follow `${CLAUDE_PLUGIN_ROOT}/references/thing.md`, which owns the rule.\n");
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -2432,6 +2474,7 @@ test("grammar: an inline-code dot, a fenced block and a table row do not split o
       "```\nThe rule references/missing.md owns.\n```\n\n" +
       "| Read `references/thing.md`? | no — this row names an owner, `${CLAUDE_PLUGIN_ROOT}/references/thing.md` is read |\n"
   );
+  rebaseline(dir);
   ok(runValidate(dir));
 });
 
@@ -2490,23 +2533,37 @@ test("stages: a malformed table fails with its reason, naming the file once and 
   failsWith(runValidate(dir), /^ - references\/stages\.json is not valid JSON — /m);
 });
 
-// --- check 28: M10, a budget raise needs a recorded decision ---
+// --- check 28: M10, a budget fixture equals its newest recorded decision ---
+
+// Records the tree's budget fixtures, then rewrites surfaceTotal's line by `delta` from its value.
+const recordSurfaceTotalOffBy = (dir, delta) => {
+  recordBudgets(dir);
+  const { surfaceTotal } = JSON.parse(readFileSync(join(dir, "tests/fixtures/surface-budget.json"), "utf8"));
+  const log = join(dir, DECISIONS_DOC);
+  writeFileSync(
+    log,
+    readFileSync(log, "utf8").replace(
+      `budget: surface-budget.json surfaceTotal ${surfaceTotal}\n`,
+      `budget: surface-budget.json surfaceTotal ${surfaceTotal + delta}\n`
+    )
+  );
+};
 
 test("budget decisions: a fixture above its newest budget line fails", () => {
   const dir = makePluginFixture();
-  const budget = JSON.parse(readFileSync(join(dir, "tests/fixtures/surface-budget.json"), "utf8"));
   ok(runValidate(dir));
-  writeInto(
-    dir,
-    DECISIONS_DOC,
-    "# Decision log\n\n```text\n" +
-      `budget: surface-budget.json surfaceTotal ${budget.surfaceTotal - 1}\n` +
-      `budget: surface-budget.json commandMax ${budget.commandMax}\n` +
-      `budget: surface-budget.json playbookMax ${budget.playbookMax}\n` +
-      "budget: context-budget.json playbooks/demoing-things.md 999999\n" +
-      "budget: context-budget.json commands/cycle.md 999999\n```\n"
-  );
+  recordSurfaceTotalOffBy(dir, -1);
   failsWith(runValidate(dir), /surface-budget\.json: surfaceTotal is \d+, above the newest recorded figure/);
+});
+
+test("budget decisions: a fixture below its newest budget line fails, naming the line a cut records", () => {
+  const dir = makePluginFixture();
+  ok(runValidate(dir));
+  recordSurfaceTotalOffBy(dir, 1);
+  failsWith(
+    runValidate(dir),
+    /tests\/fixtures\/surface-budget\.json: surfaceTotal is (\d+), below the newest recorded figure \d+ \(docs\/decisions\/README\.md:\d+\) — a cut records its figure: add "budget: surface-budget\.json surfaceTotal \1" in docs\/decisions\/README\.md/
+  );
 });
 
 test("budget decisions: a tree without the decisions log fails rather than skipping the rule", () => {

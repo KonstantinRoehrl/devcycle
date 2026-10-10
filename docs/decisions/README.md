@@ -20,13 +20,24 @@ prefix or by section from `FAN_IN_THRESHOLD` (8) or more surface files must carr
 gating only its own bytes, set at today's figure; an entry stays valid and keeps gating after the
 reference falls below the threshold.
 
+The ceilings ratchet down as well as up. Check 15 fails a `context-budget.json` entry that sits
+more than max(`RATCHET_FRACTION` 1%, `RATCHET_MIN_BYTES` 256 B) above its measured bytes, and
+prints the fixture and `budget:` lines to paste, so a cut lowers its ceiling in the same change.
+Check 28 now fails a fixture value that differs from the newest `budget:` line for its key, in
+either direction, so a lowered entry records its figure as a raised one does. The thresholds —
+fan-in 8, ratchet max(1%, 256 B), near-ceiling 5 lines — are named constants in
+`scripts/validate.mjs`, chosen by judgment rather than measured.
+
 **Why:** a file at its ceiling turns any edit that adds a line into a baseline raise, which is how
 ceilings creep. `cycle.md` lost a paragraph restating the `profile`'s engine choice, which
 `references/config.md` owns, plus re-wraps; `learning-from-sessions.md` lost clauses restating what
 its Modes section already states and a historical note, plus re-wraps. The playbook's refs-only
-closure falls 62130 → 61727 bytes and `surfaceTotal` 5911 → 5891.
+closure falls 62130 → 61727 bytes and `surfaceTotal` 5911 → 5891. An entry left above its figure
+after a cut lets the freed bytes grow back unreviewed; the 256 B floor keeps a small file's re-wrap
+from tripping the ratchet.
 
-**Supersedes:** check 15's playbook-only scope; check 9's failures are unchanged.
+**Supersedes:** check 15's playbook-only scope; check 28's at-or-below rule; check 9's failures
+are unchanged.
 
 ```text
 budget: surface-budget.json surfaceTotal 5891

@@ -82,6 +82,10 @@ const NEAR_CEILING_LINES = 5;
 // Check 15 holds a reference this many surface files read to its own context-budget entry: its
 // bytes land in every reader's closure, so its growth is charged that many times over.
 const FAN_IN_THRESHOLD = 8;
+// Check 15 fails an entry more than max(1%, 256 B) above its measured bytes: a cut has to lower
+// its ceiling, or the freed bytes could grow back without a reviewed decision.
+const RATCHET_FRACTION = 0.01;
+const RATCHET_MIN_BYTES = 256;
 
 if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const root = process.cwd();
@@ -775,7 +779,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     plus every reference reachable from it through ${CLAUDE_PLUGIN_ROOT} citations, against a
   //     committed baseline; and a high-fan-in reference's own bytes. Bytes, not lines:
   //     a context window is spent in bytes, and a long line costs what it costs. Growth is a
-  //     reviewed decision, same rule as check 9. Citations are followed by
+  //     reviewed decision, same rule as check 9, and so is a cut: an entry past the ratchet margin
+  //     above its measured bytes fails until it is lowered. Citations are followed by
   //     scripts/context-closure.mjs, which context-report.mjs shares.
   const CONTEXT_BUDGET_PATH = "tests/fixtures/context-budget.json";
   const contextFile = join(root, CONTEXT_BUDGET_PATH);
@@ -803,6 +808,16 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       contextParsed = false;
     }
     if (contextParsed) {
+      const ratchetTrips = [];
+      const ratchet = (key, bytes, limit) => {
+        const margin = Math.max(Math.ceil(limit * RATCHET_FRACTION), RATCHET_MIN_BYTES);
+        if (limit - bytes <= margin) return;
+        fail(
+          `${key}: ${bytes} bytes, ${limit - bytes} below baseline ${limit} — ` +
+            `past the ratchet margin of ${margin} B; lower the entry to ${bytes} and record it`
+        );
+        ratchetTrips.push({ key, bytes });
+      };
       const entryPoints = ["commands", "playbooks"].flatMap((d) => namesIn(d).map((f) => `${d}/${f}`));
       for (const p of entryPoints) {
         if (!(p in contextBaseline)) {
@@ -821,6 +836,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
             `${p}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, entry point plus its cited references) — ` +
               `raise the baseline in this same commit if the growth is intended`
           );
+        ratchet(p, bytes, limit);
       }
       // A reference's entry gates its own bytes. It is required at FAN_IN_THRESHOLD readers and
       // keeps gating below them, so a reference that loses readers cannot grow unreviewed.
@@ -847,7 +863,18 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
             `${ref}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, the reference's own bytes) — ` +
               `raise the baseline in this same commit if the growth is intended`
           );
+        ratchet(ref, bytes, limit);
       }
+      // Printed paste-ready: the JSON lines at the fixture's own indent, the budget lines flush left
+      // because check 28 rejects an indented one.
+      if (ratchetTrips.length)
+        fail(
+          [
+            `ratchet: set these in ${CONTEXT_BUDGET_PATH} and the decision entry's text block:`,
+            ...ratchetTrips.map(({ key, bytes }) => `  "${key}": ${bytes},`),
+            ...ratchetTrips.map(({ key, bytes }) => `budget: context-budget.json ${key} ${bytes}`),
+          ].join("\n")
+        );
       for (const p of Object.keys(contextBaseline))
         if (!entryPoints.includes(p) && !references.includes(p))
           fail(
@@ -857,8 +884,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
   }
 
-  // 28. M10: no budget fixture value above the newest `budget:` line the decisions log records for
-  //     it (scripts/budget-decisions.mjs). A missing log fails, as a missing fixture does in checks
+  // 28. M10: every budget fixture value equals the newest `budget:` line the decisions log records
+  //     for it (scripts/budget-decisions.mjs). A missing log fails, as a missing fixture does in checks
   //     9 and 15 — skipping would leave every raise unchecked. An unusable fixture is skipped here
   //     because checks 9 and 15 have already failed it.
   const decisionsPath = join(root, DECISIONS_DOC);

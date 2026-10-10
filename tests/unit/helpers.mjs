@@ -1,15 +1,17 @@
 // Shared helpers for the deterministic workflow-script tests.
 // Everything here is keyless: the `claude`/`codex` CLIs are stubbed with fake
 // executables placed first on PATH — no model call ever happens.
-import { mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync } from "node:fs";
 import { join, dirname, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { DECISIONS_DOC } from "../../scripts/doc-paths.mjs";
+import { closure } from "../../scripts/context-closure.mjs";
 
 const GIT_IDENT = ["-c", "user.name=devcycle-test", "-c", "user.email=test@devcycle.invalid"];
 const VALIDATE_SCRIPT = fileURLToPath(new URL("../../scripts/validate.mjs", import.meta.url));
+const CONTEXT_BUDGET = "tests/fixtures/context-budget.json";
 
 export function sh(cmd, args, opts = {}) {
   return execFileSync(cmd, args, { encoding: "utf8", ...opts });
@@ -131,17 +133,33 @@ export function makePluginFixture() {
     JSON.stringify({ surfaceTotal: 3620, commandMax: 104, playbookMax: 154 }, null, 2) + "\n"
   );
   // Check 15 reads each entry point's context budget from a committed baseline, so every fixture
-  // tree ships one covering its playbook and every command; the tests that exercise the check
-  // overwrite it.
+  // tree ships one covering its playbook and every command, at the measured figure its ratchet
+  // accepts; the tests that exercise the check overwrite it.
   writeInto(
     dir,
-    "tests/fixtures/context-budget.json",
-    JSON.stringify({ "playbooks/demoing-things.md": 999999, "commands/cycle.md": 999999 }, null, 2) + "\n"
+    CONTEXT_BUDGET,
+    JSON.stringify({ "playbooks/demoing-things.md": 0, "commands/cycle.md": 0 }, null, 2) + "\n"
   );
   // Check 28 holds both baselines to the decisions log's `budget:` lines, so every fixture tree
   // ships a log recording exactly the figures above.
-  recordBudgets(dir);
+  rebaseline(dir);
   return dir;
+}
+
+// Rewrites a fixture tree's context budget so every existing key holds its measured figure — an
+// entry point's refs-only closure, a reference's own bytes, the figures check 15 measures — then
+// records the result. A test that edits the surface to exercise another check calls this, so
+// neither check 15 nor its ratchet fails it. A key naming no file keeps its value.
+export function rebaseline(dir) {
+  const context = JSON.parse(readFileSync(join(dir, CONTEXT_BUDGET), "utf8"));
+  for (const key of Object.keys(context)) {
+    if (!existsSync(join(dir, key))) continue;
+    context[key] = key.startsWith("references/")
+      ? Buffer.byteLength(readFileSync(join(dir, key), "utf8"))
+      : closure(key, { follow: "refs", root: dir }).bytes;
+  }
+  writeInto(dir, CONTEXT_BUDGET, JSON.stringify(context, null, 2) + "\n");
+  recordBudgets(dir);
 }
 
 // Rewrites a fixture tree's decisions log so its `budget:` lines record exactly the tree's current

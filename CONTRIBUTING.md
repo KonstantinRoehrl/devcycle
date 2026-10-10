@@ -110,14 +110,17 @@ argument fails spuriously. A session started with `--plugin-dir` on this checkou
 module's type declarations written into `.claude-plugin/types/` at every load; `.gitignore` keeps
 them out of commits.
 
-When a playbook or command edit trips a size budget (lines for the surface, bytes for the context), `validate.mjs` reports the measured value:
-set `tests/fixtures/surface-budget.json` or `tests/fixtures/context-budget.json` to exactly that
-number and record the change in `docs/decisions/README.md`. The decision entry carries one machine
-line per key it sets, `budget: <fixture-basename> <key> <value>` (for example
+When a playbook, command or reference edit trips a size budget (lines for the surface; bytes for
+each entry point's context closure and for each reference at least eight files read),
+`validate.mjs` reports the measured value: set `tests/fixtures/surface-budget.json` or
+`tests/fixtures/context-budget.json` to exactly that number and record the change in
+`docs/decisions/README.md`. The decision entry carries one machine line per key it sets,
+`budget: <fixture-basename> <key> <value>` (for example
 `budget: surface-budget.json surfaceTotal 5693`), in a fenced `text` block; `validate.mjs` check 28
-fails a fixture value above the newest such line for its key. A key removed from a fixture is
-closed with a newer `budget: <fixture-basename> <key> retired` line, since older entries are never
-rewritten.
+fails a fixture value that differs from the newest such line for its key. Check 15 also fails an
+entry that sits more than max(1%, 256 B) above its measured figure, and prints the values to
+paste, so a cut lowers its ceiling in the same change. A key removed from a fixture is closed with
+a newer `budget: <fixture-basename> <key> retired` line, since older entries are never rewritten.
 
 The two scanners divide the work and neither subsumes the other. gitleaks owns credentials and
 tokens: it is rule-maintained, and it reads **history**, so a secret that was committed and

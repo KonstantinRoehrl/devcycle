@@ -36,8 +36,8 @@ gated by `scripts/validate.mjs` (its citation-grammar and closure-budget checks)
 - A `${CLAUDE_PLUGIN_ROOT}`-prefixed path is a read; a bare path names an owner —
   `references/README.md` § Citation grammar.
 - One owner per concept: move a rule, don't copy it — `CONTRIBUTING.md` § One owner per concept.
-- Line and closure ceilings live in `tests/fixtures/*budget*.json` and rise only with a
-  `docs/decisions/README.md` entry naming the new figure (`scripts/validate.mjs` check 28).
+- Line and closure ceilings live in `tests/fixtures/*budget*.json` and move, up or down, only with
+  a `docs/decisions/README.md` entry naming the new figure (`scripts/validate.mjs` check 28).
 - `docs/devcycle/promotions/` and `docs/devcycle/maintenance-findings/` are ledgers written by
   `/devcycle:learn` and `/devcycle:maintain` — not hand-edited, not read wholesale.
 
