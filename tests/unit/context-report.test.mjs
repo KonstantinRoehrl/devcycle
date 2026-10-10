@@ -132,6 +132,73 @@ test("text output names the totals and the diff sections", () => {
   }
 });
 
+test("--diff gives each entry point's refs-only byte delta, and null for one new since the ref", () => {
+  const dir = makeRepo();
+  try {
+    seed(dir);
+    writeInto(dir, "playbooks/b.md", `Read \`${P}/references/z.md\`.\n`);
+    writeInto(dir, "references/z.md", "z words\n");
+    commitAll(dir, "seed");
+    writeInto(dir, "references/x.md", "x words here\nand twelve more\n");
+    writeInto(dir, "playbooks/c.md", "A new playbook.\n");
+    const r = run(dir, "--json", "--diff", "HEAD");
+    assert.equal(r.status, 0, r.stderr);
+    const { entries, diff } = JSON.parse(r.stdout);
+    assert.deepEqual(
+      diff.deltas?.map((d) => d.file),
+      ["commands/go.md", "playbooks/a.md", "playbooks/b.md", "playbooks/c.md"]
+    );
+    const byFile = Object.fromEntries(diff.deltas.map((d) => [d.file, d]));
+    const after = (file) => entries.find((e) => e.file === file).refsOnly.bytes;
+    assert.deepEqual(byFile["playbooks/a.md"], {
+      file: "playbooks/a.md",
+      before: after("playbooks/a.md") - 16,
+      after: after("playbooks/a.md"),
+      delta: 16,
+    });
+    assert.equal(byFile["playbooks/b.md"].delta, 0);
+    assert.equal(byFile["commands/go.md"].delta, 0);
+    assert.deepEqual(byFile["playbooks/c.md"], { file: "playbooks/c.md", before: null, after: after("playbooks/c.md"), delta: null });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--diff --markdown prints a table of only the entry points whose closure changed", () => {
+  const dir = makeRepo();
+  try {
+    seed(dir);
+    writeInto(dir, "playbooks/b.md", `Read \`${P}/references/z.md\`.\n`);
+    writeInto(dir, "references/z.md", "z words\n");
+    commitAll(dir, "seed");
+    const unchanged = run(dir, "--diff", "HEAD", "--markdown");
+    assert.equal(unchanged.status, 0, unchanged.stderr);
+    assert.equal(unchanged.stdout, "No entry point's closure changed.\n");
+    writeInto(dir, "references/x.md", "x words here\nand twelve more\n");
+    const r = run(dir, "--diff", "HEAD", "--markdown");
+    assert.equal(r.status, 0, r.stderr);
+    const lines = r.stdout.trimEnd().split("\n");
+    assert.equal(lines[0], "| entry point | before (B) | after (B) | delta (B) |");
+    assert.match(lines[1], /^\|[-:| ]+\|$/);
+    assert.equal(lines.length, 3, r.stdout);
+    assert.match(lines[2], /^\| playbooks\/a\.md \| \d+ \| \d+ \| \+16 \|$/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--markdown without --diff is a usage error", () => {
+  const dir = makeRepo();
+  try {
+    seed(dir);
+    const r = run(dir, "--markdown");
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /context-report: --markdown needs --diff <git-ref>/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("an unknown ref, or --diff with no value, is a usage error", () => {
   const dir = makeRepo();
   try {

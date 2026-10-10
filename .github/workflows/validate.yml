@@ -69,6 +69,9 @@ jobs:
         run: node scripts/temp-dir-check.mjs
       - name: Unit tests (node --test, stubbed CLIs — no model call, no API key)
         run: node --test tests/unit/*.test.mjs
+      - name: Report each entry point's context closure change against the PR base
+        if: github.event_name == 'pull_request'
+        run: node scripts/context-report.mjs --diff HEAD^1 --markdown >> "$GITHUB_STEP_SUMMARY"
       - name: Secret scan — full history
         env:
           # Pinned by version AND digest: a release asset is mutable, a checksum is not.

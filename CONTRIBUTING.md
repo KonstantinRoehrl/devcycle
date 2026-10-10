@@ -97,7 +97,7 @@ node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-l
 node scripts/duplication-check.mjs    # duplicated prose across commands/playbooks/agents/references, and within a file — CI
 node scripts/temp-dir-check.mjs       # temp dirs created outside makeTempDir, which owns removing them — CI
 node scripts/citation-grammar.mjs     # the citation grammar's worklist (back-edge, owner-sentence, bare-read, bare-exists; --references: references nothing reads); exits 1 while any remain — local
-node scripts/context-report.mjs       # per command and playbook: refs-only and all-hops closure words; --diff <ref> lists citations that lost their prefix — local
+node scripts/context-report.mjs       # per command and playbook: refs-only and all-hops closure words; --diff <ref> lists citations that lost their prefix; --diff <ref> --markdown prints per-entry-point byte deltas (CI posts them on every PR) — local
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
 claude plugin validate . --strict     # the plugin under Claude Code's real loader (CI also validates .claude-plugin/plugin.json) — CI, on the floor and current pins
 claude plugin test .                  # the hooks module's TypeScript tests under tests/mod/ — CI, on the floor and current pins

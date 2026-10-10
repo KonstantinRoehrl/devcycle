@@ -2,7 +2,8 @@
 // Per-entry-point context cost: for every command and playbook, the files, words and bytes of its
 // refs-only closure (what validate.mjs check 15 gates, in bytes) and its all-hops closure (every
 // prefixed citation followed; reported only). --diff <ref> adds the over-demotion worklist: every
-// citation that lost its prefix since <ref>, and every file that left a closure.
+// citation that lost its prefix since <ref>, and every file that left a closure — and each entry
+// point's refs-only byte delta, which --markdown prints alone as the table CI posts on a PR.
 import { readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -128,12 +129,31 @@ export function diffSince(root, ref) {
     const allHops = gone("all");
     if (refsOnly.length || allHops.length) dropped.push({ file, refsOnly, allHops });
   }
-  return { ref, lostPrefixes, dropped };
+  const deltas = entryPoints(root)
+    .sort()
+    .map((file) => {
+      const after = closure(file, { follow: "refs", read: now }).bytes;
+      if (before(file) === null) return { file, before: null, after, delta: null };
+      const was = closure(file, { follow: "refs", read: before }).bytes;
+      return { file, before: was, after, delta: after - was };
+    });
+  return { ref, lostPrefixes, dropped, deltas };
+}
+
+function deltaTable(deltas) {
+  const changed = deltas.filter((d) => d.delta !== 0);
+  if (!changed.length) return "No entry point's closure changed.";
+  const signed = (n) => (n > 0 ? `+${n}` : `${n}`);
+  return [
+    "| entry point | before (B) | after (B) | delta (B) |",
+    "| --- | ---: | ---: | ---: |",
+    ...changed.map((d) => `| ${d.file} | ${d.before ?? "new"} | ${d.after} | ${d.delta === null ? "new" : signed(d.delta)} |`),
+  ].join("\n");
 }
 
 function usage(message) {
   console.error(`context-report: ${message}`);
-  console.error("context-report: usage: context-report.mjs [--json] [--diff <git-ref>]");
+  console.error("context-report: usage: context-report.mjs [--json] [--diff <git-ref> [--markdown]]");
   process.exit(1);
 }
 
@@ -141,11 +161,12 @@ function main(argv) {
   let flags;
   let ref;
   try {
-    ({ flags } = parseFlags(argv, { "--json": "none", "--diff": "value" }));
+    ({ flags } = parseFlags(argv, { "--json": "none", "--diff": "value", "--markdown": "none" }));
     ref = requireValue(flags, "--diff", "a git ref");
   } catch (err) {
     usage(err.message);
   }
+  if (flags["--markdown"] && ref === undefined) usage("--markdown needs --diff <git-ref>");
   const root = process.cwd();
   const entries = report(root);
   let diff;
@@ -155,6 +176,10 @@ function main(argv) {
     } catch (err) {
       usage(err.message);
     }
+  }
+  if (flags["--markdown"]) {
+    console.log(deltaTable(diff.deltas));
+    return;
   }
   if (flags["--json"]) {
     process.stdout.write(JSON.stringify(diff ? { entries, diff } : { entries }) + "\n");
