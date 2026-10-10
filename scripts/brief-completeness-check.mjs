@@ -5,18 +5,12 @@
 // edit trips and the decisions log that holds them. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
 // implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
-import { taskBlocks, parseDispatchMap, filesFieldValue } from "./task-files.mjs";
+import { taskBlocks, parseDispatchMap, filesFieldValue, fieldValue } from "./task-files.mjs";
 import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
 import { isMain } from "./is-main.mjs";
 
 const REQUIRED_FIELDS = ["Files", "Interfaces", "Dependencies", "Evidence", "Quality constraints"];
 const VALID_EVIDENCE_CLASSES = ["red-green", "green-green", "convention"];
-
-function fieldValue(block, field) {
-  const re = new RegExp(`\\*\\*${field}:\\*\\*([\\s\\S]*?)(?=\\n\\*\\*|\\n###|$)`);
-  const m = block.match(re);
-  return m ? m[1].trim() : null;
-}
 
 // **Files:** is read by task-files.mjs, which owns that grammar for every plan gate. Deciding it
 // here too is how this gate came to accept declarations wave-disjointness then called missing.

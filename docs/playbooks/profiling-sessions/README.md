@@ -7,11 +7,11 @@ and it starts no cycle.
 The playbook never walks transcripts itself; it runs `scripts/doctor.mjs` and reads the finished
 report it prints, filling in exactly two marked sections — Highlights and the ranked findings —
 and changing nothing else in the rendered document. With no flags the script scans every
-transcript under `~/.claude/projects` carrying a `devcycle:`-prefixed attribution id; `--all`
-widens that to every transcript, tagged or not; `--since`/`--until` narrow the measurement window
-within each kept session. A separate `--drift <path>` mode takes precedence over all of that: it
-skips cost analysis entirely and flags stale `userConfig` references in a target file against
-`docs/configuration/config-changelog.md`.
+transcript under `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` when set) carrying a
+`devcycle:`-prefixed attribution id; `--all` widens that to every transcript, tagged or not;
+`--since`/`--until` narrow the measurement window within each kept session. A separate
+`--drift <path>` mode takes precedence over all of that: it skips cost analysis entirely and flags
+stale `userConfig` references in a target file against `docs/configuration/config-changelog.md`.
 
 Interpretation, not transcription, is the playbook's real job: it leads from the report's
 workload-adjusted, matched-cohort `## At a glance` figures as the headline, treats the full

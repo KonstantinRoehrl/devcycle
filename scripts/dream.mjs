@@ -7,10 +7,10 @@
 // capped stores), learn-report.mjs (the report).
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, inWindow, summarizeSession, readRecords, readRunRecords } from "./doctor.mjs";
+import { claudeProjectsDir } from "./depth-probe.mjs";
 import { aggregateKeys, culpritCostByKey, periodLedger } from "./impact-ledger.mjs";
 import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, consolidatePromotion, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
@@ -678,7 +678,7 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
     // Same escaping as the transcript project directory above: every non-alphanumeric
     // character becomes "-". Replacing only "/" points at a store that does not exist
     // for any repo path containing "." or "_".
-    memoryDir: join(homedir(), ".claude", "projects", escapeProjectPath(repoRoot), "memory"),
+    memoryDir: join(claudeProjectsDir(), escapeProjectPath(repoRoot), "memory"),
     artifactFresh: fresh,
     artifactPath: path,
     // D3 step 1: the journal is already structured, so it is read directly rather than mined —
@@ -693,7 +693,7 @@ export function planCorpus({ repoRoot, projectsDir, since, cap = CAP, excludeSel
 
 // CLAUDE_DREAM_PROJECTS overrides the transcript root, mirroring doctor.mjs's
 // CLAUDE_DOCTOR_PROJECTS; it exists so the CLI is testable without scanning ~/.claude.
-const resolveProjectsRoot = () => process.env.CLAUDE_DREAM_PROJECTS || join(homedir(), ".claude", "projects");
+const resolveProjectsRoot = () => process.env.CLAUDE_DREAM_PROJECTS || claudeProjectsDir();
 
 // Every project slug directory this repo's sessions could have been written under — the literal
 // path and its realpath, per worktree — which is the same union resolveUncached builds for

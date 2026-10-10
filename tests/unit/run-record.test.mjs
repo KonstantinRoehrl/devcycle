@@ -794,3 +794,45 @@ test("append: null is refused where the schema does not admit it, and a non-bool
   assert.notStrictEqual(maybeFork.status, 0);
   assert.match(maybeFork.stderr, /"fork" must be a boolean/);
 });
+
+// Execution drive (spec 5.3): the driver appends one `drive` row as each driven session ends, from
+// Node rather than through this CLI, so writeLine — the one validated append — is exported for it.
+const DRIVE_ROW = {
+  kind: "drive",
+  runId: "0f1e2d3c4b5a6978",
+  sessionHash: "3b1f8c0d2e4a6b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
+  startedAt: "2026-10-08T09:00:00Z",
+  endedAt: "2026-10-08T09:40:00Z",
+  model: "claude-opus-5-5",
+  ledgerLinesBefore: 12,
+  ledgerLinesAfter: 19,
+  committedBefore: 2,
+  committedAfter: 3,
+  exitReason: "handoff",
+  stallCount: 0,
+};
+
+test("the drive kind accepts a session-end row with its optional fields and rejects an unknown exitReason", () => {
+  const schema = JSON.parse(readFileSync(join(REPO_ROOT, "tests/fixtures/run-record.schema.json"), "utf8"));
+  const sub = subSchemaFor(schema, "drive");
+  assert.ok(sub, "the schema must declare a drive kind");
+  assert.deepEqual(validate(DRIVE_ROW, sub), []);
+  assert.deepEqual(
+    validate({ ...DRIVE_ROW, exitReason: "stopped", stopReason: "needs-user", costUsd: 1.25, depthTokens: 182000, guardDenials: 1, waveAtStart: 3 }, sub),
+    []
+  );
+  assert.match(validate({ ...DRIVE_ROW, exitReason: "crashed" }, sub).join("; "), /"exitReason" value "crashed" is not one of/);
+  assert.match(validate({ ...DRIVE_ROW, stopReason: "bored" }, sub).join("; "), /"stopReason" value "bored" is not one of/);
+  const noStalls = { ...DRIVE_ROW };
+  delete noStalls.stallCount;
+  assert.deepEqual(validate(noStalls, sub), ['missing required field "stallCount"']);
+});
+
+test("writeLine is exported and appends one validated row to the run's record", async () => {
+  const { writeLine } = await import("../../scripts/run-record.mjs");
+  assert.equal(typeof writeLine, "function", "run-record.mjs must export writeLine");
+  process.env.DEVCYCLE_RUNS_DIR = makeTempDir("rr-drive-");
+  writeLine("/tmp/demo-drive", DRIVE_ROW.runId, DRIVE_ROW);
+  const rows = readFileSync(recordPath("/tmp/demo-drive", DRIVE_ROW.runId), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(rows, [DRIVE_ROW]);
+});

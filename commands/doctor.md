@@ -8,8 +8,8 @@ Profile token cost, context depth, and model routing, then rank what to fix — 
 a target file, flag stale devcycle config references against the config changelog. Five
 invocations:
 
-- `/devcycle:doctor` — every devcycle-tagged session found under `~/.claude/projects`.
-- `/devcycle:doctor --all` — every transcript under `~/.claude/projects`, devcycle-tagged or not.
+- `/devcycle:doctor` — every devcycle-tagged session found under `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` when set).
+- `/devcycle:doctor --all` — every transcript under `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` when set), devcycle-tagged or not.
 - `/devcycle:doctor --since <date> --until <date>` — a window.
 - `/devcycle:doctor drift <path>` — config-drift mode: flags stale `userConfig`
   references in `<path>` against `docs/configuration/config-changelog.md`.

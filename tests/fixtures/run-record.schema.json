@@ -277,6 +277,39 @@
         "warned", "refused", "reason", "isAborted", "ts"
       ],
       "additionalProperties": false
+    },
+    {
+      "title": "drive",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "drive" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "sessionHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" },
+        "model": { "type": "string", "pattern": "^[A-Za-z0-9:_.\\[\\]-]{1,80}$" },
+        "ledgerLinesBefore": { "type": "integer", "minimum": 0 },
+        "ledgerLinesAfter": { "type": "integer", "minimum": 0 },
+        "committedBefore": { "type": "integer", "minimum": 0 },
+        "committedAfter": { "type": "integer", "minimum": 0 },
+        "exitReason": { "enum": ["handoff", "valve", "stopped", "stalled", "budget", "environment", "interrupted", "error"] },
+        "stallCount": { "type": "integer", "minimum": 0 },
+        "stopReason": {
+          "enum": [
+            "needs-user", "knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start",
+            "sweep-fallback", "scope-change", "no-driver", "not-opted-in"
+          ]
+        },
+        "costUsd": { "type": "number", "minimum": 0 },
+        "depthTokens": { "type": "integer", "minimum": 0 },
+        "guardDenials": { "type": "integer", "minimum": 0 },
+        "waveAtStart": { "type": "integer", "minimum": 1 }
+      },
+      "required": [
+        "kind", "runId", "sessionHash", "startedAt", "endedAt", "model", "ledgerLinesBefore", "ledgerLinesAfter",
+        "committedBefore", "committedAfter", "exitReason", "stallCount"
+      ],
+      "additionalProperties": false
     }
   ]
 }

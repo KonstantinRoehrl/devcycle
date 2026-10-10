@@ -50,8 +50,9 @@ its numbers into the field. A failed probe is written
 `Context depth: unknown (<the probe's one-line reason>)`.
 
 At a wave → wave boundary within execution the first field is instead `Wave completed: <n> of
-<m> (stage: execution)` — `Stage completed:` is reserved for true stage ends, and these are the
-only two sanctioned first-field labels.
+<m> (stage: execution)`, and a driven session the safety valve ends inside a wave writes
+`Session ended mid-wave: <k> of <n> tasks done (stage: execution)`. `Stage completed:` is reserved
+for true stage ends, and these are the only three sanctioned first-field labels.
 
 At the finish stage specifically, the block carries one additional line, directly after
 `Artifacts:` — the resolved git policy, in the exact shape `playbooks/finishing-the-cycle.md`
@@ -69,7 +70,7 @@ column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, 
 | diagnosis → brainstorm (root cause established) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
 | brainstorm → planning (spec approved) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
 | planning → execution (plan approved) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
-| wave → wave (within execution) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
+| wave → wave (within execution) | Clear + `/devcycle:continue` | n/a — clears (unattended: the driver's next session is the clear) | n/a — clears |
 | execution → branch-review | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
 | branch-review → on-device | Fresh session | n/a — clears | n/a — clears |
 | fast-path → finish | Clear + `/devcycle:continue` | branch, what changed | the implementation conversation |
@@ -112,6 +113,15 @@ that judgment is what the table and its test already made. How small the plan is
 are left, and how urgent the run feels are not exceptions; they are the reasons the gate is
 written down rather than left to judgment. `/clear` ends the session by design; state the
 `/devcycle:continue` resume path in the same message you halt on.
+
+**Unattended execution.** After the user opts in at planning's close, a driver they started from
+their own terminal (`node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md`)
+counts as the user at the wave → wave boundary and nowhere else (`docs/decisions/README.md`,
+2026-10-08 — Unattended execution): every wave still runs in a fresh session, and a driven session
+meets every other gate by stopping through `scripts/drive-signal.mjs`. An agent never opts in or
+starts a driver itself; from inside a Claude Code session the driver refuses any start but the
+opt-in gate's own: from the session the `drive:` row's `session=` names, before any driven session
+has ended.
 
 **The hard-stop band overrides the table.** When the probe reports `hard-stop`, the boundary's
 context action is `Clear + /devcycle:continue` regardless of what the table's row says —

@@ -6,6 +6,10 @@
 // structured-agent call itself. They differ only in retry count, working
 // directory, permission mode, and the words they put in their error strings —
 // all parameters here, so neither engine keeps a private copy.
+//
+// spawnStreaming serves a third, different caller: the unattended execution
+// driver, which streams one long `claude -p` session line by line instead of
+// buffering a structured call.
 
 "use strict";
 
@@ -139,6 +143,62 @@ function run(cmd, args, { cwd, env, timeoutMs, maxBufferBytes = 10 * 1024 * 1024
   });
 }
 
+// Calls onLine once per complete line of `stream` as it arrives; the returned flush delivers a final
+// line that had no trailing newline. Every chunk is consumed even without an onLine, so a chatty
+// child never blocks on a full pipe.
+function lineReader(stream, onLine) {
+  let partial = "";
+  stream.setEncoding("utf8");
+  stream.on("data", (chunk) => {
+    const lines = (partial + chunk).split("\n");
+    partial = lines.pop();
+    if (onLine) for (const line of lines) onLine(line);
+  });
+  return () => {
+    if (partial && onLine) onLine(partial);
+    partial = "";
+  };
+}
+
+// Spawn a long-running child — the unattended driver's `claude -p` session — as the leader of its
+// own process group and stream its output line by line. Unlike run() there is no timeout, no output
+// cap and no signal hook: a caller that lives for hours installs its own SIGINT/SIGTERM/SIGHUP
+// handlers and ends the child through killGroup. `env` is passed through exactly as given. `done`
+// settles the way run() does — on `close`, or DRAIN_GRACE_MS after `exit` with a sweep of a group a
+// survivor still holds — and resolves { code, signal }; both are null only when the binary never
+// started, because a process that ran always exits with one or the other.
+function spawnStreaming(cmd, args, { cwd, env, onStdoutLine, onStderrLine } = {}) {
+  const child = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+  const flushes = [lineReader(child.stdout, onStdoutLine), lineReader(child.stderr, onStderrLine)];
+  const done = new Promise((resolve) => {
+    let settled = false;
+    let closed = false;
+    let drainTimer = null;
+    const settle = (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(drainTimer);
+      if (!closed) killGroup(child); // same evidence rule as run(): no `close` means a survivor holds the group
+      for (const flush of flushes) flush();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      resolve(status);
+    };
+    child.on("error", () => {
+      closed = true; // nothing was started, so there is no group to sweep
+      settle({ code: null, signal: null });
+    });
+    child.on("exit", (code, signal) => {
+      drainTimer = setTimeout(() => settle({ code, signal }), DRAIN_GRACE_MS);
+      child.once("close", () => {
+        closed = true;
+        settle({ code, signal });
+      });
+    });
+  });
+  return { child, done };
+}
+
 // Run a claude print-mode subagent with a schema-validated structured output.
 // Retries transport and validation failures up to `attempts` times.
 // Returns { ok: true, value } | { ok: false, error }.
@@ -205,4 +265,4 @@ async function claudeStructured({ prompt, tools, schema, model, cwd, permissionM
   return { ok: false, error: "unreachable" };
 }
 
-module.exports = { makeLogger, run, claudeStructured, DRAIN_GRACE_MS };
+module.exports = { makeLogger, run, spawnStreaming, killGroup, claudeStructured, DRAIN_GRACE_MS };

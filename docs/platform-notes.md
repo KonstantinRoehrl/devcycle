@@ -74,7 +74,8 @@ skills-into-playbooks decision — see `docs/decisions/README.md` 2026-09-29.
 
   [Amended 2026-10-02: `enum` is still rejected, but the schema does take a value list —
   `options`, an array of strings — so allowed values no longer live only in description text.
-  The five fixed-set knobs declare it; see § (g) and `docs/decisions/README.md` 2026-10-02.]
+  The fixed-set knobs declare it — six since `subagentBudget` joined them on 2026-10-07; see § (g)
+  and `docs/decisions/README.md` 2026-10-02.]
 - Skills/commands must never treat `${user_config.KEY}` inline text as always-resolved. Required
   authoring pattern: quote the placeholder and instruct the model — "if this still reads as a
   literal `${user_config...}` placeholder, the option is unset; use the documented default
@@ -356,10 +357,10 @@ against the shipped manifest: 2.1.270 and every release before it fail with
 the plugin's minimum Claude Code version and the version CI pins. Only the validator was
 bisected, not how each release renders the pick-list.
 
-**Consequence.** `profile`, `gitPolicy`, `docTrackingPolicy`, `reviewDepth` and `onDeviceGate`
-declare `options`. `scripts/validate.mjs` fails a malformed list the same way the loader would,
-and holds each of the five to `scripts/resolve-knobs.mjs`'s `ROSTER` values, with `auto` first
-on the two knobs whose fallback is a profile row.
+**Consequence.** `profile`, `gitPolicy`, `docTrackingPolicy`, `reviewDepth`, `onDeviceGate` and
+`subagentBudget` declare `options`. `scripts/validate.mjs` fails a malformed list the same way the
+loader would, and holds each of the six to `scripts/resolve-knobs.mjs`'s `ROSTER` values, with
+`auto` first on the two knobs whose fallback is a profile row.
 
 ## (h) A `--plugin-dir` load sees no configured values
 
@@ -454,3 +455,50 @@ instructions file lives at `.claude/CLAUDE.md`. CI runs both strict validations 
 test .` on 2.1.287 and 2.1.292. Whether `allowManagedModsOnly` refuses the whole `hooks.json` or
 only its `modules` cannot be checked without managed settings; doctor's `mod-inactive` candidate
 reports the effect either way.
+
+## (k) Headless `claude -p` as a driven session
+
+**What was tried.** Headless probes on 2026-10-08 against the installed Claude Code (2.1.294),
+model `claude-haiku-5-5`, in scratch repos outside this checkout, each saved as `stream-json`:
+`claude -p "/devcycle:continue"` with and without a trailing `--drive x`; the same session under
+`--permission-mode` `default`, `acceptEdits` and `auto`; a repo holding two state files; a
+`depth-probe.mjs` call from inside the session; a foreground subagent dispatch timed to process exit;
+and a main-thread `git stash` and `git reset --hard`, the stash once more under an explicit
+`--allowedTools` allow. The raw output stays outside version control, under
+`.devcycle/evidence/execution-drive/probes/` (`v2a` to `v9b`).
+
+**Exact result.**
+
+- `/devcycle:continue` expands under `-p` although the command sets
+  `disable-model-invocation: true`. `system/init` lists `devcycle` 0.23.0 under `plugins`, and
+  carries no `plugin_errors` key at all when there are none, rather than `[]` (v2a). Arguments reach
+  the command as a trailing `ARGUMENTS: --drive x` line, since `continue.md` has no `$ARGUMENTS`
+  placeholder (v2b).
+- `AskUserQuestion` is absent from `tools` in every `-p` session, not only under
+  `--permission-prompts none`. With two state files the session asked its question as plain result
+  text and exited cleanly (result `duration_ms` 5434), guessing nothing (v3).
+- `--permission-mode default` denied Bash (v2a, one denial). `acceptEdits` denied it too, because
+  RTK's PreToolUse rewrite (`git status` → `rtk git status`) changes what an allow rule matches
+  (v5a, two denials). `auto` ran with none (v5b).
+- `CLAUDE_CODE_SESSION_ID` is set inside the session's Bash and equals `system/init`'s
+  `session_id`, and `depth-probe.mjs` returns a band (v6) — `over-budget` at session start, because
+  `scripts/pricing.mjs` has no row for `claude-haiku-5-5` and its window is taken from
+  `claude-haiku-4-5-20251001` (200k), while the result's `modelUsage` reports `contextWindow: 1000000`
+  for it.
+- The session exited 0.83 s after its `result` event following a foreground subagent, and
+  `SubagentStop` fired (v8).
+- PreToolUse hooks enforce under `-p`, and a hook's deny beats an explicit `--allowedTools` allow:
+  the main-thread stash was denied and listed in the result's `permission_denials` (v9b).
+  PostToolUse and SubagentStop fire. A main-thread `git reset --hard` was not denied (v9): the
+  guard then covered the main thread only for stash.
+- Every saved `.jsonl` probe carries `rate_limit_event` lines with a `rate_limit_info.status` and
+  `resetsAt`.
+
+**Consequence.** `scripts/drive-execution.mjs` runs each wave as
+`claude -p "/devcycle:continue --drive <state>"` with `--permission-mode auto`,
+`--output-format stream-json`, `--verbose` and an explicit `--model`. It treats an absent
+`plugin_errors` as none, reads a usage limit from a rejected `rate_limit_event` before the result
+text, counts the result's `permission_denials` as guard denials, and learns that a driven session
+needs the user only from `.devcycle/drive-stop.json` — never from a missing tool or from prose.
+While a driver's lock is live the guard also denies branch-moving git on the main thread
+(`docs/decisions/README.md`, 2026-10-08).

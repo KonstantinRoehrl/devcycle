@@ -22,7 +22,7 @@ import { atomicWrite } from "./atomic-write.mjs";
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 import { eachRecord } from "./jsonl.mjs";
-import { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth, depthLine } from "./depth-probe.mjs";
+import { SYNTHETIC_MODEL, contextDepth, budgetBand, claudeProjectsDir, findTranscriptFiles, resolveDepth, depthLine } from "./depth-probe.mjs";
 import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, withInferredNote, unpricedMediansNote } from "./doctor-format.mjs";
 import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
 
@@ -168,7 +168,7 @@ export function parseArgs(argv) {
   // so only --dir and --drift take the parser's default "a path argument" wording.
   const valued = (name, noun) => requireValue(flags, name, noun) ?? null;
   return {
-    dir: requireValue(flags, "--dir") ?? join(homedir(), ".claude", "projects"),
+    dir: requireValue(flags, "--dir") ?? claudeProjectsDir(),
     since: valued("--since", "a date"),
     until: valued("--until", "a date"),
     json: "--json" in flags,
@@ -459,9 +459,30 @@ export function runAggregates(summaries) {
       reviewRounds: qualities.reduce((n, q) => n + (q.reviewRounds ?? 0), 0),
       retries: qualities.reduce((n, q) => n + (q.retries ?? 0), 0),
       sessionIds: members.map((m) => m.id),
+      drive: members.some((m) => m.drive === "auto") ? "auto" : "manual",
     });
   }
   return out;
+}
+
+// A run with any `drive` row — the driver writes one per driven session — is cohort "auto", every
+// other run "manual". The two are reported side by side and never pooled, so a difference the drive
+// mode makes is never read as a version's doing.
+function driveCohorts(summaries) {
+  const runs = new Map();
+  for (const s of summaries.filter((s) => s.runId))
+    runs.set(s.runId, runs.get(s.runId) === "auto" || s.drive === "auto" ? "auto" : "manual");
+  const rows = summaries.flatMap((s) => s.driveRuns ?? []).flatMap((r) => r.rows);
+  const tally = (values) => values.reduce((m, v) => m.set(v, (m.get(v) ?? 0) + 1), new Map());
+  const cohort = [...runs.values()];
+  return {
+    runs: { manual: cohort.filter((d) => d === "manual").length, auto: cohort.filter((d) => d === "auto").length },
+    sessions: rows.length,
+    exits: tally(rows.map((r) => r.exitReason)),
+    stops: tally(rows.filter((r) => r.exitReason === "stopped").map((r) => r.stopReason ?? "unknown")),
+    stalled: rows.filter((r) => r.exitReason === "stalled").length,
+    longestStallRun: Math.max(0, ...rows.map((r) => r.stallCount ?? 0)),
+  };
 }
 
 // A session whose plugin version cannot be read is bucketed as "unknown" and reported, never
@@ -950,6 +971,9 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
       // file and do not reset on a `session` line.
       let runId = null, pluginVersion = null, profile = null, knobs = null, schemaMismatch, triage = null;
       let current = null;
+      // The driver appends its `drive` row after the session it ran has ended, so the row is run-scoped
+      // like `triage`, not window-scoped.
+      const drives = [];
       const windows = new Map(); // sessionHash -> { stages, dispatches, verdicts, events, workloads }, file order
       for (const line of readFileSync(join(dir, repo.name, f), "utf8").split("\n").filter(Boolean)) {
         let o;
@@ -974,6 +998,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         else if (o.kind === "agent-trace") { if (current) windows.get(current).agentTraces.push(o); }
         else if (o.kind === "commit") { if (current) windows.get(current).commits.push(o); }
         else if (o.kind === "triage") { triage = { requestKind: o.requestKind, entryStage: o.entryStage }; }
+        else if (o.kind === "drive") drives.push(o);
       }
       // sensor-inactive is decided per run (see emitComplianceCandidates' C5); the run's summary
       // rides on its first planning window only, so the candidate fires at most once per run.
@@ -999,7 +1024,8 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         // an earlier estimate); null when the run wrote none (GC3 — workload-unknown, not zero).
         const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, triage, ...w,
           workload: w.workloads.at(-1) ?? null, planningRuns: h === planningWindow ? [planningRun] : [],
-          traceRuns: h === firstWindow ? [traceRun] : [] };
+          traceRuns: h === firstWindow ? [traceRun] : [],
+          drive: drives.length ? "auto" : "manual", driveRuns: h === firstWindow ? [{ runId, rows: drives }] : [] };
         const prior = bySession.get(h);
         bySession.set(h, prior
           ? { ...rec,
@@ -1014,6 +1040,8 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
               agentTraces: [...prior.agentTraces, ...rec.agentTraces],
               planningRuns: [...prior.planningRuns, ...rec.planningRuns],
               traceRuns: [...prior.traceRuns, ...rec.traceRuns],
+              driveRuns: [...prior.driveRuns, ...rec.driveRuns],
+              drive: prior.drive === "auto" || rec.drive === "auto" ? "auto" : "manual",
               triage: rec.triage ?? prior.triage ?? null,
               workload: rec.workload ?? prior.workload ?? null }
           : rec);
@@ -1290,6 +1318,9 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     // The full session id is still in hand here and the record is already resolved; a summary
     // carries only `id: sessionId.slice(0, 8)`, so nothing downstream could redo this join.
     runId: record?.runId ?? null,
+    // The run's drive cohort and, on its first window only, its drive rows; null without a record.
+    drive: record?.drive ?? null,
+    driveRuns: record?.driveRuns ?? [],
     // Joined by readRunRecords from the run's workload line; null when the run wrote none (GC3).
     workload: record?.workload ?? null,
     // References/impact-scoring.md owns the formula; this is the only call site that scores a
@@ -2870,7 +2901,9 @@ export function renderReport(summaries, ctx) {
   // never reach these (GC5/GC6) — runAggregates already excludes run-less sessions.
   const settledRuns = runAggregates(summaries.filter((s) => !s.inFlight));
   const glanceBand = recencyBand(installedVersion(), releaseDates(readFileSync(RELEASE_CHANGELOG_PATH, "utf8")));
-  const glanceSteps = workloadAdjustedSteps(settledRuns, glanceBand);
+  // Matched within one drive cohort at a time (driveCohorts), so a step never pairs a driven run with a hand-walked one.
+  const glanceSteps = ["manual", "auto"].flatMap((drive) =>
+    workloadAdjustedSteps(settledRuns.filter((r) => r.drive === drive), glanceBand).map((step) => ({ ...step, drive })));
   const excess = excessCost(settledRuns);
   // Computed up front (not only inside ## Workload) so a collection gap can be warned before the
   // cost tables — an under-collected corpus must not read as "no work" in the headline view.
@@ -2917,10 +2950,10 @@ export function renderReport(summaries, ctx) {
   const pctText = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
   if (glanceSteps.length) {
     L.push(...markdownTable(
-      ["Step", "matchKey", "n", "conf", "workload-adj cost Δ% (derived)", "main-turn Δ",
+      ["Drive", "Step", "matchKey", "n", "conf", "workload-adj cost Δ% (derived)", "main-turn Δ",
         "sub-turn Δ", "depth Δ", "conformance Δ"],
       glanceSteps.map((r) => [
-        `${r.from}→${r.to}`, r.matchKey, r.n, r.confidence, pctText(r.costDeltaPct),
+        r.drive === "auto" ? "drive: auto" : "manual", `${r.from}→${r.to}`, r.matchKey, r.n, r.confidence, pctText(r.costDeltaPct),
         pctText(r.mainTurnDeltaPct), pctText(r.subTurnDeltaPct), pctText(r.depthDeltaPct),
         r.conformanceDelta == null ? null : `${r.conformanceDelta >= 0 ? "+" : ""}${(r.conformanceDelta * 100).toFixed(0)}pp`,
       ]),
@@ -2932,6 +2965,16 @@ export function renderReport(summaries, ctx) {
     const matchable = matchableRuns(settledRuns, glanceBand);
     const versions = new Set(matchable.map((r) => r.version)).size;
     L.push(`No matched cohorts: ${matchable.length} workload-bearing runs across ${versions} versions in the band; a row needs ≥2 same-shaped runs on two adjacent releases.`);
+  }
+  const drive = driveCohorts(summaries);
+  if (drive.runs.auto) {
+    const tallyText = (m) => [...m].sort((a, b) => b[1] - a[1] || byName(a[0], b[0])).map(([k, n]) => `${k} ${n}`).join(" · ") || "none";
+    L.push("",
+      `Drive cohorts (observed): manual ${drive.runs.manual} run(s) · drive: auto ${drive.runs.auto} run(s), ` +
+        `${drive.sessions} driven session(s) — steps above compare within one cohort, never across.`,
+      `Driven-session exits (observed): ${tallyText(drive.exits)}.`,
+      `Stops by reason (observed): ${tallyText(drive.stops)}.`,
+      `Stalls (observed): ${drive.stalled} driven session(s) ended stalled; longest stall run ${drive.longestStallRun}.`);
   }
   const priciestOverall = Object.entries(agg.costByStage).sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))[0];
   L.push("", priciestOverall

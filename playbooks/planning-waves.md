@@ -172,7 +172,8 @@ as this stage's relevance filter, starting from implementation-scoped docs (a `f
 
 ## Handoff — required final output
 
-After saving the plan (or issuing a NO-GO report), update `.devcycle/state.md` (`stage: execution` —
+After saving the plan (or issuing a NO-GO report), and on a GO after the opt-in gate below, update
+`.devcycle/state.md` (`stage: execution` —
 the stage to resume at — and the `plan:` path; after a NO-GO, keep `stage: planning`), also writing
 `- plan-counts: planned=<count from the Dispatch Map> waves=<wave count from the Dispatch Map>` so
 the sensor can carry the plan totals into each progressive workload write (`planned=0 waves=0` after
@@ -190,3 +191,32 @@ plan-commit step of its own and `all-tracked` would otherwise never track a plan
 `docs/<subdir>/` the repo means to track needs its own `!docs/<subdir>/` line in `.gitignore` —
 the blanket `docs/*` swallows it otherwise — plus an allowlist below any line that re-ignores its
 contents; a subdirectory `references/config.md` § Doc tracking keeps local needs neither.
+
+**Opt-in gate (GO only).** Ask one AskUserQuestion — how execution should run — with three
+options: **Walk the waves manually** (today's behaviour) · **Unattended — start it now** ·
+**Unattended — I'll start it myself**. Offer **Unattended — start it now** only when
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --check-sandbox` prints
+`{"sandboxed":false}` and a non-null `sessionHash` (for step 3); else offer the other two, saying
+why: the sandbox blocks `~/.claude`, or this session's id is unreadable. An Other answer
+appends `user-correction-at-gate`; `references/ledger.md` owns the rule. Only the user's answer
+opts in (`docs/decisions/README.md`, 2026-10-08 — Unattended execution). On either unattended
+answer, in this order:
+
+1. Settle the branch: on the default or an integration branch, cut the topic branch now and record
+   it on `branch:` as `references/branch.md` § Committing requires, so the driver's pre-flight
+   finds it.
+2. Take `<id>` from the `model` that `node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs" --json`
+   prints, never from self-report, and `<stamp>` from `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`.
+3. Rewrite the state file in full as above, adding `- drive: auto model=<id> opted=<stamp>` (with
+   ` session=<sessionHash>` on start-now only, so no later Claude Code session can start it), then
+   commit the saved plan as the paragraph above gates it, and only then start a driver, so it never
+   reads `stage: planning` or meets this session's commit. Write nothing to the ledger: the first
+   driven session records the opt-in.
+4. **Unattended — start it now:** run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md --model <id> --detach`.
+   Exit 3 is a pre-flight refusal: report its reason and offer the manual walk, which drops the
+   `drive:` row from the state file. Otherwise print the PID it returns, the log path,
+   `tail -f .devcycle/drive.log` to watch it and `kill <PID>` to stop it, emit the handoff, and
+   touch the working tree no further. **Unattended — I'll start it myself:** print
+   `node "<devcycle-root's output>/scripts/drive-execution.mjs" --state "<the state file's absolute
+   path>"` for the user's own terminal, then emit the handoff.

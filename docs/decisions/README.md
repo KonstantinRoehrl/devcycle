@@ -5,6 +5,87 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-08 — Unattended execution: a driver the user started is the user at the wave→wave gate only
+
+**Decision:** execution may run unattended, wave after wave, under a driver process the user starts,
+which runs one fresh headless session per wave and stops for the user at every other gate. Four
+rules bound it:
+- **The opt-in is the user's act.** It is the user's answer at the planning→execution gate, given
+  before the first driven session; nothing else opts a cycle in.
+- **The driver stands in for the user at one gate.** A driver the user started after opting in
+  counts as the user at the **wave→wave** await gate of `references/handoff.md` — the `/clear` and
+  `/devcycle:continue` it would otherwise wait for — and at no other gate.
+- **Every wave still gets a fresh session.** The driver ends each session at its wave boundary and
+  starts the next wave in a new one, so the 2026-07-31 decision below (the context reset is binding
+  at every boundary) is unchanged: the reset still happens, only the keystroke that triggers it moves
+  to the driver.
+- **An agent never acts for the user.** An agent can never opt a cycle in, start a driver on its own
+  initiative, or override a gate. Every other gate a driven session reaches — a user decision, a
+  failed check, a needed confirmation — stops the run and hands it back to the user.
+
+**Why:** execution already runs one wave per session — 67 of 69 measured execution sessions on
+versions 0.20 and later did, a median of four per execution stage — so every boundary waits on a
+`/clear` + `/devcycle:continue` round trip that carries no judgment once the user has chosen, at
+planning's close, to let the waves run. Letting a process the user started supply that keystroke
+keeps the reset the 2026-07-31 numbers justify, while everything that does need judgment stays a
+stop. Writing the bound down before any drive-mode code lands is what keeps "the driver may
+continue" from widening into "an agent may continue".
+
+**Supersedes:** nothing. It narrows how the 2026-07-31 await gate is satisfied at one boundary
+(wave→wave) for a cycle the user opted in, and leaves that gate's wording, every other boundary and
+every manual run as they are.
+
+**Budgets:** `playbooks/executing-waves.md` ends below its 0.23.0 value (104814 → 95834 bytes),
+but the context budgets summed over all playbooks rise net (983585 → 1005228, +21643), mostly
+because receiving-review, sweeping-mechanical-changes and taking-the-fast-path each load 5631 bytes
+more from the expanded references/ledger.md and references/resume.md. `surfaceTotal` rises net too
+(5745 → 5894): the task scripts' contracts, the drive mode in `commands/continue.md` and the opt-in
+gate add more runtime-surface lines than the executing-waves shrink removes. The maintainer accepted
+both rises: what binds is executing-waves below its 0.23.0 value, with every risen entry carrying
+its own `budget:` line below. references/commit-convention.md § The task commit
+(task-commit.mjs's invocation and trailer) adds 11 lines to the runtime surface (5795 → 5806) and
+853 bytes to each playbook whose closure cites it: executing-waves, learning-from-sessions,
+onboarding-a-repo, sweeping-mechanical-changes and taking-the-fast-path. executing-waves.md
+through the task scripts lowers the runtime surface 5830 → 5819 (−11 lines) and
+playbooks/executing-waves.md's context 110214 → 94484 (−15730 bytes): the per-step bookkeeping
+moved into scripts/task-*.mjs and the playbook no longer loads references/resume.md or
+references/loops.md. The run-record table's writer cells in references/ledger.md add 36 bytes to
+receiving-review, sweeping-mechanical-changes and taking-the-fast-path. The mid-wave label and the
+unattended-execution clause in references/handoff.md add 9 lines to the runtime surface
+(5842 → 5851) and 796 bytes to each playbook whose closure cites it: executing-waves
+94484 → 95280, finishing-the-cycle 53662 → 54458, planning-waves 67991 → 68787, receiving-review
+113517 → 114313, reviewing-the-branch 55125 → 55921, scoping-the-request 26925 → 27721,
+sweeping-mechanical-changes 87136 → 87932, taking-the-fast-path 80261 → 81057,
+verifying-on-device 50649 → 51445 and writing-the-findings-document 65761 → 66557.
+The opt-in gate and its `drive:` row: `surfaceTotal` 5851 → 5884 (+33, the opt-in gate in
+playbooks/planning-waves.md and the drive: row in references/resume.md); planning-waves
+68787 → 70936 (+2149, the opt-in gate in playbooks/planning-waves.md); receiving-review
+114313 → 114850 (+537, the drive: row in references/resume.md); sweeping-mechanical-changes
+87932 → 88469 (+537, the drive: row in references/resume.md); taking-the-fast-path
+81057 → 81594 (+537, the drive: row in references/resume.md).
+The driver's `session=` rule: `surfaceTotal` 5888 → 5894 (+6); +91 bytes on each playbook whose
+closure cites references/handoff.md, and 186 more on planning-waves (its opt-in gate, 70936 → 71213)
+and on each that cites references/resume.md (receiving-review 115452, sweeping-mechanical-changes
+89071, taking-the-fast-path 82196). The stale review-status rule in references/resume.md (an
+earlier cycle's status file never counts): receiving-review 115452 → 115529 (+77);
+sweeping-mechanical-changes 89071 → 89135 and taking-the-fast-path 82196 → 82260 (+64 each).
+
+```text
+budget: surface-budget.json surfaceTotal 5894
+budget: context-budget.json playbooks/executing-waves.md 95834
+budget: context-budget.json playbooks/finishing-the-cycle.md 54549
+budget: context-budget.json playbooks/learning-from-sessions.md 62203
+budget: context-budget.json playbooks/onboarding-a-repo.md 30301
+budget: context-budget.json playbooks/planning-waves.md 71213
+budget: context-budget.json playbooks/receiving-review.md 115529
+budget: context-budget.json playbooks/reviewing-the-branch.md 56012
+budget: context-budget.json playbooks/scoping-the-request.md 27812
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 89135
+budget: context-budget.json playbooks/taking-the-fast-path.md 82260
+budget: context-budget.json playbooks/verifying-on-device.md 51536
+budget: context-budget.json playbooks/writing-the-findings-document.md 66648
+```
+
 ## 2026-10-07 — Fifth hook-like component: the function-hook module
 
 **Decision:** the plugin ships a fifth hook-like component beside the four settings hooks: a hooks

@@ -69,6 +69,14 @@ export function filesFieldValue(block) {
   return m ? m[1].trim() : null;
 }
 
+// Any other **Field:** of a task block, up to the next **Field:**, the next ### heading, or end of
+// input. Returns null when the field is absent.
+export function fieldValue(block, field) {
+  const re = new RegExp(`\\*\\*${field}:\\*\\*([\\s\\S]*?)(?=\\n\\*\\*|\\n###|$)`);
+  const m = block.match(re);
+  return m ? m[1].trim() : null;
+}
+
 export function taskBlocks(planText) {
   const headings = [...planText.matchAll(TASK_HEADING_RE)];
   const blocks = [];

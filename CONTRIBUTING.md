@@ -127,6 +127,10 @@ blocks a local run, `node scripts/redaction-check.mjs --auto-redact --dir <path>
 <path>`) rewrites the flagged spans in place — it refuses to run without an explicit
 `--dir`/`--file`, so it never rewrites the whole tracked tree.
 
+`.gitleaks.toml` extends gitleaks' default rules and waives one value, the synthetic drive token in
+`tests/unit/wave-setup.test.mjs`. A waiver is a value match rather than a commit fingerprint, so it
+survives a rebase or squash-merge; add another only for a value that is plainly a fixture.
+
 The commands above use the repo-relative form (`node scripts/<engine>.mjs`), correct for
 running by hand against this checkout. An engine invocation written into a command, playbook,
 reference or agent instead uses `${CLAUDE_PLUGIN_ROOT}/scripts/<engine>.mjs`, because that text

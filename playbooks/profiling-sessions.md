@@ -9,20 +9,19 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" [--all] [--since <date>] [--unti
 ```
 
 Add `--json` for machine output, `--depth` for the bare depth probe — the probe ignores the window
-flags and exits non-zero with a one-line reason when it cannot resolve a depth. Do not walk
-transcripts yourself. What it prints is the finished report, owned end to end by
-`scripts/doctor.mjs`: read it, splice the two sections below into it, carry its two overview blocks
-as the next section says, and retype none of it.
+flags and exits non-zero with a one-line reason when it cannot resolve a depth. What it prints is
+the finished report, owned end to end by `scripts/doctor.mjs`: read it, splice the two sections
+below into it, carry its two overview blocks as the next section says, and retype none of it.
 
 ## Scope — what the script actually covers, and announce it
 
-With no flags the script scans **every transcript under `~/.claude/projects`** — not this
-session — and keeps the sessions whose records carry a `devcycle:`-prefixed attribution id, which
-every devcycle slash command records. `--all` widens it to every transcript, tagged or not.
+With no flags the script scans **every transcript under `~/.claude/projects`**
+(`$CLAUDE_CONFIG_DIR/projects` if set) — not this session — and keeps the sessions whose
+records carry a `devcycle:`-prefixed attribution id, which every devcycle slash command records.
+`--all` widens it to every transcript, tagged or not.
 
 `--since`/`--until` narrow what is measured within each kept session and drop sessions with no
-records in the window; membership itself is still decided over each session's whole transcript,
-window or not.
+records in the window; membership itself is still decided over each session's whole transcript.
 
 State the scope the run actually used — "every `devcycle:`-tagged transcript", "every
 transcript, tagged or not", or the window — in the announce. The report states it again in its

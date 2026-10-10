@@ -642,9 +642,9 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         // matter how complete it is. Those other kinds keep their protection at the kind level via
         // the exercised-kind check above (existing, unchanged) rather than per field.
         // "knobs" is no longer structurally exempt: it is produced by repeated `--knob key=value`
-        // flags, so FLAG_NAME below points it at the literal `--knob` substring (singular, not the
-        // nonexistent `--knobs`) and it is checked for real, live, every run, same as any other
-        // renamed field.
+        // flags, so FLAG_NAME below points it at the literal `--knob` flag (singular: wave-setup.mjs's
+        // `--knobs` is a different flag, which the whole-flag match below does not count) and it is
+        // checked for real, live, every run, same as any other renamed field.
         // "startedAt" is always computed by the script itself (`flags.startedAt ?? new
         // Date().toISOString()...`, scripts/run-record.mjs:114) — no surface instruction ever
         // needs to name `--started-at`.
@@ -655,7 +655,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           for (const field of Object.keys(sub.properties ?? {})) {
             if (STRUCTURAL_FIELDS.has(field)) continue; // computed by the script, never a flag
             const flag = FLAG_NAME[field] ?? field;
-            const named = [...surface].some((p) => readFileSync(p, "utf8").includes(`--${flag}`));
+            const named = [...surface].some((p) => new RegExp(`--${flag}(?![\\w-])`).test(readFileSync(p, "utf8")));
             if (!named)
               fail(`tests/fixtures/run-record.schema.json: "${sub.title}.${field}" is declared but no surface instruction names --${flag}`);
           }

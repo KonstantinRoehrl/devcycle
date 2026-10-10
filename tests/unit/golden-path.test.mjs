@@ -738,13 +738,13 @@ test("harvested: executing-waves/file-backed-evidence — the evidence paths, re
 test("harvested: executing-waves/green-gate-discipline — the gate is the coordinator's, and implementers never commit", () => {
   const t = read("playbooks/executing-waves.md");
   assert.match(t, /\*\*Green gate \(REQUIRED, deterministic\)\.\*\*/);
-  assert.match(t, /re-run the task's test command\s+yourself and read the exit status/);
-  assert.ok(t.includes("event=review-verdict outcome=rejected (green gate: <symptom>)"), "the rejection ledger shape changed");
+  assert.match(t, /re-runs the test command itself and reads the exit status — never the implementer's word/);
+  assert.ok(read("scripts/task-commit.mjs").includes('"rejected (green gate:"'), "the gate's rejection ledger shape changed");
   assert.match(t, /The dispatch prompt must NEVER\s+instruct the implementer to commit, stage, or push/);
   assert.match(read("agents/implementer.md"), /NEVER run `git commit`, stage a commit, or push/);
 });
 
-test("harvested: executing-waves/handoff-block-shape — seven fields, and only two sanctioned first-field labels", () => {
+test("harvested: executing-waves/handoff-block-shape — seven fields, and only three sanctioned first-field labels", () => {
   const t = read("references/handoff.md");
   // Derive the template rows rather than hardcoding, so the test tracks its owner.
   const block = t.match(/```markdown\n## Handoff\n([\s\S]*?)```/)?.[1] ?? "";
@@ -759,9 +759,10 @@ test("harvested: executing-waves/handoff-block-shape — seven fields, and only 
   assert.notEqual(dropped, block, "the Context depth row wording changed — this discrimination check tests nothing");
   const droppedLabels = [...dropped.matchAll(/^- ([^:]+):/gm)].map((m) => m[1]);
   assert.equal(droppedLabels.length, 6, "removing a template row must reduce the derived label count");
-  // The two sanctioned first-field labels and the Compaction-hint shape stay pinned.
+  // The three sanctioned first-field labels and the Compaction-hint shape stay pinned.
   assert.match(t, /Wave completed: <n> of\s+<m> \(stage: execution\)/);
-  assert.match(t, /these are the\s+only two sanctioned first-field labels/);
+  assert.ok(t.includes("`Session ended mid-wave: <k> of <n> tasks done (stage: execution)`"), "the safety valve's mid-wave label changed");
+  assert.match(t, /these are the\s+only three sanctioned first-field labels/);
   assert.match(t, /Compaction hint: Keep <X>\. Drop <Y>\./);
 });
 
@@ -786,12 +787,39 @@ test("harvested: executing-waves/return-envelopes — a dispatch returns counts 
   assert.match(t, /opens a report or findings file only when a decision needs content the\s+envelope cannot carry/);
 });
 
+// V20: at `thorough` the upstream overlay is loaded, and three of its statements would otherwise
+// override devcycle's wave stop, user decisions and ledger format. The quotes are pinned so a
+// reword of the delta cannot drop the statement it overrides; the memo cites their source.
+test("thorough deltas: the wave stop, user decisions and the ledger format win over the upstream overlay", () => {
+  const waves = read("playbooks/executing-waves.md");
+  const deltas = waves.match(/\n- Its tail does NOT apply[\s\S]*?\n\n/)?.[0];
+  assert.ok(deltas, "executing-waves.md has no thorough delta list");
+  assert.ok(deltas.includes('"Execute all tasks from the plan without stopping" yields to the wave boundary'));
+  assert.ok(deltas.includes('"Rulings, not stalls" does not apply'));
+  assert.match(deltas, /no `Ruling:` line is ever written/);
+  assert.match(deltas, /Pre-Flight Plan Review[\s\S]*?a `needs-user` stop/);
+  assert.match(deltas, /exhausted-unresolved[\s\S]*?a `needs-user` stop/);
+  const memo = read("docs/comparisons/executing-waves.md");
+  assert.match(memo, /superpowers 6\.4\.2/);
+  for (const quote of ["Execute all tasks from the plan without stopping", "Rulings, not stalls", "Ruling: <what you decided>"])
+    assert.ok(memo.includes(quote), `the comparison memo no longer cites upstream's "${quote}"`);
+});
+
+test("the drive-mode safety valve ends the session mid-wave at hard-stop with the sanctioned label", () => {
+  const valve = read("playbooks/executing-waves.md").match(/\*\*Safety valve\.\*\*[\s\S]*?\n\n/)?.[0];
+  assert.ok(valve, "executing-waves.md has no safety valve");
+  assert.match(valve, /after every\s+task script/);
+  assert.match(valve, /`hard-stop`, dispatch no new task, finish the tasks in flight/);
+  assert.ok(valve.includes("`Session ended mid-wave: <k> of <n> tasks done (stage: execution)`"));
+  assert.match(valve, /Two task scripts in a row reporting `unknown` count as `hard-stop`/);
+});
+
 test("harvested: task-reviewer/owns-its-findings-file — the reviewer has Write and persists its own findings", () => {
   const a = read("agents/task-reviewer.md");
   assert.match(a, /^tools:.*\bWrite\b/m, "task-reviewer must grant Write to persist its findings file");
   assert.match(a, /\.devcycle\/findings\/<task-id>-round-<n>\.md/);
   const e = read("playbooks/executing-waves.md");
-  assert.match(e, /confirms the findings file exists .* before logging `event=review-verdict`/i);
+  assert.match(e, /`missing-findings` → re-dispatch the reviewer for the same round, no verdict\s+acted on/);
 });
 
 test("harvested: fast-path/mini-cycle — the fast path keeps its evidence files and its one-reviewer floor", () => {
@@ -856,6 +884,31 @@ test("harvested: planning-waves/quality-constraints — the two constraint secti
   assert.match(t, /That\s+section is \*\*not\*\* `## Global Constraints`/);
   assert.match(t, /so the two never merge/);
   assert.match(t, /Each task then carries a `\*\*Quality constraints:\*\*` line/);
+});
+
+test("planning-waves/opt-in-gate — one question with three answers; the drive row is written and the plan committed before any driver starts", () => {
+  const t = read("playbooks/planning-waves.md");
+  const handoff = t.slice(t.indexOf("## Handoff — required final output"));
+  assert.match(handoff, /Ask one AskUserQuestion/);
+  for (const option of ["Walk the waves manually", "Unattended — start it now", "Unattended — I'll start it myself"])
+    assert.ok(handoff.includes(`**${option}**`), `the opt-in gate lost its option: ${option}`);
+  assert.ok(handoff.includes('scripts/drive-execution.mjs" --check-sandbox` prints\n`{"sandboxed":false}`'), "start-now is no longer gated on the sandbox probe");
+  assert.match(handoff, /non-null `sessionHash`/, "start-now is offered without a readable session id");
+  assert.ok(handoff.includes("- drive: auto model=<id> opted=<stamp>"), "the drive row's shape changed");
+  assert.match(handoff, /scripts\/depth-probe\.mjs" --json`\n\s+prints, never from self-report/);
+  const launch = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md --model <id> --detach';
+  assert.ok(handoff.includes(launch), "the detached launch changed");
+  assert.doesNotMatch(handoff, /nohup/, "a nohup launch stays in the caller's session, where its hangup reaches the driver");
+  assert.ok(handoff.indexOf("Rewrite the state file in full") < handoff.indexOf(launch), "the driver can start before the state names execution");
+  // The plan commit happens before any driver exists: a driver's first session commits too, and the
+  // two would race on the index.
+  assert.ok(handoff.indexOf("Committing the saved plan is gated") < handoff.indexOf("**Opt-in gate (GO only).**"),
+    "the opt-in gate no longer follows the plan-commit paragraph its step 3 points to");
+  assert.match(handoff, /commit the saved plan as the paragraph above gates it, and only then start a driver/);
+  assert.match(handoff, /Write nothing to the ledger/);
+  const resume = read("references/resume.md");
+  assert.match(resume, /Three optional rows sit outside the template/);
+  assert.ok(resume.includes("- `- drive: auto model=<id> opted=<stamp>` — the user chose unattended execution"), "resume.md no longer documents the drive row");
 });
 
 test("harvested: reviewing-code/engine-delegation — one JSON argv, and exit 1 is the panel failing", () => {
@@ -964,12 +1017,14 @@ test("harvested: verifying-on-device/no-script-checkoff — only a structural ch
   assert.match(v, /\*\*ONE question per checklist item, never batched\*\*/);
 });
 
-test("the green gate step instructs both journal appends", () => {
-  const text = read("playbooks/executing-waves.md");
-  assert.match(text, /--kind event --event\s+gate-fail/,
-    "a failing green gate must append a gate-fail event");
-  assert.match(text, /--event gate-pass-clean/,
-    "a clean green gate must append a gate-pass-clean event");
+test("the green gate step runs the script that journals both gate outcomes", () => {
+  const gate = read("playbooks/executing-waves.md").match(/\*\*Green gate \(REQUIRED, deterministic\)\.\*\*[\s\S]*?\n7\. /)?.[0] ?? "";
+  assert.match(gate, /run `task-commit\.mjs`/, "the green gate step must run task-commit.mjs");
+  assert.match(read("references/commit-convention.md"), /node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/task-commit\.mjs"/,
+    "task-commit.mjs's invocation lives in references/commit-convention.md § The task commit");
+  const commit = read("scripts/task-commit.mjs");
+  assert.ok(commit.includes('event: "gate-fail"'), "a failing green gate must append a gate-fail event");
+  assert.ok(commit.includes('event: "gate-pass-clean"'), "a clean green gate must append a gate-pass-clean event");
 });
 
 test("the run-record write-site table declares the event kind", () => {
@@ -981,15 +1036,17 @@ test("the run-record write-site table declares the event kind", () => {
 
 test("every rejecting writer journals a culprit, and the boundary sentences name their enums", () => {
   const waves = read("playbooks/executing-waves.md");
-  assert.match(waves, /--kind event --event review-reject --stage execution --task <task-id> --culprit <the reviewer envelope's culprit> --attributedBy coordinator/,
-    "step 5 must journal review-reject with the culprit the reviewer envelope carries");
+  assert.match(read("scripts/task-verdict.mjs"), /review-reject/,
+    "step 5's verdict script must journal review-reject with the culprit the findings carry");
   assert.match(read("references/delegation.md"), /^culprit: <slug> \| none$/m,
     "the reviewer envelope must carry the slug, or step 5 has no data path to it");
-  assert.match(waves, /--event gate-fail --stage execution --task <task-id> --culprit <slug> --attributedBy coordinator/,
+  const commit = read("scripts/task-commit.mjs");
+  assert.ok(commit.includes('event: "gate-fail"') && commit.includes('attributedBy: "coordinator"') && /\bculprit\b/.test(commit),
     "step 6's gate-fail must carry a culprit");
-  assert.match(waves, /gate-caught-regression/, "step 6 must name the fallback slug for a gate the reviewer did not reject");
-  assert.match(waves, /`complete\|blocked\|rejected`/, "step 4 must name the dispatch outcome enum");
-  assert.match(waves, /modelSource/, "step 4 must name modelSource");
+  assert.match(commit, /gate-caught-regression/, "step 6 must name the fallback slug for a gate the reviewer did not reject");
+  assert.match(waves, /`task-intake\.mjs`/, "step 4 must run task-intake.mjs");
+  assert.match(read("references/ledger.md"), /--model-source explicit\|inherited/, "task-intake's flags must pass the dispatch's modelSource");
+  assert.match(read("scripts/task-intake.mjs"), /modelSource/, "step 4's intake script must write modelSource");
   assert.match(read("references/evidence.md"), /Culprit: <slug>/, "the needs-changes verdict block must carry a Culprit line");
   assert.match(read("agents/task-reviewer.md"), /Culprit: <slug>/, "the reviewer's output contract must name the Culprit line");
   const row = read("references/ledger.md").split("\n").find((l) => l.startsWith("| `event` |"));
@@ -2208,13 +2265,13 @@ test("every entry command except doctor resolves knobs through the identical ful
   }
 });
 
-test("C6: the workload sensor's integration-branch list matches the prose that owns it", () => {
-  // references/branch.md § Committing owns that list; hooks/workload-sensor.mjs carries its only
-  // runtime spelling, because prose cannot be handed to a hook. Parsed and compared the way C3
+test("C6: the shared integration-branch list matches the prose that owns it", () => {
+  // references/branch.md § Committing owns that list; scripts/branch-names.mjs carries its only
+  // runtime spelling, which hooks/workload-sensor.mjs, scripts/wave-setup.mjs and scripts/task-commit.mjs import. Parsed and compared the way C3
   // leg 1 parses dream.mjs's SUBCOMMANDS, so a name added on one side and not the other fails
   // here instead of silently narrowing which cut-points a cycle can be measured against.
-  const block = read("hooks/workload-sensor.mjs").match(/const INTEGRATION_BRANCHES = \[([\s\S]*?)\];/);
-  assert.ok(block, "INTEGRATION_BRANCHES array not found in hooks/workload-sensor.mjs");
+  const block = read("scripts/branch-names.mjs").match(/const INTEGRATION_BRANCHES = \[([\s\S]*?)\];/);
+  assert.ok(block, "INTEGRATION_BRANCHES array not found in scripts/branch-names.mjs");
   const runtime = [...block[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
   const sentence = read("references/branch.md")
     .match(/on an integration branch — ([\s\S]*?)or one the user names/);
@@ -2222,8 +2279,12 @@ test("C6: the workload sensor's integration-branch list matches the prose that o
   const owned = [...sentence[1].matchAll(/`([a-z-]+)`/g)].map((m) => m[1]);
   assert.ok(owned.length >= 4, `expected the full prose list, got ${owned.length}`);
   assert.deepEqual(runtime, owned,
-    "hooks/workload-sensor.mjs's INTEGRATION_BRANCHES must spell exactly the branches " +
-      "references/branch.md § Committing names — the hook is that prose's only runtime copy");
+    "scripts/branch-names.mjs's INTEGRATION_BRANCHES must spell exactly the branches " +
+      "references/branch.md § Committing names — it is that prose's only runtime copy");
+  const copies = ["scripts", "hooks", "workflows"]
+    .flatMap((dir) => readdirSync(join(root, dir), { recursive: true }).filter((n) => /\.m?js$/.test(n)).map((n) => `${dir}/${n}`))
+    .filter((p) => p !== "scripts/branch-names.mjs" && read(p).includes('"development"'));
+  assert.deepEqual(copies, [], "a runtime file spells the integration-branch list instead of importing scripts/branch-names.mjs");
 });
 
 test("cycle.md writes the kind line and appends a triage record after triage", () => {
@@ -2284,4 +2345,28 @@ test("the stage-budget constants are the counters references/delegation.md § Th
   const section = read("references/delegation.md").split("## The stage budget")[1]?.split(/\n## /)[0] ?? "";
   assert.match(section, new RegExp(`\\*\\*~${STAGE_TOOL_CALLS} tool calls\\*\\*`), "the tool-call counter drifted");
   assert.match(section, new RegExp(`\\*\\*~${STAGE_FILES_READ} files read\\*\\*`), "the files-read counter drifted");
+});
+
+// Spec § 8 "Opt-in integrity": an agent never opts a cycle into drive mode. The `drive:` state row
+// is written only by the opt-in gate at planning's close (references/resume.md documents it), and the
+// opt-in ledger line only by the first driven session, in continue.md's drive mode. No script,
+// workflow or hook writes either.
+test("opt-in integrity: only the opt-in gate writes the drive: row, only the first driven session the opt-in ledger line", () => {
+  const ROW = "- drive: auto model=";
+  const LINE = "outcome=unattended (model=";
+  const rowSites = surfaceFiles().filter((p) => read(p).includes(ROW));
+  assert.deepEqual(rowSites.filter((p) => !["playbooks/planning-waves.md", "references/resume.md"].includes(p)), [],
+    "a surface other than the opt-in gate writes the drive: row");
+  const lineSites = surfaceFiles().filter((p) => read(p).includes(LINE));
+  assert.deepEqual(lineSites.filter((p) => !["references/ledger.md", "references/resume.md"].includes(p)), ["commands/continue.md"],
+    "the opt-in ledger line must be written by commands/continue.md's drive mode and nowhere else");
+  const writes = sentences(read("commands/continue.md")).filter((s) => s.text.includes(LINE));
+  assert.equal(writes.length, 1, "commands/continue.md writes the opt-in ledger line in more than one place");
+  assert.match(writes[0].text, /first driven session/, "the opt-in ledger line is no longer scoped to the first driven session");
+  assert.match(writes[0].text, /drive\.optInLogged/, "the first driven session is no longer keyed on wave-setup's drive.optInLogged");
+  for (const dir of ["scripts", "workflows", "hooks"])
+    for (const name of readdirSync(join(root, dir), { recursive: true }).filter((n) => /\.m?js$/.test(n))) {
+      const text = read(`${dir}/${name}`);
+      assert.ok(!text.includes(ROW) && !text.includes(LINE), `${dir}/${name} writes the drive: row or the opt-in ledger line`);
+    }
 });

@@ -3,7 +3,7 @@
 The single owner of how a devcycle-driven commit's subject matches the target repo's own
 conventions. `playbooks/executing-waves.md` runs the derivation once, before wave 1's first
 commit; `playbooks/finishing-the-cycle.md` names this file when a PR title needs the same
-match. Neither restates the derivation here.
+match.
 
 ## Deriving the convention
 
@@ -11,9 +11,7 @@ Before wave 1's first commit, alongside the branch check `references/branch.md` 
 
 1. Read the repo's own convention docs. The list of what to check is owned by
    `playbooks/reviewing-code.md`'s "Inventory the repo's own conventions before
-   reaching for generic advice" bullet (step 1, Discovery) — read it there and follow
-   it; it is not restated here, so a change to that list never has to be echoed here
-   too.
+   reaching for generic advice" bullet (step 1, Discovery) — read it there and follow it.
 2. Run `git log --oneline -15` on the target repo.
 3. From both, derive: the allowed commit types, scope casing (lowercase, kebab-case, or
    none), subject phrasing (imperative vs. descriptive), ticket-ID encoding (if any), and
@@ -26,8 +24,7 @@ Before wave 1's first commit, alongside the branch check `references/branch.md` 
 
 Record it once, at the top of `.devcycle/ledger.md`, as a `Commit-convention:` preamble
 line alongside the existing `Plan:` / `Branch:` / `Profile:` lines — never in
-`.devcycle/state.md`, which is cycle-shaped, not commit-shaped, and does not survive
-across the multiple commits one cycle makes. Example:
+`.devcycle/state.md`, which is cycle-shaped, not commit-shaped. Example:
 
 ```
 Commit-convention: types fix/feat/chore/docs/refactor/perf/test/build/ci; no scope; imperative subject; no feat avoided (derived from CONTRIBUTING.md + git log)
@@ -40,8 +37,7 @@ set.
 
 ## Scoping the commit
 
-The single owner of how any devcycle-driven commit is scoped, cited rather than restated
-by every playbook that commits.
+The single owner of how any devcycle-driven commit is scoped, cited by every playbook that commits.
 
 Every commit is scoped by an explicit pathspec naming exactly the files this run authored
 — `git commit -- <the file list>` — never `git add -A` and never a bare `git commit`,
@@ -54,3 +50,16 @@ The pathspec names source files and nothing else: evidence files under
 (README), so naming an ignored, untracked evidence path in a pathspec aborts the whole
 commit with "pathspec did not match any file known to git". Evidence files are
 working-tree artifacts a reviewer reads from the checkout, not history.
+
+## The task commit
+
+`playbooks/executing-waves.md` commits each accepted task, green gate included, with
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/task-commit.mjs" --run <id> --task <id> --plan <path> --test-cmd "<cmd>" --subject "<subject>" [--subset-cmd "<cmd>"] [--trailers "<Key: value lines>"]`.
+It commits the task's changed `**Files:**` under § Scoping the commit with the subject as given, and
+adds `Devcycle-Task: <run-id>/<task-id>` to git's trailer block after any `--trailers` the convention
+carries, such as `Co-Authored-By:`. A trailer, because the subject is the repo's convention; the run
+id, because task numbers repeat across cycles on one branch. A re-run that finds a commit since the
+branch cut carrying the trailer and touching only the task's files appends the ledger and run-record
+lines it still lacks instead of committing again. It refuses (exit 2) a task with no open accept (a
+red gate closes one) unless the user decided its review loop later, and returns `needs-user` without
+running the gate while that loop awaits the user.
