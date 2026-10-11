@@ -29,15 +29,14 @@ advanced by `--commit-checkpoint` below; the other is this playbook's own
 
 ## Plan the corpus
 
-Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --plan --cap <n>`, where `<n>` is
-the `knobs:` line's `learnSessionCap`; never walk transcripts directly. The
-engine's corpus spans every live git worktree of the invoking repo — a worktree run mines the main
-checkout and its siblings too — landing all results in the invoking checkout. It
-prints the manifest as JSON. Every stage's work list is its own slice ids minus the manifest's
-`observations`, and `capped: true` is reported as a bounded run, never a failure. It also writes
-the corpus it resolved to `<git-toplevel>/.devcycle/dreaming/corpus.json`, which every `--extract`
-below reads instead of resolving the corpus again — so plan before extracting, and expect that
-file to appear in the repo.
+Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --plan --cap <n>`, where `<n>` is the `knobs:`
+line's `learnSessionCap`; never walk transcripts directly. The engine's corpus spans every live git
+worktree of the invoking repo — a worktree run mines the main checkout and its siblings too —
+landing all results in the invoking checkout. It prints the manifest as JSON.
+Every stage's work list is its own slice ids minus the manifest's `observations`, and `capped: true`
+is reported as a bounded run, never a failure. It also writes the corpus it resolved to
+`<git-toplevel>/.devcycle/dreaming/corpus.json`, which every `--extract` below reads instead of
+resolving the corpus again — so plan before extracting, and expect that file to appear in the repo.
 
 **The journal is the first corpus and is never mined.** `journal.events` counts the run-record
 events since the checkpoint; read them with
@@ -55,9 +54,8 @@ than silently re-mining its slice. Budget the run from `extractBytes`, the model
 from `totalBytes`, which is JSONL on disk.
 
 If `artifactFresh` is true, read `artifactPath` and report it — no mining, screening, recurrence
-check, artifact rewrite, and above all no checkpoint advance, since this run mined none of the
-sessions `--plan` just enumerated. **`--preview` stops there**, landing nothing and deleting no
-memory; a default run carries that artifact straight to **Confirm**.
+check, artifact rewrite, and above all no checkpoint advance, as this run mined none of the sessions
+`--plan` just listed. **`--preview` stops there**; a default run carries it straight to **Confirm**.
 
 ## Mine each slice
 
@@ -89,12 +87,11 @@ pattern that measurably shortened a stage each qualifies; "went well" with no st
 minable**. A win must also be grounded **independently of the work it praises**: set `groundingStage` to the source role of the quoted
 turn, and never let that role be the implementer grading its own work. The implementer's self-report — including a short-path
 (`fast-path`/`sweep`) author's claim about its own edit — is `execution`; an independent re-run, review, or verdict takes its verifying
-role (`task-review`/`branch-review`/`on-device`); the human is `user`. A win whose grounding is `execution`, or carries no stage, is
-rejected at the map stage (`dream.mjs --check-observations`) and dropped from the candidate list — so "went well" narrated by the
-implementer about its own task is **not minable**; the same success seen by a reviewer or the green gate is. A win clusters into a
-culprit-id and lands through the r0–r3 ladder exactly as a friction observation does, and is verified with `verify:
-journal-reinforcement` rather than `journal-recurrence` — a win that recurs after landing reads as `held` (the good practice is being
-followed), not `recurred`.
+role (`task-review`/`branch-review`/`on-device`); the human is `user`. A win whose grounding is
+`execution`, or carries no stage, is rejected at the map stage (`dream.mjs --check-observations`)
+and dropped from the candidate list. A win clusters into a culprit-id and lands through the r0–r3
+ladder exactly as a friction observation does, and is verified with `verify: journal-reinforcement`
+rather than `journal-recurrence` — a win that recurs after landing reads as `held`, not `recurred`.
 
 Each dispatch then verifies its own write with `--check-observations <slice-id>` rather than by
 re-reading the file. A nonzero exit means the write is missing, truncated, or malformed; redo the
@@ -118,15 +115,13 @@ possible at all. **It assigns every candidate a culprit-id before it clusters**:
 `${CLAUDE_PLUGIN_ROOT}/references/culprits.json` slug, or a minted `novel:<slug>` under D1's
 canonicalization rule. Identity is the id; clustering only groups what already has one.
 
-Dedup the minted ids against
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --novel-slugs` before proposing any of them: two
-independently-worded `novel:` slugs for one pattern merge here, with the absorbed forms recorded as
-`aliases`, or the taxonomy never consolidates.
+Dedup the minted ids against `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --novel-slugs` before
+proposing any of them: two independently-worded `novel:` slugs for one pattern merge here, with the
+absorbed forms recorded as `aliases`, or the taxonomy never consolidates.
 
 Suppress with `--check-suppressed "<culprit-id>"`, which answers `{"suppressed": true|false}` — read
 that key, never the absence of it. **Ids may be printed freely.** Matching is equality inside
-structured stores, never against transcript text, so echoing one cannot seed a later hit; the
-never-echo rules this section used to carry are deleted along with the prose matcher they protected.
+structured stores, never against transcript text, so echoing one cannot seed a later hit.
 
 A record that predates culprit-ids cannot be matched this way. Run
 `--legacy-similar "<candidate title>"` and carry any hits into Confirm as a **duplicate hint** for a
@@ -183,8 +178,8 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
 ## Confirm
 
 1. **Read the memory entries accumulated since `last-run:`** — `MEMORY.md` and its linked files under
-   `~/.claude/projects/<escaped-cwd>/memory/` (absolute cwd, every `/` replaced with `-`), filtered
-   by modification time where the memory system exposes it, or all of them on first run.
+   the manifest's `memoryDir`, filtered by modification time where the memory system exposes it,
+   or all of them on first run.
 2. **Check for devcycle config drift.** When the installed `plugin.json` `version` is newer than
    `last-reviewed-devcycle-version:`, run doctor's drift engine — never a second stale-key detector —
    against the user's global `CLAUDE.md` and any repo-level devcycle-wrapper skills:
@@ -215,27 +210,25 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
 6. **Surface any retirement or revert candidates** raised since the last run, proposed exactly like
    fresh candidates — this runs live. The rendered report's `## Verification candidates` section
    likewise surfaces this run's **graduation** (the `escalation` push) and **reinforcement**
-   candidates, gated by the severity thresholds
-   `references/reinforcement-policy.md` owns. Retirement is graduation-gated:
-   a **culprit** retirement candidate is a `held` **r3** lesson (a mechanical check now guards it),
-   a **win** retirement candidate is a **consolidated** win, and an ungraduated held lesson is
-   reported ineligible with the reason it has not graduated. A win folds into a playbook's default
-   flow or a scaffold once it has proven out; record that consolidation with
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --consolidate <culpritId>`, which is what makes
-   the win eligible to retire. A retirement candidate proposes deleting the line and writing a
-   **retirement** lifecycle record. A
-   **revert** candidate, read from "revert-candidates.json" in the fixed doctor directory (playbooks/profiling-sessions.md owns its resolution), proposes the undo
-   *edit* and a **revert** lifecycle record — never `git revert`, since recorded `commit:` shas
+   candidates, gated by the severity thresholds `references/reinforcement-policy.md` owns.
+   Retirement is graduation-gated: a **culprit** retirement candidate is a `held` **r3** lesson (a
+   mechanical check now guards it), a **win** retirement candidate is a **consolidated** win, and an
+   ungraduated held lesson is reported ineligible with the reason it has not graduated. A win folds
+   into a playbook's default flow or a scaffold once it has proven out; record that consolidation
+   with `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --consolidate <culpritId>`, which is what
+   makes the win eligible to retire. A retirement candidate proposes deleting the line and writing a
+   **retirement** lifecycle record. A **revert** candidate, read from "revert-candidates.json" in
+   the fixed doctor directory (playbooks/profiling-sessions.md owns its resolution), proposes the
+   undo *edit* and a **revert** lifecycle record — never `git revert`, since recorded `commit:` shas
    predate squash-merging and often do not resolve on the integration branch. Both carry the
    prior-lifecycle hint: a lifecycle record surfaces here as advice, never a hard suppression (the
    D-5 hint pattern), so re-proposing a retired or reverted lesson stays a human call.
 
-   Write either record with the lifecycle writer, which tags it so it never reads back as a
-   landing: write the JSON to a scratch file and pass it as
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --record-lifecycle "$(cat <scratch-file>)"`.
-   `--record-promotion` would write a promotion-shaped record instead, so a retirement or revert
-   recorded through it never suppresses re-proposal and never reaches the report's retirement
-   counts.
+   Write either record with the lifecycle writer, which tags it so it never reads back as a landing:
+   write the JSON to a scratch file and pass it as `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs"
+   --record-lifecycle "$(cat <scratch-file>)"`. `--record-promotion` would write a promotion-shaped
+   record instead, so a retirement or revert recorded through it never suppresses re-proposal and
+   never reaches the report's retirement counts.
 
    The rendered report's summary carries an `Always-loaded budget: <n> bytes (within budget)` line —
    the net bytes this run adds to the always-loaded surfaces — which reads `over budget — a same-run
@@ -293,27 +286,24 @@ creates `docs/devcycle/`. The trailing `false` makes failure visible — without
 status stands in for the render's — so read a non-zero exit as "no advisory this run": say so in
 the report and leave the artifact out of step 3's ask.
 It is advisory only — nothing in the pipeline reads it, and routing changes only when you read it
-and set a `*Model` knob, which `references/config.md`'s resolution order
-already treats as the one thing that beats the profile. The file is per-repo and is never plugin
-content.
+and set a `*Model` knob, which `references/config.md`'s resolution order already treats as the one
+thing that beats the profile. The file is per-repo and is never plugin content.
 
-3. **Offer to commit the freshly written output.** Read `docTrackingPolicy` from the
-   `knobs:` line. When it permits tracking — `standard` or `all-tracked`, never `all-local`
-   — name the side effect and **ask the user** (AskUserQuestion, mirroring **Confirm**'s per-item
-   batching, 1–4 at a time) whether to commit `docs/devcycle/lessons.md`, the promotion records,
-   and, only if the advisory step above succeeded, `docs/devcycle/routing-advisories.md`, as one
-   scoped Conventional commit: `git add <paths> && git commit -- <paths>` with a `docs(learn): …` or
-   `chore(learn): …` subject, respecting `references/branch.md`'s Committing
-   rule — the prompt is where the user declines on a protected branch. A `git check-ignore <path>`
-   veto narrows that path set and never cancels the ask; an empty set skips it. Never a silent
-   `git add`: any path the policy excludes, a veto drops, or the user declines stays written but
-   uncommitted.
+3. **Offer to commit the freshly written output.** Read `docTrackingPolicy` from the `knobs:` line.
+   When it permits tracking — `standard` or `all-tracked`, never `all-local` — name the side effect
+   and **ask the user** (AskUserQuestion, mirroring **Confirm**'s per-item batching, 1–4 at a time)
+   whether to commit `docs/devcycle/lessons.md`, the promotion records, and, only if the advisory
+   step above succeeded, `docs/devcycle/routing-advisories.md`, as one scoped Conventional commit:
+   `git add <paths> && git commit -- <paths>` with a `docs(learn): …` or `chore(learn): …` subject,
+   respecting `references/branch.md`'s Committing rule — the prompt is where the user declines on a
+   protected branch. A `git check-ignore <path>` veto narrows that path set and never cancels the
+   ask; an empty set skips it. Never a silent `git add`: any path the policy excludes, a veto drops,
+   or the user declines stays written but uncommitted.
 4. **Delete the source memory once its promotion lands, and only if it has one.**
 
-Finally re-render the report in outcome mode —
-`--render-report <candidates.json> --outcome` — so the proposal and the outcome are diffable, and
-rewrite the checkpoint's two lines: `last-run:` to `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`,
-the version to the installed one.
+Finally re-render the report in outcome mode — `--render-report <candidates.json> --outcome` — so
+the proposal and the outcome are diffable, and rewrite the checkpoint's two lines: `last-run:` to
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`, the version to the installed one.
 
 ## Entry points
 

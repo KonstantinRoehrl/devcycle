@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { field } from "./md-field.mjs";
 import { stageEntry, entryLines, CLOSED_STAGE, CLOSED_LINE, FALLBACK } from "./stage-entry.mjs";
+import { isMain } from "./is-main.mjs";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -27,113 +28,131 @@ const VALID_STAGES = (() => {
 })();
 const NONE = new Set(["none", "<tbd>", ""]);
 
-const args = process.argv.slice(2);
-const KNOWN_FLAGS = { "--state": "value" };
-let statePath = ".devcycle/state.md";
-try {
-  const { flags } = parseFlags(args, KNOWN_FLAGS);
-  statePath = requireValue(flags, "--state") ?? statePath;
-} catch (err) {
-  // A flag whose value is missing, that was never read at all, or whose name was dropped so only
-  // a bare path arrived, is a usage error -- never a silently absent flag resolving to the default
-  // state file while the caller had named a different one.
-  console.error(`resume-check: ${err.message}`);
-  console.error("resume-check: usage: resume-check.mjs [--state <path>]");
-  process.exit(1);
-}
-
-let text;
-try { text = readFileSync(statePath, "utf8"); }
-catch { console.error(`resume-check: cannot read state file: ${statePath}`); process.exit(1); }
-
-// references/resume.md § The ownership check: root: pins the file to one checkout, and a
-// differing root: means the file was copied or leaked from another project — never resume it.
-// This runs FIRST and exits on mismatch: every artifact path below is resolved against root:,
-// so once root: is wrong those verdicts are noise, not findings. The script reports; the
-// adopt-or-leave decision is the user's, per that same section.
-const recordedRoot = field(text, "root");
-if (recordedRoot && !NONE.has(recordedRoot)) {
-  // Derived from the state file's OWN directory, not the cwd: the question is whether this file
-  // belongs to the checkout it sits in, which is what makes it correct for nested checkouts and
-  // for git worktrees, whose toplevel is the worktree rather than the main repo.
-  const git = spawnSync("git", ["-C", dirname(statePath), "rev-parse", "--show-toplevel"], {
-    encoding: "utf8",
-  });
-  // Not a repo, or no git at all: a precondition the guard could not confirm never blocks a
-  // legitimate resume — the same posture VALID_STAGES takes toward an unreadable enum.
-  if (git.status === 0) {
-    const real = (p) => { try { return realpathSync(p); } catch { return p; } };
-    const actualRoot = real(git.stdout.trim());
-    if (real(recordedRoot) !== actualRoot) {
-      console.error("resume-check: this state file belongs to another checkout — do not resume it:");
-      console.error(`  - its root:  ${real(recordedRoot)}`);
-      console.error(`  - you are in: ${actualRoot}`);
-      console.error(`  - its request: ${field(text, "request") ?? "(none recorded)"}`);
-      console.error("  Adopt it (rewrite root:, keep everything else) or leave it alone — the user decides.");
-      process.exit(1);
-    }
-  }
-}
-
-const errors = [];
-const stage = field(text, "stage");
-if (!stage || (VALID_STAGES.size > 0 && !VALID_STAGES.has(stage)))
-  errors.push(`stage: "${stage}" is not a valid devcycle stage`);
-
-const root = field(text, "root");
-const baseForRel = root && !NONE.has(root) ? root : dirname(statePath);
-const resolve = (p) => (isAbsolute(p) ? p : join(baseForRel, p));
-
-for (const name of ["spec", "plan", "checklist"]) {
-  const raw = field(text, name);
-  if (raw === null) continue;
-  // A field may carry a path plus a trailing "— note"; take the first whitespace-delimited token.
-  const value = raw.split(/\s+/)[0];
-  if (NONE.has(value) || value.startsWith("none")) continue;
-  if (!existsSync(resolve(value)))
-    errors.push(`${name}: recorded artifact does not exist on disk: ${value}`);
-}
-
-// references/resume.md § Settle the branch: the recorded branch is where any committed work
-// lives, so a recorded topic branch that no longer exists as a ref is a leftover from a
-// completed or abandoned cycle — continue.md step 4 would otherwise try to switch onto a
-// branch that is gone. This is stale-class, exactly like a missing artifact. The other case,
-// the branch still exists but the checkout drifted to another branch, is NOT stale: that is
-// the normal resume-switch continue.md step 4 owns, so this stays silent on it and never
-// compares against HEAD.
-const branchRaw = field(text, "branch");
-if (branchRaw !== null) {
-  const branch = branchRaw.split(/\s+/)[0]; // strip the "(cut from <base> at <sha>)" annotation
-  if (!NONE.has(branch)) {
-    const at = dirname(statePath);
-    // Confirm a repo first, then existence — same fail-open posture as the root check and
-    // VALID_STAGES: a precondition the guard cannot confirm never blocks a resume.
-    const inRepo = spawnSync("git", ["-C", at, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" });
-    if (inRepo.status === 0) {
-      const ref = spawnSync(
-        "git",
-        ["-C", at, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
-        { encoding: "utf8" }
-      );
-      if (ref.status !== 0)
-        errors.push(
-          `branch: recorded branch "${branch}" no longer exists — this state file is a leftover from a completed or abandoned cycle`
-        );
-    }
-  }
-}
-
-if (errors.length) {
-  console.error("resume-check: state file is stale — resolve before continuing:");
-  for (const e of errors) console.error(`  - ${e}`);
-  process.exit(1);
-}
-console.log(`resume-check: ok — stage ${stage}, all recorded artifacts present`);
-if (stage === CLOSED_STAGE) console.log(CLOSED_LINE);
-else {
+// The ownership check, the stale checks and the stage's entry lines, as data: `kind` names the
+// failing class (`unreadable`, `foreign`, `stale`), and a passing check's `lines` are what the CLI
+// prints after its ok line. scripts/wave-setup.mjs runs it in-process; main() prints it.
+export function checkState(statePath) {
+  let text;
   try {
-    for (const line of entryLines(stageEntry(stage))) console.log(line);
+    text = readFileSync(statePath, "utf8");
+  } catch {
+    return { ok: false, kind: "unreadable", errors: [`cannot read state file: ${statePath}`] };
+  }
+
+  // references/resume.md § The ownership check: root: pins the file to one checkout, and a
+  // differing root: means the file was copied or leaked from another project — never resume it.
+  // This runs FIRST and returns on mismatch: every artifact path below is resolved against root:,
+  // so once root: is wrong those verdicts are noise, not findings. The check reports; the
+  // adopt-or-leave decision is the user's, per that same section.
+  const recordedRoot = field(text, "root");
+  if (recordedRoot && !NONE.has(recordedRoot)) {
+    // Derived from the state file's OWN directory, not the cwd: the question is whether this file
+    // belongs to the checkout it sits in, which is what makes it correct for nested checkouts and
+    // for git worktrees, whose toplevel is the worktree rather than the main repo.
+    const git = spawnSync("git", ["-C", dirname(statePath), "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+    });
+    // Not a repo, or no git at all: a precondition the guard could not confirm never blocks a
+    // legitimate resume — the same posture VALID_STAGES takes toward an unreadable enum.
+    if (git.status === 0) {
+      const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+      const actualRoot = real(git.stdout.trim());
+      if (real(recordedRoot) !== actualRoot)
+        return { ok: false, kind: "foreign", recordedRoot: real(recordedRoot), actualRoot, request: field(text, "request") ?? "(none recorded)" };
+    }
+  }
+
+  const errors = [];
+  const stage = field(text, "stage");
+  if (!stage || (VALID_STAGES.size > 0 && !VALID_STAGES.has(stage)))
+    errors.push(`stage: "${stage}" is not a valid devcycle stage`);
+
+  const root = field(text, "root");
+  const baseForRel = root && !NONE.has(root) ? root : dirname(statePath);
+  const resolve = (p) => (isAbsolute(p) ? p : join(baseForRel, p));
+
+  for (const name of ["spec", "plan", "checklist"]) {
+    const raw = field(text, name);
+    if (raw === null) continue;
+    // A field may carry a path plus a trailing "— note"; take the first whitespace-delimited token.
+    const value = raw.split(/\s+/)[0];
+    if (NONE.has(value) || value.startsWith("none")) continue;
+    if (!existsSync(resolve(value)))
+      errors.push(`${name}: recorded artifact does not exist on disk: ${value}`);
+  }
+
+  // references/resume.md § Settle the branch: the recorded branch is where any committed work
+  // lives, so a recorded topic branch that no longer exists as a ref is a leftover from a
+  // completed or abandoned cycle — continue.md step 4 would otherwise try to switch onto a
+  // branch that is gone. This is stale-class, exactly like a missing artifact. The other case,
+  // the branch still exists but the checkout drifted to another branch, is NOT stale: that is
+  // the normal resume-switch continue.md step 4 owns, so this stays silent on it and never
+  // compares against HEAD.
+  const branchRaw = field(text, "branch");
+  if (branchRaw !== null) {
+    const branch = branchRaw.split(/\s+/)[0]; // strip the "(cut from <base> at <sha>)" annotation
+    if (!NONE.has(branch)) {
+      const at = dirname(statePath);
+      // Confirm a repo first, then existence — same fail-open posture as the root check and
+      // VALID_STAGES: a precondition the guard cannot confirm never blocks a resume.
+      const inRepo = spawnSync("git", ["-C", at, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" });
+      if (inRepo.status === 0) {
+        const ref = spawnSync(
+          "git",
+          ["-C", at, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
+          { encoding: "utf8" }
+        );
+        if (ref.status !== 0)
+          errors.push(
+            `branch: recorded branch "${branch}" no longer exists — this state file is a leftover from a completed or abandoned cycle`
+          );
+      }
+    }
+  }
+
+  if (errors.length) return { ok: false, kind: "stale", errors };
+  if (stage === CLOSED_STAGE) return { ok: true, stage, lines: [CLOSED_LINE] };
+  try {
+    return { ok: true, stage, lines: entryLines(stageEntry(stage)) };
   } catch (err) {
-    console.log(`resume-check: no entry line — ${err.message}; fall back to ${FALLBACK}`);
+    return { ok: true, stage, lines: [`resume-check: no entry line — ${err.message}; fall back to ${FALLBACK}`] };
   }
 }
+
+function main(argv) {
+  let statePath = ".devcycle/state.md";
+  try {
+    const { flags } = parseFlags(argv, { "--state": "value" });
+    statePath = requireValue(flags, "--state") ?? statePath;
+  } catch (err) {
+    // A flag whose value is missing, that was never read at all, or whose name was dropped so only
+    // a bare path arrived, is a usage error -- never a silently absent flag resolving to the default
+    // state file while the caller had named a different one.
+    console.error(`resume-check: ${err.message}`);
+    console.error("resume-check: usage: resume-check.mjs [--state <path>]");
+    process.exit(1);
+  }
+
+  const result = checkState(statePath);
+  if (result.kind === "unreadable") {
+    console.error(`resume-check: ${result.errors[0]}`);
+    process.exit(1);
+  }
+  if (result.kind === "foreign") {
+    console.error("resume-check: this state file belongs to another checkout — do not resume it:");
+    console.error(`  - its root:  ${result.recordedRoot}`);
+    console.error(`  - you are in: ${result.actualRoot}`);
+    console.error(`  - its request: ${result.request}`);
+    console.error("  Adopt it (rewrite root:, keep everything else) or leave it alone — the user decides.");
+    process.exit(1);
+  }
+  if (result.kind === "stale") {
+    console.error("resume-check: state file is stale — resolve before continuing:");
+    for (const e of result.errors) console.error(`  - ${e}`);
+    process.exit(1);
+  }
+  console.log(`resume-check: ok — stage ${result.stage}, all recorded artifacts present`);
+  for (const line of result.lines) console.log(line);
+}
+
+if (isMain(import.meta.url, process.argv[1])) main(process.argv.slice(2));

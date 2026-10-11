@@ -158,6 +158,17 @@ test("fails when a task edits a budgeted surface file but omits the baseline fix
   assert.match(r.out, /Task 1: .*playbooks\/planning-waves\.md.*tests\/fixtures\/context-budget\.json/);
 });
 
+test("fails when a task edits a command but omits the context baseline every entry point declares", () => {
+  const r = run(
+    COMPLETE.replace(
+      "- Create: \`a.mjs\`",
+      "- Modify: \`commands/continue.md\`\n- Modify: \`tests/fixtures/surface-budget.json\`\n- Modify: \`docs/decisions/README.md\`",
+    ),
+  );
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: .*commands\/continue\.md.*tests\/fixtures\/context-budget\.json/);
+});
+
 test("passes once the surface edit lists both baseline fixtures and the decisions log that records them", () => {
   const r = run(
     SURFACE_EDIT.replace(
@@ -200,7 +211,7 @@ test("names the missing file's own reason and keys the suggested override on it,
   assert.equal(r.code, 1, r.out);
   assert.match(
     r.out,
-    /Task 1: \*\*Files:\*\* edits playbooks\/planning-waves\.md but omits docs\/decisions\/README\.md — add it \(a fixture raise needs a budget: line there\) or record a "- Budget-fixture override: docs\/decisions\/README\.md — <reason>"/,
+    /Task 1: \*\*Files:\*\* edits playbooks\/planning-waves\.md but omits docs\/decisions\/README\.md — add it \(every fixture change needs a budget: line there\) or record a "- Budget-fixture override: docs\/decisions\/README\.md — <reason>"/,
   );
   assert.doesNotMatch(r.out, /size baseline|override: playbooks\//);
 });

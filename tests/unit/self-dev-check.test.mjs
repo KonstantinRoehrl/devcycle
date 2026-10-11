@@ -11,7 +11,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
-import { preflight, assertLanding, pluginDigest } from "../../scripts/self-dev-check.mjs";
+import { preflight, assertLanding, pluginDigest, repoCounterpart } from "../../scripts/self-dev-check.mjs";
 import { hashTree, digest40 } from "../../scripts/tree-hash.mjs";
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "scripts", "self-dev-check.mjs");
@@ -285,4 +285,20 @@ test("the CLI refuses --assert with no --expect rather than passing an empty che
   const r = spawnSync("node", [SCRIPT, "--assert"], { encoding: "utf8" });
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, /--expect/);
+});
+
+test("a repo's untracked .claude/ content — a worktree checkout, local settings — is never compared", () => {
+  const pluginRoot = makePlugin();
+  writeInto(pluginRoot, ".claude/CLAUDE.md", "# instructions\n");
+  const repoRoot = makeSourceRepo();
+  writeInto(repoRoot, ".claude/CLAUDE.md", "# instructions\n");
+  commitAll(repoRoot, "docs: ship the instructions file");
+  writeInto(repoRoot, ".claude/worktrees/wt/scripts/shipped.mjs", "export const shipped = 3;\n");
+  writeInto(repoRoot, ".claude/settings.local.json", "{}\n");
+
+  const compared = Object.keys(repoCounterpart(pluginRoot, repoRoot)).filter((p) => p.startsWith(".claude/"));
+  assert.deepEqual(compared, [".claude/CLAUDE.md"]);
+  const out = preflight({ pluginRoot, repoRoot }).lines.join("\n");
+  assert.match(out, /matches the repo/);
+  assert.doesNotMatch(out, /worktrees|settings\.local/);
 });

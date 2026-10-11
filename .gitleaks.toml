@@ -1,0 +1,7 @@
+# Keep gitleaks' maintained rules; the allowlist below is the only addition.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic drive token in tests/unit/wave-setup.test.mjs — a fixture, not a credential"
+regexes = ['''0f1e2d3c4b5a69788796a5b4c3d2e1f0''']

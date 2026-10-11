@@ -3,17 +3,13 @@
 // record files, extracted from three drifted copies in dream.mjs, promotions.mjs, and
 // resume-check.mjs (maintenance finding unrecorded-duplication:581e1153), and the single scan of
 // a per-file record directory, which the promotions and maintenance-findings stores share.
-// `[ \t]*` — never `\s*` — stops the capture at the field's own newline, so a field left blank on
-// its own line cannot read the following "- key:" line back as its value. A miss returns null, the
-// honest sentinel: "" is a legitimate present-but-blank value. Callers needing string semantics
+// The parser itself is md-field-core.mjs's, re-exported here. Callers needing string semantics
 // (`.split(",")`, defaulting) use fieldText.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { field } from "./md-field-core.mjs";
 
-export function field(text, key) {
-  const m = String(text).match(new RegExp(`^- ${key}:[ \\t]*(.*)$`, "m"));
-  return m ? m[1].trim() : null;
-}
+export { field };
 
 export const fieldText = (text, key) => field(text, key) ?? "";
 

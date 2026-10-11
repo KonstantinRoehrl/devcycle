@@ -4,7 +4,7 @@
 - culprit-kind: docs-drift
 - severity: medium
 - confidence: verified
-- affected-files: docs/playbooks/*/README.md, CLAUDE.md
+- affected-files: docs/playbooks/*/README.md, .claude/CLAUDE.md
 - first-seen: 2026-09-20
 - last-seen: 2026-09-20
 - passes: 1

@@ -19,14 +19,13 @@ is a cache: every artifact is on disk, so the pipeline survives `/clear` and res
 
 ## Before the first confirmation
 
-Before the first user confirmation, this command may only read the repository, write
-`.devcycle/state.md` in the shape `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file
-gives, resolve config, then mint the run record and append its `session` line. No
-branch, no commit. These are the pipeline's first actions, not a side effect of the first stage
-transition: a cycle interrupted mid-scoping still leaves something to resume from. A state file at
-`stage: done` is reused — carry `configured:`, re-resolve `knobs:`, mint a fresh `run:` and
-`session` line, reset the rest, ask nothing; not a collision. At any other stage, surface the
-collision and ask — never overwrite it. After writing the state file, in this order:
+Until the first confirmation, this command may only read the repository, write `.devcycle/state.md`
+in the shape `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file gives, resolve config,
+then mint the run record and append its `session` line. No branch, no commit. These are the
+pipeline's first actions, so a cycle interrupted mid-scoping still leaves something to resume from.
+A state file at `stage: done` is reused — carry `configured:`, re-resolve `knobs:`, mint a fresh
+`run:` and `session` line, reset the rest, ask nothing; not a collision. At any other stage, surface
+the collision and ask — never overwrite it. After writing the state file, in this order:
 
 1. **Resolve knobs** per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel:
 
@@ -44,7 +43,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --walkthroughModel '${user_config.walkthroughModel}' \
   --learnStalenessSessions '${user_config.learnStalenessSessions}' \
   --learnStalenessDays '${user_config.learnStalenessDays}' \
-  --learnSessionCap '${user_config.learnSessionCap}'
+  --learnSessionCap '${user_config.learnSessionCap}' \
+  --subagentBudget '${user_config.subagentBudget}'
 ```
 
 2. **First-run test.** Only when the state file's `configured:` reads `no` **and** the `explicit:`
@@ -61,7 +61,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
    plugin.json version> --plugin-sha <node "${CLAUDE_PLUGIN_ROOT}/scripts/self-dev-check.mjs"
    --plugin-digest> --profile <profile> --knob gitPolicy=<value> --knob reviewDepth=<value>
    --knob crossModelReview=<value> --knob onDeviceGate=<value> --knob implementerModel=<value>
-   --knob taskReviewerModel=<value> --knob branchReviewModel=<value> --knob walkthroughModel=<value>`,
+   --knob taskReviewerModel=<value> --knob branchReviewModel=<value> --knob walkthroughModel=<value>
+   --knob subagentBudget=<value>`,
    every value read off the `knobs:` line, its id on the `run:` row. That content digest is the
    plugin identifier, and not `git rev-parse` because the installed plugin is not a git checkout:
    the git form answers about an unrelated enclosing repository, or fails outright. Then:
@@ -70,12 +71,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
 While reading the plugin version, also run the evidence-contract staleness preflight: `node
 "${CLAUDE_PLUGIN_ROOT}/scripts/contract-staleness-check.mjs" --plugin-root "${CLAUDE_PLUGIN_ROOT}"
 --repo-root <the target repo root>`. It is advisory and never blocks — on a `stale` line, surface
-its reinstall warning to the user before triage; any other line proceeds silently.
-
-Alongside it, run the self-development preflight: `node
-"${CLAUDE_PLUGIN_ROOT}/scripts/self-dev-check.mjs" --preflight --repo <the target repo root>`. It is
-inert unless the repo under work is this plugin's own source, and advisory even there — every
-outcome exits 0, so it never blocks — but it is what records the installed-plugin baseline the
+its reinstall warning to the user before triage; any other line proceeds silently. Alongside it, run
+the self-development preflight: `node "${CLAUDE_PLUGIN_ROOT}/scripts/self-dev-check.mjs" --preflight
+--repo <the target repo root>`. It is inert unless the repo under work is this plugin's own source,
+and advisory even there (every outcome exits 0) — but it records the installed-plugin baseline the
 finish stage's landing gate reads. Surface any line it prints alongside the staleness warning.
 
 ## Triage the input
@@ -138,35 +137,28 @@ stages' single source of truth — `scripts/validate.mjs` reads its literal form
 2. **audit** (audit-shaped input only) — in place of scoping. It writes
    `docs/audits/YYYY-MM-DD-<topic>.md`, recorded on the state file's `audit:` line; a cycle that
    ends at the report, no change selected, closes there.
-3. **diagnosis** (bugs only) — `superpowers:systematic-debugging` (upstream, unmodified):
-   reproduce the failure, then isolate the root cause. The stage ends by writing a root-cause
-   report to `.devcycle/diagnosis.md` — reproduction steps, the established cause stated with the
-   command or output that establishes it (per evidence.md § Authored claims), the surfaces
-   involved — recorded on the `diagnosis:` line, and pinned precisely
-   enough for planning to turn the reproduction into the fix task's failing test. How to fix it
-   belongs to brainstorm, which takes the report as its context; if diagnosis overturns the
-   confirmed scope, return to scoping.
-4. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified) with three notes on top.
-   Ask in AskUserQuestion batches of 1–4 with concrete options plus Other, where upstream asks
-   one question at a time. And gate upstream's "commit the design document to git" step per
-   `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking: read `docTrackingPolicy` from
-   the `knobs:` line first, then `git check-ignore` the spec's path — write the
-   file and skip the commit unless both permit it; a permitted commit follows
-   `${CLAUDE_PLUGIN_ROOT}/references/branch.md` § Committing. Before that commit gate, run
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <spec-path>` — a blocking lint
-   that flags an unguarded `path.ext:line` reference or a bare count claim, cleared by a
-   `(verified: <cmd>)` or `(assumption)` marker on the same or an adjacent line (the same backstop
-   `planning-waves.md` runs on the plan). An approved spec transitions to planning below,
-   never directly to upstream's writing-plans.
+3. **diagnosis** (bugs only) — `superpowers:systematic-debugging` (upstream, unmodified): reproduce
+   the failure, then isolate the root cause. The stage ends by writing a root-cause report to
+   `.devcycle/diagnosis.md` — reproduction steps, the established cause stated with the command or
+   output that establishes it (per evidence.md § Authored claims), the surfaces involved — recorded
+   on the `diagnosis:` line, and pinned precisely enough for planning to turn the reproduction into
+   the fix task's failing test. How to fix it belongs to brainstorm, which takes the report as its
+   context; if diagnosis overturns the confirmed scope, return to scoping.
+4. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified) with three notes on top. Ask
+   in AskUserQuestion batches of 1–4 with concrete options plus Other, where upstream asks one
+   question at a time. And gate upstream's "commit the design document to git" step per
+   `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking: read `docTrackingPolicy` from the
+   `knobs:` line first, then `git check-ignore` the spec's path — write the file and skip the commit
+   unless both permit it; a permitted commit follows `${CLAUDE_PLUGIN_ROOT}/references/branch.md`
+   § Committing. Before that commit gate, run `node
+   "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <spec-path>` — a blocking lint that
+   flags an unguarded `path.ext:line` reference or a bare count claim, cleared by a
+   `(verified: <cmd>)` or `(assumption)` marker on the same or an adjacent line. An approved spec
+   transitions to planning below, never directly to upstream's writing-plans.
 5. **planning** — wave-based plan.
 6. **execution**.
 7. **branch-review**.
-8. **on-device** — skipped only when the change has no rendered surface (record the skip in the
-   handoff).
+8. **on-device** — skipped only when no rendered surface changed (record the skip in the handoff).
 9. **finish** — closing the state file with `stage: done`.
-
-Whether planning and execution run devcycle-native or overlay their upstream counterparts is the
-`profile`'s call, read by each playbook from the `knobs:` line against the profile table in
-`references/config.md`.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

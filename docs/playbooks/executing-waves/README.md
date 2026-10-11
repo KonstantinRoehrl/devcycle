@@ -39,11 +39,21 @@ generating or updating the on-device checklist the same wave a rendered change l
 deferred to the end. At the last wave's boundary, execution updates `.devcycle/state.md` to
 `stage: branch-review` and hands off to `reviewing-the-branch.md`.
 
+Each step's bookkeeping runs through one script, so a session spends one call where it used to
+spend several: `wave-setup.mjs` hands `/devcycle:continue` the wave's resume position as one JSON
+object, `task-dispatch.mjs` writes a brief and its ledger line, `task-intake.mjs` checks and lints
+the implementer's report, `task-verdict.mjs` records the reviewer's verdict, and `task-commit.mjs`
+runs the green gate and commits the task with a `Devcycle-Task:` trailer, finding an earlier commit
+of the same task instead of committing twice. Every ledger line they append carries an idempotency
+key, so a session that crashed mid-step re-runs it without duplicating a line.
+
 ## How it fits
 - Up: [the pipeline](../../pipeline/README.md) — where Execution sits, between Planning and
   Branch review.
 - Source: [`playbooks/executing-waves.md`](../../../playbooks/executing-waves.md) — the behavior
   spec this page summarizes.
+- Unattended: [running execution unattended](unattended.md) — a driver walks the waves for you
+  after you opt in at planning's close.
 
 ```mermaid
 ---

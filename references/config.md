@@ -39,7 +39,7 @@ Only command text is templated — `${user_config.KEY}` substitutes in a command
 loads, never in a file a stage opens with Read — so knobs reach stages through one channel:
 
 - **Commands resolve.** Every entry command except `/devcycle:doctor`, which consumes no knob,
-  runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs"` with all thirteen rendered
+  runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs"` with all fourteen rendered
   placeholders as its first configuration step. That invocation is the only place a
   `${user_config.<key>}` may appear; `scripts/validate.mjs` fails one anywhere else. It prints
   `knobs: <key>=<value> …` in roster order and `explicit: <the keys that won at step 1>`. A
@@ -54,7 +54,10 @@ loads, never in a file a stage opens with Read — so knobs reach stages through
   cycle's values over changed global ones. A stage that finds neither stops and asks for its entry
   command to be re-run (`/devcycle:continue` inside a cycle); it never falls back to defaults on
   its own. Profile-row values — round cap, evidence tail, engine, audit, learn and maintenance
-  depth — are looked up in § The profile under the `knobs:` line's `profile`.
+  depth — are looked up in § The profile under the `knobs:` line's `profile`. The one value read
+  elsewhere is `subagentBudget`: the hooks module (`hooks/devcycle-mod.mjs`) takes it from the
+  `options` Claude Code hands its `register`, never from the `knobs:` line, which still prints it
+  for the state file. Its `ROSTER` entry is `live`, so `--compare` leaves it out.
 - **Drift notice.** Values are global, as `/plugin configure` stores them — there is no per-repo
   value. Where the state file's `configured:` line records a KEY=VALUE list, `/devcycle:cycle`
   and `/devcycle:continue` rerun their final resolver invocation with
@@ -89,6 +92,7 @@ carry the same keys; without it the copies drift one release at a time.
 | `learnStalenessSessions` | § Learn staleness | `5` |
 | `learnStalenessDays` | § Learn staleness | `14` |
 | `learnSessionCap` | § Learn staleness | `100` |
+| `subagentBudget` | `hooks/devcycle-mod.mjs` | `warn` |
 
 An unset knob renders as a literal `${user_config...}` placeholder, empty, or `auto`; the
 resolution order above owns what "unset" then resolves to, and this column only names the endpoint.

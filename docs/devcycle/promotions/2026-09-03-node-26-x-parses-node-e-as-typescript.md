@@ -2,7 +2,7 @@
 - promotion-type: doc-edit
 - cluster-signature: novel:node26-dash-e-parsed-as-typescript|2 occurrences|session <redacted-session>
 - files-touched: ~/.claude/devcycle/learnings/devcycle-cc59abf5/lessons.md, ~/.claude/devcycle/learnings/global/lessons.md
-- affected-files: CLAUDE.md
+- affected-files: .claude/CLAUDE.md
 - landed: 2026-09-03
 - commit: 
 - plugin-version: 0.18.2

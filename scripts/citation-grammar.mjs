@@ -15,6 +15,47 @@ const NAME = "[A-Za-z0-9._-]+";
 export const prefixedPattern = (dirs = GRAMMAR_DIRS) =>
   new RegExp(String.raw`\$\{CLAUDE_PLUGIN_ROOT\}\/((?:${dirs.join("|")})\/${NAME}\.md)`, "g");
 export const PREFIXED = prefixedPattern();
+// The separator between a command's words: horizontal whitespace or a single line break with any
+// indentation after it — so an invocation markdown-wraps across a line and is still one — but never a
+// line break followed by a blank line, so a paragraph break cannot join unrelated prose into a hit. A
+// `\` before the line ending is deliberately NOT a separator, and re-adding it would be a regression:
+// that is CommonMark's hard-break syntax as much as it is a shell continuation, the two are textually
+// identical, and with no exemption marker prose that merely hard-breaks near a path would fail CI with
+// no way out but rewording. The cost accepted for that is missing `node \` + newline + path, a form
+// that realistically appears only inside fenced code blocks.
+export const SEP = String.raw`(?:[ \t]|\r?\n(?![ \t]*\r?\n))`;
+// The section-read form: a step that needs one `##` section of a reference runs
+// `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/<file>.md <slug>`. Group 1 is the
+// reference, group 2 the slug; only references are read by section. The slug is the call's last
+// argument, as read-section.mjs takes exactly two: after any spaces or tabs, the call ends — a closing
+// backtick, a line break, the end of the text, or a shell operator (`|`, `>`, `<`, `;`, `&`, `)`). So
+// `alpha.extra` is no read of `alpha`, and neither is `alpha extra`.
+const SECTION_READ_CALL = "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs";
+const sectionReadPattern = (reference, slug, flags) =>
+  new RegExp(
+    String.raw`\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/read-section\.mjs"?${SEP}+${reference}${SEP}+${slug}(?=[ \t]*(?:[\x60|><;&)\r\n]|$))`,
+    flags
+  );
+export const SECTION_READ = sectionReadPattern(String.raw`(references\/${NAME}\.md)`, "([a-z0-9_-]+)", "g");
+// The form written out with its placeholders, as the grammar's owner documents it, is no call.
+const SECTION_READ_TEMPLATE = sectionReadPattern(String.raw`references\/<file>\.md`, "<slug>", "y");
+
+// The text with every section read blanked but its line breaks, so line numbers still hold and a
+// section read's reference is never mistaken for a bare mention.
+export const withoutSectionReads = (text) => text.replace(SECTION_READ, (m) => m.replace(/[^\n]/g, ""));
+
+// Each read-section.mjs call SECTION_READ does not parse — an uppercase slug, a quoted argument, a
+// tail past the slug — as written up to the end of its line or code span. Unparsed, it is a read no
+// check resolves and no closure counts.
+export function unparsedSectionReads(text) {
+  const parsed = new Set([...text.matchAll(SECTION_READ)].map((m) => m.index));
+  const out = [];
+  for (let i = text.indexOf(SECTION_READ_CALL); i !== -1; i = text.indexOf(SECTION_READ_CALL, i + 1)) {
+    SECTION_READ_TEMPLATE.lastIndex = i;
+    if (!parsed.has(i) && !SECTION_READ_TEMPLATE.test(text)) out.push(text.slice(i).match(/^[^`\n]*/)[0]);
+  }
+  return out;
+}
 const BACK_EDGE = prefixedPattern(["playbooks", "commands"]);
 // The lookbehind keeps a path inside a longer one (`docs/playbooks/…`, `tests/fixtures/references/…`)
 // and the prefixed form from counting as bare; a `<name>` placeholder never matches the name class.
@@ -116,14 +157,18 @@ export function ownerSentenceErrors(rel, text) {
 
 export function bareReadErrors(rel, text) {
   return sentences(text)
-    .filter((s) => !has(PREFIXED, s.text) && has(BARE, s.text) && IMPERATIVE_READ.test(s.text))
+    .filter((s) => {
+      const t = s.text.replace(SECTION_READ, "");
+      return !has(PREFIXED, t) && has(BARE, t) && IMPERATIVE_READ.test(t);
+    })
     .map((s) => hit(rel, s.line, "bare-read", `a step that reads a file must prefix it: "${excerpt(s.text)}"`));
 }
 
+// A section read's reference is check 4c's to resolve, so a missing one is reported once, there.
 export function bareExistsErrors(rel, text, exists) {
   const out = [];
   let fenced = false;
-  text.split("\n").forEach((l, i) => {
+  withoutSectionReads(text).split("\n").forEach((l, i) => {
     if (FENCE.test(l)) fenced = !fenced;
     else if (!fenced)
       for (const m of l.matchAll(BARE)) if (!exists(m[1])) out.push(hit(rel, i + 1, "bare-exists", `${m[1]} names no file in the plugin`));
@@ -222,9 +267,26 @@ export function referenceReadErrors({ references, surface, scripts }) {
     .filter((f) => {
       const own = `references/${f}`;
       const prefixed = `\${CLAUDE_PLUGIN_ROOT}/${own}`;
-      return !surface.some((s) => s.rel !== own && s.text.includes(prefixed)) && !consumers.some((script) => namesInCode(script, f));
+      const reads = (s) => s.text.includes(prefixed) || [...s.text.matchAll(SECTION_READ)].some((m) => m[1] === own);
+      return !surface.some((s) => s.rel !== own && reads(s)) && !consumers.some((script) => namesInCode(script, f));
     })
-    .map((f) => hit(`references/${f}`, 0, "reference-read", `references/${f}: no consumer — no surface file reads it prefixed and no script reads it`));
+    .map((f) => hit(`references/${f}`, 0, "reference-read", `references/${f}: no consumer — no surface file reads it prefixed or by section and no script reads it`));
+}
+
+// Who reads each reference, for validate.mjs check 15's fan-in threshold: every reference a surface
+// file other than itself reads by prefix or by section, mapped to the set of its readers' paths.
+export function referenceReaders(surface) {
+  const readers = new Map();
+  for (const { rel, text } of surface) {
+    const prefixed = [...text.matchAll(PREFIXED)].map((m) => m[1]).filter((p) => p.startsWith("references/"));
+    const bySection = [...text.matchAll(SECTION_READ)].map((m) => m[1]);
+    for (const ref of [...prefixed, ...bySection]) {
+      if (ref === rel) continue;
+      if (!readers.has(ref)) readers.set(ref, new Set());
+      readers.get(ref).add(rel);
+    }
+  }
+  return readers;
 }
 
 export const grammarFiles = (root) =>

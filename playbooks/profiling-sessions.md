@@ -9,20 +9,19 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" [--all] [--since <date>] [--unti
 ```
 
 Add `--json` for machine output, `--depth` for the bare depth probe — the probe ignores the window
-flags and exits non-zero with a one-line reason when it cannot resolve a depth. Do not walk
-transcripts yourself. What it prints is the finished report, owned end to end by
-`scripts/doctor.mjs`: read it, splice the two sections below into it, carry its two overview blocks
-as the next section says, and retype none of it.
+flags and exits non-zero with a one-line reason when it cannot resolve a depth. What it prints is
+the finished report, owned end to end by `scripts/doctor.mjs`: read it, splice the two sections
+below into it, carry its two overview blocks as the next section says, and retype none of it.
 
 ## Scope — what the script actually covers, and announce it
 
-With no flags the script scans **every transcript under `~/.claude/projects`** — not this
-session — and keeps the sessions whose records carry a `devcycle:`-prefixed attribution id, which
-every devcycle slash command records. `--all` widens it to every transcript, tagged or not.
+With no flags the script scans **every transcript under `~/.claude/projects`**
+(`$CLAUDE_CONFIG_DIR/projects` if set) — not this session — and keeps the sessions whose
+records carry a `devcycle:`-prefixed attribution id, which every devcycle slash command records.
+`--all` widens it to every transcript, tagged or not.
 
 `--since`/`--until` narrow what is measured within each kept session and drop sessions with no
-records in the window; membership itself is still decided over each session's whole transcript,
-window or not.
+records in the window; membership itself is still decided over each session's whole transcript.
 
 State the scope the run actually used — "every `devcycle:`-tagged transcript", "every
 transcript, tagged or not", or the window — in the announce. The report states it again in its
@@ -168,10 +167,10 @@ to draft. For each finding it chose:
 1. Take the draft from the script, never hand-composed:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --issue-body <slug>`. The slug may name a culprit
    (drafting a `[culprit:<slug>]` issue) OR a Compliance candidate — `inherited-model`,
-   `missing-workload`, `main-thread-browser`, `general-purpose-search`, `sensor-inactive` — drafting a
-   `[compliance:<slug>]` issue from the same section the report renders, OR `unpriced-model` —
-   drafting a `[doctor:unpriced-model]` issue for the models the report names as unpriced or
-   provisionally priced. Its `repo:` line names the
+   `missing-workload`, `main-thread-browser`, `general-purpose-search`, `sensor-inactive`,
+   `mod-inactive` — drafting a `[compliance:<slug>]` issue from the same section the report renders,
+   OR `unpriced-model` — drafting a `[doctor:unpriced-model]` issue for the models the report names
+   as unpriced or provisionally priced. Its `repo:` line names the
    repo every command below targets — read the slug from there, never from this file.
 2. Screen it before anyone sees it: write it to a file, then run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`. A draft that fails

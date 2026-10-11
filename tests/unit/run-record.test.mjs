@@ -724,3 +724,115 @@ test("append: gate-ran and depth-breach are event values, and gate-ran carries a
   assert.strictEqual(ev("--event", "depth-breach").status, 0);
   assert.notStrictEqual(ev("--event", "gate-ran", "--result", "maybe").status, 0);
 });
+
+const TRACE = {
+  kind: "agent-trace", runId: "0f1e2d3c4b5a6978", stage: "execution", agentId: "a27cbd72da7b3b62f",
+  agentType: "devcycle:implementer", requestedModel: null, resolvedModel: "claude-sonnet-5-5", parentAgentId: null,
+  background: false, fork: false, steps: 14, peakDepth: 152340, window: 1000000, windowAssumed: false,
+  peakBand: "over-budget", toolResultChars: 48211, warned: 1, refused: 0, reason: "answer", isAborted: false,
+  ts: "2026-10-07T10:40:30Z",
+};
+const expectedTrace = (runId) => {
+  const { ts: _ts, ...fields } = TRACE;
+  return { ...fields, runId };
+};
+const traceSub = () =>
+  subSchemaFor(JSON.parse(readFileSync(join(REPO_ROOT, "tests/fixtures/run-record.schema.json"), "utf8")), "agent-trace");
+
+test("validate: null passes only where the property admits it, and a boolean field takes only a boolean", () => {
+  const sub = traceSub();
+  assert.deepEqual(validate(TRACE, sub), []);
+  assert.deepEqual(validate({ ...TRACE, window: null, peakBand: null, agentType: null, resolvedModel: null }, sub), []);
+  assert.match(validate({ ...TRACE, reason: null }, sub).join("; "), /"reason" value "null" is not one of/);
+  assert.match(validate({ ...TRACE, fork: "false" }, sub).join("; "), /"fork" must be a boolean/);
+  assert.match(validate({ ...TRACE, window: 1.5 }, sub).join("; "), /"window" must be an integer/);
+});
+
+test("append: an agent-trace row coerces counts and booleans, writes null where the schema admits it, and stamps ts", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-trace");
+  const r = run(["append", "--run", runId, "--repo", "/tmp/demo-trace", "--kind", "agent-trace", "--stage", "execution",
+    "--agentId", "a27cbd72da7b3b62f", "--agentType", "devcycle:implementer", "--requestedModel", "null",
+    "--resolvedModel", "claude-sonnet-5-5", "--parentAgentId", "null", "--background", "false", "--fork", "false",
+    "--steps", "14", "--peakDepth", "152340", "--window", "1000000", "--windowAssumed", "false",
+    "--peakBand", "over-budget", "--toolResultChars", "48211", "--warned", "1", "--refused", "0",
+    "--reason", "answer", "--isAborted", "false"], runs);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const { ts, ...line } = lastLine("/tmp/demo-trace", runId);
+  assert.match(ts, /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual(line, expectedTrace(runId));
+});
+
+test("append: an agent-trace row with no known window carries null window and band", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-trace-nowin");
+  const r = run(["append", "--run", runId, "--repo", "/tmp/demo-trace-nowin", "--kind", "agent-trace", "--stage", "planning",
+    "--agentId", "b1", "--agentType", "null", "--requestedModel", "null", "--resolvedModel", "null", "--parentAgentId", "null",
+    "--background", "true", "--fork", "false", "--steps", "0", "--peakDepth", "0", "--window", "null",
+    "--windowAssumed", "false", "--peakBand", "null", "--toolResultChars", "0", "--warned", "0", "--refused", "0",
+    "--reason", "aborted", "--isAborted", "true"], runs);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const line = lastLine("/tmp/demo-trace-nowin", runId);
+  assert.equal(line.window, null);
+  assert.equal(line.peakBand, null);
+  assert.equal(line.agentType, null);
+  assert.equal(line.background, true);
+  assert.equal(line.isAborted, true);
+});
+
+test("append: null is refused where the schema does not admit it, and a non-boolean flag is refused", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-trace-bad");
+  const base = ["append", "--run", runId, "--repo", "/tmp/demo-trace-bad", "--kind", "agent-trace", "--stage", "planning",
+    "--agentId", "b1", "--agentType", "null", "--requestedModel", "null", "--resolvedModel", "null", "--parentAgentId", "null",
+    "--background", "false", "--steps", "0", "--peakDepth", "0", "--window", "null", "--windowAssumed", "false",
+    "--peakBand", "null", "--toolResultChars", "0", "--warned", "0", "--refused", "0", "--isAborted", "false"];
+  const nullReason = run([...base, "--fork", "false", "--reason", "null"], runs);
+  assert.notStrictEqual(nullReason.status, 0);
+  assert.match(nullReason.stderr, /"reason" value "null" is not one of/);
+  const maybeFork = run([...base, "--fork", "maybe", "--reason", "answer"], runs);
+  assert.notStrictEqual(maybeFork.status, 0);
+  assert.match(maybeFork.stderr, /"fork" must be a boolean/);
+});
+
+// Execution drive (spec 5.3): the driver appends one `drive` row as each driven session ends, from
+// Node rather than through this CLI, so writeLine — the one validated append — is exported for it.
+const DRIVE_ROW = {
+  kind: "drive",
+  runId: "0f1e2d3c4b5a6978",
+  sessionHash: "3b1f8c0d2e4a6b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
+  startedAt: "2026-10-08T09:00:00Z",
+  endedAt: "2026-10-08T09:40:00Z",
+  model: "claude-opus-5-5",
+  ledgerLinesBefore: 12,
+  ledgerLinesAfter: 19,
+  committedBefore: 2,
+  committedAfter: 3,
+  exitReason: "handoff",
+  stallCount: 0,
+};
+
+test("the drive kind accepts a session-end row with its optional fields and rejects an unknown exitReason", () => {
+  const schema = JSON.parse(readFileSync(join(REPO_ROOT, "tests/fixtures/run-record.schema.json"), "utf8"));
+  const sub = subSchemaFor(schema, "drive");
+  assert.ok(sub, "the schema must declare a drive kind");
+  assert.deepEqual(validate(DRIVE_ROW, sub), []);
+  assert.deepEqual(
+    validate({ ...DRIVE_ROW, exitReason: "stopped", stopReason: "needs-user", costUsd: 1.25, depthTokens: 182000, guardDenials: 1, waveAtStart: 3 }, sub),
+    []
+  );
+  assert.match(validate({ ...DRIVE_ROW, exitReason: "crashed" }, sub).join("; "), /"exitReason" value "crashed" is not one of/);
+  assert.match(validate({ ...DRIVE_ROW, stopReason: "bored" }, sub).join("; "), /"stopReason" value "bored" is not one of/);
+  const noStalls = { ...DRIVE_ROW };
+  delete noStalls.stallCount;
+  assert.deepEqual(validate(noStalls, sub), ['missing required field "stallCount"']);
+});
+
+test("writeLine is exported and appends one validated row to the run's record", async () => {
+  const { writeLine } = await import("../../scripts/run-record.mjs");
+  assert.equal(typeof writeLine, "function", "run-record.mjs must export writeLine");
+  process.env.DEVCYCLE_RUNS_DIR = makeTempDir("rr-drive-");
+  writeLine("/tmp/demo-drive", DRIVE_ROW.runId, DRIVE_ROW);
+  const rows = readFileSync(recordPath("/tmp/demo-drive", DRIVE_ROW.runId), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(rows, [DRIVE_ROW]);
+});

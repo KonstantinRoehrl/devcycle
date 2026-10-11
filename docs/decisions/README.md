@@ -5,6 +5,355 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-10 — Closures stop creeping back up
+
+**Decision:** the two files sitting exactly at their line ceilings get headroom by deletion and
+compression, never by moving text into another file: `commands/cycle.md` 174 → 164 lines and
+`playbooks/learning-from-sessions.md` 320 → 310. The ceilings (`commandMax` 174, `playbookMax`
+320) stay. `scripts/validate.mjs` check 9 now prints a notice on stdout, never a failure, for a
+command or playbook within `NEAR_CEILING_LINES` (5) lines of its ceiling, so growth toward a
+ceiling is visible before an edit fails on it. Commands are now gated as entry points: check 15
+holds each `commands/*.md`, like each playbook, to a `tests/fixtures/context-budget.json` entry for
+its own bytes plus every reference it cites, set at today's measured refs-only figure, and
+`scripts/budget-fixture-check.mjs` requires that fixture for a command edit. A reference read by
+prefix or by section from `FAN_IN_THRESHOLD` (8) or more surface files must carry its own entry,
+gating only its own bytes, set at today's figure; an entry stays valid and keeps gating after the
+reference falls below the threshold.
+
+The ceilings ratchet down as well as up. Check 15 fails a `context-budget.json` entry that sits
+more than max(`RATCHET_FRACTION` 1%, `RATCHET_MIN_BYTES` 256 B) above its measured bytes, and
+prints the fixture and `budget:` lines to paste, so a cut lowers its ceiling in the same change.
+Check 28 now fails a fixture value that differs from the newest `budget:` line for its key, in
+either direction, so a lowered entry records its figure as a raised one does. The thresholds —
+fan-in 8, ratchet max(1%, 256 B), near-ceiling 5 lines — are named constants in
+`scripts/validate.mjs`, chosen by judgment rather than measured.
+
+**Why:** a file at its ceiling turns any edit that adds a line into a baseline raise, which is how
+ceilings creep. `cycle.md` lost a paragraph restating the `profile`'s engine choice, which
+`references/config.md` owns, plus re-wraps; `learning-from-sessions.md` lost clauses restating what
+its Modes section already states and a historical note, plus re-wraps. The playbook's refs-only
+closure falls 62130 → 61777 bytes, its restored `artifactFresh` rationale included, and
+`surfaceTotal` 5911 → 5893, the fast path's third evidence read and a re-wrap included. An entry
+left above its figure after a cut lets the freed bytes grow back unreviewed; the 256 B floor keeps a
+small file's re-wrap from tripping the ratchet.
+
+**Supersedes:** check 15's playbook-only scope; check 28's at-or-below rule; check 9's failures
+are unchanged.
+
+```text
+budget: surface-budget.json surfaceTotal 5893
+budget: context-budget.json playbooks/learning-from-sessions.md 61777
+budget: context-budget.json playbooks/planning-waves.md 71372
+budget: context-budget.json commands/continue.md 50265
+budget: context-budget.json commands/cycle.md 69365
+budget: context-budget.json commands/doctor.md 2161
+budget: context-budget.json commands/learn.md 16337
+budget: context-budget.json commands/maintain.md 17516
+budget: context-budget.json commands/onboard.md 16625
+budget: context-budget.json commands/reconcile.md 24062
+budget: context-budget.json commands/review.md 24692
+budget: context-budget.json commands/verify.md 23790
+budget: context-budget.json references/branch.md 6844
+budget: context-budget.json references/config.md 14019
+budget: context-budget.json references/delegation.md 10601
+budget: context-budget.json references/evidence.md 12059
+budget: context-budget.json references/handoff.md 9035
+budget: context-budget.json references/model-routing.md 9090
+budget: context-budget.json references/output.md 756
+```
+
+## 2026-10-10 — Section-scoped reads: a step loads only the section it executes
+
+**Decision:** a citation may name one `##` section of a reference instead of the whole file, as
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/<file>.md <slug>` on one line in
+one code span. It converts only where the citing step executes exactly that section and nothing
+else in the file, its preamble included; `references/README.md` § Citation grammar owns the rule,
+`scripts/validate.mjs` check 4 fails a slug no heading of its file has, and check 15 counts only
+the section's bytes. Converted: `commands/continue.md`'s run-record pointer (`ledger.md
+the-run-record`) and step 2b (`config.md knob-channel`); `references/resume.md`'s `knobs-changed:`
+row (`ledger.md the-event-line`, a section the ledger's preamble gave up for it);
+`references/handoff.md`'s depth probe and its `Continue` test (both `delegation.md
+the-stage-budget`); `references/evidence.md`'s envelope pointer (`delegation.md return-envelopes`);
+and `playbooks/taking-the-fast-path.md`'s step 2 (`evidence.md the-three-evidence-classes`,
+`evidence.md file-backed-evidence`, `evidence.md reviewer-verdicts`), step 4 (`commit-convention.md
+scoping-the-commit`) and Delegation paragraph (`delegation.md the-short-paths`, `delegation.md
+the-stage-budget`). The fast path's resume pointer becomes a bare owner mention:
+`/devcycle:continue` has already read `references/resume.md` at its ownership check.
+
+**Why:** a scan of top-level session transcripts (a scratch script, not committed; subagent reads
+excluded) found the fast path ran once (n=1, a dogfooding run reading 3 of its 11 closure files),
+while `/devcycle:continue` ran in roughly a thousand sessions and on 0.22+ read
+`references/resume.md` almost always, `references/handoff.md` in about two thirds, and
+`config.md`, `evidence.md` and `delegation.md` in about a fifth each (per-file rates are
+session-wide). `continue` is the hot path, and whole-file reads loaded sections its steps never
+execute. Refs-only bytes (`node scripts/context-report.mjs --json`), before → after:
+
+| Entry point | Before | After | Change |
+| --- | --- | --- | --- |
+| commands/continue.md | 74341 | 50265 | −24076 (−32.4%) |
+| commands/cycle.md | 78534 | 69735 | −8799 (−11.2%) |
+| playbooks/executing-waves.md | 95816 | 96027 | +211 |
+| playbooks/finishing-the-cycle.md | 54549 | 45596 | −8953 |
+| playbooks/planning-waves.md | 71211 | 71335 | +124 |
+| playbooks/profiling-sessions.md | 47143 | 38646 | −8497 |
+| playbooks/receiving-review.md | 115525 | 108003 | −7522 |
+| playbooks/reviewing-code.md | 91394 | 91418 | +24 |
+| playbooks/reviewing-the-branch.md | 56012 | 47059 | −8953 |
+| playbooks/scoping-the-request.md | 27812 | 27912 | +100 |
+| playbooks/sweeping-mechanical-changes.md | 89131 | 81609 | −7522 |
+| playbooks/taking-the-fast-path.md | 82256 | 48690 | −33566 (−40.8%) |
+| playbooks/verifying-on-device.md | 51536 | 42583 | −8953 |
+| playbooks/writing-the-findings-document.md | 66648 | 59799 | −6849 |
+
+The four rises are closures that still load whole files whose citation lines grew:
+references/ledger.md +87 bytes (its event-line heading), references/handoff.md +100,
+references/evidence.md +24. learning-from-sessions (62130) and onboarding-a-repo (30288) did not
+move; their fixture values drop to the measured figure. `surfaceTotal` rises 5894 → 5911: the
+section reads and the citation-grammar bullet add runtime-surface lines.
+
+Each conversion was checked by running its command and reading the output beside the citing step:
+
+- commands/continue.md preamble → `the-run-record`: executes only this section (the `event` row).
+- commands/continue.md step 2b → `knob-channel`: executes only this section.
+- references/resume.md `knobs-changed:` row → `the-event-line`: executes only this section.
+- references/handoff.md `Context depth:` paragraph → `the-stage-budget`: executes only this section.
+- references/handoff.md `Continue` test → `the-stage-budget`: executes only this section.
+- references/evidence.md § File-backed evidence → `return-envelopes`: executes only this section.
+- playbooks/taking-the-fast-path.md step 2 → `the-three-evidence-classes`: executes only this
+  section.
+- playbooks/taking-the-fast-path.md step 2 → `file-backed-evidence`: executes only this section.
+- playbooks/taking-the-fast-path.md step 2 → `reviewer-verdicts`: the rejection conditions its
+  evidence must survive; its closing verdict shape is step 5's reviewer's, not step 2's.
+- playbooks/taking-the-fast-path.md step 4 → `scoping-the-commit`: executes only this section.
+- playbooks/taking-the-fast-path.md Delegation → `the-short-paths`: executes only this section.
+- playbooks/taking-the-fast-path.md Delegation → `the-stage-budget`: executes only this section.
+
+**Supersedes:** nothing; a whole-file read stays the default form, `references/model-routing.md`
+stays one, and no reference is split.
+
+```text
+budget: surface-budget.json surfaceTotal 5911
+budget: context-budget.json playbooks/executing-waves.md 96027
+budget: context-budget.json playbooks/finishing-the-cycle.md 45596
+budget: context-budget.json playbooks/learning-from-sessions.md 62130
+budget: context-budget.json playbooks/onboarding-a-repo.md 30288
+budget: context-budget.json playbooks/planning-waves.md 71335
+budget: context-budget.json playbooks/profiling-sessions.md 38646
+budget: context-budget.json playbooks/receiving-review.md 108003
+budget: context-budget.json playbooks/reviewing-code.md 91418
+budget: context-budget.json playbooks/reviewing-the-branch.md 47059
+budget: context-budget.json playbooks/scoping-the-request.md 27912
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 81609
+budget: context-budget.json playbooks/taking-the-fast-path.md 48690
+budget: context-budget.json playbooks/verifying-on-device.md 42583
+budget: context-budget.json playbooks/writing-the-findings-document.md 59799
+```
+
+## 2026-10-08 — Unattended execution: a driver the user started is the user at the wave→wave gate only
+
+**Decision:** execution may run unattended, wave after wave, under a driver process the user starts,
+which runs one fresh headless session per wave and stops for the user at every other gate. Four
+rules bound it:
+- **The opt-in is the user's act.** It is the user's answer at the planning→execution gate, given
+  before the first driven session; nothing else opts a cycle in.
+- **The driver stands in for the user at one gate.** A driver the user started after opting in
+  counts as the user at the **wave→wave** await gate of `references/handoff.md` — the `/clear` and
+  `/devcycle:continue` it would otherwise wait for — and at no other gate.
+- **Every wave still gets a fresh session.** The driver ends each session at its wave boundary and
+  starts the next wave in a new one, so the 2026-07-31 decision below (the context reset is binding
+  at every boundary) is unchanged: the reset still happens, only the keystroke that triggers it moves
+  to the driver.
+- **An agent never acts for the user.** An agent can never opt a cycle in, start a driver on its own
+  initiative, or override a gate. Every other gate a driven session reaches — a user decision, a
+  failed check, a needed confirmation — stops the run and hands it back to the user.
+
+**Why:** execution already runs one wave per session — 67 of 69 measured execution sessions on
+versions 0.20 and later did, a median of four per execution stage — so every boundary waits on a
+`/clear` + `/devcycle:continue` round trip that carries no judgment once the user has chosen, at
+planning's close, to let the waves run. Letting a process the user started supply that keystroke
+keeps the reset the 2026-07-31 numbers justify, while everything that does need judgment stays a
+stop. Writing the bound down before any drive-mode code lands is what keeps "the driver may
+continue" from widening into "an agent may continue".
+
+**Supersedes:** nothing. It narrows how the 2026-07-31 await gate is satisfied at one boundary
+(wave→wave) for a cycle the user opted in, and leaves that gate's wording, every other boundary and
+every manual run as they are.
+
+**Budgets:** `playbooks/executing-waves.md` ends below its 0.23.0 value (104814 → 95834 bytes),
+but the context budgets summed over all playbooks rise net (983585 → 1005228, +21643), mostly
+because receiving-review, sweeping-mechanical-changes and taking-the-fast-path each load 5631 bytes
+more from the expanded references/ledger.md and references/resume.md. `surfaceTotal` rises net too
+(5745 → 5894): the task scripts' contracts, the drive mode in `commands/continue.md` and the opt-in
+gate add more runtime-surface lines than the executing-waves shrink removes. The maintainer accepted
+both rises: what binds is executing-waves below its 0.23.0 value, with every risen entry carrying
+its own `budget:` line below. references/commit-convention.md § The task commit
+(task-commit.mjs's invocation and trailer) adds 11 lines to the runtime surface (5795 → 5806) and
+853 bytes to each playbook whose closure cites it: executing-waves, learning-from-sessions,
+onboarding-a-repo, sweeping-mechanical-changes and taking-the-fast-path. executing-waves.md
+through the task scripts lowers the runtime surface 5830 → 5819 (−11 lines) and
+playbooks/executing-waves.md's context 110214 → 94484 (−15730 bytes): the per-step bookkeeping
+moved into scripts/task-*.mjs and the playbook no longer loads references/resume.md or
+references/loops.md. The run-record table's writer cells in references/ledger.md add 36 bytes to
+receiving-review, sweeping-mechanical-changes and taking-the-fast-path. The mid-wave label and the
+unattended-execution clause in references/handoff.md add 9 lines to the runtime surface
+(5842 → 5851) and 796 bytes to each playbook whose closure cites it: executing-waves
+94484 → 95280, finishing-the-cycle 53662 → 54458, planning-waves 67991 → 68787, receiving-review
+113517 → 114313, reviewing-the-branch 55125 → 55921, scoping-the-request 26925 → 27721,
+sweeping-mechanical-changes 87136 → 87932, taking-the-fast-path 80261 → 81057,
+verifying-on-device 50649 → 51445 and writing-the-findings-document 65761 → 66557.
+The opt-in gate and its `drive:` row: `surfaceTotal` 5851 → 5884 (+33, the opt-in gate in
+playbooks/planning-waves.md and the drive: row in references/resume.md); planning-waves
+68787 → 70936 (+2149, the opt-in gate in playbooks/planning-waves.md); receiving-review
+114313 → 114850 (+537, the drive: row in references/resume.md); sweeping-mechanical-changes
+87932 → 88469 (+537, the drive: row in references/resume.md); taking-the-fast-path
+81057 → 81594 (+537, the drive: row in references/resume.md).
+The driver's `session=` rule: `surfaceTotal` 5888 → 5894 (+6); +91 bytes on each playbook whose
+closure cites references/handoff.md, and 186 more on planning-waves (its opt-in gate, 70936 → 71213)
+and on each that cites references/resume.md (receiving-review 115452, sweeping-mechanical-changes
+89071, taking-the-fast-path 82196). The stale review-status rule in references/resume.md (an
+earlier cycle's status file never counts): receiving-review 115452 → 115529 (+77);
+sweeping-mechanical-changes 89071 → 89135 and taking-the-fast-path 82196 → 82260 (+64 each).
+
+```text
+budget: surface-budget.json surfaceTotal 5894
+budget: context-budget.json playbooks/executing-waves.md 95834
+budget: context-budget.json playbooks/finishing-the-cycle.md 54549
+budget: context-budget.json playbooks/learning-from-sessions.md 62203
+budget: context-budget.json playbooks/onboarding-a-repo.md 30301
+budget: context-budget.json playbooks/planning-waves.md 71213
+budget: context-budget.json playbooks/receiving-review.md 115529
+budget: context-budget.json playbooks/reviewing-the-branch.md 56012
+budget: context-budget.json playbooks/scoping-the-request.md 27812
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 89135
+budget: context-budget.json playbooks/taking-the-fast-path.md 82260
+budget: context-budget.json playbooks/verifying-on-device.md 51536
+budget: context-budget.json playbooks/writing-the-findings-document.md 66648
+```
+
+## 2026-10-07 — Fifth hook-like component: the function-hook module
+
+**Decision:** the plugin ships a fifth hook-like component beside the four settings hooks: a hooks
+module, `hooks/devcycle-mod.mjs`, listed under `modules` in `hooks/hooks.json` and loaded by Claude
+Code in-process, with its Node side in `hooks/mod-sink.mjs`.
+
+**What it observes:** in a session that joined the active run, every subagent from its first step —
+per-request context depth against the model's window, steps, tool-result characters — and on each
+finished subagent turn one `agent-trace` run-record row under that subagent's agentId, written
+during the cycle rather than once at its end. In an interactive session it shows the coordinator's
+stage budget on the status line, reset at every stage change.
+
+**Tiers:** `subagentBudget` sets the limiter. `warn`, the default, adds a budget note to a bounded
+subagent's tool results from 15% of its context window, on the first crossing and then on every
+fifth result; `enforce` also refuses `Read`, `Grep`, `Glob`, `WebFetch` and `WebSearch` at 20%, never
+`Write`, `Edit` or `Bash`; `off` does neither. A fork or a teammate is never bounded. The note rides
+the tool result's own `context`, errored or not, never the system prompt.
+
+**Fail-open:** every non-streaming hook is registered with `.catch(($, e, next) => next(e))`, so a
+failing hook passes the call through — the budget is a soft rule, and a broken guard must not stall
+a cycle — and every hook that is not answering for itself returns `next`'s result, spread and
+extended, because the settings hooks sit beneath it in one chain.
+
+**Cross-check:** `hooks/dispatch-sensor.mjs` stays the owner of the per-dispatch facts and the
+collector that survives `allowManagedModsOnly` and `--bare`; the module records only what it alone
+can see, under the same agentId. Doctor's `mod-inactive` candidate flags a run on a module-shipping
+version with `agent-depth` rows and no `agent-trace` rows, and a COLLECTION GAP line names a run
+whose two kinds disagree on their distinct agentIds, so a missing collector is surfaced, never read
+as zero.
+
+**Trust delta:** a settings hook is a separate process that sees its own input; the module runs
+inside Claude Code and sees prompts, tool calls and their results. It is not sandboxed, and
+`claude plugin validate` lists every hook it registers and every engine call it makes. It writes
+only run-record rows of ids, counts and enum values.
+
+**Scope guards:** it does nothing below Claude Code 2.1.287, in the `claude -p` children devcycle's
+workflows spawn (`workflows/lib/agent-cli.js` sets `DEVCYCLE_NESTED_RUN=1` for those alone), or in a
+session that has not joined an active run. The run and the joined answer are re-derived on every
+main-loop turn, whenever the state file changes or appears at the repo root, and — because
+`/devcycle:cycle` and `/devcycle:continue` append the session's row mid-turn — after the main-loop
+Bash call that appends it and at every subagent spawn while the session is not yet joined (a 2026-10-07
+amendment from the plan review: one Node check per spawn, only until joined); only a positive
+joined answer is cached, and the version and the child marker are read once per module load.
+
+**Version floor:** devcycle's minimum Claude Code becomes 2.1.287, the first release of the
+hooks-module API the module is written against (`docs/platform-notes.md` § (j)); CI's loader gate
+runs on that floor and on the current pin, 2.1.292.
+
+**Instructions file:** devcycle's own agent instructions move from the root `CLAUDE.md` to
+`.claude/CLAUDE.md`, which Claude Code also reads as project instructions. Claude Code's plugin
+validator warns that a `CLAUDE.md` at the plugin root is not loaded as project context, and
+`--strict` turns that warning into a failure of both `claude plugin validate . --strict` and
+`claude plugin validate .claude-plugin/plugin.json --strict`, the two checks the CI loader gate
+runs. The three records whose `affected-files` named the root path now name `.claude/CLAUDE.md`, so
+lesson matching keeps firing. `.claude/` thereby becomes a directory the plugin ships, and a
+contributor's `.claude/` also holds untracked worktree checkouts and local settings, so
+`scripts/self-dev-check.mjs` compares only git-tracked files on the repo side of every shipped
+top-level directory.
+
+**Budgets:** `playbooks/profiling-sessions.md` 46850 → 46866 (+16 bytes, the `mod-inactive` slug in
+its issue-drafting list of Compliance candidates). The `subagentBudget` knob raises the runtime
+surface 5727 → 5740 (+13 lines: the subagentBudget resolver flag in each of the eight entry
+commands, the mint flag in `commands/cycle.md`, and the roster row and exception sentence in
+`references/config.md`) and `commandMax` 172 → 174 (+2 lines, `commands/cycle.md`'s resolver flag
+and mint flag). The roster row and exception sentence in `references/config.md` add 291 bytes to
+every playbook whose closure cites it: `playbooks/executing-waves.md` 103894 → 104185,
+`playbooks/finishing-the-cycle.md` 53024 → 53315, `playbooks/learning-from-sessions.md`
+60712 → 61003, `playbooks/maintaining-the-repo.md` 63216 → 63507,
+`playbooks/onboarding-a-repo.md` 29097 → 29388, `playbooks/planning-waves.md` 67353 → 67644,
+`playbooks/receiving-review.md` 108014 → 108305, `playbooks/reviewing-code.md` 90756 → 91047,
+`playbooks/reviewing-the-branch.md` 54487 → 54778 and `playbooks/verifying-on-device.md`
+50011 → 50302 (+291 bytes each).
+The hooks-module documentation raises the runtime surface again, 5740 → 5743 (+3 lines: +2, the
+stage-budget sentence in `references/delegation.md`; +1, the agent-trace row in
+`references/ledger.md`). Every playbook whose closure cites both references grows by 473 bytes
+(+191, the stage-budget sentence in `references/delegation.md`; +282, the agent-trace row in
+`references/ledger.md`): `playbooks/executing-waves.md` 104185 → 104658,
+`playbooks/receiving-review.md` 108305 → 108778, `playbooks/sweeping-mechanical-changes.md` 81131 →
+81604 and `playbooks/taking-the-fast-path.md` 74256 → 74729. Every playbook whose closure cites only
+`references/delegation.md` grows by 191 bytes (+191, the stage-budget sentence in
+`references/delegation.md`): `playbooks/finishing-the-cycle.md` 53315 → 53506,
+`playbooks/learning-from-sessions.md` 61003 → 61194, `playbooks/maintaining-the-repo.md` 63507 →
+63698, `playbooks/planning-waves.md` 67644 → 67835, `playbooks/profiling-sessions.md` 46866 → 47057,
+`playbooks/reviewing-code.md` 91047 → 91238, `playbooks/reviewing-the-branch.md` 54778 → 54969,
+`playbooks/scoping-the-request.md` 26638 → 26829, `playbooks/verifying-on-device.md` 50302 → 50493
+and `playbooks/writing-the-findings-document.md` 65474 → 65665.
+Branch review then corrects both references and the resume gate, raising the runtime surface 5743 →
+5745 (+2 lines: +1, `references/delegation.md`'s stage-budget sentence now says what each
+`subagentBudget` tier does and that only the human sees the stage meter; +1,
+`commands/continue.md`'s knob-change step says `--compare` never lists `subagentBudget`). Every
+playbook whose closure cites both references grows by 156 bytes (+96, `references/delegation.md`;
++60, the sentence in `references/config.md` naming the `live` roster mark that keeps the knob out of
+`--compare`): `playbooks/executing-waves.md` 104658 → 104814, `playbooks/finishing-the-cycle.md`
+53506 → 53662, `playbooks/learning-from-sessions.md` 61194 → 61350,
+`playbooks/maintaining-the-repo.md` 63698 → 63854, `playbooks/planning-waves.md` 67835 → 67991,
+`playbooks/receiving-review.md` 108778 → 108934, `playbooks/reviewing-code.md` 91238 → 91394,
+`playbooks/reviewing-the-branch.md` 54969 → 55125 and `playbooks/verifying-on-device.md` 50493 →
+50649. Every playbook whose closure cites only `references/delegation.md` grows by 96 bytes:
+`playbooks/profiling-sessions.md` 47057 → 47153, `playbooks/scoping-the-request.md` 26829 → 26925,
+`playbooks/sweeping-mechanical-changes.md` 81604 → 81700, `playbooks/taking-the-fast-path.md` 74729
+→ 74825 and `playbooks/writing-the-findings-document.md` 65665 → 65761.
+`playbooks/onboarding-a-repo.md`, which cites only `references/config.md`, grows by 60 bytes, 29388
+→ 29448.
+
+```text
+budget: context-budget.json playbooks/profiling-sessions.md 47153
+budget: surface-budget.json surfaceTotal 5745
+budget: surface-budget.json commandMax 174
+budget: context-budget.json playbooks/executing-waves.md 104814
+budget: context-budget.json playbooks/finishing-the-cycle.md 53662
+budget: context-budget.json playbooks/learning-from-sessions.md 61350
+budget: context-budget.json playbooks/maintaining-the-repo.md 63854
+budget: context-budget.json playbooks/onboarding-a-repo.md 29448
+budget: context-budget.json playbooks/planning-waves.md 67991
+budget: context-budget.json playbooks/receiving-review.md 108934
+budget: context-budget.json playbooks/reviewing-code.md 91394
+budget: context-budget.json playbooks/reviewing-the-branch.md 55125
+budget: context-budget.json playbooks/verifying-on-device.md 50649
+budget: context-budget.json playbooks/scoping-the-request.md 26925
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 81700
+budget: context-budget.json playbooks/taking-the-fast-path.md 74825
+budget: context-budget.json playbooks/writing-the-findings-document.md 65761
+```
+
 ## 2026-10-07 — planning context safety, Plan A: the depth gate gets its own probe, the plan gates become one
 
 **Decision:** the depth gate runs `scripts/depth-probe.mjs` directly instead of `doctor.mjs --depth`

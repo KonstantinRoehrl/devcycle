@@ -22,6 +22,10 @@ should start from them:
   `devcycle:task-reviewer` with no such escalation; this memo does not yet state
   a resolution.
 
+The `thorough` overrides in (d)8 were derived on 2026-10-08 against superpowers 6.4.2's
+`skills/subagent-driven-development/SKILL.md`, whose continuous-execution and rulings rules are
+newer than the rest of this memo's baseline.
+
 `skills/executing-plans/SKILL.md` is no longer a comparison target: the skill
 references it at no profile, so its stop-and-ask discipline is neither borrowed
 nor overridden here.
@@ -60,7 +64,8 @@ From **superpowers:subagent-driven-development**:
   section", and turn-count-beats-token-price. The actual choice is made by
   `references/model-routing.md`'s predicates (see (c)5).
 - Pre-Flight Plan Review for internal contradictions, and continuous execution
-  without between-task check-ins.
+  without between-task check-ins — both bounded by (d)8: execution runs within
+  one wave, and no ruling stands in for a user decision.
 
 Upstream's tail does **not** apply at any profile: its final whole-branch
 reviewer dispatch and its `superpowers:finishing-a-development-branch` step are
@@ -97,11 +102,16 @@ compaction is the point, not a reduction in what the stage does.
    itself and reads the exit status before accepting. Neither the implementer's
    evidence files nor a reviewer's accept verdict is sufficient — both judge a
    report, not the repo. Upstream has no coordinator-side re-run (see (d)2).
+   Since 2026-10-08 the gate, its foreign-change deferral, the branch re-check
+   and the commit are one script the coordinator runs, `scripts/task-commit.mjs`.
 3. **Ledger at `.devcycle/ledger.md`**, one appended line per event with all four
    fields required, over the six-value event enum
    (`dispatched|report-received|review-round|review-verdict|committed|user-decision`).
    Upstream keeps per-task completion lines in its own progress file; devcycle
-   writes only its own path (see (d)6).
+   writes only its own path (see (d)6). Since 2026-10-08 the task scripts
+   (`scripts/task-dispatch.mjs`, `task-intake.mjs`, `task-verdict.mjs`,
+   `task-commit.mjs`) append every per-task line, each carrying an idempotency
+   key, and the format has no `Ruling:` line (see (d)8).
 4. **Handoff blocks and wave-boundary compaction.** Every wave boundary and the
    stage end update `.devcycle/state.md` and emit the block defined by
    `references/handoff.md`, including the context action and the gate that stops
@@ -170,6 +180,14 @@ compaction is the point, not a reduction in what the stage does.
     action from a most-specific-row-wins table, with separate rows for
     sweep-token outcomes. Upstream's recovery guidance stops at "trust the ledger
     and `git log` over conversation memory", which devcycle keeps.
+    `/devcycle:continue` applies that table through `scripts/wave-setup.mjs`,
+    and the playbook acts on the JSON it returns.
+14. **Mid-wave safety valve in a driven session.** Under
+    `/devcycle:continue --drive`, the coordinator reads the depth band every task
+    script returns; at `hard-stop` it dispatches nothing new, finishes the tasks
+    in flight and ends the session with the `Session ended mid-wave` handoff
+    label, so the driver's next session resumes the wave. Upstream has no
+    context-lifecycle contract (see (c)4).
 
 ## (d) Conflicts and resolutions
 
@@ -231,6 +249,20 @@ loaded — but devcycle's side of the resolution is unconditional in every case.
    **Resolution:** devcycle governs at every profile — the coordinator commits
    only after accept plus the gate, and the review diff comes from the working
    tree, since no task commits exist yet to package.
+8. **Continuous execution and rulings.** *Live at `thorough`.* Upstream
+   (6.4.2): "Execute all tasks from the plan without stopping", and
+   "Rulings, not stalls. A running plan does not wait on a human" — conflicts,
+   ambiguities, plan defects and caps are decided by the coordinator and
+   recorded as `Ruling: <what you decided> — <why> — <what it costs if wrong>`
+   ledger lines, after a Pre-Flight conflict scan whose table also goes to its
+   ledger. **Resolution (2026-10-08):** devcycle governs at every profile,
+   manual or driven. The wave boundary wins over continuous execution: a session
+   ends at its wave's last commit. An exhausted-unresolved task, a
+   `status: blocked` report and every escalation upstream stops for are user
+   decisions — in a driven session a `needs-user` stop — never a ruling.
+   `.devcycle/ledger.md` keeps devcycle's event-line format, so neither a
+   `Ruling:` line nor the scan table is written to it, and a pre-flight conflict
+   the spec does not settle goes to the user.
 
 **Verdict:** at `lean`/`standard` the playbook is wholly devcycle-native and shares
 no text with upstream. At `thorough` it remains an overlay that references
