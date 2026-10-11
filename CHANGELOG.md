@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.24.0 — 2026-10-11
+
+- feat: run execution waves unattended, adopt Claude Code mods, and scope resume reads to sections
+
 A hooks module, `hooks/devcycle-mod.mjs`, joins the four settings hooks (Claude Code 2.1.287 or
 later). In a session that joined the active run it writes one `agent-trace` run-record row per
 finished subagent turn through its Node sink, `hooks/mod-sink.mjs`; adds a budget note to a
