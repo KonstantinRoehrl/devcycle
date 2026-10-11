@@ -2,7 +2,8 @@
 // one. Fence-aware: a heading-shaped line inside a fenced block is content. A section runs from its
 // `##` heading to the next `#` or `##` heading outside a fence, or the end of the file, so its `###`
 // subsections belong to it. As in CommonMark, only a run of the opener's character at least as long,
-// with nothing after it, closes a fence, so a ```` fence can show a ``` block whole.
+// with nothing after it, closes a fence, so a ```` fence can show a ``` block whole. A line's trailing
+// `\r` is part of its CRLF ending, never its content.
 const FENCE = /^\s*(`{3,}|~{3,})(.*)$/;
 const HEADING = /^(#{1,6})\s+(.*?)\s*$/;
 
@@ -18,7 +19,8 @@ export function sections(text) {
     if (open) out.push({ heading: open.heading, slug: open.slug, text: text.slice(open.start, end) });
     open = null;
   };
-  for (const line of text.split("\n")) {
+  for (const raw of text.split("\n")) {
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
     const f = FENCE.exec(line);
     if (fence) {
       if (f && f[1][0] === fence[0] && f[1].length >= fence.length && !f[2].trim()) fence = null;
@@ -30,7 +32,7 @@ export function sections(text) {
         if (h[1].length === 2) open = { heading: h[2], slug: slug(h[2]), start: offset };
       }
     }
-    offset += line.length + 1;
+    offset += raw.length + 1;
   }
   close(text.length);
   return out;

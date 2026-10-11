@@ -16,6 +16,7 @@ import {
   referenceReadErrors,
   referenceReaders,
   SECTION_READ,
+  unparsedSectionReads,
 } from "../../scripts/citation-grammar.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/citation-grammar.mjs", import.meta.url));
@@ -150,6 +151,16 @@ test("SECTION_READ: captures the reference and slug of a section read, and only 
   assert.deepEqual(read(step("references/delegation.md", "\n\n")), [], "a paragraph break is no separator");
   assert.deepEqual(read(step("references/delegation.md", " ", "the-stage-budget.extra")), [], "a slug ends at a word boundary");
   assert.deepEqual(read(step("references/delegation.md", " ", "The-stage-budget")), []);
+});
+
+test("SECTION_READ: the call ends after the slug, so a further argument leaves it unparsed for check 4d", () => {
+  const call = (tail) => `node "${P}/scripts/read-section.mjs" references/delegation.md the-stage-budget${tail}`;
+  const slugs = (text) => [...text.matchAll(SECTION_READ)].map((m) => m[2]);
+  assert.deepEqual(slugs(`\`${call(" extra")}\``), [], "read-section.mjs takes exactly two arguments");
+  assert.deepEqual(slugs(`\`${call(" file-backed-evidence")}\``), [], "two slugs are no read of the first");
+  assert.deepEqual(unparsedSectionReads(`Run \`${call(" extra")}\`.\n`), [call(" extra").slice("node \"".length)]);
+  for (const tail of ["`", " `", " | head -40`", "|head", ">out", " > out", " < in", "; echo", " && echo", ")", "", "\nnext line", "\t\n"])
+    assert.deepEqual(slugs(`\`${call(tail)}`), ["the-stage-budget"], `terminated by ${JSON.stringify(tail)}`);
 });
 
 test("bare-exists: a section read's reference is check 4c's to resolve, never a bare mention", () => {

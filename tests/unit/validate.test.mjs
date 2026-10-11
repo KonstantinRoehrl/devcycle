@@ -2184,6 +2184,28 @@ test("4d: a slug with a tail the slug class stops short of fails rather than rea
   failsWith(runValidate(dir), UNPARSED);
 });
 
+test("4d control: a section read piped onward still parses", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");
+  sectionRead(dir, "references/handoff.md", "the-block-shape | head -40");
+  rebaseline(dir);
+  ok(runValidate(dir));
+});
+
+test("4d: a section read with an argument past the slug fails rather than reading as the slug", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");
+  sectionRead(dir, "references/handoff.md", "the-block-shape extra");
+  failsWith(runValidate(dir), UNPARSED);
+});
+
+test("4d: a section read naming two slugs fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n\n## Other\n\nMore.\n");
+  sectionRead(dir, "references/handoff.md", "the-block-shape other");
+  failsWith(runValidate(dir), UNPARSED);
+});
+
 test("4d: a quoted reference argument fails", () => {
   const dir = makePluginFixture();
   writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");

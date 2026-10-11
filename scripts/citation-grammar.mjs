@@ -26,11 +26,16 @@ export const PREFIXED = prefixedPattern();
 export const SEP = String.raw`(?:[ \t]|\r?\n(?![ \t]*\r?\n))`;
 // The section-read form: a step that needs one `##` section of a reference runs
 // `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/<file>.md <slug>`. Group 1 is the
-// reference, group 2 the slug; only references are read by section. The slug ends where the shell
-// argument does, so `alpha.extra` is no read of `alpha`.
+// reference, group 2 the slug; only references are read by section. The slug is the call's last
+// argument, as read-section.mjs takes exactly two: after any spaces or tabs, the call ends — a closing
+// backtick, a line break, the end of the text, or a shell operator (`|`, `>`, `<`, `;`, `&`, `)`). So
+// `alpha.extra` is no read of `alpha`, and neither is `alpha extra`.
 const SECTION_READ_CALL = "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs";
 const sectionReadPattern = (reference, slug, flags) =>
-  new RegExp(String.raw`\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/read-section\.mjs"?${SEP}+${reference}${SEP}+${slug}(?![^\s\x60])`, flags);
+  new RegExp(
+    String.raw`\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/read-section\.mjs"?${SEP}+${reference}${SEP}+${slug}(?=[ \t]*(?:[\x60|><;&)\r\n]|$))`,
+    flags
+  );
 export const SECTION_READ = sectionReadPattern(String.raw`(references\/${NAME}\.md)`, "([a-z0-9_-]+)", "g");
 // The form written out with its placeholders, as the grammar's owner documents it, is no call.
 const SECTION_READ_TEMPLATE = sectionReadPattern(String.raw`references\/<file>\.md`, "<slug>", "y");

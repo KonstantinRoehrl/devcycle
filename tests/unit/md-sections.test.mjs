@@ -55,6 +55,17 @@ test("sections: only a fence of the opener's character, at least as long and bar
   assert.deepEqual(sections(mixed).map((s) => s.slug), ["a", "b"]);
 });
 
+test("sections: a CRLF file splits as its LF form does, byte for byte", () => {
+  const crlf = (s) => s.replace(/\n/g, "\r\n");
+  const nested = "## A\n````md\n```\n## Inner\n```\n````\nafter\n## B\nb\n";
+  const mixed = "## A\n~~~\n```\n## Inner\n~~~ md\n## Still inner\n~~~~\n## B\n";
+  for (const doc of [DOC, nested, mixed]) {
+    assert.deepEqual(sections(crlf(doc)).map((s) => s.slug), sections(doc).map((s) => s.slug));
+    assert.deepEqual(sections(crlf(doc)).map((s) => s.text), sections(doc).map((s) => crlf(s.text)));
+  }
+  assert.deepEqual(sections(crlf(DOC)).map((s) => s.heading), ["First", "Second", "Last"]);
+});
+
 test("sections: a # heading ends a section", () => {
   assert.equal(sectionText(DOC, "second"), "## Second\n\nSecond body.\n\n");
 });
