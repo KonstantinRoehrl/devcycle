@@ -25,6 +25,9 @@ const isEntryPoint = (f) => (f.startsWith("commands/") || f.startsWith("playbook
 // so editing a reference grows a budget no entry point in the Files block appears to touch. That is
 // the shape the recurring failure took.
 const isReference = (f) => f.startsWith("references/") && f.endsWith(".md");
+// Check 15 counts a reference's readers across the whole surface, agents included, so an agent that
+// adds a citation can lift a reference to the fan-in threshold and make its entry required.
+const isAgent = (f) => f.startsWith("agents/") && f.endsWith(".md");
 
 // The join, in one place: which committed size baselines a tracked path sits under. A baseline is
 // itself held by the decisions log -- validate.mjs check 28 fails a fixture value that differs from
@@ -33,13 +36,13 @@ const isReference = (f) => f.startsWith("references/") && f.endsWith(".md");
 function requiredFixtures(file) {
   const fixtures = [];
   if (isSurface(file)) fixtures.push(SURFACE_BUDGET);
-  if (isEntryPoint(file) || isReference(file)) fixtures.push(CONTEXT_BUDGET);
+  if (isEntryPoint(file) || isReference(file) || isAgent(file)) fixtures.push(CONTEXT_BUDGET);
   if (file === SURFACE_BUDGET || file === CONTEXT_BUDGET) fixtures.push(DECISIONS_DOC);
   return fixtures;
 }
 
 const WHY = {
-  [DECISIONS_DOC]: "a fixture raise needs a budget: line there",
+  [DECISIONS_DOC]: "every fixture change needs a budget: line there",
   [SURFACE_BUDGET]: "growth needs a baseline bump",
   [CONTEXT_BUDGET]: "growth needs a baseline bump",
 };

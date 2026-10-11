@@ -22,7 +22,7 @@ import {
 } from "./citation-grammar.mjs";
 import { sectionText } from "./md-sections.mjs";
 import { loadStages } from "./stage-entry.mjs";
-import { budgetDecisionErrors } from "./budget-decisions.mjs";
+import { budgetDecisionErrors, recordedBudgets, newestRecorded } from "./budget-decisions.mjs";
 import { DECISIONS_DOC } from "./doc-paths.mjs";
 
 
@@ -85,7 +85,7 @@ export function docsSubdirTrackingErrors(repoRoot) {
 }
 
 const DESCRIPTION_BUDGET_TOTAL = 6000; // chars; source: docs/platform-notes.md
-// Check 9 prints a notice, never a failure, for a command or playbook this many lines or fewer
+// Check 9 prints a notice, never a failure, for a command or playbook fewer than this many lines
 // under its ceiling, so the next edit's growth is seen before it fails.
 const NEAR_CEILING_LINES = 5;
 // Check 15 holds a reference this many surface files read to its own context-budget entry: its
@@ -537,7 +537,10 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     const key = r.startsWith("commands/") ? "commandMax" : r.startsWith("playbooks/") ? "playbookMax" : null;
     const max = key && budgetsParsed ? budgets[key] : undefined;
     if (Number.isInteger(max) && n <= max && max - n < NEAR_CEILING_LINES)
-      nearCeilingNotices.push(`validate: notice: ${r}: ${n} lines, within ${NEAR_CEILING_LINES} of the ${key} ceiling ${max}`);
+      nearCeilingNotices.push(
+        `validate: notice: ${r}: ${n} lines, fewer than ${NEAR_CEILING_LINES} under the ${key} ceiling ${max} — ` +
+          `trim it before adding to it, or raise the ceiling with a decisions entry`
+      );
   }
   if (budgetsParsed && Number.isInteger(budgets.surfaceTotal) && surfaceLines > budgets.surfaceTotal)
     fail(
@@ -788,6 +791,10 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
   }
 
+  // Read once for checks 15 and 28; null when the log is missing, which check 28 fails.
+  const decisionsPath = join(root, DECISIONS_DOC);
+  const decisionsText = existsSync(decisionsPath) ? readFileSync(decisionsPath, "utf8") : null;
+
   const contextRows = [];
   // 15. Per-entry-point context budget: an entry point's (a command's or a playbook's) own bytes
   //     plus every reference reachable from it through ${CLAUDE_PLUGIN_ROOT} citations, against a
@@ -834,8 +841,12 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       };
       const entryPoints = ["commands", "playbooks"].flatMap((d) => namesIn(d).map((f) => `${d}/${f}`));
       for (const p of entryPoints) {
+        const { bytes } = closure(p, { follow: "refs", root });
         if (!(p in contextBaseline)) {
-          fail(`${p}: no entry in ${CONTEXT_BUDGET_PATH} — an entry point must declare its context budget`);
+          fail(
+            `${p}: no entry in ${CONTEXT_BUDGET_PATH} — an entry point must declare its context budget; ` +
+              `add "${p}": ${bytes} and record it`
+          );
           continue;
         }
         const limit = contextBaseline[p];
@@ -843,7 +854,6 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           fail(`${CONTEXT_BUDGET_PATH}: ${p} must be an integer, got ${JSON.stringify(limit)}`);
           continue;
         }
-        const { bytes } = closure(p, { follow: "refs", root });
         contextRows.push({ path: p, bytes, limit, allHops: closure(p, { follow: "all", root }) });
         if (bytes > limit)
           fail(
@@ -853,13 +863,22 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         ratchet(p, bytes, limit);
       }
       // A reference's entry gates its own bytes. It is required at FAN_IN_THRESHOLD readers and
-      // keeps gating below them, so a reference that loses readers cannot grow unreviewed.
+      // keeps gating below them, so a reference that loses readers cannot grow unreviewed. An entry is
+      // removed only with its file: one the decisions log has ever recorded stays required while the
+      // file exists.
       const references = namesIn("references").map((f) => `references/${f}`);
       const readers = referenceReaders(surface.map((p) => ({ rel: rel(p), text: readFileSync(p, "utf8") })));
+      const recorded = decisionsText === null ? new Map() : recordedBudgets(decisionsText).recorded;
       for (const ref of references) {
         const n = readers.get(ref)?.size ?? 0;
+        const bytes = Buffer.byteLength(readFileSync(join(root, ref), "utf8"));
         if (!(ref in contextBaseline)) {
-          if (n >= FAN_IN_THRESHOLD)
+          if (newestRecorded(recorded, "context-budget.json", ref))
+            fail(
+              `${ref}: its context-budget entry was retired while the file still exists — ` +
+                `restore the entry at ${bytes}; an entry is removed only with its file`
+            );
+          else if (n >= FAN_IN_THRESHOLD)
             fail(
               `${ref}: read by ${n} files (threshold ${FAN_IN_THRESHOLD}) and has no entry in ${CONTEXT_BUDGET_PATH} — ` +
                 `a high-fan-in reference declares its own byte budget`
@@ -871,7 +890,6 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           fail(`${CONTEXT_BUDGET_PATH}: ${ref} must be an integer, got ${JSON.stringify(limit)}`);
           continue;
         }
-        const bytes = Buffer.byteLength(readFileSync(join(root, ref), "utf8"));
         if (bytes > limit)
           fail(
             `${ref}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, the reference's own bytes) — ` +
@@ -902,13 +920,12 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     for it (scripts/budget-decisions.mjs). A missing log fails, as a missing fixture does in checks
   //     9 and 15 — skipping would leave every raise unchecked. An unusable fixture is skipped here
   //     because checks 9 and 15 have already failed it.
-  const decisionsPath = join(root, DECISIONS_DOC);
-  if (!existsSync(decisionsPath))
+  if (decisionsText === null)
     fail(`${DECISIONS_DOC}: missing — no budget decision is recorded, so no budget raise could be checked against one`);
   else if (budgetsParsed && contextParsed)
     for (const message of budgetDecisionErrors({
       fixtures: { "surface-budget.json": budgets, "context-budget.json": contextBaseline },
-      logText: readFileSync(decisionsPath, "utf8"),
+      logText: decisionsText,
     }))
       fail(message);
 

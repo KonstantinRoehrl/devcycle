@@ -97,7 +97,7 @@ node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-l
 node scripts/duplication-check.mjs    # duplicated prose across commands/playbooks/agents/references, and within a file — CI
 node scripts/temp-dir-check.mjs       # temp dirs created outside makeTempDir, which owns removing them — CI
 node scripts/citation-grammar.mjs     # the citation grammar's worklist (back-edge, owner-sentence, bare-read, bare-exists; --references: references nothing reads); exits 1 while any remain — local
-node scripts/context-report.mjs       # per command and playbook: refs-only and all-hops closure words; --diff <ref> lists citations that lost their prefix; --diff <ref> --markdown prints per-entry-point byte deltas (CI posts them on every PR) — local
+node scripts/context-report.mjs       # per command and playbook: refs-only and all-hops closure words; --diff <ref> lists citations that lost their prefix; --diff <ref> --markdown prints per-entry-point byte deltas (CI writes them to every PR run's job summary, even when Validate fails) — local
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
 claude plugin validate . --strict     # the plugin under Claude Code's real loader (CI also validates .claude-plugin/plugin.json) — CI, on the floor and current pins
 claude plugin test .                  # the hooks module's TypeScript tests under tests/mod/ — CI, on the floor and current pins
@@ -110,17 +110,24 @@ argument fails spuriously. A session started with `--plugin-dir` on this checkou
 module's type declarations written into `.claude-plugin/types/` at every load; `.gitignore` keeps
 them out of commits.
 
-When a playbook, command or reference edit trips a size budget (lines for the surface; bytes for
-each entry point's context closure and for each reference at least eight files read),
-`validate.mjs` reports the measured value: set `tests/fixtures/surface-budget.json` or
-`tests/fixtures/context-budget.json` to exactly that number and record the change in
-`docs/decisions/README.md`. The decision entry carries one machine line per key it sets,
+When a playbook, command, agent or reference edit trips a size budget (lines for the surface; bytes
+for each entry point's context closure and for each reference read by at least eight files — agents
+count among a reference's readers), `validate.mjs` reports the measured value: set
+`tests/fixtures/surface-budget.json` or `tests/fixtures/context-budget.json` to exactly that number
+and record the change in `docs/decisions/README.md`. The decision entry carries one machine line per key it sets,
 `budget: <fixture-basename> <key> <value>` (for example
 `budget: surface-budget.json surfaceTotal 5693`), in a fenced `text` block; `validate.mjs` check 28
 fails a fixture value that differs from the newest such line for its key. Check 15 also fails an
 entry that sits more than max(1%, 256 B) above its measured figure, and prints the values to
 paste, so a cut lowers its ceiling in the same change. A key removed from a fixture is closed with
-a newer `budget: <fixture-basename> <key> retired` line, since older entries are never rewritten.
+a newer `budget: <fixture-basename> <key> retired` line, since older entries are never rewritten;
+a reference's entry is removed only with its file, so check 15 fails one retired while the file
+still exists.
+
+A command or playbook fewer than five lines under its `commandMax` or `playbookMax` ceiling draws
+`validate: notice: <file>: <n> lines, fewer than 5 under the <key> ceiling <max>`. The notice never
+fails the build; it warns that a few more lines will. Trim the file before adding to it, or raise the
+ceiling with a decisions entry as above.
 
 The two scanners divide the work and neither subsumes the other. gitleaks owns credentials and
 tokens: it is rule-maintained, and it reads **history**, so a secret that was committed and

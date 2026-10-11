@@ -1,5 +1,5 @@
-// Structural, deterministic checks against the two release workflows that had no suite:
-// back-merge.yml and bump-version.yml. Same approach as prepare-release.test.mjs — raw text plus
+// Structural, deterministic checks against the two release workflows that had no suite,
+// back-merge.yml and bump-version.yml, and against validate.yml's PR-only report step. Same approach as prepare-release.test.mjs — raw text plus
 // regex, no YAML parser, no workflow execution. What these pin is the contract CONTRIBUTING.md
 // § Releasing states: back-merge is green and silent on a clean merge, red only on a genuine
 // conflict, and opens a fallback PR only on a push event; Release refuses to re-tag.
@@ -9,6 +9,7 @@ import { read, parseJobs } from "./workflow-yaml.mjs";
 
 const BACK_MERGE = ".github/workflows/back-merge.yml";
 const RELEASE = ".github/workflows/bump-version.yml";
+const VALIDATE = ".github/workflows/validate.yml";
 
 test("back-merge: the fallback PR opens only on a push event", () => {
   const yaml = read(BACK_MERGE);
@@ -112,4 +113,15 @@ test("release: the checkout is pinned to a full commit sha and stores no push cr
   );
   assert.match(yaml, /persist-credentials: false/,
     "the checkout leaves a push credential in .git/config for later steps to read");
+});
+
+test("validate: the closure-delta report runs on a pull request even after an earlier step failed", () => {
+  const steps = parseJobs(read(VALIDATE)).validate.join("\n");
+  const step = steps.match(/- name: Report each entry point's context closure change against the PR base\n((?: {8}.*\n)+)/);
+  assert.ok(step, "no closure-delta report step in the validate job");
+  assert.match(
+    step[1],
+    /^ {8}if: \$\{\{ !cancelled\(\) && github\.event_name == 'pull_request' \}\}$/m,
+    "the report step keeps the implicit success() — an over-budget closure fails Validate and hides the table that explains it"
+  );
 });

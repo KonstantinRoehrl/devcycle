@@ -10,6 +10,7 @@ import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { DECISIONS_DOC } from "../../scripts/doc-paths.mjs";
 import { makePluginFixture as makeBaseFixture, writeInto, runValidate, recordBudgets, rebaseline, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
 import { recordStoreTrackingErrors, docsSubdirTrackingErrors } from "../../scripts/validate.mjs";
+import { closure } from "../../scripts/context-closure.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
@@ -712,12 +713,36 @@ const padPlaybook = (dir, count) => {
   budgetEntryPoints(dir, "playbooks/padding-things.md");
 };
 
-test("budget check: a playbook within 5 lines of playbookMax passes with a notice", () => {
+test("budget check: a playbook fewer than 5 lines under playbookMax passes with a notice naming it and the fix", () => {
   const dir = makePluginFixture();
   padPlaybook(dir, 154 - 2);
   const { status, stdout } = runValidate(dir);
   assert.equal(status, 0, stdout);
-  assert.match(stdout, /validate: notice: playbooks\/.+: \d+ lines, within 5 of the playbookMax ceiling/);
+  assert.match(
+    stdout,
+    /^validate: notice: playbooks\/padding-things\.md: 152 lines, fewer than 5 under the playbookMax ceiling 154 — trim it before adding to it, or raise the ceiling with a decisions entry$/m
+  );
+  assert.equal(stdout.match(/validate: notice:/g).length, 1, stdout);
+});
+
+test("budget check: a command fewer than 5 lines under commandMax passes with a notice", () => {
+  const dir = makePluginFixture();
+  const command = readFileSync(join(dir, "commands/cycle.md"), "utf8");
+  const have = command.replace(/\n$/, "").split("\n").length;
+  writeInto(dir, "commands/cycle.md", command + "x\n".repeat(104 - 1 - have));
+  rebaseline(dir);
+  const { status, stdout } = runValidate(dir);
+  assert.equal(status, 0, stdout);
+  assert.match(stdout, /^validate: notice: commands\/cycle\.md: 103 lines, fewer than 5 under the commandMax ceiling 104 — /m);
+});
+
+test("budget check: a playbook over playbookMax gets its failure and no notice", () => {
+  const dir = makePluginFixture();
+  padPlaybook(dir, 154 + 1);
+  const { status, stdout, stderr } = runValidate(dir);
+  assert.equal(status, 1);
+  assert.match(stderr, /playbooks\/padding-things\.md: 155 lines > 154/);
+  assert.doesNotMatch(stdout, /validate: notice:/);
 });
 
 test("budget check: a playbook 5 lines under playbookMax prints no notice", () => {
@@ -1252,14 +1277,18 @@ test("context budget: growth past a playbook's baseline fails and names both num
   assert.match(stderr, /raise the baseline in this same commit/);
 });
 
-test("context budget: a command missing from the baseline fails — commands are entry points too", () => {
+test("context budget: a command missing from the baseline fails — commands are entry points too — and names the figure to add", () => {
   const dir = makePluginFixture();
   writeInto(dir, CONTEXT_PATH, JSON.stringify({ [PLAYBOOK]: fileBytes(dir, PLAYBOOK) }, null, 2) + "\n");
+  const { bytes } = closure("commands/cycle.md", { follow: "refs", root: dir });
   const { status, stderr } = runValidate(dir);
   assert.equal(status, 1);
   assert.match(
     stderr,
-    /commands\/.+: no entry in tests\/fixtures\/context-budget\.json — an entry point must declare its context budget/
+    new RegExp(
+      `commands/cycle\\.md: no entry in tests/fixtures/context-budget\\.json — an entry point must declare its context budget; ` +
+        `add "commands/cycle\\.md": ${bytes} and record it`
+    )
   );
 });
 
@@ -1436,6 +1465,43 @@ test("context budget: a reference's entry past the ratchet margin fails like an 
     runValidate(dir),
     new RegExp(`references/hub\\.md: ${bytes} bytes, 300 below baseline ${bytes + 300} — past the ratchet margin of 256 B`),
     new RegExp(`^\\s*budget: context-budget\\.json references/hub\\.md ${bytes}$`, "m")
+  );
+});
+
+// An entry is removed only with its file: a reference that dropped below the fan-in threshold must
+// not shed the entry that gates its growth. `history` is the decisions log's lines for the hub,
+// newest first, written above the lines recordBudgets keeps for the rest of the tree.
+const shedHubEntry = (dir, history) => {
+  const context = JSON.parse(readFileSync(join(dir, CONTEXT_PATH), "utf8"));
+  delete context[HUB];
+  writeInto(dir, CONTEXT_PATH, JSON.stringify(context, null, 2) + "\n");
+  recordBudgets(dir);
+  const log = join(dir, DECISIONS_DOC);
+  writeFileSync(log, readFileSync(log, "utf8").replace("```text\n", "```text\n" + history.join("\n") + "\n"));
+};
+
+test("context budget: a reference whose entry was retired while the file still exists fails, naming the entry to restore", () => {
+  const dir = makePluginFixture();
+  const bytes = hubReadBy(dir, 7);
+  budgetHub(dir, bytes);
+  ok(runValidate(dir));
+  shedHubEntry(dir, [`budget: context-budget.json ${HUB} retired`, `budget: context-budget.json ${HUB} ${bytes}`]);
+  failsWith(
+    runValidate(dir),
+    new RegExp(
+      `references/hub\\.md: its context-budget entry was retired while the file still exists — ` +
+        `restore the entry at ${bytes}; an entry is removed only with its file`
+    )
+  );
+});
+
+test("context budget: a reference with recorded budget lines but no entry fails the same way", () => {
+  const dir = makePluginFixture();
+  const bytes = hubReadBy(dir, 7);
+  shedHubEntry(dir, [`budget: context-budget.json ${HUB} ${bytes}`]);
+  failsWith(
+    runValidate(dir),
+    new RegExp(`references/hub\\.md: its context-budget entry was retired while the file still exists — restore the entry at ${bytes}`)
   );
 });
 
@@ -2628,6 +2694,22 @@ test("budget decisions: a fixture below its newest budget line fails, naming the
     runValidate(dir),
     /tests\/fixtures\/surface-budget\.json: surfaceTotal is (\d+), below the newest recorded figure \d+ \(docs\/decisions\/README\.md:\d+\) — a cut records its figure: add "budget: surface-budget\.json surfaceTotal \1" in docs\/decisions\/README\.md/
   );
+});
+
+// A negative value has no recorded line to name, and used to throw, losing every failure collected
+// before check 28 ran.
+test("budget decisions: a negative fixture value fails with its fix and keeps the failures collected before it", () => {
+  const dir = makePluginFixture();
+  ok(runValidate(dir));
+  const context = JSON.parse(readFileSync(join(dir, CONTEXT_PATH), "utf8"));
+  writeInto(dir, CONTEXT_PATH, JSON.stringify({ ...context, [PLAYBOOK]: -5 }, null, 2) + "\n");
+  const res = runValidate(dir);
+  failsWith(
+    res,
+    /playbooks\/demoing-things\.md: \d+ bytes > baseline -5/,
+    /tests\/fixtures\/context-budget\.json: playbooks\/demoing-things\.md is -5, not a byte or line count — set it to the measured value/
+  );
+  assert.doesNotMatch(res.stderr, /TypeError/);
 });
 
 test("budget decisions: a tree without the decisions log fails rather than skipping the rule", () => {

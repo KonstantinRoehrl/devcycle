@@ -70,7 +70,9 @@ jobs:
       - name: Unit tests (node --test, stubbed CLIs — no model call, no API key)
         run: node --test tests/unit/*.test.mjs
       - name: Report each entry point's context closure change against the PR base
-        if: github.event_name == 'pull_request'
+        # Runs after a failed step too: an over-budget closure is what fails Validate, and this table
+        # is what explains it.
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: node scripts/context-report.mjs --diff HEAD^1 --markdown >> "$GITHUB_STEP_SUMMARY"
       - name: Secret scan — full history
         env:

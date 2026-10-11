@@ -211,7 +211,7 @@ test("names the missing file's own reason and keys the suggested override on it,
   assert.equal(r.code, 1, r.out);
   assert.match(
     r.out,
-    /Task 1: \*\*Files:\*\* edits playbooks\/planning-waves\.md but omits docs\/decisions\/README\.md — add it \(a fixture raise needs a budget: line there\) or record a "- Budget-fixture override: docs\/decisions\/README\.md — <reason>"/,
+    /Task 1: \*\*Files:\*\* edits playbooks\/planning-waves\.md but omits docs\/decisions\/README\.md — add it \(every fixture change needs a budget: line there\) or record a "- Budget-fixture override: docs\/decisions\/README\.md — <reason>"/,
   );
   assert.doesNotMatch(r.out, /size baseline|override: playbooks\//);
 });

@@ -375,7 +375,7 @@ stage's entry through `scripts/stage-entry.mjs` and opens `resume.md` only when 
 Since 2026-10-10 a step that executes one section of a reference loads only that section, through
 `scripts/read-section.mjs`, and check 15 counts only that section's bytes.
 `scripts/context-report.mjs` reports each entry point's refs-only and all-hops closures. Every
-command and playbook closure, and every reference at least eight files read, carries a byte
+command and playbook closure, and every reference read by at least eight files, carries a byte
 ceiling that only a recorded decision moves, in either direction.
 
 ### 15.2 Native engines vs upstream overlays, keyed to `profile`
