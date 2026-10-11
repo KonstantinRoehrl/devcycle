@@ -15,6 +15,44 @@ CI's plugin-load job now runs on Claude Code 2.1.287 and 2.1.292, validates the 
 the plugin manifest, and runs the module's tests with `claude plugin test`. devcycle's own
 instructions file moved to `.claude/CLAUDE.md`.
 
+**Execution waves can run unattended.** `scripts/drive-execution.mjs` starts one
+`claude -p "/devcycle:continue --drive …"` session after another under a drive lock, writes one
+`drive` run-record row per finished session, and stops on a drive-stop signal, a stall, churn, the
+`--max-usd` spend cap (which holds as a total cap, killed sessions' subagent output included) or an
+interrupt. Planning's close now offers the opt-in; the driver stands in for you at the wave-to-wave
+gate only, and every other gate writes `.devcycle/drive-stop.json` and ends the session instead of
+asking. A driven session starts only from the session that opted in. Doctor splits its At a glance table into driven and
+manual cohorts and reports drive stops and stalls.
+
+**The per-task cycle runs through scripts.** `task-dispatch`, `task-intake`, `task-verdict`,
+`task-commit` and `wave-setup` append to a locked, idempotent ledger core and replace the
+hand-written ledger steps in `executing-waves`: an implementer's report is checked and either
+routed to review or bounced, a reviewer's verdict is read only from a real verdict line outside any
+fenced block, and a commit carries an idempotent task trailer behind the coordinator's green gate.
+Retries cap at 2 before the user is asked, review rounds cap at 3 and a failed green gate after an
+accept now counts as a round, and `references/resume.md` gains the matching resume rows.
+
+**The git guard stops denying data.** Quoted heredoc bodies and single-quoted text on a line that
+never runs them are now read as data, so ledger and findings writes are no longer refused as "git
+in a command substitution"; where the scanner and the shell could disagree the input still fails
+closed, and `rtk git …` and `rtk proxy git …` are classified like the git they launch. While a
+driver holds the drive lock the guard also denies branch-moving and tree-destroying git on the main
+thread, joins backslash line continuations, resolves `-C`, `--git-dir` and `--work-tree`, and
+denies a git whose subcommand comes from a substitution or variable. The guard's known gaps are
+recorded in the drive docs.
+
+**`/devcycle:continue` reads sections, not whole references.** A new fence-aware
+`scripts/read-section.mjs` prints one heading's section of a reference, and `commands/continue.md`
+and the fast path cite `references/*.md § <heading>` instead of whole files; the citation grammar,
+context report, validator and stage meter understand the form, and a file read whole and by section
+counts once. The fast path's context closure fell by about 41% (82,256 → 48,690 bytes).
+
+**Closure growth is gated.** Every command's context closure is gated as an entry point, each
+high-fan-in reference has its own byte budget, ratchet and fixture figures must equal their
+recorded value, and files near a line ceiling are noticed. CI's Validate job summary now reports
+each entry point's closure change against the PR base, and still does when Validate fails.
+`.claude/CLAUDE.md` gains "Done means" and "Rules that fail late" sections.
+
 ## 0.23.0 — 2026-10-07
 
 - feat(doctor): record subagent context depth, gate plans with one plan-check, and print overview tables in every doctor reply
