@@ -2052,13 +2052,77 @@ test("4c: a section read whose slug no heading of the reference has fails", () =
   const dir = makePluginFixture();
   writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");
   sectionRead(dir, "references/handoff.md", "nope");
-  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /section read of references\/.+ names "nope", which no "## " heading/);
+  failsWith(
+    runValidate(dir),
+    /playbooks\/demoing-things\.md/,
+    /section read of references\/.+ names "nope", which no "## " heading of that file slugs to — use the slug of one of its "## " headings, or restore the renamed heading/
+  );
 });
 
-test("4c: a section read of a reference that does not ship fails", () => {
+test("4c: a section read of a reference that does not ship fails, reported once", () => {
   const dir = makePluginFixture();
   sectionRead(dir, "references/missing.md", "one");
-  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /section read of references\/missing\.md names no file in the plugin/);
+  const res = runValidate(dir);
+  failsWith(
+    res,
+    /playbooks\/demoing-things\.md/,
+    /section read of references\/missing\.md names no file in the plugin — fix the path or restore the reference/
+  );
+  assert.equal(res.stderr.split("\n").filter((l) => l.includes("references/missing.md")).length, 1, res.stderr);
+});
+
+// A section read wrapped onto the next line, as markdown reflow leaves it, is the same read.
+const wrappedSectionRead = (dir, target, slug) => {
+  writeInto(dir, "scripts/read-section.mjs", "// fixture script\n");
+  playbook(dir, `Run \`node "\${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" ${target}\n${slug}\` first.\n`);
+};
+
+test("4c control: a section read wrapped across a line break passes", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");
+  wrappedSectionRead(dir, "references/handoff.md", "the-block-shape");
+  rebaseline(dir);
+  ok(runValidate(dir));
+});
+
+test("4c: a wrapped section read whose slug no heading has fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");
+  wrappedSectionRead(dir, "references/handoff.md", "the-blokc-shape");
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md/, /names "the-blokc-shape", which no "## " heading/);
+});
+
+// --- check 4d: every read-section.mjs call in surface text is one check 4c can parse ---
+
+const UNPARSED = /playbooks\/demoing-things\.md: `.*` is a read-section\.mjs call validate cannot parse — write it as node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/read-section\.mjs" references\/<file>\.md <lowercase-slug>/;
+
+test("4d control: the documented placeholder template is no call", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "scripts/read-section.mjs", "// fixture script\n");
+  playbook(dir, 'The form is `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/<file>.md <slug>`.\n');
+  rebaseline(dir);
+  ok(runValidate(dir));
+});
+
+test("4d: a section read with an uppercase slug fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");
+  sectionRead(dir, "references/handoff.md", "The-block-shape");
+  failsWith(runValidate(dir), UNPARSED);
+});
+
+test("4d: a slug with a tail the slug class stops short of fails rather than reading as the slug", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");
+  sectionRead(dir, "references/handoff.md", "the-block-shape.extra");
+  failsWith(runValidate(dir), UNPARSED);
+});
+
+test("4d: a quoted reference argument fails", () => {
+  const dir = makePluginFixture();
+  writeInto(dir, "references/handoff.md", "# Handoff\n\n## The block shape\n\nFields.\n");
+  sectionRead(dir, '"references/handoff.md"', "the-block-shape");
+  failsWith(runValidate(dir), UNPARSED);
 });
 
 // --- check 22: hooks/hooks.json registration ---

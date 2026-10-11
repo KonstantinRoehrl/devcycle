@@ -10,7 +10,16 @@ import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run
 import { readPolicy } from "./reinforcement-policy.mjs";
 import { closure } from "./context-closure.mjs";
 import { ROSTER } from "./resolve-knobs.mjs";
-import { bareExistsErrors, grammarFiles, grammarHits, referenceReaders, referenceReadErrors, SECTION_READ } from "./citation-grammar.mjs";
+import {
+  bareExistsErrors,
+  grammarFiles,
+  grammarHits,
+  referenceReaders,
+  referenceReadErrors,
+  SECTION_READ,
+  SEP,
+  unparsedSectionReads,
+} from "./citation-grammar.mjs";
 import { sectionText } from "./md-sections.mjs";
 import { loadStages } from "./stage-entry.mjs";
 import { budgetDecisionErrors } from "./budget-decisions.mjs";
@@ -277,20 +286,12 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     //     is what keeps the prescribed form clean — so an opening quote is optional and its closing
     //     one is consumed only if it is there. Detection never depends on the quotes balancing: an
     //     unterminated quote, or one closing past the path (`node "scripts/x.mjs --flag"`), is the
-    //     same broken dispatch. A separator is horizontal whitespace or a single line break with
-    //     any indentation after it — so an invocation markdown-wraps across a line and is still
-    //     caught — but never a line break followed by a blank line, so a paragraph break cannot
-    //     join unrelated prose into a hit. A `\` before the line ending is deliberately NOT a
-    //     separator, and re-adding it would be a regression: that is CommonMark's hard-break
-    //     syntax as much as it is a shell continuation, the two are textually identical, and with
-    //     no exemption marker prose that merely hard-breaks near a `scripts/` path would fail CI
-    //     with no way out but rewording. The cost accepted for that is missing `node \` + newline
-    //     + path, a form that realistically appears only inside fenced code blocks. The
+    //     same broken dispatch. A separator is citation-grammar.mjs's SEP, which a section read
+    //     shares, so an invocation markdown-wraps across a line and is still caught. Its
     //     alternatives begin with different characters, so a run of them parses one way only and
     //     cannot backtrack. The target class and the trailing-punctuation strip match check 4's,
     //     so a nested path keeps its subdirectory and un-backticked prose does not suggest a fix
     //     ending in a sentence period.
-    const SEP = String.raw`(?:[ \t]|\r?\n(?![ \t]*\r?\n))`;
     const BARE_DISPATCH = new RegExp(
       String.raw`(?<![A-Za-z0-9_-])[Nn]ode(?:${SEP}+-{1,2}[A-Za-z0-9][A-Za-z0-9._=-]*)*` +
         String.raw`${SEP}+(["']?)(?:\./)?((?:scripts|workflows)/[A-Za-z0-9._/-]+)\1?`,
@@ -310,10 +311,23 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     for (const [, file, wanted] of text.matchAll(SECTION_READ)) {
       const abs = join(root, file);
       if (!existsSync(abs) || !statSync(abs).isFile())
-        once(`section:${file}`, `${rel(p)}: section read of ${file} names no file in the plugin`);
+        once(`section:${file}`, `${rel(p)}: section read of ${file} names no file in the plugin — fix the path or restore the reference`);
       else if (sectionText(readFileSync(abs, "utf8"), wanted) === null)
-        once(`section:${file}#${wanted}`, `${rel(p)}: section read of ${file} names "${wanted}", which no "## " heading of that file slugs to`);
+        once(
+          `section:${file}#${wanted}`,
+          `${rel(p)}: section read of ${file} names "${wanted}", which no "## " heading of that file slugs to — ` +
+            `use the slug of one of its "## " headings, or restore the renamed heading`
+        );
     }
+
+    // 4d. 4c can only hold a section read it parses: any other read-section.mjs call would load
+    //     nothing anyone checked, so it fails here.
+    for (const call of unparsedSectionReads(text))
+      once(
+        `unparsed:${call}`,
+        `${rel(p)}: \`${call}\` is a read-section.mjs call validate cannot parse — write it as ` +
+          `node "\${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/<file>.md <lowercase-slug>`
+      );
   }
 
   // --- continue.md's resume discovery must stay hook-proof ---

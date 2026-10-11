@@ -141,12 +141,21 @@ test("bare-exists: a bare path that names no file fails; longer paths and placeh
   assert.deepEqual(rules(bareExistsErrors("playbooks/p.md", text, exists)), ["bare-exists@1"]);
 });
 
-test("SECTION_READ: captures the reference and slug of a one-line section read, and only a reference's", () => {
+test("SECTION_READ: captures the reference and slug of a section read, and only a reference's", () => {
   const read = (text) => [...text.matchAll(SECTION_READ)].map((m) => [m[1], m[2]]);
-  const step = (path, sep = " ") => `run \`node "${P}/scripts/read-section.mjs" ${path}${sep}the-stage-budget\``;
+  const step = (path, sep = " ", slug = "the-stage-budget") => `run \`node "${P}/scripts/read-section.mjs" ${path}${sep}${slug}\``;
   assert.deepEqual(read(step("references/delegation.md")), [["references/delegation.md", "the-stage-budget"]]);
   assert.deepEqual(read(step("playbooks/delegation.md")), []);
-  assert.deepEqual(read(step("references/delegation.md", "\n")), []);
+  assert.deepEqual(read(step("references/delegation.md", "\n  ")), [["references/delegation.md", "the-stage-budget"]], "a wrapped read is a read");
+  assert.deepEqual(read(step("references/delegation.md", "\n\n")), [], "a paragraph break is no separator");
+  assert.deepEqual(read(step("references/delegation.md", " ", "the-stage-budget.extra")), [], "a slug ends at a word boundary");
+  assert.deepEqual(read(step("references/delegation.md", " ", "The-stage-budget")), []);
+});
+
+test("bare-exists: a section read's reference is check 4c's to resolve, never a bare mention", () => {
+  const text = `Run \`node "${P}/scripts/read-section.mjs" references/gone.md one\`, then\n\`node "${P}/scripts/read-section.mjs"\nreferences/gone.md two\`.\n`;
+  assert.deepEqual(bareExistsErrors("playbooks/p.md", text, () => false), []);
+  assert.deepEqual(rules(bareExistsErrors("playbooks/p.md", `${text}Owner: references/gone.md.\n`, () => false)), ["bare-exists@4"]);
 });
 
 test("reference-read: a reference only ever named bare has no consumer; a prefixed citation or a script consumes it", () => {

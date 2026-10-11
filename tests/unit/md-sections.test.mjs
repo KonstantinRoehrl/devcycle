@@ -48,6 +48,13 @@ test("sections: a fenced ## line is content, not a heading", () => {
   assert.match(sectionText(DOC, "first"), /```md\n## Not a heading\n```\n/);
 });
 
+test("sections: only a fence of the opener's character, at least as long and bare, closes it", () => {
+  const nested = "## A\n````md\n```\n## Inner\n```\n````\nafter\n## B\nb\n";
+  assert.deepEqual(sections(nested).map((s) => s.slug), ["a", "b"]);
+  const mixed = "## A\n~~~\n```\n## Inner\n~~~ md\n## Still inner\n~~~~\n## B\n";
+  assert.deepEqual(sections(mixed).map((s) => s.slug), ["a", "b"]);
+});
+
 test("sections: a # heading ends a section", () => {
   assert.equal(sectionText(DOC, "second"), "## Second\n\nSecond body.\n\n");
 });
