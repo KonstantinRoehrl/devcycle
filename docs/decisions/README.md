@@ -5,6 +5,150 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-10 — Closures stop creeping back up
+
+**Decision:** the two files sitting exactly at their line ceilings get headroom by deletion and
+compression, never by moving text into another file: `commands/cycle.md` 174 → 164 lines and
+`playbooks/learning-from-sessions.md` 320 → 310. The ceilings (`commandMax` 174, `playbookMax`
+320) stay. `scripts/validate.mjs` check 9 now prints a notice on stdout, never a failure, for a
+command or playbook within `NEAR_CEILING_LINES` (5) lines of its ceiling, so growth toward a
+ceiling is visible before an edit fails on it. Commands are now gated as entry points: check 15
+holds each `commands/*.md`, like each playbook, to a `tests/fixtures/context-budget.json` entry for
+its own bytes plus every reference it cites, set at today's measured refs-only figure, and
+`scripts/budget-fixture-check.mjs` requires that fixture for a command edit. A reference read by
+prefix or by section from `FAN_IN_THRESHOLD` (8) or more surface files must carry its own entry,
+gating only its own bytes, set at today's figure; an entry stays valid and keeps gating after the
+reference falls below the threshold.
+
+The ceilings ratchet down as well as up. Check 15 fails a `context-budget.json` entry that sits
+more than max(`RATCHET_FRACTION` 1%, `RATCHET_MIN_BYTES` 256 B) above its measured bytes, and
+prints the fixture and `budget:` lines to paste, so a cut lowers its ceiling in the same change.
+Check 28 now fails a fixture value that differs from the newest `budget:` line for its key, in
+either direction, so a lowered entry records its figure as a raised one does. The thresholds —
+fan-in 8, ratchet max(1%, 256 B), near-ceiling 5 lines — are named constants in
+`scripts/validate.mjs`, chosen by judgment rather than measured.
+
+**Why:** a file at its ceiling turns any edit that adds a line into a baseline raise, which is how
+ceilings creep. `cycle.md` lost a paragraph restating the `profile`'s engine choice, which
+`references/config.md` owns, plus re-wraps; `learning-from-sessions.md` lost clauses restating what
+its Modes section already states and a historical note, plus re-wraps. The playbook's refs-only
+closure falls 62130 → 61777 bytes, its restored `artifactFresh` rationale included, and
+`surfaceTotal` 5911 → 5893, the fast path's third evidence read and a re-wrap included. An entry
+left above its figure after a cut lets the freed bytes grow back unreviewed; the 256 B floor keeps a
+small file's re-wrap from tripping the ratchet.
+
+**Supersedes:** check 15's playbook-only scope; check 28's at-or-below rule; check 9's failures
+are unchanged.
+
+```text
+budget: surface-budget.json surfaceTotal 5893
+budget: context-budget.json playbooks/learning-from-sessions.md 61777
+budget: context-budget.json playbooks/planning-waves.md 71372
+budget: context-budget.json commands/continue.md 50265
+budget: context-budget.json commands/cycle.md 69365
+budget: context-budget.json commands/doctor.md 2161
+budget: context-budget.json commands/learn.md 16337
+budget: context-budget.json commands/maintain.md 17516
+budget: context-budget.json commands/onboard.md 16625
+budget: context-budget.json commands/reconcile.md 24062
+budget: context-budget.json commands/review.md 24692
+budget: context-budget.json commands/verify.md 23790
+budget: context-budget.json references/branch.md 6844
+budget: context-budget.json references/config.md 14019
+budget: context-budget.json references/delegation.md 10601
+budget: context-budget.json references/evidence.md 12059
+budget: context-budget.json references/handoff.md 9035
+budget: context-budget.json references/model-routing.md 9090
+budget: context-budget.json references/output.md 756
+```
+
+## 2026-10-10 — Section-scoped reads: a step loads only the section it executes
+
+**Decision:** a citation may name one `##` section of a reference instead of the whole file, as
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/<file>.md <slug>` on one line in
+one code span. It converts only where the citing step executes exactly that section and nothing
+else in the file, its preamble included; `references/README.md` § Citation grammar owns the rule,
+`scripts/validate.mjs` check 4 fails a slug no heading of its file has, and check 15 counts only
+the section's bytes. Converted: `commands/continue.md`'s run-record pointer (`ledger.md
+the-run-record`) and step 2b (`config.md knob-channel`); `references/resume.md`'s `knobs-changed:`
+row (`ledger.md the-event-line`, a section the ledger's preamble gave up for it);
+`references/handoff.md`'s depth probe and its `Continue` test (both `delegation.md
+the-stage-budget`); `references/evidence.md`'s envelope pointer (`delegation.md return-envelopes`);
+and `playbooks/taking-the-fast-path.md`'s step 2 (`evidence.md the-three-evidence-classes`,
+`evidence.md file-backed-evidence`, `evidence.md reviewer-verdicts`), step 4 (`commit-convention.md
+scoping-the-commit`) and Delegation paragraph (`delegation.md the-short-paths`, `delegation.md
+the-stage-budget`). The fast path's resume pointer becomes a bare owner mention:
+`/devcycle:continue` has already read `references/resume.md` at its ownership check.
+
+**Why:** a scan of top-level session transcripts (a scratch script, not committed; subagent reads
+excluded) found the fast path ran once (n=1, a dogfooding run reading 3 of its 11 closure files),
+while `/devcycle:continue` ran in roughly a thousand sessions and on 0.22+ read
+`references/resume.md` almost always, `references/handoff.md` in about two thirds, and
+`config.md`, `evidence.md` and `delegation.md` in about a fifth each (per-file rates are
+session-wide). `continue` is the hot path, and whole-file reads loaded sections its steps never
+execute. Refs-only bytes (`node scripts/context-report.mjs --json`), before → after:
+
+| Entry point | Before | After | Change |
+| --- | --- | --- | --- |
+| commands/continue.md | 74341 | 50265 | −24076 (−32.4%) |
+| commands/cycle.md | 78534 | 69735 | −8799 (−11.2%) |
+| playbooks/executing-waves.md | 95816 | 96027 | +211 |
+| playbooks/finishing-the-cycle.md | 54549 | 45596 | −8953 |
+| playbooks/planning-waves.md | 71211 | 71335 | +124 |
+| playbooks/profiling-sessions.md | 47143 | 38646 | −8497 |
+| playbooks/receiving-review.md | 115525 | 108003 | −7522 |
+| playbooks/reviewing-code.md | 91394 | 91418 | +24 |
+| playbooks/reviewing-the-branch.md | 56012 | 47059 | −8953 |
+| playbooks/scoping-the-request.md | 27812 | 27912 | +100 |
+| playbooks/sweeping-mechanical-changes.md | 89131 | 81609 | −7522 |
+| playbooks/taking-the-fast-path.md | 82256 | 48690 | −33566 (−40.8%) |
+| playbooks/verifying-on-device.md | 51536 | 42583 | −8953 |
+| playbooks/writing-the-findings-document.md | 66648 | 59799 | −6849 |
+
+The four rises are closures that still load whole files whose citation lines grew:
+references/ledger.md +87 bytes (its event-line heading), references/handoff.md +100,
+references/evidence.md +24. learning-from-sessions (62130) and onboarding-a-repo (30288) did not
+move; their fixture values drop to the measured figure. `surfaceTotal` rises 5894 → 5911: the
+section reads and the citation-grammar bullet add runtime-surface lines.
+
+Each conversion was checked by running its command and reading the output beside the citing step:
+
+- commands/continue.md preamble → `the-run-record`: executes only this section (the `event` row).
+- commands/continue.md step 2b → `knob-channel`: executes only this section.
+- references/resume.md `knobs-changed:` row → `the-event-line`: executes only this section.
+- references/handoff.md `Context depth:` paragraph → `the-stage-budget`: executes only this section.
+- references/handoff.md `Continue` test → `the-stage-budget`: executes only this section.
+- references/evidence.md § File-backed evidence → `return-envelopes`: executes only this section.
+- playbooks/taking-the-fast-path.md step 2 → `the-three-evidence-classes`: executes only this
+  section.
+- playbooks/taking-the-fast-path.md step 2 → `file-backed-evidence`: executes only this section.
+- playbooks/taking-the-fast-path.md step 2 → `reviewer-verdicts`: the rejection conditions its
+  evidence must survive; its closing verdict shape is step 5's reviewer's, not step 2's.
+- playbooks/taking-the-fast-path.md step 4 → `scoping-the-commit`: executes only this section.
+- playbooks/taking-the-fast-path.md Delegation → `the-short-paths`: executes only this section.
+- playbooks/taking-the-fast-path.md Delegation → `the-stage-budget`: executes only this section.
+
+**Supersedes:** nothing; a whole-file read stays the default form, `references/model-routing.md`
+stays one, and no reference is split.
+
+```text
+budget: surface-budget.json surfaceTotal 5911
+budget: context-budget.json playbooks/executing-waves.md 96027
+budget: context-budget.json playbooks/finishing-the-cycle.md 45596
+budget: context-budget.json playbooks/learning-from-sessions.md 62130
+budget: context-budget.json playbooks/onboarding-a-repo.md 30288
+budget: context-budget.json playbooks/planning-waves.md 71335
+budget: context-budget.json playbooks/profiling-sessions.md 38646
+budget: context-budget.json playbooks/receiving-review.md 108003
+budget: context-budget.json playbooks/reviewing-code.md 91418
+budget: context-budget.json playbooks/reviewing-the-branch.md 47059
+budget: context-budget.json playbooks/scoping-the-request.md 27912
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 81609
+budget: context-budget.json playbooks/taking-the-fast-path.md 48690
+budget: context-budget.json playbooks/verifying-on-device.md 42583
+budget: context-budget.json playbooks/writing-the-findings-document.md 59799
+```
+
 ## 2026-10-08 — Unattended execution: a driver the user started is the user at the wave→wave gate only
 
 **Decision:** execution may run unattended, wave after wave, under a driver process the user starts,

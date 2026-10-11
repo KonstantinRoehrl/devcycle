@@ -10,9 +10,19 @@ import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run
 import { readPolicy } from "./reinforcement-policy.mjs";
 import { closure } from "./context-closure.mjs";
 import { ROSTER } from "./resolve-knobs.mjs";
-import { bareExistsErrors, grammarFiles, grammarHits, referenceReadErrors } from "./citation-grammar.mjs";
+import {
+  bareExistsErrors,
+  grammarFiles,
+  grammarHits,
+  referenceReaders,
+  referenceReadErrors,
+  SECTION_READ,
+  SEP,
+  unparsedSectionReads,
+} from "./citation-grammar.mjs";
+import { sectionText } from "./md-sections.mjs";
 import { loadStages } from "./stage-entry.mjs";
-import { budgetDecisionErrors } from "./budget-decisions.mjs";
+import { budgetDecisionErrors, recordedBudgets, newestRecorded } from "./budget-decisions.mjs";
 import { DECISIONS_DOC } from "./doc-paths.mjs";
 
 
@@ -75,6 +85,16 @@ export function docsSubdirTrackingErrors(repoRoot) {
 }
 
 const DESCRIPTION_BUDGET_TOTAL = 6000; // chars; source: docs/platform-notes.md
+// Check 9 prints a notice, never a failure, for a command or playbook fewer than this many lines
+// under its ceiling, so the next edit's growth is seen before it fails.
+const NEAR_CEILING_LINES = 5;
+// Check 15 holds a reference this many surface files read to its own context-budget entry: its
+// bytes land in every reader's closure, so its growth is charged that many times over.
+const FAN_IN_THRESHOLD = 8;
+// Check 15 fails an entry more than max(1%, 256 B) above its measured bytes: a cut has to lower
+// its ceiling, or the freed bytes could grow back without a reviewed decision.
+const RATCHET_FRACTION = 0.01;
+const RATCHET_MIN_BYTES = 256;
 
 if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const root = process.cwd();
@@ -266,20 +286,12 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     //     is what keeps the prescribed form clean — so an opening quote is optional and its closing
     //     one is consumed only if it is there. Detection never depends on the quotes balancing: an
     //     unterminated quote, or one closing past the path (`node "scripts/x.mjs --flag"`), is the
-    //     same broken dispatch. A separator is horizontal whitespace or a single line break with
-    //     any indentation after it — so an invocation markdown-wraps across a line and is still
-    //     caught — but never a line break followed by a blank line, so a paragraph break cannot
-    //     join unrelated prose into a hit. A `\` before the line ending is deliberately NOT a
-    //     separator, and re-adding it would be a regression: that is CommonMark's hard-break
-    //     syntax as much as it is a shell continuation, the two are textually identical, and with
-    //     no exemption marker prose that merely hard-breaks near a `scripts/` path would fail CI
-    //     with no way out but rewording. The cost accepted for that is missing `node \` + newline
-    //     + path, a form that realistically appears only inside fenced code blocks. The
+    //     same broken dispatch. A separator is citation-grammar.mjs's SEP, which a section read
+    //     shares, so an invocation markdown-wraps across a line and is still caught. Its
     //     alternatives begin with different characters, so a run of them parses one way only and
     //     cannot backtrack. The target class and the trailing-punctuation strip match check 4's,
     //     so a nested path keeps its subdirectory and un-backticked prose does not suggest a fix
     //     ending in a sentence period.
-    const SEP = String.raw`(?:[ \t]|\r?\n(?![ \t]*\r?\n))`;
     const BARE_DISPATCH = new RegExp(
       String.raw`(?<![A-Za-z0-9_-])[Nn]ode(?:${SEP}+-{1,2}[A-Za-z0-9][A-Za-z0-9._=-]*)*` +
         String.raw`${SEP}+(["']?)(?:\./)?((?:scripts|workflows)/[A-Za-z0-9._/-]+)\1?`,
@@ -293,6 +305,29 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           `from the installed plugin, not this repo; use \${CLAUDE_PLUGIN_ROOT}/${target}`
       );
     }
+
+    // 4c. A section read names a reference that ships and a `##` section it has, so a heading rename
+    //     cannot leave a dangling read.
+    for (const [, file, wanted] of text.matchAll(SECTION_READ)) {
+      const abs = join(root, file);
+      if (!existsSync(abs) || !statSync(abs).isFile())
+        once(`section:${file}`, `${rel(p)}: section read of ${file} names no file in the plugin — fix the path or restore the reference`);
+      else if (sectionText(readFileSync(abs, "utf8"), wanted) === null)
+        once(
+          `section:${file}#${wanted}`,
+          `${rel(p)}: section read of ${file} names "${wanted}", which no "## " heading of that file slugs to — ` +
+            `use the slug of one of its "## " headings, or restore the renamed heading`
+        );
+    }
+
+    // 4d. 4c can only hold a section read it parses: any other read-section.mjs call would load
+    //     nothing anyone checked, so it fails here.
+    for (const call of unparsedSectionReads(text))
+      once(
+        `unparsed:${call}`,
+        `${rel(p)}: \`${call}\` is a read-section.mjs call validate cannot parse — write it as ` +
+          `node "\${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/<file>.md <lowercase-slug>`
+      );
   }
 
   // --- continue.md's resume discovery must stay hook-proof ---
@@ -491,6 +526,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     return text === "" ? 0 : text.replace(/\n$/, "").split("\n").length;
   };
   let surfaceLines = 0;
+  const nearCeilingNotices = [];
   for (const p of surface) {
     const n = lines(p), r = rel(p);
     surfaceLines += n;
@@ -498,6 +534,13 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       fail(`${r}: ${n} lines > ${budgets.commandMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
     if (budgetsParsed && Number.isInteger(budgets.playbookMax) && r.startsWith("playbooks/") && n > budgets.playbookMax)
       fail(`${r}: ${n} lines > ${budgets.playbookMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
+    const key = r.startsWith("commands/") ? "commandMax" : r.startsWith("playbooks/") ? "playbookMax" : null;
+    const max = key && budgetsParsed ? budgets[key] : undefined;
+    if (Number.isInteger(max) && n <= max && max - n < NEAR_CEILING_LINES)
+      nearCeilingNotices.push(
+        `validate: notice: ${r}: ${n} lines, fewer than ${NEAR_CEILING_LINES} under the ${key} ceiling ${max} — ` +
+          `trim it before adding to it, or raise the ceiling with a decisions entry`
+      );
   }
   if (budgetsParsed && Number.isInteger(budgets.surfaceTotal) && surfaceLines > budgets.surfaceTotal)
     fail(
@@ -511,8 +554,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       fail(`agents/${f}: frontmatter must not set model: — a pin defeats session-tier escalation`);
 
   // 11. Every reference has at least one consumer: a surface file that reads it — a prefixed
-  //     ${CLAUDE_PLUGIN_ROOT} citation, never a bare mention, which only names an owner — or a
-  //     script that reads it. A reference citing itself is not its own consumer, and
+  //     ${CLAUDE_PLUGIN_ROOT} citation or a section read, never a bare mention, which only names an
+  //     owner — or a script that reads it. A reference citing itself is not its own consumer, and
   //     references/README.md is the index, a consumer OF references, so it needs none.
   const scripts = existsSync(join(root, "scripts")) ? [...walk(join(root, "scripts"))] : [];
   for (const h of referenceReadErrors({
@@ -748,11 +791,17 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
   }
 
+  // Read once for checks 15 and 28; null when the log is missing, which check 28 fails.
+  const decisionsPath = join(root, DECISIONS_DOC);
+  const decisionsText = existsSync(decisionsPath) ? readFileSync(decisionsPath, "utf8") : null;
+
   const contextRows = [];
-  // 15. Per-stage context budget: a playbook's own bytes plus every reference reachable from it
-  //     through ${CLAUDE_PLUGIN_ROOT} citations, against a committed baseline. Bytes, not lines:
+  // 15. Per-entry-point context budget: an entry point's (a command's or a playbook's) own bytes
+  //     plus every reference reachable from it through ${CLAUDE_PLUGIN_ROOT} citations, against a
+  //     committed baseline; and a high-fan-in reference's own bytes. Bytes, not lines:
   //     a context window is spent in bytes, and a long line costs what it costs. Growth is a
-  //     reviewed decision, same rule as check 9. Citations are followed by
+  //     reviewed decision, same rule as check 9, and so is a cut: an entry past the ratchet margin
+  //     above its measured bytes fails until it is lowered. Citations are followed by
   //     scripts/context-closure.mjs, which context-report.mjs shares.
   const CONTEXT_BUDGET_PATH = "tests/fixtures/context-budget.json";
   const contextFile = join(root, CONTEXT_BUDGET_PATH);
@@ -763,7 +812,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   // checks 17 and 18 execute at all. Check 28 reads both.
   let contextBaseline, contextParsed = false;
   if (!existsSync(contextFile)) {
-    fail(`${CONTEXT_BUDGET_PATH}: missing — no stage declares its context cost, so growth could not be reviewed`);
+    fail(`${CONTEXT_BUDGET_PATH}: missing — no entry point declares its context cost, so growth could not be reviewed`);
   } else {
     contextParsed = true;
     try {
@@ -774,16 +823,30 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
     if (contextParsed && (typeof contextBaseline !== "object" || contextBaseline === null || Array.isArray(contextBaseline))) {
       fail(
-        `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each playbook to its byte budget, ` +
+        `${CONTEXT_BUDGET_PATH}: must be a JSON object mapping each entry point and each high-fan-in reference to its byte budget, ` +
           `got ${JSON.stringify(contextBaseline)}`
       );
       contextParsed = false;
     }
     if (contextParsed) {
-      const playbookNames = namesIn("playbooks").map((f) => `playbooks/${f}`);
-      for (const p of playbookNames) {
+      const ratchetTrips = [];
+      const ratchet = (key, bytes, limit) => {
+        const margin = Math.max(Math.ceil(limit * RATCHET_FRACTION), RATCHET_MIN_BYTES);
+        if (limit - bytes <= margin) return;
+        fail(
+          `${key}: ${bytes} bytes, ${limit - bytes} below baseline ${limit} — ` +
+            `past the ratchet margin of ${margin} B; lower the entry to ${bytes} and record it`
+        );
+        ratchetTrips.push({ key, bytes });
+      };
+      const entryPoints = ["commands", "playbooks"].flatMap((d) => namesIn(d).map((f) => `${d}/${f}`));
+      for (const p of entryPoints) {
+        const { bytes } = closure(p, { follow: "refs", root });
         if (!(p in contextBaseline)) {
-          fail(`${p}: no entry in ${CONTEXT_BUDGET_PATH} — a stage must declare its context budget`);
+          fail(
+            `${p}: no entry in ${CONTEXT_BUDGET_PATH} — an entry point must declare its context budget; ` +
+              `add "${p}": ${bytes} and record it`
+          );
           continue;
         }
         const limit = contextBaseline[p];
@@ -791,31 +854,78 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
           fail(`${CONTEXT_BUDGET_PATH}: ${p} must be an integer, got ${JSON.stringify(limit)}`);
           continue;
         }
-        const { bytes } = closure(p, { follow: "refs", root });
         contextRows.push({ path: p, bytes, limit, allHops: closure(p, { follow: "all", root }) });
         if (bytes > limit)
           fail(
-            `${p}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, playbook plus its cited references) — ` +
+            `${p}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, entry point plus its cited references) — ` +
               `raise the baseline in this same commit if the growth is intended`
           );
+        ratchet(p, bytes, limit);
       }
+      // A reference's entry gates its own bytes. It is required at FAN_IN_THRESHOLD readers and
+      // keeps gating below them, so a reference that loses readers cannot grow unreviewed. An entry is
+      // removed only with its file: one the decisions log has ever recorded stays required while the
+      // file exists.
+      const references = namesIn("references").map((f) => `references/${f}`);
+      const readers = referenceReaders(surface.map((p) => ({ rel: rel(p), text: readFileSync(p, "utf8") })));
+      const recorded = decisionsText === null ? new Map() : recordedBudgets(decisionsText).recorded;
+      for (const ref of references) {
+        const n = readers.get(ref)?.size ?? 0;
+        const bytes = Buffer.byteLength(readFileSync(join(root, ref), "utf8"));
+        if (!(ref in contextBaseline)) {
+          if (newestRecorded(recorded, "context-budget.json", ref))
+            fail(
+              `${ref}: its context-budget entry was retired while the file still exists — ` +
+                `restore the entry at ${bytes}; an entry is removed only with its file`
+            );
+          else if (n >= FAN_IN_THRESHOLD)
+            fail(
+              `${ref}: read by ${n} files (threshold ${FAN_IN_THRESHOLD}) and has no entry in ${CONTEXT_BUDGET_PATH} — ` +
+                `a high-fan-in reference declares its own byte budget`
+            );
+          continue;
+        }
+        const limit = contextBaseline[ref];
+        if (!Number.isInteger(limit)) {
+          fail(`${CONTEXT_BUDGET_PATH}: ${ref} must be an integer, got ${JSON.stringify(limit)}`);
+          continue;
+        }
+        if (bytes > limit)
+          fail(
+            `${ref}: ${bytes} bytes > baseline ${limit} (${CONTEXT_BUDGET_PATH}, the reference's own bytes) — ` +
+              `raise the baseline in this same commit if the growth is intended`
+          );
+        ratchet(ref, bytes, limit);
+      }
+      // Printed paste-ready: the JSON lines at the fixture's own indent, the budget lines flush left
+      // because check 28 rejects an indented one.
+      if (ratchetTrips.length)
+        fail(
+          [
+            `ratchet: set these in ${CONTEXT_BUDGET_PATH} and the decision entry's text block:`,
+            ...ratchetTrips.map(({ key, bytes }) => `  "${key}": ${bytes},`),
+            ...ratchetTrips.map(({ key, bytes }) => `budget: context-budget.json ${key} ${bytes}`),
+          ].join("\n")
+        );
       for (const p of Object.keys(contextBaseline))
-        if (!playbookNames.includes(p))
-          fail(`${CONTEXT_BUDGET_PATH}: entry "${p}" names no such playbook — remove it or restore the file`);
+        if (!entryPoints.includes(p) && !references.includes(p))
+          fail(
+            `${CONTEXT_BUDGET_PATH}: entry "${p}" names no such entry point or reference — ` +
+              `remove it with a "budget: context-budget.json ${p} retired" line, or restore the file`
+          );
     }
   }
 
-  // 28. M10: no budget fixture value above the newest `budget:` line the decisions log records for
-  //     it (scripts/budget-decisions.mjs). A missing log fails, as a missing fixture does in checks
+  // 28. M10: every budget fixture value equals the newest `budget:` line the decisions log records
+  //     for it (scripts/budget-decisions.mjs). A missing log fails, as a missing fixture does in checks
   //     9 and 15 — skipping would leave every raise unchecked. An unusable fixture is skipped here
   //     because checks 9 and 15 have already failed it.
-  const decisionsPath = join(root, DECISIONS_DOC);
-  if (!existsSync(decisionsPath))
+  if (decisionsText === null)
     fail(`${DECISIONS_DOC}: missing — no budget decision is recorded, so no budget raise could be checked against one`);
   else if (budgetsParsed && contextParsed)
     for (const message of budgetDecisionErrors({
       fixtures: { "surface-budget.json": budgets, "context-budget.json": contextBaseline },
-      logText: readFileSync(decisionsPath, "utf8"),
+      logText: decisionsText,
     }))
       fail(message);
 
@@ -1191,14 +1301,16 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
   }
 
-  // L17: the all-hops closure follows playbook→playbook hops check 15 deliberately does not gate.
+  // L17: the all-hops closure follows the playbook and command hops check 15 deliberately does not gate.
   // Reported beside the gated figure so the hops stay visible without collapsing every budget
   // into one number.
   if (contextRows.length) {
-    console.log("context (check 15 gates refs-only bytes; all-hops is reported, never gated):");
+    console.log("context (check 15 gates each entry point's refs-only bytes; all-hops is reported, never gated):");
     for (const r of contextRows)
       console.log(`  ${r.path}  refs-only ${r.bytes}/${r.limit} B  all-hops ${r.allHops.files.length} files, ${r.allHops.words} words`);
   }
+
+  for (const notice of nearCeilingNotices) console.log(notice);
 
   if (errors.length) { console.error("VALIDATION FAILED:\n" + errors.map((e) => " - " + e).join("\n")); process.exit(1); }
   console.log("validate: ok");

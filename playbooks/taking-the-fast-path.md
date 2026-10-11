@@ -22,24 +22,27 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    on the `branch:` line of `.devcycle/state.md` is the durable record of where this work
    lives, and resume (below) keys off it.
 2. **Implement in-session.** No subagents, no plan file, no ledger entries — just make the
-   change. It still carries the evidence class triage determined at the gate: read
-   `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` and produce that class's before/after
-   evidence as it specifies, writing this run's files to `.devcycle/evidence/fast-before.txt`
-   and `.devcycle/evidence/fast-after.txt` (`fast` is this path's task id). `fast-before.txt`
-   opens with one line naming the declared class and the exact verification command, and each
-   run's exit status is appended to its own evidence file as the run finishes — that reference
-   makes "an exit status contradicts the declared class" and "the class mismatches the diff"
-   rejection conditions, and step 5's reviewer can only run those checks if the class, the
-   command and the statuses are on disk with the output.
+   change. It still carries the evidence class triage determined at the gate: run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/evidence.md the-three-evidence-classes`,
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/evidence.md file-backed-evidence`
+   and
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/evidence.md reviewer-verdicts`
+   and produce that class's before/after evidence as they specify, writing this run's files to
+   `.devcycle/evidence/fast-before.txt` and `.devcycle/evidence/fast-after.txt` (`fast` is this
+   path's task id). `fast-before.txt` opens with one line naming the declared class and the exact
+   verification command, and each run's exit status is appended to its own evidence file as the
+   run finishes — the reviewer verdicts make "an exit status contradicts the declared class" and
+   "the class mismatches the diff" rejection conditions, and step 5's reviewer can only run those
+   checks if the class, the command and the statuses are on disk with the output.
 3. **Escalation valve.** If implementation reveals the change is not trivial after all — the
    blast radius is spreading past what triage saw, or a real design choice has surfaced that
    the request didn't settle — stop, say so, and re-enter the normal pipeline at whichever
    stage the discovery calls for (usually scoping or brainstorm), updating
    `.devcycle/state.md` accordingly. Never push a non-trivial change through the fast path
    just because it is already in flight.
-4. **Commit** with a Conventional Commit subject, scoped per
-   `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the commit" — read it
-   there and follow it. Run `git add -N` on any file the change creates before committing, or
+4. **Commit** with a Conventional Commit subject, scoped by the rule
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/commit-convention.md scoping-the-commit`
+   prints — follow it. Run `git add -N` on any file the change creates before committing, or
    the pathspec matches nothing for it and the commit aborts.
 5. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model
    `taskReviewerModel` resolves per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`, with the
@@ -70,9 +73,10 @@ the standard `.devcycle/ledger.md` line but is unused, there being no wave dispa
 
 ## Resume (`/devcycle:continue`)
 
-On re-entry at `stage: fast-path`, read `${CLAUDE_PLUGIN_ROOT}/references/resume.md` and
-follow it. Mapped onto this playbook: its `(re)implement` row is step 2, its `dispatch the
-task reviewer` row is step 5, and the acceptance it says is never inferable from git is
+On re-entry at `stage: fast-path`, `/devcycle:continue` has already read
+`references/resume.md` at its ownership check, and its rows bind here. Mapped onto this
+playbook: its `(re)implement` row is step 2, its `dispatch the task reviewer` row is step 5,
+and the acceptance it says is never inferable from git is
 recorded only by step 6 advancing `stage:` to `finish` — after which `/devcycle:continue`
 routes to `playbooks/finishing-the-cycle.md` and never re-enters here.
 
@@ -80,7 +84,10 @@ routes to `playbooks/finishing-the-cycle.md` and never re-enters here.
 topic branch, step 2's evidence files, step 5's single reviewer dispatch, and — the moment it
 stops being small — step 3's valve rather than a push to the finish line.
 
-**Delegation.** `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` exempts this path from
-delegate-by-default (`## The short paths`) — working in-session is the point. Its stage budget
-still binds: reaching those counters here means triage judged the change trivial and was
-wrong. Say so and escalate to the full pipeline rather than pressing on.
+**Delegation.**
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/delegation.md the-short-paths`
+prints this path's exemption from delegate-by-default — working in-session is the point. Its
+stage budget still binds —
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/delegation.md the-stage-budget`
+prints the counters: reaching them here means triage judged the change trivial and was wrong.
+Say so and escalate to the full pipeline rather than pressing on.

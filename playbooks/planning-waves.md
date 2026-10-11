@@ -121,15 +121,15 @@ fixing what it finds inline as you go; no re-review pass.
    Files block (`blastRadius`); no same-wave task's brief names a file another same-wave task edits
    (`contentCoupling`); a task touching a budgeted surface (`playbooks/`, `commands/`, `agents/`,
    `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md`, which holds
-   their `budget:` lines — `references/` markdown matches the context budget as well, because a
-   playbook's context budget counts every reference it cites (`budgetFixtures`); no two same-wave tasks
-   list the same file (`waveDisjointness`); and item 4's claims (`authoredClaims`). A plan with no
-   `## Dispatch Map` fails before any leg runs. Three findings clear by an explicit override line
-   instead of a fix, each reasonless form a hard error: `- Blast-radius override: <changed-file>
-   [→ <referencer>] — <reason>` (e.g. referenced only in a comment), `- Content-coupling override:
-   Task B → <file> (Task A) — <reason>` (or a real dependency), and `- Budget-fixture override:
-   <surface-or-fixture> — <reason>`. A non-zero exit is a stop, resolved by fixing the plan or recording
-   an override — never by handing off around it.
+   their `budget:` lines — `references/` and `agents/` markdown match the context budget too: every
+   entry point pays for the references it cites, and agents count toward a reference's fan-in
+   (`budgetFixtures`); no two same-wave tasks list the same file (`waveDisjointness`); and item 4's
+   claims (`authoredClaims`). A plan with no `## Dispatch Map` fails before any leg runs. Three
+   findings clear by an explicit override line instead of a fix, each reasonless form a hard error:
+   `- Blast-radius override: <changed-file> [→ <referencer>] — <reason>` (e.g. referenced only in a
+   comment), `- Content-coupling override: Task B → <file> (Task A) — <reason>` (or a real
+   dependency), and `- Budget-fixture override: <surface-or-fixture> — <reason>`. A non-zero exit is
+   a stop, resolved by fixing the plan or recording an override — never by handing off around it.
 
 ## The three per-task declaration lines
 

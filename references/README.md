@@ -35,10 +35,15 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
   file, or the named section of it, at that point. `scripts/validate.mjs` check 15 counts it.
 - A bare `references/<file>.md`, `playbooks/<file>.md` or `commands/<file>.md` means **owner**: it
   names where a rule lives, and an agent does not open it on the strength of the mention.
+- `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/<file>.md <slug>`, unquoted, with
+  a lowercase slug and wrapped or not, means **read that section**: the step loads only the `##`
+  section whose heading slugs to `<slug>`, and check 15 counts only its bytes. Convert a citation to
+  it only when the step executes exactly that section and nothing else in the file, its preamble included.
 - A conventions list is an owner list. Its entries are bare, and a step that executes one of those
   owners carries its own prefixed citation at that step.
 
 `scripts/validate.mjs` check 26 holds the grammar over `commands/`, `playbooks/` and `references/`:
 no reference cites a playbook or command prefixed; no prefixed citation sits in an owner sentence
 unless a read verb opens it or a clause; no sentence that opens with a read verb names its target
-bare; every bare path resolves. `agents/` keep their own citations.
+bare; a section read is a read, never a bare mention; every bare path resolves. `agents/` keep their
+own citations. Check 4 fails a section read it cannot parse, or whose slug no heading of its file has.

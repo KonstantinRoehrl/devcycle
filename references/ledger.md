@@ -17,8 +17,14 @@ Profile: `<resolved profile>` (evidence tail <N> lines)
 `Branch:` is recorded once that playbook's pre-flight has the topic branch, `Profile:` from its own
 resolved profile, and its commit-convention pre-flight step appends a fourth line,
 `Commit-convention:`, once its derivation runs —
-`references/commit-convention.md` owns that line's format. Then one
-appended line per event, all four fields REQUIRED, exactly this shape:
+`references/commit-convention.md` owns that line's format. Then one appended line per event, in the
+shape § The event line gives.
+
+After any compaction or resume, trust the ledger and `git log` over conversation memory.
+
+## The event line
+
+One appended line per event, all four fields REQUIRED, exactly this shape:
 
 ```
 - [<ISO-8601 UTC>] task=<id> event=<dispatched|report-received|review-round|review-verdict|committed|user-decision> outcome=<short> ref=<commit-sha|file|none>
@@ -29,8 +35,6 @@ taken when the entry is appended — never a narrated or estimated time.
 A task script (§ Task scripts) appends one more token after `ref=`, `key=<id>/<event>/<round>/<retry>`:
 `<round>` is the review round (0 before the first), `<retry>` the dispatch's retry index for that
 task. A line without it stays valid, and a reader that does not know it ignores it.
-
-After any compaction or resume, trust the ledger and `git log` over conversation memory.
 
 ## The run record
 

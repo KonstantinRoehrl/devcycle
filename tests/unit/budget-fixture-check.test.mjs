@@ -38,11 +38,26 @@ const AGENT_ONLY = `# Plan
 - Wave 1: Task 1
 `;
 
-test("a task touching a non-playbook surface file without surface-budget.json fails on surface-budget only, not context-budget", () => {
+test("an agent edit needs context-budget.json too — check 15 counts an agent among a reference's readers", () => {
   const { code, out } = run(AGENT_ONLY);
   assert.equal(code, 1);
-  assert.match(out, /tests\/fixtures\/surface-budget\.json/);
-  assert.doesNotMatch(out, /tests\/fixtures\/context-budget\.json/);
+  assert.match(out, /Task 1 edits agents\/implementer\.md but its Files omit tests\/fixtures\/surface-budget\.json/);
+  assert.match(out, /Task 1 edits agents\/implementer\.md but its Files omit tests\/fixtures\/context-budget\.json/);
+});
+
+// An agent that adds a citation can lift a reference to the fan-in threshold, which makes its
+// context-budget entry required; a plan that listed only the line budget passed this gate and then
+// failed validate.
+test("an agent edit listing the line budget and the log but not context-budget.json fails", () => {
+  const { code, out } = run(
+    AGENT_ONLY.replace(
+      "## Dispatch Map",
+      "- Modify: \`tests/fixtures/surface-budget.json\`\n- Modify: \`docs/decisions/README.md\`\n## Dispatch Map"
+    )
+  );
+  assert.equal(code, 1, out);
+  assert.match(out, /Task 1 edits agents\/implementer\.md but its Files omit tests\/fixtures\/context-budget\.json/);
+  assert.doesNotMatch(out, /omit tests\/fixtures\/surface-budget\.json|omit docs\/decisions/);
 });
 
 const PLAYBOOK_WITH_BOTH_FIXTURES = `# Plan
@@ -126,13 +141,29 @@ test("a reference edit needs context-budget.json too — a playbook's context bu
   assert.match(out, /tests\/fixtures\/context-budget\.json/);
 });
 
+const COMMAND_ONLY = `# Plan
+### Task 1: Tweak the resume command
+**Files:**
+- Modify: \`commands/x.md\`
+- Modify: \`tests/fixtures/surface-budget.json\`
+- Modify: \`docs/decisions/README.md\`
+## Dispatch Map
+- Wave 1: Task 1
+`;
+
+test("a command edit needs context-budget.json too — a command is an entry point with its own context budget", () => {
+  const { code, out } = run(COMMAND_ONLY);
+  assert.equal(code, 1);
+  assert.match(out, /Task 1 edits commands\/x\.md but its Files omit tests\/fixtures\/context-budget\.json/);
+});
+
 const FIXTURES_WITHOUT_LOG = PLAYBOOK_WITH_BOTH_FIXTURES.replace("- Modify: \`docs/decisions/README.md\`\n", "");
 
 test("a task that bumps the budget fixtures but omits the decisions log fails once, naming the log", () => {
   const { code, out } = run(FIXTURES_WITHOUT_LOG);
   assert.equal(code, 1);
   assert.equal(out.match(/omit docs\/decisions\/README\.md/g)?.length, 1, out);
-  assert.match(out, /a fixture raise needs a budget: line there/);
+  assert.match(out, /every fixture change needs a budget: line there/);
 });
 
 test("a task listing only a budget fixture still needs the decisions log", () => {
@@ -153,6 +184,7 @@ test("the decisions log follows the fixture's override: overriding the fixture o
 **Files:**
 - Modify: \`agents/implementer.md\`
 - Budget-fixture override: tests/fixtures/surface-budget.json — wording only, no growth
+- Budget-fixture override: tests/fixtures/context-budget.json — cites no reference, so no closure moves
 ## Dispatch Map
 - Wave 1: Task 1
 `;
@@ -170,7 +202,7 @@ test("a gap's remedy gives the missing file's own reason and keys the override o
   assert.equal(log.code, 1);
   assert.match(
     log.out,
-    /omit docs\/decisions\/README\.md — add it \(a fixture raise needs a budget: line there\) or record a "- Budget-fixture override: docs\/decisions\/README\.md — <reason>"/
+    /omit docs\/decisions\/README\.md — add it \(every fixture change needs a budget: line there\) or record a "- Budget-fixture override: docs\/decisions\/README\.md — <reason>"/
   );
   const fixture = run(AGENT_ONLY);
   assert.match(

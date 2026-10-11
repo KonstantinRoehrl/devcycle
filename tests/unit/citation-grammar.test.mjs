@@ -14,6 +14,9 @@ import {
   bareReadErrors,
   bareExistsErrors,
   referenceReadErrors,
+  referenceReaders,
+  SECTION_READ,
+  unparsedSectionReads,
 } from "../../scripts/citation-grammar.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/citation-grammar.mjs", import.meta.url));
@@ -139,6 +142,33 @@ test("bare-exists: a bare path that names no file fails; longer paths and placeh
   assert.deepEqual(rules(bareExistsErrors("playbooks/p.md", text, exists)), ["bare-exists@1"]);
 });
 
+test("SECTION_READ: captures the reference and slug of a section read, and only a reference's", () => {
+  const read = (text) => [...text.matchAll(SECTION_READ)].map((m) => [m[1], m[2]]);
+  const step = (path, sep = " ", slug = "the-stage-budget") => `run \`node "${P}/scripts/read-section.mjs" ${path}${sep}${slug}\``;
+  assert.deepEqual(read(step("references/delegation.md")), [["references/delegation.md", "the-stage-budget"]]);
+  assert.deepEqual(read(step("playbooks/delegation.md")), []);
+  assert.deepEqual(read(step("references/delegation.md", "\n  ")), [["references/delegation.md", "the-stage-budget"]], "a wrapped read is a read");
+  assert.deepEqual(read(step("references/delegation.md", "\n\n")), [], "a paragraph break is no separator");
+  assert.deepEqual(read(step("references/delegation.md", " ", "the-stage-budget.extra")), [], "a slug ends at a word boundary");
+  assert.deepEqual(read(step("references/delegation.md", " ", "The-stage-budget")), []);
+});
+
+test("SECTION_READ: the call ends after the slug, so a further argument leaves it unparsed for check 4d", () => {
+  const call = (tail) => `node "${P}/scripts/read-section.mjs" references/delegation.md the-stage-budget${tail}`;
+  const slugs = (text) => [...text.matchAll(SECTION_READ)].map((m) => m[2]);
+  assert.deepEqual(slugs(`\`${call(" extra")}\``), [], "read-section.mjs takes exactly two arguments");
+  assert.deepEqual(slugs(`\`${call(" file-backed-evidence")}\``), [], "two slugs are no read of the first");
+  assert.deepEqual(unparsedSectionReads(`Run \`${call(" extra")}\`.\n`), [call(" extra").slice("node \"".length)]);
+  for (const tail of ["`", " `", " | head -40`", "|head", ">out", " > out", " < in", "; echo", " && echo", ")", "", "\nnext line", "\t\n"])
+    assert.deepEqual(slugs(`\`${call(tail)}`), ["the-stage-budget"], `terminated by ${JSON.stringify(tail)}`);
+});
+
+test("bare-exists: a section read's reference is check 4c's to resolve, never a bare mention", () => {
+  const text = `Run \`node "${P}/scripts/read-section.mjs" references/gone.md one\`, then\n\`node "${P}/scripts/read-section.mjs"\nreferences/gone.md two\`.\n`;
+  assert.deepEqual(bareExistsErrors("playbooks/p.md", text, () => false), []);
+  assert.deepEqual(rules(bareExistsErrors("playbooks/p.md", `${text}Owner: references/gone.md.\n`, () => false)), ["bare-exists@4"]);
+});
+
 test("reference-read: a reference only ever named bare has no consumer; a prefixed citation or a script consumes it", () => {
   const hits = referenceReadErrors({
     references: ["README.md", "named.md", "cited.md", "scripted.md"],
@@ -150,6 +180,34 @@ test("reference-read: a reference only ever named bare has no consumer; a prefix
   });
   assert.deepEqual(hits.map((h) => h.rel), ["references/named.md"]);
   assert.match(hits[0].message, /no consumer/);
+});
+
+test("bare-read: a section read is a read, so it never fires; a genuine bare read beside it still does", () => {
+  const sectionRead = `Run \`node "${P}/scripts/read-section.mjs" references/a.md some-slug\``;
+  assert.deepEqual(bareReadErrors("playbooks/p.md", `${sectionRead} first.\n`), []);
+  assert.deepEqual(rules(bareReadErrors("playbooks/p.md", `${sectionRead} and read \`references/b.md\`.\n`)), ["bare-read@1"]);
+});
+
+test("reference-read: a section read of a reference consumes it", () => {
+  const hits = referenceReadErrors({
+    references: ["a.md"],
+    surface: [{ rel: "playbooks/p.md", text: `\`node "${P}/scripts/read-section.mjs" references/a.md one\`\n` }],
+    scripts: [],
+  });
+  assert.deepEqual(hits, []);
+});
+
+test("referenceReaders: a prefixed and a section read count once per reader, and a reference never reads itself", () => {
+  const sectionRead = `\`node "${P}/scripts/read-section.mjs" references/a.md one\``;
+  const readers = referenceReaders([
+    { rel: "playbooks/p.md", text: `Read \`${P}/references/a.md\`, then \`${P}/references/a.md\` again.\n` },
+    { rel: "commands/c.md", text: `Run ${sectionRead} and read \`${P}/references/a.md\`.\n` },
+    { rel: "agents/r.md", text: `Run ${sectionRead}.\n` },
+    { rel: "references/a.md", text: `See \`${P}/references/a.md\`.\n` },
+    { rel: "references/b.md", text: `Read \`${P}/references/a.md\` and \`${P}/playbooks/p.md\`; references/c.md owns the rest.\n` },
+  ]);
+  assert.deepEqual([...readers.keys()], ["references/a.md"]);
+  assert.deepEqual([...readers.get("references/a.md")].sort(), ["agents/r.md", "commands/c.md", "playbooks/p.md", "references/b.md"]);
 });
 
 test("reference-read: a script consumes a reference only in code — a comment naming it does not count", () => {

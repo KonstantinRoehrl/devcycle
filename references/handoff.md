@@ -45,8 +45,9 @@ The run's `workload` record is not a boundary instruction: the `hooks/workload-s
 commit-sensor refreshes it on each commit, so no `stage` boundary carries a step to write it.
 
 `Context depth:` is measured, not estimated: at every boundary this file names, run the depth
-probe in `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` (`## The stage budget`) and copy
-its numbers into the field. A failed probe is written
+probe the stage budget names —
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/delegation.md the-stage-budget`
+prints it — and copy its numbers into the field. A failed probe is written
 `Context depth: unknown (<the probe's one-line reason>)`.
 
 At a wave → wave boundary within execution the first field is instead `Wave completed: <n> of
@@ -87,8 +88,9 @@ column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, 
 `audit → brainstorm`, `fast-path → finish`, and `sweep → finish` — and nowhere else — the
 action softens to `Continue` when all three hold:
 
-- the stage that just ended stayed under the budget in
-  `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` (`## The stage budget`); and
+- the stage that just ended stayed under the stage budget
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/delegation.md the-stage-budget`
+  prints; and
 - it dispatched no implementer, task-reviewer, or sweep — a research dispatch does not count,
   because it returns a map on the fast tier and barely moves the coordinator's depth; and
 - the next stage's inputs are all on disk.

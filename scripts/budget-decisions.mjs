@@ -1,9 +1,9 @@
-// M10: a budget fixture never exceeds what the decisions log records. Each decision that sets a
+// M10: a budget fixture equals what the decisions log records. Each decision that sets a
 // budget carries one machine line per key, `budget: <fixture-basename> <key> <value>`; the log is
 // newest first, so the first line for a key is its recorded value. A key with no line counts as 0,
-// so a raise cannot land without a decision naming its exact figure — and no git history is needed,
-// so a shallow clone or a tarball checks the same way. `retired` closes a key whose fixture entry
-// was removed, because older entries are history and are never rewritten.
+// so neither a raise nor a cut can land without a decision naming its exact figure — and no git
+// history is needed, so a shallow clone or a tarball checks the same way. `retired` closes a key
+// whose fixture entry was removed, because older entries are history and are never rewritten.
 import { DECISIONS_DOC } from "./doc-paths.mjs";
 
 export const BUDGET_LINE = /^budget:\s+(\S+)\s+(\S+)\s+(\d+|retired)\s*$/;
@@ -28,6 +28,10 @@ export function recordedBudgets(logText) {
   return { recorded, errors };
 }
 
+// One key's newest recorded line from recordedBudgets' map — `retired` included — or undefined when
+// the log never names the key.
+export const newestRecorded = (recorded, fixture, name) => recorded.get(`${fixture} ${name}`);
+
 export function budgetDecisionErrors({ fixtures, logText, logPath = DECISIONS_DOC }) {
   const { recorded, errors } = recordedBudgets(logText);
   const out = errors.map((e) => `${logPath}:${e.line}: ${e.message}`);
@@ -38,19 +42,30 @@ export function budgetDecisionErrors({ fixtures, logText, logPath = DECISIONS_DO
     else if (!Object.hasOwn(fixtures[fixture], name))
       out.push(
         `${logPath}:${line}: budget line names key "${name}", which ${fixture} does not have — ` +
-          `a stale line cannot shadow a real key; retire it with a newer "budget: ${fixture} ${name} retired" line`
+          `a stale line cannot shadow a real key; restore "${name}" in ${fixture}, or retire it with a newer "budget: ${fixture} ${name} retired" line`
       );
   }
   for (const [fixture, values] of Object.entries(fixtures))
     for (const [name, value] of Object.entries(values)) {
       if (!Number.isInteger(value)) continue;
-      const r = recorded.get(`${fixture} ${name}`);
-      const allowed = r && r.value !== "retired" ? r.value : 0;
+      // No budget line can record a negative figure, so the only fix is the measured value.
+      if (value < 0) {
+        out.push(`tests/fixtures/${fixture}: ${name} is ${value}, not a byte or line count — set it to the measured value`);
+        continue;
+      }
+      const r = newestRecorded(recorded, fixture, name);
+      const live = r && r.value !== "retired";
+      const allowed = live ? r.value : 0;
+      const figure = live ? `newest recorded figure ${allowed} (${logPath}:${r.line})` : "unrecorded 0";
       if (value > allowed)
         out.push(
-          `tests/fixtures/${fixture}: ${name} is ${value}, above the ` +
-            `${r && r.value !== "retired" ? `newest recorded figure ${allowed} (${logPath}:${r.line})` : "unrecorded 0"} — ` +
+          `tests/fixtures/${fixture}: ${name} is ${value}, above the ${figure} — ` +
             `a raise needs a decision line "budget: ${fixture} ${name} ${value}" in ${logPath}`
+        );
+      else if (value < allowed)
+        out.push(
+          `tests/fixtures/${fixture}: ${name} is ${value}, below the ${figure} — ` +
+            `a cut records its figure: add "budget: ${fixture} ${name} ${value}" in ${logPath}`
         );
     }
   return out;

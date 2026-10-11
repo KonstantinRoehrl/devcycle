@@ -372,7 +372,11 @@ path is a read and a bare path names an owner — the citation grammar in the
 [references index](../../references/README.md#citation-grammar) — and `scripts/validate.mjs`
 check 26 enforces it. `references/stages.json` carries the stage dispatch, so a command reaches a
 stage's entry through `scripts/stage-entry.mjs` and opens `resume.md` only when that lookup fails.
-`scripts/context-report.mjs` reports each entry point's refs-only and all-hops closures.
+Since 2026-10-10 a step that executes one section of a reference loads only that section, through
+`scripts/read-section.mjs`, and check 15 counts only that section's bytes.
+`scripts/context-report.mjs` reports each entry point's refs-only and all-hops closures. Every
+command and playbook closure, and every reference read by at least eight files, carries a byte
+ceiling that only a recorded decision moves, in either direction.
 
 ### 15.2 Native engines vs upstream overlays, keyed to `profile`
 
