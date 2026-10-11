@@ -54,8 +54,8 @@ than silently re-mining its slice. Budget the run from `extractBytes`, the model
 from `totalBytes`, which is JSONL on disk.
 
 If `artifactFresh` is true, read `artifactPath` and report it — no mining, screening, recurrence
-check, artifact rewrite, and above all no checkpoint advance. **`--preview` stops there**; a default
-run carries that artifact straight to **Confirm**.
+check, artifact rewrite, and above all no checkpoint advance, as this run mined none of the sessions
+`--plan` just listed. **`--preview` stops there**; a default run carries it straight to **Confirm**.
 
 ## Mine each slice
 

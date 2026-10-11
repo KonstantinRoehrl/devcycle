@@ -26,6 +26,23 @@ test('a read-section call counts as a read of that file', async ($, on) => {
   expect(seen.status.at(-1)).toBe(text('execution', 3, 1));
 });
 
+test('a file read whole and by section counts once', async ($, on) => {
+  const seen = session(on, { surfaces: ['terminal'] });
+  engine(on);
+  await $.turn.start({ text: 'go', turnId: 'm1' });
+  await mainCall($, '/plugin/references/delegation.md');
+  await bash($, 'node "/plugin/scripts/read-section.mjs" references/delegation.md the-stage-budget');
+  expect(seen.status.at(-1)).toBe(text('execution', 2, 1));
+});
+
+test('a read-section call with a quoted reference counts as a read of that file', async ($, on) => {
+  const seen = session(on, { surfaces: ['terminal'] });
+  engine(on);
+  await $.turn.start({ text: 'go', turnId: 'm1' });
+  await bash($, 'node /plugin/scripts/read-section.mjs "references/ledger.md" the-event-line');
+  expect(seen.status.at(-1)).toBe(text('execution', 1, 1));
+});
+
 test('the context percent comes from session.measure', async ($, on) => {
   const seen = session(on, { surfaces: ['terminal'] });
   engine(on);

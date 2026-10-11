@@ -23,16 +23,17 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    lives, and resume (below) keys off it.
 2. **Implement in-session.** No subagents, no plan file, no ledger entries — just make the
    change. It still carries the evidence class triage determined at the gate: run
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/evidence.md the-three-evidence-classes`
-   and
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/evidence.md the-three-evidence-classes`,
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/evidence.md file-backed-evidence`
+   and
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/evidence.md reviewer-verdicts`
    and produce that class's before/after evidence as they specify, writing this run's files to
    `.devcycle/evidence/fast-before.txt` and `.devcycle/evidence/fast-after.txt` (`fast` is this
    path's task id). `fast-before.txt` opens with one line naming the declared class and the exact
    verification command, and each run's exit status is appended to its own evidence file as the
-   run finishes — `references/evidence.md` makes "an exit status contradicts the declared class" and "the class mismatches the diff"
-   rejection conditions, and step 5's reviewer can only run those checks if the class, the
-   command and the statuses are on disk with the output.
+   run finishes — the reviewer verdicts make "an exit status contradicts the declared class" and
+   "the class mismatches the diff" rejection conditions, and step 5's reviewer can only run those
+   checks if the class, the command and the statuses are on disk with the output.
 3. **Escalation valve.** If implementation reveals the change is not trivial after all — the
    blast radius is spreading past what triage saw, or a real design choice has surfaced that
    the request didn't settle — stop, say so, and re-enter the normal pipeline at whichever
@@ -73,8 +74,9 @@ the standard `.devcycle/ledger.md` line but is unused, there being no wave dispa
 ## Resume (`/devcycle:continue`)
 
 On re-entry at `stage: fast-path`, `/devcycle:continue` has already read
-`references/resume.md` at its ownership check, and its rows bind here. Mapped onto this playbook: its `(re)implement` row is step 2, its `dispatch the
-task reviewer` row is step 5, and the acceptance it says is never inferable from git is
+`references/resume.md` at its ownership check, and its rows bind here. Mapped onto this
+playbook: its `(re)implement` row is step 2, its `dispatch the task reviewer` row is step 5,
+and the acceptance it says is never inferable from git is
 recorded only by step 6 advancing `stage:` to `finish` — after which `/devcycle:continue`
 routes to `playbooks/finishing-the-cycle.md` and never re-enters here.
 

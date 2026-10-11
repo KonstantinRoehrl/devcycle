@@ -118,8 +118,8 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
 The report itself is a file on the same principle: the implementer writes it to
 `.devcycle/reports/<task-id>.md` in the shape below, and the dispatch returns only the short
 envelope `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/delegation.md return-envelopes`
-prints. A report pasted into the dispatch's reply instead of written to that path is the same defect as
-an inlined evidence tail.
+prints. A report pasted into the dispatch's reply instead of written to that path is the same
+defect as an inlined evidence tail.
 
 - Implementer report shape:
 

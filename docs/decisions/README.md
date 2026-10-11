@@ -32,16 +32,18 @@ fan-in 8, ratchet max(1%, 256 B), near-ceiling 5 lines — are named constants i
 ceilings creep. `cycle.md` lost a paragraph restating the `profile`'s engine choice, which
 `references/config.md` owns, plus re-wraps; `learning-from-sessions.md` lost clauses restating what
 its Modes section already states and a historical note, plus re-wraps. The playbook's refs-only
-closure falls 62130 → 61727 bytes and `surfaceTotal` 5911 → 5891. An entry left above its figure
-after a cut lets the freed bytes grow back unreviewed; the 256 B floor keeps a small file's re-wrap
-from tripping the ratchet.
+closure falls 62130 → 61777 bytes, its restored `artifactFresh` rationale included, and
+`surfaceTotal` 5911 → 5893, the fast path's third evidence read and a re-wrap included. An entry
+left above its figure after a cut lets the freed bytes grow back unreviewed; the 256 B floor keeps a
+small file's re-wrap from tripping the ratchet.
 
 **Supersedes:** check 15's playbook-only scope; check 28's at-or-below rule; check 9's failures
 are unchanged.
 
 ```text
-budget: surface-budget.json surfaceTotal 5891
-budget: context-budget.json playbooks/learning-from-sessions.md 61727
+budget: surface-budget.json surfaceTotal 5893
+budget: context-budget.json playbooks/learning-from-sessions.md 61777
+budget: context-budget.json playbooks/planning-waves.md 71372
 budget: context-budget.json commands/continue.md 50265
 budget: context-budget.json commands/cycle.md 69365
 budget: context-budget.json commands/doctor.md 2161
@@ -73,10 +75,10 @@ row (`ledger.md the-event-line`, a section the ledger's preamble gave up for it)
 `references/handoff.md`'s depth probe and its `Continue` test (both `delegation.md
 the-stage-budget`); `references/evidence.md`'s envelope pointer (`delegation.md return-envelopes`);
 and `playbooks/taking-the-fast-path.md`'s step 2 (`evidence.md the-three-evidence-classes`,
-`evidence.md file-backed-evidence`), step 4 (`commit-convention.md scoping-the-commit`) and
-Delegation paragraph (`delegation.md the-short-paths`, `delegation.md the-stage-budget`). The fast
-path's resume pointer becomes a bare owner mention: `/devcycle:continue` has already read
-`references/resume.md` at its ownership check.
+`evidence.md file-backed-evidence`, `evidence.md reviewer-verdicts`), step 4 (`commit-convention.md
+scoping-the-commit`) and Delegation paragraph (`delegation.md the-short-paths`, `delegation.md
+the-stage-budget`). The fast path's resume pointer becomes a bare owner mention:
+`/devcycle:continue` has already read `references/resume.md` at its ownership check.
 
 **Why:** a scan of top-level session transcripts (a scratch script, not committed; subagent reads
 excluded) found the fast path ran once (n=1, a dogfooding run reading 3 of its 11 closure files),
@@ -99,7 +101,7 @@ execute. Refs-only bytes (`node scripts/context-report.mjs --json`), before → 
 | playbooks/reviewing-the-branch.md | 56012 | 47059 | −8953 |
 | playbooks/scoping-the-request.md | 27812 | 27912 | +100 |
 | playbooks/sweeping-mechanical-changes.md | 89131 | 81609 | −7522 |
-| playbooks/taking-the-fast-path.md | 82256 | 46396 | −35860 (−43.6%) |
+| playbooks/taking-the-fast-path.md | 82256 | 48690 | −33566 (−40.8%) |
 | playbooks/verifying-on-device.md | 51536 | 42583 | −8953 |
 | playbooks/writing-the-findings-document.md | 66648 | 59799 | −6849 |
 
@@ -120,6 +122,8 @@ Each conversion was checked by running its command and reading the output beside
 - playbooks/taking-the-fast-path.md step 2 → `the-three-evidence-classes`: executes only this
   section.
 - playbooks/taking-the-fast-path.md step 2 → `file-backed-evidence`: executes only this section.
+- playbooks/taking-the-fast-path.md step 2 → `reviewer-verdicts`: the rejection conditions its
+  evidence must survive; its closing verdict shape is step 5's reviewer's, not step 2's.
 - playbooks/taking-the-fast-path.md step 4 → `scoping-the-commit`: executes only this section.
 - playbooks/taking-the-fast-path.md Delegation → `the-short-paths`: executes only this section.
 - playbooks/taking-the-fast-path.md Delegation → `the-stage-budget`: executes only this section.
@@ -140,7 +144,7 @@ budget: context-budget.json playbooks/reviewing-code.md 91418
 budget: context-budget.json playbooks/reviewing-the-branch.md 47059
 budget: context-budget.json playbooks/scoping-the-request.md 27912
 budget: context-budget.json playbooks/sweeping-mechanical-changes.md 81609
-budget: context-budget.json playbooks/taking-the-fast-path.md 46396
+budget: context-budget.json playbooks/taking-the-fast-path.md 48690
 budget: context-budget.json playbooks/verifying-on-device.md 42583
 budget: context-budget.json playbooks/writing-the-findings-document.md 59799
 ```
