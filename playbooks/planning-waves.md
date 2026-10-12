@@ -76,7 +76,10 @@ suite run is step 1. Never a commit step.
 **Plan header — every plan starts with it:** an H1 `<Feature Name> Implementation Plan`; a blockquote
 for agentic workers naming `playbooks/executing-waves.md` as the REQUIRED
 executor and noting checkbox (`- [ ]`) step syntax; `**Goal:**` (one sentence); `**Architecture:**`
-(2–3 sentences); `**Tech Stack:**`; `## Global Constraints` (the spec's project-wide requirements —
+(2–3 sentences); `**Tech Stack:**`; `**Verification gate:**` (the repo's whole verification gate as one
+exact shell command in one code span: every test-class task's evidence and green gate run it; a
+convention task's gate is its own ``convention (`<cmd>`)`` parenthetical, also one code span);
+`## Global Constraints` (the spec's project-wide requirements —
 version floors, dependency limits, naming and copy rules, platform requirements — one line each,
 copied verbatim, implicitly part of every task's requirements); and `## Quality Constraints` above.
 
@@ -116,8 +119,8 @@ fixing what it finds inline as you go; no re-review pass.
 7. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch.
 8. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path>` — one command,
    seven legs, compact on success: pasted JS/mjs code blocks parse (`codeBlocks`); every task carries
-   Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints and the Dispatch Map
-   lists every task (`briefCompleteness`); every referencer of a changed file, test or not, sits in some
+   Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, the header carries
+   one `**Verification gate:**` code span, and the Dispatch Map lists every task (`briefCompleteness`); every referencer of a changed file, test or not, sits in some
    Files block (`blastRadius`); no same-wave task's brief names a file another same-wave task edits
    (`contentCoupling`); a task touching a budgeted surface (`playbooks/`, `commands/`, `agents/`,
    `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md`, which holds

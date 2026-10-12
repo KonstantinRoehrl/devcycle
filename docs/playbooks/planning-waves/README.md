@@ -22,7 +22,9 @@ from what's actually consumed, `Evidence` in one of the three classes evidence.m
 optional `Execution: sweep` marker for one uniform edit rule) — directly; at `thorough` the same
 template comes from the `superpowers:writing-plans` sub-skill instead, with two rules this
 playbook always keeps regardless: the executor named in the plan header is always
-`executing-waves.md`, and no task ever carries a commit step.
+`executing-waves.md`, and no task ever carries a commit step. The header also names the repo's
+whole verification gate as one `**Verification gate:**` command — the single command every
+test-class task's evidence captures and the green gate re-runs.
 
 Once the plan is drafted, planning runs its own eight-item self-review — spec coverage,
 placeholder scan, type consistency, factual-claim accuracy, no count-only enumeration,

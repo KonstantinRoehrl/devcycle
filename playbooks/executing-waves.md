@@ -75,7 +75,8 @@ exit 2 or 3 a stop.
 2. **Slice the brief**, carrying exactly: the task's id (the plan's task number); `**Files:**`
    (create/modify/test); `**Interfaces:**` (consumes/produces, exact signatures); `**Dependencies:**`; the
    `**Evidence:**` class from the plan; an `**Evidence tail:** <N>` line, `<N>` from the profile; the
-   task's steps; the global constraints and pinned interfaces that apply; the task's quality constraints
+   task's steps; the `**Gate command:**` line, which `task-dispatch.mjs` appends itself, never sliced by
+   hand; the global constraints and pinned interfaces that apply; the task's quality constraints
    resolved; and one read, `"$(devcycle-root)/references/delegation.md"` § Read discipline.
    Nothing else, and nothing restated that a named reference owns —
    `references/evidence.md` owns the evidence classes, the evidence file paths (keyed
@@ -114,7 +115,8 @@ exit 2 or 3 a stop.
    itself (the dispatch supplies the path and round n).
    Give its brief to `task-dispatch.mjs --role reviewer --round <n>` the same way first; read the
    verdict with `task-verdict.mjs --round <n> --findings <that path> --evidence-class <evidenceClass>`.
-   The wave setup's `tasks[]` gives each uncommitted task its `reviewRound`, `evidenceClass` and `testCmd`.
+   The wave setup's `tasks[]` gives each uncommitted task its `reviewRound`, `evidenceClass`, `testCmd`
+   and `gateCmd`.
    `accepted` → step 6. `rejected` → the findings path back to the implementer (step 3), then the
    next round's review. `missing-findings` → re-dispatch the reviewer for the same round, no verdict
    acted on. `needs-user` → the user decides (driven: a `needs-user` stop).
@@ -123,8 +125,8 @@ exit 2 or 3 a stop.
    `exhausted-unresolved` — `task-verdict.mjs` or `task-commit.mjs` writes that status — and is
    surfaced to the user as a decision, never committed as if it had passed.
 6. **Green gate (REQUIRED, deterministic).** On acceptance, run `task-commit.mjs` with the plan,
-   `--test-cmd "<the task's test command>"` and your subject, plus
-   `--subset-cmd "<the task's file-scoped command>"` when the test command is the whole suite.
+   `--test-cmd "<gateCmd>"` and your subject, plus `--subset-cmd "<testCmd>"`, both from the wave setup;
+   a task with no `gateCmd` passes `--test-cmd "<testCmd>"`.
    It re-runs the test command itself and reads the exit status — never the implementer's word for
    it; a repo with no test suite passes its documented convention as the test command.
    On failure, acceptance is blocked: no commit, `gate-fail`, back to the implementer with the gate

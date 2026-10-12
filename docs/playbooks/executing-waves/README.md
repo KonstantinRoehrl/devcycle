@@ -45,7 +45,9 @@ object, `task-dispatch.mjs` writes a brief and its ledger line, `task-intake.mjs
 the implementer's report, `task-verdict.mjs` records the reviewer's verdict, and `task-commit.mjs`
 runs the green gate and commits the task with a `Devcycle-Task:` trailer, finding an earlier commit
 of the same task instead of committing twice. Every ledger line they append carries an idempotency
-key, so a session that crashed mid-step re-runs it without duplicating a line.
+key, so a session that crashed mid-step re-runs it without duplicating a line. Implementers write
+their evidence through `capture-evidence.mjs` rather than by hand, and the green gate runs the
+task's gate command, with the task's own test run as the subset that attributes a red.
 
 ## How it fits
 - Up: [the pipeline](../../pipeline/README.md) — where Execution sits, between Planning and

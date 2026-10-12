@@ -207,7 +207,9 @@ plugin ships. Start there.
   required-checks manifest `tests/fixtures/required-gate-checks.json` — a committed JSON array of
   substrings every convention whole-gate command must contain, enforced by
   `scripts/evidence-completeness-check.mjs` and a no-op when absent, keeping the plugin
-  repo-agnostic. The contract itself lives in
+  repo-agnostic. Every capture is written by `scripts/capture-evidence.mjs`, which runs the task's
+  gate command, so a capture's header, the report's `cmd:` and the gate cannot drift apart. The
+  contract itself lives in
   [`references/evidence.md`](references/evidence.md).
 
 [superpowers]: https://github.com/obra/superpowers

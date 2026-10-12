@@ -1,5 +1,12 @@
 # Changelog
 
+Implementer reports stop bouncing on counts quoted in their evidence tail and on dotnet test
+summaries. A plan now names its whole verification gate in its header;
+`scripts/capture-evidence.mjs` writes every evidence capture from that command, implementer briefs
+end with it, intake rejects a `cmd:` that differs from it and a red explained as pre-existing or
+flaky without its reproduction file, and the green gate runs it. Implementers lint their own reports
+before returning. The evidence contract is now version 2.
+
 ## 0.24.0 — 2026-10-11
 
 - feat: run execution waves unattended, adopt Claude Code mods, and scope resume reads to sections

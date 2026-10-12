@@ -729,10 +729,24 @@ test("harvested: executing-waves/file-backed-evidence — the evidence paths, re
   assert.ok(t.includes(".devcycle/evidence/<task-id>-after.txt"), "after-path missing");
   assert.ok(t.includes(".devcycle/reports/<task-id>.md"), "report path missing");
   assert.ok(t.includes("**Evidence tail:** <N>"), "the tail line is not pinned");
-  assert.match(t, /`\{ c1 && c2; \} > file 2>&1`/);
+  assert.ok(t.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/capture-evidence.mjs"'), "the capture helper is not the pinned capture path");
+  assert.match(t, /never by a hand-written redirect/);
   assert.match(t, /a named evidence file is missing or empty/);
   assert.match(t, /an exit status contradicts the declared class/);
   assert.match(t, /the class mismatches the diff/);
+});
+
+test("the implementer captures through the helper and lints its own report, each script through the shim", () => {
+  const t = read("agents/implementer.md");
+  for (const script of ["capture-evidence.mjs", "authored-claims-check.mjs", "evidence-completeness-check.mjs"])
+    assert.ok(t.includes(`node "$(devcycle-root)/scripts/${script}"`), `agents/implementer.md must run ${script} through the shim`);
+});
+
+test("the evidence contract's doc marker and the check's CONTRACT_VERSION agree", () => {
+  const doc = read("references/evidence.md").match(/<!-- evidence-contract-version: (\d+) -->/)?.[1];
+  const code = read("scripts/evidence-completeness-check.mjs").match(/^export const CONTRACT_VERSION = (\d+);$/m)?.[1];
+  assert.equal(doc, "2");
+  assert.equal(code, doc);
 });
 
 test("harvested: executing-waves/green-gate-discipline — the gate is the coordinator's, and implementers never commit", () => {
