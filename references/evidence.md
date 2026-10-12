@@ -20,10 +20,10 @@ produce, in exactly one of these forms:
 - `**Evidence:** green-green (behavior-preserving)` — refactors and other
   behavior-preserving changes, where no honest red state exists: the same suite command
   run green before the change and green after, both captured verbatim.
-- `**Evidence:** convention (<command or procedure>)` — non-code tasks (docs, config) and
-  repos with no test suite: the repo's own documented verification convention, its
-  before/after output captured the same way — the before-capture command is the identical
-  string used for after-capture, never a truncated subset, even when both exit 0.
+- ``**Evidence:** convention (`<command>`)`` — non-code tasks (docs, config) and
+  repos with no test suite: the repo's documented verification command as exactly one code span,
+  its before/after output captured the same way — both run the identical, untruncated command,
+  even if both exit 0. Its `cmd:` may also be the plan's `**Verification gate:**`.
 
 The class is planning's call, not the implementer's: derive it from what the task actually
 changes, and never declare `red-green` where no failing test can exist — that forces the
@@ -161,8 +161,8 @@ report. Reject when:
   run against **clean HEAD** and against **the change** at the **same iteration count** with their
   actual pass/fail counts (the "clean 20/20; change 6/20" shape), and the #167 foreign-change check
   ruled out concurrent-sibling pollution. The reviewer reads that file rather than trusting the
-  claim. `evidence-completeness-check.mjs` bounces a report line that pairs a failure word with
-  such an attribution and cites no non-empty `<task-id>-flaky.txt` on it or the next line.
+  claim. `evidence-completeness-check.mjs` bounces a report line that explains a failure away
+  so and cites no non-empty `<task-id>-flaky.txt` on it or an adjacent line.
 - a `- Narrowing:` declaration's reason does not hold up: accept a legitimate concurrent-wave
   narrowing, reject a reason that is
   lazy partial coverage dressed up as narrowing.

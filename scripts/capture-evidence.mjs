@@ -20,14 +20,17 @@ export function captureEvidence(argv, cwd = process.cwd()) {
   if (phase === "red" && !explicit)
     throw new UsageError("--phase red needs --cmd: the red capture runs the task's own failing subset, never the whole gate");
   const ledger = flags["--ledger"] ? resolve(cwd, flags["--ledger"]) : join(root, ".devcycle/ledger.md");
-  const cmd = explicit || taskGate(ledger, task)?.cmd;
+  const gate = taskGate(ledger, task);
+  const cmd = explicit || gate?.cmd;
   if (!cmd)
     throw new UsageError(`no gate command resolves for task ${task} (no plan in the ledger, or no gate for this task in it) — pass --cmd`);
   if (/[\r\n]/.test(cmd)) throw new UsageError("--cmd must be one line: the capture's header holds it on its first line");
   const run = runShell(root, cmd);
   const rel = writeCapture(root, `.devcycle/evidence/${task}-${phase}.txt`, [run]);
   const label = phase[0].toUpperCase() + phase.slice(1);
-  return [...(phase === "red" ? [] : [`- Evidence: <class> | cmd: ${cmd}`]), `- ${label}: ${rel} (exit ${run.status})`];
+  // The class comes from the plan; a task no plan resolves keeps a placeholder the evidence check rejects.
+  const evidenceClass = gate?.evidenceClass ?? "<class>";
+  return [...(phase === "red" ? [] : [`- Evidence: ${evidenceClass} | cmd: ${cmd}`]), `- ${label}: ${rel} (exit ${run.status})`];
 }
 
 if (isMain(import.meta.url, process.argv[1])) {

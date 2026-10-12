@@ -30,7 +30,13 @@ test("with no --cmd it runs the task's resolved gate, and the header is that exa
   const r = capture(repo, ["--task", "3", "--phase", "after"]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(evidence(repo, "3-after.txt"), `# devcycle-cmd: ${GATE}\nℹ pass 1\n# exit 0\n`);
-  assert.equal(r.stdout, `- Evidence: <class> | cmd: ${GATE}\n- After: .devcycle/evidence/3-after.txt (exit 0)\n`);
+  assert.equal(r.stdout, `- Evidence: green-green | cmd: ${GATE}\n- After: .devcycle/evidence/3-after.txt (exit 0)\n`);
+});
+
+test("the Evidence line names the task's class from the plan, even under an explicit --cmd; only a task no plan resolves keeps the placeholder", () => {
+  const repo = checkout();
+  assert.match(capture(repo, ["--task", "3", "--phase", "before", "--cmd", "true"]).stdout, /^- Evidence: green-green \| cmd: true$/m);
+  assert.match(capture(repo, ["--task", "fast", "--phase", "before", "--cmd", "true"]).stdout, /^- Evidence: <class> \| cmd: true$/m);
 });
 
 test("a --cmd carrying $VAR and quotes is recorded as typed, never as the shell expanded it", () => {
@@ -71,7 +77,7 @@ test("a report built from the helper's printed lines passes the evidence check a
   const repo = checkout();
   const lines = ["before", "after"].flatMap((phase) => capture(repo, ["--task", "3", "--phase", phase]).stdout.trim().split("\n"));
   const [evidenceLine] = lines;
-  const report = ["## Task report", evidenceLine.replace("<class>", "green-green"),
+  const report = ["## Task report", evidenceLine,
     ...lines.filter((l) => /^- (Before|After):/.test(l)), "- Deviations: none", ""].join("\n");
   mkdirSync(join(repo, ".devcycle/reports"), { recursive: true });
   writeFileSync(join(repo, ".devcycle/reports/3.md"), report);

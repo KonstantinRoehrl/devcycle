@@ -106,26 +106,31 @@ export function verificationGate(planText) {
   return verificationGateField(planText)?.match(SINGLE_SPAN_RE)?.[1].trim() || null;
 }
 
-// A convention parenthetical is one command when it is one code span, or text with no backtick at
-// all; one mixing spans and prose describes a procedure, which no capture can run as one string.
-function conventionCommand(evidence) {
+// A convention parenthetical is a command only when it is exactly one code span
+// (references/evidence.md § The three evidence classes). Bare text is prose as often as a command
+// ("whole-gate green-before/green-after"), and a span writing into .devcycle/evidence/ is a
+// hand-written capture recipe from before the capture helper, so running either would capture
+// nonsense or overwrite a capture: both resolve to null, as a cycle planned without a gate does.
+export function conventionCommand(evidence) {
   const inner = evidence.split("\n")[0].match(/^convention\s*\((.*)\)\s*$/)?.[1].trim() ?? "";
-  const cmd = inner.match(SINGLE_SPAN_RE)?.[1] ?? (inner.includes("`") ? "" : inner);
-  return cmd.trim() || null;
+  const cmd = inner.match(SINGLE_SPAN_RE)?.[1].trim();
+  return cmd && !cmd.includes(".devcycle/evidence/") ? cmd : null;
 }
 
 // The one resolver for a task's gate command — the capture helper, the evidence check, the brief
-// writer and wave setup all read it here: a convention task's own command, any other task's header gate.
+// writer and wave setup all read it here: a convention task's own command, any other task's header
+// gate. It also carries the task's evidence class, and for a convention task the header gate, which
+// its report may declare instead of the parenthetical.
 export function gateCommand(planText, taskNum) {
   const block = taskBlocks(planText).find((b) => b.num === taskNum);
   if (!block) return null;
   const evidence = fieldValue(block.text, "Evidence") ?? "";
+  const planGate = verificationGate(planText);
   if (/^convention\b/.test(evidence)) {
     const cmd = conventionCommand(evidence);
-    return cmd ? { cmd, source: "convention" } : null;
+    return cmd ? { cmd, source: "convention", evidenceClass: "convention", planGate } : null;
   }
-  const cmd = verificationGate(planText);
-  return cmd ? { cmd, source: "plan-gate" } : null;
+  return planGate ? { cmd: planGate, source: "plan-gate", evidenceClass: evidence.split(/\s+/)[0] } : null;
 }
 
 export function taskFileMap(planText) {

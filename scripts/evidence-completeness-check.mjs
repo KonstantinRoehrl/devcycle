@@ -11,11 +11,12 @@
 // whole-tree-capture case (a scoped diff standing in for a full run across a shared
 // checkout).
 import { readFileSync, existsSync } from "node:fs";
-import { basename, dirname, resolve, isAbsolute } from "node:path";
+import { basename, dirname, join, resolve, isAbsolute } from "node:path";
 import { proseLines } from "./authored-claims-check.mjs";
+import { VALID_EVIDENCE_CLASSES } from "./brief-completeness-check.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { TEST_FILE_SUFFIXES } from "./task-files.mjs";
-import { taskGate } from "./task-ledger.mjs";
+import { taskGate, workTreeRoot } from "./task-ledger.mjs";
 
 // The evidence contract's version (references/evidence.md's `<!-- evidence-contract-version: N -->`
 // marker is the doc-side twin of this constant).
@@ -80,6 +81,34 @@ if (cmd === "") {
   console.error(`evidence-completeness-check: cmd is empty in ${reportPath}`);
   process.exit(1);
 }
+// An unknown class would skip every class-gated check below, so the capture helper's `<class>`
+// placeholder copied verbatim must not pass as a class of its own.
+if (!VALID_EVIDENCE_CLASSES.includes(classPhrase.split(/[\s(]/)[0])) {
+  console.error(
+    `evidence-completeness-check: - Evidence: names no evidence class (${VALID_EVIDENCE_CLASSES.join(" | ")}), got "${classPhrase}" — ` +
+      "write the task's class from its plan (references/evidence.md § The three evidence classes)",
+  );
+  process.exit(1);
+}
+
+// #282/#337: the task's gate, read through the one resolver the capture helper uses. The ledger sits
+// at the work-tree root, wherever in the checkout the check runs; outside a git checkout the cwd stands
+// in. A run with no --task, or a cycle planned without a gate, has no gate to compare against.
+function defaultLedgerPath() {
+  try {
+    return join(workTreeRoot(), ".devcycle/ledger.md");
+  } catch {
+    return resolve(".devcycle/ledger.md");
+  }
+}
+const gate = taskArg ? taskGate(ledgerArg ? resolve(ledgerArg) : defaultLedgerPath(), taskArg) : null;
+if (taskArg && !gate)
+  console.log(
+    `evidence-completeness-check: notice — no gate command resolves for task ${taskArg} (no plan in the ledger, or no gate for this task in it); the gate comparison is skipped`,
+  );
+// A convention task's report may declare the plan's whole Verification gate instead of its own
+// parenthetical (references/evidence.md § The three evidence classes).
+const cmdIsGate = Boolean(gate) && [gate.cmd, gate.planGate].includes(cmd);
 
 // The narrow-selector heuristic is invocation-aware (references/evidence.md §File-backed
 // evidence): the cmd is split on the shell operators that separate sub-commands, the
@@ -273,7 +302,8 @@ function narrowingDeclaration(reportText) {
   return { scope: m[1], reason: m[2] };
 }
 
-const narrowHit = narrowSelectorHit(cmd);
+// The task's own gate is the whole gate by definition, even when it names a single test file.
+const narrowHit = cmdIsGate ? undefined : narrowSelectorHit(cmd);
 if (narrowHit) {
   const decl = narrowingDeclaration(text);
   if (decl) {
@@ -403,16 +433,14 @@ const collect = (msg) => {
 };
 const firstBeforeLine = text.matchAll(BEFORE_LINE_RE).next().value;
 
-// #282/#337: the declared cmd: is the task's resolved gate, read through the one resolver the
-// capture helper uses. A cycle planned without a gate, or a run with no --task, skips the comparison.
+// #282/#337: the declared cmd: is the task's resolved gate (resolved above).
 function checkGateEquality() {
-  if (!taskArg) return;
-  const gate = taskGate(resolve(ledgerArg ?? ".devcycle/ledger.md"), taskArg);
-  if (!gate || gate.cmd === cmd || narrowingDeclaration(text)) return;
+  if (!gate || cmdIsGate || narrowingDeclaration(text)) return;
   const beforePath = firstBeforeLine ? resolveEvidence(evidencePath(firstBeforeLine), reportPath) : null;
   const header = beforePath && existsSync(beforePath) ? readCmdHeader(beforePath) : null;
+  const gates = gate.planGate ? `${gate.cmd} or the plan's Verification gate ${gate.planGate}` : gate.cmd;
   collect(
-    `cmd: is not the task's gate command — gate: ${gate.cmd} | cmd: ${cmd} | capture header: ${header ?? "none"} — ` +
+    `cmd: is not the task's gate command — gate: ${gates} | cmd: ${cmd} | capture header: ${header ?? "none"} — ` +
       "capture through capture-evidence.mjs and copy the cmd: it prints, or declare a - Narrowing: line (references/evidence.md § File-backed evidence)",
   );
 }
@@ -420,8 +448,27 @@ function checkGateEquality() {
 // #333: a red explained away needs its reproduction artifact (references/evidence.md § Reviewer
 // verdicts). Report-only: in a spec or a plan "pre-existing" is ordinary vocabulary. A sibling-caused
 // red is the Narrowing line's, which foreign-change-check.mjs judges, so that line is skipped.
-const FAILURE_WORD_RE = /(?<![\w-])(?:fail\w*|errors?|erroring|crash\w*|broken|red)(?![\w-])/i;
-const ATTRIBUTION_WORD_RE = /(?<![\w-])(?:pre-?existing|flak\w*|unrelated|environmental)(?![\w-])/i;
+// A failure word and an attribution word merely sharing a line bounced truthful lines, so a clause
+// (the line cut at `;` and sentence ends) counts only when it explains a failure away: the attribution
+// modifies the failure ("environmental failure"), a copula hands it to the failure ("the 2 failures are
+// pre-existing"), or the clause calls something a flake ("test X is flaky"). A negator just before the
+// match ("no pre-existing failures", "nothing flaky") or a fix verb in the clause ("this task fixes the
+// pre-existing failure") means nothing is being explained away.
+const bounded = (alternatives) => `(?<![\\w-])(?:${alternatives})(?![\\w-])`;
+const FAILURE = bounded("fail\\w*|errors?|erroring|crash\\w*|broken|red");
+const ATTRIBUTION = bounded("pre-?existing|flak\\w*|unrelated|environmental");
+const COPULA = bounded("is|are|was|were|be|been|looks?|seems?");
+const EXPLAINED_FAILURE_RES = [
+  new RegExp(`${ATTRIBUTION}\\s+${FAILURE}`, "gi"),
+  new RegExp(`${FAILURE}.*?${COPULA}\\s+(?:(?!not\\b|never\\b)[\\w-]+\\s+)?${ATTRIBUTION}`, "gi"),
+  new RegExp(bounded("flak\\w*"), "gi"),
+];
+const NEGATOR_BEFORE_RE = /(?:^|\s)(?:no|zero|nothing|none|not|without|never)\s+(?:[\w-]+\s+)?$/i;
+const FIX_VERB_RE = new RegExp(bounded("fix(?:es|ed|ing)?|resolv(?:e|es|ed|ing)|repair(?:s|ed|ing)?"), "i");
+const explainsFailureAway = (clause) =>
+  !FIX_VERB_RE.test(clause) &&
+  EXPLAINED_FAILURE_RES.some((re) => [...clause.matchAll(re)].some((m) => !NEGATOR_BEFORE_RE.test(clause.slice(0, m.index))));
+const attributesFailure = (prose) => prose.split(/[;!?]|\.(?=\s|$)/).some(explainsFailureAway);
 const FLAKY_CITATION_RE = /\.devcycle\/evidence\/[\w.-]+-flaky\.txt/g;
 function checkFailureAttribution() {
   const taskId = taskArg ?? (firstBeforeLine && basename(evidencePath(firstBeforeLine)).match(/^(.+)-before\.txt$/)?.[1]);
@@ -430,14 +477,14 @@ function checkFailureAttribution() {
   const raw = text.split("\n");
   proseLines(text).forEach((prose, i) => {
     if (prose === null || NARROWING_START.test(raw[i])) return;
-    if (!FAILURE_WORD_RE.test(prose) || !ATTRIBUTION_WORD_RE.test(prose)) return;
+    if (!attributesFailure(prose)) return;
     // Inline code is blanked in prose, so the citation is searched on the raw lines.
     const cited = [i - 1, i, i + 1].map((j) => citationOn(raw[j])).find(Boolean);
     const where = `line ${i + 1}: "${raw[i].trim()}"`;
     if (!cited) {
       collect(
         `a failure is attributed as pre-existing, flaky, unrelated or environmental with no reproduction artifact — ${where} — ` +
-          `cite ${artifact} on that line or the next, holding the failing run on clean HEAD and on the change at the same iteration count ` +
+          `cite ${artifact} on that line or an adjacent line, holding the failing run on clean HEAD and on the change at the same iteration count ` +
           "(references/evidence.md § Reviewer verdicts)",
       );
       return;

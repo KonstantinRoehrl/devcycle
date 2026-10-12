@@ -191,8 +191,8 @@ test("ledgerPlan reads the preamble's plan path; null without a ledger or a prea
 
 test("taskGate resolves through the ledger's plan, relative to the checkout holding the ledger", () => {
   const path = checkoutLedger({ plan: GATE_PLAN });
-  assert.deepEqual(taskGate(path, "1"), { cmd: "npm test", source: "plan-gate" });
-  assert.deepEqual(taskGate(path, "2"), { cmd: "npm run lint", source: "convention" });
+  assert.deepEqual(taskGate(path, "1"), { cmd: "npm test", source: "plan-gate", evidenceClass: "red-green" });
+  assert.deepEqual(taskGate(path, "2"), { cmd: "npm run lint", source: "convention", evidenceClass: "convention", planGate: "npm test" });
 });
 
 test("taskGate is null for a missing plan file, a non-numeric task id, or an unknown task", () => {
@@ -208,7 +208,7 @@ test("taskGate reads a plan the preamble names by absolute path as is", () => {
   writeFileSync(plan, GATE_PLAN);
   const path = join(makeTempDir("task-ledger-abs-"), "ledger.md");
   writeFileSync(path, `Plan: \`${plan}\`\n\n`);
-  assert.deepEqual(taskGate(path, "1"), { cmd: "npm test", source: "plan-gate" });
+  assert.deepEqual(taskGate(path, "1"), { cmd: "npm test", source: "plan-gate", evidenceClass: "red-green" });
 });
 
 test("checkTaskId refuses a task id the task scripts would refuse", () => {

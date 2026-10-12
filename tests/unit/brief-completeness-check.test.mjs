@@ -67,9 +67,23 @@ test("fails on an Evidence value that merely starts with a valid class name", ()
 });
 
 test("passes a valid Evidence class with a parenthetical suffix", () => {
-  const r = run(COMPLETE.replace("**Evidence:** red-green", "**Evidence:** convention (node test)"));
+  const r = run(COMPLETE.replace("**Evidence:** red-green", "**Evidence:** convention (`node test`)"));
   assert.equal(r.code, 0);
   assert.match(r.out, /ok/);
+});
+
+test("fails a convention parenthetical that is not exactly one code span holding the gate command", () => {
+  for (const evidence of [
+    "convention (whole-gate green-before/green-after)",
+    "convention (node test)",
+    "convention (`node a.mjs` then `node b.mjs`)",
+    "convention (`{ node test; } > .devcycle/evidence/1-after.txt 2>&1`)",
+    "convention",
+  ]) {
+    const r = run(COMPLETE.replace("**Evidence:** red-green", `**Evidence:** ${evidence}`));
+    assert.equal(r.code, 1, evidence);
+    assert.match(r.out, /Task 1: \*\*Evidence:\*\* convention must carry its gate command as exactly one code span, .*got: .*references\/evidence\.md § The three evidence classes/, evidence);
+  }
 });
 
 const TWO_TASK = `# Plan

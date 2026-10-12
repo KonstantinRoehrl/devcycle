@@ -5,12 +5,15 @@
 // edit trips and the decisions log that holds them. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
 // implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
-import { taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField } from "./task-files.mjs";
+import {
+  taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField, conventionCommand,
+} from "./task-files.mjs";
 import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
 import { isMain } from "./is-main.mjs";
 
 const REQUIRED_FIELDS = ["Files", "Interfaces", "Dependencies", "Evidence", "Quality constraints"];
-const VALID_EVIDENCE_CLASSES = ["red-green", "green-green", "convention"];
+// The evidence classes references/evidence.md defines; evidence-completeness-check.mjs reads them here too.
+export const VALID_EVIDENCE_CLASSES = ["red-green", "green-green", "convention"];
 
 // **Files:** is read by task-files.mjs, which owns that grammar for every plan gate. Deciding it
 // here too is how this gate came to accept declarations wave-disjointness then called missing.
@@ -49,6 +52,12 @@ export function briefCompletenessLeg(planText, { planPath }, { includeBudgetFixt
       const evidenceClass = evidence.split(/\s+/)[0];
       if (!VALID_EVIDENCE_CLASSES.includes(evidenceClass)) {
         errors.push(`Task ${num}: **Evidence:** does not name a valid class (${VALID_EVIDENCE_CLASSES.join(" | ")})`);
+      } else if (evidenceClass === "convention" && conventionCommand(evidence) === null) {
+        errors.push(
+          `Task ${num}: **Evidence:** convention must carry its gate command as exactly one code span, ` +
+            `convention (\`<cmd>\`), not prose, a procedure or a capture redirect; got: ${evidence.split("\n")[0]} ` +
+            "(references/evidence.md § The three evidence classes)",
+        );
       }
     }
   }

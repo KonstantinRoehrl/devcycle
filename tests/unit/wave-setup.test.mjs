@@ -33,7 +33,7 @@ const PLAN = [
   "**Quality constraints:** none", "**Lessons:**", "",
   "- [ ] Run `node --test tests/b.test.mjs` — expect green.", "",
   "### Task 3: Third", "**Files:**", "- Modify: src/a.mjs",
-  "**Interfaces:** none", "**Dependencies:** Tasks 1+2 committed", "**Evidence:** convention (node scripts/validate.mjs)",
+  "**Interfaces:** none", "**Dependencies:** Tasks 1+2 committed", "**Evidence:** convention (`node scripts/validate.mjs`)",
   "**Quality constraints:** none", "**Lessons:**", "",
   "- [ ] Run `node scripts/validate.mjs` — expect `validate: ok`.", "",
   "## Dispatch Map", "",
@@ -180,7 +180,7 @@ test("the current wave is the first with uncommitted work; dispatchable tasks ca
 
   const second = setup(cycle({ ledger: [committed(1), committed(2)] }));
   assert.equal(second.wave, 2);
-  assert.deepEqual(second.dispatchable, [{ task: "3", files: ["src/a.mjs"], evidence: "convention (node scripts/validate.mjs)",
+  assert.deepEqual(second.dispatchable, [{ task: "3", files: ["src/a.mjs"], evidence: "convention (`node scripts/validate.mjs`)",
     evidenceClass: "convention", testCmd: null, gateCmd: "node scripts/validate.mjs", dependencies: ["1", "2"], mapRow: { wave: 2, tasks: [3] } }]);
 
   const done = setup(cycle({ ledger: [1, 2, 3].map(committed) }));

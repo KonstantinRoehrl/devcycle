@@ -149,6 +149,14 @@ test("a plan with no **Verification gate:** line trips only the briefCompletenes
   assert.match(r.stderr, /^plan-check: briefCompleteness: missing \*\*Verification gate:\*\*/m);
 });
 
+test("a convention task whose parenthetical is prose trips only the briefCompleteness leg", () => {
+  const prose = task(2, ["src/b.txt"]).replace("**Evidence:** red-green", "**Evidence:** convention (whole-gate green-before/green-after)");
+  const r = run(plan(task(1, ["src/a.txt"]) + prose));
+  assert.equal(r.status, 1, r.stdout);
+  assert.deepEqual([...reportingLegs(r.stderr)], ["briefCompleteness"], r.stderr);
+  assert.match(r.stderr, /^plan-check: briefCompleteness: Task 2: \*\*Evidence:\*\* convention must carry its gate command as exactly one code span/m);
+});
+
 test("a leg that throws becomes that leg's finding: the other legs still report and gate-ran records fail", () => {
   const repo = makeRepo();
   writeInto(repo, ".devcycle/state.md", "# devcycle state\n- stage: planning\n- run: 00000000000000c3\n");
