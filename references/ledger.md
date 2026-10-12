@@ -77,8 +77,8 @@ run-record row — and `depthBand`) and exits non-zero only on a usage (2) or en
   once the implementer's envelope returns, against the task's latest `dispatched` line:
   `status: blocked` appends `report-received outcome=blocked` (action `needs-user`); a missing report,
   or one with no `- Evidence:` line, appends `outcome=rejected (missing report file)` (`missing-report`);
-  a report failing `authored-claims-check.mjs` or `evidence-completeness-check.mjs` appends
-  `outcome=rejected (intake bounce)` with its findings file as `ref=` (`bounce`); a clean one appends
+  a report failing `authored-claims-check.mjs` or `evidence-completeness-check.mjs --task <id>` (its
+  `cmd:` held to the task's gate through this ledger's plan) appends `outcome=rejected (intake bounce)` with its findings file as `ref=` (`bounce`); a clean one appends
   `outcome=complete` (`review`). All but a missing report write the `dispatch` row.
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-verdict.mjs" --run <run-id> --task <id> --round <n> --findings <path> --evidence-class red-green|green-green|convention`
   once the reviewer's envelope returns, against that round's `review-round` line (exit 2 once a later

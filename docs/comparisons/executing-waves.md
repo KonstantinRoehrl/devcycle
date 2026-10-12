@@ -98,7 +98,7 @@ compaction is the point, not a reduction in what the stage does.
    task whose declared dependencies are committed AND whose file set overlaps no
    other candidate or running task. Execution is by readiness, never by written
    order.
-2. **Deterministic green gate.** The coordinator re-runs the task's test command
+2. **Deterministic green gate.** The coordinator re-runs the task's gate command
    itself and reads the exit status before accepting. Neither the implementer's
    evidence files nor a reviewer's accept verdict is sufficient — both judge a
    report, not the repo. Upstream has no coordinator-side re-run (see (d)2).
@@ -205,7 +205,7 @@ loaded — but devcycle's side of the resolution is unconditional in every case.
 2. **Who verifies green.** *Live at `thorough`.* Upstream: "Do not ask a reviewer
    to re-run tests the implementer already ran." **Resolution:** both stand. The
    reviewer still is not asked to re-run as a matter of course; the *coordinator*
-   deterministically re-runs the task's test command as an acceptance gate — one
+   deterministically re-runs the task's gate command as an acceptance gate — one
    command run, not a second review. The gate is unconditional and explicitly
    never profile-conditional.
 3. **TDD content delivery.** *Live at `thorough`.* 6.1.1's

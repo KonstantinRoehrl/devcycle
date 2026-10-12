@@ -570,6 +570,16 @@ test("pre-flight allows tracked edits inside the current wave's in-flight Files 
   assert.match(committedTask.out, /src\/a\.txt/);
 });
 
+test("a ledger whose Plan: preamble names another plan is a previous cycle's: its lines count as no progress", () => {
+  const root = makeCycle();
+  writeInto(root, ".devcycle/ledger.md",
+    "Plan: `docs/old-plan.md`\nBranch: `feat/drive` (cut from `main` at `0000000`)\n\n" + `- [2026-10-08T00:00:00Z] ${DONE[0]}\n`);
+  // Read as this plan's, Task 1 would be committed and an edit to its file a stray change.
+  writeInto(root, "src/a.txt", "half-done implementer edit\n");
+  const r = dryRun(root);
+  assert.equal(r.code, 0, r.out);
+});
+
 test("pre-flight refuses a state without the drive row, a state off execution, a model whose window cannot hold a session start, and a sandbox", () => {
   const notOpted = dryRun(makeCycle({ drive: null }));
   assert.equal(notOpted.code, 3, notOpted.out);

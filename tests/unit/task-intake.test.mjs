@@ -153,3 +153,15 @@ test("usage and environment errors", () => {
   assert.match(env.out.error, /no dispatched line for task 5/);
   assert.equal(existsSync(join(noDispatch.repo, ".devcycle/findings")), false);
 });
+
+test("intake holds the report's cmd: to the task's gate, read through the ledger's plan", () => {
+  const f = fixture();
+  writeInto(f.repo, "docs/plan.md", ["# P", "", "**Verification gate:** `npm run gate`", "",
+    "### Task 5: T", "**Files:**", "- Modify: src/a.mjs", "**Evidence:** red-green", "**Quality constraints:** none", "",
+    "## Dispatch Map", "", "- Wave 1: Task 5", ""].join("\n"));
+  writeInto(f.repo, ".devcycle/reports/5.md", report());
+  const r = intake(f);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.action, "bounce");
+  assert.ok(r.out.findings.some((x) => /cmd: is not the task's gate command — gate: npm run gate \| cmd: npm test/.test(x)), r.out.findings.join("\n"));
+});

@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   ledgerKey, parseLedgerLine, appendLedgerLine, nextRetry, retryCount, latestKeyed, appendRunRecordOnce, depthBandNow,
+  checkTaskId, ledgerPlan, taskGate, UsageError,
 } from "../../scripts/task-ledger.mjs";
 
 const LEDGER_MODULE = new URL("../../scripts/task-ledger.mjs", import.meta.url).href;
@@ -159,4 +160,58 @@ test("appendLedgerLine: three tasks appending in parallel to one ledger lose no 
   const keys = lines(path).map((l) => parseLedgerLine(l).key);
   assert.equal(keys.length, 60);
   assert.equal(new Set(keys).size, 60);
+});
+
+const GATE_PLAN = [
+  "# P", "", "**Verification gate:** `npm test`", "",
+  "### Task 1: A", "**Files:**", "- Modify: a.mjs", "**Evidence:** red-green", "**Quality constraints:** none", "",
+  "### Task 2: B", "**Files:**", "- Modify: b.md", "**Evidence:** convention (`npm run lint`)", "**Quality constraints:** none", "",
+  "## Dispatch Map", "", "- Wave 1: Task 1, Task 2", "",
+].join("\n");
+
+// A checkout as the execution stage lays it out: <root>/.devcycle/ledger.md naming <root>/docs/plan.md.
+function checkoutLedger({ plan = null } = {}) {
+  const root = makeTempDir("task-ledger-gate-");
+  mkdirSync(join(root, ".devcycle"), { recursive: true });
+  writeFileSync(join(root, ".devcycle/ledger.md"), PREAMBLE);
+  if (plan !== null) {
+    mkdirSync(join(root, "docs"), { recursive: true });
+    writeFileSync(join(root, "docs/plan.md"), plan);
+  }
+  return join(root, ".devcycle/ledger.md");
+}
+
+test("ledgerPlan reads the preamble's plan path; null without a ledger or a preamble", () => {
+  assert.equal(ledgerPlan(ledger()), "docs/plan.md");
+  assert.equal(ledgerPlan(join(makeTempDir("task-ledger-none-"), "ledger.md")), null);
+  const bare = join(makeTempDir("task-ledger-bare-"), "ledger.md");
+  writeFileSync(bare, "- [2026-10-08T10:00:00Z] task=1 event=dispatched outcome=x ref=none\n");
+  assert.equal(ledgerPlan(bare), null);
+});
+
+test("taskGate resolves through the ledger's plan, relative to the checkout holding the ledger", () => {
+  const path = checkoutLedger({ plan: GATE_PLAN });
+  assert.deepEqual(taskGate(path, "1"), { cmd: "npm test", source: "plan-gate", evidenceClass: "red-green" });
+  assert.deepEqual(taskGate(path, "2"), { cmd: "npm run lint", source: "convention", evidenceClass: "convention", planGate: "npm test" });
+});
+
+test("taskGate is null for a missing plan file, a non-numeric task id, or an unknown task", () => {
+  assert.equal(taskGate(checkoutLedger(), "1"), null);
+  const path = checkoutLedger({ plan: GATE_PLAN });
+  assert.equal(taskGate(path, "fast"), null);
+  assert.equal(taskGate(path, "0x1"), null);
+  assert.equal(taskGate(path, "7"), null);
+});
+
+test("taskGate reads a plan the preamble names by absolute path as is", () => {
+  const plan = join(makeTempDir("task-ledger-abs-plan-"), "plan.md");
+  writeFileSync(plan, GATE_PLAN);
+  const path = join(makeTempDir("task-ledger-abs-"), "ledger.md");
+  writeFileSync(path, `Plan: \`${plan}\`\n\n`);
+  assert.deepEqual(taskGate(path, "1"), { cmd: "npm test", source: "plan-gate", evidenceClass: "red-green" });
+});
+
+test("checkTaskId refuses a task id the task scripts would refuse", () => {
+  assert.doesNotThrow(() => checkTaskId("3"));
+  assert.throws(() => checkTaskId("../x"), (err) => err instanceof UsageError && /--task must be a plan task id, got "\.\.\/x"/.test(err.message));
 });

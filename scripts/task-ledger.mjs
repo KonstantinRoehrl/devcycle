@@ -4,13 +4,14 @@
 // row that already exists is not appended again, so a crash re-run is harmless while the next
 // round or retry — a new key — still appends.
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { withFileLock } from "./file-lock.mjs";
 import { now } from "./stamp.mjs";
 import { parseFlags, requireCount } from "./cli-flags.mjs";
 import { recordPath, subSchemaFor, validate, validateCulprit, writeLine } from "./run-record.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
+import { gateCommand } from "./task-files.mjs";
 
 const SCHEMA_PATH = new URL("../tests/fixtures/run-record.schema.json", import.meta.url);
 const LEDGER_LINE_RE = /^- \[([^\]]+)\] task=(\S+) event=(\S+) outcome=(.*?) ref=(\S+)(?: key=(\S+))?$/;
@@ -31,6 +32,25 @@ export function parseLedgerLine(line) {
 const ledgerText = (ledgerPath) => (existsSync(ledgerPath) ? readFileSync(ledgerPath, "utf8") : "");
 const ledgerEntries = (ledgerPath) => ledgerText(ledgerPath).split("\n").map(parseLedgerLine).filter(Boolean);
 export const taskEntries = (ledgerPath, task) => ledgerEntries(ledgerPath).filter((e) => e.task === task);
+
+// A ledger's `Plan:` preamble names the plan its lines belong to (references/resume.md § The state
+// file); one naming another plan is a previous cycle's slot.
+const LEDGER_PLAN_RE = /^Plan:\s*`([^`]+)`/m;
+
+export function ledgerPlan(ledgerPath) {
+  return ledgerText(ledgerPath).match(LEDGER_PLAN_RE)?.[1] ?? null;
+}
+
+// A task's gate command through the ledger's plan, or null when there is none to resolve: no plan
+// named, no plan file, or a task id that is no plan task number (`fast`, `sweep`).
+export function taskGate(ledgerPath, task) {
+  const plan = ledgerPlan(ledgerPath);
+  if (!plan || !/^\d+$/.test(task)) return null;
+  // The preamble's path is relative to the checkout whose .devcycle/ holds the ledger.
+  const planPath = isAbsolute(plan) ? plan : join(dirname(dirname(ledgerPath)), plan);
+  if (!existsSync(planPath)) return null;
+  return gateCommand(readFileSync(planPath, "utf8"), Number(task));
+}
 
 export const MISSING_FINDINGS = "rejected (missing findings file)";
 
@@ -159,9 +179,13 @@ export function countFlag(flags, name, min) {
 const RUN_ID_RE = /^[0-9a-f]{16}$/;
 const TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+export function checkTaskId(task) {
+  if (!TASK_ID_RE.test(task ?? "")) throw new UsageError(`--task must be a plan task id, got "${task}"`);
+}
+
 export function checkIds({ run, task }) {
   if (!RUN_ID_RE.test(run)) throw new UsageError(`--run must be a 16-hex run id, got "${run}"`);
-  if (!TASK_ID_RE.test(task)) throw new UsageError(`--task must be a plan task id, got "${task}"`);
+  checkTaskId(task);
 }
 
 // The task-script CLI contract: exactly one JSON object on stdout; exit 0 for every normal outcome,

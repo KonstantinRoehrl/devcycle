@@ -5,6 +5,37 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-12 — One gate command per task, captured by a helper
+
+**Decision:** a plan's header names the repo's whole verification gate on one `**Verification
+gate:**` line, and `gateCommand` in `scripts/task-files.mjs` is the one resolver of a task's gate:
+a convention task's parenthetical, any other task's header line. `scripts/capture-evidence.mjs`
+writes every evidence capture, running that gate unless `--cmd` names another command, and prints
+the report lines to copy. `task-dispatch.mjs` ends every implementer brief with a `**Gate
+command:**` line. `evidence-completeness-check.mjs --task <id>` holds a report's `cmd:` to that gate
+unless a `- Narrowing:` line explains the difference. The green gate runs `task-commit.mjs` with
+`--test-cmd` set to the wave setup's `gateCmd` and `--subset-cmd` set to its `testCmd`. The
+evidence contract is version 2. The authored-claims lint skips the lines under a report's Tail
+field, and a red attributed as pre-existing, flaky, unrelated or environmental needs its
+`<task-id>-flaky.txt` reproduction cited.
+
+**Why:** truthful reports bounced at intake on counts quoted in their captured tail (#281) and on
+dotnet test summaries (#283), while a capture's header, the report's `cmd:` and the task's gate
+were three hand-copied strings free to drift (#282, #337), and a red explained away needed no
+reproduction (#333). To offset the growth, `references/evidence.md` lost its hand-written capture
+template and brace-group rule, a restated description of the concurrent-wave case, and two
+asides, so its own bytes stay under their entry; the playbooks' figures rise by their own new lines.
+
+**Supersedes:** the hand-written `{ echo "# devcycle-cmd: …"; …; } > file 2>&1` capture
+template; the test command scraped from a task's steps as the green gate's whole-suite run.
+
+```text
+budget: surface-budget.json surfaceTotal 5904
+budget: context-budget.json commands/cycle.md 69441
+budget: context-budget.json playbooks/executing-waves.md 96199
+budget: context-budget.json playbooks/planning-waves.md 71672
+```
+
 ## 2026-10-10 — Closures stop creeping back up
 
 **Decision:** the two files sitting exactly at their line ceilings get headroom by deletion and

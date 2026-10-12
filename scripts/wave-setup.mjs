@@ -15,8 +15,8 @@ import { describe } from "./find-state-files.mjs";
 import { checkState } from "./resume-check.mjs";
 import { compareKnobs, parseRecordedLine } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
-import { TEST_FILE_SUFFIXES, fieldValue, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
-import { nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
+import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
+import { ledgerPlan, nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
 import { pendingReviewLoop, reviewLoopId } from "./task-verdict.mjs";
 import { DRIVE_LOCK_REL, driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";
@@ -65,14 +65,8 @@ export function taskPosition(lines, { pendingLoop = null, retries = () => 0 } = 
 // This cycle's ledger lines. A ledger whose `Plan:` preamble names another plan is a previous
 // cycle's slot (references/resume.md § The state file): none of its lines is this cycle's.
 function readLedger(ledgerPath, plan) {
-  let text;
-  try {
-    text = readFileSync(ledgerPath, "utf8");
-  } catch {
-    return [];
-  }
-  if (!plan || text.match(/^Plan: `([^`]+)`/m)?.[1] !== plan) return [];
-  return text.split("\n").map(parseLedgerLine).filter(Boolean);
+  if (!plan || ledgerPlan(ledgerPath) !== plan) return [];
+  return readFileSync(ledgerPath, "utf8").split("\n").map(parseLedgerLine).filter(Boolean);
 }
 
 // The declaration forms playbooks/planning-waves.md allows — `none (…)`, `Task 2 (…)`, `Tasks 1+4
@@ -159,13 +153,14 @@ function wavePosition(root, plan, lines, ledgerPath) {
   const ready = (task) => dependenciesOf(blocks.get(task) ?? "").every((dep) => done.has(dep));
   const filesOf = (task) => [...(files.get(Number(task)) ?? [])];
   // What playbooks/executing-waves.md's per-task steps take from the plan. Every task still to commit
-  // carries them, so one resumed at a reviewer dispatch, the commit or a re-gate has its evidence class
-  // and test command too, with the round its next review takes.
+  // carries them, so one resumed at a reviewer dispatch, the commit or a re-gate has its evidence class,
+  // test command and gate command too, with the round its next review takes.
   const briefInputs = (task) => {
     const block = blocks.get(task) ?? "";
     const taskFiles = filesOf(task);
     const evidence = fieldValue(block, "Evidence");
-    return { files: taskFiles, evidence, evidenceClass: evidence?.split(/\s+/)[0] ?? null, testCmd: testCommand(block, taskFiles) };
+    return { files: taskFiles, evidence, evidenceClass: evidence?.split(/\s+/)[0] ?? null, testCmd: testCommand(block, taskFiles),
+      gateCmd: gateCommand(planText, Number(task))?.cmd ?? null };
   };
   const withInputs = (task, position) => position.next === "done" ? { task, ...position }
     : { task, ...position, ...briefInputs(task), reviewRound: nextReviewRound(byTask.get(task) ?? []) };

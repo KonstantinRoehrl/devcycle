@@ -205,9 +205,12 @@ plugin ships. Start there.
   `scripts/contract-staleness-check.mjs` as an advisory preflight that warns when a cached plugin's
   contract predates the target repo's. A host repo can declare its whole-gate checks in the
   required-checks manifest `tests/fixtures/required-gate-checks.json` — a committed JSON array of
-  substrings every convention whole-gate command must contain, enforced by
-  `scripts/evidence-completeness-check.mjs` and a no-op when absent, keeping the plugin
-  repo-agnostic. The contract itself lives in
+  substrings every convention whole-gate command must contain, enforced by plan-check against the
+  plan's gate commands and by `scripts/evidence-completeness-check.mjs` against each capture's
+  `cmd:`, and a no-op when absent, keeping the plugin
+  repo-agnostic. Every capture is written by `scripts/capture-evidence.mjs`, which runs the task's
+  gate command, so a capture's header, the report's `cmd:` and the gate cannot drift apart. The
+  contract itself lives in
   [`references/evidence.md`](references/evidence.md).
 
 [superpowers]: https://github.com/obra/superpowers

@@ -23,6 +23,8 @@ A self-contained task brief containing:
 - The task's Files (Create/Modify/Test), Interfaces (Consumes/Produces, exact
   signatures), Dependencies, an `**Evidence:**` class line, and an
   `**Evidence tail:** <N>` line giving the number of lines your report tails.
+- A `**Gate command:**` line: the task's whole verification gate, the command
+  `capture-evidence.mjs` runs by default.
 - Any Global Constraints and Pinned Interfaces that apply across the whole
   plan.
 - For `red-green` tasks, the relevant TDD content preloaded into the brief
@@ -74,10 +76,10 @@ denied unless it is an inspection command or `git add -N`.
 
 ## Evidence files and report
 
-You write the evidence files yourself: capture each run's full output —
-stdout and stderr together — into the before/after paths that
-`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` pins, using the `<task-id>`
-it defines, and record each run's exit status. Never hand-edit, trim, or
+Write every capture with
+`node "$(devcycle-root)/scripts/capture-evidence.mjs" --task <task-id> --phase before|after|red`
+(`red` takes `--cmd "<the failing subset>"`) and copy the report lines it
+prints; never a hand-written redirect. Never hand-edit, trim, or
 reconstruct those files; they hold what the command actually printed.
 Any prose claim your report makes about source state ("X already existed", "no other caller", "the suite was already green") carries the command that proves it or is labeled an assumption — never stated as bare fact (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims).
 
@@ -86,6 +88,11 @@ When a capture is legitimately narrowed away from the whole gate — e.g. a conc
 Report in the shape `references/evidence.md` pins, with `<N>` taken from
 the brief's `**Evidence tail:** <N>` line. If the brief has no such line,
 tail 20 lines and flag the missing line under Deviations.
+
+Before you return, run `node "$(devcycle-root)/scripts/authored-claims-check.mjs" <report>`
+and `node "$(devcycle-root)/scripts/evidence-completeness-check.mjs" <report> --task <task-id>`,
+fix every finding they print, and run them again until both exit 0. Intake
+runs both again as the backstop.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`. Within that, write
 findings and deviations symptom first — what broke or what's missing before

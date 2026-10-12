@@ -33,7 +33,7 @@ const PLAN = [
   "**Quality constraints:** none", "**Lessons:**", "",
   "- [ ] Run `node --test tests/b.test.mjs` — expect green.", "",
   "### Task 3: Third", "**Files:**", "- Modify: src/a.mjs",
-  "**Interfaces:** none", "**Dependencies:** Tasks 1+2 committed", "**Evidence:** convention (node scripts/validate.mjs)",
+  "**Interfaces:** none", "**Dependencies:** Tasks 1+2 committed", "**Evidence:** convention (`node scripts/validate.mjs`)",
   "**Quality constraints:** none", "**Lessons:**", "",
   "- [ ] Run `node scripts/validate.mjs` — expect `validate: ok`.", "",
   "## Dispatch Map", "",
@@ -176,15 +176,26 @@ test("the current wave is the first with uncommitted work; dispatchable tasks ca
   assert.deepEqual([first.ok, first.action, first.wave, first.appended], [true, "resume", 1, []]);
   assert.deepEqual(first.tasks.map(positionOf), [{ task: "1", position: "committed", next: "done" }, { task: "2", position: "not-dispatched", next: "dispatch-implementer" }]);
   assert.deepEqual(first.dispatchable, [{ task: "2", files: ["src/b.mjs", "tests/b.test.mjs"], evidence: "green-green (behavior-preserving)",
-    evidenceClass: "green-green", testCmd: "node --test tests/b.test.mjs", dependencies: [], mapRow: { wave: 1, tasks: [1, 2] } }]);
+    evidenceClass: "green-green", testCmd: "node --test tests/b.test.mjs", gateCmd: null, dependencies: [], mapRow: { wave: 1, tasks: [1, 2] } }]);
 
   const second = setup(cycle({ ledger: [committed(1), committed(2)] }));
   assert.equal(second.wave, 2);
-  assert.deepEqual(second.dispatchable, [{ task: "3", files: ["src/a.mjs"], evidence: "convention (node scripts/validate.mjs)",
-    evidenceClass: "convention", testCmd: null, dependencies: ["1", "2"], mapRow: { wave: 2, tasks: [3] } }]);
+  assert.deepEqual(second.dispatchable, [{ task: "3", files: ["src/a.mjs"], evidence: "convention (`node scripts/validate.mjs`)",
+    evidenceClass: "convention", testCmd: null, gateCmd: "node scripts/validate.mjs", dependencies: ["1", "2"], mapRow: { wave: 2, tasks: [3] } }]);
 
   const done = setup(cycle({ ledger: [1, 2, 3].map(committed) }));
   assert.deepEqual([done.wave, done.tasks, done.dispatchable, done.pendingDecision], [null, [], [], null]);
+});
+
+test("every uncommitted task carries its gate command: the header gate for a test-class task, its parenthetical for a convention one", () => {
+  const gated = PLAN.replace("# Fixture plan\n", "# Fixture plan\n\n**Verification gate:** `npm run gate`\n");
+  const fresh = setup(cycle({ plan: gated }));
+  assert.deepEqual(fresh.dispatchable.map((d) => [d.task, d.gateCmd, d.testCmd]),
+    [["1", "npm run gate", "node --test tests/a.test.mjs"], ["2", "npm run gate", "node --test tests/b.test.mjs"]]);
+  const second = setup(cycle({ plan: gated, ledger: [committed(1), committed(2)] }));
+  assert.equal(second.tasks[0].gateCmd, "node scripts/validate.mjs");
+  const ungated = setup(cycle());
+  assert.deepEqual(ungated.tasks.map((t) => t.gateCmd), [null, null]);
 });
 
 // Steps 5 and 6 need a task's evidence class, test command and review round whatever step it resumes

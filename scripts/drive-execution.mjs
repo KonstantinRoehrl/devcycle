@@ -25,7 +25,7 @@ import { eachRecord } from "./jsonl.mjs";
 import { PRICING } from "./pricing.mjs";
 import { now } from "./stamp.mjs";
 import { parseDispatchMap, taskFileMap } from "./task-files.mjs";
-import { appendRunRecordOnce, parseLedgerLine } from "./task-ledger.mjs";
+import { appendRunRecordOnce, ledgerPlan, parseLedgerLine } from "./task-ledger.mjs";
 
 const { spawnStreaming, killGroup } = agentCli;
 
@@ -114,10 +114,8 @@ function readState(statePath) {
 // A ledger whose `Plan:` header names another plan is a previous cycle's (references/resume.md).
 function ledgerEntries(root, plan) {
   const path = join(root, LEDGER_REL);
-  if (!plan || !existsSync(path)) return [];
-  const text = readFileSync(path, "utf8");
-  if (text.match(/^Plan:\s*`([^`]+)`/m)?.[1] !== plan) return [];
-  return text.split("\n").map(parseLedgerLine).filter(Boolean);
+  if (!plan || ledgerPlan(path) !== plan) return [];
+  return readFileSync(path, "utf8").split("\n").map(parseLedgerLine).filter(Boolean);
 }
 
 const progressOf = (entries) => ({
