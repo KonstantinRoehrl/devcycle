@@ -98,9 +98,10 @@ exit 2 or 3 a stop.
    instruct the implementer to commit, stage, or push. Immediately before it, give the brief to
    `task-dispatch.mjs --role implementer --model-decision "<the routing decision>"` (a fix pass adds
    `--round <n>`) on stdin as a quoted heredoc (`<<'EOF'`) — one `node` call, nothing chained to it,
-   no `$(…)` in its flags: the one form the git guard reads as data. It writes the brief file the
-   dispatch names. The implementer returns the envelope `references/delegation.md` defines — never
-   the report body — and that envelope's on-device count is what triggers the checklist below.
+   no `$(…)` in its flags: the one form the git guard reads as data. Dispatch the file at the
+   `briefPath` it prints, gate line appended, never the piped text. The implementer returns the
+   envelope `references/delegation.md` defines — never the report body — and that envelope's
+   on-device count is what triggers the checklist below.
 4. **Intake.** `task-intake.mjs`, given the envelope's `report:` path and `status:` and the task
    notification's agent id as `--agent-id`, checks the report against its evidence class and lints
    it — the envelope's `report:` field is a claim, not proof. `review` → step 5. `bounce` or `missing-report` → back to the implementer with
@@ -125,10 +126,9 @@ exit 2 or 3 a stop.
    `exhausted-unresolved` — `task-verdict.mjs` or `task-commit.mjs` writes that status — and is
    surfaced to the user as a decision, never committed as if it had passed.
 6. **Green gate (REQUIRED, deterministic).** On acceptance, run `task-commit.mjs` with the plan,
-   `--test-cmd "<gateCmd>"` and your subject, plus `--subset-cmd "<testCmd>"`, both from the wave setup;
-   a task with no `gateCmd` passes `--test-cmd "<testCmd>"`.
-   It re-runs the test command itself and reads the exit status — never the implementer's word for
-   it; a repo with no test suite passes its documented convention as the test command.
+   `--test-cmd "<gateCmd>"` and your subject, plus `--subset-cmd "<testCmd>"` when `testCmd` is non-null,
+   both from the wave setup; a task with no `gateCmd` passes `--test-cmd "<testCmd>"`.
+   It re-runs the test command itself and reads the exit status — never the implementer's word for it.
    On failure, acceptance is blocked: no commit, `gate-fail`, back to the implementer with the gate
    evidence its ledger line names, then the next round's review; after round 3, `needs-user`.
    `deferred` means a concurrent sibling's edit caused the red: call it again once the wave quiesces.

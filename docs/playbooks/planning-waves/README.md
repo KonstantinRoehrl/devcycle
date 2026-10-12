@@ -20,11 +20,11 @@ history). At `lean`/`standard` a self-contained Plan Mechanics section supplies 
 template — `Files`, `Interfaces`, the three per-task declaration lines (`Dependencies` derived
 from what's actually consumed, `Evidence` in one of the three classes evidence.md owns, and an
 optional `Execution: sweep` marker for one uniform edit rule) — directly; at `thorough` the same
-template comes from the `superpowers:writing-plans` sub-skill instead, with two rules this
-playbook always keeps regardless: the executor named in the plan header is always
-`executing-waves.md`, and no task ever carries a commit step. The header also names the repo's
-whole verification gate as one `**Verification gate:**` command — the single command every
-test-class task's evidence captures and the green gate re-runs.
+template comes from the `superpowers:writing-plans` sub-skill instead, with rules this playbook
+always keeps regardless: the executor named in the plan header is always `executing-waves.md`,
+the header names the repo's whole verification gate as one `**Verification gate:**` command — the
+single command every test-class task's evidence captures and the green gate re-runs — no task
+ever carries a commit step, and the plan gate below runs on the finished plan.
 
 Once the plan is drafted, planning runs its own eight-item self-review — spec coverage,
 placeholder scan, type consistency, factual-claim accuracy, no count-only enumeration,

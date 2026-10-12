@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Commits one accepted execution-stage task: the coordinator's green gate and the acceptance commit
 // in one call (playbooks/executing-waves.md steps 6-7, references/commit-convention.md § The task
-// commit). The gate is this script's own run of the task's test command, never a report's word.
+// commit). The gate is this script's own run of the task's gate command (--test-cmd), never a
+// report's word; the task's own test run (--subset-cmd) decides whether a red is a sibling's.
 // Each commit carries a `Devcycle-Task: <run>/<task>` trailer, so a re-run after a crash finds it
 // and appends only the ledger and run-record lines still missing instead of committing twice.
 import { readFileSync } from "node:fs";

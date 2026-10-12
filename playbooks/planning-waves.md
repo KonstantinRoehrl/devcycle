@@ -12,9 +12,10 @@ Read `profile` from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references/conf
 channel. At **`lean` / `standard`** do NOT
 load `superpowers:writing-plans` — the Plan mechanics section below is self-contained. At
 **`thorough`** it is a REQUIRED SUB-SKILL for all plan-writing mechanics; where the two disagree this
-playbook wins, and two of that section's rules always override it — the plan header's "For agentic workers"
+playbook wins, and these rules of that section always override it — the plan header's "For agentic workers"
 line names `playbooks/executing-waves.md` as the executor (never upstream's
-subagent-vs-inline execution choice), and no task gets a commit step. Everything outside that one
+subagent-vs-inline execution choice), the header carries a `**Verification gate:**` line, no task gets a
+commit step, and item 8's plan gate runs. Everything outside that one
 section is unconditional, so a finished plan has the same shape whichever engine produced it.
 
 ## Feasibility gate — before any detailed planning
@@ -77,8 +78,7 @@ suite run is step 1. Never a commit step.
 for agentic workers naming `playbooks/executing-waves.md` as the REQUIRED
 executor and noting checkbox (`- [ ]`) step syntax; `**Goal:**` (one sentence); `**Architecture:**`
 (2–3 sentences); `**Tech Stack:**`; `**Verification gate:**` (the repo's whole verification gate as one
-exact shell command in one code span: every test-class task's evidence and green gate run it; a
-convention task's gate is its own ``convention (`<cmd>`)`` parenthetical, also one code span);
+exact shell command in one code span; `references/evidence.md` § File-backed evidence says which tasks run it);
 `## Global Constraints` (the spec's project-wide requirements —
 version floors, dependency limits, naming and copy rules, platform requirements — one line each,
 copied verbatim, implicitly part of every task's requirements); and `## Quality Constraints` above.

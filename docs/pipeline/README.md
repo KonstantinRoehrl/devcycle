@@ -161,7 +161,7 @@ see `docs/design/`.
    behavior-preserving task instead proves the suite green before and after the change, per
    the evidence class its plan task declares. A reviewer checks every task — producing the
    task's diff itself rather than being handed one — the coordinator re-runs the tests
-   itself before accepting (the *green gate*: the task's test command must pass in the
+   itself before accepting (the *green gate*: the task's gate command must pass in the
    coordinator's own re-run, not just in the implementer's report), and only accepted work
    is committed.
 7. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole

@@ -27,13 +27,11 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/evidence.md file-backed-evidence`
    and
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/evidence.md reviewer-verdicts`
-   and produce that class's before/after evidence as they specify, writing this run's files to
+   and produce that class's before/after evidence as they specify, into
    `.devcycle/evidence/fast-before.txt` and `.devcycle/evidence/fast-after.txt` (`fast` is this
-   path's task id). `fast-before.txt` opens with one line naming the declared class and the exact
-   verification command, and each run's exit status is appended to its own evidence file as the
-   run finishes — the reviewer verdicts make "an exit status contradicts the declared class" and
-   "the class mismatches the diff" rejection conditions, and step 5's reviewer can only run those
-   checks if the class, the command and the statuses are on disk with the output.
+   path's task id, so each capture passes `--cmd`). Copy the lines the captures print — the
+   `- Evidence:` line once, `<class>` filled in — to `.devcycle/reports/fast.md`: step 5's reviewer
+   judges the declared class against the exit statuses and the diff, so it needs the class on disk.
 3. **Escalation valve.** If implementation reveals the change is not trivial after all — the
    blast radius is spreading past what triage saw, or a real design choice has surfaced that
    the request didn't settle — stop, say so, and re-enter the normal pipeline at whichever
@@ -46,9 +44,8 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    the pathspec matches nothing for it and the commit aborts.
 5. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model
    `taskReviewerModel` resolves per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`, with the
-   diff and the two evidence-file paths from step 2; the reviewer reads the declared class and
-   the exact command off `fast-before.txt`'s first line, since the fast path writes no
-   implementer report to carry them. On reject: fix, re-verify the evidence, re-dispatch.
+   diff and `.devcycle/reports/fast.md`, which stands in for an implementer report: it names the
+   declared class and the two evidence files. On reject: fix, re-capture the evidence, re-dispatch.
    No review panel, no cross-model lens, no red-team — those belong to the full branch-review
    stage, not here. This one-reviewer floor is never profile-conditional: a `lean` run runs it too.
 

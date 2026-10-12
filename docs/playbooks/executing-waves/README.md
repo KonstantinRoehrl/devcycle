@@ -20,7 +20,8 @@ dependencies are already committed AND whose files overlap no other candidate or
 joins the same wave, executed by readiness rather than written order. Each task then runs its own
 cycle: the brief is sliced down to exactly what that implementer needs — its id, Files,
 Interfaces, Dependencies, evidence class and tail length, quality constraints resolved to
-verbatim lines, and matched lessons — and dispatched to a fresh `devcycle:implementer`, never
+verbatim lines, matched lessons, and the gate command `task-dispatch.mjs` appends to the brief
+file it writes — and that file is dispatched to a fresh `devcycle:implementer`, never
 carrying prior tasks' history. Once its report file is confirmed to exist and carry the fields
 its evidence class requires, a `devcycle:task-reviewer` (read-only apart from its own findings
 file) is dispatched to produce the task's diff itself and return a verdict; it writes that verdict
@@ -29,15 +30,14 @@ exists before acting on the verdict. A non-zero verdict sends findings back to t
 implementer for a fix pass, bounded at three rounds per task, past which the task exits
 `exhausted-unresolved` and is surfaced to the user rather than committed as if it had passed.
 
-Acceptance still isn't automatic on a reviewer's approval: the coordinator re-runs the task's own
-test command itself (or the repo's documented convention, where there is no suite) and reads the
-exit status directly — the green gate — before re-checking the actual git branch against the
-recorded one and committing with a Conventional Commit subject. Each commit's ledger entry, and
-the moment any task produces rendered changes, together drive two triggers this playbook owns:
-closing the wave once nothing in it remains undispatched, in review, or uncommitted, and
-generating or updating the on-device checklist the same wave a rendered change lands, never
-deferred to the end. At the last wave's boundary, execution updates `.devcycle/state.md` to
-`stage: branch-review` and hands off to `reviewing-the-branch.md`.
+Acceptance still isn't automatic on a reviewer's approval: the coordinator re-runs the task's gate
+command itself and reads the exit status directly — the green gate — before re-checking the
+actual git branch against the recorded one and committing with a Conventional Commit subject.
+Each commit's ledger entry, and the moment any task produces rendered changes, together drive two
+triggers this playbook owns: closing the wave once nothing in it remains undispatched, in review,
+or uncommitted, and generating or updating the on-device checklist the same wave a rendered change
+lands, never deferred to the end. At the last wave's boundary, execution updates
+`.devcycle/state.md` to `stage: branch-review` and hands off to `reviewing-the-branch.md`.
 
 Each step's bookkeeping runs through one script, so a session spends one call where it used to
 spend several: `wave-setup.mjs` hands `/devcycle:continue` the wave's resume position as one JSON
@@ -70,7 +70,7 @@ flowchart TD
     REVIEW --> VERDICT{"Verdict, within a 3-round cap?"}:::stage
     VERDICT -->|needs-changes| DISPATCH
     VERDICT -->|"cap reached"| EXHAUSTED("exhausted-unresolved — surfaced to the user, never committed"):::stage
-    VERDICT -->|accept| GATE{"Green gate — coordinator re-runs the test command itself"}:::stage
+    VERDICT -->|accept| GATE{"Green gate — coordinator re-runs the gate command itself"}:::stage
     GATE -->|fail| DISPATCH
     GATE -->|pass| COMMIT("Re-check the branch, then commit with a Conventional Commit subject"):::stage
     COMMIT --> LEDGER[("ledger.md — event=committed")]:::structural
