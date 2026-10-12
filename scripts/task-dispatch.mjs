@@ -13,7 +13,7 @@ import { isMain } from "./is-main.mjs";
 import { now } from "./stamp.mjs";
 import {
   UsageError, appendLedgerLine, checkIds, countFlag, ledgerKey, nextReviewRound, nextRetry, runTaskScript, taskEntries, taskFlags,
-  workTreeRoot,
+  taskGate, workTreeRoot,
 } from "./task-ledger.mjs";
 
 const FLAGS = {
@@ -49,7 +49,10 @@ export function dispatch(argv, brief, cwd = process.cwd()) {
   const briefPath = `.devcycle/briefs/${task}-${role}${round ? `-round-${round}` : ""}.md`;
   mkdirSync(join(root, ".devcycle/briefs"), { recursive: true });
   mkdirSync(join(root, ".devcycle/dispatch"), { recursive: true });
-  atomicWrite(join(root, briefPath), brief);
+  // An implementer brief ends with the task's resolved gate, so the brief, the capture helper's cmd:
+  // and the evidence check agree with no hand slicing (references/evidence.md § File-backed evidence).
+  const gate = role === "implementer" ? taskGate(ledger, task) : null;
+  atomicWrite(join(root, briefPath), gate ? `${brief.replace(/\n*$/, "\n")}\n**Gate command:** \`${gate.cmd}\`\n` : brief);
   if (role === "reviewer") setAsideFindings(root, task, round, retry);
   atomicWrite(join(root, `.devcycle/dispatch/${task}-${role}-${round}-${retry}.json`), JSON.stringify({ startedAt: now() }) + "\n");
   // The routing decision is the audit shape references/model-routing.md records on `dispatched`.
