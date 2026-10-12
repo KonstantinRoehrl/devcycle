@@ -174,3 +174,28 @@ test("a leg that throws becomes that leg's finding: the other legs still report 
     .filter((o) => o.kind === "event");
   assert.deepEqual(events.map((e) => [e.event, e.result]), [["gate-ran", "fail"]]);
 });
+
+// #322: with a required-checks manifest at the repo root, a pinned gate that omits a check fails at plan time.
+test("a pinned gate omitting a required-checks manifest entry trips only the briefCompleteness leg; no manifest, no check", () => {
+  const withManifest = () => {
+    const repo = realpathSync(makeTempDir("plan-check-repo"));
+    mkdirSync(join(repo, "tests/fixtures"), { recursive: true });
+    writeFileSync(join(repo, "tests/fixtures/required-gate-checks.json"), JSON.stringify(["redaction-check.mjs"]));
+    return repo;
+  };
+  const fullGate = "npm test && node scripts/redaction-check.mjs";
+  const narrow = task(2, ["src/b.txt"]).replace("**Evidence:** red-green", "**Evidence:** convention (`npm test`)");
+  const gated = (body) => plan(body).replace("`npm test`", `\`${fullGate}\``);
+
+  const r = run(gated(task(1, ["src/a.txt"]) + narrow), { repo: withManifest() });
+  assert.equal(r.status, 1, r.stdout);
+  assert.deepEqual([...reportingLegs(r.stderr)], ["briefCompleteness"], r.stderr);
+  assert.match(r.stderr, /^plan-check: briefCompleteness: Task 2: convention command `npm test` omits required gate check "redaction-check\.mjs"/m);
+
+  const header = run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])), { repo: withManifest() });
+  assert.match(header.stderr, /^plan-check: briefCompleteness: the \*\*Verification gate:\*\* `npm test` omits required gate check "redaction-check\.mjs"/m);
+
+  const full = task(2, ["src/b.txt"]).replace("**Evidence:** red-green", `**Evidence:** convention (\`${fullGate}\`)`);
+  assert.equal(run(gated(task(1, ["src/a.txt"]) + full), { repo: withManifest() }).status, 0);
+  assert.equal(run(plan(task(1, ["src/a.txt"]) + narrow)).status, 0, "no manifest at the repo root");
+});

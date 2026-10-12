@@ -103,8 +103,8 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   without the declaration is a defect.
 - A repo may own a required-checks manifest at `tests/fixtures/required-gate-checks.json`: a JSON
   array of substrings that every whole-gate `cmd:` must contain, enforced by
-  `evidence-completeness-check.mjs` (overridable via `--required-checks <path>`). The manifest is
-  absent by default and an absent manifest is a no-op, keeping the plugin repo-agnostic.
+  `evidence-completeness-check.mjs` (overridable via `--required-checks <path>`) and, on a plan's
+  pinned gates, by `plan-check.mjs`. Absent, it is a no-op, keeping the plugin repo-agnostic.
 - **Scope every capture to the task's own `**Files:**` list**, as a pathspec — `git diff -- <the
   task's files>`, never a bare `git diff`. Concurrent implementers share one checkout, and wave
   formation guarantees no two of them touch the same file, so a file-scoped capture sees exactly
@@ -161,8 +161,8 @@ report. Reject when:
   run against **clean HEAD** and against **the change** at the **same iteration count** with their
   actual pass/fail counts (the "clean 20/20; change 6/20" shape), and the #167 foreign-change check
   ruled out concurrent-sibling pollution. The reviewer reads that file rather than trusting the
-  claim. `evidence-completeness-check.mjs` bounces a report line that explains a failure away
-  so and cites no non-empty `<task-id>-flaky.txt` on it or an adjacent line.
+  claim. `evidence-completeness-check.mjs` bounces a report line explaining a failure away
+  that cites no non-empty `<task-id>-flaky.txt` on it or an adjacent line.
 - a `- Narrowing:` declaration's reason does not hold up: accept a legitimate concurrent-wave
   narrowing, reject a reason that is
   lazy partial coverage dressed up as narrowing.

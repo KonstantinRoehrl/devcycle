@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, realpathSync } from "node:fs";
+import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -8,12 +8,18 @@ import { taskFileMap } from "../../scripts/task-files.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/brief-completeness-check.mjs");
 
-function run(planText) {
+// Runs from a scratch work tree, so the real repo's required-checks manifest never applies; `manifest`
+// writes one at that tree's root.
+function run(planText, { manifest } = {}) {
   const dir = realpathSync(makeTempDir("bcc-"));
   const plan = join(dir, "plan.md");
   writeFileSync(plan, planText);
+  if (manifest) {
+    mkdirSync(join(dir, "tests/fixtures"), { recursive: true });
+    writeFileSync(join(dir, "tests/fixtures/required-gate-checks.json"), manifest);
+  }
   try {
-    const stdout = execFileSync("node", [SCRIPT, plan], { encoding: "utf8" });
+    const stdout = execFileSync("node", [SCRIPT, plan], { encoding: "utf8", cwd: dir });
     return { code: 0, out: stdout };
   } catch (e) {
     return { code: e.status, out: `${e.stdout || ""}${e.stderr || ""}` };
@@ -250,4 +256,43 @@ test("a **Verification gate:** line inside a task block is not the header's", ()
   const r = run(COMPLETE.replace("**Verification gate:** `npm test`\n", "").replace("**Lessons:**\n", "**Lessons:**\n**Verification gate:** `npm test`\n"));
   assert.equal(r.code, 1);
   assert.match(r.out, /missing \*\*Verification gate:\*\* line/);
+});
+
+// --- #322: the required-checks manifest, held at plan time ---
+
+const MANIFEST = JSON.stringify(["validate.mjs", "redaction-check.mjs"]);
+const FULL_GATE = "node scripts/validate.mjs && node scripts/redaction-check.mjs && npm test";
+const GATED = COMPLETE.replace("`npm test`", `\`${FULL_GATE}\``);
+
+test("fails a convention task whose command omits a required check, naming the task and the check", () => {
+  const r = run(GATED.replace("**Evidence:** red-green", "**Evidence:** convention (`node scripts/validate.mjs`)"), { manifest: MANIFEST });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: convention command `node scripts\/validate\.mjs` omits required gate check "redaction-check\.mjs" \(tests\/fixtures\/required-gate-checks\.json\) — .*references\/evidence\.md § File-backed evidence/);
+  assert.doesNotMatch(r.out, /"validate\.mjs"/);
+});
+
+test("passes a convention task that pins the full gate", () => {
+  const r = run(GATED.replace("**Evidence:** red-green", `**Evidence:** convention (\`${FULL_GATE}\`)`), { manifest: MANIFEST });
+  assert.equal(r.code, 0, r.out);
+});
+
+test("fails a **Verification gate:** that omits a required check, naming the gate and the check", () => {
+  const r = run(COMPLETE, { manifest: MANIFEST });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /the \*\*Verification gate:\*\* `npm test` omits required gate check "validate\.mjs"/);
+  assert.match(r.out, /the \*\*Verification gate:\*\* `npm test` omits required gate check "redaction-check\.mjs"/);
+});
+
+test("without a manifest at the work-tree root a narrow gate is not checked", () => {
+  const r = run(COMPLETE.replace("**Evidence:** red-green", "**Evidence:** convention (`node scripts/validate.mjs`)"));
+  assert.equal(r.code, 0, r.out);
+});
+
+test("a manifest that is not a JSON array of strings fails naming the file, not with a stack trace", () => {
+  for (const manifest of ["[validate", JSON.stringify({ checks: [] })]) {
+    const r = run(GATED, { manifest });
+    assert.equal(r.code, 1, manifest);
+    assert.match(r.out, /required-gate-checks\.json: (invalid JSON|must be a JSON array of command substrings)/, manifest);
+    assert.doesNotMatch(r.out, /^\s+at /m);
+  }
 });

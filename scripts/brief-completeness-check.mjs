@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Pre-flight check for a devcycle plan: every "### Task N" block must carry the required
 // dispatch fields, the Evidence value must name a valid class, "## Dispatch Map" must list
-// every task, and a Files block that edits a budgeted file must list the size baselines that
-// edit trips and the decisions log that holds them. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
+// every task, every pinned gate command must run the repo's required checks, and a Files block
+// that edits a budgeted file must list the size baselines that edit trips and the decisions log
+// that holds them. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
 // implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField, conventionCommand,
 } from "./task-files.mjs";
@@ -14,6 +16,50 @@ import { isMain } from "./is-main.mjs";
 const REQUIRED_FIELDS = ["Files", "Interfaces", "Dependencies", "Evidence", "Quality constraints"];
 // The evidence classes references/evidence.md defines; evidence-completeness-check.mjs reads them here too.
 export const VALID_EVIDENCE_CLASSES = ["red-green", "green-green", "convention"];
+
+// The required-checks manifest (references/evidence.md § File-backed evidence): substrings every
+// whole-gate command must contain. One reader for both holders — this plan-time check and
+// evidence-completeness-check.mjs's capture-time one — so the two never disagree on the list.
+// Returns null when the manifest is absent, the documented no-op.
+export const REQUIRED_CHECKS_PATH = "tests/fixtures/required-gate-checks.json";
+export function readRequiredChecks(path) {
+  if (!existsSync(path)) return null;
+  let checks;
+  try {
+    checks = JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    throw new Error(`${path}: invalid JSON (${e.message})`);
+  }
+  if (!Array.isArray(checks) || !checks.every((c) => typeof c === "string"))
+    throw new Error(`${path}: must be a JSON array of command substrings`);
+  return checks;
+}
+export const missingRequiredChecks = (command, checks) => checks.filter((c) => !command.includes(c));
+
+// #322: a gate pinned narrower than the manifest is caught here, where it is first written, rather
+// than after the implementer has captured it. The header gate covers every test-class task; a
+// convention task pins its own command.
+function requiredCheckErrors(planText, blocks, repoRoot) {
+  let checks;
+  try {
+    checks = readRequiredChecks(join(repoRoot, REQUIRED_CHECKS_PATH));
+  } catch (e) {
+    return [e.message];
+  }
+  if (!checks) return [];
+  const pinned = [["the **Verification gate:**", verificationGate(planText)]];
+  for (const { num, text } of blocks)
+    pinned.push([`Task ${num}: convention command`, conventionCommand(fieldValue(text, "Evidence") ?? "")]);
+  return pinned
+    .filter(([, cmd]) => cmd)
+    .flatMap(([who, cmd]) =>
+      missingRequiredChecks(cmd, checks).map(
+        (check) =>
+          `${who} \`${cmd}\` omits required gate check "${check}" (${REQUIRED_CHECKS_PATH}) — pin the whole gate, ` +
+          "which runs every check the manifest lists (references/evidence.md § File-backed evidence)",
+      ),
+    );
+}
 
 // **Files:** is read by task-files.mjs, which owns that grammar for every plan gate. Deciding it
 // here too is how this gate came to accept declarations wave-disjointness then called missing.
@@ -33,13 +79,14 @@ function gateLineErrors(planText) {
   return [];
 }
 
-export function briefCompletenessLeg(planText, { planPath }, { includeBudgetFixtures = true } = {}) {
+// repoRoot is the work tree whose required-checks manifest applies; plan-check passes its own.
+export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cwd() }, { includeBudgetFixtures = true } = {}) {
   const errors = [];
   const blocks = taskBlocks(planText);
   if (blocks.length === 0) {
     return { findings: [`no "### Task N" blocks found in ${planPath}`], ok: "", notes: [] };
   }
-  errors.push(...gateLineErrors(planText));
+  errors.push(...gateLineErrors(planText), ...requiredCheckErrors(planText, blocks, repoRoot));
 
   for (const { num, text: block } of blocks) {
     for (const field of REQUIRED_FIELDS) {

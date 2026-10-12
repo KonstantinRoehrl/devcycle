@@ -964,29 +964,54 @@ test("the attribution finding asks for the citation on that line or an adjacent 
   assert.match(runIn(gatedCheckout(t, { extra: [ATTRIBUTION] }).dir).stderr, /cite \.devcycle\/evidence\/4-flaky\.txt on that line or an adjacent line,/);
 });
 
-test("truthful lines that mention a failure word and an attribution word are not attributions", (t) => {
-  for (const line of [
-    "- Deviations: No pre-existing failures; the whole gate was green before and after.",
-    "- Deviations: Nothing flaky observed across three runs, zero failures.",
-    "- Deviations: The before run is red as expected; no unrelated files were touched.",
-    "- Deviations: Error handling for the unrelated legacy path is unchanged.",
-    "- Claims: this task fixes the pre-existing failure in parseDate that the spec names",
-  ]) {
-    const res = runIn(gatedCheckout(t, { extra: [line] }).dir);
-    assert.equal(res.status, 0, `${line}\n${res.stderr}`);
-  }
-});
+// Each line sits in a report that is otherwise valid, so its exit status is the attribution verdict alone.
+const ATTRIBUTION_CASES = {
+  pass: [
+    "No pre-existing failures; the whole gate was green before and after.",
+    "Nothing flaky observed across three runs, zero failures.",
+    "The before run is red as expected; no unrelated files were touched.",
+    "Error handling for the unrelated legacy path is unchanged.",
+    "this task fixes the pre-existing failure in parseDate that the spec names",
+    "Flakes: none.",
+    "flaky: none observed",
+    "None of the tests are flaky.",
+    "Updated the docs section on flaky tests.",
+  ],
+  fail: [
+    "The 2 failures are pre-existing.",
+    "test X is flaky, not caused by this change",
+    "the red in foo.test is unrelated to this task",
+    "environmental failure on CI, pre-existing",
+    "2 tests failed; both are pre-existing.",
+    "2 tests failed, both pre-existing.",
+    "2 tests failed — both pre-existing.",
+    "1 failure (pre-existing)",
+    "The red is caused by an unrelated sibling change.",
+    "I did not fix the pre-existing failure in parseDate.",
+    "The pre-existing failure in parseDate was not fixed by this task.",
+    "2 failures remain. They are pre-existing.",
+    "foo.test fails for unrelated reasons.",
+    "The crash is a known pre-existing issue.",
+    "Gate red due to an environmental issue.",
+    "The gate is red because of unrelated tests.",
+    "The 2 failures, both pre-existing, predate this branch.",
+    "the failure appears pre-existing",
+    "the red is pre-existing and I did not fix it",
+    "no new failures, the one remaining failure is pre-existing",
+    "the 3 errors are not caused by this task; they are pre-existing",
+    "foo.test flaked once and passed on rerun",
+  ],
+};
 
-test("a failure explained as pre-existing, flaky, unrelated or environmental still needs its artifact", (t) => {
-  for (const line of [
-    "- Deviations: The 2 failures are pre-existing.",
-    "- Deviations: test X is flaky, not caused by this change",
-    "- Deviations: the red in foo.test is unrelated to this task",
-    "- Deviations: environmental failure on CI, pre-existing",
-  ]) {
-    const res = runIn(gatedCheckout(t, { extra: [line] }).dir);
-    assert.equal(res.status, 1, line);
-    assert.match(res.stderr, /with no reproduction artifact/, line);
+test("a line fires only when something on it explains a failure away", (t) => {
+  for (const [verdict, lines] of Object.entries(ATTRIBUTION_CASES)) {
+    for (const line of lines) {
+      for (const field of ["- Claims:", "- Deviations:"]) {
+        const res = runIn(gatedCheckout(t, { extra: [`${field} ${line}`] }).dir);
+        assert.equal(res.status, verdict === "pass" ? 0 : 1, `${verdict}: ${field} ${line}\n${res.stderr}`);
+        if (verdict === "fail") assert.match(res.stderr, /with no reproduction artifact/, line);
+      }
+    }
   }
 });
 

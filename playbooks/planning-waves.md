@@ -118,13 +118,13 @@ fixing what it finds inline as you go; no re-review pass.
 6. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
 7. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch.
 8. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path>` — one command,
-   seven legs, compact on success: pasted JS/mjs code blocks parse (`codeBlocks`); every task carries
+   seven legs: pasted JS/mjs code blocks parse (`codeBlocks`); every task carries
    Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, the header carries
-   one `**Verification gate:**` code span, and the Dispatch Map lists every task (`briefCompleteness`); every referencer of a changed file, test or not, sits in some
+   one `**Verification gate:**` code span, pinned gates run every required-checks manifest entry, and the Dispatch Map lists every task (`briefCompleteness`); every referencer of a changed file, test or not, sits in some
    Files block (`blastRadius`); no same-wave task's brief names a file another same-wave task edits
    (`contentCoupling`); a task touching a budgeted surface (`playbooks/`, `commands/`, `agents/`,
-   `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md`, which holds
-   their `budget:` lines — `references/` and `agents/` markdown match the context budget too: every
+   `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md` —
+   `references/` and `agents/` markdown match the context budget too: every
    entry point pays for the references it cites, and agents count toward a reference's fan-in
    (`budgetFixtures`); no two same-wave tasks list the same file (`waveDisjointness`); and item 4's
    claims (`authoredClaims`). A plan with no `## Dispatch Map` fails before any leg runs. Three
