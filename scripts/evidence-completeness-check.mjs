@@ -11,21 +11,37 @@
 // whole-tree-capture case (a scoped diff standing in for a full run across a shared
 // checkout).
 import { readFileSync, existsSync } from "node:fs";
-import { dirname, resolve, isAbsolute } from "node:path";
+import { basename, dirname, resolve, isAbsolute } from "node:path";
+import { proseLines } from "./authored-claims-check.mjs";
+import { parseFlags } from "./cli-flags.mjs";
 import { TEST_FILE_SUFFIXES } from "./task-files.mjs";
+import { taskGate } from "./task-ledger.mjs";
 
-// The evidence contract's embedded minimum version, named in the staleness-aware
-// header-missing error below (references/evidence.md's `<!-- evidence-contract-version: 1 -->`
+// The evidence contract's version (references/evidence.md's `<!-- evidence-contract-version: N -->`
 // marker is the doc-side twin of this constant).
-export const CONTRACT_VERSION = 1;
+export const CONTRACT_VERSION = 2;
+// The version that introduced the `# devcycle-cmd:` capture header: a capture without one predates
+// that version, so the header-missing error names it rather than the current one.
+const HEADER_SINCE_VERSION = 1;
 
-const argv = process.argv.slice(2);
-const reportPath = argv[0];
-const rcFlagIdx = argv.indexOf("--required-checks");
-const requiredChecksArg = rcFlagIdx !== -1 ? argv[rcFlagIdx + 1] : undefined;
+const USAGE =
+  "usage: node scripts/evidence-completeness-check.mjs <report-file> [--task <id>] [--ledger <path>] [--required-checks <path>]";
+let flags, positionals;
+try {
+  ({ flags, positionals } = parseFlags(
+    process.argv.slice(2),
+    { "--task": "value", "--ledger": "value", "--required-checks": "value" },
+    { allowPositionals: true },
+  ));
+} catch (err) {
+  console.error(`evidence-completeness-check: ${err.message} — ${USAGE}`);
+  process.exit(1);
+}
+const [reportPath] = positionals;
+const { "--required-checks": requiredChecksArg, "--task": taskArg, "--ledger": ledgerArg } = flags;
 
 if (!reportPath) {
-  console.error("evidence-completeness-check: usage: node scripts/evidence-completeness-check.mjs <report-file>");
+  console.error(`evidence-completeness-check: ${USAGE}`);
   process.exit(1);
 }
 
@@ -280,8 +296,11 @@ const isConvention = classPhrase.startsWith("convention");
 
 // --- #61: additive completeness checks on the report's captured evidence ---
 
+// node --test / TAP counters, `<n> passed|failed`, `Tests: … passed`, and dotnet vstest's
+// `Passed!  - Failed: 0, Passed: 98, …`; dotnet MTP's `total: 98` / `failed: 0` block already matches
+// `<n> failed` across its line break.
 const RUNNER_SUMMARY_RE =
-  /(?:^|[#ℹ\s])(?:pass|fail)\s+\d+|\d+\s+(?:passed|failed)|tests?:.*\b(?:passed|failed)\b/im;
+  /(?:^|[#ℹ\s])(?:pass|fail)\s+\d+|\d+\s+(?:passed|failed)|tests?:.*\b(?:passed|failed)\b|\b(?:Passed|Failed)!\s+-\s+Failed:\s+\d+,\s+Passed:\s+\d+/im;
 const BEFORE_LINE_RE = /^-\s*Before:\s*(.*)$/gm;
 const AFTER_LINE_RE = /^-\s*After:\s*(.*)$/gm;
 
@@ -304,8 +323,10 @@ const readCmdHeader = (filePath) => {
   const m = first.match(/^#\s*devcycle-cmd:\s*(.+?)\s*$/);
   return m ? m[1] : null;
 };
+// A Before/After line's value is "<path> (exit <n>)"; its first token is the capture's path.
+const evidencePath = (lineMatch) => stripBackticks(lineMatch[1].trim().split(/\s+/)[0]);
 function captureHeaderOrExit(lineMatch, label) {
-  const p = stripBackticks(lineMatch[1].trim().split(/\s+/)[0]);
+  const p = evidencePath(lineMatch);
   const resolved = resolveEvidence(p, reportPath);
   if (!existsSync(resolved)) {
     console.error(`evidence-completeness-check: ${label}-evidence file not found: ${p}`);
@@ -321,7 +342,7 @@ function verifyCaptureHeaders(beforeM, afterM) {
   if (before.header === null || after.header === null) {
     console.error(
       "evidence-completeness-check: evidence file missing '# devcycle-cmd: <cmd>' header line " +
-        "(contract version " + CONTRACT_VERSION + "; a capture authored against an older cached plugin " +
+        "(contract version " + HEADER_SINCE_VERSION + "; a capture authored against an older cached plugin " +
         "predates this requirement — reinstall the plugin or add the header per references/evidence.md §File-backed evidence)",
     );
     process.exit(1);
@@ -373,6 +394,62 @@ function enforceRequiredChecks(commandStr) {
   }
 }
 
+// The gate-equality and failure-attribution checks print every finding they collect and exit once at
+// the end, so one intake bounce names all of them; the checks below keep their first-failure exits.
+let collected = 0;
+const collect = (msg) => {
+  collected++;
+  console.error(`evidence-completeness-check: ${msg}`);
+};
+const firstBeforeLine = text.matchAll(BEFORE_LINE_RE).next().value;
+
+// #282/#337: the declared cmd: is the task's resolved gate, read through the one resolver the
+// capture helper uses. A cycle planned without a gate, or a run with no --task, skips the comparison.
+function checkGateEquality() {
+  if (!taskArg) return;
+  const gate = taskGate(resolve(ledgerArg ?? ".devcycle/ledger.md"), taskArg);
+  if (!gate || gate.cmd === cmd || narrowingDeclaration(text)) return;
+  const beforePath = firstBeforeLine ? resolveEvidence(evidencePath(firstBeforeLine), reportPath) : null;
+  const header = beforePath && existsSync(beforePath) ? readCmdHeader(beforePath) : null;
+  collect(
+    `cmd: is not the task's gate command — gate: ${gate.cmd} | cmd: ${cmd} | capture header: ${header ?? "none"} — ` +
+      "capture through capture-evidence.mjs and copy the cmd: it prints, or declare a - Narrowing: line (references/evidence.md § File-backed evidence)",
+  );
+}
+
+// #333: a red explained away needs its reproduction artifact (references/evidence.md § Reviewer
+// verdicts). Report-only: in a spec or a plan "pre-existing" is ordinary vocabulary. A sibling-caused
+// red is the Narrowing line's, which foreign-change-check.mjs judges, so that line is skipped.
+const FAILURE_WORD_RE = /(?<![\w-])(?:fail\w*|errors?|erroring|crash\w*|broken|red)(?![\w-])/i;
+const ATTRIBUTION_WORD_RE = /(?<![\w-])(?:pre-?existing|flak\w*|unrelated|environmental)(?![\w-])/i;
+const FLAKY_CITATION_RE = /\.devcycle\/evidence\/[\w.-]+-flaky\.txt/g;
+function checkFailureAttribution() {
+  const taskId = taskArg ?? (firstBeforeLine && basename(evidencePath(firstBeforeLine)).match(/^(.+)-before\.txt$/)?.[1]);
+  const artifact = `.devcycle/evidence/${taskId ?? "<task-id>"}-flaky.txt`;
+  const citationOn = (line) => [...(line ?? "").matchAll(FLAKY_CITATION_RE)].map((m) => m[0]).find((c) => !taskId || c === artifact);
+  const raw = text.split("\n");
+  proseLines(text).forEach((prose, i) => {
+    if (prose === null || NARROWING_START.test(raw[i])) return;
+    if (!FAILURE_WORD_RE.test(prose) || !ATTRIBUTION_WORD_RE.test(prose)) return;
+    // Inline code is blanked in prose, so the citation is searched on the raw lines.
+    const cited = [i - 1, i, i + 1].map((j) => citationOn(raw[j])).find(Boolean);
+    const where = `line ${i + 1}: "${raw[i].trim()}"`;
+    if (!cited) {
+      collect(
+        `a failure is attributed as pre-existing, flaky, unrelated or environmental with no reproduction artifact — ${where} — ` +
+          `cite ${artifact} on that line or the next, holding the failing run on clean HEAD and on the change at the same iteration count ` +
+          "(references/evidence.md § Reviewer verdicts)",
+      );
+      return;
+    }
+    const path = resolveEvidence(cited, reportPath);
+    if (!existsSync(path) || readFileSync(path, "utf8").trim() === "") collect(`${where} cites ${cited}, which is missing or empty`);
+  });
+}
+
+checkGateEquality();
+checkFailureAttribution();
+
 // Convention reports: when before/after captures are present, verify them against their
 // `# devcycle-cmd:` header exactly as test-class captures are — header identity, the
 // required-checks manifest against the ACTUAL capture command (#150), then header-vs-cmd:
@@ -409,6 +486,7 @@ if (isTestClass) {
   }
 }
 
+if (collected) process.exit(1);
 console.log(`evidence-completeness-check: ok — cmd: ${cmd}`);
 
 function resolveEvidence(p, reportFile) {

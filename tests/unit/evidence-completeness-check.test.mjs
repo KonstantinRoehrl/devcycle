@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
@@ -811,4 +811,136 @@ test("a report with no Evidence line at all reports the absent line, distinct fr
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- #283: dotnet's vstest summary; MTP's multi-line summary already matches ---
+
+const VSTEST_PASS = "Passed!  - Failed:     0, Passed:    98, Skipped:     0, Total:    98, Duration: 1 s - Tests.dll (net8.0)";
+const VSTEST_FAIL = "Failed!  - Failed:     2, Passed:    96, Skipped:     0, Total:    98, Duration: 1 s - Tests.dll (net8.0)";
+const MTP_SUMMARY = ["Test run summary: Passed! - bin/Debug/net9.0/Tests.dll (net9.0|x64)", "  total: 98", "  failed: 0",
+  "  succeeded: 98", "  skipped: 0", "  duration: 1s 204ms"].join("\n");
+const DOTNET_REPORT = "## Task report\n- Evidence: green-green | cmd: dotnet test\n- Before: before.txt (exit 0)\n- After: after.txt (exit 0)\n";
+
+for (const [name, after] of [["vstest pass", VSTEST_PASS], ["vstest fail", VSTEST_FAIL], ["MTP", MTP_SUMMARY]]) {
+  test(`a dotnet ${name} summary counts as a test-runner summary`, () => {
+    const { dir, file } = makeReportWithEvidence(DOTNET_REPORT, `${after}\n`);
+    try {
+      const res = run(file);
+      assert.equal(res.status, 0, res.stderr);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("dotnet build output with no test summary still fails", () => {
+  const { dir, file } = makeReportWithEvidence(DOTNET_REPORT, "Build succeeded.\n    0 Warning(s)\n    0 Error(s)\n");
+  try {
+    const res = run(file);
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /has no test-runner summary line/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- #282/#337: --task holds cmd: to the task's resolved gate ---
+
+// A checkout as the execution stage lays it out: ledger → plan → evidence → report, task 4. The
+// test context removes it once the test ends.
+function gatedCheckout(t, { cmd = "npm run gate", header = cmd, narrowing = null, extra = [], plan = true } = {}) {
+  const dir = makeTempDir("evidence-completeness-gate-");
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const write = (rel, content) => {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), content);
+  };
+  write(".devcycle/ledger.md", "Plan: `docs/plan.md`\n");
+  if (plan)
+    write("docs/plan.md", ["# P", "", "**Verification gate:** `npm run gate`", "",
+      "### Task 4: T", "**Files:**", "- Modify: a.mjs", "**Evidence:** red-green", "**Quality constraints:** none", "",
+      "## Dispatch Map", "", "- Wave 1: Task 4", ""].join("\n"));
+  write(".devcycle/evidence/4-before.txt", `# devcycle-cmd: ${header}\nnot ok 1 - adds\n`);
+  write(".devcycle/evidence/4-after.txt", `# devcycle-cmd: ${header}\n${NODE_SUMMARY}\n`);
+  write(".devcycle/reports/4.md", ["## Task report", `- Evidence: red-green | cmd: ${cmd}`,
+    "- Before: .devcycle/evidence/4-before.txt (exit 1)", "- After: .devcycle/evidence/4-after.txt (exit 0)",
+    ...(narrowing ? [`- Narrowing: ${narrowing}`] : []), ...extra, ""].join("\n"));
+  return { dir, write };
+}
+const runIn = (dir, args = ["--task", "4"]) =>
+  spawnSync(process.execPath, [SCRIPT, ".devcycle/reports/4.md", ...args], { cwd: dir, encoding: "utf8" });
+
+test("--task: a cmd: equal to the task's gate passes", (t) => {
+  const { dir } = gatedCheckout(t);
+  const res = runIn(dir);
+  assert.equal(res.status, 0, res.stderr);
+});
+
+test("--task: a cmd: differing from the gate fails naming the gate, the cmd: and the capture header", (t) => {
+  const { dir } = gatedCheckout(t, { cmd: "npm test" });
+  const res = runIn(dir);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /cmd: is not the task's gate command — gate: npm run gate \| cmd: npm test \| capture header: npm test — .*references\/evidence\.md § File-backed evidence/);
+});
+
+test("--task: a differing cmd: with a valid Narrowing line passes", (t) => {
+  const { dir } = gatedCheckout(t, { cmd: "npm test", narrowing: "npm test only — sibling task 3's uncommitted edit reddens the whole gate" });
+  assert.equal(runIn(dir).status, 0);
+});
+
+test("--task: no plan, or no --task, skips the gate comparison", (t) => {
+  assert.equal(runIn(gatedCheckout(t, { cmd: "npm test", plan: false }).dir).status, 0);
+  assert.equal(runIn(gatedCheckout(t, { cmd: "npm test" }).dir, []).status, 0);
+});
+
+test("--task: the subset red capture is exempt from the gate comparison", (t) => {
+  const { dir, write } = gatedCheckout(t, { extra: ["- Red: .devcycle/evidence/4-red.txt (exit 1)"] });
+  write(".devcycle/evidence/4-red.txt", "# devcycle-cmd: node --test tests/unit/a.test.mjs\nnot ok 1 - adds\n");
+  assert.equal(runIn(dir).status, 0);
+});
+
+// --- #333: a red explained away needs its reproduction artifact ---
+
+const ATTRIBUTION = "- Deviations: the parser test fails on clean HEAD too, a pre-existing flake";
+
+test("a failure attributed as pre-existing with no artifact fails, naming the task's flaky file", (t) => {
+  const res = runIn(gatedCheckout(t, { extra: [ATTRIBUTION] }).dir);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /attributed as pre-existing, flaky, unrelated or environmental with no reproduction artifact — line \d+: .*\.devcycle\/evidence\/4-flaky\.txt/);
+});
+
+test("an attribution citing a non-empty flaky file passes; citing a missing one fails", (t) => {
+  const cited = `${ATTRIBUTION} (.devcycle/evidence/4-flaky.txt)`;
+  const present = gatedCheckout(t, { extra: [cited] });
+  present.write(".devcycle/evidence/4-flaky.txt", "clean 20/20; change 20/20\n");
+  assert.equal(runIn(present.dir).status, 0);
+  const missing = runIn(gatedCheckout(t, { extra: [cited] }).dir);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /cites \.devcycle\/evidence\/4-flaky\.txt, which is missing or empty/);
+});
+
+test("an (assumption) marker does not clear an unbacked attribution", (t) => {
+  assert.equal(runIn(gatedCheckout(t, { extra: [`${ATTRIBUTION} (assumption)`] }).dir).status, 1);
+});
+
+test("the Narrowing line, red-green, unrelated whitespace and the Tail body are not attributions", (t) => {
+  const res = runIn(gatedCheckout(t, {
+    narrowing: "the whole gate — sibling task 3's unrelated edit makes it fail",
+    extra: ["- Deviations: reflowed unrelated whitespace; the red-green pair is in the evidence files",
+      "- Tail (after, last 2 lines):", "  not ok 3 - flaky retry failed", "  pre-existing failure"],
+  }).dir);
+  assert.equal(res.status, 0, res.stderr);
+});
+
+test("without --task the flaky file is named from the Before path's task id", (t) => {
+  const res = runIn(gatedCheckout(t, { extra: [ATTRIBUTION] }).dir, []);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /\.devcycle\/evidence\/4-flaky\.txt/);
+});
+
+test("a gate mismatch and an unbacked attribution are reported together, in one run", (t) => {
+  const res = runIn(gatedCheckout(t, { cmd: "npm test", extra: [ATTRIBUTION] }).dir);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /cmd: is not the task's gate command/);
+  assert.match(res.stderr, /with no reproduction artifact/);
 });

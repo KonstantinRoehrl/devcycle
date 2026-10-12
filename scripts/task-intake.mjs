@@ -31,11 +31,13 @@ const MISSING = "rejected (missing report file)";
 const BOUNCE = "rejected (intake bounce)";
 const RETRY_CAP = 2;
 
-// Both lints over the report, as one list of finding lines; evidence-completeness-check runs as
-// the CLI it is (it has no importable entry), from the checkout root its relative paths assume.
-function lintFindings(root, reportRel, text) {
+// Both lints over the report, as one list of finding lines; evidence-completeness-check runs against
+// the task's gate as the CLI it is (it has no importable entry), from the checkout root its relative
+// paths assume.
+function lintFindings(root, reportRel, text, { task, ledger }) {
   const findings = authoredClaimsLeg(text, { planPath: reportRel }).findings.map((f) => `authored-claims-check: ${f}`);
-  const ec = spawnSync(process.execPath, [EVIDENCE_COMPLETENESS, reportRel], { cwd: root, encoding: "utf8" });
+  const args = [EVIDENCE_COMPLETENESS, reportRel, "--task", task, "--ledger", ledger];
+  const ec = spawnSync(process.execPath, args, { cwd: root, encoding: "utf8" });
   if (ec.status !== 0) findings.push(...ec.stderr.split("\n").filter(Boolean));
   return findings;
 }
@@ -88,7 +90,7 @@ export function intake(argv, cwd = process.cwd()) {
       ? { ...base, action: "needs-user", reason: "retry cap: a third missing report file", appended }
       : { ...base, action: "missing-report", appended };
   }
-  const findings = lintFindings(root, reportRel, text);
+  const findings = lintFindings(root, reportRel, text, { task, ledger });
   if (findings.length) {
     const findingsRel = `.devcycle/findings/${task}-intake-${round}-${retry}.md`;
     mkdirSync(join(root, ".devcycle/findings"), { recursive: true });
