@@ -8,6 +8,9 @@ import {
   taskFileMap,
   parseDispatchMap,
   filesFieldValue,
+  gateCommand,
+  verificationGate,
+  verificationGateField,
 } from "../../scripts/task-files.mjs";
 
 test("normalizeFileToken strips ranges, backticks, and rejects non-paths", () => {
@@ -222,4 +225,45 @@ test("the trusted path drops a trailing period the caller typed, so the lesson s
   assert.equal(normalizeFileToken("docs/CHANGELOG.md."), "docs/CHANGELOG.md");
   assert.equal(normalizeFileToken("e.g."), null);
   assert.equal(normalizeFileToken("Node.js."), null);
+});
+
+const GATE = "node scripts/validate.mjs && node --test tests/unit/*.test.mjs";
+const GATED_PLAN = [
+  "# P Implementation Plan", "",
+  `**Verification gate:** \`${GATE}\``,
+  "## Global Constraints", "- none", "",
+  "### Task 1: Code", "**Files:**", "- Modify: src/a.mjs", "**Evidence:** red-green", "**Quality constraints:** none", "",
+  "### Task 2: Refactor", "**Files:**", "- Modify: src/b.mjs", "**Evidence:** green-green (behavior-preserving)", "**Quality constraints:** none", "",
+  "### Task 3: Docs", "**Files:**", "- Modify: README.md", "**Evidence:** convention (`node scripts/validate.mjs`)", "**Quality constraints:** none", "",
+  "### Task 4: Bare docs", "**Files:**", "- Modify: docs/a.md", "**Evidence:** convention (node scripts/validate.mjs)", "**Quality constraints:** none", "",
+  "### Task 5: Procedure", "**Files:**", "- Modify: docs/b.md", "**Evidence:** convention (`node a.mjs` then `node b.mjs`)", "**Quality constraints:** none", "",
+  "## Dispatch Map", "", "- Wave 1: Task 1, Task 2, Task 3, Task 4, Task 5", "",
+].join("\n");
+const ungated = (text) => text.replace(/^\*\*Verification gate:\*\*.*\n/m, "");
+
+test("gateCommand: a test-class task's gate is the plan header's Verification gate", () => {
+  assert.deepEqual(gateCommand(GATED_PLAN, 1), { cmd: GATE, source: "plan-gate" });
+  assert.deepEqual(gateCommand(GATED_PLAN, 2), { cmd: GATE, source: "plan-gate" });
+});
+
+test("gateCommand: a convention task's gate is its parenthetical, one code span or bare text", () => {
+  assert.deepEqual(gateCommand(GATED_PLAN, 3), { cmd: "node scripts/validate.mjs", source: "convention" });
+  assert.deepEqual(gateCommand(GATED_PLAN, 4), { cmd: "node scripts/validate.mjs", source: "convention" });
+  assert.deepEqual(gateCommand(ungated(GATED_PLAN), 3), { cmd: "node scripts/validate.mjs", source: "convention" });
+});
+
+test("gateCommand: null for a mixed parenthetical, an unknown task, or a test-class task in an ungated plan", () => {
+  assert.equal(gateCommand(GATED_PLAN, 5), null);
+  assert.equal(gateCommand(GATED_PLAN, 9), null);
+  assert.equal(gateCommand(ungated(GATED_PLAN), 1), null);
+});
+
+test("the Verification gate is read from the header line only, never from a task block or a following section", () => {
+  assert.equal(verificationGateField(GATED_PLAN), `\`${GATE}\``);
+  assert.equal(verificationGate(GATED_PLAN), GATE);
+  const inTask = ungated(GATED_PLAN).replace("**Quality constraints:** none\n", "**Quality constraints:** none\n**Verification gate:** `npm test`\n");
+  assert.equal(verificationGateField(inTask), null);
+  const twoSpans = GATED_PLAN.replace(`\`${GATE}\``, "`npm test` and `npm run lint`");
+  assert.equal(verificationGateField(twoSpans), "`npm test` and `npm run lint`");
+  assert.equal(verificationGate(twoSpans), null);
 });

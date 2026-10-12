@@ -88,6 +88,46 @@ export function taskBlocks(planText) {
   return blocks;
 }
 
+// The plan header (playbooks/planning-waves.md § plan header) is everything before the first task.
+// Its `**Verification gate:**` line is read line-scoped: fieldValue runs on to the next `**` field,
+// so it would swallow the section after the header into the value.
+const GATE_LINE_RE = /^\*\*Verification gate:\*\*[ \t]*(.*?)[ \t]*$/m;
+const SINGLE_SPAN_RE = /^`([^`]+)`$/;
+const planHeader = (planText) => {
+  const first = planText.search(/^### Task \d+:/m);
+  return first === -1 ? planText : planText.slice(0, first);
+};
+
+export function verificationGateField(planText) {
+  return planHeader(planText).match(GATE_LINE_RE)?.[1] ?? null;
+}
+
+export function verificationGate(planText) {
+  return verificationGateField(planText)?.match(SINGLE_SPAN_RE)?.[1].trim() || null;
+}
+
+// A convention parenthetical is one command when it is one code span, or text with no backtick at
+// all; one mixing spans and prose describes a procedure, which no capture can run as one string.
+function conventionCommand(evidence) {
+  const inner = evidence.split("\n")[0].match(/^convention\s*\((.*)\)\s*$/)?.[1].trim() ?? "";
+  const cmd = inner.match(SINGLE_SPAN_RE)?.[1] ?? (inner.includes("`") ? "" : inner);
+  return cmd.trim() || null;
+}
+
+// The one resolver for a task's gate command — the capture helper, the evidence check, the brief
+// writer and wave setup all read it here: a convention task's own command, any other task's header gate.
+export function gateCommand(planText, taskNum) {
+  const block = taskBlocks(planText).find((b) => b.num === taskNum);
+  if (!block) return null;
+  const evidence = fieldValue(block.text, "Evidence") ?? "";
+  if (/^convention\b/.test(evidence)) {
+    const cmd = conventionCommand(evidence);
+    return cmd ? { cmd, source: "convention" } : null;
+  }
+  const cmd = verificationGate(planText);
+  return cmd ? { cmd, source: "plan-gate" } : null;
+}
+
 export function taskFileMap(planText) {
   const map = new Map();
   for (const { num, text } of taskBlocks(planText)) {
