@@ -21,6 +21,7 @@ function run(planText) {
 }
 
 const COMPLETE = `# Plan
+**Verification gate:** \`npm test\`
 ### Task 1: Thing
 **Files:**
 - Create: \`a.mjs\`
@@ -214,4 +215,25 @@ test("names the missing file's own reason and keys the suggested override on it,
     /Task 1: \*\*Files:\*\* edits playbooks\/planning-waves\.md but omits docs\/decisions\/README\.md — add it \(every fixture change needs a budget: line there\) or record a "- Budget-fixture override: docs\/decisions\/README\.md — <reason>"/,
   );
   assert.doesNotMatch(r.out, /size baseline|override: playbooks\//);
+});
+
+test("fails a plan with no **Verification gate:** header line", () => {
+  const r = run(COMPLETE.replace("**Verification gate:** `npm test`\n", ""));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /missing \*\*Verification gate:\*\* line in the plan header/);
+});
+
+test("fails a **Verification gate:** value that is not exactly one code span", () => {
+  const bare = run(COMPLETE.replace("`npm test`", "npm test"));
+  assert.equal(bare.code, 1);
+  assert.match(bare.out, /\*\*Verification gate:\*\* must be exactly one backtick-quoted command, got: npm test/);
+  const two = run(COMPLETE.replace("`npm test`", "`npm test` && `npm run lint`"));
+  assert.equal(two.code, 1);
+  assert.match(two.out, /must be exactly one backtick-quoted command/);
+});
+
+test("a **Verification gate:** line inside a task block is not the header's", () => {
+  const r = run(COMPLETE.replace("**Verification gate:** `npm test`\n", "").replace("**Lessons:**\n", "**Lessons:**\n**Verification gate:** `npm test`\n"));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /missing \*\*Verification gate:\*\* line/);
 });

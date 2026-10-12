@@ -5,7 +5,7 @@
 // edit trips and the decisions log that holds them. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
 // implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
-import { taskBlocks, parseDispatchMap, filesFieldValue, fieldValue } from "./task-files.mjs";
+import { taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField } from "./task-files.mjs";
 import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
 import { isMain } from "./is-main.mjs";
 
@@ -18,12 +18,25 @@ function readField(block, field) {
   return field === "Files" ? filesFieldValue(block) : fieldValue(block, field);
 }
 
+// The header's whole-gate line (playbooks/planning-waves.md § plan header): gateCommand resolves
+// every test-class task's gate from it, so a plan without it leaves the capture helper, the evidence
+// check and the green gate no command to agree on.
+function gateLineErrors(planText) {
+  const raw = verificationGateField(planText);
+  if (raw === null)
+    return ["missing **Verification gate:** line in the plan header — add the repo's whole verification gate as one backtick-quoted command before the first task"];
+  if (verificationGate(planText) === null)
+    return [`**Verification gate:** must be exactly one backtick-quoted command, got: ${raw || "(empty)"}`];
+  return [];
+}
+
 export function briefCompletenessLeg(planText, { planPath }, { includeBudgetFixtures = true } = {}) {
   const errors = [];
   const blocks = taskBlocks(planText);
   if (blocks.length === 0) {
     return { findings: [`no "### Task N" blocks found in ${planPath}`], ok: "", notes: [] };
   }
+  errors.push(...gateLineErrors(planText));
 
   for (const { num, text: block } of blocks) {
     for (const field of REQUIRED_FIELDS) {

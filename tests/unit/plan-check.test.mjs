@@ -17,7 +17,7 @@ const task = (n, files) => [
   "**Quality constraints:** none", "**Lessons:**", "", "- [ ] step", "",
 ].join("\n");
 const plan = (body, map = "## Dispatch Map\n\n- Wave 1: Task 1, Task 2 (file-disjoint, no dependencies)\n") =>
-  `# P Implementation Plan\n\n${body}\n${map}`;
+  `# P Implementation Plan\n\n**Verification gate:** \`npm test\`\n\n${body}\n${map}`;
 
 function run(planText, { repo = realpathSync(makeTempDir("plan-check-repo")), args = [], env = {} } = {}) {
   const p = join(repo, "plan.md");
@@ -141,6 +141,13 @@ for (const [leg, trip] of Object.entries(TRIPS)) {
     assert.deepEqual([...reportingLegs(r.stderr)], [leg], r.stderr);
   });
 }
+
+test("a plan with no **Verification gate:** line trips only the briefCompleteness leg", () => {
+  const r = run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])).replace("**Verification gate:** `npm test`\n\n", ""));
+  assert.equal(r.status, 1, r.stdout);
+  assert.deepEqual([...reportingLegs(r.stderr)], ["briefCompleteness"], r.stderr);
+  assert.match(r.stderr, /^plan-check: briefCompleteness: missing \*\*Verification gate:\*\*/m);
+});
 
 test("a leg that throws becomes that leg's finding: the other legs still report and gate-ran records fail", () => {
   const repo = makeRepo();
