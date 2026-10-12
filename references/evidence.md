@@ -161,8 +161,8 @@ report. Reject when:
   run against **clean HEAD** and against **the change** at the **same iteration count** with their
   actual pass/fail counts (the "clean 20/20; change 6/20" shape), and the #167 foreign-change check
   ruled out concurrent-sibling pollution. The reviewer reads that file rather than trusting the
-  claim. `evidence-completeness-check.mjs` bounces a report line explaining a failure away
-  that cites no non-empty `<task-id>-flaky.txt` on it or an adjacent line.
+  claim. `evidence-completeness-check.mjs` bounces a report line that pairs a failure with them
+  and cites no non-empty `<task-id>-flaky.txt` on it or an adjacent line.
 - a `- Narrowing:` declaration's reason does not hold up: accept a legitimate concurrent-wave
   narrowing, reject a reason that is
   lazy partial coverage dressed up as narrowing.

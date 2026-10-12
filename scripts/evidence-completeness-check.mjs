@@ -445,64 +445,25 @@ function checkGateEquality() {
 // #333: a red explained away needs its reproduction artifact (references/evidence.md § Reviewer
 // verdicts). Report-only: in a spec or a plan "pre-existing" is ordinary vocabulary. A sibling-caused
 // red is the Narrowing line's, which foreign-change-check.mjs judges, so that line is skipped.
-// The trigger is a failure word and an attribution word on one prose line, or a flake word alone. The
-// line is let through only when every such attribution word is inert, judged within its phrase (the
-// line cut at punctuation):
-//   - negated: a negator just before it ("no pre-existing failures", "nothing flaky"), "none of"
-//     ahead of it ("none of the tests are flaky"), or "none" right after it ("flakes: none");
-//   - governed by a fix verb that is not itself negated ("this task fixes the pre-existing failure",
-//     but not "did not fix" or "was not fixed");
-//   - an adjective on a noun that names no failure and no cause, with no causal link ahead of it
-//     ("unrelated legacy path", "flaky tests"; not "unrelated reasons" or "because of unrelated tests").
-// Anything else explains a failure away: a predicate ("are pre-existing", "unrelated to this task",
-// "flaked once") or an attribution of a failure or a cause ("environmental failure", "a known
-// pre-existing issue"). Without a failure word on the line only a flake word is judged.
+// Deliberately conservative: a failure word and an attribution word on one prose line, or a flake
+// word alone, is an explained-away red unless the attribution word is negated by a negator directly
+// before it ("no pre-existing failures", "nothing flaky") or by a phrase-final "none" after it
+// ("flakes: none"). Every cleverer exemption let a failure through, so a line that only mentions a
+// failure beside an attribution word bounces too and its writer rephrases.
 const bounded = (alternatives) => `(?<![\\w-])(?:${alternatives})(?![\\w-])`;
-const FAILURE = "fail\\w*|errors?|erroring|crash\\w*|broken|red";
-const FAILURE_RE = new RegExp(bounded(FAILURE), "i");
+const FAILURE_RE = new RegExp(bounded("fail\\w*|errors?|erroring|crash\\w*|broken|red"), "i");
 const ATTRIBUTION_RE = new RegExp(bounded("pre-?existing|flak\\w*|unrelated|environmental"), "gi");
 const FLAKE_RE = /^flak/i;
-const PHRASE_BOUNDARY_RE = /[,;:!?()[\]—–]|\.(?=\s|$)|\s-\s/g;
-const NEGATED_BEFORE_RE = /(?:^|\s)(?:no|zero|nothing|none|not|without|never|\w+n['’]t)\s+(?:[\w-]+\s+)?$/i;
-const NONE_OF_RE = new RegExp(bounded("none\\s+of"), "i");
+const NEGATOR_BEFORE_RE = /(?<![\w-])(?:no|zero|nothing|none|not|without|never)\s+$/i;
 const NONE_AFTER_RE = /^(?:\s+[\w-]+)?\s*(?::\s*|\s+)none(?![\w-])/i;
-const FIX_VERB_RE = new RegExp(bounded("fix(?:es|ed|ing)?|resolv(?:e|es|ed|ing)|repair(?:s|ed|ing)?"), "gi");
-// Only these forms modify a following noun; "flaked", "flakes" and "a flake" always predicate.
-const ADJECTIVE_RE = /^(?:pre-?existing|flaky|unrelated|environmental)$/i;
-// A word after the adjective that starts a predicate's complement or a new clause, not a noun it modifies.
-const FUNCTION_WORD_RE =
-  /^(?:to|in|on|at|of|for|from|by|with|and|or|but|nor|so|as|is|are|was|were|be|been|since|because|due|than|that|which|when|while|if|once|too|also|again|here|there|now|yet|both|either)$/i;
-const FAILURE_OR_CAUSE_RE = new RegExp(bounded(`${FAILURE}|reasons?|causes?|issues?|problems?|bugs?|flak\\w*`), "i");
-const CAUSAL_RE = new RegExp(bounded("because|due|caus\\w*|owing|blam\\w*|attribut\\w*"), "i");
-
-// The text of the phrase around [start, end), split at the attribution word.
-function phraseAround(prose, start, end) {
-  let from = 0;
-  let to = prose.length;
-  for (const b of prose.matchAll(PHRASE_BOUNDARY_RE)) {
-    if (b.index + b[0].length <= start) from = b.index + b[0].length;
-    else if (b.index >= end) {
-      to = b.index;
-      break;
-    }
-  }
-  return { before: prose.slice(from, start), after: prose.slice(end, to) };
-}
-const isNegated = ({ before }, rest) => NEGATED_BEFORE_RE.test(before) || NONE_OF_RE.test(before) || NONE_AFTER_RE.test(rest);
-const fixGoverns = (phrase) => [...phrase.matchAll(FIX_VERB_RE)].some((v) => !NEGATED_BEFORE_RE.test(phrase.slice(0, v.index)));
-function modifiesInertNoun(word, { before, after }) {
-  const next = after.match(/^\s+([A-Za-z][\w-]*)/)?.[1];
-  if (!ADJECTIVE_RE.test(word) || !next || FUNCTION_WORD_RE.test(next)) return false;
-  return !FAILURE_OR_CAUSE_RE.test(after) && !CAUSAL_RE.test(before);
-}
-function explainsAway(prose, m) {
-  const end = m.index + m[0].length;
-  const phrase = phraseAround(prose, m.index, end);
-  return !isNegated(phrase, prose.slice(end)) && !fixGoverns(phrase.before + m[0] + phrase.after) && !modifiesInertNoun(m[0], phrase);
-}
 function attributesFailure(prose) {
-  const judged = [...prose.matchAll(ATTRIBUTION_RE)].filter((m) => FAILURE_RE.test(prose) || FLAKE_RE.test(m[0]));
-  return judged.some((m) => explainsAway(prose, m));
+  const hasFailure = FAILURE_RE.test(prose);
+  return [...prose.matchAll(ATTRIBUTION_RE)].some(
+    (m) =>
+      (hasFailure || FLAKE_RE.test(m[0])) &&
+      !NEGATOR_BEFORE_RE.test(prose.slice(0, m.index)) &&
+      !NONE_AFTER_RE.test(prose.slice(m.index + m[0].length)),
+  );
 }
 const FLAKY_CITATION_RE = /\.devcycle\/evidence\/[\w.-]+-flaky\.txt/g;
 function checkFailureAttribution() {

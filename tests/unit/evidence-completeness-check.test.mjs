@@ -965,17 +965,18 @@ test("the attribution finding asks for the citation on that line or an adjacent 
 });
 
 // Each line sits in a report that is otherwise valid, so its exit status is the attribution verdict alone.
+// The rule is deliberately conservative: a failure word and an attribution word on one line, or a
+// flake word alone, bounce unless a negator sits directly before the attribution word or "none"
+// follows it. Lines that merely mention a failure beside an attribution word ("this task fixes the
+// pre-existing failure", "Error handling for the unrelated legacy path") bounce too; that cost is
+// accepted and the report writer rephrases, because every smarter exemption let a failure through.
 const ATTRIBUTION_CASES = {
   pass: [
     "No pre-existing failures; the whole gate was green before and after.",
     "Nothing flaky observed across three runs, zero failures.",
     "The before run is red as expected; no unrelated files were touched.",
-    "Error handling for the unrelated legacy path is unchanged.",
-    "this task fixes the pre-existing failure in parseDate that the spec names",
     "Flakes: none.",
     "flaky: none observed",
-    "None of the tests are flaky.",
-    "Updated the docs section on flaky tests.",
   ],
   fail: [
     "The 2 failures are pre-existing.",
@@ -1000,6 +1001,18 @@ const ATTRIBUTION_CASES = {
     "no new failures, the one remaining failure is pre-existing",
     "the 3 errors are not caused by this task; they are pre-existing",
     "foo.test flaked once and passed on rerun",
+    "The failure is a pre-existing regression on main.",
+    "The red comes from an unrelated sibling change.",
+    "the failure is a flaky timeout",
+    "the failure is in unrelated code",
+    "failure: flaky test",
+    "Fixing the pre-existing failure in parseDate is out of scope.",
+    "None of my changes touch the pre-existing failure in parseDate.",
+    "nobody fixed the pre-existing failure; it remains",
+    "this task fixes the pre-existing failure in parseDate that the spec names",
+    "Error handling for the unrelated legacy path is unchanged.",
+    "None of the tests are flaky.",
+    "Updated the docs section on flaky tests.",
   ],
 };
 
