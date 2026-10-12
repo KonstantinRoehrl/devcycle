@@ -31,23 +31,30 @@ const blank = (line, re) => line.replace(re, (m) => " ".repeat(m.length));
 // The report template's Tail field line, `- Tail (after, last <N> lines):` (references/evidence.md
 // § File-backed evidence): the lines under it are captured tool output, not authored prose.
 const TAIL_START_RE = /^\s*-\s*Tail\s*\([^)]*\):\s*$/i;
+// Any report-template field line, `- <Label>:` or `- <Label> (…):` (references/evidence.md
+// § File-backed evidence) — `- Deviations:`, `- On-device items:`, `- Tail (after, …):`.
+const REPORT_FIELD_RE = /^\s*-\s*[A-Z][\w -]*(?:\([^)]*\))?:/;
 const indentOf = (line) => line.match(/^\s*/)[0].length;
 
 // One owner for "which lines of an artifact are prose", shared with evidence-completeness-check.mjs.
 // A Tail body is every line after a Tail field line that is blank or indented deeper than it, up to
 // the first non-blank line indented no deeper, so an indented Tail field ends at its next sibling.
 // A fence opened inside a Tail body belongs to it until it closes, however either marker or the
-// lines between are indented, so a mis-indented fence can't leave the rest of the artifact as code.
+// lines between are indented, so a mis-indented fence can't leave the rest of the artifact as code —
+// but a report field line at the Tail's depth ends the Tail and its fence regardless, so one unpaired
+// marker in captured output can't silence every field after it.
 export function proseLines(text) {
   let inFence = false;
   let tailIndent = null;
   return text.split("\n").map((line) => {
     if (tailIndent !== null) {
-      if (inFence || line.trim() === "" || indentOf(line) > tailIndent) {
+      const atTailDepth = line.trim() !== "" && indentOf(line) <= tailIndent;
+      if (!atTailDepth || (inFence && !REPORT_FIELD_RE.test(line))) {
         if (FENCE_RE.test(line)) inFence = !inFence;
         return null;
       }
       tailIndent = null;
+      inFence = false;
     }
     if (FENCE_RE.test(line)) {
       inFence = !inFence;

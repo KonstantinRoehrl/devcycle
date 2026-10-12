@@ -207,3 +207,24 @@ test("a well-formed fenced Tail body yields no findings", () => {
   const { code, out } = run(fencedTailReport(["  ```", "  ran 98 tests", "  ```"]).replace("touched 12 files", "none"));
   assert.equal(code, 0, out);
 });
+
+// The next report field line ends the Tail whatever its fence state, so one unpaired fence marker
+// in the Tail can't silence every field after it.
+const unpairedFenceTailReport = (fenceLines) =>
+  fencedTailReport(fenceLines) + "- Claims: 2 failures are pre-existing, see 4 tests\n";
+
+test("a Tail fence that never closes still leaves the report fields after it linted", () => {
+  const { code, out } = run(unpairedFenceTailReport(["  ```", "  ran 98 tests"]));
+  assert.equal(code, 1);
+  assert.match(out, /:4: unverified count claim "12 files"/);
+  assert.match(out, /:5: unverified count claim "4 tests"/);
+  assert.doesNotMatch(out, /98 tests/);
+});
+
+test("an unpaired fence marker inside Tail output still leaves the report fields after it linted", () => {
+  const { code, out } = run(unpairedFenceTailReport(["  +++ b/README.md", "  ```bash", "  ran 98 tests"]));
+  assert.equal(code, 1);
+  assert.match(out, /:5: unverified count claim "12 files"/);
+  assert.match(out, /:6: unverified count claim "4 tests"/);
+  assert.doesNotMatch(out, /98 tests/);
+});
