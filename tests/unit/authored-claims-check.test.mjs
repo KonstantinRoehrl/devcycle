@@ -179,3 +179,31 @@ test("proseLines blanks guarded spans and nulls fences, fenced lines and the Tai
   const tailHeader = "- Tail (after, last 1 lines".replace(/./g, " ") + "):";
   assert.deepEqual(proseLines(text), ["a " + " ".repeat(3) + " b", null, null, null, tailHeader, null, "end"]);
 });
+
+// A fence opened inside a Tail body belongs to the Tail until it closes, wherever its markers are
+// indented — otherwise a stray marker leaves every later line read as code and silences the lint.
+const fencedTailReport = (fenceLines) => [
+  "- Tail (after, last 2 lines):",
+  ...fenceLines,
+  "- Deviations: touched 12 files",
+  "",
+].join("\n");
+
+test("a Tail fence closed flush-left still leaves the prose after it linted", () => {
+  const { code, out } = run(fencedTailReport(["  ```", "  ran 98 tests", "```"]));
+  assert.equal(code, 1);
+  assert.match(out, /:5: unverified count claim "12 files"/);
+  assert.doesNotMatch(out, /98 tests/);
+});
+
+test("flush-left output inside an indented Tail fence is not linted, and the prose after it is", () => {
+  const { code, out } = run(fencedTailReport(["  ```", "ran 98 tests", "  ```"]));
+  assert.equal(code, 1);
+  assert.match(out, /:5: unverified count claim "12 files"/);
+  assert.doesNotMatch(out, /98 tests/);
+});
+
+test("a well-formed fenced Tail body yields no findings", () => {
+  const { code, out } = run(fencedTailReport(["  ```", "  ran 98 tests", "  ```"]).replace("touched 12 files", "none"));
+  assert.equal(code, 0, out);
+});

@@ -36,12 +36,17 @@ const indentOf = (line) => line.match(/^\s*/)[0].length;
 // One owner for "which lines of an artifact are prose", shared with evidence-completeness-check.mjs.
 // A Tail body is every line after a Tail field line that is blank or indented deeper than it, up to
 // the first non-blank line indented no deeper, so an indented Tail field ends at its next sibling.
+// A fence opened inside a Tail body belongs to it until it closes, however either marker or the
+// lines between are indented, so a mis-indented fence can't leave the rest of the artifact as code.
 export function proseLines(text) {
   let inFence = false;
   let tailIndent = null;
   return text.split("\n").map((line) => {
     if (tailIndent !== null) {
-      if (line.trim() === "" || indentOf(line) > tailIndent) return null;
+      if (inFence || line.trim() === "" || indentOf(line) > tailIndent) {
+        if (FENCE_RE.test(line)) inFence = !inFence;
+        return null;
+      }
       tailIndent = null;
     }
     if (FENCE_RE.test(line)) {
