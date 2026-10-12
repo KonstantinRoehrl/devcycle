@@ -447,15 +447,16 @@ function checkGateEquality() {
 // red is the Narrowing line's, which foreign-change-check.mjs judges, so that line is skipped.
 // Deliberately conservative: a failure word and an attribution word on one prose line, or a flake
 // word alone, is an explained-away red unless the attribution word is negated by a negator directly
-// before it ("no pre-existing failures", "nothing flaky") or by a phrase-final "none" after it
-// ("flakes: none"). Every cleverer exemption let a failure through, so a line that only mentions a
-// failure beside an attribution word bounces too and its writer rephrases.
+// before it ("no pre-existing failures", "nothing flaky") or by a colon-form "none" that ends the
+// line after it ("flakes: none", "flaky: none observed"). Every cleverer exemption let a failure
+// through, so a line that only mentions a failure beside an attribution word bounces too and its
+// writer rephrases.
 const bounded = (alternatives) => `(?<![\\w-])(?:${alternatives})(?![\\w-])`;
 const FAILURE_RE = new RegExp(bounded("fail\\w*|errors?|erroring|crash\\w*|broken|red"), "i");
 const ATTRIBUTION_RE = new RegExp(bounded("pre-?existing|flak\\w*|unrelated|environmental"), "gi");
 const FLAKE_RE = /^flak/i;
 const NEGATOR_BEFORE_RE = /(?<![\w-])(?:no|zero|nothing|none|not|without|never)\s+$/i;
-const NONE_AFTER_RE = /^(?:\s+[\w-]+)?\s*(?::\s*|\s+)none(?![\w-])/i;
+const NONE_AFTER_RE = /^(?:\s+[\w-]+)?\s*:\s*none(?:\s+\w+)?[.;,)]*\s*$/i;
 function attributesFailure(prose) {
   const hasFailure = FAILURE_RE.test(prose);
   return [...prose.matchAll(ATTRIBUTION_RE)].some(

@@ -966,10 +966,11 @@ test("the attribution finding asks for the citation on that line or an adjacent 
 
 // Each line sits in a report that is otherwise valid, so its exit status is the attribution verdict alone.
 // The rule is deliberately conservative: a failure word and an attribution word on one line, or a
-// flake word alone, bounce unless a negator sits directly before the attribution word or "none"
-// follows it. Lines that merely mention a failure beside an attribution word ("this task fixes the
-// pre-existing failure", "Error handling for the unrelated legacy path") bounce too; that cost is
-// accepted and the report writer rephrases, because every smarter exemption let a failure through.
+// flake word alone, bounce unless a negator sits directly before the attribution word or a
+// colon-form "none" ends the line after it. Lines that merely mention a failure beside an
+// attribution word ("this task fixes the pre-existing failure", "Error handling for the unrelated
+// legacy path") bounce too; that cost is accepted and the report writer rephrases, because every
+// smarter exemption let a failure through.
 const ATTRIBUTION_CASES = {
   pass: [
     "No pre-existing failures; the whole gate was green before and after.",
@@ -977,6 +978,8 @@ const ATTRIBUTION_CASES = {
     "The before run is red as expected; no unrelated files were touched.",
     "Flakes: none.",
     "flaky: none observed",
+    "Flakes: none observed.",
+    "- flaky: none",
   ],
   fail: [
     "The 2 failures are pre-existing.",
@@ -1013,6 +1016,12 @@ const ATTRIBUTION_CASES = {
     "Error handling for the unrelated legacy path is unchanged.",
     "None of the tests are flaky.",
     "Updated the docs section on flaky tests.",
+    "The failure is pre-existing and none of my changes touch it.",
+    "the failing test is flaky since none of the reruns reproduce it",
+    "The failure is pre-existing: none of my changes touch parseDate.",
+    "the failure is environmental because none of the reruns reproduce it",
+    "the failure is pre-existing so none of ours",
+    "Flaky tests: none found, 3 reruns",
   ],
 };
 
