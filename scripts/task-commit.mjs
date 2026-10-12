@@ -4,14 +4,14 @@
 // commit). The gate is this script's own run of the task's test command, never a report's word.
 // Each commit carries a `Devcycle-Task: <run>/<task>` trailer, so a re-run after a crash finds it
 // and appends only the ledger and run-record lines still missing instead of committing twice.
-import { mkdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { requireValue } from "./cli-flags.mjs";
 import { taskFileMap } from "./task-files.mjs";
 import { field } from "./md-field.mjs";
-import { atomicWrite } from "./atomic-write.mjs";
+import { runShell, writeCapture } from "./evidence-capture.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { gitToplevel, recordPath, validateCulprit } from "./run-record.mjs";
 import { isMain } from "./is-main.mjs";
@@ -110,14 +110,6 @@ function findTaskCommit(cwd, range, value, files) {
   return null;
 }
 
-// The test command is the plan's own text, so it runs through the shell exactly as typed; its output
-// goes to the gate evidence file, never to this script's stdout.
-function runShell(cwd, cmd) {
-  const r = spawnSync("sh", ["-c", cmd], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024 });
-  if (r.error) throw new Error(`cannot run "${cmd}": ${r.error.message}`);
-  return { cmd, status: r.status ?? 1, output: `${r.stdout ?? ""}${r.stderr ?? ""}` };
-}
-
 // executing-waves.md step 6: a whole-suite red is the task's own unless foreign-change-check reports a
 // sibling's edit and the task's file-scoped subset is green — then it is deferred, never attributed.
 function greenGate(cwd, { testCmd, subsetCmd, files }) {
@@ -130,14 +122,6 @@ function greenGate(cwd, { testCmd, subsetCmd, files }) {
   return subset.status === 0
     ? { gate: "deferred", runs: [whole, subset] }
     : { gate: "fail", status: subset.status, runs: [whole, subset] };
-}
-
-function writeGateEvidence(root, task, runs) {
-  const rel = `.devcycle/evidence/${task}-gate.txt`;
-  const abs = join(root, rel);
-  mkdirSync(dirname(abs), { recursive: true });
-  atomicWrite(abs, runs.map((r) => `# devcycle-cmd: ${r.cmd}\n${r.output}# exit ${r.status}\n`).join("\n"));
-  return rel;
 }
 
 // The task's changed Files the commit names, and those `git add` must take: all but a path already
@@ -268,7 +252,7 @@ export function taskCommit(argv, cwd = process.cwd()) {
   const before = branchMismatch();
   if (before) return before;
   const gate = greenGate(root, { testCmd: args.testCmd, subsetCmd: args.subsetCmd, files: [...files] });
-  const evidenceRef = writeGateEvidence(root, args.task, gate.runs);
+  const evidenceRef = writeCapture(root, `.devcycle/evidence/${args.task}-gate.txt`, gate.runs);
   if (gate.gate !== "pass") {
     const round = latestKeyed(ctx.ledgerPath, args.task, "review-round")?.round ?? 0;
     // A red gate rejects the round its reviewer accepted, so it counts toward the review loop's cap;
