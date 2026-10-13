@@ -174,12 +174,13 @@ and takes the generic rows.
 | `report-received outcome=blocked` | the implementer reported `status: blocked`: a user decision is pending (drive mode: stop `needs-user`) |
 | `review-round` (no verdict after it) | the reviewer's run may have died: re-dispatch it for that round |
 | `review-verdict outcome=accepted` | run the green gate, commit |
-| `review-verdict outcome=rejected` or `rejected (green gate: …)` | re-dispatch the implementer with the findings or gate evidence — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet (findings, task body, applied-edits disclosure), never a sweep re-run; the next review is the next round |
+| `review-verdict outcome=rejected` or `rejected (green gate: …)` | re-dispatch the implementer with the findings or gate evidence — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet, never a sweep re-run; the next review is the next round |
 | `review-verdict outcome=rejected (missing findings file)` | re-dispatch the **reviewer** for that round, not the implementer |
 | `review-verdict outcome=deferred (concurrent sibling edits)` | re-run the green gate once the wave quiesces (`playbooks/executing-waves.md` step 6), not a re-dispatch |
 | `committed` | task done — move to the next task |
+| `user-decision` | carry out the decision its `outcome=` records (`next: "follow-decision"`) |
 | `dispatched outcome=sweep …` | no brief to re-dispatch: re-run the sweep bullets from the clean-targets check |
-| any other sweep-token outcome (`applied-none`, `dirty-targets`, `sweep hard stop: …`) | a decision was pending when the run died: re-present the fallback, never an automatic dispatch. Reasons come from the saved report, or for `dirty-targets` from the files the event names (no sweep ran, so no report exists); a hard stop also carries its applied-files disclosure |
+| any other sweep-token outcome (`applied-none`, `dirty-targets`, `sweep hard stop: …`) | a decision was pending when the run died: re-present the fallback, never an automatic dispatch. Reasons come from the saved report, or for `dirty-targets` from the files the event names; a hard stop also carries its applied-files disclosure |
 
 **Retry caps.** An intake bounce, `rejected (missing report file)` and `rejected (missing findings
 file)` each allow two retries per task: the third such line for the task is a pending user decision

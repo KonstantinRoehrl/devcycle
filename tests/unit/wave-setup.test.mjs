@@ -52,7 +52,7 @@ const committed = (task) => entry(task, "committed", "accepted", "abc1234");
 const keyed = (task, event, outcome, round, retry, ref = "none") => `${entry(task, event, outcome, ref)} key=${task}/${event}/${round}/${retry}`;
 const positionOf = ({ task, position, next }) => ({ task, position, next });
 
-function cycle({ ledger = null, state = [], branch = "feat/x", root = null, planHeader = "docs/plan.md", plan = PLAN } = {}) {
+function cycle({ ledger = null, state = [], branch = "feat/x", root = null, planHeader = "docs/plan.md", runHeader = null, plan = PLAN } = {}) {
   const repo = realpathSync(makeRepo());
   sh("git", ["checkout", "-qb", "feat/x"], { cwd: repo });
   writeInto(repo, "docs/plan.md", plan);
@@ -62,7 +62,7 @@ function cycle({ ledger = null, state = [], branch = "feat/x", root = null, plan
   ].join("\n") + "\n");
   const ledgerPath = join(repo, ".devcycle", "ledger.md");
   if (ledger)
-    writeFileSync(ledgerPath, [`Plan: \`${planHeader}\``, "Branch: `feat/x` (cut from `main` at `0000000`)",
+    writeFileSync(ledgerPath, [`Plan: \`${planHeader}\``, ...(runHeader ? [`Run: \`${runHeader}\``] : []), "Branch: `feat/x` (cut from `main` at `0000000`)",
       "Profile: `standard` (evidence tail 40 lines)", "", ...ledger, ""].join("\n"));
   return { repo, statePath, ledgerPath };
 }
@@ -271,6 +271,29 @@ test("a ledger whose Plan: header names another plan is a previous cycle's: none
   assert.deepEqual(r.tasks.map((t) => t.position), ["not-dispatched", "not-dispatched"]);
 });
 
+// references/resume.md § The state file: a ledger whose Run: names another run is a previous cycle's
+// slot even under the same plan path, so no position, overview count or opt-in is read from it.
+test("a ledger whose Run: header names another run is a previous cycle's: stale, and none of its lines counts", () => {
+  const optIn = entry("drive", "user-decision", "unattended (model=claude-haiku-4-5)", ".devcycle/state.md");
+  const stale = setup(cycle({ ledger: [committed(1), optIn], runHeader: "00000000000000b2" }));
+  assert.deepEqual([stale.ledgerSlot, stale.overview.committed, stale.overview.nextWave, stale.drive.optInLogged], ["stale", 0, 1, false]);
+  assert.deepEqual(stale.tasks.map(positionOf), [{ task: "1", position: "not-dispatched", next: "dispatch-implementer" },
+    { task: "2", position: "not-dispatched", next: "dispatch-implementer" }]);
+  const own = setup(cycle({ ledger: [committed(1), optIn], runHeader: "00000000000000a1" }));
+  assert.deepEqual([own.ledgerSlot, own.overview.committed, own.drive.optInLogged, own.tasks[0].position], ["fresh", 1, true, "committed"]);
+});
+
+// Every ledger event references/ledger.md's line format allows is a row of the table resume.md owns,
+// and the user-decision row names the action wave-setup.mjs reports for it.
+test("references/resume.md's per-task position table has a row for every ledger event, user-decision's naming follow-decision", () => {
+  const events = readFileSync(join(ROOT, "references/ledger.md"), "utf8").match(/ event=<([a-z|-]+)> /)?.[1].split("|") ?? [];
+  assert.ok(events.includes("user-decision"), `references/ledger.md's line format no longer lists its events: ${events}`);
+  const table = readFileSync(join(ROOT, "references/resume.md"), "utf8")
+    .split("\n## Resuming a wave's per-task position\n")[1]?.split("\n## ")[0].split("\n").filter((l) => l.startsWith("| `")) ?? [];
+  for (const event of events) assert.ok(table.some((row) => row.startsWith(`| \`${event}`)), `references/resume.md has no \`${event}\` row`);
+  assert.match(table.find((row) => row.startsWith("| `user-decision")) ?? "", /follow-decision/);
+});
+
 test("knob drift compares the recorded knobs: line with the fresh one; a matching knobs-declined row is flagged", () => {
   const c = cycle({ state: [`- ${KNOBS}`] });
   const r = setup(c, { knobsLine: LEAN });
@@ -343,7 +366,7 @@ test("drive mode: only a session holding the live driver's token drives; not opt
     [driven(drift, { knobsLine: LEAN }).stopReason, driven(drift, { knobsLine: KNOBS }).action], ["knob-drift", "resume"]));
   const moved = cycle(opted);
   sh("git", ["checkout", "-q", "main"], { cwd: moved.repo });
-  withLock(moved, () => assert.equal(driven(moved).stopReason, "branch"));
+  withLock(moved, () => assert.deepEqual([driven(moved).stopReason, driven(moved).stopTask], ["branch", null]));
   const deep = cycle(opted);
   withLock(deep, () => assert.equal(driven(deep, { env: overBudget(deep.repo) }).stopReason, "depth-at-start"));
   const closed = cycle(opted);
@@ -353,13 +376,43 @@ test("drive mode: only a session holding the live driver's token drives; not opt
     entry(2, "report-received", "rejected (missing report file)", ".devcycle/reports/2.md"))] });
   withLock(capped, () => {
     const r = driven(capped);
-    assert.deepEqual([r.action, r.stopReason, r.stopDetail], ["stop", "needs-user", "task 2: retry-cap"]);
+    assert.deepEqual([r.action, r.stopReason, r.stopDetail, r.stopTask], ["stop", "needs-user", "task 2: retry-cap", "2"]);
   });
   const swept = cycle({ ...opted, ledger: [committed(1), entry(2, "dispatched", "sweep 4 targets"), entry(2, "review-verdict", "applied-none")] });
   withLock(swept, () => {
     const r = driven(swept);
-    assert.deepEqual([r.action, r.stopReason, r.stopDetail], ["stop", "sweep-fallback", "task 2: sweep-decision"]);
+    assert.deepEqual([r.action, r.stopReason, r.stopDetail, r.stopTask], ["stop", "sweep-fallback", "task 2: sweep-decision", "2"]);
   });
+});
+
+// spec §1: a task's stop names its task, so the stopped run's answer, recorded as that task's
+// user-decision, moves the task on instead of stopping the next driven session on it again.
+test("drive mode: a stop on a task's pending decision names the task, and that task's user-decision lets the next driven session past it", () => {
+  const exhausted = [committed(1), keyed(2, "review-verdict", "rejected", 3, 2, ".devcycle/findings/2-round-3.md")];
+  for (const [position, ledger] of [["blocked", [committed(1), entry(2, "report-received", "blocked", ".devcycle/reports/2.md")]],
+    ["exhausted-unresolved", exhausted]]) {
+    const c = cycle({ state: [DRIVE_ROW], ledger });
+    writeInto(c.repo, `.devcycle/findings/${reviewLoopId(2)}-status.md`, "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: none\n");
+    withLock(c, () => {
+      const stopped = driven(c);
+      assert.deepEqual([stopped.action, stopped.stopReason, stopped.stopDetail, stopped.stopTask], ["stop", "needs-user", `task 2: ${position}`, "2"]);
+      appendFileSync(c.ledgerPath, entry(2, "user-decision", "task-2-review: carry the residue to an issue", ".devcycle/state.md") + "\n");
+      const next = driven(c);
+      assert.deepEqual([next.action, next.pendingDecision, positionOf(next.tasks[1])],
+        ["resume", null, { task: "2", position: "user-decision", next: "follow-decision" }], position);
+    });
+  }
+});
+
+// spec §1: the exhausted-unresolved question is asked once, as the stopped run's question, never
+// again as continue's own pendingDecision gate on the same call.
+test("drive.action: a gate on the task whose review loop is pending carries that decision, and only it", () => {
+  const c = cycle({ state: [DRIVE_ROW], ledger: [committed(1), keyed(2, "review-verdict", "rejected", 3, 2, ".devcycle/findings/2-round-3.md")] });
+  writeInto(c.repo, `.devcycle/findings/${reviewLoopId(2)}-status.md`, "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: none\n");
+  const own = setup(ended(c, runEnd("gate-stop", { code: 4, reason: "needs-user", task: "2", detail: "task 2: exhausted-unresolved" })));
+  assert.deepEqual([own.drive.action, own.pendingDecision, own.drive.gate.pendingDecision], ["gate", null, { task: "2", loopId: "task-2-review" }]);
+  const other = setup(ended(c, runEnd("gate-stop", { code: 4, reason: "needs-user", task: "3", detail: "task 3: blocked" })));
+  assert.deepEqual([other.pendingDecision, other.drive.gate.pendingDecision], [{ task: "2", loopId: "task-2-review" }, null]);
 });
 
 test("drive mode: a resumable cycle reports its opt-in, its model, its driver and whether the opt-in line is logged", () => {
@@ -426,7 +479,7 @@ test("drive.action: an auto style starts on no result, a resumable end or a cras
   assert.deepEqual([crashed.drive.action, crashed.drive.result.outcome, crashed.drive.result.running], ["start", "crashed", false]);
   const blocked = setup(ended(c, runEnd("gate-stop", { code: 4, reason: "needs-user", task: "2", detail: "task 2: blocked" })));
   assert.deepEqual([blocked.action, blocked.drive.action, blocked.drive.gate],
-    ["resume", "gate", { reason: "needs-user", detail: "task 2: blocked", task: "2", settled: false }]);
+    ["resume", "gate", { reason: "needs-user", detail: "task 2: blocked", task: "2", settled: false, pendingDecision: null }]);
   const knob = setup(ended(cycle(), runEnd("stalled", { code: 5 })), { knobsLine: knobsWith("unattended") });
   assert.deepEqual([knob.drive.action, knob.drive.writeRow, knob.drive.gate.reason], ["gate", "auto", "stalled"]);
   const manual = setup(ended(cycle({ state: [MANUAL_ROW] }), runEnd("stalled", { code: 5 })));

@@ -15,8 +15,7 @@ record; `references/ledger.md` owns the rule.
 With `drive.action: "attach"`, `wave-setup.mjs` computed no other gate: append this session's row
 as § Execution resume says and act on nothing else beside the running driver. With any other
 action, answer the gates § Execution resume names first — knob drift, the branch verdict, the
-depth band, `pendingDecision` (with `gate`, a `pendingDecision` naming `drive.gate.task` is asked
-once, at the stopped run, not twice) — then act on `drive.action`:
+depth band, `pendingDecision` — then act on `drive.action`:
 
 | `drive.action` | What this session does |
 | --- | --- |
@@ -48,8 +47,8 @@ state file in full with the row added; every other rewrite carries it forward
 
 ## Answering a stopped run
 
-`drive.gate` carries the stop's `reason`, `detail`, `task` and `settled`, and `drive.result` the
-run's classified end. Ask ONE AskUserQuestion, its options per reason below. Every option set also
+`drive.gate` carries the stop's `reason`, `detail`, `task`, `settled` and `pendingDecision` (the
+top-level one then null), and `drive.result` the run's classified end. Ask ONE AskUserQuestion, its options per reason below. Every option set also
 offers **Walk the waves manually**, which rewrites the row to `manual` as § Drive actions says and
 walks the waves in this session, and **Leave it stopped**, which ends the session with the result
 left unhandled, so the next `/devcycle:continue` asks again. An Other answer is recorded like
@@ -58,9 +57,9 @@ any answer below.
 | reason | The question, and how its answer is recorded |
 | --- | --- |
 | `drive.gate.settled` true: `knob-drift`, `foreign-state`, `resume-check`, `branch`, `depth-at-start`, `no-driver`, `not-opted-in` | No question of its own: this session's own gates have just been computed and answered, so the stop is settled. Run the start path. |
-| `needs-user`, `task` set, and `pendingDecision` names that task | The `pendingDecision` question of § Execution resume, asked once; record `task=<n> event=user-decision outcome=task-<n>-review: <answer>`, the line `references/resume.md` § Resuming a wave's per-task position reads as settling it. |
-| `needs-user`, `task` set otherwise — a blocked implementer, a retry cap, a refused commit, a human-required step | The stop's `detail` as the question; record `task=<n> event=user-decision outcome=<answer>`, which resumes that task at `next: "follow-decision"`. |
-| `needs-user` with no `task`, and `sweep-fallback` | The stop's `detail` as the question; record `task=drive event=user-decision outcome=<answer>`. |
+| `needs-user` with `drive.gate.pendingDecision` set | The `pendingDecision` question of § Execution resume, asked once; record `task=<n> event=user-decision outcome=task-<n>-review: <answer>`, the line `references/resume.md` § Resuming a wave's per-task position reads as settling it. |
+| `needs-user` or `sweep-fallback`, `task` set otherwise — a blocked implementer, a retry cap, a refused commit, a human-required step, a sweep fallback | The stop's `detail` as the question; record `task=<n> event=user-decision outcome=<answer>`. |
+| `needs-user` or `sweep-fallback` with no `task` | The stop's `detail` as the question; record `task=drive event=user-decision outcome=<answer>`. |
 | `scope-change` | The stop's `detail` as the question: whether the cycle goes back to brainstorm or planning. The answer rewrites `stage:` to that stage, so no driver starts; continue there as § Resume says. |
 | `stopped` | **Resume unattended** first. The user stopped the run with `--stop`; it never restarts unasked. |
 | `stalled`, `no-progress`, `environment`, `max-usd` | The stop's `detail` — for `stalled` the last session's text, for `no-progress` that two restarts in a row added no ledger line beyond a dispatch — with **Restart unattended** first. |

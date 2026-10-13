@@ -68,10 +68,10 @@ export function taskPosition(lines, { pendingLoop = null, retries = () => 0 } = 
   return { position: "unknown", next: "needs-user" };
 }
 
-// This cycle's ledger lines. A ledger whose `Plan:` preamble names another plan is a previous
-// cycle's slot (references/resume.md § The state file): none of its lines is this cycle's.
-function readLedger(ledgerPath, plan) {
-  if (!plan || ledgerPlan(ledgerPath) !== plan) return [];
+// This cycle's ledger lines. A stale slot, or a ledger whose `Plan:` preamble names another plan, is a
+// previous cycle's (references/resume.md § The state file): none of its lines is this cycle's.
+function readLedger(ledgerPath, plan, slot) {
+  if (!plan || slot === "stale" || ledgerPlan(ledgerPath) !== plan) return [];
   return readFileSync(ledgerPath, "utf8").split("\n").map(parseLedgerLine).filter(Boolean);
 }
 
@@ -146,13 +146,15 @@ function driveStatus(root, statePath, stateText, lines, knobsLine) {
 
 // A recorded row is the cycle's record and outranks the knob; with no row the knob decides, and its
 // decision is the row continue writes. An auto style starts the driver unless its last end needs an answer.
-function driveAction({ row, mode }, driver) {
+// A stop on the task whose review loop is pending is that decision: the gate carries it, so it is asked once.
+function driveAction({ row, mode }, driver, pending) {
   const style = row ?? (mode === "unattended" ? "auto" : mode);
   const writeRow = row === null && style !== "ask" ? style : null;
   if (style !== "auto") return { action: style, writeRow, gate: null };
   if (driver.next !== "answer-gate") return { action: "start", writeRow, gate: null };
   const { reason, detail, task } = driver;
-  return { action: "gate", writeRow, gate: { reason, detail, task, settled: SETTLED_REASONS.has(reason) } };
+  const pendingDecision = task !== null && task === pending?.task ? pending : null;
+  return { action: "gate", writeRow, gate: { reason, detail, task, settled: SETTLED_REASONS.has(reason), pendingDecision } };
 }
 
 function readPlan(root, plan) {
@@ -253,7 +255,8 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
     knobsLine: recordedKnobs, knobsDeclined: Boolean(declined && knobsLine && sameValues(declined, knobsLine)),
   };
   const ledger = ledgerPath ? resolve(cwd, ledgerPath) : join(root, ".devcycle", "ledger.md");
-  const lines = readLedger(ledger, plan);
+  const slot = ledgerSlotState({ root, plan, run: state.run });
+  const lines = readLedger(ledger, plan, slot);
   const driver = classifyDrive({ statePath: abs });
   // Beside a running driver nothing is acted on, so nothing is judged: not even the depth.
   const attach = !drive && driver.running;
@@ -263,7 +266,8 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
     ok: true, action: "resume", state, knobDrift: [], branch: null, depth, wave: null, tasks: [], dispatchable: [],
     pendingDecision: null, drive: status.drive, entryLines: [], appended: [], depthBand: depth?.band ?? null,
   };
-  const stop = (stopReason, stopDetail) => ({ ...result, action: "stop", stopReason, stopDetail });
+  // A stop on one task's pending decision names it, so the answer is recorded as that task's.
+  const stop = (stopReason, stopDetail, stopTask = null) => ({ ...result, action: "stop", stopReason, stopDetail, stopTask });
 
   // A live lock is not proof enough: only a session the lock's driver started carries the token
   // whose hash the lock holds, so `--drive` typed in any other session is refused (spec 4.B.3).
@@ -276,7 +280,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
 
   const planText = readPlan(root, plan);
   const map = mapPositions(root, planText, lines, ledger);
-  Object.assign(result, { overview: overviewOf(map), ledgerSlot: ledgerSlotState({ root, plan, run: state.run }) });
+  Object.assign(result, { overview: overviewOf(map), ledgerSlot: slot });
   const decided = (decision) => ({ ...result.drive, ...decision, result: driver });
   if (attach) return { ...result, drive: decided({ lock: { pid: driver.pid, log: driver.log }, action: "attach", writeRow: null, gate: null }) };
   if (!checked.ok) return stop("resume-check", checked.errors.join("; "));
@@ -288,7 +292,10 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
     : [];
   result.branch = branchVerdict(root, field(stateText, "branch"));
   Object.assign(result, wavePosition(root, planText, map, lines));
-  if (!drive) return { ...result, drive: decided(driveAction(result.drive, driver)) };
+  if (!drive) {
+    const decision = driveAction(result.drive, driver, result.pendingDecision);
+    return { ...result, pendingDecision: decision.gate?.pendingDecision ? null : result.pendingDecision, drive: decided(decision) };
+  }
 
   // Drive mode: every gate continue would ask about is a stop (spec 4.B.3).
   result.drive = decided({ action: "none", writeRow: null, gate: null });
@@ -297,9 +304,9 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
     return stop("branch", `recorded ${result.branch.recorded ?? "none"}, current ${result.branch.current ?? "unknown"}: ${result.branch.verdict}`);
   if (depth.band === "over-budget" || depth.band === "hard-stop") return stop("depth-at-start", `the session starts at ${depth.tokens} tokens (${depth.band})`);
   const sweep = result.tasks.find((t) => t.position === "sweep-decision");
-  if (sweep) return stop("sweep-fallback", `task ${sweep.task}: sweep-decision`);
+  if (sweep) return stop("sweep-fallback", `task ${sweep.task}: sweep-decision`, sweep.task);
   const waiting = result.tasks.find((t) => t.next === "needs-user");
-  if (waiting) return stop("needs-user", `task ${waiting.task}: ${waiting.position}`);
+  if (waiting) return stop("needs-user", `task ${waiting.task}: ${waiting.position}`, waiting.task);
   return result;
 }
 
