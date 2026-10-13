@@ -5,20 +5,26 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { hostname } from "node:os";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, sh, writeInto } from "./helpers.mjs";
 import { RETRY_CAP, taskPosition, waveSetup } from "../../scripts/wave-setup.mjs";
-import { acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
+import { DRIVE_LOCK_REL, acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
+import { RESULT_REL } from "../../scripts/drive-result.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
 import { reviewLoopId } from "../../scripts/task-verdict.mjs";
 import { ROSTER, formatKnobsLine, resolveKnobs } from "../../scripts/resolve-knobs.mjs";
 
 const ROOT = process.cwd();
 const SCRIPT = join(ROOT, "scripts/wave-setup.mjs");
-const KNOBS = formatKnobsLine(resolveKnobs(Object.fromEntries(ROSTER.map(({ key }) => [key, ""]))).knobs);
+const UNSET = Object.fromEntries(ROSTER.map(({ key }) => [key, ""]));
+const KNOBS = formatKnobsLine(resolveKnobs(UNSET).knobs);
 const LEAN = KNOBS.replace("profile=standard", "profile=lean");
+// The fresh knobs: line with only executionMode set.
+const knobsWith = (mode) => formatKnobsLine(resolveKnobs({ ...UNSET, executionMode: mode }).knobs);
 const DRIVE_ROW = "- drive: auto model=claude-haiku-4-5 opted=2026-10-08T10:00:00Z";
+const MANUAL_ROW = "- drive: manual chosen=2026-10-13T09:00:00Z via=answer";
 // The token a driver hands the sessions it starts; withLock's lock holds its hash.
 const TOKEN = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
 
@@ -80,6 +86,20 @@ function overBudget(repo) {
     model: "claude-opus-5", content: [],
     usage: { input_tokens: 52340, cache_creation_input_tokens: 0, cache_read_input_tokens: 100000, output_tokens: 9 } } }) + "\n");
   return { CLAUDE_CODE_SESSION_ID: "sess-1", CLAUDE_DOCTOR_PROJECTS: projects };
+}
+// The result file a driver's end leaves beside the state file.
+const runEnd = (outcome, fields = {}) => ({ code: 1, outcome, reason: null, task: null, detail: `the run ended: ${outcome}`,
+  startedAt: "2026-10-13T09:00:00Z", endedAt: "2026-10-13T09:30:00Z", progressed: true, noProgressEnds: 0, ...fields });
+function ended(c, end) {
+  writeInto(c.repo, RESULT_REL, JSON.stringify(end) + "\n");
+  return c;
+}
+// A lock naming this state file whose process is gone: a driver killed outright, or one a reboot ended.
+function deadLock(c) {
+  const { pid } = spawnSync(process.execPath, ["-e", ""]);
+  writeInto(c.repo, DRIVE_LOCK_REL, JSON.stringify({ pid, startTime: "Tue Oct 13 09:00:00 2026", hostname: hostname(), state: c.statePath,
+    log: join(c.repo, ".devcycle", "drive.log"), tokenHash: null }) + "\n");
+  return c;
 }
 
 test("every resume-table row maps a task's last ledger event to its next action, most specific row first", () => {
@@ -280,7 +300,7 @@ test("the depth band rides along; an unmeasurable depth is unknown, and neither 
   assert.deepEqual([deep.depth.band, deep.depth.tokens, deep.depthBand, deep.action], ["over-budget", 152340, "over-budget", "resume"]);
 });
 
-test("manual stops: another checkout's file, a stale file, a live driver on this state file", () => {
+test("manual stops: another checkout's file, a stale file; a live driver on this state file is attached to, not a stop", () => {
   const foreign = setup(cycle({ root: "/nowhere/else" }));
   assert.deepEqual([foreign.action, foreign.stopReason], ["stop", "foreign-state"]);
   const planning = cycle();
@@ -292,10 +312,12 @@ test("manual stops: another checkout's file, a stale file, a live driver on this
   const c = cycle();
   withLock(c, (lock) => {
     const r = setup(c);
-    assert.deepEqual([r.action, r.stopReason, r.drive.lock], ["stop", "driver-running", { pid: process.pid, log: lock.log }]);
-    assert.match(r.stopDetail, new RegExp(`; if pid ${process.pid} is no longer running \\(after a reboot, say\\), remove \\.devcycle/drive\\.lock$`));
+    assert.deepEqual([r.action, r.stopReason, r.drive.action, r.drive.lock], ["resume", undefined, "attach", { pid: process.pid, log: lock.log }]);
   });
-  withLock(c, () => assert.equal(setup(c).action, "resume"), join(c.repo, ".devcycle", "other-state.md"));
+  withLock(c, () => {
+    const r = setup(c);
+    assert.deepEqual([r.action, r.drive.action, r.drive.result.running], ["resume", "ask", false]);
+  }, join(c.repo, ".devcycle", "other-state.md"));
 });
 
 test("drive mode: only a session holding the live driver's token drives; not opted in, and every gate a stop", () => {
@@ -307,8 +329,10 @@ test("drive mode: only a session holding the live driver's token drives; not opt
       const r = setup(typed, { drive: true, env });
       assert.deepEqual([r.action, r.stopReason], ["stop", "no-driver"], `--drive typed beside a live driver resumed with ${JSON.stringify(env)}`);
     }
-    assert.equal(setup(typed).stopReason, "driver-running", "a manual continue beside a live driver resumed");
-    assert.equal(driven(typed).action, "resume");
+    const manual = setup(typed);
+    assert.deepEqual([manual.action, manual.drive.action], ["resume", "attach"], "a manual continue beside a live driver did not attach");
+    const own = driven(typed);
+    assert.deepEqual([own.action, own.drive.action, own.drive.writeRow, own.drive.gate], ["resume", "none", null, null]);
   });
   const plain = cycle();
   withLock(plain, () => assert.equal(driven(plain).stopReason, "not-opted-in"));
@@ -343,11 +367,106 @@ test("drive mode: a resumable cycle reports its opt-in, its model, its driver an
   withLock(c, (lock) => {
     const r = driven(c, { knobsLine: KNOBS });
     assert.equal(r.action, "resume");
-    assert.deepEqual(r.drive, { opted: true, model: "claude-haiku-4-5", lock: { pid: process.pid, log: lock.log }, optInLogged: false });
+    assert.deepEqual(r.drive, { opted: true, model: "claude-haiku-4-5", lock: { pid: process.pid, log: lock.log }, optInLogged: false,
+      row: "auto", mode: "ask", action: "none", writeRow: null, gate: null, result: r.drive.result });
+    assert.deepEqual([r.drive.result.running, r.drive.result.pid], [true, process.pid]);
+    assert.deepEqual([r.overview.committed, r.overview.nextWave, r.ledgerSlot], [1, 1, "fresh"]);
     assert.ok(!JSON.stringify(r).includes(driveTokenHash(TOKEN)), "wave-setup reports the lock's token hash");
     appendFileSync(c.ledgerPath, entry("drive", "user-decision", "unattended (model=claude-haiku-4-5)", ".devcycle/state.md") + "\n");
     assert.equal(driven(c).drive.optInLogged, true);
   });
+});
+
+// spec §1 Gate order: beside a running driver nothing is acted on, so nothing is judged either.
+test("drive.action: a live driver on this state file is attached to before knob drift, branch, depth, wave position or resume-check", () => {
+  const c = cycle({ state: [DRIVE_ROW, `- ${KNOBS}`, "- spec: docs/gone.md"], ledger: [committed(1)] });
+  sh("git", ["checkout", "-q", "main"], { cwd: c.repo });
+  withLock(c, (lock) => {
+    const r = setup(c, { knobsLine: LEAN, env: overBudget(c.repo) });
+    assert.deepEqual([r.action, r.drive.action, r.drive.lock], ["resume", "attach", { pid: process.pid, log: lock.log }]);
+    assert.deepEqual([r.drive.result.running, r.drive.gate, r.drive.writeRow], [true, null, null]);
+    assert.deepEqual([r.knobDrift, r.branch, r.depth, r.depthBand, r.wave, r.tasks, r.dispatchable, r.pendingDecision, r.entryLines],
+      [[], null, null, null, null, [], [], null, []]);
+    assert.deepEqual([r.overview.committed, r.overview.nextWave, r.ledgerSlot], [1, 1, "fresh"]);
+  });
+  const foreign = cycle({ root: "/nowhere/else" });
+  withLock(foreign, () => assert.equal(setup(foreign).stopReason, "foreign-state", "foreign-state no longer stops first"));
+});
+
+test("drive.action: a drive: row outranks the executionMode knob; with no row the knob asks, walks manually or starts", () => {
+  assert.match(knobsWith("unattended"), / executionMode=unattended$/);
+  const decide = (c, knobsLine) => {
+    const r = setup(c, { knobsLine });
+    return [r.action, r.drive.row, r.drive.mode, r.drive.action, r.drive.writeRow];
+  };
+  assert.deepEqual(decide(cycle(), KNOBS), ["resume", null, "ask", "ask", null]);
+  assert.deepEqual(decide(cycle(), null), ["resume", null, "ask", "ask", null], "no --knobs line reads as ask");
+  assert.deepEqual(decide(cycle(), KNOBS.replace("executionMode=ask", "executionMode=bogus")), ["resume", null, "ask", "ask", null]);
+  assert.deepEqual(decide(cycle(), knobsWith("manual")), ["resume", null, "manual", "manual", "manual"]);
+  assert.deepEqual(decide(cycle(), knobsWith("unattended")), ["resume", null, "unattended", "start", "auto"]);
+  assert.deepEqual(decide(cycle({ state: [MANUAL_ROW] }), knobsWith("unattended")), ["resume", "manual", "unattended", "manual", null]);
+  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), knobsWith("manual")), ["resume", "auto", "manual", "start", null]);
+  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), KNOBS), ["resume", "auto", "ask", "start", null]);
+  assert.deepEqual(setup(cycle({ state: [`- ${KNOBS}`] }), { knobsLine: knobsWith("unattended") }).knobDrift, [],
+    "executionMode is live: a changed value is never knob drift");
+});
+
+test("drive.action: an auto style starts on no result, a resumable end or a crash, and gates on an end that needs an answer", () => {
+  const c = cycle({ state: [DRIVE_ROW] });
+  const fresh = setup(c);
+  assert.deepEqual([fresh.drive.action, fresh.drive.gate], ["start", null]);
+  assert.deepEqual([fresh.drive.result.outcome, fresh.drive.result.next], [null, "none"]);
+  for (const end of [runEnd("interrupted", { code: 130 }), runEnd("failed"), runEnd("budget", { code: 6, reason: "wait-cap" })]) {
+    const r = setup(ended(c, end));
+    assert.deepEqual([r.drive.action, r.drive.result.next, r.drive.gate], ["start", "restart", null], `${end.outcome} ${end.reason}`);
+  }
+  const rewound = setup(ended(c, runEnd("complete", { code: 0 })));
+  assert.deepEqual([rewound.drive.action, rewound.drive.result.next], ["start", "none"], "a complete run with the stage back at execution");
+  const crashed = setup(deadLock(cycle({ state: [DRIVE_ROW] })));
+  assert.deepEqual([crashed.drive.action, crashed.drive.result.outcome, crashed.drive.result.running], ["start", "crashed", false]);
+  const blocked = setup(ended(c, runEnd("gate-stop", { code: 4, reason: "needs-user", task: "2", detail: "task 2: blocked" })));
+  assert.deepEqual([blocked.action, blocked.drive.action, blocked.drive.gate],
+    ["resume", "gate", { reason: "needs-user", detail: "task 2: blocked", task: "2", settled: false }]);
+  const knob = setup(ended(cycle(), runEnd("stalled", { code: 5 })), { knobsLine: knobsWith("unattended") });
+  assert.deepEqual([knob.drive.action, knob.drive.writeRow, knob.drive.gate.reason], ["gate", "auto", "stalled"]);
+  const manual = setup(ended(cycle({ state: [MANUAL_ROW] }), runEnd("stalled", { code: 5 })));
+  assert.deepEqual([manual.drive.action, manual.drive.gate], ["manual", null]);
+});
+
+// spec §1, the gate question per reason: continue's own gates were computed and answered on this very
+// call, so a driver that stopped on one of them needs no question of its own.
+test("drive.action: a gate whose reason continue's own gates just answered is settled; every other reason is a question", () => {
+  const c = cycle({ state: [DRIVE_ROW] });
+  for (const reason of ["knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start", "no-driver", "not-opted-in"]) {
+    const r = setup(ended(c, runEnd("gate-stop", { code: 4, reason })));
+    assert.deepEqual([r.drive.action, r.drive.gate?.reason, r.drive.gate?.settled], ["gate", reason, true], reason);
+  }
+  for (const [end, reason] of [
+    [runEnd("gate-stop", { code: 4, reason: "needs-user", task: "2" }), "needs-user"],
+    [runEnd("gate-stop", { code: 4, reason: "sweep-fallback" }), "sweep-fallback"],
+    [runEnd("gate-stop", { code: 4, reason: "scope-change" }), "scope-change"],
+    [runEnd("stalled", { code: 5 }), "stalled"],
+    [runEnd("environment", { code: 3 }), "environment"],
+    [runEnd("budget", { code: 6, reason: "max-usd" }), "max-usd"],
+    [runEnd("stopped", { code: 130 }), "stopped"],
+    [runEnd("interrupted", { code: 130, progressed: false, noProgressEnds: 2 }), "no-progress"],
+  ]) {
+    const r = setup(ended(c, end));
+    assert.deepEqual([r.drive.action, r.drive.gate?.reason, r.drive.gate?.settled], ["gate", reason, false], reason);
+  }
+});
+
+test("overview: waves, tasks and committed counts from the Dispatch Map, for parallel waves and for single-task waves", () => {
+  const parallel = setup(cycle({ ledger: [committed(1)] }));
+  assert.deepEqual(parallel.overview, { waves: 2, tasks: 3, committed: 1, nextWave: 1,
+    perWave: [{ wave: 1, tasks: ["1", "2"], committed: 1 }, { wave: 2, tasks: ["3"], committed: 0 }] });
+  const plan = PLAN.split("## Dispatch Map")[0] + ["## Dispatch Map", "", "- Wave 1: Task 1", "- Wave 2: Task 2",
+    "- Wave 3: Task 3 (needs Tasks 1+2 committed)", ""].join("\n");
+  const serial = setup(cycle({ plan, ledger: [committed(1), committed(2)] }));
+  assert.deepEqual(serial.overview, { waves: 3, tasks: 3, committed: 2, nextWave: 3,
+    perWave: [{ wave: 1, tasks: ["1"], committed: 1 }, { wave: 2, tasks: ["2"], committed: 1 }, { wave: 3, tasks: ["3"], committed: 0 }] });
+  const done = setup(cycle({ ledger: [1, 2, 3].map(committed) }));
+  assert.deepEqual([done.overview.committed, done.overview.nextWave], [3, null]);
 });
 
 test("cli: one JSON object on stdout; a usage error exits 2, a state file outside git exits 3", () => {

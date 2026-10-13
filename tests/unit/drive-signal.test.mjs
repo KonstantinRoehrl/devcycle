@@ -67,11 +67,11 @@ test("with no --state the signal goes to the repo's .devcycle; outside a repo it
 });
 
 // In drive mode continue passes wave-setup.mjs's stopReason straight to this script, so every reason
-// wave-setup stops a driven session with must be one it accepts. driver-running is manual-only.
+// wave-setup stops a driven session with must be one it accepts.
 test("every reason wave-setup.mjs stops a driven session with is one drive-signal.mjs accepts", () => {
   const accepted = new Set(JSON.parse(readFileSync(SCRIPT, "utf8").match(/const STOP_REASONS = (\[[^\]]*\]);/)[1]));
   const driven = new Set([...readFileSync(join(ROOT, "scripts/wave-setup.mjs"), "utf8").matchAll(/\bstop\("([a-z-]+)"/g)]
-    .map((m) => m[1]).filter((reason) => reason !== "driver-running"));
+    .map((m) => m[1]));
   assert.ok(driven.size >= 8, `expected wave-setup's drive-mode stops, found ${[...driven].join(", ")}`);
   for (const reason of driven) assert.ok(accepted.has(reason), `wave-setup.mjs stops a driven session with "${reason}", which drive-signal.mjs rejects`);
 });
