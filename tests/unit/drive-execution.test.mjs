@@ -10,6 +10,7 @@ import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { DRIVE_LOCK_REL } from "../../scripts/drive-lock.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
 import { inFlightFiles, SESSION_START_TOKENS } from "../../scripts/drive-execution.mjs";
+import { classifyDrive, readDriveResult, readHandledResult, RESULT_REL, STOP_REQUEST_REL } from "../../scripts/drive-result.mjs";
 import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
 
 const DRIVER = fileURLToPath(new URL("../../scripts/drive-execution.mjs", import.meta.url));
@@ -629,4 +630,128 @@ test("inFlightFiles names the first wave with an uncommitted task and only its u
   // A later wave's task the ledger already names was dispatched ahead by readiness: in flight too.
   const ahead = PLAN.replace("**Dependencies:** Tasks 1 committed", "**Dependencies:** none (completely independent)");
   assert.deepEqual(inFlightFiles(ahead, [entry(2, "dispatched")]), { wave: 1, files: new Set(["src/a.txt", "src/b.txt"]) });
+});
+
+const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const statePathOf = (root) => join(root, ".devcycle", "state.md");
+function resultOf(root) {
+  const r = readDriveResult(root);
+  assert.ok(r, "the driver wrote no .devcycle/drive-result.json");
+  return r;
+}
+// A driver whose session hangs, stopped in `finally` with its session's group if a test fails first.
+async function withHungDriver(fn) {
+  const root = makeCycle();
+  const h = harness([{ ledger: [line(1, "dispatched")], hangMs: 60000 }]);
+  const d = startDriver(root, h);
+  try {
+    await waitFor(() => calls(h).length === 1);
+    await fn({ root, h, d });
+  } finally {
+    if (d.child.exitCode === null) d.child.kill("SIGKILL");
+    try { process.kill(-calls(h)[0].pid, "SIGKILL"); } catch { /* already gone */ }
+  }
+}
+
+test("a run that reaches branch-review writes drive-result.json: outcome complete, progressed, stamped", async () => {
+  const root = makeCycle();
+  const r = await drive(root, [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }]);
+  assert.equal(r.code, 0, r.out);
+  const res = resultOf(root);
+  assert.deepEqual([res.code, res.outcome, res.reason, res.task, res.detail, res.progressed, res.noProgressEnds], [0, "complete", null, null, "", true, 0]);
+  assert.match(res.startedAt, STAMP);
+  assert.match(res.endedAt, STAMP);
+  assert.equal(classifyDrive({ statePath: statePathOf(root) }).next, "branch-review");
+});
+
+test("a gate stop copies the stop's reason, task and detail into the result; a stop with no --task records task null", async () => {
+  const root = makeCycle();
+  const r = await drive(root, [{ ledger: [line(1, "report-received")], stop: { reason: "needs-user", detail: "task 2 is blocked", task: "2" } }]);
+  assert.equal(r.code, 4, r.out);
+  const res = resultOf(root);
+  assert.deepEqual([res.code, res.outcome, res.reason, res.task, res.detail, res.progressed, res.noProgressEnds],
+    [4, "gate-stop", "needs-user", "2", "task 2 is blocked", true, 0]);
+  const bare = makeCycle();
+  assert.equal((await drive(bare, [{ stop: { reason: "branch", detail: "off the topic branch" } }])).code, 4);
+  assert.deepEqual([resultOf(bare).reason, resultOf(bare).task], ["branch", null]);
+});
+
+test("a budget end records why: max-usd over the dollar cap, wait-cap past --max-backoff", async () => {
+  const spent = makeCycle();
+  assert.equal((await drive(spent, [{ ledger: [line(1, "report-received")], costUsd: 0.6 }], { flags: ["--max-usd", "1"] })).code, 6);
+  assert.deepEqual([resultOf(spent).outcome, resultOf(spent).reason], ["budget", "max-usd"]);
+  // Silence is waited out like a limit with no reset, under Task 6's rules too, so a zero
+  // --max-backoff reaches wait-cap at once, with no real-time wait.
+  const capped = makeCycle();
+  assert.equal((await drive(capped, [{ hangMs: 60000 }], { flags: ["--max-backoff", "0"], env: { DEVCYCLE_DRIVE_IDLE_MS: "300" } })).code, 6);
+  const res = resultOf(capped);
+  assert.deepEqual([res.outcome, res.reason, res.progressed, res.noProgressEnds], ["budget", "wait-cap", false, 1]);
+  assert.equal(classifyDrive({ statePath: statePathOf(capped) }).next, "restart");
+});
+
+test("SIGINT with no stop request records interrupted, which the next continue restarts", async () => {
+  await withHungDriver(async ({ root, d }) => {
+    d.child.kill("SIGINT");
+    const r = await d.result();
+    assert.equal(r.code, 130, r.out);
+    const res = resultOf(root);
+    assert.deepEqual([res.code, res.outcome, res.progressed, res.noProgressEnds], [130, "interrupted", false, 1]);
+    assert.equal(classifyDrive({ statePath: statePathOf(root) }).next, "restart");
+  });
+});
+
+test("--stop writes the stop request and SIGTERMs the driver, which records stopped; with no driver running --stop exits 3", async () => {
+  let stoppedRoot;
+  await withHungDriver(async ({ root, h, d }) => {
+    stoppedRoot = root;
+    const stop = spawnSync(process.execPath, [DRIVER, "--stop", "--state", statePathOf(root)], { cwd: root, env: h.env, encoding: "utf8" });
+    assert.equal(stop.status, 0, stop.stdout + stop.stderr);
+    assert.deepEqual(JSON.parse(stop.stdout), { stopped: true, pid: d.child.pid });
+    const r = await d.result();
+    assert.equal(r.code, 130, r.out);
+    assert.deepEqual([resultOf(root).code, resultOf(root).outcome], [130, "stopped"]);
+    assert.equal(existsSync(join(root, STOP_REQUEST_REL)), false, "the stop request outlived the run it stopped");
+    assert.deepEqual(records(h).map((x) => x.exitReason), ["interrupted"]);
+    const c = classifyDrive({ statePath: statePathOf(root) });
+    assert.deepEqual([c.next, c.reason], ["answer-gate", "stopped"], "a stopped run must never restart unasked");
+  });
+  const none = spawnSync(process.execPath, [DRIVER, "--stop", "--state", statePathOf(stoppedRoot)], { encoding: "utf8" });
+  assert.equal(none.status, 3, none.stdout + none.stderr);
+  assert.equal(none.stderr, `drive-execution: no driver is running for ${statePathOf(stoppedRoot)}\n`);
+  assert.equal(existsSync(join(stoppedRoot, STOP_REQUEST_REL)), false);
+});
+
+test("--mark-handled hands off the result once continue has acted on it, says whether there was one, and needs --state", () => {
+  const root = makeCycle();
+  writeInto(root, RESULT_REL, JSON.stringify({ code: 4, outcome: "gate-stop", reason: "needs-user", noProgressEnds: 0 }));
+  const mark = (args) => spawnSync(process.execPath, [DRIVER, "--mark-handled", ...args], { cwd: root, encoding: "utf8" });
+  const first = mark(["--state", statePathOf(root)]);
+  assert.equal(first.status, 0, first.stdout + first.stderr);
+  assert.deepEqual(JSON.parse(first.stdout), { handled: true });
+  assert.equal(readDriveResult(root), null);
+  assert.equal(readHandledResult(root).outcome, "gate-stop");
+  assert.equal(classifyDrive({ statePath: statePathOf(root) }).next, "none");
+  const second = mark(["--state", statePathOf(root)]);
+  assert.equal(second.status, 0, second.stderr);
+  assert.deepEqual(JSON.parse(second.stdout), { handled: false });
+  assert.equal(mark([]).status, 2, "--mark-handled without --state");
+});
+
+test("the next pre-flight marks a result left unhandled as handled and clears a stale stop request, even when it refuses", async () => {
+  const refused = makeCycle({ branch: "main" });
+  writeInto(refused, RESULT_REL, JSON.stringify({ code: 130, outcome: "interrupted", noProgressEnds: 1 }));
+  writeInto(refused, STOP_REQUEST_REL, "2026-10-13T00:00:00Z\n");
+  const r = dryRun(refused);
+  assert.equal(r.code, 3, r.out);
+  assert.equal(readDriveResult(refused), null, "the refused pre-flight left the result unhandled");
+  assert.equal(readHandledResult(refused).outcome, "interrupted");
+  assert.equal(existsSync(join(refused, STOP_REQUEST_REL)), false);
+
+  // The handled end chains into this run's count: a second resumable end without progress.
+  const again = makeCycle();
+  writeInto(again, RESULT_REL, JSON.stringify({ code: 130, outcome: "interrupted", progressed: false, noProgressEnds: 1 }));
+  assert.equal((await drive(again, [{ hangMs: 60000 }], { flags: ["--max-backoff", "0"], env: { DEVCYCLE_DRIVE_IDLE_MS: "300" } })).code, 6);
+  assert.equal(resultOf(again).noProgressEnds, 2);
+  const c = classifyDrive({ statePath: statePathOf(again) });
+  assert.deepEqual([c.next, c.reason], ["answer-gate", "no-progress"]);
 });

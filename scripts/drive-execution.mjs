@@ -18,6 +18,8 @@ import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
+import { LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, STOP_REQUEST_REL, writeDriveResult } from "./drive-result.mjs";
+import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
 import { gitToplevel, hashSession, recordPath } from "./run-record.mjs";
@@ -32,7 +34,6 @@ const { spawnStreaming, killGroup } = agentCli;
 // Measured over 69 execution sessions (2026-10-08): a session holds ~55k tokens before it reads
 // anything. A window that puts that in the over-budget band cannot carry a wave.
 export const SESSION_START_TOKENS = 55_000;
-const LOG_REL = ".devcycle/drive.log";
 const STOP_REL = ".devcycle/drive-stop.json";
 const LEDGER_REL = ".devcycle/ledger.md";
 const RUN_ID = /^[0-9a-f]{16}$/;
@@ -64,6 +65,8 @@ const KNOWN_FLAGS = {
   "--claude": "value",
   "--check-sandbox": "none",
   "--detach": "none",
+  "--stop": "none",
+  "--mark-handled": "none",
 };
 
 class Exit extends Error {
@@ -92,6 +95,8 @@ function parseArgs(argv) {
     maxBackoffMs: (requireCount(flags, "--max-backoff", { min: 0 }) ?? 360) * 60_000,
     dryRun: "--dry-run" in flags,
     detach: "--detach" in flags,
+    stop: "--stop" in flags,
+    markHandled: "--mark-handled" in flags,
     bin: requireValue(flags, "--claude", "an executable") ?? "claude",
   };
 }
@@ -251,7 +256,7 @@ function preflight(opts) {
   const root = dirname(dirname(statePath));
   // The token proves to wave-setup.mjs that a session was started by this driver; the lock keeps
   // only its hash, and only the sessions this driver starts are handed the token itself.
-  const ctx = { root, statePath, stateRel: relative(root, statePath), lock: null, session: null, token: randomBytes(16).toString("hex") };
+  const ctx = { root, statePath, stateRel: relative(root, statePath), lock: null, session: null, progressed: false, token: randomBytes(16).toString("hex") };
   if (opts.dryRun) {
     const holder = readLiveDriveLock(root);
     if (holder) throw new Exit(3, heldBy(holder));
@@ -260,6 +265,10 @@ function preflight(opts) {
     if (!got.ok) throw new Exit(3, heldBy(got.holder));
     ctx.lock = got.lock;
   }
+  // Only once no live driver remains, which a racing --stop or a result being written could
+  // belong to; and before every other check, so a result never survives into the next run.
+  markResultHandled(root);
+  rmSync(join(root, STOP_REQUEST_REL), { force: true });
   try {
     Object.assign(ctx, checkEnvironment(root, readState(statePath), opts));
   } catch (err) {
@@ -455,9 +464,9 @@ function readStop(root) {
   if (!existsSync(path)) return null;
   try {
     const stop = JSON.parse(readFileSync(path, "utf8"));
-    return { reason: String(stop.reason), detail: String(stop.detail ?? "") };
+    return { reason: String(stop.reason), detail: String(stop.detail ?? ""), task: stop.task == null ? null : String(stop.task) };
   } catch {
-    return { reason: "needs-user", detail: `${STOP_REL} is unreadable` };
+    return { reason: "needs-user", detail: `${STOP_REL} is unreadable`, task: null };
   }
 }
 
@@ -481,10 +490,10 @@ function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, inte
   if (interrupted) return verdict("interrupted", 130, "interrupted — the session was stopped and the lock released");
   if (s.environment) return verdict("environment", 3, s.environment);
   const stop = readStop(ctx.root);
-  if (stop) return verdict("stopped", 4, `stopped for you — ${stop.reason}: ${stop.detail}`, { stopReason: stop.reason });
+  if (stop) return verdict("stopped", 4, `stopped for you — ${stop.reason}: ${stop.detail}`, { stopReason: stop.reason, stop });
   const overBudget = opts.maxUsd !== undefined && spent >= opts.maxUsd;
   const counts = progressCounts(before, after, { stalls, churn }, Boolean(s.limit));
-  const budgetSpent = () => verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, counts);
+  const budgetSpent = () => verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, { ...counts, reason: "max-usd" });
   const said = `The last session said:\n${s.resultText || "(no result)"}`;
   const stalled = (how = "") => verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row added no ledger line beyond a dispatch${how}. ${said}`, counts);
   const churned = () => verdict("stalled", 5, `stalled: ${counts.churn} sessions in a row added ledger lines but no report, verdict or commit. ${said}`, counts);
@@ -495,7 +504,7 @@ function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, inte
     if (counts.churn >= opts.maxChurn) return churned();
     if (overBudget) return budgetSpent();
     const waitMs = s.limit?.resetAt ? Math.max(s.limit.resetAt * 1000 - Date.now(), 1000) : DEFAULT_BACKOFF_MS;
-    if (waited + waitMs > opts.maxBackoffMs) return verdict("budget", 6, "usage limit: waiting it out would pass --max-backoff", counts);
+    if (waited + waitMs > opts.maxBackoffMs) return verdict("budget", 6, "usage limit: waiting it out would pass --max-backoff", { ...counts, reason: "wait-cap" });
     return verdict("budget", null, null, { waitMs, ...counts });
   }
   const crashed = s.result === null;
@@ -591,21 +600,29 @@ function makeLog(root) {
   };
 }
 
+const OUTCOME_OF = { interrupted: "interrupted", environment: "environment", stalled: "stalled", budget: "budget" };
+const ended = (code, outcome, detail = "") => ({ code, outcome, reason: null, detail, task: null });
+
+function endOf(verdict) {
+  if (verdict.stop) return { code: 4, outcome: "gate-stop", reason: verdict.stop.reason, detail: verdict.stop.detail, task: verdict.stop.task };
+  return { ...ended(verdict.code, OUTCOME_OF[verdict.exitReason], verdict.message ?? ""), reason: verdict.reason ?? null };
+}
+
 async function walk(ctx, opts, log, trap) {
   let stalls = 0;
   let churn = 0;
   let spent = 0;
   let waited = 0;
   for (let n = 1; ; n++) {
-    if (trap.interrupted) return 130;
+    if (trap.interrupted) return ended(130, "interrupted");
     const stage = readState(ctx.statePath).stage;
     if (stage === "branch-review") {
       log("execution is complete — the branch is ready for branch review");
-      return 0;
+      return ended(0, "complete");
     }
     if (stage !== "execution") {
       log(`the state left execution for stage ${stage}; stopping`);
-      return 1;
+      return ended(1, "left-execution", `the state left execution for stage ${stage}`);
     }
     rmSync(join(ctx.root, STOP_REL), { force: true });
     const entriesBefore = ledgerEntries(ctx.root, ctx.plan);
@@ -615,6 +632,7 @@ async function walk(ctx, opts, log, trap) {
     log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}`);
     const s = await runSession(ctx, opts.bin, sessionArgs(ctx, opts, spent), log, n);
     const after = progressOf(ledgerEntries(ctx.root, ctx.plan));
+    if (after.advanced > before.advanced) ctx.progressed = true;
     spent += s.spentUsd;
     const verdict = judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, interrupted: trap.interrupted });
     ({ stalls, churn } = verdict);
@@ -622,13 +640,26 @@ async function walk(ctx, opts, log, trap) {
     const cost = s.costUsd !== null ? `, $${s.costUsd.toFixed(2)}` : s.spentUsd > 0 ? `, ~$${s.spentUsd.toFixed(2)} estimated` : "";
     log(`session ${n} ended — ${verdict.exitReason}; ledger +${after.lines - before.lines}, commits +${after.committed - before.committed}${cost}`);
     if (verdict.message) log(verdict.message);
-    if (verdict.code !== null) return verdict.code;
+    if (verdict.code !== null) return endOf(verdict);
     if (verdict.waitMs) {
       log(`usage limit — waiting ${Math.ceil(verdict.waitMs / 60_000)} min before the next session`);
       await sleep(trap, verdict.waitMs);
       waited += verdict.waitMs;
     }
   }
+}
+
+// A 130 is a --stop when its request is on disk, and otherwise a signal from elsewhere (a terminal
+// closing, a shutdown), which the next /devcycle:continue restarts.
+function recordEnd(ctx, end, startedAt) {
+  const request = join(ctx.root, STOP_REQUEST_REL);
+  const outcome = end.code === 130 && existsSync(request) ? "stopped" : end.outcome;
+  const { progressed } = ctx;
+  writeDriveResult(ctx.root, {
+    code: end.code, outcome, reason: end.reason, task: end.task, detail: end.detail, startedAt, endedAt: now(),
+    progressed, noProgressEnds: noProgressEndsAfter(ctx.root, { progressed, outcome, reason: end.reason }),
+  });
+  rmSync(request, { force: true });
 }
 
 async function drive(opts) {
@@ -638,11 +669,21 @@ async function drive(opts) {
     return 0;
   }
   const trap = trapSignals(ctx);
+  const startedAt = now();
+  let end = ended(1, "failed");
   try {
-    return await walk(ctx, opts, makeLog(ctx.root), trap);
+    end = await walk(ctx, opts, makeLog(ctx.root), trap);
+    return end.code;
+  } catch (err) {
+    end = ended(1, "failed", err.message);
+    throw err;
   } finally {
     trap.dispose();
-    release(ctx);
+    try {
+      recordEnd(ctx, end, startedAt);
+    } finally {
+      release(ctx);
+    }
   }
 }
 
@@ -662,6 +703,36 @@ function detach(opts, argv) {
   return 0;
 }
 
+// The way to stop a driver on purpose: the request on disk is what makes its 130 read as stopped,
+// which /devcycle:continue never restarts unasked.
+function stopDriver(state) {
+  const statePath = resolve(state);
+  const root = dirname(dirname(statePath));
+  const notRunning = () => {
+    console.error(`drive-execution: no driver is running for ${state}`);
+    return 3;
+  };
+  const holder = readLiveDriveLock(root);
+  if (!holder || !lockNamesState(root, holder, statePath)) return notRunning();
+  const request = join(root, STOP_REQUEST_REL);
+  atomicWrite(request, `${now()}\n`);
+  try {
+    process.kill(holder.pid, "SIGTERM");
+  } catch {
+    rmSync(request, { force: true });
+    return notRunning();
+  }
+  console.log(JSON.stringify({ stopped: true, pid: holder.pid }));
+  return 0;
+}
+
+// /devcycle:continue's hand-off once it has acted on a result: a gate answered, or a restart begun.
+function markHandled(state) {
+  const root = dirname(dirname(resolve(state)));
+  console.log(JSON.stringify({ handled: markResultHandled(root) }));
+  return 0;
+}
+
 async function main(argv) {
   let opts;
   try {
@@ -676,6 +747,8 @@ async function main(argv) {
     return 0;
   }
   try {
+    if (opts.stop) return stopDriver(opts.state);
+    if (opts.markHandled) return markHandled(opts.state);
     return opts.detach && !opts.dryRun ? detach(opts, argv) : await drive(opts);
   } catch (err) {
     console.error(`drive-execution: ${err.message}`);

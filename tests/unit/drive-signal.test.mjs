@@ -75,3 +75,18 @@ test("every reason wave-setup.mjs stops a driven session with is one drive-signa
   assert.ok(driven.size >= 8, `expected wave-setup's drive-mode stops, found ${[...driven].join(", ")}`);
   for (const reason of driven) assert.ok(accepted.has(reason), `wave-setup.mjs stops a driven session with "${reason}", which drive-signal.mjs rejects`);
 });
+
+test("--task names the stopped task in drive-stop.json, task is null without it, and a task that is not a whole number is a usage error", () => {
+  const { dir, statePath } = devcycleDir();
+  const r = signal(["needs-user", "--detail", "task 3 is blocked", "--task", "3", "--state", statePath]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(stopFile(dir).task, "3");
+  assert.equal(signal(["needs-user", "--detail", "which plan?", "--state", statePath]).status, 0);
+  assert.equal(stopFile(dir).task, null);
+  for (const bad of ["3a", "-1", " "]) {
+    const refused = signal(["needs-user", "--detail", "x", "--task", bad, "--state", statePath]);
+    assert.equal(refused.status, 2, `--task ${JSON.stringify(bad)}: ${refused.stderr}`);
+    assert.match(refused.stderr, /^drive-signal: --task requires a task number/);
+  }
+  assert.equal(stopFile(dir).detail, "which plan?", "a refused signal replaced the last good one");
+});
