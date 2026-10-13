@@ -32,21 +32,28 @@ waited for a human to start it again (#348, #349). A restart of a resumable end 
 answer (D2), which a one-shot grant would contradict. **Considered and rejected:** a nonce that
 `wave-setup.mjs` mints and the driver's pre-flight consumes. Any agent can run `wave-setup.mjs`,
 so the nonce would prove nothing the prose rule does not; the guard stays a rule, as the
-2026-10-08 entry's rule 4 already was.
+2026-10-08 entry's rule 4 already was. The execution-start surface lives in a new
+references/drive.md, read by section only at stage: execution, so commands/continue.md stays at its
+174-line ceiling; the surface total and the closures that load it rise by its sections.
 
 **Supersedes:** the 2026-10-08 entry's rules 1, 2 and 4 as worded there (rule 3 stands), and the
 `session=` field of its `drive: auto` row.
 
 **Budgets:** the `executionMode` flag line in each entry command's resolver block (+8) and, in
 references/config.md, the roster row (+1) and the two-knob live sentence (+2) raise the measured
-runtime surface 5901 → 5912 (+11), so `surfaceTotal` moves 5904 → 5912. Each command's context
+runtime surface 5901 → 5912 (+11); the new references/drive.md and the surface edits that point at
+it raise it on to 6022 (+110), so `surfaceTotal` moves 5904 → 6022 (+118). Each command's context
 figure rises by its own flag line, and every entry whose closure cites references/config.md by that
-file's growth; every risen entry carries its own `budget:` line below, at the figure
-`node scripts/validate.mjs` measured.
+file's growth. commands/continue.md's closure also takes in references/drive.md's sections and the
+ledger event-line section they load (→ 59988); references/handoff.md's own bytes move by its
+rewritten Unattended execution paragraph (→ 9038), and the closures that read it whole by the same
+3 bytes; executing-waves.md rises by its ledger-slot pre-flight step and the references it reads
+(→ 96948), and planning-waves.md falls by its removed opt-in gate (→ 69685). Every moved entry carries its own `budget:` line below,
+at the figure `node scripts/validate.mjs` measured.
 
 ```text
-budget: surface-budget.json surfaceTotal 5912
-budget: context-budget.json commands/continue.md 50509
+budget: surface-budget.json surfaceTotal 6022
+budget: context-budget.json commands/continue.md 59988
 budget: context-budget.json commands/cycle.md 69722
 budget: context-budget.json commands/learn.md 16618
 budget: context-budget.json commands/maintain.md 17797
@@ -54,17 +61,19 @@ budget: context-budget.json commands/onboard.md 16906
 budget: context-budget.json commands/reconcile.md 24343
 budget: context-budget.json commands/review.md 24973
 budget: context-budget.json commands/verify.md 24071
-budget: context-budget.json playbooks/executing-waves.md 96421
-budget: context-budget.json playbooks/finishing-the-cycle.md 45826
+budget: context-budget.json playbooks/executing-waves.md 96948
+budget: context-budget.json playbooks/finishing-the-cycle.md 45829
 budget: context-budget.json playbooks/learning-from-sessions.md 62007
 budget: context-budget.json playbooks/maintaining-the-repo.md 64084
 budget: context-budget.json playbooks/onboarding-a-repo.md 30518
-budget: context-budget.json playbooks/planning-waves.md 71901
+budget: context-budget.json playbooks/planning-waves.md 69685
 budget: context-budget.json playbooks/receiving-review.md 108214
 budget: context-budget.json playbooks/reviewing-code.md 91629
-budget: context-budget.json playbooks/reviewing-the-branch.md 47289
-budget: context-budget.json playbooks/verifying-on-device.md 42813
+budget: context-budget.json playbooks/reviewing-the-branch.md 47292
+budget: context-budget.json playbooks/scoping-the-request.md 27915
+budget: context-budget.json playbooks/verifying-on-device.md 42816
 budget: context-budget.json references/config.md 14249
+budget: context-budget.json references/handoff.md 9038
 ```
 
 ## 2026-10-12 — One gate command per task, captured by a helper

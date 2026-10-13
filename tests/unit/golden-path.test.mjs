@@ -16,6 +16,7 @@ import { PLAYBOOK_STAGE } from "../../scripts/doctor.mjs";
 import { ROSTER } from "../../scripts/resolve-knobs.mjs";
 import { closure } from "../../scripts/context-closure.mjs";
 import { sentences } from "../../scripts/citation-grammar.mjs";
+import { sectionText } from "../../scripts/md-sections.mjs";
 import { STAGE_TOOL_CALLS, STAGE_FILES_READ } from "../../scripts/depth-bands.mjs";
 
 const root = process.cwd();
@@ -900,29 +901,24 @@ test("harvested: planning-waves/quality-constraints — the two constraint secti
   assert.match(t, /Each task then carries a `\*\*Quality constraints:\*\*` line/);
 });
 
-test("planning-waves/opt-in-gate — one question with three answers; the drive row is written and the plan committed before any driver starts", () => {
+test("planning hands off without asking how execution runs; references/drive.md's start path starts, watches and stops the driver", () => {
   const t = read("playbooks/planning-waves.md");
   const handoff = t.slice(t.indexOf("## Handoff — required final output"));
-  assert.match(handoff, /Ask one AskUserQuestion/);
-  for (const option of ["Walk the waves manually", "Unattended — start it now", "Unattended — I'll start it myself"])
-    assert.ok(handoff.includes(`**${option}**`), `the opt-in gate lost its option: ${option}`);
-  assert.ok(handoff.includes('scripts/drive-execution.mjs" --check-sandbox` prints\n`{"sandboxed":false}`'), "start-now is no longer gated on the sandbox probe");
-  assert.match(handoff, /non-null `sessionHash`/, "start-now is offered without a readable session id");
-  assert.ok(handoff.includes("- drive: auto model=<id> opted=<stamp>"), "the drive row's shape changed");
-  assert.match(handoff, /scripts\/depth-probe\.mjs" --json`\n\s+prints, never from self-report/);
-  const launch = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md --model <id> --detach';
-  assert.ok(handoff.includes(launch), "the detached launch changed");
-  assert.doesNotMatch(handoff, /nohup/, "a nohup launch stays in the caller's session, where its hangup reaches the driver");
-  assert.ok(handoff.indexOf("Rewrite the state file in full") < handoff.indexOf(launch), "the driver can start before the state names execution");
-  // The plan commit happens before any driver exists: a driver's first session commits too, and the
-  // two would race on the index.
-  assert.ok(handoff.indexOf("Committing the saved plan is gated") < handoff.indexOf("**Opt-in gate (GO only).**"),
-    "the opt-in gate no longer follows the plan-commit paragraph its step 3 points to");
-  assert.match(handoff, /commit the saved plan as the paragraph above gates it, and only then start a driver/);
-  assert.match(handoff, /Write nothing to the ledger/);
-  const resume = read("references/resume.md");
-  assert.match(resume, /Three optional rows sit outside the template/);
-  assert.ok(resume.includes("- `- drive: auto model=<id> opted=<stamp>` — the user chose unattended execution"), "resume.md no longer documents the drive row");
+  for (const gone of ["AskUserQuestion", "drive-execution", "--check-sandbox"])
+    assert.ok(!handoff.includes(gone), `planning-waves § Handoff still names ${gone} — the execution-style question belongs to /devcycle:continue`);
+  assert.match(handoff, /the context action is `Clear \+ \/devcycle:continue`/);
+  assert.ok(existsSync(join(root, "references/drive.md")), "references/drive.md is missing");
+  const start = sectionText(read("references/drive.md"), "the-start-path");
+  assert.ok(start, "references/drive.md has no `## The start path` section");
+  assert.ok(start.includes("<W> waves · <T> tasks · <C> committed — next: wave <w>"), "the start path no longer prints the overview");
+  for (const flag of ["--detach", "--follow", "--wait", "--stop"])
+    assert.ok(start.includes(`scripts/drive-execution.mjs" ${flag}`) || start.includes(`.md ${flag}`) || start.includes(` ${flag} `),
+      `the start path no longer names drive-execution.mjs ${flag}`);
+  assert.match(start, /--since <logOffset>/, "the follow watch no longer resumes from the start's log offset");
+  assert.match(start, /\bMonitor\b/, "the follow watch no longer runs under Monitor");
+  assert.ok(start.includes("references/drive.md when-the-run-ends"), "the start path no longer says what to do when --wait returns");
+  assert.ok(read("commands/continue.md").includes('scripts/read-section.mjs" references/drive.md drive-actions'),
+    "commands/continue.md § Execution resume no longer reads references/drive.md's drive actions");
 });
 
 test("harvested: reviewing-code/engine-delegation — one JSON argv, and exit 1 is the panel failing", () => {
@@ -2361,16 +2357,16 @@ test("the stage-budget constants are the counters references/delegation.md § Th
   assert.match(section, new RegExp(`\\*\\*~${STAGE_FILES_READ} files read\\*\\*`), "the files-read counter drifted");
 });
 
-// Spec § 8 "Opt-in integrity": an agent never opts a cycle into drive mode. The `drive:` state row
-// is written only by the opt-in gate at planning's close (references/resume.md documents it), and the
-// opt-in ledger line only by the first driven session, in continue.md's drive mode. No script,
-// workflow or hook writes either.
-test("opt-in integrity: only the opt-in gate writes the drive: row, only the first driven session the opt-in ledger line", () => {
+// Opt-in integrity: an agent never opts a cycle into drive mode. The `drive:` state row is written
+// only by /devcycle:continue at execution start (references/drive.md owns its forms and writers;
+// references/resume.md only names the row), and the opt-in ledger line only by the first driven session,
+// in continue.md's drive mode. No script, workflow or hook writes either.
+test("opt-in integrity: only execution start writes the drive: row, only the first driven session the opt-in ledger line", () => {
   const ROW = "- drive: auto model=";
   const LINE = "outcome=unattended (model=";
   const rowSites = surfaceFiles().filter((p) => read(p).includes(ROW));
-  assert.deepEqual(rowSites.filter((p) => !["playbooks/planning-waves.md", "references/resume.md"].includes(p)), [],
-    "a surface other than the opt-in gate writes the drive: row");
+  assert.deepEqual(rowSites.filter((p) => p !== "references/drive.md"), [],
+    "a surface other than references/drive.md's execution-start writers writes the drive: row");
   const lineSites = surfaceFiles().filter((p) => read(p).includes(LINE));
   assert.deepEqual(lineSites.filter((p) => !["references/ledger.md", "references/resume.md"].includes(p)), ["commands/continue.md"],
     "the opt-in ledger line must be written by commands/continue.md's drive mode and nowhere else");

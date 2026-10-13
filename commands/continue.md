@@ -125,9 +125,8 @@ resolver command first, unchanged (it reads no state file), then
 It runs the ownership check, `resume-check`, the knob comparison, the branch check and the depth
 probe, and prints one JSON object. Every gate stays this command's; it reads their inputs there:
 
-- `action: "stop"` → report `stopDetail` and stop. `foreign-state` and `resume-check` go to the
-  user as steps 2 and 2a say; `driver-running` means a driver owns this cycle: name its
-  `drive.lock.pid` and `drive.lock.log`, and never resume.
+- `action: "stop"` → report `stopDetail` and stop; `foreign-state` and `resume-check` go to the
+  user as steps 2 and 2a say.
 - Otherwise append this session's row as its own Bash call, never folded into another command —
   the hooks module joins a session to its run only on a main-loop call carrying `--kind session`:
   `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append --run <state.run> --kind session --sessionId "$CLAUDE_CODE_SESSION_ID"`.
@@ -137,9 +136,10 @@ probe, and prints one JSON object. Every gate stays this command's; it reads the
 - `depth.band` `over-budget` or `hard-stop` → § Resume's depth rule; `unknown` → proceed.
 - `pendingDecision` → that task's `exhausted-unresolved` loop goes to the user as a decision.
 
-Then announce the position from `tasks` (each task's `position` and `next`) and continue through
-`entryLines` as § Resume says, past its depth check; the entered playbook takes the wave's
-positions and every uncommitted task's brief inputs from this object.
+`drive.action` then decides, per `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/drive.md drive-actions`.
+At `manual` or `none`, announce the position from `tasks` (each task's `position` and `next`) and
+continue through `entryLines` as § Resume says, past its depth check; the entered playbook takes
+the wave's positions and every uncommitted task's brief inputs from this object.
 
 ## Announce the derived position
 
