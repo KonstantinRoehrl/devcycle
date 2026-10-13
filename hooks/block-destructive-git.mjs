@@ -341,7 +341,8 @@ const UNREADABLE_SUBCOMMAND = "the guard cannot read git's subcommand here (a su
 const driveDenyReason = (why = "") =>
   `devcycle: a driver (pid ${driveLock.pid}, log ${driveLock.log}) is running unattended execution in this checkout — ` +
   `the main thread may not move the branch or destroy the working tree while it runs${why && `, and ${why}`}. Stop the driver first ` +
-  `(Ctrl-C in its terminal, or kill ${driveLock.pid}), or run git from your own terminal; if pid ${driveLock.pid} is no ` +
+  `(\`node <devcycle>/scripts/drive-execution.mjs --stop --state ${driveLock.state}\`, or ask the /devcycle:continue session ` +
+  `watching it to stop it), or run git from your own terminal; if pid ${driveLock.pid} is no ` +
   `longer running (after a reboot, say), remove ${DRIVE_LOCK_REL}. command: ${command.slice(0, 200)}`;
 
 // A heredoc, a quote or a substitution decides whether a `git` in the text is RUN or only READ, and

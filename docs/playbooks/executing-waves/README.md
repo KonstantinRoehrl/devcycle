@@ -55,7 +55,7 @@ task's gate command, with the task's own test run as the subset that attributes 
 - Source: [`playbooks/executing-waves.md`](../../../playbooks/executing-waves.md) — the behavior
   spec this page summarizes.
 - Unattended: [running execution unattended](unattended.md) — a driver walks the waves for you
-  after you opt in at planning's close.
+  after you opt in when `/devcycle:continue` resumes at execution.
 
 ```mermaid
 ---

@@ -606,7 +606,8 @@ test("main thread + a live driver lock: moving the branch or destroying the tree
     assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
   const { reason } = decideRaw({ cwd, tool_input: { command: "git checkout main" } });
   assert.match(reason, new RegExp(`^devcycle: a driver \\(pid ${process.pid}, log [^)]*drive\\.log\\) is running unattended execution in this checkout`));
-  assert.match(reason, /Stop the driver first/);
+  assert.match(reason, /Stop the driver first \(`node <devcycle>\/scripts\/drive-execution\.mjs --stop --state [^`]+`, or ask the \/devcycle:continue session watching it to stop it\), or run git from your own terminal; /);
+  assert.doesNotMatch(reason, /Ctrl-C in its terminal|, or kill \d+\)/, "the deny text still tells the user to kill the driver instead of --stop");
   assert.match(reason, new RegExp(`if pid ${process.pid} is no longer running \\(after a reboot, say\\), remove \\.devcycle/drive\\.lock\\. command: git checkout main$`));
 });
 
