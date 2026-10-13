@@ -17,6 +17,7 @@ import { compareKnobs, parseRecordedLine } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
 import { ledgerPlan, nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
+import { ledgerSlotState } from "./ledger-slot.mjs";
 import { pendingReviewLoop, reviewLoopId } from "./task-verdict.mjs";
 import { DRIVE_LOCK_REL, driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";
@@ -230,6 +231,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   if (state.stage !== "execution") return stop("resume-check", `the state file is at stage ${state.stage}, not execution`);
 
   result.entryLines = checked.lines;
+  result.ledgerSlot = ledgerSlotState({ root, plan, run: state.run });
   result.knobDrift = recordedKnobs && knobsLine
     ? compareKnobs(parseRecordedLine(recordedKnobs), parseRecordedLine(knobsLine)).map((c) => `${c.key}: ${c.old} → ${c.new}`)
     : [];

@@ -376,6 +376,19 @@ test("cli: one JSON object on stdout; a usage error exits 2, a state file outsid
   assert.match(failure.error, /not a git repository/);
 });
 
+test("ledgerSlot: stale for another plan's ledger or orphaned per-task files, fresh otherwise, under --drive too", () => {
+  assert.equal(setup(cycle({ ledger: [] })).ledgerSlot, "fresh");
+  assert.equal(setup(cycle()).ledgerSlot, "fresh");
+  assert.equal(setup(cycle({ ledger: [], planHeader: "docs/old-plan.md" })).ledgerSlot, "stale");
+  const orphaned = cycle();
+  writeInto(orphaned.repo, ".devcycle/evidence/1-red.txt", "red\n");
+  assert.equal(setup(orphaned).ledgerSlot, "stale");
+  const c = cycle({ ledger: [], planHeader: "docs/old-plan.md", state: [DRIVE_ROW] });
+  const r = withLock(c, () => driven(c));
+  assert.equal(r.action, "resume");
+  assert.equal(r.ledgerSlot, "stale");
+});
+
 // The hooks module joins a session to its run only on a main-loop Bash call carrying the session
 // append (hooks/devcycle-mod.mjs `appendsSessionRow`; tests/mod/guard.test.ts pins the join). An
 // append folded into wave-setup would never be seen, and agent tracing and the subagent governor
