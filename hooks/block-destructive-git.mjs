@@ -338,10 +338,11 @@ const DRIVE_WORD = /\b(?:checkout|switch|reset|clean)\b/;
 const mentionsDriveWord = (tokens) => tokens.some((t) => DRIVE_WORDS.has(normalizeHead(t)));
 // A git whose subcommand the shell fills in, or one fed its whole argv, may run any subcommand.
 const UNREADABLE_SUBCOMMAND = "the guard cannot read git's subcommand here (a substitution, a variable or xargs supplies it)";
+const DRIVER = fileURLToPath(new URL("../scripts/drive-execution.mjs", import.meta.url));
 const driveDenyReason = (why = "") =>
   `devcycle: a driver (pid ${driveLock.pid}, log ${driveLock.log}) is running unattended execution in this checkout — ` +
   `the main thread may not move the branch or destroy the working tree while it runs${why && `, and ${why}`}. Stop the driver first ` +
-  `(\`node <devcycle>/scripts/drive-execution.mjs --stop --state ${driveLock.state}\`, or ask the /devcycle:continue session ` +
+  `(\`node "${DRIVER}" --stop --state "${resolve(driveLock.root, driveLock.state)}"\`, or ask the /devcycle:continue session ` +
   `watching it to stop it), or run git from your own terminal; if pid ${driveLock.pid} is no ` +
   `longer running (after a reboot, say), remove ${DRIVE_LOCK_REL}. command: ${command.slice(0, 200)}`;
 

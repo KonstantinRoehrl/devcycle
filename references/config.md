@@ -95,7 +95,7 @@ carry the same keys; without it the copies drift one release at a time.
 | `learnStalenessDays` | § Learn staleness | `14` |
 | `learnSessionCap` | § Learn staleness | `100` |
 | `subagentBudget` | `hooks/devcycle-mod.mjs` | `warn` |
-| `executionMode` | `commands/continue.md` | `ask` |
+| `executionMode` | `references/drive.md` | `ask` |
 
 An unset knob renders as a literal `${user_config...}` placeholder, empty, or `auto`; the
 resolution order above owns what "unset" then resolves to, and this column only names the endpoint.

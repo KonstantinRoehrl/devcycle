@@ -19,7 +19,7 @@ depth band, `pendingDecision` — then act on `drive.action`:
 
 | `drive.action` | What this session does |
 | --- | --- |
-| `attach` | A driver is running this cycle (`drive.lock` names its pid and log). Run steps 5–7 of the start path, with `--follow` given no `--since`, so it starts at the log's current end. |
+| `attach` | A driver is running this cycle (`drive.lock` names its pid and log). Run steps 4–6 of the start path, with `--follow` given no `--since`, so it starts at the log's current end. |
 | `ask` | One AskUserQuestion — how execution runs: **Unattended** · **Walk the waves manually**. Write the row from the answer with `via=answer`, then act as `start` or `manual`. |
 | `start` | Write an `auto` row with `via=knob` when `drive.writeRow` is `auto`, then run the start path, asking nothing. |
 | `gate` | The last run stopped for a person: ask the stopped run's question, then run the start path unless the answer left unattended. |
@@ -40,7 +40,7 @@ load each only when its action needs it.
 never self-report, and `<stamp>` is `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`. `via=answer`
 records the user's answer, `via=knob` the `executionMode` knob through `drive.writeRow`. Only the
 actions above write the row — `ask`, `start` and `manual` — and **Walk the waves manually** at a
-stopped run or a refused start, which rewrites an `auto` row to `manual`. Write it by rewriting the
+stopped run or when the start's sandbox approval is refused, which rewrites an `auto` row to `manual`. Write it by rewriting the
 state file in full with the row added; every other rewrite carries it forward
 (`references/resume.md` § The state file). A row outranks the knob: once it exists, a changed
 `executionMode` no longer decides.
@@ -87,19 +87,17 @@ In this order, never dispatching a task from this session:
    Bash tool's sandbox override, which asks the user to approve it. The start:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md --detach`.
    - It prints `{"pid":<n>,"log":".devcycle/drive.log","logOffset":<n>}` once the driver holds
-     its lock: keep `logOffset`.
+     its lock and has marked the previous result handled: keep `logOffset`.
    - The approval is refused or the override unavailable: print
      `node "<plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach`
      for a terminal that is not a Claude Code session, and offer **Walk the waves manually**; on
      that answer, run `--mark-handled` as § Answering a stopped run says before walking.
    - Exit 3 is a refusal: report its message, which names the remedy, and stop. The row stays, so
      the next `/devcycle:continue` retries. Any other non-zero exit: report its message and stop.
-4. **Mark the previous result handled.** `--detach` has already renamed
-   `.devcycle/drive-result.json` to `.devcycle/drive-result.handled.json`; run nothing.
-5. **Print the overview** from `wave-setup.mjs`'s `overview`:
+4. **Print the overview** from `wave-setup.mjs`'s `overview`:
    `<W> waves · <T> tasks · <C> committed — next: wave <w>`, then one line per wave,
    `wave <w>: tasks <ids> (<c>/<n> committed)`.
-6. **Arm the watches.** Progress:
+5. **Arm the watches.** Progress:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --follow --state .devcycle/state.md --since <logOffset>`
    under `Monitor` with its maximum timeout. Relay each line it prints to the user as one line,
    without its ` @<offset>` tail; a `wait:` line names when the run resumes, and is relayed once.
@@ -109,9 +107,10 @@ In this order, never dispatching a task from this session:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/drive.md when-the-run-ends`.
    Where neither tool exists, print `tail -f .devcycle/drive.log` and that Ctrl-C stops watching,
    never the driver.
-7. **Stand down.** Edit no file, commit nothing, walk no wave. When the user asks to stop the run,
+6. **Stand down.** Edit no file, commit nothing, walk no wave. When the user asks to stop the run,
    run `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --stop --state .devcycle/state.md`:
-   the run ends `stopped`, which no `/devcycle:continue` restarts unasked.
+   the run ends `stopped`, which no `/devcycle:continue` restarts unasked. Exit 1 means the signal
+   was not delivered: report its message — the driver stops before its next session.
 
 ## When the run ends
 
