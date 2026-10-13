@@ -18,7 +18,7 @@ import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
-import { LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, STOP_REQUEST_REL, writeDriveResult } from "./drive-result.mjs";
+import { holderRunning, LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeDriveResult } from "./drive-result.mjs";
 import { follow, statusReport, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
@@ -45,14 +45,17 @@ const IDLE_LIMIT_MS = Number(process.env.DEVCYCLE_DRIVE_IDLE_MS) || 30 * 60_000;
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
 const SIGNAL_GRACE_MS = 10_000;
 const DETACH_POLL_MS = 50;
-const DETACH_TIMEOUT_MS = Number(process.env.DEVCYCLE_DRIVE_DETACH_TIMEOUT_MS) || 30_000;
 const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
 // Every wait is a wall-clock deadline checked in slices, so a machine that sleeps through a deadline
 // starts the next session on wake. DEVCYCLE_DRIVE_SLICE_MS and DEVCYCLE_DRIVE_CLOCK_FILE (a file
 // holding epoch milliseconds) let tests run hours of waiting in milliseconds.
 const SLICE_MS = Number(process.env.DEVCYCLE_DRIVE_SLICE_MS) || 60_000;
-// A failure that says nothing about the work: an overloaded or unreachable API.
-const TRANSIENT_TEXT = /api error|overloaded|connection|timed? ?out|ECONNRESET|socket hang up|\b5\d\d\b/i;
+// A failure that says nothing about the work: an overloaded or unreachable API. An API error's status
+// decides on its own: a 5xx (529 is overloaded), a 408 or a 429 passes, while any other 4xx — a low
+// credit balance, an unknown model, a refused permission — fails the same way every time.
+const API_STATUS = /api error:?\s*(\d{3})\b/i;
+const PASSING_4XX = new Set([408, 429]);
+const TRANSIENT_TEXT = /api error|overloaded|connection|timed? ?out|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed/i;
 const AUTH_TEXT = /\/login|not logged in|invalid api key|authentication_error|oauth token (has )?expired/i;
 // Minutes before the k-th consecutive transient retry; every later one waits the last figure.
 const BACKOFF_MINUTES = [1, 2, 4, 8, 16, 30];
@@ -272,7 +275,9 @@ function release(ctx) {
   ctx.lock = null;
 }
 
-// Fail closed: every refusal exits 3 and leaves no lock behind.
+// Fail closed: every refusal exits 3 and leaves no lock behind — and leaves the last run's result and
+// a stop request where they are, since only a run that starts supersedes them. The checks come
+// before the lock, so a lock naming a driver means its pre-flight passed, which detach relies on.
 function preflight(opts) {
   let statePath;
   try {
@@ -285,25 +290,17 @@ function preflight(opts) {
   // The token proves to wave-setup.mjs that a session was started by this driver; the lock keeps
   // only its hash, and only the sessions this driver starts are handed the token itself.
   const ctx = { root, statePath, stateRel: relative(root, statePath), lock: null, session: null, progressed: false, token: randomBytes(16).toString("hex") };
-  if (opts.dryRun) {
-    const holder = readLiveDriveLock(root);
-    if (holder) throw new Exit(3, heldBy(holder));
-  } else {
-    const got = acquireDriveLock(root, { statePath: ctx.stateRel, logPath: LOG_REL, tokenHash: driveTokenHash(ctx.token) });
-    if (!got.ok) throw new Exit(3, heldBy(got.holder));
-    ctx.lock = got.lock;
-  }
-  // Only once no live driver remains, which a racing --stop or a result being written could
-  // belong to; and before every other check, so a result never survives into the next run.
+  const holder = readLiveDriveLock(root);
+  if (holder) throw new Exit(3, heldBy(holder));
+  Object.assign(ctx, checkEnvironment(root, readState(statePath), opts));
+  if (opts.dryRun) return ctx;
+  const got = acquireDriveLock(root, { statePath: ctx.stateRel, logPath: LOG_REL, tokenHash: driveTokenHash(ctx.token) });
+  if (!got.ok) throw new Exit(3, heldBy(got.holder));
+  ctx.lock = got.lock;
+  // Only once no live driver remains, which a racing --stop or a result being written could belong to.
   markResultHandled(root);
   rmSync(join(root, STOP_REQUEST_REL), { force: true });
-  try {
-    Object.assign(ctx, checkEnvironment(root, readState(statePath), opts));
-  } catch (err) {
-    release(ctx);
-    throw err;
-  }
-  if (!opts.dryRun && ctx.leftAlone.length) {
+  if (ctx.leftAlone.length) {
     const log = makeLog(root);
     log(`${ctx.leftAlone.length} tracked change(s) no remaining task writes are left alone`);
     for (const path of ctx.leftAlone) log(path);
@@ -412,6 +409,12 @@ const devcycleErrors = (errors) =>
     return typeof name !== "string" || /^devcycle(@|$)/.test(name);
   });
 
+function apiFailure(text) {
+  const status = Number(text.match(API_STATUS)?.[1]);
+  if (status >= 400 && status < 500 && !PASSING_4XX.has(status)) return "refused";
+  return status || TRANSIENT_TEXT.test(text) ? "transient" : null;
+}
+
 function finalize(s, model) {
   const r = s.result;
   s.resultText = typeof r?.result === "string" ? r.result : "";
@@ -424,6 +427,9 @@ function finalize(s, model) {
     s.environment = `authentication failed: ${s.resultText.split("\n")[0]}`;
   if (!s.limit && r?.is_error && USAGE_LIMIT_TEXT.test(s.resultText))
     s.limit = { resetAt: Number(s.resultText.match(/\|(\d{9,})\b/)?.[1]) || null };
+  if (!s.environment && !s.limit && r?.is_error && apiFailure(s.resultText) === "refused")
+    s.environment = `the API refused the session's request, and retrying cannot fix that: ${s.resultText.split("\n")[0]} — ` +
+      "fix what it names (the account's credit balance, the model id, the key's access), then restart the run from /devcycle:continue";
   return s;
 }
 
@@ -509,12 +515,12 @@ function readStop(root) {
 
 const backoffMs = (attempt) => BACKOFF_MINUTES[Math.min(attempt, BACKOFF_MINUTES.length) - 1] * 60_000;
 
-// A limit with no reset time, an API error, or a session that ended with no result and no ledger
+// A limit with no reset time, an API error that passes, or a session that ended with no result and no ledger
 // line (a connection lost across a sleep): the next session is likely to get further once it
 // passes, so it is backed off and never counted as a stall or churn.
 function transientKind(s, before, after) {
   if (s.limit && !s.limit.resetAt) return "usage-limit";
-  if (s.result?.is_error && TRANSIENT_TEXT.test(s.resultText)) return "api-error";
+  if (s.result?.is_error && apiFailure(s.resultText) === "transient") return "api-error";
   if (s.result === null && !s.environment && !s.silent && after.lines === before.lines) return "no-result";
   return null;
 }
@@ -665,8 +671,12 @@ function clockNow() {
   return Date.now();
 }
 
-async function waitUntil(trap, deadlineMs) {
-  while (!trap.interrupted) {
+// A --stop whose signal could not be delivered leaves its request on disk, and the driver ends on it
+// between sessions and in every slice of a wait.
+const stopRequested = (root) => existsSync(join(root, STOP_REQUEST_REL));
+
+async function waitUntil(trap, deadlineMs, root) {
+  while (!trap.interrupted && !stopRequested(root)) {
     const left = deadlineMs - clockNow();
     if (left <= 0) return;
     await sleep(trap, Math.min(SLICE_MS, left));
@@ -711,6 +721,10 @@ async function walk(ctx, opts, log, trap) {
   let attempts = 0;
   for (let n = 1; ; n++) {
     if (trap.interrupted) return ended(130, "interrupted");
+    if (stopRequested(ctx.root)) {
+      log("a --stop request is on disk; stopping before the next session");
+      return ended(130, "interrupted");
+    }
     const stage = readState(ctx.statePath).stage;
     if (stage === "branch-review") {
       log("execution is complete — the branch is ready for branch review");
@@ -747,7 +761,7 @@ async function walk(ctx, opts, log, trap) {
     if (verdict.wait) {
       const deadline = clockNow() + verdict.wait.ms;
       log(`wait: ${verdict.wait.what} — resuming at ${new Date(deadline).toISOString()}`);
-      await waitUntil(trap, deadline);
+      await waitUntil(trap, deadline, ctx.root);
       if (verdict.wait.charged) waited += verdict.wait.ms;
     }
   }
@@ -805,12 +819,22 @@ function relayRefusal(root, logOffset) {
 // Runs the pre-flight here, so a refusal still exits 3 in the caller's terminal, then starts the
 // driver again without --detach as a new session's leader (`detached: true` calls setsid on POSIX):
 // no terminal's hangup reaches it, unlike a `nohup … &` child of the caller's session. It returns
-// only once the child holds the lock, so a watch armed next never reads a run not yet begun as ended.
+// only once the child holds the lock and has handed off the last run's result, so a watch armed next
+// never reads a run not yet begun as ended; however long that takes, since a driver left running
+// unreported runs unwatched. The child's pre-flight is bounded, so the wait ends.
 async function detach(opts, argv) {
   const { root } = preflight({ ...opts, dryRun: true });
-  markResultHandled(root);
   const logPath = join(root, LOG_REL);
   const logOffset = existsSync(logPath) ? statSync(logPath).size : 0;
+  // The child renames the result away, or replaces it with its own: either changes its inode.
+  const resultIno = () => {
+    try {
+      return statSync(join(root, RESULT_REL)).ino;
+    } catch {
+      return null;
+    }
+  };
+  const staleResult = resultIno();
   const log = openSync(logPath, "a");
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv.filter((a) => a !== "--detach")], {
     detached: true,
@@ -821,8 +845,8 @@ async function detach(opts, argv) {
   child.once("exit", (code) => {
     exited = { code };
   });
-  for (const deadline = Date.now() + DETACH_TIMEOUT_MS; Date.now() < deadline; ) {
-    if (readDriveLockHolder(root)?.pid === child.pid) {
+  for (;;) {
+    if (readDriveLockHolder(root)?.pid === child.pid && (staleResult === null || resultIno() !== staleResult)) {
       child.unref();
       console.log(JSON.stringify({ pid: child.pid, log: LOG_REL, logOffset }));
       return 0;
@@ -833,28 +857,31 @@ async function detach(opts, argv) {
     }
     await new Promise((done) => setTimeout(done, DETACH_POLL_MS));
   }
-  child.unref();
-  throw new Exit(1, `the driver (pid ${child.pid}) has not taken the lock after ${DETACH_TIMEOUT_MS / 1000} s — see ${LOG_REL}`);
 }
 
 // The way to stop a driver on purpose: the request on disk is what makes its 130 read as stopped,
 // which /devcycle:continue never restarts unasked.
-function stopDriver(state) {
+export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, signal) } = {}) {
   const statePath = resolve(state);
   const root = dirname(dirname(statePath));
+  const request = join(root, STOP_REQUEST_REL);
   const notRunning = () => {
+    rmSync(request, { force: true });
     console.error(`drive-execution: no driver is running for ${state}`);
     return 3;
   };
-  const holder = readLiveDriveLock(root);
-  if (!holder || !lockNamesState(root, holder, statePath)) return notRunning();
-  const request = join(root, STOP_REQUEST_REL);
+  // The watcher's liveness (scripts/drive-result.mjs): a sandbox that runs no ps still finds the driver.
+  const holder = readDriveLockHolder(root);
+  if (!holder || !lockNamesState(root, holder, statePath) || !holderRunning(holder)) return notRunning();
   atomicWrite(request, `${now()}\n`);
   try {
-    process.kill(holder.pid, "SIGTERM");
-  } catch {
-    rmSync(request, { force: true });
-    return notRunning();
+    kill(holder.pid, "SIGTERM");
+  } catch (err) {
+    if (err.code === "ESRCH") return notRunning();
+    console.error(`drive-execution: could not signal the driver (pid ${holder.pid}: ${err.code ?? err.message}) — ` +
+      `the stop request stays in ${STOP_REQUEST_REL}, so the driver stops before its next session or within a minute of a wait; ` +
+      `to stop it now, run kill ${holder.pid} from a shell allowed to signal it`);
+    return 1;
   }
   console.log(JSON.stringify({ stopped: true, pid: holder.pid }));
   return 0;

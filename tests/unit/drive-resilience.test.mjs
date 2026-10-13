@@ -116,6 +116,39 @@ test("an API-error session is no stall: it backs off, and the next session start
   assert.ok(r.calls[1].clock >= resumes[0] && r.calls[2].clock >= resumes[1], "a session started before its backoff deadline");
 });
 
+// The status decides: a 5xx, a 408 or a 429 passes on its own, and so does an error with no status
+// (the connection never got one). Any other 4xx is the request's own fault, and retrying it for hours
+// fails the same way every time.
+test("an API error with a 5xx, 408, 429 or no status, or a network error, backs off as transient", TIMEOUT, async () => {
+  const errors = [
+    'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}',
+    'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}',
+    "API Error: 408 Request Timeout",
+    "API Error: Connection error.",
+    "TypeError: fetch failed",
+    "connect ETIMEDOUT 160.79.104.10:443",
+  ];
+  const r = await drive(makeCycle(), [...errors.map((result) => ({ isError: true, result })), { ledger: DONE, stage: "branch-review" }], ["--max-stalls", "1"]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.records.map((x) => x.exitReason), [...errors.map(() => "transient"), "handoff"]);
+});
+
+test("an API error the request itself causes — a 4xx other than 408 or 429 — ends the run at once, naming the error and the remedy, exit 3", TIMEOUT, async () => {
+  const refusals = [
+    'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}',
+    'API Error: 403 {"type":"error","error":{"type":"permission_error","message":"Your API key does not have permission to use the specified resource."}}',
+    'API Error: 404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-sonnet-0-0"}}',
+  ];
+  for (const result of refusals) {
+    const r = await drive(makeCycle(), [{ isError: true, result }, { ledger: DONE, stage: "branch-review" }]);
+    assert.equal(r.code, 3, r.out);
+    assert.equal(r.calls.length, 1, `retried: ${result}`);
+    assert.deepEqual(r.records.map((x) => x.exitReason), ["environment"]);
+    assert.ok(r.out.includes(`the API refused the session's request, and retrying cannot fix that: ${result}`), r.out);
+    assert.match(r.out, /fix what it names[^\n]*, then restart the run from \/devcycle:continue/);
+  }
+});
+
 test("a session with no result and no ledger line is transient, and so is a claude that dies before init, each with its own drive row", TIMEOUT, async () => {
   const lost = await drive(makeCycle(), [{ noResult: true, exitCode: 1 }, { ledger: DONE, stage: "branch-review" }], ["--max-stalls", "1"]);
   assert.equal(lost.code, 0, lost.out);

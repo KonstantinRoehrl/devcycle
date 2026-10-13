@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { createHash } from "node:crypto";
 import { delimiter, dirname, join } from "node:path";
@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
-import { classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS } from "../../scripts/drive-execution.mjs";
+import { classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
 import { classifyDrive, HANDLED_REL, readDriveResult, readHandledResult, RESULT_REL, STOP_REQUEST_REL } from "../../scripts/drive-result.mjs";
 import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
 
@@ -481,22 +481,32 @@ test("--detach relays a driver that fails to start: its own stderr lines from th
   assert.equal(calls(h).length, 0);
 });
 
-// A reclaim mutex a live process holds keeps the child waiting about 2 s (drive-lock.mjs's
-// RECLAIM_WAIT_MS) without the lock, past the shortened detach timeout.
-test("--detach gives up with exit 1, naming the driver's pid and the log, when the driver has not taken the lock in time", async () => {
+// A reclaim mutex a live process (this test) holds keeps the child from the lock until the mutex goes,
+// a second here. The detach timeout this once read is set short, so a wait that gives up would show.
+test("--detach waits for a slow driver until it takes the lock, with no time limit", async () => {
   const root = makeCycle();
   const dead = spawnSync(process.execPath, ["-e", ""]).pid;
   writeLock(root, { pid: dead, startTime: "Thu Jan  1 00:00:00 1970" });
-  writeFileSync(`${lockPath(root)}.reclaim`, JSON.stringify({ hostname: hostname(), pid: process.pid, startTime: processStartTime(process.pid) }));
+  const mutex = `${lockPath(root)}.reclaim`;
+  writeFileSync(mutex, JSON.stringify({ hostname: hostname(), pid: process.pid, startTime: processStartTime(process.pid) }));
   const h = harness([{ ledger: DONE, stage: "branch-review" }], { DEVCYCLE_DRIVE_DETACH_TIMEOUT_MS: "300" });
-  const r = spawnSync(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, "--detach"], { cwd: root, env: h.env, encoding: "utf8", timeout: 20000 });
-  const pid = Number(r.stderr.match(/pid (\d+)/)?.[1]);
+  const detaching = spawn(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, "--detach"], { cwd: root, env: h.env });
+  let out = "";
+  detaching.stdout.on("data", (d) => { out += d; });
+  detaching.stderr.on("data", (d) => { out += d; });
+  const code = new Promise((res) => detaching.on("close", res));
+  setTimeout(() => rmSync(mutex, { force: true }), 1000);
+  const status = await code;
+  let pid = null;
   try {
-    assert.equal(r.status, 1, r.stdout + r.stderr);
-    assert.equal(r.stdout, "");
-    assert.match(r.stderr, /^drive-execution: the driver \(pid \d+\) has not taken the lock after 0\.3 s — see \.devcycle\/drive\.log$/m);
+    assert.equal(status, 0, out);
+    pid = JSON.parse(out).pid;
+    assert.ok(pid > 0, out);
+    await waitFor(() => isDead(pid), 30000);
+    assert.deepEqual(records(h).map((x) => x.exitReason), ["handoff"]);
   } finally {
-    if (pid) await waitFor(() => isDead(pid), 10000).catch(() => process.kill(-pid, "SIGKILL"));
+    const stray = pid ?? Number(out.match(/pid (\d+)/)?.[1]);
+    if (stray && !isDead(stray)) process.kill(-stray, "SIGKILL");
   }
 });
 
@@ -782,21 +792,99 @@ test("--mark-handled hands off the result once continue has acted on it, says wh
   assert.equal(mark([]).status, 2, "--mark-handled without --state");
 });
 
-test("the next pre-flight marks a result left unhandled as handled and clears a stale stop request, even when it refuses", async () => {
-  const refused = makeCycle({ branch: "main" });
-  writeInto(refused, RESULT_REL, JSON.stringify({ code: 130, outcome: "interrupted", noProgressEnds: 1 }));
-  writeInto(refused, STOP_REQUEST_REL, "2026-10-13T00:00:00Z\n");
-  const r = dryRun(refused);
-  assert.equal(r.code, 3, r.out);
-  assert.equal(readDriveResult(refused), null, "the refused pre-flight left the result unhandled");
-  assert.equal(readHandledResult(refused).outcome, "interrupted");
-  assert.equal(existsSync(join(refused, STOP_REQUEST_REL)), false);
+// A stopped run never restarts unasked, so only a start that passes its pre-flight and holds the
+// lock may hand off the result it supersedes.
+test("a --dry-run, or a start its pre-flight refuses, leaves an unhandled result and a stop request where they are", async () => {
+  const stopped = { code: 130, outcome: "stopped", noProgressEnds: 0 };
+  const untouched = (root, label) => {
+    assert.equal(readDriveResult(root)?.outcome, "stopped", `${label} handled a result it never acted on`);
+    assert.equal(readHandledResult(root), null, label);
+    assert.ok(existsSync(join(root, STOP_REQUEST_REL)), `${label} removed the stop request`);
+  };
+  const passing = makeCycle();
+  const refusedBranch = makeCycle({ branch: "main" });
+  const notOpted = makeCycle({ drive: null });
+  for (const root of [passing, refusedBranch, notOpted]) {
+    writeInto(root, RESULT_REL, JSON.stringify(stopped));
+    writeInto(root, STOP_REQUEST_REL, "2026-10-13T00:00:00Z\n");
+  }
+  const dry = dryRun(passing);
+  assert.equal(dry.code, 0, dry.out);
+  untouched(passing, "a passing --dry-run");
+  assert.equal(dryRun(refusedBranch).code, 3);
+  untouched(refusedBranch, "a refused --dry-run");
+  assert.equal(dryRun(notOpted).code, 3);
+  untouched(notOpted, "a --dry-run refused for the missing drive row");
+  assert.deepEqual([classifyDrive({ statePath: statePathOf(notOpted) }).next, classifyDrive({ statePath: statePathOf(notOpted) }).reason], ["answer-gate", "stopped"]);
+  const started = await drive(refusedBranch, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(started.code, 3, started.out);
+  untouched(refusedBranch, "a refused start");
+});
 
+test("a start that passes its pre-flight marks the result left unhandled as handled and clears a stale stop request", async () => {
   // The handled end chains into this run's count: a second resumable end without progress.
   const again = makeCycle();
   writeInto(again, RESULT_REL, JSON.stringify({ code: 130, outcome: "interrupted", progressed: false, noProgressEnds: 1 }));
-  assert.equal((await drive(again, [{ hangMs: 60000 }], { flags: ["--max-backoff", "0"], env: { DEVCYCLE_DRIVE_IDLE_MS: "300" } })).code, 6);
+  writeInto(again, STOP_REQUEST_REL, "2026-10-13T00:00:00Z\n");
+  const r = await drive(again, [{ hangMs: 60000 }], { flags: ["--max-backoff", "0"], env: { DEVCYCLE_DRIVE_IDLE_MS: "300" } });
+  assert.equal(r.code, 6, r.out);
+  assert.equal(r.calls.length, 1, "a stale stop request stopped the run it predates");
+  assert.equal(readHandledResult(again).outcome, "interrupted");
+  assert.equal(existsSync(join(again, STOP_REQUEST_REL)), false);
   assert.equal(resultOf(again).noProgressEnds, 2);
   const c = classifyDrive({ statePath: statePathOf(again) });
   assert.deepEqual([c.next, c.reason], ["answer-gate", "no-progress"]);
+});
+
+// A driver another user or a sandbox started may refuse the signal (EPERM) while it runs on. Only a
+// pid that no longer exists (ESRCH) means no driver runs. The kill is injected: this test's own
+// process stands in as the live holder.
+test("--stop keeps the stop request and says so when the driver cannot be signalled; only a driver that is gone reads as not running", (t) => {
+  const root = makeCycle();
+  writeLock(root, { pid: process.pid, startTime: processStartTime(process.pid) });
+  const said = [];
+  t.mock.method(console, "error", (msg) => said.push(msg));
+  t.mock.method(console, "log", (msg) => said.push(msg));
+  const refusing = (code) => () => {
+    throw Object.assign(new Error(`kill ${code}`), { code });
+  };
+  assert.equal(stopDriver(statePathOf(root), { kill: refusing("EPERM") }), 1);
+  assert.ok(existsSync(join(root, STOP_REQUEST_REL)), "the stop request was removed while the driver may still run");
+  assert.doesNotMatch(said.join("\n"), /no driver is running/);
+  assert.match(said.join("\n"), new RegExp(`^drive-execution: could not signal the driver \\(pid ${process.pid}: EPERM\\)`, "m"));
+  assert.match(said.join("\n"), /the stop request stays in \.devcycle\/drive-stop-request/);
+
+  said.length = 0;
+  assert.equal(stopDriver(statePathOf(root), { kill: refusing("ESRCH") }), 3);
+  assert.equal(existsSync(join(root, STOP_REQUEST_REL)), false);
+  assert.deepEqual(said, [`drive-execution: no driver is running for ${statePathOf(root)}`]);
+});
+
+// What makes a stop request on disk work without the signal: the driver reads it between sessions
+// and in every slice of a wait. The fake claude writes it during session 1, as a --stop whose signal
+// was refused would.
+test("a driver that finds a stop request on disk ends as stopped before its next session, or within a slice of a wait", async () => {
+  const request = `require("node:fs").writeFileSync(${JSON.stringify(STOP_REQUEST_REL)}, "2026-10-13T00:00:00Z\\n");\n`;
+  const root = makeCycle();
+  const h = harness([{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }], {}, { prelude: request });
+  const r = await startDriver(root, h).result();
+  assert.equal(r.code, 130, r.out);
+  assert.equal(calls(h).length, 1, "the driver started a session after a stop request");
+  assert.equal(resultOf(root).outcome, "stopped");
+  assert.equal(existsSync(join(root, STOP_REQUEST_REL)), false);
+
+  const waiting = makeCycle();
+  const hw = harness([{ rateLimitInSec: 3600 }], { DEVCYCLE_DRIVE_SLICE_MS: "50" });
+  const d = startDriver(waiting, hw);
+  try {
+    const log = join(waiting, ".devcycle", "drive.log");
+    await waitFor(() => existsSync(log) && /wait: usage limit/.test(readFileSync(log, "utf8")));
+    writeInto(waiting, STOP_REQUEST_REL, "2026-10-13T00:00:00Z\n");
+    const ended = await Promise.race([d.result(), new Promise((res) => setTimeout(() => res(null), 10000))]);
+    assert.ok(ended, "the driver waited on past a stop request");
+    assert.equal(ended.code, 130, ended.out);
+    assert.equal(resultOf(waiting).outcome, "stopped");
+  } finally {
+    if (d.child.exitCode === null) d.child.kill("SIGKILL");
+  }
 });
