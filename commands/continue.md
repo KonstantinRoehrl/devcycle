@@ -88,15 +88,16 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --learnStalenessSessions '${user_config.learnStalenessSessions}' \
   --learnStalenessDays '${user_config.learnStalenessDays}' \
   --learnSessionCap '${user_config.learnSessionCap}' \
-  --subagentBudget '${user_config.subagentBudget}'
+  --subagentBudget '${user_config.subagentBudget}' \
+  --executionMode '${user_config.executionMode}'
 ```
 
    When the state file carries a `- knobs:` line, rerun that command with `--compare '<that
    line>'` appended. No output → proceed. Any output (`key: old → new` lines) → show it and ask
    ONE question, the knob-change question, unless a `- knobs-declined:` row skips it: **apply for
    the rest of this cycle**, rewriting `- knobs:` from the fresh line, or **keep this cycle's
-   values**, leaving `- knobs:` as it is. The comparison never prints `subagentBudget`: the hooks
-   module reads its global value, not `- knobs:`, so a keep could not hold it (§ Knob channel).
+   values**, leaving `- knobs:` as it is. The comparison never prints a live knob — `subagentBudget`,
+   `executionMode` — whose reader takes the global value, so a keep could not hold it (§ Knob channel).
    Whatever the comparison printed, update the `knobs-declined:`/`knobs-changed:` rows and record
    an apply as `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file specifies. A state
    file with no `- knobs:` line gets one written from the fresh line without asking. Then the
