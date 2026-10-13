@@ -18,7 +18,7 @@ import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
-import { holderRunning, LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeDriveResult } from "./drive-result.mjs";
+import { holderRunning, LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
 import { follow, statusReport, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
@@ -433,12 +433,20 @@ function finalize(s, model) {
   return s;
 }
 
+// Once the run progresses, the crashed result a death from here on would leave says so.
+function markProgressed(ctx) {
+  if (ctx.progressed) return;
+  ctx.progressed = true;
+  writeCrashedResult(ctx.root, { startedAt: ctx.startedAt, progressed: true });
+}
+
 function runSession(ctx, bin, args, log, n) {
   const s = { sessionId: null, environment: null, result: null, limit: null, silent: false, tools: 0, depthTokens: null, requests: new Map() };
   let seen = ledgerEntries(ctx.root, ctx.plan).length;
-  return new Promise((settle) => {
+  return new Promise((settle, fail) => {
     let handle;
     let idle;
+    let broken = null;
     const armIdle = () => {
       clearTimeout(idle);
       idle = setTimeout(() => {
@@ -471,7 +479,7 @@ function runSession(ctx, bin, args, log, n) {
         s.result = e;
       }
     };
-    const onStdoutLine = (line) => {
+    const readLine = (line) => {
       armIdle();
       let event;
       try {
@@ -481,9 +489,21 @@ function runSession(ctx, bin, args, log, n) {
       }
       onEvent(event);
       const entries = ledgerEntries(ctx.root, ctx.plan);
-      for (const entry of entries.slice(seen))
+      for (const entry of entries.slice(seen)) {
         log(`session ${n} · ${s.tools} tool calls · task=${entry.task} event=${entry.event} outcome=${entry.outcome}`);
+        if (!DISPATCH_EVENTS.has(entry.event)) markProgressed(ctx);
+      }
       seen = Math.max(seen, entries.length);
+    };
+    // This runs inside the stream's data handler, where a throw would end the driver with no result.
+    const onStdoutLine = (line) => {
+      if (broken) return;
+      try {
+        readLine(line);
+      } catch (err) {
+        broken = err;
+        stopSession(handle);
+      }
     };
     let startError = null;
     handle = spawnStreaming(bin, args, { cwd: ctx.root, env: childEnv(ctx), onStdoutLine, onStderrLine: armIdle });
@@ -496,8 +516,12 @@ function runSession(ctx, bin, args, log, n) {
     handle.done.then(({ code, signal }) => {
       clearTimeout(idle);
       ctx.session = null;
-      if (code === null && signal === null) s.environment = `cannot run ${bin}: ${startError?.message ?? "it never started"}`;
-      settle(finalize(s, ctx.model));
+      if (broken)
+        fail(new Error(`session ${n}'s output broke the driver (${broken.message}) — the session was stopped; the next /devcycle:continue restarts the run`));
+      else {
+        if (code === null && signal === null) s.environment = `cannot run ${bin}: ${startError?.message ?? "it never started"}`;
+        settle(finalize(s, ctx.model));
+      }
     });
   });
 }
@@ -744,7 +768,7 @@ async function walk(ctx, opts, log, trap) {
     const entriesAfter = ledgerEntries(ctx.root, ctx.plan);
     const after = progressOf(entriesAfter);
     if (after.advanced > before.advanced) {
-      ctx.progressed = true;
+      markProgressed(ctx);
       waited = 0;
       attempts = 0;
     }
@@ -788,8 +812,10 @@ async function drive(opts) {
   }
   const trap = trapSignals(ctx);
   const startedAt = now();
+  ctx.startedAt = startedAt;
   let end = ended(1, "failed");
   try {
+    writeCrashedResult(ctx.root, { startedAt, progressed: false });
     end = await walk(ctx, opts, makeLog(ctx.root), trap);
     return end.code;
   } catch (err) {
@@ -872,7 +898,7 @@ export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, si
   };
   // The watcher's liveness (scripts/drive-result.mjs): a sandbox that runs no ps still finds the driver.
   const holder = readDriveLockHolder(root);
-  if (!holder || !lockNamesState(root, holder, statePath) || !holderRunning(holder)) return notRunning();
+  if (!holder || !lockNamesState(root, holder, statePath) || !holderRunning(root, holder)) return notRunning();
   atomicWrite(request, `${now()}\n`);
   try {
     kill(holder.pid, "SIGTERM");

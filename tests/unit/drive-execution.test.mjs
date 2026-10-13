@@ -445,7 +445,7 @@ test("--detach handles a stale result, returns once the lock names the driver it
     pid = printed.pid;
     assert.equal(readDriveLockHolder(root)?.pid, pid, "--detach returned before the driver held the lock");
     assert.deepEqual([printed.log, printed.logOffset], [".devcycle/drive.log", Buffer.byteLength(earlier)]);
-    assert.ok(!existsSync(join(root, RESULT_REL)), "the earlier run's result survived into this run");
+    assert.notEqual(readDriveResult(root)?.outcome, "interrupted", "the earlier run's result survived into this run");
     assert.equal(JSON.parse(readFileSync(join(root, HANDLED_REL), "utf8")).outcome, "interrupted");
     // A new session's leader leads its own process group too: the caller's hangup cannot reach it.
     assert.equal(spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim(), String(pid));
@@ -834,6 +834,49 @@ test("a start that passes its pre-flight marks the result left unhandled as hand
   assert.equal(resultOf(again).noProgressEnds, 2);
   const c = classifyDrive({ statePath: statePathOf(again) });
   assert.deepEqual([c.next, c.reason], ["answer-gate", "no-progress"]);
+});
+
+// A driver killed outright (SIGKILL, out of memory) records no end of its own; the result it wrote as
+// it started is what the next /devcycle:continue reads.
+async function killDriverMidRun(root, h, { until = () => true } = {}) {
+  const sessions = calls(h).length;
+  const d = startDriver(root, h);
+  try {
+    await waitFor(() => calls(h).length > sessions && until(), 10000);
+  } finally {
+    if (d.child.exitCode === null) d.child.kill("SIGKILL");
+    await d.result();
+    try { process.kill(-calls(h).at(-1).pid, "SIGKILL"); } catch { /* already gone */ }
+  }
+  return classifyDrive({ statePath: statePathOf(root) });
+}
+
+test("a driver killed mid-run reads as crashed and restarts; a restart killed again with no progress becomes the no-progress question", async () => {
+  const root = makeCycle();
+  const h = harness([{ ledger: [line(1, "dispatched")], hangMs: 60000 }]);
+  const first = await killDriverMidRun(root, h);
+  assert.deepEqual([first.outcome, first.noProgressEnds, first.next], ["crashed", 1, "restart"]);
+  const second = await killDriverMidRun(root, h);
+  assert.deepEqual([second.outcome, second.noProgressEnds, second.next, second.reason], ["crashed", 2, "answer-gate", "no-progress"]);
+});
+
+test("a driver killed after its run made progress, mid-session included, reads as a crash to restart whatever ended before it", async () => {
+  const root = makeCycle();
+  writeInto(root, RESULT_REL, JSON.stringify({ code: 130, outcome: "interrupted", progressed: false, noProgressEnds: 1 }));
+  const h = harness([{ ledger: [line(1, "dispatched"), line(1, "report-received")], hangMs: 60000 }]);
+  const c = await killDriverMidRun(root, h, { until: () => readDriveResult(root)?.progressed === true });
+  assert.deepEqual([c.outcome, c.progressed, c.noProgressEnds, c.next], ["crashed", true, 0, "restart"]);
+});
+
+test("a session event the driver fails on ends the run as failed, with its result written and its lock released", async () => {
+  const root = makeCycle();
+  // An init event whose plugin list is no list.
+  const r = await drive(root, [{ plugins: { devcycle: true } }]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /^drive-execution: session 1's output broke the driver \(.+\) — /m);
+  assert.deepEqual([resultOf(root).code, resultOf(root).outcome], [1, "failed"]);
+  assert.ok(!existsSync(lockPath(root)), "the driver left its lock behind");
+  assert.equal(classifyDrive({ statePath: statePathOf(root) }).next, "restart");
 });
 
 // A driver another user or a sandbox started may refuse the signal (EPERM) while it runs on. Only a

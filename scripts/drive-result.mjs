@@ -1,11 +1,11 @@
 // The driver's result file and the one reading of a run's state. scripts/drive-execution.mjs writes
-// .devcycle/drive-result.json as a run ends, before it releases its lock; classifyDrive turns that
-// file, the lock and the state's stage into what the next /devcycle:continue does. Nothing else
-// decides what a driver's end means.
+// .devcycle/drive-result.json as a crash when a run starts and replaces it with the run's end before
+// it releases its lock; classifyDrive turns that file, the lock and the state's stage into what the
+// next /devcycle:continue does. Nothing else decides what a driver's end means.
 import { mkdirSync, readFileSync, realpathSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
-import { readDriveLockHolder } from "./drive-lock.mjs";
+import { readDriveLockHolder, readLiveDriveLock } from "./drive-lock.mjs";
 import { isLiveHolder, processStartTime } from "./file-lock.mjs";
 import { field } from "./md-field.mjs";
 
@@ -14,7 +14,7 @@ export const RESULT_REL = ".devcycle/drive-result.json";
 export const HANDLED_REL = ".devcycle/drive-result.handled.json";
 export const STOP_REQUEST_REL = ".devcycle/drive-stop-request";
 // The ends a restart retries as they are: none of them needs a person.
-export const RESUMABLE = new Set(["interrupted", "failed", "wait-cap"]);
+export const RESUMABLE = new Set(["interrupted", "failed", "wait-cap", "crashed"]);
 // A run that ends this many times in a row without progress fails the same way every time.
 const NO_PROGRESS_LIMIT = 2;
 
@@ -58,9 +58,23 @@ export function noProgressEndsAfter(root, { progressed }) {
   return previous && RESUMABLE.has(resumableKey(previous)) ? (Number(previous.noProgressEnds) || 0) + 1 : 1;
 }
 
+const CRASH_DETAIL =
+  "the driver ended without recording how its run ended (killed, or out of memory); the end of .devcycle/drive.log may say why";
+
+// What a run that dies before it records its end leaves behind: written as the run starts, and again
+// once it makes progress, so a crash counts toward the no-progress bound like any resumable end.
+export function writeCrashedResult(root, { startedAt, progressed }) {
+  writeDriveResult(root, {
+    code: null, outcome: "crashed", reason: null, task: null, detail: CRASH_DETAIL, startedAt, endedAt: null,
+    progressed, noProgressEnds: noProgressEndsAfter(root, { progressed }),
+  });
+}
+
 // kill(pid, 0) says whether the pid exists; the start time, where ps can read it, whether it is still
-// the process that wrote the lock. A watcher whose sandbox runs no ps trusts the pid alone.
-export function holderRunning(holder) {
+// the process that wrote the lock. A watcher whose sandbox runs no ps trusts the pid alone. A lock
+// that carries its holder's start in clock ticks (Linux) is judged by the lock module instead: a
+// clock step moves the start time ps prints, never the ticks.
+export function holderRunning(root, holder) {
   // kill() reads a pid of 0 or below as a process group.
   if (!holder || !(holder.pid > 0)) return false;
   try {
@@ -68,7 +82,10 @@ export function holderRunning(holder) {
   } catch (err) {
     if (err.code !== "EPERM") return false;
   }
-  return processStartTime(holder.pid) === null || isLiveHolder(holder);
+  if (processStartTime(holder.pid) === null) return true;
+  if (typeof holder.ticks !== "string") return isLiveHolder(holder);
+  const live = readLiveDriveLock(root);
+  return live?.pid === holder.pid && live.startTime === holder.startTime;
 }
 
 const real = (path) => {
@@ -114,9 +131,14 @@ export function classifyDrive({ statePath }) {
   };
   const holder = readDriveLockHolder(root);
   const ours = holder !== null && lockNamesState(root, holder, state);
-  if (ours && holderRunning(holder)) return { ...idle, running: true, pid: holder.pid, log: holder.log ?? null };
+  if (ours && holderRunning(root, holder)) return { ...idle, running: true, pid: holder.pid, log: holder.log ?? null };
   const result = readDriveResult(root);
-  if (!result) return ours ? { ...idle, pid: holder.pid, log: holder.log ?? null, outcome: "crashed", next: "restart" } : idle;
+  if (!result && !ours) return idle;
+  // A driver that died before it wrote its starting result is read as the crash that result records.
+  if (!result) {
+    const crashed = { ...idle, pid: holder.pid, log: holder.log ?? null, outcome: "crashed", detail: CRASH_DETAIL, noProgressEnds: noProgressEndsAfter(root, { progressed: false }) };
+    return { ...crashed, ...nextFor(crashed, stageOf(state)) };
+  }
   const ended = {
     ...idle,
     outcome: result.outcome ?? null,

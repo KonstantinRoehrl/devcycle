@@ -8,10 +8,10 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
-import { DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
+import { acquireDriveLock, DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
 import {
   classifyDrive, HANDLED_REL, holderRunning, markResultHandled, noProgressEndsAfter, readDriveResult,
-  readHandledResult, RESULT_REL, RESUMABLE, writeDriveResult,
+  readHandledResult, RESULT_REL, RESUMABLE, writeCrashedResult, writeDriveResult,
 } from "../../scripts/drive-result.mjs";
 
 function cycle(stage = "execution") {
@@ -72,7 +72,7 @@ test("markResultHandled renames the result over any earlier handled one and says
 });
 
 test("noProgressEndsAfter counts consecutive resumable ends without progress, chained through the handled result", () => {
-  assert.deepEqual([...RESUMABLE].sort(), ["failed", "interrupted", "wait-cap"]);
+  assert.deepEqual([...RESUMABLE].sort(), ["crashed", "failed", "interrupted", "wait-cap"]);
   const { root } = cycle();
   const after = (progressed = false) => noProgressEndsAfter(root, { progressed, outcome: "interrupted", reason: null });
   assert.equal(after(), 1, "with no handled result");
@@ -81,6 +81,7 @@ test("noProgressEndsAfter counts consecutive resumable ends without progress, ch
   for (const [fields, expected] of [
     [{ outcome: "interrupted", noProgressEnds: 1 }, 2],
     [{ outcome: "failed", noProgressEnds: 1 }, 2],
+    [{ outcome: "crashed", noProgressEnds: 1 }, 2],
     [{ outcome: "budget", reason: "wait-cap", noProgressEnds: 3 }, 4],
     [{ outcome: "budget", reason: "max-usd", noProgressEnds: 3 }, 1],
     [{ outcome: "gate-stop", reason: "needs-user", noProgressEnds: 4 }, 1],
@@ -92,11 +93,31 @@ test("noProgressEndsAfter counts consecutive resumable ends without progress, ch
 });
 
 test("holderRunning: a live holder runs; no holder, a dead pid, a reused pid and a process-group pid do not", () => {
-  assert.equal(holderRunning(live()), true);
-  assert.equal(holderRunning(null), false);
-  assert.equal(holderRunning(dead()), false);
-  assert.equal(holderRunning(reused()), false);
-  assert.equal(holderRunning({ ...live(), pid: 0 }), false);
+  const { root } = cycle();
+  assert.equal(holderRunning(root, live()), true);
+  assert.equal(holderRunning(root, null), false);
+  assert.equal(holderRunning(root, dead()), false);
+  assert.equal(holderRunning(root, reused()), false);
+  assert.equal(holderRunning(root, { ...live(), pid: 0 }), false);
+});
+
+test("holderRunning: a lock that carries its holder's start in clock ticks is judged by them, so ticks naming another start do not run", () => {
+  const { root } = cycle();
+  const holder = { ...live(), ticks: "1" };
+  writeLock(root, holder);
+  assert.equal(holderRunning(root, holder), false);
+});
+
+// ps derives a process's start time from the wall clock, so a clock step (a resume from suspend, an
+// NTP correction) moves the time it prints; the start in ticks since boot does not move.
+test("holderRunning: on Linux a live driver whose ps start time a clock step moved still runs", { skip: process.platform !== "linux" && "only a Linux lock carries /proc start ticks" }, () => {
+  const { root, statePath } = cycle();
+  const { ok, lock } = acquireDriveLock(root, { statePath: ".devcycle/state.md", logPath: ".devcycle/drive.log" });
+  assert.ok(ok && typeof lock.ticks === "string", JSON.stringify(lock));
+  const stepped = { ...lock, startTime: "Thu Jan  1 00:00:00 1970" };
+  writeFileSync(join(root, DRIVE_LOCK_REL), JSON.stringify(stepped));
+  assert.equal(holderRunning(root, stepped), true);
+  assert.equal(classify(statePath).running, true);
 });
 
 test("classifyDrive: a live lock naming this state file is a running driver, whatever result file is beside it", () => {
@@ -114,7 +135,7 @@ test("classifyDrive: a lock naming a dead or a reused pid, with no result, is a 
     const { root, statePath } = cycle();
     writeLock(root, holder);
     const c = classify(statePath);
-    assert.deepEqual([c.running, c.outcome, c.noProgressEnds, c.next], [false, "crashed", 0, "restart"], JSON.stringify(holder));
+    assert.deepEqual([c.running, c.outcome, c.noProgressEnds, c.next], [false, "crashed", 1, "restart"], JSON.stringify(holder));
   }
   const { root, statePath } = cycle();
   writeLock(root, dead());
@@ -180,6 +201,30 @@ test("classifyDrive: a second resumable end without progress turns restart into 
   writeHandled(root, { outcome: "interrupted", noProgressEnds: 1 });
   writeDriveResult(root, result({ outcome: "interrupted", noProgressEnds: noProgressEndsAfter(root, { progressed: false, outcome: "interrupted", reason: null }) }));
   assert.deepEqual([classify(statePath).next, classify(statePath).reason], ["answer-gate", "no-progress"]);
+});
+
+test("classifyDrive: crashes count toward the no-progress bound, whether the dead driver left its starting result or none", () => {
+  const startedAt = "2026-10-13T00:00:00Z";
+  const { root, statePath } = cycle();
+  writeLock(root, dead());
+  writeCrashedResult(root, { startedAt, progressed: false });
+  let c = classify(statePath);
+  assert.deepEqual([c.outcome, c.noProgressEnds, c.next], ["crashed", 1, "restart"]);
+  assert.match(c.detail, /drive\.log/);
+  // The restart that crashes in turn: its start hands off the first crash, then writes its own.
+  markResultHandled(root);
+  writeCrashedResult(root, { startedAt, progressed: false });
+  c = classify(statePath);
+  assert.deepEqual([c.outcome, c.noProgressEnds, c.next, c.reason], ["crashed", 2, "answer-gate", "no-progress"]);
+  writeCrashedResult(root, { startedAt, progressed: true });
+  c = classify(statePath);
+  assert.deepEqual([c.progressed, c.noProgressEnds, c.next], [true, 0, "restart"], "a crash after progress restarts");
+  // A driver that died before it wrote its starting result chains the same way.
+  const bare = cycle();
+  writeLock(bare.root, dead());
+  writeHandled(bare.root, { outcome: "crashed", noProgressEnds: 1 });
+  c = classify(bare.statePath);
+  assert.deepEqual([c.outcome, c.noProgressEnds, c.next, c.reason], ["crashed", 2, "answer-gate", "no-progress"]);
 });
 
 test("classifyDrive: no result, a handled result and an unparsable result all read as none", () => {

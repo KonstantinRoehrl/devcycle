@@ -92,12 +92,14 @@ driver runs on; your next `/devcycle:continue` attaches or picks up the end.
    depth probe loses the session for two task scripts in a row — finishes its in-flight tasks, dispatches nothing new, and ends with the handoff label
    `Session ended mid-wave: <k> of <n> tasks done (stage: execution)`; the driver starts the next
    session and the wave resumes where it stopped.
-5. **One result per run.** Before it releases its lock the driver writes `.devcycle/drive-result.json`:
-   its exit code, the outcome (`complete`, `left-execution`, `failed`, `environment`, `gate-stop`,
-   `stalled`, `budget`, `stopped`, `interrupted`), the stop's reason, task and detail, whether the
-   run made progress, and how many resumable ends in a row made none. `/devcycle:continue` decides
-   from it whether to restart, ask, or hand off; a lock naming a dead pid with no result reads as a
-   crash and is restarted.
+5. **One result per run.** Holding the lock, the driver writes `.devcycle/drive-result.json` as a
+   crash (`crashed`) when the run starts and again once it makes progress, and replaces it before it
+   releases the lock with its exit code, the outcome (`complete`, `left-execution`, `failed`,
+   `environment`, `gate-stop`, `stalled`, `budget`, `stopped`, `interrupted`), the stop's reason,
+   task and detail, whether the run made progress, and how many resumable ends in a row made none.
+   `/devcycle:continue` decides from it whether to restart, ask, or hand off. A driver killed
+   outright leaves its `crashed` result, and a lock naming a dead pid with no result reads the same:
+   a crash counts toward the no-progress bound like any resumable end.
 
 ## Usage limits, failures and silent sessions
 
