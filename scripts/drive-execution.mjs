@@ -45,6 +45,16 @@ const IDLE_LIMIT_MS = Number(process.env.DEVCYCLE_DRIVE_IDLE_MS) || 30 * 60_000;
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
 const SIGNAL_GRACE_MS = 10_000;
 const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
+// Every wait is a wall-clock deadline checked in slices, so a machine that sleeps through a deadline
+// starts the next session on wake. DEVCYCLE_DRIVE_SLICE_MS and DEVCYCLE_DRIVE_CLOCK_FILE (a file
+// holding epoch milliseconds) let tests run hours of waiting in milliseconds.
+const SLICE_MS = Number(process.env.DEVCYCLE_DRIVE_SLICE_MS) || 60_000;
+// A failure that says nothing about the work: an overloaded or unreachable API.
+const TRANSIENT_TEXT = /api error|overloaded|connection|timed? ?out|ECONNRESET|socket hang up|\b5\d\d\b/i;
+const AUTH_TEXT = /\/login|not logged in|invalid api key|authentication_error|oauth token (has )?expired/i;
+// Minutes before the k-th consecutive transient retry; every later one waits the last figure.
+const BACKOFF_MINUTES = [1, 2, 4, 8, 16, 30];
+const RESET_MARGIN_MS = 60_000;
 const MID_WAVE_LABEL = "Session ended mid-wave:";
 // The ledger events that mean a task moved: a session that adds lines but none of these is churn.
 const OUTCOME_EVENTS = new Set(["committed", "report-received", "review-verdict"]);
@@ -396,6 +406,8 @@ function finalize(s, model) {
   if (s.costUsd === null) tallyTranscripts(s.requests, s.sessionId);
   s.spentUsd = s.costUsd ?? estimateUsd(s.requests, model);
   s.denials = Array.isArray(r?.permission_denials) ? r.permission_denials.length : 0;
+  if (!s.environment && r?.is_error && AUTH_TEXT.test(s.resultText))
+    s.environment = `authentication failed: ${s.resultText.split("\n")[0]}`;
   if (!s.limit && r?.is_error && USAGE_LIMIT_TEXT.test(s.resultText))
     s.limit = { resetAt: Number(s.resultText.match(/\|(\d{9,})\b/)?.[1]) || null };
   return s;
@@ -481,6 +493,26 @@ function readStop(root) {
   }
 }
 
+const backoffMs = (attempt) => BACKOFF_MINUTES[Math.min(attempt, BACKOFF_MINUTES.length) - 1] * 60_000;
+
+// A limit with no reset time, an API error, or a session that ended with no result and no ledger
+// line (a connection lost across a sleep): the next session is likely to get further once it
+// passes, so it is backed off and never counted as a stall or churn.
+function transientKind(s, before, after) {
+  if (s.limit && !s.limit.resetAt) return "usage-limit";
+  if (s.result?.is_error && TRANSIENT_TEXT.test(s.resultText)) return "api-error";
+  if (s.result === null && !s.environment && !s.silent && after.lines === before.lines) return "no-result";
+  return null;
+}
+
+// The Dispatch-Map waves a session finished: from the one in flight at its start up to, not
+// including, the one in flight after it — all of them once nothing is left in flight.
+function waveEnds(planText, waveAtStart, waveAfter) {
+  if (waveAtStart === null) return [];
+  const waves = [...(parseDispatchMap(planText)?.keys() ?? [])].sort((a, b) => a - b);
+  return waves.filter((w) => w >= waveAtStart && (waveAfter === null || w < waveAfter)).map((w) => `wave ${w} of ${waves.at(-1)} complete`);
+}
+
 // Progress, judged the same however a session ended: a ledger line beyond a dispatch resets the
 // stall count, and a report, verdict or commit the churn count too: churn is such lines but no task
 // outcome. A session a usage limit held adds to neither count.
@@ -494,29 +526,46 @@ function progressCounts(before, after, { stalls, churn }, limited) {
 }
 
 // The evaluation order the driver promises: an interrupt, a broken environment, a stop the session
-// signalled, a usage limit (its stall and churn counts, then the dollar cap, before any wait), the
-// stage leaving execution, then progress and the dollar cap.
-function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, interrupted }) {
+// signalled, then a usage limit with a known reset, a transient failure or a silent session (each
+// checks the dollar cap before any wait; silence also its stall and churn counts), the stage leaving
+// execution, then progress and the dollar cap.
+function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, attempts, interrupted }) {
   const verdict = (exitReason, code, message, extra = {}) => ({ exitReason, code, message, stalls, churn, ...extra });
   if (interrupted) return verdict("interrupted", 130, "interrupted — the session was stopped and the lock released");
   if (s.environment) return verdict("environment", 3, s.environment);
   const stop = readStop(ctx.root);
   if (stop) return verdict("stopped", 4, `stopped for you — ${stop.reason}: ${stop.detail}`, { stopReason: stop.reason, stop });
   const overBudget = opts.maxUsd !== undefined && spent >= opts.maxUsd;
-  const counts = progressCounts(before, after, { stalls, churn }, Boolean(s.limit));
+  const transient = transientKind(s, before, after);
+  const counts = progressCounts(before, after, { stalls, churn }, Boolean(s.limit || transient));
   const budgetSpent = () => verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, { ...counts, reason: "max-usd" });
   const said = `The last session said:\n${s.resultText || "(no result)"}`;
   const stalled = (how = "") => verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row added no ledger line beyond a dispatch${how}. ${said}`, counts);
   const churned = () => verdict("stalled", 5, `stalled: ${counts.churn} sessions in a row added ledger lines but no report, verdict or commit. ${said}`, counts);
-  if (s.limit || s.silent) {
+  if (s.limit?.resetAt) {
+    if (overBudget) return budgetSpent();
+    const ms = Math.max(s.limit.resetAt * 1000 - clockNow(), 0) + RESET_MARGIN_MS;
+    return verdict("budget", null, null, { ...counts, wait: { ms, what: "usage limit until its reset", charged: false } });
+  }
+  if (transient) {
+    if (overBudget) return budgetSpent();
+    const attempt = attempts + 1;
+    const ms = backoffMs(attempt);
+    if (waited + ms > opts.maxBackoffMs)
+      return verdict("budget", 6,
+        `transient failure (${transient}), attempt ${attempt}: backing off ${ms / 60_000} more min would pass --max-backoff — the next /devcycle:continue restarts the run`,
+        { ...counts, reason: "wait-cap" });
+    return verdict("transient", null, null, { ...counts, attempts: attempt, wait: { ms, what: `transient failure (${transient}), attempt ${attempt}`, charged: true } });
+  }
+  if (s.silent) {
     // Silence with no usage-limit signal may be a limit — or a session that hangs every time, so it
     // also counts toward a stall or churn, as an ended session would.
     if (counts.stalls >= opts.maxStalls) return stalled("; the last went silent with no usage-limit signal until the driver stopped it");
     if (counts.churn >= opts.maxChurn) return churned();
     if (overBudget) return budgetSpent();
-    const waitMs = s.limit?.resetAt ? Math.max(s.limit.resetAt * 1000 - Date.now(), 1000) : DEFAULT_BACKOFF_MS;
-    if (waited + waitMs > opts.maxBackoffMs) return verdict("budget", 6, "usage limit: waiting it out would pass --max-backoff", { ...counts, reason: "wait-cap" });
-    return verdict("budget", null, null, { waitMs, ...counts });
+    if (waited + DEFAULT_BACKOFF_MS > opts.maxBackoffMs)
+      return verdict("budget", 6, "a silent session: waiting it out would pass --max-backoff — the next /devcycle:continue restarts the run", { ...counts, reason: "wait-cap" });
+    return verdict("budget", null, null, { ...counts, wait: { ms: DEFAULT_BACKOFF_MS, what: "silent session", charged: true } });
   }
   const crashed = s.result === null;
   if (readState(ctx.statePath).stage !== "execution") return verdict(crashed ? "error" : "handoff", null, null);
@@ -589,6 +638,27 @@ function sleep(trap, ms) {
   });
 }
 
+function clockNow() {
+  const file = process.env.DEVCYCLE_DRIVE_CLOCK_FILE;
+  if (file) {
+    try {
+      const text = readFileSync(file, "utf8").trim();
+      if (/^\d+$/.test(text)) return Number(text);
+    } catch {
+      // An unreadable clock file leaves the real clock.
+    }
+  }
+  return Date.now();
+}
+
+async function waitUntil(trap, deadlineMs) {
+  while (!trap.interrupted) {
+    const left = deadlineMs - clockNow();
+    if (left <= 0) return;
+    await sleep(trap, Math.min(SLICE_MS, left));
+  }
+}
+
 function isStdout(path) {
   try {
     const out = fstatSync(process.stdout.fd);
@@ -624,6 +694,7 @@ async function walk(ctx, opts, log, trap) {
   let churn = 0;
   let spent = 0;
   let waited = 0;
+  let attempts = 0;
   for (let n = 1; ; n++) {
     if (trap.interrupted) return ended(130, "interrupted");
     const stage = readState(ctx.statePath).stage;
@@ -642,20 +713,28 @@ async function walk(ctx, opts, log, trap) {
     const startedAt = now();
     log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}`);
     const s = await runSession(ctx, opts.bin, sessionArgs(ctx, opts, spent), log, n);
-    const after = progressOf(ledgerEntries(ctx.root, ctx.plan));
-    if (after.advanced > before.advanced) ctx.progressed = true;
+    const entriesAfter = ledgerEntries(ctx.root, ctx.plan);
+    const after = progressOf(entriesAfter);
+    if (after.advanced > before.advanced) {
+      ctx.progressed = true;
+      waited = 0;
+      attempts = 0;
+    }
     spent += s.spentUsd;
-    const verdict = judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, interrupted: trap.interrupted });
+    const verdict = judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, attempts, interrupted: trap.interrupted });
     ({ stalls, churn } = verdict);
+    attempts = verdict.attempts ?? 0;
     writeRecord(ctx, s, { startedAt, before, after, waveAtStart, ...verdict }, n);
     const cost = s.costUsd !== null ? `, $${s.costUsd.toFixed(2)}` : s.spentUsd > 0 ? `, ~$${s.spentUsd.toFixed(2)} estimated` : "";
     log(`session ${n} ended — ${verdict.exitReason}; ledger +${after.lines - before.lines}, commits +${after.committed - before.committed}${cost}`);
+    for (const waveEnd of waveEnds(ctx.planText, waveAtStart, inFlightFiles(ctx.planText, entriesAfter).wave)) log(waveEnd);
     if (verdict.message) log(verdict.message);
     if (verdict.code !== null) return endOf(verdict);
-    if (verdict.waitMs) {
-      log(`usage limit — waiting ${Math.ceil(verdict.waitMs / 60_000)} min before the next session`);
-      await sleep(trap, verdict.waitMs);
-      waited += verdict.waitMs;
+    if (verdict.wait) {
+      const deadline = clockNow() + verdict.wait.ms;
+      log(`wait: ${verdict.wait.what} — resuming at ${new Date(deadline).toISOString()}`);
+      await waitUntil(trap, deadline);
+      if (verdict.wait.charged) waited += verdict.wait.ms;
     }
   }
 }

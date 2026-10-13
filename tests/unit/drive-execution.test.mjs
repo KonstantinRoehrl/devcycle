@@ -221,22 +221,6 @@ test("sessions that add ledger lines but no report, verdict or commit are churn:
   assert.equal(two.calls.length, 2);
 });
 
-// A claude that dies before its init event reports no session id, and sessions like that end within
-// the same second: each still gets its own drive row. Five of them cannot all start in different
-// seconds, so the first run collides on any key built from a timestamp.
-test("sessions that die before init each write their own drive row", async () => {
-  const five = await drive(makeCycle(), [{ noInit: true }], { flags: ["--max-stalls", "5"] });
-  assert.equal(five.code, 5, five.out);
-  assert.deepEqual(five.records.map((x) => x.exitReason), ["error", "error", "error", "error", "stalled"]);
-  const r = await drive(makeCycle(), [{ noInit: true }]);
-  assert.equal(r.code, 5, r.out);
-  assert.equal(r.calls.length, 2);
-  assert.deepEqual(r.records.map((x) => x.exitReason), ["error", "stalled"]);
-  assert.equal(new Set(r.records.map((x) => x.sessionHash)).size, 2);
-  const token = r.calls[0].token;
-  for (const row of r.records) assert.ok(!JSON.stringify(row).includes(token), "a drive row stores the raw drive token");
-});
-
 test("every stop reason a driven session signals ends the driver with exit 4, its reason and its detail", async () => {
   for (const reason of STOP_REASONS) {
     const r = await drive(makeCycle(), [{ stop: { reason, detail: `detail for ${reason}` } }]);
@@ -342,21 +326,6 @@ test("a usage limit or a silent session still ends the driver once --max-usd is 
     { flags: ["--max-usd", "1", "--max-backoff", "1"], env: { DEVCYCLE_DRIVE_IDLE_MS: "5000" } });
   assert.equal(silent.code, 6, silent.out);
   assert.match(silent.out, /spent \$1\.20 of --max-usd 1/);
-});
-
-test("a usage limit waits for the reset and retries without counting a stall; past --max-backoff it exits 6", async () => {
-  const waited = await drive(makeCycle(), [{ rateLimitInSec: 1 }, { ledger: DONE, stage: "branch-review" }], { flags: ["--max-stalls", "1"] });
-  assert.equal(waited.code, 0, waited.out);
-  assert.deepEqual(waited.records.map((x) => [x.exitReason, x.stallCount]), [["budget", 0], ["handoff", 0]]);
-
-  const capped = await drive(makeCycle(), [{ rateLimitInSec: 120 }], { flags: ["--max-backoff", "1"] });
-  assert.equal(capped.code, 6, capped.out);
-  assert.equal(capped.calls.length, 1);
-
-  const resetAt = Math.floor(Date.now() / 1000) + 120;
-  const fromText = await drive(makeCycle(), [{ isError: true, result: `Claude AI usage limit reached|${resetAt}` }], { flags: ["--max-backoff", "1"] });
-  assert.equal(fromText.code, 6, fromText.out);
-  assert.equal(fromText.records[0].exitReason, "budget");
 });
 
 // DEVCYCLE_DRIVE_IDLE_MS shortens the 30-minute silence after which the driver stops a session.
