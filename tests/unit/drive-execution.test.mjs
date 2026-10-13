@@ -7,10 +7,10 @@ import { createHash } from "node:crypto";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { DRIVE_LOCK_REL } from "../../scripts/drive-lock.mjs";
+import { DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
-import { inFlightFiles, SESSION_START_TOKENS } from "../../scripts/drive-execution.mjs";
-import { classifyDrive, readDriveResult, readHandledResult, RESULT_REL, STOP_REQUEST_REL } from "../../scripts/drive-result.mjs";
+import { classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS } from "../../scripts/drive-execution.mjs";
+import { classifyDrive, HANDLED_REL, readDriveResult, readHandledResult, RESULT_REL, STOP_REQUEST_REL } from "../../scripts/drive-result.mjs";
 import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
 
 const DRIVER = fileURLToPath(new URL("../../scripts/drive-execution.mjs", import.meta.url));
@@ -36,13 +36,11 @@ const line = (task, event, ref = "none") => `task=${task} event=${event} outcome
 const DONE = [line(1, "committed", "abc1234"), line(2, "committed", "def5678")];
 
 // A git repo on a topic branch holding a two-wave plan, a state file at execution and an empty ledger.
-function makeCycle({ branch = "feat/drive", stage = "execution", drive = `- drive: auto model=${MODEL} opted=2026-10-08T00:00:00Z` } = {}) {
+function makeCycle({ branch = "feat/drive", stage = "execution", drive = `- drive: auto model=${MODEL} opted=2026-10-08T00:00:00Z via=answer`, plan = PLAN, files = [] } = {}) {
   const root = makeRepo();
   if (branch !== "main") sh("git", ["checkout", "-q", "-b", branch], { cwd: root });
-  writeInto(root, "src/a.txt", "a\n");
-  writeInto(root, "src/b.txt", "b\n");
-  writeInto(root, "other.txt", "other\n");
-  writeInto(root, "docs/plan.md", PLAN);
+  for (const path of ["src/a.txt", "src/b.txt", "other.txt", ...files]) writeInto(root, path, "seed\n");
+  writeInto(root, "docs/plan.md", plan);
   commitAll(root, "chore: fixture");
   writeInto(root, ".devcycle/state.md", [
     "# devcycle state", `- stage: ${stage}`, `- root: ${root}`, `- branch: ${branch} (cut from main at 0000000)`,
@@ -55,18 +53,18 @@ function makeCycle({ branch = "feat/drive", stage = "execution", drive = `- driv
 }
 
 // One isolated world per scenario: its own HOME (the sandbox probe writes under ~/.claude), runs dir,
-// scenario and call log, and a `claude` on PATH that is the stub. DEVCYCLE_NESTED_RUN and a stale
-// DEVCYCLE_DRIVE_TOKEN are set on purpose — the driver must strip the one and replace the other in
-// every session it starts. CLAUDECODE, which a suite run inside Claude Code inherits, and
+// scenario and call log, and a `claude` on PATH that is the stub. DEVCYCLE_NESTED_RUN is set on
+// purpose — the driver must strip it from every session it starts. CLAUDECODE and a
+// DEVCYCLE_DRIVE_TOKEN, which a suite run inside Claude Code or a driven session inherits, and
 // CLAUDE_CONFIG_DIR, which would point the driver at the real transcripts, are dropped: only the
-// tests that are about them set them.
-const { CLAUDECODE: _claudeCode, CLAUDE_CONFIG_DIR: _configDir, ...BASE_ENV } = process.env;
-function harness(scenario = [], env = {}) {
+// tests that are about them set them. `prelude` runs in the fake `claude` before the stub does.
+const { CLAUDECODE: _claudeCode, CLAUDE_CONFIG_DIR: _configDir, DEVCYCLE_DRIVE_TOKEN: _driveToken, ...BASE_ENV } = process.env;
+function harness(scenario = [], env = {}, { prelude = "" } = {}) {
   const dir = makeTempDir("devcycle-drive-test-");
   const home = join(dir, "home");
   mkdirSync(home);
   writeFileSync(join(dir, "scenario.json"), JSON.stringify(scenario));
-  const bin = join(makeFakeBin("claude", `import(${JSON.stringify(STUB_URL)});\n`), "claude");
+  const bin = join(makeFakeBin("claude", `${prelude}import(${JSON.stringify(STUB_URL)});\n`), "claude");
   return {
     bin,
     runsDir: join(dir, "runs"),
@@ -79,7 +77,6 @@ function harness(scenario = [], env = {}) {
       STUB_CLAUDE_SCENARIO: join(dir, "scenario.json"),
       STUB_CLAUDE_CALLS: join(dir, "calls.jsonl"),
       DEVCYCLE_NESTED_RUN: "1",
-      DEVCYCLE_DRIVE_TOKEN: "inherited-token",
       ...env,
     },
   };
@@ -168,11 +165,27 @@ test("each session gets this driver's own token, whose hash and only its hash th
   const r = await drive(makeCycle(), [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }]);
   assert.equal(r.code, 0, r.out);
   const [first, second] = r.calls;
-  assert.match(first.token, /^[0-9a-f]{32}$/, "the driven session was not handed a token (or kept the inherited one)");
+  assert.match(first.token, /^[0-9a-f]{32}$/, "the driven session was not handed a token");
   assert.equal(first.lockTokenHash, createHash("sha256").update(first.token).digest("hex"));
   assert.equal(second.token, first.token, "one driver run hands every session the same token");
   const again = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review" }]);
   assert.notEqual(again.calls[0].token, first.token, "two driver runs share a token");
+});
+
+// D5: a driven session holds DEVCYCLE_DRIVE_TOKEN; only /devcycle:continue starts a driver.
+test("a start from a driven session (DEVCYCLE_DRIVE_TOKEN set) is refused before the pre-flight, touching neither the lock nor a result", async () => {
+  const root = makeCycle();
+  writeInto(root, RESULT_REL, JSON.stringify({ outcome: "interrupted", code: 130 }));
+  const env = { DEVCYCLE_DRIVE_TOKEN: "a-driven-session" };
+  const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }], { env });
+  assert.equal(r.code, 3, r.out);
+  assert.match(r.out, /drive-execution: a driven session never starts a driver; \/devcycle:continue does/);
+  assert.equal(r.calls.length, 0);
+  assert.ok(!existsSync(lockPath(root)), "a refused start left a lock");
+  assert.ok(existsSync(join(root, RESULT_REL)), "a refused start handled a result it never acted on");
+  const dry = dryRun(root, [], env);
+  assert.equal(dry.code, 3, dry.out);
+  assert.match(dry.out, /a driven session never starts a driver/);
 });
 
 test("a session that ends mid-wave is respawned, and the safety valve's label is recorded as valve", async () => {
@@ -416,24 +429,75 @@ test("a lock whose pid is alive but whose start time differs is a reused pid, an
   assert.equal(r.code, 0, r.out);
 });
 
-test("--detach returns at once with the driver's pid, and the detached driver walks to branch-review on its own, logging to .devcycle/drive.log", async () => {
+const isDead = (pid) => { try { process.kill(pid, 0); return false; } catch { return true; } };
+
+test("--detach handles a stale result, returns once the lock names the driver it started with the log offset its run begins at, and the driver walks to branch-review on its own", async () => {
   const root = makeCycle();
+  const earlier = "[drive 2026-10-12T00:00:00Z] an earlier run's line\n";
+  writeInto(root, ".devcycle/drive.log", earlier);
+  writeInto(root, RESULT_REL, JSON.stringify({ outcome: "interrupted", code: 130 }));
   const h = harness([{ ledger: [line(1, "dispatched"), DONE[0]], hangMs: 2000 }, { ledger: [DONE[1]], stage: "branch-review" }]);
   const r = spawnSync(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, "--detach"], { cwd: root, env: h.env, encoding: "utf8" });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  const { pid, log } = JSON.parse(r.stdout);
-  assert.equal(log, ".devcycle/drive.log");
-  assert.doesNotThrow(() => process.kill(pid, 0), "the detached driver was not running when --detach returned");
-  // A new session's leader leads its own process group too: the caller's hangup cannot reach it.
-  assert.equal(spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim(), String(pid));
-  await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, 30000);
-  assert.deepEqual(records(h).map((x) => x.exitReason), ["handoff", "handoff"]);
-  assert.ok(!existsSync(lockPath(root)), "the detached driver left its lock behind");
-  assert.equal(readFileSync(join(root, ".devcycle", "drive.log"), "utf8").match(/execution is complete/g)?.length, 1,
-    "the detached driver's log lacks the line, or holds it twice");
+  let pid = null;
+  try {
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const printed = JSON.parse(r.stdout);
+    pid = printed.pid;
+    assert.equal(readDriveLockHolder(root)?.pid, pid, "--detach returned before the driver held the lock");
+    assert.deepEqual([printed.log, printed.logOffset], [".devcycle/drive.log", Buffer.byteLength(earlier)]);
+    assert.ok(!existsSync(join(root, RESULT_REL)), "the earlier run's result survived into this run");
+    assert.equal(JSON.parse(readFileSync(join(root, HANDLED_REL), "utf8")).outcome, "interrupted");
+    // A new session's leader leads its own process group too: the caller's hangup cannot reach it.
+    assert.equal(spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim(), String(pid));
+    await waitFor(() => isDead(pid), 30000);
+    assert.deepEqual(records(h).map((x) => x.exitReason), ["handoff", "handoff"]);
+    assert.ok(!existsSync(lockPath(root)), "the detached driver left its lock behind");
+    assert.equal(readFileSync(join(root, ".devcycle", "drive.log"), "utf8").match(/execution is complete/g)?.length, 1,
+      "the detached driver's log lacks the line, or holds it twice");
+  } finally {
+    if (pid && !isDead(pid)) process.kill(-pid, "SIGKILL");
+  }
 
   const refused = spawnSync(process.execPath, [DRIVER, "--state", join(makeCycle({ branch: "main" }), ".devcycle", "state.md"), "--claude", h.bin, "--detach"], { env: h.env, encoding: "utf8" });
   assert.equal(refused.status, 3, "a pre-flight refusal must reach the caller before anything detaches");
+  assert.match(refused.stderr, /default or an integration branch/);
+});
+
+// The child runs the pre-flight the parent just passed, so the refusal here is one only the child
+// meets: the lock module fails closed on a reclaim a dead starter left half-done (scripts/drive-lock.mjs).
+test("--detach relays a driver that fails to start: its own stderr lines from this run, and its exit code", () => {
+  const root = makeCycle();
+  const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+  const stale = { pid: dead, startTime: "Thu Jan  1 00:00:00 1970" };
+  writeLock(root, stale);
+  writeFileSync(`${lockPath(root)}.reclaim`, JSON.stringify({ hostname: hostname(), ...stale }));
+  writeInto(root, ".devcycle/drive.log", "drive-execution: an earlier run's refusal\n");
+  const h = harness([{ ledger: DONE, stage: "branch-review" }]);
+  const r = spawnSync(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, "--detach"], { cwd: root, env: h.env, encoding: "utf8", timeout: 20000 });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.stdout, "", "a driver that never held the lock was reported started");
+  assert.match(r.stderr, /^drive-execution: drive-lock: a starter died while reclaiming /m);
+  assert.doesNotMatch(r.stderr, /an earlier run's refusal/);
+  assert.equal(calls(h).length, 0);
+});
+
+// A reclaim mutex a live process holds keeps the child waiting about 2 s (drive-lock.mjs's
+// RECLAIM_WAIT_MS) without the lock, past the shortened detach timeout.
+test("--detach gives up with exit 1, naming the driver's pid and the log, when the driver has not taken the lock in time", async () => {
+  const root = makeCycle();
+  const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+  writeLock(root, { pid: dead, startTime: "Thu Jan  1 00:00:00 1970" });
+  writeFileSync(`${lockPath(root)}.reclaim`, JSON.stringify({ hostname: hostname(), pid: process.pid, startTime: processStartTime(process.pid) }));
+  const h = harness([{ ledger: DONE, stage: "branch-review" }], { DEVCYCLE_DRIVE_DETACH_TIMEOUT_MS: "300" });
+  const r = spawnSync(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, "--detach"], { cwd: root, env: h.env, encoding: "utf8", timeout: 20000 });
+  const pid = Number(r.stderr.match(/pid (\d+)/)?.[1]);
+  try {
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.equal(r.stdout, "");
+    assert.match(r.stderr, /^drive-execution: the driver \(pid \d+\) has not taken the lock after 0\.3 s — see \.devcycle\/drive\.log$/m);
+  } finally {
+    if (pid) await waitFor(() => isDead(pid), 10000).catch(() => process.kill(-pid, "SIGKILL"));
+  }
 });
 
 test("a second driver on a live lock exits 3, naming the running one, and leaves its lock alone", async () => {
@@ -485,40 +549,21 @@ test("pre-flight refuses the default branch, an integration branch, a branch oth
   assert.match(unresolved.out, /cannot resolve the default branch/);
 });
 
-// D7: an agent never starts a driver. Inside Claude Code (CLAUDECODE set) the only start that passes
-// is the opt-in gate's start-now: from the session the drive row names as the one the user answered
-// in, before any driven session has ended and written its drive row. A row that names no session —
-// the "I'll start it myself" answer — admits no start from inside Claude Code at all.
-test("from inside a Claude Code session only the session that opted in starts the driver, and only while the opt-in is unused", async () => {
-  const gate = "gate-session-id";
-  const sha256 = (s) => createHash("sha256").update(s).digest("hex");
-  const root = makeCycle({ drive: `- drive: auto model=${MODEL} opted=2026-10-08T00:00:00Z session=${sha256(gate)}` });
-  const h = harness([{ stop: { reason: "needs-user", detail: "which branch?" } }]);
-  const preflight = (env, at = root) => {
-    const r = spawnSync(process.execPath, [DRIVER, "--state", join(at, ".devcycle", "state.md"), "--claude", h.bin, "--dry-run"],
-      { cwd: at, env: { ...h.env, ...env }, encoding: "utf8" });
-    return { status: r.status, out: r.stdout + r.stderr };
-  };
-  const inSession = (id) => ({ CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: id });
-  assert.equal(preflight(inSession(gate)).status, 0, "the opt-in gate's start-now was refused");
-  for (const id of ["a-later-session", ""]) {
-    const agent = preflight(inSession(id));
-    assert.equal(agent.status, 3, `session ${JSON.stringify(id)}: ${agent.out}`);
-    assert.match(agent.out, /start it from your own terminal/);
-  }
-  assert.equal((await startDriver(root, h).result()).code, 4, "the first driven session did not stop");
-  assert.equal(records(h).length, 1);
-  const used = preflight(inSession(gate));
-  assert.equal(used.status, 3, used.out);
-  assert.match(used.out, /start it from your own terminal/);
-  assert.equal(preflight({ CLAUDE_CODE_SESSION_ID: "" }).status, 0, "a start from the user's own terminal was refused");
-
-  const self = makeCycle();
-  assert.equal(preflight(inSession(gate), self).status, 3, "a drive row naming no session admitted an in-session start");
-  assert.equal(preflight({ CLAUDE_CODE_SESSION_ID: "" }, self).status, 0);
+// D5: /devcycle:continue starts the driver from inside its own Claude Code session, so CLAUDECODE
+// no longer gates a start; a nested `claude -p` must still never inherit it.
+test("a start from inside a Claude Code session with a `drive: auto` row is admitted, and no session it starts sees CLAUDECODE", async () => {
+  const seen = join(makeTempDir("devcycle-drive-env-"), "claudecode.log");
+  const prelude = `require("node:fs").appendFileSync(${JSON.stringify(seen)}, (process.env.CLAUDECODE ?? "absent") + "\\n");\n`;
+  const inSession = { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "the-continue-session" };
+  const h = harness([{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }], inSession, { prelude });
+  const r = await startDriver(makeCycle(), h).result();
+  assert.equal(r.code, 0, r.out);
+  assert.equal(readFileSync(seen, "utf8"), "absent\nabsent\n", "a driven session inherited CLAUDECODE");
 });
 
-test("pre-flight allows tracked edits inside the current wave's in-flight Files and untracked files, and refuses any other tracked change", () => {
+const remedy = (path, task) => `${path}: commit, stash or revert it — task ${task} writes this file`;
+
+test("pre-flight allows an in-flight task's tracked edits and untracked files, and refuses a later wave's task's file, naming the file and the task", () => {
   const root = makeCycle();
   writeInto(root, "src/a.txt", "half-done implementer edit\n");
   writeInto(root, "notes.txt", "untracked\n");
@@ -527,17 +572,52 @@ test("pre-flight allows tracked edits inside the current wave's in-flight Files 
   assert.deepEqual(JSON.parse(allowed.out.trim().split("\n").at(-1)).command.slice(1, 3), ["-p", "/devcycle:continue --drive .devcycle/state.md"]);
   assert.equal(allowed.calls.length, 0, "--dry-run spawned a session");
 
-  writeInto(root, "other.txt", "stray\n");
+  writeInto(root, "src/b.txt", "edited ahead of its wave\n");
   const refused = dryRun(root);
   assert.equal(refused.code, 3, refused.out);
-  assert.match(refused.out, /other\.txt/);
+  assert.ok(refused.out.includes(`tracked changes a remaining task would overwrite: ${remedy("src/b.txt", 2)}`), refused.out);
+});
 
-  const later = makeCycle();
-  writeInto(later, ".devcycle/ledger.md", readFileSync(join(later, ".devcycle/ledger.md"), "utf8") + `- [2026-10-08T00:00:00Z] ${DONE[0]}\n`);
-  writeInto(later, "src/a.txt", "edit to a committed task's file\n");
-  const committedTask = dryRun(later);
-  assert.equal(committedTask.code, 3, committedTask.out);
-  assert.match(committedTask.out, /src\/a\.txt/);
+test("pre-flight lists every tracked change a remaining task would overwrite, more than five included", () => {
+  const many = ["src/b.txt", "src/c1.txt", "src/c2.txt", "src/c3.txt", "src/c4.txt", "src/c5.txt"];
+  const plan = PLAN.replace("- Modify: src/b.txt", many.map((p) => `- Modify: ${p}`).join("\n"));
+  const root = makeCycle({ plan, files: many });
+  for (const path of many) writeInto(root, path, "edited before the run\n");
+  const r = dryRun(root);
+  assert.equal(r.code, 3, r.out);
+  assert.ok(r.out.includes(`tracked changes a remaining task would overwrite: ${many.map((p) => remedy(p, 2)).join("; ")}`), r.out);
+});
+
+test("tracked changes no remaining task writes — outside the plan, or only in a committed task's Files — are left alone and listed in drive.log", async () => {
+  const root = makeCycle();
+  writeInto(root, ".devcycle/ledger.md", readFileSync(join(root, ".devcycle/ledger.md"), "utf8") + `- [2026-10-08T00:00:00Z] ${DONE[0]}\n`);
+  writeInto(root, "src/a.txt", "edit to a committed task's file\n");
+  writeInto(root, "other.txt", "edit outside every task\n");
+  const r = await drive(root, [{ ledger: [DONE[1]], stage: "branch-review" }]);
+  assert.equal(r.code, 0, r.out);
+  const log = readFileSync(join(root, ".devcycle", "drive.log"), "utf8");
+  assert.match(log, /\] 2 tracked change\(s\) no remaining task writes are left alone\n\[drive [^\]]+\] other\.txt\n\[drive [^\]]+\] src\/a\.txt\n/);
+  assert.ok(log.indexOf("left alone") < log.indexOf("session 1 starts"), "the left-alone list was not logged before the first session");
+});
+
+test("classifyTrackedChanges allows in-flight Files, refuses a remaining task's file naming the lowest such task, and leaves every other path alone", () => {
+  const plan = [
+    "### Task 1: one", "", "**Files:**", "- Modify: src/a.txt", "",
+    "### Task 2: two", "", "**Files:**", "- Modify: src/b.txt", "- Modify: shared.txt", "",
+    "### Task 3: three", "", "**Files:**", "- Modify: shared.txt", "- Modify: src/c.txt", "",
+    "## Dispatch Map", "", "- Wave 1: Task 1", "- Wave 2: Task 2", "- Wave 3: Task 3", "",
+  ].join("\n");
+  const committed = (...tasks) => tasks.map((t) => ({ task: String(t), event: "committed" }));
+  const paths = ["other.txt", "shared.txt", "src/a.txt", "src/b.txt", "src/c.txt"];
+  assert.deepEqual(classifyTrackedChanges(plan, [], paths), {
+    refused: [{ path: "shared.txt", task: "2" }, { path: "src/b.txt", task: "2" }, { path: "src/c.txt", task: "3" }],
+    leftAlone: ["other.txt"],
+  });
+  assert.deepEqual(classifyTrackedChanges(plan, committed(1), paths), {
+    refused: [{ path: "src/c.txt", task: "3" }],
+    leftAlone: ["other.txt", "src/a.txt"],
+  });
+  assert.deepEqual(classifyTrackedChanges(plan, committed(1, 2), paths), { refused: [], leftAlone: ["other.txt", "src/a.txt", "src/b.txt"] });
 });
 
 test("a ledger whose Plan: preamble names another plan is a previous cycle's: its lines count as no progress", () => {
@@ -553,7 +633,7 @@ test("a ledger whose Plan: preamble names another plan is a previous cycle's: it
 test("pre-flight refuses a state without the drive row, a state off execution, a model whose window cannot hold a session start, and a sandbox", () => {
   const notOpted = dryRun(makeCycle({ drive: null }));
   assert.equal(notOpted.code, 3, notOpted.out);
-  assert.match(notOpted.out, /drive: auto/);
+  assert.ok(notOpted.out.includes("the state file has no `drive: auto` row — run /devcycle:continue and choose Unattended, or set executionMode"), notOpted.out);
 
   const planning = dryRun(makeCycle({ stage: "planning" }));
   assert.equal(planning.code, 3, planning.out);
@@ -569,24 +649,20 @@ test("pre-flight refuses a state without the drive row, a state off execution, a
   try {
     const sandbox = dryRun(makeCycle(), [], { HOME: home });
     assert.equal(sandbox.code, 3, sandbox.out);
-    assert.match(sandbox.out, /sandbox/);
+    assert.ok(sandbox.out.includes('the Claude Code Bash sandbox blocks ~/.claude — /devcycle:continue retries the start outside the sandbox through a permission prompt; from a terminal, use one that is not a Claude Code session ("!" runs inside the session)'), sandbox.out);
   } finally {
     chmodSync(home, 0o700);
   }
 });
 
-test("--check-sandbox answers with JSON and touches no state; usage errors exit 2", () => {
+test("--check-sandbox answers {sandboxed} alone, in a Claude Code session too, and touches no state; usage errors exit 2", () => {
   const h = harness();
-  const run = (args) => spawnSync(process.execPath, [DRIVER, ...args], { env: h.env, encoding: "utf8" });
-  const probe = run(["--check-sandbox"]);
+  const run = (args, env = {}) => spawnSync(process.execPath, [DRIVER, ...args], { env: { ...h.env, ...env }, encoding: "utf8" });
+  const probe = run(["--check-sandbox"], { CLAUDE_CODE_SESSION_ID: "a-session-id" });
   assert.equal(probe.status, 0, probe.stderr);
-  assert.equal(JSON.parse(probe.stdout).sandboxed, false);
-  // The planning gate copies sessionHash into the drive row it writes on a start-now answer.
-  const inSession = spawnSync(process.execPath, [DRIVER, "--check-sandbox"], { env: { ...h.env, CLAUDE_CODE_SESSION_ID: "gate-session-id" }, encoding: "utf8" });
-  assert.deepEqual(JSON.parse(inSession.stdout), { sandboxed: false, sessionHash: createHash("sha256").update("gate-session-id").digest("hex") });
-  const outside = spawnSync(process.execPath, [DRIVER, "--check-sandbox"], { env: { ...h.env, CLAUDE_CODE_SESSION_ID: "" }, encoding: "utf8" });
-  assert.deepEqual(JSON.parse(outside.stdout), { sandboxed: false, sessionHash: null });
-  for (const args of [[], ["--state"], ["--state", "x", "--bogus"], ["--state", "x", "--max-stalls", "0"], ["--state", "x", "--max-usd", "abc"]])
+  assert.deepEqual(JSON.parse(probe.stdout), { sandboxed: false });
+  for (const args of [[], ["--state"], ["--state", "x", "--bogus"], ["--state", "x", "--max-stalls", "0"], ["--state", "x", "--max-usd", "abc"],
+  ])
     assert.equal(run(args).status, 2, `expected a usage error for ${JSON.stringify(args)}`);
 });
 

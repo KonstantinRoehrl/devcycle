@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// The execution driver. After the user opted in at planning's close, it walks the execution stage
-// one fresh `claude -p` session per wave — the session a manual /clear + /devcycle:continue would
-// start — and stands in for the user at the wave → wave boundary only (docs/decisions/README.md,
-// 2026-10-08, D7). Every other gate stops it: a driven session writes .devcycle/drive-stop.json
+// The execution driver. Started by /devcycle:continue on a cycle the user opted in at execution
+// start, it walks the execution stage one fresh `claude -p` session per wave — the session a manual
+// /clear + /devcycle:continue would start — and stands in for the user at the wave → wave boundary
+// only (docs/decisions/README.md, 2026-10-13). Every other gate stops it: a driven session writes .devcycle/drive-stop.json
 // through scripts/drive-signal.mjs, and the driver exits 4 with that reason. POSIX only: a signal
 // reaches a session through its process group.
 import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -17,13 +17,13 @@ import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
-import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
+import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
 import { LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, STOP_REQUEST_REL, writeDriveResult } from "./drive-result.mjs";
 import { follow, statusReport, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
-import { gitToplevel, hashSession, recordPath } from "./run-record.mjs";
+import { gitToplevel, hashSession } from "./run-record.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { PRICING } from "./pricing.mjs";
 import { now } from "./stamp.mjs";
@@ -44,6 +44,8 @@ const RUN_ID = /^[0-9a-f]{16}$/;
 const IDLE_LIMIT_MS = Number(process.env.DEVCYCLE_DRIVE_IDLE_MS) || 30 * 60_000;
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
 const SIGNAL_GRACE_MS = 10_000;
+const DETACH_POLL_MS = 50;
+const DETACH_TIMEOUT_MS = Number(process.env.DEVCYCLE_DRIVE_DETACH_TIMEOUT_MS) || 30_000;
 const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
 // Every wait is a wall-clock deadline checked in slices, so a machine that sleeps through a deadline
 // starts the next session on wake. DEVCYCLE_DRIVE_SLICE_MS and DEVCYCLE_DRIVE_CLOCK_FILE (a file
@@ -133,7 +135,6 @@ function readState(statePath) {
     run: first("run"),
     opted: /^auto\b/.test(drive),
     model: drive.match(/\bmodel=(\S+)/)?.[1] ?? null,
-    session: drive.match(/\bsession=([0-9a-f]{64})\b/)?.[1] ?? null,
   };
 }
 
@@ -167,6 +168,24 @@ export function inFlightFiles(planText, entries) {
     return { wave, files: new Set([...open, ...early].flatMap((t) => [...(filesOf.get(t) ?? [])])) };
   }
   return { wave: null, files: new Set() };
+}
+
+// #351: a dirty tracked path an in-flight task writes is a crashed session's edit, and stays. One a
+// task still to come writes would be overwritten or committed under it, so it refuses the start,
+// naming the lowest such task. Any other path is no task's to touch, and is left alone.
+export function classifyTrackedChanges(planText, entries, paths) {
+  const committed = new Set(entries.filter((e) => e.event === "committed").map((e) => String(e.task)));
+  const inFlight = inFlightFiles(planText, entries).files;
+  const remaining = [...taskFileMap(planText)].filter(([task]) => !committed.has(String(task))).sort(([a], [b]) => a - b);
+  const refused = [];
+  const leftAlone = [];
+  for (const path of paths) {
+    if (inFlight.has(path)) continue;
+    const owner = remaining.find(([, files]) => files.has(path));
+    if (owner) refused.push({ path, task: String(owner[0]) });
+    else leftAlone.push(path);
+  }
+  return { refused, leftAlone };
 }
 
 function git(root, args) {
@@ -210,32 +229,19 @@ function modelRefusal(model) {
   return null;
 }
 
-// The opt-in is used once a driven session has ended: every session end writes a `drive` row.
-function optInUsed(root, run) {
-  let used = false;
-  eachRecord(recordPath(gitToplevel(root), run), (r) => {
-    used = r.kind === "drive";
-    return !used;
-  });
-  return used;
-}
-
 const heldBy = (h) =>
   `a driver already runs for this checkout (pid ${h.pid}, log ${h.log}) — stop it, or wait for it to end; ` +
   `if pid ${h.pid} is no longer running (after a reboot, say), remove ${DRIVE_LOCK_REL}`;
 
-const sessionHashOf = (env) => (env.CLAUDE_CODE_SESSION_ID ? hashSession(env.CLAUDE_CODE_SESSION_ID) : null);
+const SANDBOX_REFUSAL =
+  "the Claude Code Bash sandbox blocks ~/.claude — /devcycle:continue retries the start outside the sandbox through a " +
+  'permission prompt; from a terminal, use one that is not a Claude Code session ("!" runs inside the session)';
 
 function checkEnvironment(root, state, opts) {
-  if (!state.opted) throw new Exit(3, "the state file has no `drive: auto` row — unattended execution is opted into at planning's close");
+  if (!state.opted)
+    throw new Exit(3, "the state file has no `drive: auto` row — run /devcycle:continue and choose Unattended, or set executionMode");
   if (state.stage !== "execution") throw new Exit(3, `the state is at stage ${state.stage}, not execution`);
   if (!RUN_ID.test(state.run ?? "")) throw new Exit(3, "the state file names no run id, so no drive record could be written");
-  // An agent never starts a driver (D7). Inside a Claude Code session the one start allowed is the
-  // opt-in gate's start-now: from the session the drive row names as the one the user answered in,
-  // before any driven session has ended. A row naming no session admits none.
-  const gateSession = state.session !== null && sessionHashOf(process.env) === state.session;
-  if (process.env.CLAUDECODE && (!gateSession || optInUsed(root, state.run)))
-    throw new Exit(3, "inside a Claude Code session only the opt-in gate's start-now may start a driver, before its first session ends — start it from your own terminal");
   const model = opts.model ?? state.model;
   if (!model) throw new Exit(3, "no model: the drive row records none and --model is absent");
   const current = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -250,14 +256,15 @@ function checkEnvironment(root, state, opts) {
   } catch {
     throw new Exit(3, `the plan ${state.plan} cannot be read`);
   }
-  const { files } = inFlightFiles(planText, ledgerEntries(root, state.plan));
-  const stray = trackedChanges(root).filter((p) => !files.has(p));
-  if (stray.length)
-    throw new Exit(3, `tracked changes outside the current wave's in-flight tasks: ${stray.slice(0, 5).join(", ")}${stray.length > 5 ? ", …" : ""}`);
+  const { refused, leftAlone } = classifyTrackedChanges(planText, ledgerEntries(root, state.plan), trackedChanges(root));
+  if (refused.length) {
+    const each = refused.map(({ path, task }) => `${path}: commit, stash or revert it — task ${task} writes this file`);
+    throw new Exit(3, `tracked changes a remaining task would overwrite: ${each.join("; ")}`);
+  }
   const refusal = modelRefusal(model);
   if (refusal) throw new Exit(3, refusal);
-  if (sandboxed()) throw new Exit(3, "cannot write under ~/.claude — this looks like a Claude Code Bash sandbox; start the driver from a normal terminal");
-  return { model, planText, plan: state.plan, run: state.run };
+  if (sandboxed()) throw new Exit(3, SANDBOX_REFUSAL);
+  return { model, planText, plan: state.plan, run: state.run, leftAlone };
 }
 
 function release(ctx) {
@@ -296,6 +303,11 @@ function preflight(opts) {
     release(ctx);
     throw err;
   }
+  if (!opts.dryRun && ctx.leftAlone.length) {
+    const log = makeLog(root);
+    log(`${ctx.leftAlone.length} tracked change(s) no remaining task writes are left alone`);
+    for (const path of ctx.leftAlone) log(path);
+  }
   return ctx;
 }
 
@@ -308,10 +320,12 @@ function sessionArgs(ctx, opts, spent) {
 
 function childEnv(ctx) {
   const env = { ...process.env, DEVCYCLE_DRIVE_TOKEN: ctx.token };
-  // agent-cli's claudeStructured sets this for its own children, and a driver started from one of
-  // them inherits it; a driven session that kept it would run with the hooks module inert — no
-  // agent tracing, no subagent budget governor.
+  // agent-cli's claudeStructured sets DEVCYCLE_NESTED_RUN for its own children, and a driver
+  // started from one of them inherits it; a driven session that kept it would run with the hooks
+  // module inert — no agent tracing, no subagent budget governor. CLAUDECODE is there because
+  // /devcycle:continue starts the driver from inside its own session.
   delete env.DEVCYCLE_NESTED_RUN;
+  delete env.CLAUDECODE;
   return env;
 }
 
@@ -777,20 +791,50 @@ async function drive(opts) {
   }
 }
 
+// The child's stderr is the log, so its refusal is the `drive-execution: ` lines the log gained.
+function relayRefusal(root, logOffset) {
+  let gained = "";
+  try {
+    gained = readFileSync(join(root, LOG_REL)).subarray(logOffset).toString("utf8");
+  } catch {
+    // No log: the child said nothing.
+  }
+  for (const l of gained.split("\n")) if (l.startsWith("drive-execution: ")) process.stderr.write(`${l}\n`);
+}
+
 // Runs the pre-flight here, so a refusal still exits 3 in the caller's terminal, then starts the
 // driver again without --detach as a new session's leader (`detached: true` calls setsid on POSIX):
-// no terminal's hangup reaches it, unlike a `nohup … &` child of the caller's session.
-function detach(opts, argv) {
+// no terminal's hangup reaches it, unlike a `nohup … &` child of the caller's session. It returns
+// only once the child holds the lock, so a watch armed next never reads a run not yet begun as ended.
+async function detach(opts, argv) {
   const { root } = preflight({ ...opts, dryRun: true });
-  const log = openSync(join(root, LOG_REL), "a");
+  markResultHandled(root);
+  const logPath = join(root, LOG_REL);
+  const logOffset = existsSync(logPath) ? statSync(logPath).size : 0;
+  const log = openSync(logPath, "a");
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv.filter((a) => a !== "--detach")], {
     detached: true,
     stdio: ["ignore", log, log],
   });
-  child.unref();
   closeSync(log);
-  console.log(JSON.stringify({ pid: child.pid, log: LOG_REL }));
-  return 0;
+  let exited = null;
+  child.once("exit", (code) => {
+    exited = { code };
+  });
+  for (const deadline = Date.now() + DETACH_TIMEOUT_MS; Date.now() < deadline; ) {
+    if (readDriveLockHolder(root)?.pid === child.pid) {
+      child.unref();
+      console.log(JSON.stringify({ pid: child.pid, log: LOG_REL, logOffset }));
+      return 0;
+    }
+    if (exited) {
+      relayRefusal(root, logOffset);
+      return exited.code ?? 1;
+    }
+    await new Promise((done) => setTimeout(done, DETACH_POLL_MS));
+  }
+  child.unref();
+  throw new Exit(1, `the driver (pid ${child.pid}) has not taken the lock after ${DETACH_TIMEOUT_MS / 1000} s — see ${LOG_REL}`);
 }
 
 // The way to stop a driver on purpose: the request on disk is what makes its 130 read as stopped,
@@ -839,14 +883,15 @@ async function main(argv) {
     return 0;
   }
   if (opts.checkSandbox) {
-    // The opt-in gate asks this first, and writes sessionHash into the drive row on a start-now answer.
-    console.log(JSON.stringify({ sandboxed: sandboxed(), sessionHash: sessionHashOf(process.env) }));
+    console.log(JSON.stringify({ sandboxed: sandboxed() }));
     return 0;
   }
   try {
     if (opts.stop) return stopDriver(opts.state);
     if (opts.markHandled) return markHandled(opts.state);
-    return opts.detach && !opts.dryRun ? detach(opts, argv) : await drive(opts);
+    // D5 (docs/decisions/README.md, 2026-10-13): only /devcycle:continue starts a driver; this is the part the driver can enforce.
+    if (process.env.DEVCYCLE_DRIVE_TOKEN) throw new Exit(3, "a driven session never starts a driver; /devcycle:continue does");
+    return opts.detach && !opts.dryRun ? await detach(opts, argv) : await drive(opts);
   } catch (err) {
     console.error(`drive-execution: ${err.message}`);
     return err instanceof Exit ? err.code : 1;
