@@ -19,6 +19,7 @@ import { claudeProjectsDir } from "./depth-probe.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
 import { LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, STOP_REQUEST_REL, writeDriveResult } from "./drive-result.mjs";
+import { follow, statusReport, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
@@ -67,6 +68,10 @@ const KNOWN_FLAGS = {
   "--detach": "none",
   "--stop": "none",
   "--mark-handled": "none",
+  "--status": "none",
+  "--follow": "none",
+  "--wait": "none",
+  "--since": "value",
 };
 
 class Exit extends Error {
@@ -78,6 +83,10 @@ class Exit extends Error {
 
 function parseArgs(argv) {
   const { flags } = parseFlags(argv, KNOWN_FLAGS);
+  const watches = ["--status", "--follow", "--wait"].filter((f) => f in flags);
+  if (watches.length > 1) throw new Error("--status, --follow and --wait are exclusive");
+  const since = requireCount(flags, "--since", { min: 0, noun: "a byte offset" });
+  if (since !== undefined && watches[0] !== "--follow") throw new Error("--since applies to --follow only");
   const checkSandbox = "--check-sandbox" in flags;
   const state = requireValue(flags, "--state");
   if (!state && !checkSandbox) throw new Error("--state <path to .devcycle/state.md> is required");
@@ -86,6 +95,8 @@ function parseArgs(argv) {
   if (maxUsd !== undefined && !(maxUsd > 0))
     throw new Error(`--max-usd requires a positive dollar amount, got ${JSON.stringify(usd)}`);
   return {
+    watch: watches[0] ?? null,
+    since: since ?? null,
     checkSandbox,
     state,
     maxUsd,
@@ -740,6 +751,13 @@ async function main(argv) {
   } catch (err) {
     console.error(`drive-execution: ${err.message}`);
     return 2;
+  }
+  if (opts.watch) {
+    const pollMs = Number(process.env.DEVCYCLE_DRIVE_POLL_MS) || undefined;
+    const statePath = opts.state;
+    if (opts.watch === "--follow") await follow({ statePath, since: opts.since, pollMs });
+    else console.log(JSON.stringify(opts.watch === "--wait" ? await waitForEnd({ statePath, pollMs }) : statusReport({ statePath })));
+    return 0;
   }
   if (opts.checkSandbox) {
     // The opt-in gate asks this first, and writes sessionHash into the drive row on a start-now answer.
