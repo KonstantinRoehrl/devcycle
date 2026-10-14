@@ -145,7 +145,7 @@ marker with the version the change lands in, since only the release computes tha
   default: warn
   values: [off, warn, enforce]
   note: "the hooks module's subagent limiter tier; profile-independent, so it takes no auto"
-- version: "unreleased"
+- version: "0.25.0"
   change: added
   key: executionMode
   default: ask

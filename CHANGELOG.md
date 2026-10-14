@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.25.0 — 2026-10-14
+
+- feat: ask the execution style at execution start, make unattended runs watchable and resumable, and pin the evidence-capture contract
+
 Implementer reports stop bouncing on counts quoted in their evidence tail and on dotnet test
 summaries. A plan now names its whole verification gate in its header;
 `scripts/capture-evidence.mjs` writes every evidence capture from that command, implementer briefs
