@@ -50,6 +50,8 @@ export function taskPosition(lines, { pendingLoop = null, retries = () => 0 } = 
   if (!last) return { position: "not-dispatched", next: "dispatch-implementer" };
   const { event, outcome } = last;
   if (event === "committed") return { position: "committed", next: "done" };
+  // references/sweep-execution.md logs a dirty target as a user-decision line before anyone answers it.
+  if (outcome.startsWith("sweep dirty-targets")) return { position: "sweep-decision", next: "needs-user" };
   if (event === "user-decision") return { position: "user-decision", next: "follow-decision" };
   if (event === "dispatched" && outcome.startsWith("sweep")) return { position: "sweep-dispatched", next: "rerun-sweep" };
   if (SWEEP_TOKEN.test(outcome)) return { position: "sweep-decision", next: "needs-user" };
@@ -294,7 +296,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   Object.assign(result, wavePosition(root, planText, map, lines));
   if (!drive) {
     const decision = driveAction(result.drive, driver, result.pendingDecision);
-    return { ...result, pendingDecision: decision.gate?.pendingDecision ? null : result.pendingDecision, drive: decided(decision) };
+    return { ...result, drive: decided(decision) };
   }
 
   // Drive mode: every gate continue would ask about is a stop (spec 4.B.3).

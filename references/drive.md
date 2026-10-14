@@ -47,17 +47,17 @@ state file in full with the row added; every other rewrite carries it forward
 
 ## Answering a stopped run
 
-`drive.gate` carries the stop's `reason`, `detail`, `task`, `settled` and `pendingDecision` (the
-top-level one then null), and `drive.result` the run's classified end. Ask ONE AskUserQuestion, its options per reason below. Every option set also
-offers **Walk the waves manually**, which rewrites the row to `manual` as § Drive actions says and
-walks the waves in this session, and **Leave it stopped**, which ends the session with the result
+`drive.gate` carries the stop's `reason`, `detail`, `task`, `settled` and `pendingDecision`, and
+`drive.result` the run's classified end. Ask ONE AskUserQuestion, its options per reason below. Every option set also
+offers **Walk the waves manually**, which rewrites the row to `manual` and walks as § Drive actions
+says, and **Leave it stopped**, which ends the session with the result
 left unhandled, so the next `/devcycle:continue` asks again. An Other answer is recorded like
 any answer below.
 
 | reason | The question, and how its answer is recorded |
 | --- | --- |
 | `drive.gate.settled` true: `knob-drift`, `foreign-state`, `resume-check`, `branch`, `depth-at-start`, `no-driver`, `not-opted-in` | No question of its own: this session's own gates have just been computed and answered, so the stop is settled. Run the start path. |
-| `needs-user` with `drive.gate.pendingDecision` set | The `pendingDecision` question of § Execution resume, asked once; record `task=<n> event=user-decision outcome=task-<n>-review: <answer>`, the line `references/resume.md` § Resuming a wave's per-task position reads as settling it. |
+| `needs-user` with `drive.gate.pendingDecision` set | The `pendingDecision` question of § Execution resume, asked here, or first in a manual walk; record `task=<n> event=user-decision outcome=task-<n>-review: <answer>`, which `references/resume.md` § Resuming a wave's per-task position reads as settling it. |
 | `needs-user` or `sweep-fallback`, `task` set otherwise — a blocked implementer, a retry cap, a refused commit, a human-required step, a sweep fallback | The stop's `detail` as the question; record `task=<n> event=user-decision outcome=<answer>`. |
 | `needs-user` or `sweep-fallback` with no `task` | The stop's `detail` as the question; record `task=drive event=user-decision outcome=<answer>`. |
 | `scope-change` | The stop's `detail` as the question: whether the cycle goes back to brainstorm or planning. The answer rewrites `stage:` to that stage, so no driver starts; continue there as § Resume says. |
@@ -92,8 +92,9 @@ In this order, never dispatching a task from this session:
      `node "<plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach`
      for a terminal that is not a Claude Code session, and offer **Walk the waves manually**; on
      that answer, run `--mark-handled` as § Answering a stopped run says before walking.
-   - Exit 3 is a refusal: report its message, which names the remedy, and stop. The row stays, so
-     the next `/devcycle:continue` retries. Any other non-zero exit: report its message and stop.
+   - Exit 3 is a refusal: report its message, which names the remedy, and stop. The result stays, so
+     the next `/devcycle:continue` retries or asks again. Any other non-zero exit: report its
+     message and stop.
 4. **Print the overview** from `wave-setup.mjs`'s `overview`:
    `<W> waves · <T> tasks · <C> committed — next: wave <w>`, then one line per wave,
    `wave <w>: tasks <ids> (<c>/<n> committed)`.

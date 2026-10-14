@@ -120,6 +120,8 @@ test("every resume-table row maps a task's last ledger event to its next action,
     [[entry(2, "dispatched", "sweep 4 targets")], "sweep-dispatched", "rerun-sweep"],
     [[entry(2, "dispatched", "sweep 4 targets"), entry(2, "review-verdict", "applied-none")], "sweep-decision", "needs-user"],
     [[entry(2, "user-decision", "keep the residue")], "user-decision", "follow-decision"],
+    [[entry(2, "user-decision", "sweep dirty-targets src/b.mjs")], "sweep-decision", "needs-user"],
+    [[entry(2, "user-decision", "sweep again once src/b.mjs is clean")], "user-decision", "follow-decision"],
   ];
   for (const [lines, position, next] of rows)
     assert.deepEqual(taskPosition(lines.map(parseLedgerLine)), { position, next }, lines.join(" | ") || "no ledger line");
@@ -405,12 +407,15 @@ test("drive mode: a stop on a task's pending decision names the task, and that t
 });
 
 // spec §1: the exhausted-unresolved question is asked once, as the stopped run's question, never
-// again as continue's own pendingDecision gate on the same call.
+// again as continue's own pendingDecision gate on the same call. The top-level pendingDecision still
+// names it: a walk the stopped run's answer starts takes its positions from this same object.
 test("drive.action: a gate on the task whose review loop is pending carries that decision, and only it", () => {
   const c = cycle({ state: [DRIVE_ROW], ledger: [committed(1), keyed(2, "review-verdict", "rejected", 3, 2, ".devcycle/findings/2-round-3.md")] });
   writeInto(c.repo, `.devcycle/findings/${reviewLoopId(2)}-status.md`, "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: none\n");
   const own = setup(ended(c, runEnd("gate-stop", { code: 4, reason: "needs-user", task: "2", detail: "task 2: exhausted-unresolved" })));
-  assert.deepEqual([own.drive.action, own.pendingDecision, own.drive.gate.pendingDecision], ["gate", null, { task: "2", loopId: "task-2-review" }]);
+  assert.deepEqual([own.drive.action, own.drive.gate.pendingDecision], ["gate", { task: "2", loopId: "task-2-review" }]);
+  assert.deepEqual([own.pendingDecision, positionOf(own.tasks[1])],
+    [{ task: "2", loopId: "task-2-review" }, { task: "2", position: "exhausted-unresolved", next: "needs-user" }], "the manual walk loses the decision");
   const other = setup(ended(c, runEnd("gate-stop", { code: 4, reason: "needs-user", task: "3", detail: "task 3: blocked" })));
   assert.deepEqual([other.pendingDecision, other.drive.gate.pendingDecision], [{ task: "2", loopId: "task-2-review" }, null]);
 });

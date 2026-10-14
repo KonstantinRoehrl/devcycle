@@ -134,7 +134,7 @@ probe, and prints one JSON object. Every gate stays this command's; it reads the
   `state.knobsLine` null → write `- knobs:` from the fresh line, as step 2b says.
 - `branch.verdict` `switch-needed` or `integration` → step 4's rules.
 - `depth.band` `over-budget` or `hard-stop` → § Resume's depth rule; `unknown` → proceed.
-- `pendingDecision` → that task's `exhausted-unresolved` loop goes to the user as a decision.
+- `pendingDecision`, unless `drive.gate` has it → that task's `exhausted-unresolved` loop is the user's decision.
 
 `drive.action` then decides, per `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/drive.md drive-actions`.
 At `manual` or `none`, announce the position from `tasks` (each task's `position` and `next`) and

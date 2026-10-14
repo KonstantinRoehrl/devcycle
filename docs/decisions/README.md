@@ -37,7 +37,10 @@ references/drive.md, read by section only at stage: execution, so commands/conti
 174-line ceiling; the surface total and the closures that load it rise by its sections.
 
 **Supersedes:** the 2026-10-08 entry's rules 1, 2 and 4 as worded there (rule 3 stands), and the
-`session=` field of its `drive: auto` row.
+`session=` field of its `drive: auto` row. Settled at branch review, it also supersedes the design's
+§1 rule that a `sweep-fallback` answer is recorded `task=drive`: the stop names its task and the
+answer is recorded `task=<n>`, since a `task=drive` line leaves the task at its sweep decision and
+the next driven session stops on it again.
 
 **Budgets:** the `executionMode` flag line in each entry command's resolver block (+8) and, in
 references/config.md, the roster row (+1) and the two-knob live sentence (+2) raise the measured
