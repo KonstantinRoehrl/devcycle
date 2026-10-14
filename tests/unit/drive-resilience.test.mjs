@@ -117,8 +117,8 @@ test("an API-error session is no stall: it backs off, and the next session start
 });
 
 // The status decides: a 5xx, a 408 or a 429 passes on its own, and so does an error with no status
-// (the connection never got one). Any other 4xx is the request's own fault, and retrying it for hours
-// fails the same way every time.
+// (the connection never got one). A status counts only where the text calls it one, so a "500 tokens"
+// is no server error.
 test("an API error with a 5xx, 408, 429 or no status, or a network error, backs off as transient", TIMEOUT, async () => {
   const errors = [
     'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}',
@@ -127,17 +127,48 @@ test("an API error with a 5xx, 408, 429 or no status, or a network error, backs 
     "API Error: Connection error.",
     "TypeError: fetch failed",
     "connect ETIMEDOUT 160.79.104.10:443",
+    "Request failed with status code 503",
+    "HTTP 502 from the upstream proxy",
+    "503 Service Unavailable",
   ];
   const r = await drive(makeCycle(), [...errors.map((result) => ({ isError: true, result })), { ledger: DONE, stage: "branch-review" }], ["--max-stalls", "1"]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.records.map((x) => x.exitReason), [...errors.map(() => "transient"), "handoff"]);
 });
 
-test("an API error the request itself causes — a 4xx other than 408 or 429 — ends the run at once, naming the error and the remedy, exit 3", TIMEOUT, async () => {
+test("an error that only mentions a 5xx figure, such as 500 tokens, is no server error: it counts as a stall and is never backed off", TIMEOUT, async () => {
+  const r = await drive(makeCycle(), [{ isError: true, result: "The reply was cut off after 500 tokens" }], ["--max-stalls", "1"]);
+  assert.equal(r.code, 5, r.out);
+  assert.deepEqual(r.records.map((x) => x.exitReason), ["stalled"]);
+  assert.doesNotMatch(r.log, /wait: transient failure/);
+});
+
+// Each session is a fresh `claude -p`, so a 4xx caused by one session's own transcript — tool-use
+// blocks out of step, a request grown too large — is not repeated by the next. A session that ends on
+// one is judged like any other: no wait, and a stall unless it progressed.
+test("an API error that belongs to its session — a 400 over its tool-use blocks, a 413 — starts a fresh session at once, and counts as a stall without progress", TIMEOUT, async () => {
+  const concurrency = 'API Error: 400 due to tool use concurrency issues. Run /rewind to recover the conversation.';
+  const orphaned = 'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"messages.12: `tool_use` ids were found without `tool_result` blocks immediately after: toolu_01"}}';
+  const tooLarge = 'API Error: 413 {"type":"error","error":{"type":"request_too_large","message":"Request exceeds the maximum allowed number of bytes."}}';
+  const r = await drive(makeCycle(), [
+    { isError: true, result: concurrency, ledger: [line(1, "report-received")] },
+    { isError: true, result: orphaned },
+    { isError: true, result: tooLarge },
+  ]);
+  assert.equal(r.code, 5, r.out);
+  assert.equal(r.calls.length, 3);
+  assert.deepEqual(r.records.map((x) => [x.exitReason, x.stallCount]), [["handoff", 0], ["stalled", 1], ["stalled", 2]]);
+  assert.doesNotMatch(r.log, /wait: /);
+  assert.doesNotMatch(r.out, /the API refused/);
+  assert.ok(r.out.includes(`The last session said:\n${tooLarge}`), r.out);
+});
+
+test("an API error that fails the same way in every session — a credit balance, a key without access, an unknown model — ends the run at once, naming the error and the remedy, exit 3", TIMEOUT, async () => {
   const refusals = [
     'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}',
     'API Error: 403 {"type":"error","error":{"type":"permission_error","message":"Your API key does not have permission to use the specified resource."}}',
     'API Error: 404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-sonnet-0-0"}}',
+    "Credit balance is too low",
   ];
   for (const result of refusals) {
     const r = await drive(makeCycle(), [{ isError: true, result }, { ledger: DONE, stage: "branch-review" }]);

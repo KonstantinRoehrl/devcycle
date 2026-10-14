@@ -108,6 +108,22 @@ test("holderRunning: a lock that carries its holder's start in clock ticks is ju
   assert.equal(holderRunning(root, holder), false);
 });
 
+// A PATH with no ps in it stands in for a sandbox that cannot run ps. The hand-written locks carry no
+// machine or boot id, so judging them spawns nothing else either.
+test("holderRunning: where ps cannot run it trusts a live pid, unless the lock's clock ticks can judge it", () => {
+  const { root } = cycle();
+  const ticked = { ...live(), ticks: "1" };
+  writeLock(root, ticked);
+  const path = process.env.PATH;
+  process.env.PATH = makeTempDir("drive-result-no-ps-");
+  try {
+    assert.equal(holderRunning(root, live()), true);
+    assert.equal(holderRunning(root, ticked), false);
+  } finally {
+    process.env.PATH = path;
+  }
+});
+
 // ps derives a process's start time from the wall clock, so a clock step (a resume from suspend, an
 // NTP correction) moves the time it prints; the start in ticks since boot does not move.
 test("holderRunning: on Linux a live driver whose ps start time a clock step moved still runs", { skip: process.platform !== "linux" && "only a Linux lock carries /proc start ticks" }, () => {

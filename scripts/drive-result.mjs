@@ -70,23 +70,28 @@ export function writeCrashedResult(root, { startedAt, progressed }) {
   });
 }
 
-// kill(pid, 0) says whether the pid exists; the start time, where ps can read it, whether it is still
-// the process that wrote the lock. A watcher whose sandbox runs no ps trusts the pid alone. A lock
-// that carries its holder's start in clock ticks (Linux) is judged by the lock module instead: a
-// clock step moves the start time ps prints, never the ticks.
-export function holderRunning(root, holder) {
+// kill(pid, 0) says whether the pid exists. A lock that carries its holder's start in clock ticks
+// (Linux) is judged by the lock module, which needs no ps: a clock step moves the start time ps
+// prints, never the ticks. Otherwise the start time, where ps can read it, says whether the pid is
+// still the process that wrote the lock; where ps cannot run, that stays "unverified".
+export function holderLiveness(root, holder) {
   // kill() reads a pid of 0 or below as a process group.
-  if (!holder || !(holder.pid > 0)) return false;
+  if (!holder || !(holder.pid > 0)) return "gone";
   try {
     process.kill(holder.pid, 0);
   } catch (err) {
-    if (err.code !== "EPERM") return false;
+    if (err.code !== "EPERM") return "gone";
   }
-  if (processStartTime(holder.pid) === null) return true;
-  if (typeof holder.ticks !== "string") return isLiveHolder(holder);
-  const live = readLiveDriveLock(root);
-  return live?.pid === holder.pid && live.startTime === holder.startTime;
+  if (typeof holder.ticks === "string") {
+    const live = readLiveDriveLock(root);
+    return live?.pid === holder.pid && live.startTime === holder.startTime ? "running" : "gone";
+  }
+  if (processStartTime(holder.pid) === null) return "unverified";
+  return isLiveHolder(holder) ? "running" : "gone";
 }
+
+// A watcher whose sandbox runs no ps trusts the pid alone.
+export const holderRunning = (root, holder) => holderLiveness(root, holder) !== "gone";
 
 const real = (path) => {
   try {

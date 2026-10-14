@@ -113,9 +113,12 @@ driver runs on; your next `/devcycle:continue` attaches or picks up the end.
   (exit 6), and `/devcycle:continue` restarts it.
 - **An authentication failure** (a result asking you to log in, an invalid key) ends the run at
   once (exit 3).
-- **An API error the request itself causes** — any other 4xx status: a low credit balance, an
-  unknown model, a key without access — ends the run at once (exit 3), naming the error; retrying
-  would fail the same way.
+- **An API error every session would hit** — a low credit balance, an unknown model, a key without
+  access (a 401, 403 or 404) — ends the run at once (exit 3), naming the error; retrying would fail
+  the same way.
+- **An API error one session's own conversation caused** — any other 4xx, such as a 400 over its
+  tool-use blocks or a 413 for a request grown too large — ends only that session. The next starts
+  at once, fresh, and the ended one counts as a stall unless it made progress.
 - **A silent session.** A session that prints nothing for 30 minutes is stopped. If it had already
   printed its result, that is only a slow exit and the session is judged like any other. If not,
   the driver waits 5 minutes, charged to `--max-backoff` like a transient failure, and judges its
@@ -170,8 +173,9 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
   `node <plugin root>/scripts/drive-execution.mjs --stop --state .devcycle/state.md`. The driver
   stops the running session's whole process group, writes that session's record and its result
   (`stopped`), releases the lock and exits 130; `/devcycle:continue` asks before resuming it. A
-  driver another user or a sandbox started may refuse the signal: `--stop` then leaves the request
-  on disk and exits 1, and the driver stops before its next session or within a minute of a wait. A
+  driver another user or a sandbox started may refuse the signal, and where `ps` cannot run to
+  confirm the pid is still the driver's, `--stop` sends none: either way it leaves the request on
+  disk and exits 1, and the driver stops before its next session or within a minute of a wait. A
   bare `kill <PID>` or Ctrl-C still works and records `interrupted`, which the next
   `/devcycle:continue` restarts without asking. A `kill -9`, crash or reboot leaves the lock
   behind; it reads as a crash and is restarted, and the next driver on the same machine reclaims
@@ -206,9 +210,9 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 | Code | Meaning |
 | --- | --- |
 | 0 | Done: the state reached `branch-review`. `/devcycle:continue` emits the branch-review handoff. |
-| 1 | Unexpected driver error, or the state left execution for a stage other than branch review. `--stop` exits 1 when the driver cannot be signalled. |
+| 1 | Unexpected driver error, or the state left execution for a stage other than branch review. `--stop` exits 1 when the driver cannot be signalled, or `ps` cannot confirm the pid is still the driver's. |
 | 2 | Usage error: an unknown flag, a missing `--state`, a malformed number. |
-| 3 | Environment: a pre-flight check failed — among them no `drive: auto` row, a start from a driven session, the Bash sandbox, or tracked changes a remaining task would overwrite —, another driver holds the lock, devcycle did not load in a session (another plugin's load errors do not count), authentication failed, or the API refused a request as its own fault (a 4xx other than 408 or 429). The message names the check and its remedy. `--stop` exits 3 when no driver runs. |
+| 3 | Environment: a pre-flight check failed — among them no `drive: auto` row, a start from a driven session, the Bash sandbox, or tracked changes a remaining task would overwrite —, another driver holds the lock, devcycle did not load in a session (another plugin's load errors do not count), authentication failed, or the API refused a request every session would make (a low credit balance, an unknown model, a key without access). The message names the check and its remedy. `--stop` exits 3 when no driver runs. |
 | 4 | Stopped for you: a session reached a gate. The reason and its detail are printed. |
 | 5 | Stalled: `--max-stalls` sessions in a row added no ledger line beyond a dispatch, or `--max-churn` sessions in a row added such lines but no report, verdict or commit — whether each ended or went silent. The last session's final text is printed — usually the question it could not ask. |
 | 6 | Budget: `--max-usd` is spent, or transient failures or silent sessions outlasted `--max-backoff`. |

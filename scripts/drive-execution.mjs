@@ -18,7 +18,7 @@ import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
-import { holderRunning, LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
+import { holderLiveness, LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
 import { follow, statusReport, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
@@ -50,11 +50,15 @@ const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
 // starts the next session on wake. DEVCYCLE_DRIVE_SLICE_MS and DEVCYCLE_DRIVE_CLOCK_FILE (a file
 // holding epoch milliseconds) let tests run hours of waiting in milliseconds.
 const SLICE_MS = Number(process.env.DEVCYCLE_DRIVE_SLICE_MS) || 60_000;
-// A failure that says nothing about the work: an overloaded or unreachable API. An API error's status
-// decides on its own: a 5xx (529 is overloaded), a 408 or a 429 passes, while any other 4xx — a low
-// credit balance, an unknown model, a refused permission — fails the same way every time.
-const API_STATUS = /api error:?\s*(\d{3})\b/i;
+// A failure that says nothing about the work: an overloaded or unreachable API. An HTTP status decides
+// on its own, read only where the text calls it one, so "500 tokens" is none: a 5xx (529 is
+// overloaded), a 408 or a 429 passes. A refused key, an unknown model or a low credit balance fails
+// the same way in every session. Any other 4xx — tool-use blocks out of step, a request too large —
+// came from the one session's transcript, which the next session does not carry.
+const API_STATUS = /(?:api error|status(?: code)?|HTTP(?:\/[\d.]+)?):?\s*(\d{3})\b|\b(5\d\d) (?:internal server error|bad gateway|service unavailable|gateway time-?out)\b/i;
 const PASSING_4XX = new Set([408, 429]);
+const REFUSED_4XX = new Set([401, 403, 404]);
+const REFUSED_TEXT = /credit balance|billing|invalid model/i;
 const TRANSIENT_TEXT = /api error|overloaded|connection|timed? ?out|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed/i;
 const AUTH_TEXT = /\/login|not logged in|invalid api key|authentication_error|oauth token (has )?expired/i;
 // Minutes before the k-th consecutive transient retry; every later one waits the last figure.
@@ -409,10 +413,15 @@ const devcycleErrors = (errors) =>
     return typeof name !== "string" || /^devcycle(@|$)/.test(name);
   });
 
+// "transient" backs off, "refused" ends the run, and null leaves the session to be judged on its
+// progress like any other, which bounds a 4xx that does recur by --max-stalls.
 function apiFailure(text) {
-  const status = Number(text.match(API_STATUS)?.[1]);
-  if (status >= 400 && status < 500 && !PASSING_4XX.has(status)) return "refused";
-  return status || TRANSIENT_TEXT.test(text) ? "transient" : null;
+  const match = text.match(API_STATUS);
+  const status = Number(match?.[1] ?? match?.[2]);
+  if (status >= 500 || PASSING_4XX.has(status)) return "transient";
+  if (REFUSED_4XX.has(status) || REFUSED_TEXT.test(text)) return "refused";
+  if (status >= 400) return null;
+  return TRANSIENT_TEXT.test(text) ? "transient" : null;
 }
 
 function finalize(s, model) {
@@ -896,17 +905,24 @@ export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, si
     console.error(`drive-execution: no driver is running for ${state}`);
     return 3;
   };
+  const requestStays = `the stop request stays in ${STOP_REQUEST_REL}, so the driver stops before its next session or within a minute of a wait`;
   // The watcher's liveness (scripts/drive-result.mjs): a sandbox that runs no ps still finds the driver.
   const holder = readDriveLockHolder(root);
-  if (!holder || !lockNamesState(root, holder, statePath) || !holderRunning(root, holder)) return notRunning();
+  const liveness = holder && lockNamesState(root, holder, statePath) ? holderLiveness(root, holder) : "gone";
+  if (liveness === "gone") return notRunning();
   atomicWrite(request, `${now()}\n`);
+  // A pid ps cannot vouch for may be a later process that reused a dead driver's pid: never signal it.
+  if (liveness === "unverified") {
+    console.error(`drive-execution: cannot confirm pid ${holder.pid} is still the driver, because ps does not run here, so it was not signalled — ` +
+      `${requestStays}; to stop it now, run kill ${holder.pid} from a shell where ps shows that pid is the driver`);
+    return 1;
+  }
   try {
     kill(holder.pid, "SIGTERM");
   } catch (err) {
     if (err.code === "ESRCH") return notRunning();
     console.error(`drive-execution: could not signal the driver (pid ${holder.pid}: ${err.code ?? err.message}) — ` +
-      `the stop request stays in ${STOP_REQUEST_REL}, so the driver stops before its next session or within a minute of a wait; ` +
-      `to stop it now, run kill ${holder.pid} from a shell allowed to signal it`);
+      `${requestStays}; to stop it now, run kill ${holder.pid} from a shell allowed to signal it`);
     return 1;
   }
   console.log(JSON.stringify({ stopped: true, pid: holder.pid }));

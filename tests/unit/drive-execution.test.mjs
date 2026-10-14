@@ -463,6 +463,40 @@ test("--detach handles a stale result, returns once the lock names the driver it
   assert.match(refused.stderr, /default or an integration branch/);
 });
 
+// The driver takes the lock before it hands off the last run's result, and in a real run the gap is
+// microseconds. A preload in the detached driver alone stretches that hand-off (its rename of
+// drive-result.json) to 1.5 s, so a --detach that returned on the lock alone would leave the earlier
+// run's result in place.
+test("--detach returns only once the driver it started has handed off the previous run's result, not as soon as it holds the lock", async () => {
+  const root = makeCycle();
+  writeInto(root, RESULT_REL, JSON.stringify({ outcome: "interrupted", code: 130 }));
+  const h = harness([{ ledger: DONE, stage: "branch-review" }]);
+  const preload = join(dirname(h.callsPath), "slow-hand-off.cjs");
+  writeFileSync(preload, [
+    'const fs = require("node:fs");',
+    'if (!process.argv.includes("--detach")) {',
+    "  const rename = fs.renameSync;",
+    "  fs.renameSync = (from, to) => {",
+    '    if (String(from).endsWith("drive-result.json")) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);',
+    "    return rename(from, to);",
+    "  };",
+    '  require("node:module").syncBuiltinESMExports();',
+    "}",
+  ].join("\n"));
+  const env = { ...h.env, NODE_OPTIONS: `${h.env.NODE_OPTIONS ?? ""} --require "${preload}"` };
+  const r = spawnSync(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, "--detach"], { cwd: root, env, encoding: "utf8" });
+  let pid = null;
+  try {
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    pid = JSON.parse(r.stdout).pid;
+    assert.notEqual(readDriveResult(root)?.outcome, "interrupted", "--detach returned while the earlier run's result was still in place");
+    assert.equal(readHandledResult(root)?.outcome, "interrupted");
+    await waitFor(() => isDead(pid), 30000);
+  } finally {
+    if (pid && !isDead(pid)) process.kill(-pid, "SIGKILL");
+  }
+});
+
 // The child runs the pre-flight the parent just passed, so the refusal here is one only the child
 // meets: the lock module fails closed on a reclaim a dead starter left half-done (scripts/drive-lock.mjs).
 test("--detach relays a driver that fails to start: its own stderr lines from this run, and its exit code", () => {
@@ -901,6 +935,31 @@ test("--stop keeps the stop request and says so when the driver cannot be signal
   assert.equal(stopDriver(statePathOf(root), { kill: refusing("ESRCH") }), 3);
   assert.equal(existsSync(join(root, STOP_REQUEST_REL)), false);
   assert.deepEqual(said, [`drive-execution: no driver is running for ${statePathOf(root)}`]);
+});
+
+// Where ps cannot run, a live pid may be the driver or a later process that reused a dead driver's
+// pid. The watcher may trust it; a signal must not, since it would land on that other process. A
+// PATH with no ps in it stands in for such a sandbox.
+test("--stop sends no signal when ps cannot confirm the pid is still the driver: the stop request stays and it says so", (t) => {
+  const root = makeCycle();
+  writeLock(root, { pid: process.pid, startTime: processStartTime(process.pid) });
+  const said = [];
+  t.mock.method(console, "error", (msg) => said.push(msg));
+  t.mock.method(console, "log", (msg) => said.push(msg));
+  const signalled = [];
+  const path = process.env.PATH;
+  process.env.PATH = makeTempDir("devcycle-no-ps-");
+  let code;
+  try {
+    code = stopDriver(statePathOf(root), { kill: (pid, signal) => signalled.push([pid, signal]) });
+  } finally {
+    process.env.PATH = path;
+  }
+  assert.deepEqual(signalled, [], "a pid ps could not confirm was signalled");
+  assert.equal(code, 1);
+  assert.ok(existsSync(join(root, STOP_REQUEST_REL)), "the stop request was removed while the driver may still run");
+  assert.match(said.join("\n"), new RegExp(`^drive-execution: cannot confirm pid ${process.pid} is still the driver`, "m"));
+  assert.match(said.join("\n"), /the stop request stays in \.devcycle\/drive-stop-request/);
 });
 
 // What makes a stop request on disk work without the signal: the driver reads it between sessions
