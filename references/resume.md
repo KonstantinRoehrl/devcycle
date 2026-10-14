@@ -47,8 +47,8 @@ state file that has no `knobs:` line yet write it; every other stage rewrite car
 unchanged, like `kind:` and `plan-counts:`. `configured:` is carried forward the
 same way; the next section owns its forms.
 Three optional rows sit outside the template. Only `/devcycle:continue`'s knob comparison and the
-knob-change question it gates write or drop the two `knobs-` rows, and only the opt-in gate at
-planning's close writes `drive:`; every other rewrite carries all three forward, and
+knob-change question it gates write or drop the two `knobs-` rows, and only `/devcycle:continue` at
+execution start writes or rewrites `drive:`; every other rewrite carries all three forward, and
 `/devcycle:cycle`'s `stage: done` reuse resets them with the rest.
 
 - `- knobs-declined: <a fresh knobs: line's values>` — global values the user chose not to apply.
@@ -59,20 +59,18 @@ planning's close writes `drive:`; every other rewrite carries all three forward,
 - `- knobs-changed: <stamp> <the compare lines joined by "; ">` — the first **apply** made before
   this cycle's ledger exists, so the run record's minted knobs are known superseded from that
   stamp; a second such apply leaves that row alone. This cycle's ledger exists once
-  `.devcycle/ledger.md`'s `Plan:` header names the state file's `plan:` path. A ledger file whose
-  header names another plan is a previous cycle's slot, and a `plan: none` cycle (fast path,
+  `.devcycle/ledger.md`'s `Plan:` header names the state file's `plan:` path and its `Run:` header,
+  when it has one, the state file's `run:` id (a ledger without `Run:` predates it and is judged by
+  `Plan:` alone). A ledger file whose header names another plan or run is a previous cycle's slot,
+  which `scripts/ledger-slot.mjs` archives before execution writes a new one, and a `plan: none` cycle (fast path,
   sweep) never has one: neither is appended to. Once it exists, an apply instead appends a
   `task=config event=user-decision` line in the shape
   `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/ledger.md the-event-line`
   prints, outcome `knobs changed mid-cycle: <the compare lines joined by "; ">`, ref
   `.devcycle/state.md`.
-- `- drive: auto model=<id> opted=<stamp>` — the user chose unattended execution at
-  `playbooks/planning-waves.md` § Handoff; an agent writes it only as that answer's direct result
-  (`docs/decisions/README.md`, 2026-10-08 — Unattended execution). `<id>` is the opting-in
-  session's model as the depth probe reads it. A start-now answer appends `session=<hash>` (the
-  `--check-sandbox` `sessionHash`): inside Claude Code the driver starts only from that session,
-  before the first driven session ends. No row means manual: `scripts/drive-execution.mjs`
-  refuses to start, and `/devcycle:continue --drive` stops `not-opted-in`.
+- `- drive: …` — how this cycle's waves run, unattended or walked in an interactive session.
+  `references/drive.md` owns its two forms and who writes them (`docs/decisions/README.md`,
+  2026-10-13 — Unattended execution).
 
 `updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`
 taken when the field is written — never a narrated or estimated time.
@@ -176,12 +174,13 @@ and takes the generic rows.
 | `report-received outcome=blocked` | the implementer reported `status: blocked`: a user decision is pending (drive mode: stop `needs-user`) |
 | `review-round` (no verdict after it) | the reviewer's run may have died: re-dispatch it for that round |
 | `review-verdict outcome=accepted` | run the green gate, commit |
-| `review-verdict outcome=rejected` or `rejected (green gate: …)` | re-dispatch the implementer with the findings or gate evidence — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet (findings, task body, applied-edits disclosure), never a sweep re-run; the next review is the next round |
+| `review-verdict outcome=rejected` or `rejected (green gate: …)` | re-dispatch the implementer with the findings or gate evidence — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet, never a sweep re-run; the next review is the next round |
 | `review-verdict outcome=rejected (missing findings file)` | re-dispatch the **reviewer** for that round, not the implementer |
 | `review-verdict outcome=deferred (concurrent sibling edits)` | re-run the green gate once the wave quiesces (`playbooks/executing-waves.md` step 6), not a re-dispatch |
 | `committed` | task done — move to the next task |
+| `user-decision` | carry out the decision its `outcome=` records (`next: "follow-decision"`) |
 | `dispatched outcome=sweep …` | no brief to re-dispatch: re-run the sweep bullets from the clean-targets check |
-| any other sweep-token outcome (`applied-none`, `dirty-targets`, `sweep hard stop: …`) | a decision was pending when the run died: re-present the fallback, never an automatic dispatch. Reasons come from the saved report, or for `dirty-targets` from the files the event names (no sweep ran, so no report exists); a hard stop also carries its applied-files disclosure |
+| any other sweep-token outcome (`applied-none`, `dirty-targets`, `sweep hard stop: …`) | a decision was pending when the run died: re-present the fallback, never an automatic dispatch. Reasons come from the saved report, or for `dirty-targets` from the files the event names; a hard stop also carries its applied-files disclosure |
 
 **Retry caps.** An intake bounce, `rejected (missing report file)` and `rejected (missing findings
 file)` each allow two retries per task: the third such line for the task is a pending user decision

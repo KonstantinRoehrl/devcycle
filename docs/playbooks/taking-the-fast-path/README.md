@@ -13,13 +13,14 @@ steps: (1) branch discipline — read `references/branch.md` and never implement
 an integration branch, the same rule any committing path follows; (2) implement in-session, no
 subagents or plan file, still producing the before/after evidence the triage-determined class
 requires, written to `.devcycle/evidence/fast-before.txt` and `fast-after.txt` (`fast` is this
-path's task id) with the declared class and exact command on `fast-before.txt`'s first line; (3)
+path's task id) by `capture-evidence.mjs --cmd`, with the declared class copied to
+`.devcycle/reports/fast.md`; (3)
 an **escalation valve** — if implementation reveals the change isn't trivial after all (blast
 radius spreading, a real design choice surfacing), stop and re-enter the normal pipeline at
 scoping or brainstorm rather than forcing a non-trivial change through; (4) commit with a
 Conventional Commit subject, scoped per `references/commit-convention.md`, running `git add -N`
 first on any newly created file; (5) light review — exactly one `devcycle:task-reviewer`
-dispatch reading the declared class and command off `fast-before.txt`, capped at 2 rounds, its
+dispatch reading the declared class from `.devcycle/reports/fast.md`, capped at 2 rounds, its
 verdict written to `.devcycle/findings/fast-path-status.md` before anything is reported to the
 user; (6) handoff to `playbooks/finishing-the-cycle.md`, unchanged from how the full pipeline
 finishes.

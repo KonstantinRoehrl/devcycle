@@ -5,6 +5,111 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-13 — Unattended execution: chosen at execution start, started by /devcycle:continue
+
+**Decision:** a cycle's execution style is chosen when it reaches the execution stage, by the
+`/devcycle:continue` that resumes it, not at planning's close; a new knob, `executionMode`
+(`ask` | `manual` | `unattended`, fallback `ask`), can give that answer in advance. The 2026-10-08
+entry's four rules become:
+- **The opt-in is the user's act.** It is the user's answer at **execution start**, or the
+  `executionMode` knob the user set; nothing else opts a cycle in.
+- **The driver stands in for the user at one gate.** A driver started by a `/devcycle:continue`
+  the user invoked on an opted-in cycle — including that session's automatic restart of a
+  resumable end — counts as the user at the **wave→wave** await gate of `references/handoff.md`,
+  and at no other gate.
+- **Every wave still gets a fresh session.** Unchanged.
+- **An agent never acts for the user.** An agent never opts a cycle in, never answers a gate, and
+  never starts a driver outside `/devcycle:continue`'s start path.
+
+The driver enforces what it can structurally: it refuses a start from a driven session
+(`DEVCYCLE_DRIVE_TOKEN` set) and while a live lock exists. The `CLAUDECODE` + `session=` +
+"before the first driven session ends" check is removed, and so is `--check-sandbox`'s
+`sessionHash`.
+
+**Why:** asked at planning's close, the question came before the `/clear` execution needs, so the
+session that recorded the answer could neither watch the run nor restart it, and a run's end
+waited for a human to start it again (#348, #349). A restart of a resumable end needs no new
+answer (D2), which a one-shot grant would contradict. **Considered and rejected:** a nonce that
+`wave-setup.mjs` mints and the driver's pre-flight consumes. Any agent can run `wave-setup.mjs`,
+so the nonce would prove nothing the prose rule does not; the guard stays a rule, as the
+2026-10-08 entry's rule 4 already was. The execution-start surface lives in a new
+references/drive.md, read by section only at stage: execution, so commands/continue.md stays at its
+174-line ceiling; the surface total and the closures that load it rise by its sections.
+
+**Supersedes:** the 2026-10-08 entry's rules 1, 2 and 4 as worded there (rule 3 stands), and the
+`session=` field of its `drive: auto` row. Settled at branch review, it also supersedes the design's
+§1 rule that a `sweep-fallback` answer is recorded `task=drive`: the stop names its task and the
+answer is recorded `task=<n>`, since a `task=drive` line leaves the task at its sweep decision and
+the next driven session stops on it again.
+
+**Budgets:** the `executionMode` flag line in each entry command's resolver block (+8) and, in
+references/config.md, the roster row (+1) and the two-knob live sentence (+2) raise the measured
+runtime surface 5901 → 5912 (+11); the new references/drive.md and the surface edits that point at
+it raise it on to 6022 (+110), so `surfaceTotal` moves 5904 → 6022 (+118). Each command's context
+figure rises by its own flag line, and every entry whose closure cites references/config.md by that
+file's growth. commands/continue.md's closure also takes in references/drive.md's sections and the
+ledger event-line section they load (→ 59988); references/handoff.md's own bytes move by its
+rewritten Unattended execution paragraph (→ 9038), and the closures that read it whole by the same
+3 bytes; executing-waves.md rises by its ledger-slot pre-flight step and the references it reads
+(→ 96948), and planning-waves.md falls by its removed opt-in gate (→ 69685). Every moved entry carries its own `budget:` line below,
+at the figure `node scripts/validate.mjs` measured.
+
+```text
+budget: surface-budget.json surfaceTotal 6022
+budget: context-budget.json commands/continue.md 59988
+budget: context-budget.json commands/cycle.md 69722
+budget: context-budget.json commands/learn.md 16618
+budget: context-budget.json commands/maintain.md 17797
+budget: context-budget.json commands/onboard.md 16906
+budget: context-budget.json commands/reconcile.md 24343
+budget: context-budget.json commands/review.md 24973
+budget: context-budget.json commands/verify.md 24071
+budget: context-budget.json playbooks/executing-waves.md 96948
+budget: context-budget.json playbooks/finishing-the-cycle.md 45829
+budget: context-budget.json playbooks/learning-from-sessions.md 62007
+budget: context-budget.json playbooks/maintaining-the-repo.md 64084
+budget: context-budget.json playbooks/onboarding-a-repo.md 30518
+budget: context-budget.json playbooks/planning-waves.md 69685
+budget: context-budget.json playbooks/receiving-review.md 108214
+budget: context-budget.json playbooks/reviewing-code.md 91629
+budget: context-budget.json playbooks/reviewing-the-branch.md 47292
+budget: context-budget.json playbooks/scoping-the-request.md 27915
+budget: context-budget.json playbooks/verifying-on-device.md 42816
+budget: context-budget.json references/config.md 14249
+budget: context-budget.json references/handoff.md 9038
+```
+
+## 2026-10-12 — One gate command per task, captured by a helper
+
+**Decision:** a plan's header names the repo's whole verification gate on one `**Verification
+gate:**` line, and `gateCommand` in `scripts/task-files.mjs` is the one resolver of a task's gate:
+a convention task's parenthetical, any other task's header line. `scripts/capture-evidence.mjs`
+writes every evidence capture, running that gate unless `--cmd` names another command, and prints
+the report lines to copy. `task-dispatch.mjs` ends every implementer brief with a `**Gate
+command:**` line. `evidence-completeness-check.mjs --task <id>` holds a report's `cmd:` to that gate
+unless a `- Narrowing:` line explains the difference. The green gate runs `task-commit.mjs` with
+`--test-cmd` set to the wave setup's `gateCmd` and `--subset-cmd` set to its `testCmd`. The
+evidence contract is version 2. The authored-claims lint skips the lines under a report's Tail
+field, and a red attributed as pre-existing, flaky, unrelated or environmental needs its
+`<task-id>-flaky.txt` reproduction cited.
+
+**Why:** truthful reports bounced at intake on counts quoted in their captured tail (#281) and on
+dotnet test summaries (#283), while a capture's header, the report's `cmd:` and the task's gate
+were three hand-copied strings free to drift (#282, #337), and a red explained away needed no
+reproduction (#333). To offset the growth, `references/evidence.md` lost its hand-written capture
+template and brace-group rule, a restated description of the concurrent-wave case, and two
+asides, so its own bytes stay under their entry; the playbooks' figures rise by their own new lines.
+
+**Supersedes:** the hand-written `{ echo "# devcycle-cmd: …"; …; } > file 2>&1` capture
+template; the test command scraped from a task's steps as the green gate's whole-suite run.
+
+```text
+budget: surface-budget.json surfaceTotal 5904
+budget: context-budget.json commands/cycle.md 69441
+budget: context-budget.json playbooks/executing-waves.md 96199
+budget: context-budget.json playbooks/planning-waves.md 71672
+```
+
 ## 2026-10-10 — Closures stop creeping back up
 
 **Decision:** the two files sitting exactly at their line ceilings get headroom by deletion and

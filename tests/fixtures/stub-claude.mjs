@@ -3,12 +3,14 @@
 // STUB_CLAUDE_SCENARIO — editing the state file, the ledger and drive-stop.json the way a driven
 // session would, then printing stream-json events — and first appends what it was given (its argv,
 // whether DEVCYCLE_NESTED_RUN reached it, its pid, the DEVCYCLE_DRIVE_TOKEN it was handed and the
-// drive lock's tokenHash at that moment) to the JSONL file named by STUB_CLAUDE_CALLS.
+// drive lock's tokenHash at that moment, and its clock reading) to the JSONL file named by
+// STUB_CLAUDE_CALLS.
 //
 // A step's keys, all optional: `plugins` (the init event's list; default devcycle only),
 // `pluginErrors`, `ledger` (lines appended after a `- [<stamp>] ` prefix), `stage` (rewrites the
 // state's `- stage:` row), `stop` ({ reason, detail } written as drive-stop.json), `rateLimitInSec`
-// (a rejected rate_limit_event resetting that many seconds from now), `result`, `isError`,
+// (a rejected rate_limit_event resetting that many seconds from now),
+// `rateLimitNoReset` (a rejected rate_limit_event that names no reset time), `result`, `isError`,
 // `costUsd`, `denials`, `usage` (the assistant event's usage block), `messageId` and `repeat` (that
 // event's message id, and how many times it is streamed, as Claude Code streams one event per
 // content block), `hangMs` (wait before the result event), `hangAfterResultMs` (stay alive and silent
@@ -17,6 +19,18 @@
 // `exitCode` says otherwise), `exitCode`.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+// The driver's injected clock (DEVCYCLE_DRIVE_CLOCK_FILE), so a limit's reset and the call log are
+// stamped on the same clock the driver waits on.
+function clockNow() {
+  try {
+    const text = readFileSync(process.env.DEVCYCLE_DRIVE_CLOCK_FILE ?? "", "utf8").trim();
+    if (/^\d+$/.test(text)) return Number(text);
+  } catch {
+    // No clock file: the real clock.
+  }
+  return Date.now();
+}
 
 const steps = JSON.parse(readFileSync(process.env.STUB_CLAUDE_SCENARIO, "utf8"));
 const callsPath = process.env.STUB_CLAUDE_CALLS;
@@ -30,7 +44,7 @@ try {
   // No lock: a dry run, or a test that drives without one.
 }
 appendFileSync(callsPath, JSON.stringify({ argv, nested: "DEVCYCLE_NESTED_RUN" in process.env, pid: process.pid,
-  token: process.env.DEVCYCLE_DRIVE_TOKEN ?? null, lockTokenHash }) + "\n");
+  token: process.env.DEVCYCLE_DRIVE_TOKEN ?? null, lockTokenHash, clock: clockNow() }) + "\n");
 if (step.noInit) process.exit(step.exitCode ?? 1);
 
 const prompt = argv[argv.indexOf("-p") + 1] ?? "";
@@ -51,7 +65,8 @@ if (step.stop)
     JSON.stringify({ stage: "execution", stamp: "2026-10-08T00:00:00Z", sessionHash: "0".repeat(64), ...step.stop }),
   );
 if (step.rateLimitInSec !== undefined)
-  emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: Math.floor(Date.now() / 1000) + step.rateLimitInSec } });
+  emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: Math.floor(clockNow() / 1000) + step.rateLimitInSec } });
+if (step.rateLimitNoReset) emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected" } });
 const usage = step.usage ?? { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 60000 };
 for (let i = 0; i < (step.repeat ?? 1); i++)
   emit({

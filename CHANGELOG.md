@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.25.0 — 2026-10-14
+
+- feat: ask the execution style at execution start, make unattended runs watchable and resumable (#348, #349, #351)
+- fix: remove intake-lint false positives and pin the evidence-capture contract (#281, #283, #282, #337, #75, #303)
+
+Implementer reports stop bouncing on counts quoted in their evidence tail and on dotnet test
+summaries. A plan now names its whole verification gate in its header;
+`scripts/capture-evidence.mjs` writes every evidence capture from that command, implementer briefs
+end with it, intake rejects a `cmd:` that differs from it and a red explained as pre-existing or
+flaky without its reproduction file, and the green gate runs it. `scripts/plan-check.mjs` fails a
+plan whose pinned gate omits a check the repo's required-checks manifest lists (#322). Implementers
+lint their own reports before returning. The evidence contract is now version 2.
+
+Unattended execution is now chosen at execution start: planning always hands off
+`Clear + /devcycle:continue`, and `/devcycle:continue` asks whether to walk the waves or run them
+unattended (#348, #349). The new `executionMode` setting (`ask`, `manual`, `unattended`) answers
+for you. On **Unattended** the session starts the driver itself, prints an overview of the waves,
+relays progress as it lands and emits the branch-review handoff at the end; run it again while a
+driver runs and it attaches. Every driver end is resumable without lost progress: the driver
+writes a result file, an interrupted or crashed run restarts on the next `/devcycle:continue`, and
+a run that stopped for you becomes one question. The driver waits out a usage limit until its
+reset, backs off from transient API failures, ends at once on an authentication failure, and keeps
+its waits on the wall clock across sleep. New flags: `--stop`, `--status`, `--follow`, `--wait`;
+`--detach` returns only once the driver holds its lock. The pre-flight refuses only tracked changes
+a remaining task would overwrite, listing each with its task (#351), and a previous cycle's leftover
+ledger is archived before a new one starts. Refusals name their remedy.
+
 ## 0.24.0 — 2026-10-11
 
 - feat: run execution waves unattended, adopt Claude Code mods, and scope resume reads to sections

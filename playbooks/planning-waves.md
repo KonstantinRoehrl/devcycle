@@ -12,9 +12,10 @@ Read `profile` from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references/conf
 channel. At **`lean` / `standard`** do NOT
 load `superpowers:writing-plans` — the Plan mechanics section below is self-contained. At
 **`thorough`** it is a REQUIRED SUB-SKILL for all plan-writing mechanics; where the two disagree this
-playbook wins, and two of that section's rules always override it — the plan header's "For agentic workers"
+playbook wins, and these rules of that section always override it — the plan header's "For agentic workers"
 line names `playbooks/executing-waves.md` as the executor (never upstream's
-subagent-vs-inline execution choice), and no task gets a commit step. Everything outside that one
+subagent-vs-inline execution choice), the header carries a `**Verification gate:**` line, no task gets a
+commit step, and item 8's plan gate runs. Everything outside that one
 section is unconditional, so a finished plan has the same shape whichever engine produced it.
 
 ## Feasibility gate — before any detailed planning
@@ -76,7 +77,9 @@ suite run is step 1. Never a commit step.
 **Plan header — every plan starts with it:** an H1 `<Feature Name> Implementation Plan`; a blockquote
 for agentic workers naming `playbooks/executing-waves.md` as the REQUIRED
 executor and noting checkbox (`- [ ]`) step syntax; `**Goal:**` (one sentence); `**Architecture:**`
-(2–3 sentences); `**Tech Stack:**`; `## Global Constraints` (the spec's project-wide requirements —
+(2–3 sentences); `**Tech Stack:**`; `**Verification gate:**` (the repo's whole verification gate as one
+exact shell command in one code span; `references/evidence.md` § File-backed evidence says which tasks run it);
+`## Global Constraints` (the spec's project-wide requirements —
 version floors, dependency limits, naming and copy rules, platform requirements — one line each,
 copied verbatim, implicitly part of every task's requirements); and `## Quality Constraints` above.
 
@@ -115,13 +118,13 @@ fixing what it finds inline as you go; no re-review pass.
 6. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
 7. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch.
 8. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path>` — one command,
-   seven legs, compact on success: pasted JS/mjs code blocks parse (`codeBlocks`); every task carries
-   Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints and the Dispatch Map
-   lists every task (`briefCompleteness`); every referencer of a changed file, test or not, sits in some
+   seven legs: pasted JS/mjs code blocks parse (`codeBlocks`); every task carries
+   Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, the header carries
+   one `**Verification gate:**` code span, pinned gates run every required-checks manifest entry, and the Dispatch Map lists every task (`briefCompleteness`); every referencer of a changed file, test or not, sits in some
    Files block (`blastRadius`); no same-wave task's brief names a file another same-wave task edits
    (`contentCoupling`); a task touching a budgeted surface (`playbooks/`, `commands/`, `agents/`,
-   `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md`, which holds
-   their `budget:` lines — `references/` and `agents/` markdown match the context budget too: every
+   `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md` —
+   `references/` and `agents/` markdown match the context budget too: every
    entry point pays for the references it cites, and agents count toward a reference's fan-in
    (`budgetFixtures`); no two same-wave tasks list the same file (`waveDisjointness`); and item 4's
    claims (`authoredClaims`). A plan with no `## Dispatch Map` fails before any leg runs. Three
@@ -172,15 +175,15 @@ as this stage's relevance filter, starting from implementation-scoped docs (a `f
 
 ## Handoff — required final output
 
-After saving the plan (or issuing a NO-GO report), and on a GO after the opt-in gate below, update
-`.devcycle/state.md` (`stage: execution` —
+After saving the plan (or issuing a NO-GO report), update `.devcycle/state.md` (`stage: execution` —
 the stage to resume at — and the `plan:` path; after a NO-GO, keep `stage: planning`), also writing
 `- plan-counts: planned=<count from the Dispatch Map> waves=<wave count from the Dispatch Map>` so
 the sensor can carry the plan totals into each progressive workload write (`planned=0 waves=0` after
 a NO-GO, where no Dispatch Map exists), then emit this
 stage's handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with
 `Stage completed: planning` and the plan path (or the NO-GO report) as its artifact. The plan carries
-everything execution needs, so the context action is `Clear + /devcycle:continue`.
+everything execution needs, so the context action is `Clear + /devcycle:continue`. How the waves
+run — walked or unattended — is settled at execution start, never here (`references/drive.md`).
 
 Committing the saved plan is gated the way the spec's commit is: read
 `docTrackingPolicy` from the `knobs:` line and check it against
@@ -191,32 +194,3 @@ plan-commit step of its own and `all-tracked` would otherwise never track a plan
 `docs/<subdir>/` the repo means to track needs its own `!docs/<subdir>/` line in `.gitignore` —
 the blanket `docs/*` swallows it otherwise — plus an allowlist below any line that re-ignores its
 contents; a subdirectory `references/config.md` § Doc tracking keeps local needs neither.
-
-**Opt-in gate (GO only).** Ask one AskUserQuestion — how execution should run — with three
-options: **Walk the waves manually** (today's behaviour) · **Unattended — start it now** ·
-**Unattended — I'll start it myself**. Offer **Unattended — start it now** only when
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --check-sandbox` prints
-`{"sandboxed":false}` and a non-null `sessionHash` (for step 3); else offer the other two, saying
-why: the sandbox blocks `~/.claude`, or this session's id is unreadable. An Other answer
-appends `user-correction-at-gate`; `references/ledger.md` owns the rule. Only the user's answer
-opts in (`docs/decisions/README.md`, 2026-10-08 — Unattended execution). On either unattended
-answer, in this order:
-
-1. Settle the branch: on the default or an integration branch, cut the topic branch now and record
-   it on `branch:` as `references/branch.md` § Committing requires, so the driver's pre-flight
-   finds it.
-2. Take `<id>` from the `model` that `node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs" --json`
-   prints, never from self-report, and `<stamp>` from `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`.
-3. Rewrite the state file in full as above, adding `- drive: auto model=<id> opted=<stamp>` (with
-   ` session=<sessionHash>` on start-now only, so no later Claude Code session can start it), then
-   commit the saved plan as the paragraph above gates it, and only then start a driver, so it never
-   reads `stage: planning` or meets this session's commit. Write nothing to the ledger: the first
-   driven session records the opt-in.
-4. **Unattended — start it now:** run
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md --model <id> --detach`.
-   Exit 3 is a pre-flight refusal: report its reason and offer the manual walk, which drops the
-   `drive:` row from the state file. Otherwise print the PID it returns, the log path,
-   `tail -f .devcycle/drive.log` to watch it and `kill <PID>` to stop it, emit the handoff, and
-   touch the working tree no further. **Unattended — I'll start it myself:** print
-   `node "<devcycle-root's output>/scripts/drive-execution.mjs" --state "<the state file's absolute
-   path>"` for the user's own terminal, then emit the handoff.

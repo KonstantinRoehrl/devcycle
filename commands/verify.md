@@ -26,7 +26,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --learnStalenessSessions '${user_config.learnStalenessSessions}' \
   --learnStalenessDays '${user_config.learnStalenessDays}' \
   --learnSessionCap '${user_config.learnSessionCap}' \
-  --subagentBudget '${user_config.subagentBudget}'
+  --subagentBudget '${user_config.subagentBudget}' \
+  --executionMode '${user_config.executionMode}'
 ```
 
 **This run is standalone: no cycle, and this command is not a pipeline stage.** That, plus

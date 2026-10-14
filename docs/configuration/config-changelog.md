@@ -145,6 +145,12 @@ marker with the version the change lands in, since only the release computes tha
   default: warn
   values: [off, warn, enforce]
   note: "the hooks module's subagent limiter tier; profile-independent, so it takes no auto"
+- version: "0.25.0"
+  change: added
+  key: executionMode
+  default: ask
+  values: [ask, manual, unattended]
+  note: "how /devcycle:continue runs the waves at execution start while the cycle has no drive: row; profile-independent, so it takes no auto"
 ```
 
 ## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)

@@ -28,18 +28,46 @@ const TAIL_FIELD_RE = /^\s*-\s*Tail\b.*?\blast\s+\d+\s+lines\b/i;
 // positions of everything else stay meaningful.
 const blank = (line, re) => line.replace(re, (m) => " ".repeat(m.length));
 
-export function authoredClaimsLeg(text, { planPath }) {
-  const rawLines = text.split("\n");
+// The report template's Tail field line, `- Tail (after, last <N> lines):` (references/evidence.md
+// § File-backed evidence): the lines under it are captured tool output, not authored prose.
+const TAIL_START_RE = /^\s*-\s*Tail\s*\([^)]*\):\s*$/i;
+// Any report-template field line, `- <Label>:` or `- <Label> (…):` (references/evidence.md
+// § File-backed evidence) — `- Deviations:`, `- On-device items:`, `- Tail (after, …):`.
+const REPORT_FIELD_RE = /^\s*-\s*[A-Z][\w -]*(?:\([^)]*\))?:/;
+const indentOf = (line) => line.match(/^\s*/)[0].length;
 
+// One owner for "which lines of an artifact are prose", shared with evidence-completeness-check.mjs.
+// A Tail body is every line after a Tail field line that is blank or indented deeper than it, up to
+// the first non-blank line indented no deeper, so an indented Tail field ends at its next sibling.
+// A fence opened inside a Tail body belongs to it until it closes, however either marker or the
+// lines between are indented, so a mis-indented fence can't leave the rest of the artifact as code —
+// but a report field line at the Tail's depth ends the Tail and its fence regardless, so one unpaired
+// marker in captured output can't silence every field after it.
+export function proseLines(text) {
   let inFence = false;
-  const guardedLines = rawLines.map((line) => {
+  let tailIndent = null;
+  return text.split("\n").map((line) => {
+    if (tailIndent !== null) {
+      const atTailDepth = line.trim() !== "" && indentOf(line) <= tailIndent;
+      if (!atTailDepth || (inFence && !REPORT_FIELD_RE.test(line))) {
+        if (FENCE_RE.test(line)) inFence = !inFence;
+        return null;
+      }
+      tailIndent = null;
+      inFence = false;
+    }
     if (FENCE_RE.test(line)) {
       inFence = !inFence;
       return null; // the fence delimiter line itself carries no claims
     }
     if (inFence) return null;
+    if (TAIL_START_RE.test(line)) tailIndent = indentOf(line);
     return blank(blank(blank(line, INLINE_CODE_RE), URL_RE), TAIL_FIELD_RE);
   });
+}
+
+export function authoredClaimsLeg(text, { planPath }) {
+  const rawLines = text.split("\n");
 
   const markerClears = (lineIdx) =>
     [lineIdx - 1, lineIdx, lineIdx + 1].some(
@@ -49,7 +77,7 @@ export function authoredClaimsLeg(text, { planPath }) {
   const findings = [];
   const flag = (idx, kind, claim) =>
     findings.push(`${planPath}:${idx + 1}: unverified ${kind} claim "${claim}" — add a (verified: <cmd>) or (assumption) marker`);
-  guardedLines.forEach((guarded, idx) => {
+  proseLines(text).forEach((guarded, idx) => {
     if (guarded === null) return;
     if (markerClears(idx)) return;
     for (const m of guarded.matchAll(LINE_REF_RE)) flag(idx, "line-reference", m[0]);

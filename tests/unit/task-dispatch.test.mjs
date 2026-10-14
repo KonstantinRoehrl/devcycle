@@ -160,3 +160,33 @@ test("several tasks dispatched in parallel on one ledger each leave their line",
   assert.deepEqual(ledgerLines(repo).map((l) => l.match(/ key=(\S+)$/)[1]).sort(),
     ["1", "2", "3", "4", "5", "6"].map((t) => `${t}/dispatched/0/0`));
 });
+
+const GATED_PLAN = ["# P", "", "**Verification gate:** `npm run gate`", "",
+  "### Task 5: T", "**Files:**", "- Modify: src/a.mjs", "**Evidence:** red-green", "**Quality constraints:** none", "",
+  "## Dispatch Map", "", "- Wave 1: Task 5", ""].join("\n");
+
+function gatedRepo() {
+  const repo = repoWithLedger();
+  mkdirSync(join(repo, "docs"), { recursive: true });
+  writeFileSync(join(repo, "docs/plan.md"), GATED_PLAN);
+  return repo;
+}
+const briefAt = (repo, rel) => readFileSync(join(repo, rel), "utf8");
+
+test("an implementer brief ends with the task's resolved gate command", () => {
+  const repo = gatedRepo();
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"), "# Brief for task 5\n\n**Gate command:** `npm run gate`\n");
+});
+
+test("a fix-pass brief carries the gate line too; a reviewer brief and an ungated task get none", () => {
+  const repo = gatedRepo();
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--round", "1"], "# Fix pass");
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer-round-1.md"), "# Fix pass\n\n**Gate command:** `npm run gate`\n");
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"], "# Review brief\n");
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-reviewer-round-1.md"), "# Review brief\n");
+  const plain = repoWithLedger();
+  dispatch(plain, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n");
+  assert.equal(briefAt(plain, ".devcycle/briefs/5-implementer.md"), "# Brief for task 5\n");
+});

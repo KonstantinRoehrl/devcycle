@@ -5,17 +5,19 @@ The single owner of the ledger's *write* format: its preamble records and its pe
 position back *out* of it, `references/evidence.md` report and verdict shapes.
 
 Single source of truth for progress, at `.devcycle/ledger.md` — one ledger, never a second.
-`playbooks/executing-waves.md` creates the file, before any per-event line, with these three
+`playbooks/executing-waves.md` creates the file, before any per-event line, with these four
 records at the top, each written once, in this order:
 
 ```
 Plan: `<the plan path this stage was handed>`
+Run: `<the state file's run: id>`
 Branch: `<topic branch>` (cut from `<integration or default branch>` at `<sha>`)
 Profile: `<resolved profile>` (evidence tail <N> lines)
 ```
 
-`Branch:` is recorded once that playbook's pre-flight has the topic branch, `Profile:` from its own
-resolved profile, and its commit-convention pre-flight step appends a fourth line,
+`Run:` ties the ledger to this cycle's run, so a previous cycle's slot is told apart even when it
+named the same plan. `Branch:` is recorded once that playbook's pre-flight has the topic branch,
+`Profile:` from its own resolved profile, and its commit-convention pre-flight step appends a fifth line,
 `Commit-convention:`, once its derivation runs —
 `references/commit-convention.md` owns that line's format. Then one appended line per event, in the
 shape § The event line gives.
@@ -77,8 +79,8 @@ run-record row — and `depthBand`) and exits non-zero only on a usage (2) or en
   once the implementer's envelope returns, against the task's latest `dispatched` line:
   `status: blocked` appends `report-received outcome=blocked` (action `needs-user`); a missing report,
   or one with no `- Evidence:` line, appends `outcome=rejected (missing report file)` (`missing-report`);
-  a report failing `authored-claims-check.mjs` or `evidence-completeness-check.mjs` appends
-  `outcome=rejected (intake bounce)` with its findings file as `ref=` (`bounce`); a clean one appends
+  a report failing `authored-claims-check.mjs` or `evidence-completeness-check.mjs --task <id>` (its
+  `cmd:` held to the task's gate through this ledger's plan) appends `outcome=rejected (intake bounce)` with its findings file as `ref=` (`bounce`); a clean one appends
   `outcome=complete` (`review`). All but a missing report write the `dispatch` row.
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-verdict.mjs" --run <run-id> --task <id> --round <n> --findings <path> --evidence-class red-green|green-green|convention`
   once the reviewer's envelope returns, against that round's `review-round` line (exit 2 once a later

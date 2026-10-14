@@ -17,7 +17,7 @@ const task = (n, files) => [
   "**Quality constraints:** none", "**Lessons:**", "", "- [ ] step", "",
 ].join("\n");
 const plan = (body, map = "## Dispatch Map\n\n- Wave 1: Task 1, Task 2 (file-disjoint, no dependencies)\n") =>
-  `# P Implementation Plan\n\n${body}\n${map}`;
+  `# P Implementation Plan\n\n**Verification gate:** \`npm test\`\n\n${body}\n${map}`;
 
 function run(planText, { repo = realpathSync(makeTempDir("plan-check-repo")), args = [], env = {} } = {}) {
   const p = join(repo, "plan.md");
@@ -142,6 +142,21 @@ for (const [leg, trip] of Object.entries(TRIPS)) {
   });
 }
 
+test("a plan with no **Verification gate:** line trips only the briefCompleteness leg", () => {
+  const r = run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])).replace("**Verification gate:** `npm test`\n\n", ""));
+  assert.equal(r.status, 1, r.stdout);
+  assert.deepEqual([...reportingLegs(r.stderr)], ["briefCompleteness"], r.stderr);
+  assert.match(r.stderr, /^plan-check: briefCompleteness: missing \*\*Verification gate:\*\*/m);
+});
+
+test("a convention task whose parenthetical is prose trips only the briefCompleteness leg", () => {
+  const prose = task(2, ["src/b.txt"]).replace("**Evidence:** red-green", "**Evidence:** convention (whole-gate green-before/green-after)");
+  const r = run(plan(task(1, ["src/a.txt"]) + prose));
+  assert.equal(r.status, 1, r.stdout);
+  assert.deepEqual([...reportingLegs(r.stderr)], ["briefCompleteness"], r.stderr);
+  assert.match(r.stderr, /^plan-check: briefCompleteness: Task 2: \*\*Evidence:\*\* convention must carry its gate command as exactly one code span/m);
+});
+
 test("a leg that throws becomes that leg's finding: the other legs still report and gate-ran records fail", () => {
   const repo = makeRepo();
   writeInto(repo, ".devcycle/state.md", "# devcycle state\n- stage: planning\n- run: 00000000000000c3\n");
@@ -158,4 +173,29 @@ test("a leg that throws becomes that leg's finding: the other legs still report 
   const events = readdirSync(dir).flatMap((f) => readFileSync(join(dir, f), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)))
     .filter((o) => o.kind === "event");
   assert.deepEqual(events.map((e) => [e.event, e.result]), [["gate-ran", "fail"]]);
+});
+
+// #322: with a required-checks manifest at the repo root, a pinned gate that omits a check fails at plan time.
+test("a pinned gate omitting a required-checks manifest entry trips only the briefCompleteness leg; no manifest, no check", () => {
+  const withManifest = () => {
+    const repo = realpathSync(makeTempDir("plan-check-repo"));
+    mkdirSync(join(repo, "tests/fixtures"), { recursive: true });
+    writeFileSync(join(repo, "tests/fixtures/required-gate-checks.json"), JSON.stringify(["redaction-check.mjs"]));
+    return repo;
+  };
+  const fullGate = "npm test && node scripts/redaction-check.mjs";
+  const narrow = task(2, ["src/b.txt"]).replace("**Evidence:** red-green", "**Evidence:** convention (`npm test`)");
+  const gated = (body) => plan(body).replace("`npm test`", `\`${fullGate}\``);
+
+  const r = run(gated(task(1, ["src/a.txt"]) + narrow), { repo: withManifest() });
+  assert.equal(r.status, 1, r.stdout);
+  assert.deepEqual([...reportingLegs(r.stderr)], ["briefCompleteness"], r.stderr);
+  assert.match(r.stderr, /^plan-check: briefCompleteness: Task 2: convention command `npm test` omits required gate check "redaction-check\.mjs"/m);
+
+  const header = run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])), { repo: withManifest() });
+  assert.match(header.stderr, /^plan-check: briefCompleteness: the \*\*Verification gate:\*\* `npm test` omits required gate check "redaction-check\.mjs"/m);
+
+  const full = task(2, ["src/b.txt"]).replace("**Evidence:** red-green", `**Evidence:** convention (\`${fullGate}\`)`);
+  assert.equal(run(gated(task(1, ["src/a.txt"]) + full), { repo: withManifest() }).status, 0);
+  assert.equal(run(plan(task(1, ["src/a.txt"]) + narrow)).status, 0, "no manifest at the repo root");
 });

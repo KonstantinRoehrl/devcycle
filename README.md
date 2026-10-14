@@ -129,9 +129,10 @@ The pipeline pauses between stages by design: it stops at most stage boundaries 
 run `/clear` and then `/devcycle:continue`, so a cycle plays out as several short sessions
 rather than one long one.
 
-Execution can also walk its waves without you: at planning's close devcycle asks whether to run
-them unattended, and a driver then gives each wave a fresh session and stops at the first thing
-that needs you — see [running execution unattended](docs/playbooks/executing-waves/unattended.md).
+Execution can also walk its waves without you: when `/devcycle:continue` resumes at execution it
+asks whether to run them unattended (or follows the `executionMode` setting), then starts a driver
+that gives each wave a fresh session, watches it, and stops at the first thing that needs you — see
+[running execution unattended](docs/playbooks/executing-waves/unattended.md).
 
 **Add `.devcycle/` to the target repo's `.gitignore`** — none of it belongs in git history.
 What devcycle attempts to commit *outside* that directory is `docTrackingPolicy`'s call.
@@ -205,9 +206,12 @@ plugin ships. Start there.
   `scripts/contract-staleness-check.mjs` as an advisory preflight that warns when a cached plugin's
   contract predates the target repo's. A host repo can declare its whole-gate checks in the
   required-checks manifest `tests/fixtures/required-gate-checks.json` — a committed JSON array of
-  substrings every convention whole-gate command must contain, enforced by
-  `scripts/evidence-completeness-check.mjs` and a no-op when absent, keeping the plugin
-  repo-agnostic. The contract itself lives in
+  substrings every convention whole-gate command must contain, enforced by plan-check against the
+  plan's gate commands and by `scripts/evidence-completeness-check.mjs` against each capture's
+  `cmd:`, and a no-op when absent, keeping the plugin
+  repo-agnostic. Every capture is written by `scripts/capture-evidence.mjs`, which runs the task's
+  gate command, so a capture's header, the report's `cmd:` and the gate cannot drift apart. The
+  contract itself lives in
   [`references/evidence.md`](references/evidence.md).
 
 [superpowers]: https://github.com/obra/superpowers

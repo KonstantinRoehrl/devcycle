@@ -39,13 +39,17 @@ continuous execution, and these deltas are the only places devcycle differs from
 
 ## Pre-flight, before wave 1
 
-1. **Branch discipline.** Read `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and follow it before
+1. **Ledger slot.** When `wave-setup.mjs` reported `ledgerSlot: "stale"`, run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/ledger-slot.mjs" --state .devcycle/state.md --reset` before
+   the ledger is created: it archives the previous cycle's ledger and per-task files, so no stale
+   line, brief or report is read as this cycle's.
+2. **Branch discipline.** Read `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and follow it before
    dispatching anything — the coordinator commits from wave 1 onward, so the topic branch must exist
    and be recorded first.
-2. **Commit convention.** Read `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md` and follow its
+3. **Commit convention.** Read `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md` and follow its
    derivation before wave 1's first commit, recording the result as the ledger's `Commit-convention:`
    preamble line.
-3. **Plan hygiene.** A requirements block at the top of a plan that no task's steps implement WILL be
+4. **Plan hygiene.** A requirements block at the top of a plan that no task's steps implement WILL be
    silently skipped. When the pre-dispatch read finds one, patch the owning task's steps explicitly
    and re-extract that task's brief before dispatching it.
 
@@ -75,7 +79,8 @@ exit 2 or 3 a stop.
 2. **Slice the brief**, carrying exactly: the task's id (the plan's task number); `**Files:**`
    (create/modify/test); `**Interfaces:**` (consumes/produces, exact signatures); `**Dependencies:**`; the
    `**Evidence:**` class from the plan; an `**Evidence tail:** <N>` line, `<N>` from the profile; the
-   task's steps; the global constraints and pinned interfaces that apply; the task's quality constraints
+   task's steps; the `**Gate command:**` line, which `task-dispatch.mjs` appends itself, never sliced by
+   hand; the global constraints and pinned interfaces that apply; the task's quality constraints
    resolved; and one read, `"$(devcycle-root)/references/delegation.md"` § Read discipline.
    Nothing else, and nothing restated that a named reference owns —
    `references/evidence.md` owns the evidence classes, the evidence file paths (keyed
@@ -97,9 +102,10 @@ exit 2 or 3 a stop.
    instruct the implementer to commit, stage, or push. Immediately before it, give the brief to
    `task-dispatch.mjs --role implementer --model-decision "<the routing decision>"` (a fix pass adds
    `--round <n>`) on stdin as a quoted heredoc (`<<'EOF'`) — one `node` call, nothing chained to it,
-   no `$(…)` in its flags: the one form the git guard reads as data. It writes the brief file the
-   dispatch names. The implementer returns the envelope `references/delegation.md` defines — never
-   the report body — and that envelope's on-device count is what triggers the checklist below.
+   no `$(…)` in its flags: the one form the git guard reads as data. Dispatch the file at the
+   `briefPath` it prints, gate line appended, never the piped text. The implementer returns the
+   envelope `references/delegation.md` defines — never the report body — and that envelope's
+   on-device count is what triggers the checklist below.
 4. **Intake.** `task-intake.mjs`, given the envelope's `report:` path and `status:` and the task
    notification's agent id as `--agent-id`, checks the report against its evidence class and lints
    it — the envelope's `report:` field is a claim, not proof. `review` → step 5. `bounce` or `missing-report` → back to the implementer with
@@ -114,7 +120,8 @@ exit 2 or 3 a stop.
    itself (the dispatch supplies the path and round n).
    Give its brief to `task-dispatch.mjs --role reviewer --round <n>` the same way first; read the
    verdict with `task-verdict.mjs --round <n> --findings <that path> --evidence-class <evidenceClass>`.
-   The wave setup's `tasks[]` gives each uncommitted task its `reviewRound`, `evidenceClass` and `testCmd`.
+   The wave setup's `tasks[]` gives each uncommitted task its `reviewRound`, `evidenceClass`, `testCmd`
+   and `gateCmd`.
    `accepted` → step 6. `rejected` → the findings path back to the implementer (step 3), then the
    next round's review. `missing-findings` → re-dispatch the reviewer for the same round, no verdict
    acted on. `needs-user` → the user decides (driven: a `needs-user` stop).
@@ -123,10 +130,9 @@ exit 2 or 3 a stop.
    `exhausted-unresolved` — `task-verdict.mjs` or `task-commit.mjs` writes that status — and is
    surfaced to the user as a decision, never committed as if it had passed.
 6. **Green gate (REQUIRED, deterministic).** On acceptance, run `task-commit.mjs` with the plan,
-   `--test-cmd "<the task's test command>"` and your subject, plus
-   `--subset-cmd "<the task's file-scoped command>"` when the test command is the whole suite.
-   It re-runs the test command itself and reads the exit status — never the implementer's word for
-   it; a repo with no test suite passes its documented convention as the test command.
+   `--test-cmd "<gateCmd>"` and your subject, plus `--subset-cmd "<testCmd>"` when `testCmd` is non-null,
+   both from the wave setup; a task with no `gateCmd` passes `--test-cmd "<testCmd>"`.
+   It re-runs the test command itself and reads the exit status — never the implementer's word for it.
    On failure, acceptance is blocked: no commit, `gate-fail`, back to the implementer with the gate
    evidence its ledger line names, then the next round's review; after round 3, `needs-user`.
    `deferred` means a concurrent sibling's edit caused the red: call it again once the wave quiesces.
@@ -161,8 +167,9 @@ the deltas disagree, the deltas win.
 ## Ledger
 
 Progress is written to `.devcycle/ledger.md`; the task scripts append every per-task line. Read
-`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` for the format of the rest — the preamble (pre-flight
-steps 1–2 supply its `Branch:` and `Commit-convention:` lines), a sweep's own lines, `user-decision`.
+`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` for the format of the rest — the preamble (its `Run:`
+line is the state file's `run:` id; pre-flight steps 2–3 supply its `Branch:` and
+`Commit-convention:` lines), a sweep's own lines, `user-decision`.
 
 ## UI and on-device outcomes
 

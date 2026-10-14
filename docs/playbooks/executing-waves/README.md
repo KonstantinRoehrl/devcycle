@@ -11,16 +11,18 @@ review/fix loop, but overrides several of that skill's defaults: devcycle's own
 reviewing-the-branch and finish stages replace its final-code-reviewer and
 finishing-a-development-branch steps, its progress file is replaced by `.devcycle/ledger.md`, and
 implementers never commit — only the coordinator does, at step 7 of the per-task cycle. Before
-wave 1, a pre-flight settles branch discipline (the topic branch must exist and be recorded) and
-the commit-message convention, and patches any task whose plan-level requirements aren't yet
-reflected in its own steps.
+wave 1, a pre-flight archives a ledger and per-task files a previous cycle left behind
+(`scripts/ledger-slot.mjs --reset`, when `wave-setup.mjs` reports the slot stale), settles branch
+discipline (the topic branch must exist and be recorded) and the commit-message convention, and
+patches any task whose plan-level requirements aren't yet reflected in its own steps.
 
 A wave is formed from the plan's dependency declarations and file lists: every task whose
 dependencies are already committed AND whose files overlap no other candidate or running task
 joins the same wave, executed by readiness rather than written order. Each task then runs its own
 cycle: the brief is sliced down to exactly what that implementer needs — its id, Files,
 Interfaces, Dependencies, evidence class and tail length, quality constraints resolved to
-verbatim lines, and matched lessons — and dispatched to a fresh `devcycle:implementer`, never
+verbatim lines, matched lessons, and the gate command `task-dispatch.mjs` appends to the brief
+file it writes — and that file is dispatched to a fresh `devcycle:implementer`, never
 carrying prior tasks' history. Once its report file is confirmed to exist and carry the fields
 its evidence class requires, a `devcycle:task-reviewer` (read-only apart from its own findings
 file) is dispatched to produce the task's diff itself and return a verdict; it writes that verdict
@@ -29,15 +31,14 @@ exists before acting on the verdict. A non-zero verdict sends findings back to t
 implementer for a fix pass, bounded at three rounds per task, past which the task exits
 `exhausted-unresolved` and is surfaced to the user rather than committed as if it had passed.
 
-Acceptance still isn't automatic on a reviewer's approval: the coordinator re-runs the task's own
-test command itself (or the repo's documented convention, where there is no suite) and reads the
-exit status directly — the green gate — before re-checking the actual git branch against the
-recorded one and committing with a Conventional Commit subject. Each commit's ledger entry, and
-the moment any task produces rendered changes, together drive two triggers this playbook owns:
-closing the wave once nothing in it remains undispatched, in review, or uncommitted, and
-generating or updating the on-device checklist the same wave a rendered change lands, never
-deferred to the end. At the last wave's boundary, execution updates `.devcycle/state.md` to
-`stage: branch-review` and hands off to `reviewing-the-branch.md`.
+Acceptance still isn't automatic on a reviewer's approval: the coordinator re-runs the task's gate
+command itself and reads the exit status directly — the green gate — before re-checking the
+actual git branch against the recorded one and committing with a Conventional Commit subject.
+Each commit's ledger entry, and the moment any task produces rendered changes, together drive two
+triggers this playbook owns: closing the wave once nothing in it remains undispatched, in review,
+or uncommitted, and generating or updating the on-device checklist the same wave a rendered change
+lands, never deferred to the end. At the last wave's boundary, execution updates
+`.devcycle/state.md` to `stage: branch-review` and hands off to `reviewing-the-branch.md`.
 
 Each step's bookkeeping runs through one script, so a session spends one call where it used to
 spend several: `wave-setup.mjs` hands `/devcycle:continue` the wave's resume position as one JSON
@@ -45,7 +46,9 @@ object, `task-dispatch.mjs` writes a brief and its ledger line, `task-intake.mjs
 the implementer's report, `task-verdict.mjs` records the reviewer's verdict, and `task-commit.mjs`
 runs the green gate and commits the task with a `Devcycle-Task:` trailer, finding an earlier commit
 of the same task instead of committing twice. Every ledger line they append carries an idempotency
-key, so a session that crashed mid-step re-runs it without duplicating a line.
+key, so a session that crashed mid-step re-runs it without duplicating a line. Implementers write
+their evidence through `capture-evidence.mjs` rather than by hand, and the green gate runs the
+task's gate command, with the task's own test run as the subset that attributes a red.
 
 ## How it fits
 - Up: [the pipeline](../../pipeline/README.md) — where Execution sits, between Planning and
@@ -53,7 +56,7 @@ key, so a session that crashed mid-step re-runs it without duplicating a line.
 - Source: [`playbooks/executing-waves.md`](../../../playbooks/executing-waves.md) — the behavior
   spec this page summarizes.
 - Unattended: [running execution unattended](unattended.md) — a driver walks the waves for you
-  after you opt in at planning's close.
+  after you opt in when `/devcycle:continue` resumes at execution.
 
 ```mermaid
 ---
@@ -68,7 +71,7 @@ flowchart TD
     REVIEW --> VERDICT{"Verdict, within a 3-round cap?"}:::stage
     VERDICT -->|needs-changes| DISPATCH
     VERDICT -->|"cap reached"| EXHAUSTED("exhausted-unresolved — surfaced to the user, never committed"):::stage
-    VERDICT -->|accept| GATE{"Green gate — coordinator re-runs the test command itself"}:::stage
+    VERDICT -->|accept| GATE{"Green gate — coordinator re-runs the gate command itself"}:::stage
     GATE -->|fail| DISPATCH
     GATE -->|pass| COMMIT("Re-check the branch, then commit with a Conventional Commit subject"):::stage
     COMMIT --> LEDGER[("ledger.md — event=committed")]:::structural

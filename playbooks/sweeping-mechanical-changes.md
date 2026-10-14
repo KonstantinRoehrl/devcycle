@@ -44,10 +44,11 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    file, re-present) / abort (closed out per **State file** below). Nothing runs and no agent edits anything
    until this gate passes. On confirm, write `{"files": [...], "instruction": "...", "verifyCommand":
    "..."}` to `.devcycle/sweep-args.json`.
-4. **Capture the baseline, then run the sweep.** BEFORE invoking anything, run the confirmed verifyCommand in
-   the real working tree and write its output verbatim to `.devcycle/evidence/sweep-before.txt` — the only
-   moment it exists, since the script starts copying files back as it goes and keeps nothing of its own green
-   baseline. Red is a stop, not a sweep input: report it verbatim and put it to the user. Green → run:
+4. **Capture the baseline, then run the sweep.** BEFORE invoking anything, capture the confirmed verifyCommand
+   in the real working tree with `capture-evidence.mjs --task sweep --phase before --cmd "<verifyCommand>"`,
+   writing `.devcycle/evidence/sweep-before.txt` — the only moment it exists, since the script starts copying
+   files back as it goes and keeps nothing of its own green baseline. Red is a stop, not a sweep input: report
+   it verbatim and put it to the user. Green → run:
 
    `node "${CLAUDE_PLUGIN_ROOT}/workflows/mechanical-sweep.js" "$(cat .devcycle/sweep-args.json)"`
 
@@ -79,8 +80,8 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    changed the verifyCommand also re-captures `.devcycle/evidence/sweep-before.txt` from the reverted tree.
    The revert is safe only for the sweep's own edits — if the targets may have changed
    underneath the run, show `git diff -- <targets>` and have the user confirm before reverting.
-5. **Verify the real tree, then commit.** Run the confirmed verifyCommand in the real working tree and write
-   its output verbatim to `.devcycle/evidence/sweep-after.txt` — the script's worktree carries HEAD state
+5. **Verify the real tree, then commit.** Capture the confirmed verifyCommand in the real working tree the
+   same way, `--phase after`, as `.devcycle/evidence/sweep-after.txt` — the script's worktree carries HEAD state
    for every non-target file, so this is the only green produced against the exact tree being committed. Red
    → a hard stop: report verbatim, stop for a user decision, never commit. Green → ONE Conventional Commit
    for the whole sweep, scoped per `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md`'s "Scoping the
@@ -89,8 +90,8 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    that line rather than guessing which `git log` entry is the sweep's.
 6. **Light review.** Dispatch exactly ONE `devcycle:task-reviewer` subagent, on the model
    `taskReviewerModel` resolves per `references/model-routing.md`, with the diff, the two evidence
-   files, and the sweep report (skips included). On reject: fix in-session, re-run the verifyCommand
-   (rewriting `.devcycle/evidence/sweep-after.txt`), re-dispatch, then fold the accepted fix into the sweep
+   files, and the sweep report (skips included). On reject: fix in-session, re-capture
+   `.devcycle/evidence/sweep-after.txt` as in step 5, re-dispatch, then fold the accepted fix into the sweep
    commit. The fix must stay within the confirmed target files — a finding whose fix needs any other file
    exceeds the sweep's mechanical scope and stops for a user decision. Amending rewrites history, so first
    confirm the commit was never pushed: `git branch -r --contains <the recorded sweepCommit sha>` must print
@@ -107,10 +108,9 @@ Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --les
    `stage: finish` in `.devcycle/state.md` and hand to
    `${CLAUDE_PLUGIN_ROOT}/playbooks/finishing-the-cycle.md` unchanged.
 
-**Evidence.** Follow `${CLAUDE_PLUGIN_ROOT}/references/evidence.md`. Three things are route-specific: the
-class is `green-green` by construction, since a sweep preserves behavior; `sweep-before.txt` comes from step
-4's own pre-sweep verify run, not from the script; and an exit 0 with an empty `applied` list commits
-nothing, so the evidence is then the report's per-file skip reasons.
+**Evidence.** Follow `${CLAUDE_PLUGIN_ROOT}/references/evidence.md`. Two things are route-specific: the class
+is `green-green` by construction, since a sweep preserves behavior; and an exit 0 with an empty `applied`
+list commits nothing, so the evidence is then the report's per-file skip reasons.
 
 **Escalation valve.** If derivation reveals per-file judgment, an ambiguous rule, or an exploding file list
 — stop, say so, and re-enter the normal pipeline at scoping or brainstorm, updating `.devcycle/state.md`

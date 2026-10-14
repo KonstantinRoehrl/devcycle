@@ -116,14 +116,14 @@ are left, and how urgent the run feels are not exceptions; they are the reasons 
 written down rather than left to judgment. `/clear` ends the session by design; state the
 `/devcycle:continue` resume path in the same message you halt on.
 
-**Unattended execution.** After the user opts in at planning's close, a driver they started from
-their own terminal (`node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md`)
-counts as the user at the wave → wave boundary and nowhere else (`docs/decisions/README.md`,
-2026-10-08 — Unattended execution): every wave still runs in a fresh session, and a driven session
-meets every other gate by stopping through `scripts/drive-signal.mjs`. An agent never opts in or
-starts a driver itself; from inside a Claude Code session the driver refuses any start but the
-opt-in gate's own: from the session the `drive:` row's `session=` names, before any driven session
-has ended.
+**Unattended execution.** On a cycle opted in at execution start — the user's answer there, or the
+`executionMode` knob they set — a driver started by a `/devcycle:continue` the user invoked,
+including its automatic restart of a resumable end, counts as the user at the wave → wave boundary
+and nowhere else (`docs/decisions/README.md`, 2026-10-13 — Unattended execution: chosen at
+execution start, started by /devcycle:continue): every wave still runs in a fresh session, and a
+driven session meets every other gate by stopping through `scripts/drive-signal.mjs`. An agent
+never opts a cycle in, never answers a gate, and never starts a driver outside the start path
+`references/drive.md` holds.
 
 **The hard-stop band overrides the table.** When the probe reports `hard-stop`, the boundary's
 context action is `Clear + /devcycle:continue` regardless of what the table's row says —
