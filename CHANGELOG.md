@@ -2,7 +2,8 @@
 
 ## 0.25.0 — 2026-10-14
 
-- feat: ask the execution style at execution start, make unattended runs watchable and resumable, and pin the evidence-capture contract
+- feat: ask the execution style at execution start, make unattended runs watchable and resumable (#348, #349, #351)
+- fix: remove intake-lint false positives and pin the evidence-capture contract (#281, #283, #282, #337, #75, #303)
 
 Implementer reports stop bouncing on counts quoted in their evidence tail and on dotnet test
 summaries. A plan now names its whole verification gate in its header;
