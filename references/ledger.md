@@ -5,17 +5,19 @@ The single owner of the ledger's *write* format: its preamble records and its pe
 position back *out* of it, `references/evidence.md` report and verdict shapes.
 
 Single source of truth for progress, at `.devcycle/ledger.md` — one ledger, never a second.
-`playbooks/executing-waves.md` creates the file, before any per-event line, with these three
+`playbooks/executing-waves.md` creates the file, before any per-event line, with these four
 records at the top, each written once, in this order:
 
 ```
 Plan: `<the plan path this stage was handed>`
+Run: `<the state file's run: id>`
 Branch: `<topic branch>` (cut from `<integration or default branch>` at `<sha>`)
 Profile: `<resolved profile>` (evidence tail <N> lines)
 ```
 
-`Branch:` is recorded once that playbook's pre-flight has the topic branch, `Profile:` from its own
-resolved profile, and its commit-convention pre-flight step appends a fourth line,
+`Run:` ties the ledger to this cycle's run, so a previous cycle's slot is told apart even when it
+named the same plan. `Branch:` is recorded once that playbook's pre-flight has the topic branch,
+`Profile:` from its own resolved profile, and its commit-convention pre-flight step appends a fifth line,
 `Commit-convention:`, once its derivation runs —
 `references/commit-convention.md` owns that line's format. Then one appended line per event, in the
 shape § The event line gives.

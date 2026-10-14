@@ -67,11 +67,26 @@ test("with no --state the signal goes to the repo's .devcycle; outside a repo it
 });
 
 // In drive mode continue passes wave-setup.mjs's stopReason straight to this script, so every reason
-// wave-setup stops a driven session with must be one it accepts. driver-running is manual-only.
+// wave-setup stops a driven session with must be one it accepts.
 test("every reason wave-setup.mjs stops a driven session with is one drive-signal.mjs accepts", () => {
   const accepted = new Set(JSON.parse(readFileSync(SCRIPT, "utf8").match(/const STOP_REASONS = (\[[^\]]*\]);/)[1]));
   const driven = new Set([...readFileSync(join(ROOT, "scripts/wave-setup.mjs"), "utf8").matchAll(/\bstop\("([a-z-]+)"/g)]
-    .map((m) => m[1]).filter((reason) => reason !== "driver-running"));
+    .map((m) => m[1]));
   assert.ok(driven.size >= 8, `expected wave-setup's drive-mode stops, found ${[...driven].join(", ")}`);
   for (const reason of driven) assert.ok(accepted.has(reason), `wave-setup.mjs stops a driven session with "${reason}", which drive-signal.mjs rejects`);
+});
+
+test("--task names the stopped task in drive-stop.json, task is null without it, and a task that is not a whole number is a usage error", () => {
+  const { dir, statePath } = devcycleDir();
+  const r = signal(["needs-user", "--detail", "task 3 is blocked", "--task", "3", "--state", statePath]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(stopFile(dir).task, "3");
+  assert.equal(signal(["needs-user", "--detail", "which plan?", "--state", statePath]).status, 0);
+  assert.equal(stopFile(dir).task, null);
+  for (const bad of ["3a", "-1", " "]) {
+    const refused = signal(["needs-user", "--detail", "x", "--task", bad, "--state", statePath]);
+    assert.equal(refused.status, 2, `--task ${JSON.stringify(bad)}: ${refused.stderr}`);
+    assert.match(refused.stderr, /^drive-signal: --task requires a task number/);
+  }
+  assert.equal(stopFile(dir).detail, "which plan?", "a refused signal replaced the last good one");
 });

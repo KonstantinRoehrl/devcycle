@@ -475,3 +475,25 @@ test("usage errors exit 2 and environment errors exit 3, both before anything is
     rmSync(outside, { recursive: true, force: true });
   }
 });
+
+// A driven session runs task-commit.mjs with DEVCYCLE_DRIVE_TOKEN set; the pre-flight leaves files
+// outside the plan dirty (scripts/drive-execution.mjs classifyTrackedChanges), so no task may take them.
+test("in a driven session the commit still takes only the task's own Files: a dirty file outside the plan stays unstaged", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "outside.txt", "seed\n");
+    git(fx, "add", "outside.txt");
+    git(fx, "-c", "user.name=devcycle-test", "-c", "user.email=test@devcycle.invalid", "commit", "-qm", "chore: a file no task lists");
+    writeInto(fx.dir, "outside.txt", "the user's own edit\n");
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const r = spawnSync(process.execPath, [SCRIPT, "--run", RUN, "--task", "1", "--plan", "docs/plan.md",
+      "--test-cmd", "true", "--subject", "feat: land task one"], { cwd: fx.dir, encoding: "utf8", env: { ...env(fx), DEVCYCLE_DRIVE_TOKEN: "a-driven-session" } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).action, "committed", r.stdout);
+    assert.equal(git(fx, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"), "src/a.txt");
+    assert.equal(git(fx, "diff", "--cached", "--name-only"), "", "something was left staged");
+    assert.equal(git(fx, "diff", "--name-only"), "outside.txt", "the file outside the plan did not stay dirty");
+  } finally {
+    cleanup(fx);
+  }
+});

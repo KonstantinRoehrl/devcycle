@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // /devcycle:continue's execution resume path in one call (spec 4.A.3): the ownership check and
-// resume-check, the knob comparison, the branch verdict, the depth probe and the drive status, then
-// every current-wave task's position per references/resume.md § Resuming a wave's per-task position
-// with its brief inputs until it is committed, and the next implementer dispatches — one JSON object
-// on stdout. It never appends the run's session row: the hooks module (hooks/devcycle-mod.mjs) joins
-// a session to its run only when it sees that append as a main-loop Bash call of its own, so
-// commands/continue.md keeps it so.
+// resume-check, the knob comparison, the branch verdict, the depth probe, the plan's overview, the
+// ledger slot and the drive action, then every current-wave task's position per references/resume.md
+// § Resuming a wave's per-task position with its brief inputs until it is committed, and the next
+// implementer dispatches — one JSON object on stdout. It never appends the run's session row: the
+// hooks module (hooks/devcycle-mod.mjs) joins a session to its run only when it sees that append as a
+// main-loop Bash call of its own, so commands/continue.md keeps it so.
 import { readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -13,12 +13,14 @@ import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
 import { describe } from "./find-state-files.mjs";
 import { checkState } from "./resume-check.mjs";
-import { compareKnobs, parseRecordedLine } from "./resolve-knobs.mjs";
+import { ROSTER, compareKnobs, parseRecordedLine } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
 import { ledgerPlan, nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
+import { ledgerSlotState } from "./ledger-slot.mjs";
 import { pendingReviewLoop, reviewLoopId } from "./task-verdict.mjs";
-import { DRIVE_LOCK_REL, driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
+import { driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
+import { classifyDrive } from "./drive-result.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";
 
 const NONE = new Set(["none", "<tbd>", ""]);
@@ -34,6 +36,10 @@ export const RETRY_CAP = 2;
 const CAPPED_OUTCOMES = ["rejected (intake bounce)", "rejected (missing report file)", "rejected (missing findings file)"];
 const SWEEP_TOKEN = /\bsweep\b|\bapplied-none\b|\bdirty-targets\b/;
 const IMPLEMENTER_NEXT = new Set(["dispatch-implementer", "redispatch-implementer", "fix"]);
+const MODE_KNOB = ROSTER.find(({ key }) => key === "executionMode");
+// The stops continue's own gates compute and answer on the very call that reads the driver's result,
+// so a driver that stopped on one needs no question of its own.
+const SETTLED_REASONS = new Set(["knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start", "no-driver", "not-opted-in"]);
 
 // references/resume.md § Resuming a wave's per-task position, most specific row first. `lines` are
 // one task's parsed ledger lines in file order; `retries(prefix)` counts that task's lines whose
@@ -44,6 +50,8 @@ export function taskPosition(lines, { pendingLoop = null, retries = () => 0 } = 
   if (!last) return { position: "not-dispatched", next: "dispatch-implementer" };
   const { event, outcome } = last;
   if (event === "committed") return { position: "committed", next: "done" };
+  // references/sweep-execution.md logs a dirty target as a user-decision line before anyone answers it.
+  if (outcome.startsWith("sweep dirty-targets")) return { position: "sweep-decision", next: "needs-user" };
   if (event === "user-decision") return { position: "user-decision", next: "follow-decision" };
   if (event === "dispatched" && outcome.startsWith("sweep")) return { position: "sweep-dispatched", next: "rerun-sweep" };
   if (SWEEP_TOKEN.test(outcome)) return { position: "sweep-decision", next: "needs-user" };
@@ -62,10 +70,10 @@ export function taskPosition(lines, { pendingLoop = null, retries = () => 0 } = 
   return { position: "unknown", next: "needs-user" };
 }
 
-// This cycle's ledger lines. A ledger whose `Plan:` preamble names another plan is a previous
-// cycle's slot (references/resume.md § The state file): none of its lines is this cycle's.
-function readLedger(ledgerPath, plan) {
-  if (!plan || ledgerPlan(ledgerPath) !== plan) return [];
+// This cycle's ledger lines. A stale slot, or a ledger whose `Plan:` preamble names another plan, is a
+// previous cycle's (references/resume.md § The state file): none of its lines is this cycle's.
+function readLedger(ledgerPath, plan, slot) {
+  if (!plan || slot === "stale" || ledgerPlan(ledgerPath) !== plan) return [];
   return readFileSync(ledgerPath, "utf8").split("\n").map(parseLedgerLine).filter(Boolean);
 }
 
@@ -117,27 +125,52 @@ const realPath = (p) => {
   }
 };
 
+// The fresh executionMode, read from the --knobs line; a missing or unknown value is the knob's fallback.
+function executionMode(knobsLine) {
+  const value = knobsLine ? parseRecordedLine(knobsLine).executionMode : undefined;
+  return MODE_KNOB.values.includes(value) ? value : MODE_KNOB.fallback;
+}
+
 // The reported drive status, and the live lock's token hash, which is never reported.
-function driveStatus(root, statePath, stateText, lines) {
+function driveStatus(root, statePath, stateText, lines, knobsLine) {
   const row = field(stateText, "drive") ?? "";
   const model = row.match(/\bmodel=(\S+)/)?.[1];
   const live = readLiveDriveLock(root);
   const holder = live && realPath(resolve(root, live.state ?? "")) === realPath(statePath) ? live : null;
   const optInLogged = lines.some((l) => l.task === "drive" && l.event === "user-decision");
   const lock = holder ? { pid: holder.pid, log: holder.log } : null;
-  return { drive: { opted: /^auto\b/.test(row), ...(model ? { model } : {}), lock, optInLogged }, tokenHash: holder?.tokenHash ?? null };
+  return {
+    drive: { opted: /^auto\b/.test(row), ...(model ? { model } : {}), lock, optInLogged, row: row.match(/^(auto|manual)\b/)?.[1] ?? null,
+      mode: executionMode(knobsLine) },
+    tokenHash: holder?.tokenHash ?? null,
+  };
 }
 
-function wavePosition(root, plan, lines, ledgerPath) {
-  let planText = "";
+// A recorded row is the cycle's record and outranks the knob; with no row the knob decides, and its
+// decision is the row continue writes. An auto style starts the driver unless its last end needs an answer.
+// A stop on the task whose review loop is pending is that decision: the gate carries it, so it is asked once.
+function driveAction({ row, mode }, driver, pending) {
+  const style = row ?? (mode === "unattended" ? "auto" : mode);
+  const writeRow = row === null && style !== "ask" ? style : null;
+  if (style !== "auto") return { action: style, writeRow, gate: null };
+  if (driver.next !== "answer-gate") return { action: "start", writeRow, gate: null };
+  const { reason, detail, task } = driver;
+  const pendingDecision = task !== null && task === pending?.task ? pending : null;
+  return { action: "gate", writeRow, gate: { reason, detail, task, settled: SETTLED_REASONS.has(reason), pendingDecision } };
+}
+
+function readPlan(root, plan) {
   try {
-    if (plan) planText = readFileSync(isAbsolute(plan) ? plan : join(root, plan), "utf8");
+    return plan ? readFileSync(isAbsolute(plan) ? plan : join(root, plan), "utf8") : "";
   } catch {
-    // resume-check confirmed the plan a moment ago; one that vanished since reads as no waves.
+    // A plan that vanished reads as no waves; resume-check is what names it.
+    return "";
   }
+}
+
+// Every Dispatch Map task's position, in Map wave order.
+function mapPositions(root, planText, lines, ledgerPath) {
   const waves = [...(parseDispatchMap(planText) ?? new Map())].sort(([a], [b]) => a - b);
-  const blocks = new Map(taskBlocks(planText).map(({ num, text }) => [String(num), text]));
-  const files = taskFileMap(planText);
   const byTask = Map.groupBy(lines, (l) => l.task);
   const positions = new Map();
   for (const [, nums] of waves)
@@ -146,7 +179,25 @@ function wavePosition(root, plan, lines, ledgerPath) {
       const own = byTask.get(task) ?? [];
       positions.set(task, taskPosition(own, { pendingLoop: pendingReviewLoop(root, task, own), retries: (prefix) => retryCount(ledgerPath, task, prefix) }));
     }
-  const done = new Set([...positions].filter(([, p]) => p.position === "committed").map(([task]) => task));
+  return { waves, positions };
+}
+
+function overviewOf({ waves, positions }) {
+  const perWave = waves.map(([wave, nums]) => {
+    const tasks = nums.map(String);
+    return { wave, tasks, committed: tasks.filter((task) => positions.get(task).position === "committed").length };
+  });
+  return {
+    waves: perWave.length, tasks: perWave.flatMap((w) => w.tasks).length, committed: perWave.reduce((n, w) => n + w.committed, 0),
+    nextWave: perWave.find((w) => w.committed < w.tasks.length)?.wave ?? null, perWave,
+  };
+}
+
+function wavePosition(root, planText, { waves, positions }, lines) {
+  const blocks = new Map(taskBlocks(planText).map(({ num, text }) => [String(num), text]));
+  const files = taskFileMap(planText);
+  const byTask = Map.groupBy(lines, (l) => l.task);
+  const done =new Set([...positions].filter(([, p]) => p.position === "committed").map(([task]) => task));
   const current = waves.find(([, nums]) => nums.some((num) => !done.has(String(num))));
   if (!current) return { wave: null, tasks: [], dispatchable: [], pendingDecision: null };
   const [wave, nums] = current;
@@ -206,14 +257,19 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
     knobsLine: recordedKnobs, knobsDeclined: Boolean(declined && knobsLine && sameValues(declined, knobsLine)),
   };
   const ledger = ledgerPath ? resolve(cwd, ledgerPath) : join(root, ".devcycle", "ledger.md");
-  const lines = readLedger(ledger, plan);
-  const depth = depthNow(env, cwd);
-  const status = driveStatus(root, abs, stateText, lines);
+  const slot = ledgerSlotState({ root, plan, run: state.run });
+  const lines = readLedger(ledger, plan, slot);
+  const driver = classifyDrive({ statePath: abs });
+  // Beside a running driver nothing is acted on, so nothing is judged: not even the depth.
+  const attach = !drive && driver.running;
+  const depth = attach ? null : depthNow(env, cwd);
+  const status = driveStatus(root, abs, stateText, lines, knobsLine);
   const result = {
     ok: true, action: "resume", state, knobDrift: [], branch: null, depth, wave: null, tasks: [], dispatchable: [],
-    pendingDecision: null, drive: status.drive, entryLines: [], appended: [], depthBand: depth.band,
+    pendingDecision: null, drive: status.drive, entryLines: [], appended: [], depthBand: depth?.band ?? null,
   };
-  const stop = (stopReason, stopDetail) => ({ ...result, action: "stop", stopReason, stopDetail });
+  // A stop on one task's pending decision names it, so the answer is recorded as that task's.
+  const stop = (stopReason, stopDetail, stopTask = null) => ({ ...result, action: "stop", stopReason, stopDetail, stopTask });
 
   // A live lock is not proof enough: only a session the lock's driver started carries the token
   // whose hash the lock holds, so `--drive` typed in any other session is refused (spec 4.B.3).
@@ -223,10 +279,13 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   if (drive && !result.drive.opted) return stop("not-opted-in", "the state file carries no drive: auto row");
   const checked = checkState(abs);
   if (checked.kind === "foreign") return stop("foreign-state", `its root: ${checked.recordedRoot} is not this checkout (${checked.actualRoot})`);
+
+  const planText = readPlan(root, plan);
+  const map = mapPositions(root, planText, lines, ledger);
+  Object.assign(result, { overview: overviewOf(map), ledgerSlot: slot });
+  const decided = (decision) => ({ ...result.drive, ...decision, result: driver });
+  if (attach) return { ...result, drive: decided({ lock: { pid: driver.pid, log: driver.log }, action: "attach", writeRow: null, gate: null }) };
   if (!checked.ok) return stop("resume-check", checked.errors.join("; "));
-  if (!drive && result.drive.lock)
-    return stop("driver-running", `a driver (pid ${result.drive.lock.pid}) is running this cycle; its log: ${result.drive.lock.log}; ` +
-      `if pid ${result.drive.lock.pid} is no longer running (after a reboot, say), remove ${DRIVE_LOCK_REL}`);
   if (state.stage !== "execution") return stop("resume-check", `the state file is at stage ${state.stage}, not execution`);
 
   result.entryLines = checked.lines;
@@ -234,18 +293,22 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
     ? compareKnobs(parseRecordedLine(recordedKnobs), parseRecordedLine(knobsLine)).map((c) => `${c.key}: ${c.old} → ${c.new}`)
     : [];
   result.branch = branchVerdict(root, field(stateText, "branch"));
-  Object.assign(result, wavePosition(root, plan, lines, ledger));
-  if (!drive) return result;
+  Object.assign(result, wavePosition(root, planText, map, lines));
+  if (!drive) {
+    const decision = driveAction(result.drive, driver, result.pendingDecision);
+    return { ...result, drive: decided(decision) };
+  }
 
   // Drive mode: every gate continue would ask about is a stop (spec 4.B.3).
+  result.drive = decided({ action: "none", writeRow: null, gate: null });
   if (result.knobDrift.length && !state.knobsDeclined) return stop("knob-drift", result.knobDrift.join("; "));
   if (result.branch.verdict !== "ok")
     return stop("branch", `recorded ${result.branch.recorded ?? "none"}, current ${result.branch.current ?? "unknown"}: ${result.branch.verdict}`);
   if (depth.band === "over-budget" || depth.band === "hard-stop") return stop("depth-at-start", `the session starts at ${depth.tokens} tokens (${depth.band})`);
   const sweep = result.tasks.find((t) => t.position === "sweep-decision");
-  if (sweep) return stop("sweep-fallback", `task ${sweep.task}: sweep-decision`);
+  if (sweep) return stop("sweep-fallback", `task ${sweep.task}: sweep-decision`, sweep.task);
   const waiting = result.tasks.find((t) => t.next === "needs-user");
-  if (waiting) return stop("needs-user", `task ${waiting.task}: ${waiting.position}`);
+  if (waiting) return stop("needs-user", `task ${waiting.task}: ${waiting.position}`, waiting.task);
   return result;
 }
 

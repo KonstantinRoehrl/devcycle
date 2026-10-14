@@ -39,13 +39,17 @@ continuous execution, and these deltas are the only places devcycle differs from
 
 ## Pre-flight, before wave 1
 
-1. **Branch discipline.** Read `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and follow it before
+1. **Ledger slot.** When `wave-setup.mjs` reported `ledgerSlot: "stale"`, run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/ledger-slot.mjs" --state .devcycle/state.md --reset` before
+   the ledger is created: it archives the previous cycle's ledger and per-task files, so no stale
+   line, brief or report is read as this cycle's.
+2. **Branch discipline.** Read `${CLAUDE_PLUGIN_ROOT}/references/branch.md` and follow it before
    dispatching anything — the coordinator commits from wave 1 onward, so the topic branch must exist
    and be recorded first.
-2. **Commit convention.** Read `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md` and follow its
+3. **Commit convention.** Read `${CLAUDE_PLUGIN_ROOT}/references/commit-convention.md` and follow its
    derivation before wave 1's first commit, recording the result as the ledger's `Commit-convention:`
    preamble line.
-3. **Plan hygiene.** A requirements block at the top of a plan that no task's steps implement WILL be
+4. **Plan hygiene.** A requirements block at the top of a plan that no task's steps implement WILL be
    silently skipped. When the pre-dispatch read finds one, patch the owning task's steps explicitly
    and re-extract that task's brief before dispatching it.
 
@@ -163,8 +167,9 @@ the deltas disagree, the deltas win.
 ## Ledger
 
 Progress is written to `.devcycle/ledger.md`; the task scripts append every per-task line. Read
-`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` for the format of the rest — the preamble (pre-flight
-steps 1–2 supply its `Branch:` and `Commit-convention:` lines), a sweep's own lines, `user-decision`.
+`${CLAUDE_PLUGIN_ROOT}/references/ledger.md` for the format of the rest — the preamble (its `Run:`
+line is the state file's `run:` id; pre-flight steps 2–3 supply its `Branch:` and
+`Commit-convention:` lines), a sweep's own lines, `user-decision`.
 
 ## UI and on-device outcomes
 

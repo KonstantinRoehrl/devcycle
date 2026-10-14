@@ -182,3 +182,9 @@ export function readLiveDriveLock(toplevel) {
   const holder = parseHolder(readRaw(lockPath(toplevel)));
   return isLive(holder) ? holder : null;
 }
+
+// The lock as written, with no judgment of whether its holder still runs: a watcher judges that
+// itself (scripts/drive-result.mjs), without the sysctl and ioreg calls isLive makes.
+export function readDriveLockHolder(toplevel) {
+  return parseHolder(readRaw(lockPath(toplevel)));
+}

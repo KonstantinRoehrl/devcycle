@@ -16,13 +16,14 @@ const cli = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding:
 const STANDARD_DEFAULTS =
   "knobs: profile=standard gitPolicy=local-commits-only docTrackingPolicy=standard reviewDepth=single " +
   "crossModelReview=false onDeviceGate=human-required implementerModel=auto taskReviewerModel=auto " +
-  "branchReviewModel=auto walkthroughModel=auto learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100 subagentBudget=warn";
+  "branchReviewModel=auto walkthroughModel=auto learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100 subagentBudget=warn " +
+  "executionMode=ask";
 
-test("the roster carries the 14 shipped knobs in config.md's roster order", () => {
+test("the roster carries the 15 shipped knobs in config.md's roster order", () => {
   assert.deepEqual(ROSTER.map(({ key }) => key), [
     "profile", "gitPolicy", "docTrackingPolicy", "reviewDepth", "crossModelReview", "onDeviceGate",
     "implementerModel", "taskReviewerModel", "branchReviewModel", "walkthroughModel",
-    "learnStalenessSessions", "learnStalenessDays", "learnSessionCap", "subagentBudget",
+    "learnStalenessSessions", "learnStalenessDays", "learnSessionCap", "subagentBudget", "executionMode",
   ]);
 });
 
@@ -163,7 +164,15 @@ test("compare leaves out a live knob, whose reader takes the global value and ne
   const { knobs } = resolveKnobs(with_({ gitPolicy: "open-pr", subagentBudget: "enforce" }));
   assert.deepEqual(compareKnobs({ subagentBudget: "warn" }, knobs), []);
   assert.deepEqual(compareKnobs({ subagentBudget: "warn", gitPolicy: "local-commits-only" }, knobs), [{ key: "gitPolicy", old: "local-commits-only", new: "open-pr" }]);
-  assert.deepEqual(ROSTER.filter((e) => e.live).map(({ key }) => key), ["subagentBudget"]);
+  assert.deepEqual(ROSTER.filter((e) => e.live).map(({ key }) => key), ["subagentBudget", "executionMode"]);
+});
+
+test("compare leaves out executionMode, a live knob whose reader takes the fresh value", () => {
+  assert.deepEqual(ROSTER.find((e) => e.key === "executionMode"),
+    { key: "executionMode", kind: "enum", values: ["ask", "manual", "unattended"], fallback: "ask", live: true });
+  const { knobs } = resolveKnobs(with_({ executionMode: "unattended" }));
+  assert.equal(knobs.executionMode, "unattended");
+  assert.deepEqual(compareKnobs({ executionMode: "ask" }, knobs), []);
 });
 
 test("the resolver's profile rows match config.md's profile matrix", () => {
@@ -221,6 +230,12 @@ test("cli: --compare prints nothing for a subagentBudget-only difference, but st
   const mixed = cli([...argv(raw), "--compare", "- knobs: profile=lean subagentBudget=warn"]);
   assert.equal(mixed.status, 0, mixed.stderr);
   assert.equal(mixed.stdout, "profile: lean → standard\n");
+});
+
+test("cli: --compare prints nothing for an executionMode-only difference", () => {
+  const r = cli([...argv(with_({ executionMode: "unattended" })), "--compare", "- knobs: profile=standard executionMode=manual"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
 });
 
 test("cli: --compare against the resolver's own printed line reports nothing", () => {

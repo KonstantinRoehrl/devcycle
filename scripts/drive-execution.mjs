@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// The execution driver. After the user opted in at planning's close, it walks the execution stage
-// one fresh `claude -p` session per wave — the session a manual /clear + /devcycle:continue would
-// start — and stands in for the user at the wave → wave boundary only (docs/decisions/README.md,
-// 2026-10-08, D7). Every other gate stops it: a driven session writes .devcycle/drive-stop.json
+// The execution driver. Started by /devcycle:continue on a cycle the user opted in at execution
+// start, it walks the execution stage one fresh `claude -p` session per wave — the session a manual
+// /clear + /devcycle:continue would start — and stands in for the user at the wave → wave boundary
+// only (docs/decisions/README.md, 2026-10-13). Every other gate stops it: a driven session writes .devcycle/drive-stop.json
 // through scripts/drive-signal.mjs, and the driver exits 4 with that reason. POSIX only: a signal
 // reaches a session through its process group.
 import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -17,10 +17,13 @@ import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
-import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
+import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
+import { holderLiveness, LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
+import { follow, statusReport, waitForEnd } from "./drive-watch.mjs";
+import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
-import { gitToplevel, hashSession, recordPath } from "./run-record.mjs";
+import { gitToplevel, hashSession } from "./run-record.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { PRICING } from "./pricing.mjs";
 import { now } from "./stamp.mjs";
@@ -32,7 +35,6 @@ const { spawnStreaming, killGroup } = agentCli;
 // Measured over 69 execution sessions (2026-10-08): a session holds ~55k tokens before it reads
 // anything. A window that puts that in the over-budget band cannot carry a wave.
 export const SESSION_START_TOKENS = 55_000;
-const LOG_REL = ".devcycle/drive.log";
 const STOP_REL = ".devcycle/drive-stop.json";
 const LEDGER_REL = ".devcycle/ledger.md";
 const RUN_ID = /^[0-9a-f]{16}$/;
@@ -42,7 +44,26 @@ const RUN_ID = /^[0-9a-f]{16}$/;
 const IDLE_LIMIT_MS = Number(process.env.DEVCYCLE_DRIVE_IDLE_MS) || 30 * 60_000;
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
 const SIGNAL_GRACE_MS = 10_000;
+const DETACH_POLL_MS = 50;
 const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
+// Every wait is a wall-clock deadline checked in slices, so a machine that sleeps through a deadline
+// starts the next session on wake. DEVCYCLE_DRIVE_SLICE_MS and DEVCYCLE_DRIVE_CLOCK_FILE (a file
+// holding epoch milliseconds) let tests run hours of waiting in milliseconds.
+const SLICE_MS = Number(process.env.DEVCYCLE_DRIVE_SLICE_MS) || 60_000;
+// A failure that says nothing about the work: an overloaded or unreachable API. An HTTP status decides
+// on its own, read only where the text calls it one, so "500 tokens" is none: a 5xx (529 is
+// overloaded), a 408 or a 429 passes. A refused key, an unknown model or a low credit balance fails
+// the same way in every session. Any other 4xx — tool-use blocks out of step, a request too large —
+// came from the one session's transcript, which the next session does not carry.
+const API_STATUS = /(?:api error|status(?: code)?|HTTP(?:\/[\d.]+)?):?\s*(\d{3})\b|\b(5\d\d) (?:internal server error|bad gateway|service unavailable|gateway time-?out)\b/i;
+const PASSING_4XX = new Set([408, 429]);
+const REFUSED_4XX = new Set([401, 403, 404]);
+const REFUSED_TEXT = /credit balance|billing|invalid model/i;
+const TRANSIENT_TEXT = /api error|overloaded|connection|timed? ?out|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed/i;
+const AUTH_TEXT = /\/login|not logged in|invalid api key|authentication_error|oauth token (has )?expired/i;
+// Minutes before the k-th consecutive transient retry; every later one waits the last figure.
+const BACKOFF_MINUTES = [1, 2, 4, 8, 16, 30];
+const RESET_MARGIN_MS = 60_000;
 const MID_WAVE_LABEL = "Session ended mid-wave:";
 // The ledger events that mean a task moved: a session that adds lines but none of these is churn.
 const OUTCOME_EVENTS = new Set(["committed", "report-received", "review-verdict"]);
@@ -64,6 +85,12 @@ const KNOWN_FLAGS = {
   "--claude": "value",
   "--check-sandbox": "none",
   "--detach": "none",
+  "--stop": "none",
+  "--mark-handled": "none",
+  "--status": "none",
+  "--follow": "none",
+  "--wait": "none",
+  "--since": "value",
 };
 
 class Exit extends Error {
@@ -75,6 +102,10 @@ class Exit extends Error {
 
 function parseArgs(argv) {
   const { flags } = parseFlags(argv, KNOWN_FLAGS);
+  const watches = ["--status", "--follow", "--wait"].filter((f) => f in flags);
+  if (watches.length > 1) throw new Error("--status, --follow and --wait are exclusive");
+  const since = requireCount(flags, "--since", { min: 0, noun: "a byte offset" });
+  if (since !== undefined && watches[0] !== "--follow") throw new Error("--since applies to --follow only");
   const checkSandbox = "--check-sandbox" in flags;
   const state = requireValue(flags, "--state");
   if (!state && !checkSandbox) throw new Error("--state <path to .devcycle/state.md> is required");
@@ -83,6 +114,8 @@ function parseArgs(argv) {
   if (maxUsd !== undefined && !(maxUsd > 0))
     throw new Error(`--max-usd requires a positive dollar amount, got ${JSON.stringify(usd)}`);
   return {
+    watch: watches[0] ?? null,
+    since: since ?? null,
     checkSandbox,
     state,
     maxUsd,
@@ -92,6 +125,8 @@ function parseArgs(argv) {
     maxBackoffMs: (requireCount(flags, "--max-backoff", { min: 0 }) ?? 360) * 60_000,
     dryRun: "--dry-run" in flags,
     detach: "--detach" in flags,
+    stop: "--stop" in flags,
+    markHandled: "--mark-handled" in flags,
     bin: requireValue(flags, "--claude", "an executable") ?? "claude",
   };
 }
@@ -107,7 +142,6 @@ function readState(statePath) {
     run: first("run"),
     opted: /^auto\b/.test(drive),
     model: drive.match(/\bmodel=(\S+)/)?.[1] ?? null,
-    session: drive.match(/\bsession=([0-9a-f]{64})\b/)?.[1] ?? null,
   };
 }
 
@@ -141,6 +175,24 @@ export function inFlightFiles(planText, entries) {
     return { wave, files: new Set([...open, ...early].flatMap((t) => [...(filesOf.get(t) ?? [])])) };
   }
   return { wave: null, files: new Set() };
+}
+
+// #351: a dirty tracked path an in-flight task writes is a crashed session's edit, and stays. One a
+// task still to come writes would be overwritten or committed under it, so it refuses the start,
+// naming the lowest such task. Any other path is no task's to touch, and is left alone.
+export function classifyTrackedChanges(planText, entries, paths) {
+  const committed = new Set(entries.filter((e) => e.event === "committed").map((e) => String(e.task)));
+  const inFlight = inFlightFiles(planText, entries).files;
+  const remaining = [...taskFileMap(planText)].filter(([task]) => !committed.has(String(task))).sort(([a], [b]) => a - b);
+  const refused = [];
+  const leftAlone = [];
+  for (const path of paths) {
+    if (inFlight.has(path)) continue;
+    const owner = remaining.find(([, files]) => files.has(path));
+    if (owner) refused.push({ path, task: String(owner[0]) });
+    else leftAlone.push(path);
+  }
+  return { refused, leftAlone };
 }
 
 function git(root, args) {
@@ -184,32 +236,19 @@ function modelRefusal(model) {
   return null;
 }
 
-// The opt-in is used once a driven session has ended: every session end writes a `drive` row.
-function optInUsed(root, run) {
-  let used = false;
-  eachRecord(recordPath(gitToplevel(root), run), (r) => {
-    used = r.kind === "drive";
-    return !used;
-  });
-  return used;
-}
-
 const heldBy = (h) =>
   `a driver already runs for this checkout (pid ${h.pid}, log ${h.log}) — stop it, or wait for it to end; ` +
   `if pid ${h.pid} is no longer running (after a reboot, say), remove ${DRIVE_LOCK_REL}`;
 
-const sessionHashOf = (env) => (env.CLAUDE_CODE_SESSION_ID ? hashSession(env.CLAUDE_CODE_SESSION_ID) : null);
+const SANDBOX_REFUSAL =
+  "the Claude Code Bash sandbox blocks ~/.claude — /devcycle:continue retries the start outside the sandbox through a " +
+  'permission prompt; from a terminal, use one that is not a Claude Code session ("!" runs inside the session)';
 
 function checkEnvironment(root, state, opts) {
-  if (!state.opted) throw new Exit(3, "the state file has no `drive: auto` row — unattended execution is opted into at planning's close");
+  if (!state.opted)
+    throw new Exit(3, "the state file has no `drive: auto` row — run /devcycle:continue and choose Unattended, or set executionMode");
   if (state.stage !== "execution") throw new Exit(3, `the state is at stage ${state.stage}, not execution`);
   if (!RUN_ID.test(state.run ?? "")) throw new Exit(3, "the state file names no run id, so no drive record could be written");
-  // An agent never starts a driver (D7). Inside a Claude Code session the one start allowed is the
-  // opt-in gate's start-now: from the session the drive row names as the one the user answered in,
-  // before any driven session has ended. A row naming no session admits none.
-  const gateSession = state.session !== null && sessionHashOf(process.env) === state.session;
-  if (process.env.CLAUDECODE && (!gateSession || optInUsed(root, state.run)))
-    throw new Exit(3, "inside a Claude Code session only the opt-in gate's start-now may start a driver, before its first session ends — start it from your own terminal");
   const model = opts.model ?? state.model;
   if (!model) throw new Exit(3, "no model: the drive row records none and --model is absent");
   const current = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -224,14 +263,15 @@ function checkEnvironment(root, state, opts) {
   } catch {
     throw new Exit(3, `the plan ${state.plan} cannot be read`);
   }
-  const { files } = inFlightFiles(planText, ledgerEntries(root, state.plan));
-  const stray = trackedChanges(root).filter((p) => !files.has(p));
-  if (stray.length)
-    throw new Exit(3, `tracked changes outside the current wave's in-flight tasks: ${stray.slice(0, 5).join(", ")}${stray.length > 5 ? ", …" : ""}`);
+  const { refused, leftAlone } = classifyTrackedChanges(planText, ledgerEntries(root, state.plan), trackedChanges(root));
+  if (refused.length) {
+    const each = refused.map(({ path, task }) => `${path}: commit, stash or revert it — task ${task} writes this file`);
+    throw new Exit(3, `tracked changes a remaining task would overwrite: ${each.join("; ")}`);
+  }
   const refusal = modelRefusal(model);
   if (refusal) throw new Exit(3, refusal);
-  if (sandboxed()) throw new Exit(3, "cannot write under ~/.claude — this looks like a Claude Code Bash sandbox; start the driver from a normal terminal");
-  return { model, planText, plan: state.plan, run: state.run };
+  if (sandboxed()) throw new Exit(3, SANDBOX_REFUSAL);
+  return { model, planText, plan: state.plan, run: state.run, leftAlone };
 }
 
 function release(ctx) {
@@ -239,7 +279,9 @@ function release(ctx) {
   ctx.lock = null;
 }
 
-// Fail closed: every refusal exits 3 and leaves no lock behind.
+// Fail closed: every refusal exits 3 and leaves no lock behind — and leaves the last run's result and
+// a stop request where they are, since only a run that starts supersedes them. The checks come
+// before the lock, so a lock naming a driver means its pre-flight passed, which detach relies on.
 function preflight(opts) {
   let statePath;
   try {
@@ -251,20 +293,21 @@ function preflight(opts) {
   const root = dirname(dirname(statePath));
   // The token proves to wave-setup.mjs that a session was started by this driver; the lock keeps
   // only its hash, and only the sessions this driver starts are handed the token itself.
-  const ctx = { root, statePath, stateRel: relative(root, statePath), lock: null, session: null, token: randomBytes(16).toString("hex") };
-  if (opts.dryRun) {
-    const holder = readLiveDriveLock(root);
-    if (holder) throw new Exit(3, heldBy(holder));
-  } else {
-    const got = acquireDriveLock(root, { statePath: ctx.stateRel, logPath: LOG_REL, tokenHash: driveTokenHash(ctx.token) });
-    if (!got.ok) throw new Exit(3, heldBy(got.holder));
-    ctx.lock = got.lock;
-  }
-  try {
-    Object.assign(ctx, checkEnvironment(root, readState(statePath), opts));
-  } catch (err) {
-    release(ctx);
-    throw err;
+  const ctx = { root, statePath, stateRel: relative(root, statePath), lock: null, session: null, progressed: false, token: randomBytes(16).toString("hex") };
+  const holder = readLiveDriveLock(root);
+  if (holder) throw new Exit(3, heldBy(holder));
+  Object.assign(ctx, checkEnvironment(root, readState(statePath), opts));
+  if (opts.dryRun) return ctx;
+  const got = acquireDriveLock(root, { statePath: ctx.stateRel, logPath: LOG_REL, tokenHash: driveTokenHash(ctx.token) });
+  if (!got.ok) throw new Exit(3, heldBy(got.holder));
+  ctx.lock = got.lock;
+  // Only once no live driver remains, which a racing --stop or a result being written could belong to.
+  markResultHandled(root);
+  rmSync(join(root, STOP_REQUEST_REL), { force: true });
+  if (ctx.leftAlone.length) {
+    const log = makeLog(root);
+    log(`${ctx.leftAlone.length} tracked change(s) no remaining task writes are left alone`);
+    for (const path of ctx.leftAlone) log(path);
   }
   return ctx;
 }
@@ -278,10 +321,12 @@ function sessionArgs(ctx, opts, spent) {
 
 function childEnv(ctx) {
   const env = { ...process.env, DEVCYCLE_DRIVE_TOKEN: ctx.token };
-  // agent-cli's claudeStructured sets this for its own children, and a driver started from one of
-  // them inherits it; a driven session that kept it would run with the hooks module inert — no
-  // agent tracing, no subagent budget governor.
+  // agent-cli's claudeStructured sets DEVCYCLE_NESTED_RUN for its own children, and a driver
+  // started from one of them inherits it; a driven session that kept it would run with the hooks
+  // module inert — no agent tracing, no subagent budget governor. CLAUDECODE is there because
+  // /devcycle:continue starts the driver from inside its own session.
   delete env.DEVCYCLE_NESTED_RUN;
+  delete env.CLAUDECODE;
   return env;
 }
 
@@ -368,6 +413,17 @@ const devcycleErrors = (errors) =>
     return typeof name !== "string" || /^devcycle(@|$)/.test(name);
   });
 
+// "transient" backs off, "refused" ends the run, and null leaves the session to be judged on its
+// progress like any other, which bounds a 4xx that does recur by --max-stalls.
+function apiFailure(text) {
+  const match = text.match(API_STATUS);
+  const status = Number(match?.[1] ?? match?.[2]);
+  if (status >= 500 || PASSING_4XX.has(status)) return "transient";
+  if (REFUSED_4XX.has(status) || REFUSED_TEXT.test(text)) return "refused";
+  if (status >= 400) return null;
+  return TRANSIENT_TEXT.test(text) ? "transient" : null;
+}
+
 function finalize(s, model) {
   const r = s.result;
   s.resultText = typeof r?.result === "string" ? r.result : "";
@@ -376,17 +432,30 @@ function finalize(s, model) {
   if (s.costUsd === null) tallyTranscripts(s.requests, s.sessionId);
   s.spentUsd = s.costUsd ?? estimateUsd(s.requests, model);
   s.denials = Array.isArray(r?.permission_denials) ? r.permission_denials.length : 0;
+  if (!s.environment && r?.is_error && AUTH_TEXT.test(s.resultText))
+    s.environment = `authentication failed: ${s.resultText.split("\n")[0]}`;
   if (!s.limit && r?.is_error && USAGE_LIMIT_TEXT.test(s.resultText))
     s.limit = { resetAt: Number(s.resultText.match(/\|(\d{9,})\b/)?.[1]) || null };
+  if (!s.environment && !s.limit && r?.is_error && apiFailure(s.resultText) === "refused")
+    s.environment = `the API refused the session's request, and retrying cannot fix that: ${s.resultText.split("\n")[0]} — ` +
+      "fix what it names (the account's credit balance, the model id, the key's access), then restart the run from /devcycle:continue";
   return s;
+}
+
+// Once the run progresses, the crashed result a death from here on would leave says so.
+function markProgressed(ctx) {
+  if (ctx.progressed) return;
+  ctx.progressed = true;
+  writeCrashedResult(ctx.root, { startedAt: ctx.startedAt, progressed: true });
 }
 
 function runSession(ctx, bin, args, log, n) {
   const s = { sessionId: null, environment: null, result: null, limit: null, silent: false, tools: 0, depthTokens: null, requests: new Map() };
   let seen = ledgerEntries(ctx.root, ctx.plan).length;
-  return new Promise((settle) => {
+  return new Promise((settle, fail) => {
     let handle;
     let idle;
+    let broken = null;
     const armIdle = () => {
       clearTimeout(idle);
       idle = setTimeout(() => {
@@ -419,7 +488,7 @@ function runSession(ctx, bin, args, log, n) {
         s.result = e;
       }
     };
-    const onStdoutLine = (line) => {
+    const readLine = (line) => {
       armIdle();
       let event;
       try {
@@ -429,9 +498,21 @@ function runSession(ctx, bin, args, log, n) {
       }
       onEvent(event);
       const entries = ledgerEntries(ctx.root, ctx.plan);
-      for (const entry of entries.slice(seen))
+      for (const entry of entries.slice(seen)) {
         log(`session ${n} · ${s.tools} tool calls · task=${entry.task} event=${entry.event} outcome=${entry.outcome}`);
+        if (!DISPATCH_EVENTS.has(entry.event)) markProgressed(ctx);
+      }
       seen = Math.max(seen, entries.length);
+    };
+    // This runs inside the stream's data handler, where a throw would end the driver with no result.
+    const onStdoutLine = (line) => {
+      if (broken) return;
+      try {
+        readLine(line);
+      } catch (err) {
+        broken = err;
+        stopSession(handle);
+      }
     };
     let startError = null;
     handle = spawnStreaming(bin, args, { cwd: ctx.root, env: childEnv(ctx), onStdoutLine, onStderrLine: armIdle });
@@ -444,8 +525,12 @@ function runSession(ctx, bin, args, log, n) {
     handle.done.then(({ code, signal }) => {
       clearTimeout(idle);
       ctx.session = null;
-      if (code === null && signal === null) s.environment = `cannot run ${bin}: ${startError?.message ?? "it never started"}`;
-      settle(finalize(s, ctx.model));
+      if (broken)
+        fail(new Error(`session ${n}'s output broke the driver (${broken.message}) — the session was stopped; the next /devcycle:continue restarts the run`));
+      else {
+        if (code === null && signal === null) s.environment = `cannot run ${bin}: ${startError?.message ?? "it never started"}`;
+        settle(finalize(s, ctx.model));
+      }
     });
   });
 }
@@ -455,10 +540,30 @@ function readStop(root) {
   if (!existsSync(path)) return null;
   try {
     const stop = JSON.parse(readFileSync(path, "utf8"));
-    return { reason: String(stop.reason), detail: String(stop.detail ?? "") };
+    return { reason: String(stop.reason), detail: String(stop.detail ?? ""), task: stop.task == null ? null : String(stop.task) };
   } catch {
-    return { reason: "needs-user", detail: `${STOP_REL} is unreadable` };
+    return { reason: "needs-user", detail: `${STOP_REL} is unreadable`, task: null };
   }
+}
+
+const backoffMs = (attempt) => BACKOFF_MINUTES[Math.min(attempt, BACKOFF_MINUTES.length) - 1] * 60_000;
+
+// A limit with no reset time, an API error that passes, or a session that ended with no result and no ledger
+// line (a connection lost across a sleep): the next session is likely to get further once it
+// passes, so it is backed off and never counted as a stall or churn.
+function transientKind(s, before, after) {
+  if (s.limit && !s.limit.resetAt) return "usage-limit";
+  if (s.result?.is_error && apiFailure(s.resultText) === "transient") return "api-error";
+  if (s.result === null && !s.environment && !s.silent && after.lines === before.lines) return "no-result";
+  return null;
+}
+
+// The Dispatch-Map waves a session finished: from the one in flight at its start up to, not
+// including, the one in flight after it — all of them once nothing is left in flight.
+function waveEnds(planText, waveAtStart, waveAfter) {
+  if (waveAtStart === null) return [];
+  const waves = [...(parseDispatchMap(planText)?.keys() ?? [])].sort((a, b) => a - b);
+  return waves.filter((w) => w >= waveAtStart && (waveAfter === null || w < waveAfter)).map((w) => `wave ${w} of ${waves.at(-1)} complete`);
 }
 
 // Progress, judged the same however a session ended: a ledger line beyond a dispatch resets the
@@ -474,29 +579,46 @@ function progressCounts(before, after, { stalls, churn }, limited) {
 }
 
 // The evaluation order the driver promises: an interrupt, a broken environment, a stop the session
-// signalled, a usage limit (its stall and churn counts, then the dollar cap, before any wait), the
-// stage leaving execution, then progress and the dollar cap.
-function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, interrupted }) {
+// signalled, then a usage limit with a known reset, a transient failure or a silent session (each
+// checks the dollar cap before any wait; silence also its stall and churn counts), the stage leaving
+// execution, then progress and the dollar cap.
+function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, attempts, interrupted }) {
   const verdict = (exitReason, code, message, extra = {}) => ({ exitReason, code, message, stalls, churn, ...extra });
   if (interrupted) return verdict("interrupted", 130, "interrupted — the session was stopped and the lock released");
   if (s.environment) return verdict("environment", 3, s.environment);
   const stop = readStop(ctx.root);
-  if (stop) return verdict("stopped", 4, `stopped for you — ${stop.reason}: ${stop.detail}`, { stopReason: stop.reason });
+  if (stop) return verdict("stopped", 4, `stopped for you — ${stop.reason}: ${stop.detail}`, { stopReason: stop.reason, stop });
   const overBudget = opts.maxUsd !== undefined && spent >= opts.maxUsd;
-  const counts = progressCounts(before, after, { stalls, churn }, Boolean(s.limit));
-  const budgetSpent = () => verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, counts);
+  const transient = transientKind(s, before, after);
+  const counts = progressCounts(before, after, { stalls, churn }, Boolean(s.limit || transient));
+  const budgetSpent = () => verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, { ...counts, reason: "max-usd" });
   const said = `The last session said:\n${s.resultText || "(no result)"}`;
   const stalled = (how = "") => verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row added no ledger line beyond a dispatch${how}. ${said}`, counts);
   const churned = () => verdict("stalled", 5, `stalled: ${counts.churn} sessions in a row added ledger lines but no report, verdict or commit. ${said}`, counts);
-  if (s.limit || s.silent) {
+  if (s.limit?.resetAt) {
+    if (overBudget) return budgetSpent();
+    const ms = Math.max(s.limit.resetAt * 1000 - clockNow(), 0) + RESET_MARGIN_MS;
+    return verdict("budget", null, null, { ...counts, wait: { ms, what: "usage limit until its reset", charged: false } });
+  }
+  if (transient) {
+    if (overBudget) return budgetSpent();
+    const attempt = attempts + 1;
+    const ms = backoffMs(attempt);
+    if (waited + ms > opts.maxBackoffMs)
+      return verdict("budget", 6,
+        `transient failure (${transient}), attempt ${attempt}: backing off ${ms / 60_000} more min would pass --max-backoff — the next /devcycle:continue restarts the run`,
+        { ...counts, reason: "wait-cap" });
+    return verdict("transient", null, null, { ...counts, attempts: attempt, wait: { ms, what: `transient failure (${transient}), attempt ${attempt}`, charged: true } });
+  }
+  if (s.silent) {
     // Silence with no usage-limit signal may be a limit — or a session that hangs every time, so it
     // also counts toward a stall or churn, as an ended session would.
     if (counts.stalls >= opts.maxStalls) return stalled("; the last went silent with no usage-limit signal until the driver stopped it");
     if (counts.churn >= opts.maxChurn) return churned();
     if (overBudget) return budgetSpent();
-    const waitMs = s.limit?.resetAt ? Math.max(s.limit.resetAt * 1000 - Date.now(), 1000) : DEFAULT_BACKOFF_MS;
-    if (waited + waitMs > opts.maxBackoffMs) return verdict("budget", 6, "usage limit: waiting it out would pass --max-backoff", counts);
-    return verdict("budget", null, null, { waitMs, ...counts });
+    if (waited + DEFAULT_BACKOFF_MS > opts.maxBackoffMs)
+      return verdict("budget", 6, "a silent session: waiting it out would pass --max-backoff — the next /devcycle:continue restarts the run", { ...counts, reason: "wait-cap" });
+    return verdict("budget", null, null, { ...counts, wait: { ms: DEFAULT_BACKOFF_MS, what: "silent session", charged: true } });
   }
   const crashed = s.result === null;
   if (readState(ctx.statePath).stage !== "execution") return verdict(crashed ? "error" : "handoff", null, null);
@@ -569,6 +691,31 @@ function sleep(trap, ms) {
   });
 }
 
+function clockNow() {
+  const file = process.env.DEVCYCLE_DRIVE_CLOCK_FILE;
+  if (file) {
+    try {
+      const text = readFileSync(file, "utf8").trim();
+      if (/^\d+$/.test(text)) return Number(text);
+    } catch {
+      // An unreadable clock file leaves the real clock.
+    }
+  }
+  return Date.now();
+}
+
+// A --stop whose signal could not be delivered leaves its request on disk, and the driver ends on it
+// between sessions and in every slice of a wait.
+const stopRequested = (root) => existsSync(join(root, STOP_REQUEST_REL));
+
+async function waitUntil(trap, deadlineMs, root) {
+  while (!trap.interrupted && !stopRequested(root)) {
+    const left = deadlineMs - clockNow();
+    if (left <= 0) return;
+    await sleep(trap, Math.min(SLICE_MS, left));
+  }
+}
+
 function isStdout(path) {
   try {
     const out = fstatSync(process.stdout.fd);
@@ -591,21 +738,34 @@ function makeLog(root) {
   };
 }
 
+const OUTCOME_OF = { interrupted: "interrupted", environment: "environment", stalled: "stalled", budget: "budget" };
+const ended = (code, outcome, detail = "") => ({ code, outcome, reason: null, detail, task: null });
+
+function endOf(verdict) {
+  if (verdict.stop) return { code: 4, outcome: "gate-stop", reason: verdict.stop.reason, detail: verdict.stop.detail, task: verdict.stop.task };
+  return { ...ended(verdict.code, OUTCOME_OF[verdict.exitReason], verdict.message ?? ""), reason: verdict.reason ?? null };
+}
+
 async function walk(ctx, opts, log, trap) {
   let stalls = 0;
   let churn = 0;
   let spent = 0;
   let waited = 0;
+  let attempts = 0;
   for (let n = 1; ; n++) {
-    if (trap.interrupted) return 130;
+    if (trap.interrupted) return ended(130, "interrupted");
+    if (stopRequested(ctx.root)) {
+      log("a --stop request is on disk; stopping before the next session");
+      return ended(130, "interrupted");
+    }
     const stage = readState(ctx.statePath).stage;
     if (stage === "branch-review") {
       log("execution is complete — the branch is ready for branch review");
-      return 0;
+      return ended(0, "complete");
     }
     if (stage !== "execution") {
       log(`the state left execution for stage ${stage}; stopping`);
-      return 1;
+      return ended(1, "left-execution", `the state left execution for stage ${stage}`);
     }
     rmSync(join(ctx.root, STOP_REL), { force: true });
     const entriesBefore = ledgerEntries(ctx.root, ctx.plan);
@@ -614,21 +774,43 @@ async function walk(ctx, opts, log, trap) {
     const startedAt = now();
     log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}`);
     const s = await runSession(ctx, opts.bin, sessionArgs(ctx, opts, spent), log, n);
-    const after = progressOf(ledgerEntries(ctx.root, ctx.plan));
+    const entriesAfter = ledgerEntries(ctx.root, ctx.plan);
+    const after = progressOf(entriesAfter);
+    if (after.advanced > before.advanced) {
+      markProgressed(ctx);
+      waited = 0;
+      attempts = 0;
+    }
     spent += s.spentUsd;
-    const verdict = judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, interrupted: trap.interrupted });
+    const verdict = judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, attempts, interrupted: trap.interrupted });
     ({ stalls, churn } = verdict);
+    attempts = verdict.attempts ?? 0;
     writeRecord(ctx, s, { startedAt, before, after, waveAtStart, ...verdict }, n);
     const cost = s.costUsd !== null ? `, $${s.costUsd.toFixed(2)}` : s.spentUsd > 0 ? `, ~$${s.spentUsd.toFixed(2)} estimated` : "";
     log(`session ${n} ended — ${verdict.exitReason}; ledger +${after.lines - before.lines}, commits +${after.committed - before.committed}${cost}`);
+    for (const waveEnd of waveEnds(ctx.planText, waveAtStart, inFlightFiles(ctx.planText, entriesAfter).wave)) log(waveEnd);
     if (verdict.message) log(verdict.message);
-    if (verdict.code !== null) return verdict.code;
-    if (verdict.waitMs) {
-      log(`usage limit — waiting ${Math.ceil(verdict.waitMs / 60_000)} min before the next session`);
-      await sleep(trap, verdict.waitMs);
-      waited += verdict.waitMs;
+    if (verdict.code !== null) return endOf(verdict);
+    if (verdict.wait) {
+      const deadline = clockNow() + verdict.wait.ms;
+      log(`wait: ${verdict.wait.what} — resuming at ${new Date(deadline).toISOString()}`);
+      await waitUntil(trap, deadline, ctx.root);
+      if (verdict.wait.charged) waited += verdict.wait.ms;
     }
   }
+}
+
+// A 130 is a --stop when its request is on disk, and otherwise a signal from elsewhere (a terminal
+// closing, a shutdown), which the next /devcycle:continue restarts.
+function recordEnd(ctx, end, startedAt) {
+  const request = join(ctx.root, STOP_REQUEST_REL);
+  const outcome = end.code === 130 && existsSync(request) ? "stopped" : end.outcome;
+  const { progressed } = ctx;
+  writeDriveResult(ctx.root, {
+    code: end.code, outcome, reason: end.reason, task: end.task, detail: end.detail, startedAt, endedAt: now(),
+    progressed, noProgressEnds: noProgressEndsAfter(ctx.root, { progressed, outcome, reason: end.reason }),
+  });
+  rmSync(request, { force: true });
 }
 
 async function drive(opts) {
@@ -638,27 +820,119 @@ async function drive(opts) {
     return 0;
   }
   const trap = trapSignals(ctx);
+  const startedAt = now();
+  ctx.startedAt = startedAt;
+  let end = ended(1, "failed");
   try {
-    return await walk(ctx, opts, makeLog(ctx.root), trap);
+    writeCrashedResult(ctx.root, { startedAt, progressed: false });
+    end = await walk(ctx, opts, makeLog(ctx.root), trap);
+    return end.code;
+  } catch (err) {
+    end = ended(1, "failed", err.message);
+    throw err;
   } finally {
     trap.dispose();
-    release(ctx);
+    try {
+      recordEnd(ctx, end, startedAt);
+    } finally {
+      release(ctx);
+    }
   }
+}
+
+// The child's stderr is the log, so its refusal is the `drive-execution: ` lines the log gained.
+function relayRefusal(root, logOffset) {
+  let gained = "";
+  try {
+    gained = readFileSync(join(root, LOG_REL)).subarray(logOffset).toString("utf8");
+  } catch {
+    // No log: the child said nothing.
+  }
+  for (const l of gained.split("\n")) if (l.startsWith("drive-execution: ")) process.stderr.write(`${l}\n`);
 }
 
 // Runs the pre-flight here, so a refusal still exits 3 in the caller's terminal, then starts the
 // driver again without --detach as a new session's leader (`detached: true` calls setsid on POSIX):
-// no terminal's hangup reaches it, unlike a `nohup … &` child of the caller's session.
-function detach(opts, argv) {
+// no terminal's hangup reaches it, unlike a `nohup … &` child of the caller's session. It returns
+// only once the child holds the lock and has handed off the last run's result, so a watch armed next
+// never reads a run not yet begun as ended; however long that takes, since a driver left running
+// unreported runs unwatched. The child's pre-flight is bounded, so the wait ends.
+async function detach(opts, argv) {
   const { root } = preflight({ ...opts, dryRun: true });
-  const log = openSync(join(root, LOG_REL), "a");
+  const logPath = join(root, LOG_REL);
+  const logOffset = existsSync(logPath) ? statSync(logPath).size : 0;
+  // The child renames the result away, or replaces it with its own: either changes its inode.
+  const resultIno = () => {
+    try {
+      return statSync(join(root, RESULT_REL)).ino;
+    } catch {
+      return null;
+    }
+  };
+  const staleResult = resultIno();
+  const log = openSync(logPath, "a");
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv.filter((a) => a !== "--detach")], {
     detached: true,
     stdio: ["ignore", log, log],
   });
-  child.unref();
   closeSync(log);
-  console.log(JSON.stringify({ pid: child.pid, log: LOG_REL }));
+  let exited = null;
+  child.once("exit", (code) => {
+    exited = { code };
+  });
+  for (;;) {
+    if (readDriveLockHolder(root)?.pid === child.pid && (staleResult === null || resultIno() !== staleResult)) {
+      child.unref();
+      console.log(JSON.stringify({ pid: child.pid, log: LOG_REL, logOffset }));
+      return 0;
+    }
+    if (exited) {
+      relayRefusal(root, logOffset);
+      return exited.code ?? 1;
+    }
+    await new Promise((done) => setTimeout(done, DETACH_POLL_MS));
+  }
+}
+
+// The way to stop a driver on purpose: the request on disk is what makes its 130 read as stopped,
+// which /devcycle:continue never restarts unasked.
+export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, signal) } = {}) {
+  const statePath = resolve(state);
+  const root = dirname(dirname(statePath));
+  const request = join(root, STOP_REQUEST_REL);
+  const notRunning = () => {
+    rmSync(request, { force: true });
+    console.error(`drive-execution: no driver is running for ${state}`);
+    return 3;
+  };
+  const requestStays = `the stop request stays in ${STOP_REQUEST_REL}, so the driver stops before its next session or within a minute of a wait`;
+  // The watcher's liveness (scripts/drive-result.mjs): a sandbox that runs no ps still finds the driver.
+  const holder = readDriveLockHolder(root);
+  const liveness = holder && lockNamesState(root, holder, statePath) ? holderLiveness(root, holder) : "gone";
+  if (liveness === "gone") return notRunning();
+  atomicWrite(request, `${now()}\n`);
+  // A pid ps cannot vouch for may be a later process that reused a dead driver's pid: never signal it.
+  if (liveness === "unverified") {
+    console.error(`drive-execution: cannot confirm pid ${holder.pid} is still the driver, because ps does not run here, so it was not signalled — ` +
+      `${requestStays}; to stop it now, run kill ${holder.pid} from a shell where ps shows that pid is the driver`);
+    return 1;
+  }
+  try {
+    kill(holder.pid, "SIGTERM");
+  } catch (err) {
+    if (err.code === "ESRCH") return notRunning();
+    console.error(`drive-execution: could not signal the driver (pid ${holder.pid}: ${err.code ?? err.message}) — ` +
+      `${requestStays}; to stop it now, run kill ${holder.pid} from a shell allowed to signal it`);
+    return 1;
+  }
+  console.log(JSON.stringify({ stopped: true, pid: holder.pid }));
+  return 0;
+}
+
+// /devcycle:continue's hand-off once it has acted on a result: a gate answered, or a restart begun.
+function markHandled(state) {
+  const root = dirname(dirname(resolve(state)));
+  console.log(JSON.stringify({ handled: markResultHandled(root) }));
   return 0;
 }
 
@@ -670,13 +944,23 @@ async function main(argv) {
     console.error(`drive-execution: ${err.message}`);
     return 2;
   }
+  if (opts.watch) {
+    const pollMs = Number(process.env.DEVCYCLE_DRIVE_POLL_MS) || undefined;
+    const statePath = opts.state;
+    if (opts.watch === "--follow") await follow({ statePath, since: opts.since, pollMs });
+    else console.log(JSON.stringify(opts.watch === "--wait" ? await waitForEnd({ statePath, pollMs }) : statusReport({ statePath })));
+    return 0;
+  }
   if (opts.checkSandbox) {
-    // The opt-in gate asks this first, and writes sessionHash into the drive row on a start-now answer.
-    console.log(JSON.stringify({ sandboxed: sandboxed(), sessionHash: sessionHashOf(process.env) }));
+    console.log(JSON.stringify({ sandboxed: sandboxed() }));
     return 0;
   }
   try {
-    return opts.detach && !opts.dryRun ? detach(opts, argv) : await drive(opts);
+    if (opts.stop) return stopDriver(opts.state);
+    if (opts.markHandled) return markHandled(opts.state);
+    // D5 (docs/decisions/README.md, 2026-10-13): only /devcycle:continue starts a driver; this is the part the driver can enforce.
+    if (process.env.DEVCYCLE_DRIVE_TOKEN) throw new Exit(3, "a driven session never starts a driver; /devcycle:continue does");
+    return opts.detach && !opts.dryRun ? await detach(opts, argv) : await drive(opts);
   } catch (err) {
     console.error(`drive-execution: ${err.message}`);
     return err instanceof Exit ? err.code : 1;

@@ -14,14 +14,16 @@ import { hashSession } from "./run-record.mjs";
 
 const STOP_REASONS = ["needs-user", "knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start", "sweep-fallback", "scope-change", "no-driver", "not-opted-in"];
 const MAX_DETAIL = 500;
-const USAGE = "drive-signal: usage: drive-signal.mjs <reason> --detail <text> [--state <path>]";
+const USAGE = "drive-signal: usage: drive-signal.mjs <reason> --detail <text> [--task <n>] [--state <path>]";
 
 function main(argv) {
-  let reason, detail, statePath;
+  let reason, detail, statePath, task;
   try {
-    const { flags, positionals } = parseFlags(argv, { "--detail": "value", "--state": "value" }, { allowPositionals: true });
+    const { flags, positionals } = parseFlags(argv, { "--detail": "value", "--state": "value", "--task": "value" }, { allowPositionals: true });
     detail = requireValue(flags, "--detail", "a one-line detail");
     statePath = requireValue(flags, "--state");
+    task = requireValue(flags, "--task", "a task number") ?? null;
+    if (task !== null && !/^[0-9]+$/.test(task)) throw new Error(`--task requires a task number, got ${JSON.stringify(task)}`);
     if (positionals.length !== 1) throw new Error("exactly one <reason> is required");
     [reason] = positionals;
     if (!STOP_REASONS.includes(reason)) throw new Error(`unknown reason "${reason}" — one of ${STOP_REASONS.join(", ")}`);
@@ -52,6 +54,7 @@ function main(argv) {
   const signal = {
     reason,
     detail: detail.replace(/\s+/g, " ").trim().slice(0, MAX_DETAIL),
+    task,
     stage,
     stamp: now(),
     sessionHash: sessionId ? hashSession(sessionId) : null,

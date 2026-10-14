@@ -88,7 +88,7 @@ A driver replaces a stale `.devcycle/drive.lock` only while it holds a second fi
 `.devcycle/drive.lock.reclaim`, so two starters can never both take over the same dead lock. A
 starter killed with `kill -9` in the few system calls between taking that file and removing it
 leaves it behind, and every later start exits 1 with `drive-lock: a starter died while reclaiming …`
-(a `--detach` start prints its PID first and reports the failure in `.devcycle/drive.log`). It is
+(a `--detach` start relays that message and exit code). It is
 left rather than fixed because guessing that the reclaimer is gone could let two drivers share a
 checkout. When no driver runs, remove both files by hand.
 
@@ -101,6 +101,13 @@ inside a container that has since restarted (a new pid namespace) leaves a lock 
 refuses, and the lock of a driver on a cloned VM that shares this machine's id and started before
 this machine last booted is taken for a reboot's and reclaimed. It is left rather than fixed because nothing
 cheap tells a reboot from a clone that booted earlier. When no driver runs, remove the lock by hand.
+
+`/devcycle:continue` judges a lock without that machinery: a lock whose pid is gone, or whose pid
+now belongs to a process started at another time than the lock records, reads as a crash and is
+restarted, so a pid reused after a reboot never passes for the driver. Where `ps` cannot read a
+process's start time — a sandbox that denies it — the pid's existence alone decides, and a reused
+pid reads as a running driver: `/devcycle:continue` attaches to it and watches nothing. Running
+`drive-execution.mjs --status --state .devcycle/state.md` outside the sandbox tells the two apart.
 
 ### An off-by-one review round stops a driven session (low)
 

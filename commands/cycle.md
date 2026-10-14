@@ -44,7 +44,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --learnStalenessSessions '${user_config.learnStalenessSessions}' \
   --learnStalenessDays '${user_config.learnStalenessDays}' \
   --learnSessionCap '${user_config.learnSessionCap}' \
-  --subagentBudget '${user_config.subagentBudget}'
+  --subagentBudget '${user_config.subagentBudget}' \
+  --executionMode '${user_config.executionMode}'
 ```
 
 2. **First-run test.** Only when the state file's `configured:` reads `no` **and** the `explicit:`

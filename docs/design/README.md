@@ -245,7 +245,8 @@ gated by `userConfig.crossModelReview`.
   "learnStalenessSessions": 5,
   "learnStalenessDays": 14,
   "learnSessionCap": 100,
-  "subagentBudget": "off | warn | enforce"
+  "subagentBudget": "off | warn | enforce",
+  "executionMode": "ask | manual | unattended"
 }
 ```
 
@@ -296,6 +297,10 @@ gated by `userConfig.crossModelReview`.
   adds a budget note to a subagent's next tool result once it passes 15% of its context window,
   then to every fifth one; `enforce` also refuses reads at 20%; `off` does neither. A fork or a
   teammate is never limited. It is profile-independent, so it takes no `auto`.
+- `executionMode` (added 2026-10-13) is how `/devcycle:continue` runs the waves at execution start
+  while the cycle has no `drive:` row: `ask`, the default, asks Unattended or Walk the waves
+  manually; `manual` walks them in the session; `unattended` starts the driver. A recorded row
+  outranks it, and it is `live`, so a mid-cycle change is never knob drift. It takes no `auto`.
 
 ---
 

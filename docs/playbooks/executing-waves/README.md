@@ -11,9 +11,10 @@ review/fix loop, but overrides several of that skill's defaults: devcycle's own
 reviewing-the-branch and finish stages replace its final-code-reviewer and
 finishing-a-development-branch steps, its progress file is replaced by `.devcycle/ledger.md`, and
 implementers never commit — only the coordinator does, at step 7 of the per-task cycle. Before
-wave 1, a pre-flight settles branch discipline (the topic branch must exist and be recorded) and
-the commit-message convention, and patches any task whose plan-level requirements aren't yet
-reflected in its own steps.
+wave 1, a pre-flight archives a ledger and per-task files a previous cycle left behind
+(`scripts/ledger-slot.mjs --reset`, when `wave-setup.mjs` reports the slot stale), settles branch
+discipline (the topic branch must exist and be recorded) and the commit-message convention, and
+patches any task whose plan-level requirements aren't yet reflected in its own steps.
 
 A wave is formed from the plan's dependency declarations and file lists: every task whose
 dependencies are already committed AND whose files overlap no other candidate or running task
@@ -55,7 +56,7 @@ task's gate command, with the task's own test run as the subset that attributes 
 - Source: [`playbooks/executing-waves.md`](../../../playbooks/executing-waves.md) — the behavior
   spec this page summarizes.
 - Unattended: [running execution unattended](unattended.md) — a driver walks the waves for you
-  after you opt in at planning's close.
+  after you opt in when `/devcycle:continue` resumes at execution.
 
 ```mermaid
 ---
