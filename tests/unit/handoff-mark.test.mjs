@@ -36,6 +36,30 @@ test("withHandoffRow adds the row after the last row when absent and replaces it
   assert.ok(replaced.includes(DRIVE), "the drive: row is carried byte for byte");
 });
 
+test("withHandoffRow keeps a CRLF file's line endings: replaced or added row ends in CRLF, no bare LF, every other line byte-identical", () => {
+  const crlf = STATE.replaceAll("\n", "\r\n");
+  const added = withHandoffRow(crlf, "pending", "2026-10-16T10:00:00Z");
+  assert.equal(added, crlf.replace("- updated: 2026-10-16T09:00:00Z\r\n", "- updated: 2026-10-16T09:00:00Z\r\n- handoff: pending 2026-10-16T10:00:00Z\r\n"));
+  const replaced = withHandoffRow(added, "ready", "2026-10-16T11:00:00Z");
+  assert.equal(replaced, added.replace("- handoff: pending 2026-10-16T10:00:00Z", "- handoff: ready 2026-10-16T11:00:00Z"));
+  for (const text of [added, replaced]) assert.equal(text.replaceAll("\r\n", "").match(/[\r\n]/g), null, "a bare CR or LF is left in the file");
+});
+
+test("withHandoffRow on a CRLF file with no trailing newline adds one CRLF-terminated row and no bare LF", () => {
+  const crlf = STATE.replaceAll("\n", "\r\n").replace(/\r\n$/, "");
+  const added = withHandoffRow(crlf, "ready", "2026-10-16T10:00:00Z");
+  assert.equal(added, `${crlf}\r\n- handoff: ready 2026-10-16T10:00:00Z`);
+  assert.equal(added.replaceAll("\r\n", "").match(/[\r\n]/g), null, "a bare CR or LF is left in the file");
+});
+
+test("cli --pending on a CRLF state file leaves only CRLF line endings", () => {
+  const p = stateFile(STATE.replaceAll("\n", "\r\n"));
+  assert.equal(run(["--state", p, "--pending"]).status, 0);
+  const text = readFileSync(p, "utf8");
+  assert.equal(text.replaceAll("\r\n", "").match(/[\r\n]/g), null, "a bare CR or LF is left in the file");
+  assert.equal(text.split("\r\n").filter((l) => l.startsWith("- handoff: pending ")).length, 1);
+});
+
 test("notifyLines: one line per channel the knob names, only for clear, fresh and stopped", () => {
   const done = "devcycle: planning done — safe to /clear + /devcycle:continue";
   assert.deepEqual(notifyLines({ knob: "both", action: "clear", completed: "planning" }), [`notify: terminal ${done}`, `notify: push ${done}`]);

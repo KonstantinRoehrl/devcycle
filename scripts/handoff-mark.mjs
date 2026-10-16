@@ -28,10 +28,11 @@ export function parseHandoff(value) {
 export function withHandoffRow(text, state, stamp) {
   const row = `- handoff: ${state} ${stamp}`;
   if (ROW.test(text)) return text.replace(ROW, row);
+  const eol = text.includes("\r\n") ? "\r\n" : "\n"; // a hand-edited or Windows-checkout file keeps its endings
   const last = [...text.matchAll(ANY_ROW)].at(-1);
-  if (!last) return `${text}${text === "" || text.endsWith("\n") ? "" : "\n"}${row}\n`;
+  if (!last) return `${text}${text === "" || text.endsWith("\n") ? "" : eol}${row}${eol}`;
   const end = last.index + last[0].length;
-  return `${text.slice(0, end)}\n${row}${text.slice(end)}`;
+  return `${text.slice(0, end)}${eol}${row}${text.slice(end)}`;
 }
 
 // A Continue boundary and a started driver leave the user nothing to come back for.
