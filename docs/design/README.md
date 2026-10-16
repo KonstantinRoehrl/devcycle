@@ -111,6 +111,7 @@ devcycle/                (public GitHub repo)
 │   ├── red-team-reviewer.md      # adversarial charter; read-only allowlist; spliced into
 │   │                             # review-panel's per-finding verification pass
 │   ├── history-inspector.md      # read-only git-history lens for /devcycle:maintain; bounded traversal
+│   ├── spec-reviewer.md          # read-only spec-claims check against live code, before brainstorm's approval question
 │   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
 │                                 # origin the browser guard below permits
 ├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05, 2026-10-07)
@@ -122,7 +123,7 @@ devcycle/                (public GitHub repo)
 │   ├── lib/run-context.mjs            # state file → active run → joined session, for the depth-sensor and the module's sink
 │   ├── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
 │   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent
-│   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter
+│   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter, handoff notification relay
 │   └── mod-sink.mjs              # the module's Node side: the joined check and agent-trace writes
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
 ├── scripts/                      # L4 — validate.mjs, doctor.mjs, dream.mjs, the checkers, bump-version.mjs
@@ -246,6 +247,7 @@ gated by `userConfig.crossModelReview`.
   "learnStalenessDays": 14,
   "learnSessionCap": 100,
   "subagentBudget": "off | warn | enforce",
+  "handoffNotification": "off | terminal | push | both",
   "executionMode": "ask | manual | unattended"
 }
 ```
@@ -297,10 +299,15 @@ gated by `userConfig.crossModelReview`.
   adds a budget note to a subagent's next tool result once it passes 15% of its context window,
   then to every fifth one; `enforce` also refuses reads at 20%; `off` does neither. A fork or a
   teammate is never limited. It is profile-independent, so it takes no `auto`.
+- `handoffNotification` (added 2026-10-16) is whether devcycle tells the user that a handoff is
+  safe to clear, and that an unattended run stopped for them: `off`, the default; `terminal`, raised
+  by the hooks module through Claude Code's own notification channel; `push`, a push notification;
+  or `both`. It is read from the cycle's `knobs:` line and is profile-independent, so it takes no `auto`.
 - `executionMode` (added 2026-10-13) is how `/devcycle:continue` runs the waves at execution start
-  while the cycle has no `drive:` row: `ask`, the default, asks Unattended or Walk the waves
-  manually; `manual` walks them in the session; `unattended` starts the driver. A recorded row
-  outranks it, and it is `live`, so a mid-cycle change is never knob drift. It takes no `auto`.
+  while the cycle has no `drive:` row: `ask`, the default, asks Start unattended or Walk the waves
+  manually; `manual` walks them in the session; `unattended` asks the same question with **Start
+  unattended** first, since an unattended run starts only on the user's answer in the session
+  (decision log, 2026-10-16). A recorded row outranks it, and it is `live`, so a mid-cycle change is never knob drift. It takes no `auto`.
 
 ---
 
@@ -333,7 +340,8 @@ gated by `userConfig.crossModelReview`.
 - Playbooks: verb-first gerunds, listed in §3. They are addressed by path, never as
   `devcycle:<name>`, so a playbook name is never a user-typed string.
 - Agents: `devcycle:implementer`, `devcycle:task-reviewer`,
-  `devcycle:red-team-reviewer`, `devcycle:on-device-driver`, `devcycle:history-inspector`. The plugin id is not decoration:
+  `devcycle:red-team-reviewer`, `devcycle:on-device-driver`, `devcycle:history-inspector`,
+  `devcycle:spec-reviewer`. The plugin id is not decoration:
   the harness passes `<plugin>:<name>` as a subagent's `agent_type`, which is the spelling the
   browser guard's allowlist must carry (`docs/platform-notes.md` § (e)).
 - Hooks: four settings hooks and one hooks module — two guards, `block-main-thread-browser` and `block-destructive-git`, named for

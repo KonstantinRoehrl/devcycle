@@ -677,7 +677,7 @@ test("a ledger whose Plan: preamble names another plan is a previous cycle's: it
 test("pre-flight refuses a state without the drive row, a state off execution, a model whose window cannot hold a session start, and a sandbox", () => {
   const notOpted = dryRun(makeCycle({ drive: null }));
   assert.equal(notOpted.code, 3, notOpted.out);
-  assert.ok(notOpted.out.includes("the state file has no `drive: auto` row — run /devcycle:continue and choose Unattended, or set executionMode"), notOpted.out);
+  assert.ok(notOpted.out.includes("the state file has no `drive: auto` row — run /devcycle:continue and answer Start unattended"), notOpted.out);
 
   const planning = dryRun(makeCycle({ stage: "planning" }));
   assert.equal(planning.code, 3, planning.out);

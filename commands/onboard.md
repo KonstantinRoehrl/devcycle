@@ -30,6 +30,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --learnStalenessDays '${user_config.learnStalenessDays}' \
   --learnSessionCap '${user_config.learnSessionCap}' \
   --subagentBudget '${user_config.subagentBudget}' \
+  --handoffNotification '${user_config.handoffNotification}' \
   --executionMode '${user_config.executionMode}'
 ```
 

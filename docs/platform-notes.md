@@ -74,7 +74,7 @@ skills-into-playbooks decision — see `docs/decisions/README.md` 2026-09-29.
 
   [Amended 2026-10-02: `enum` is still rejected, but the schema does take a value list —
   `options`, an array of strings — so allowed values no longer live only in description text.
-  The fixed-set knobs declare it — seven since `executionMode` joined them on 2026-10-13; see § (g)
+  The fixed-set knobs declare it — eight since `handoffNotification` joined them on 2026-10-16; see § (g)
   and `docs/decisions/README.md` 2026-10-02.]
 - Skills/commands must never treat `${user_config.KEY}` inline text as always-resolved. Required
   authoring pattern: quote the placeholder and instruct the model — "if this still reads as a
@@ -271,7 +271,7 @@ itself, then the real one. The installed file was restored afterwards and verifi
 **Exact result.** A plugin agent's `agent_type` is `<plugin>:<frontmatter name>` —
 `devcycle:on-device-driver` for this plugin's driver, read off the running harness. On the main
 thread the key is absent from the stdin JSON entirely, not an empty string. A second guard now relies on this: `hooks/block-destructive-git.mjs` denies destructive git from the
-`task-reviewer`/`red-team-reviewer`/`implementer` origins, pinning both the bare and
+`task-reviewer`/`red-team-reviewer`/`implementer`/`spec-reviewer` origins, pinning both the bare and
 `devcycle:`-namespaced spellings for the same reason the browser guard does. Its main-thread branch
 (the cycle-scoped `git stash` ban) reads `cwd` from the `PreToolUse` stdin JSON exactly as the
 commit-sensor reads it from `PostToolUse` stdin, through the shared `hooks/lib/find-state-file.mjs`.
@@ -358,8 +358,8 @@ the plugin's minimum Claude Code version and the version CI pins. Only the valid
 bisected, not how each release renders the pick-list.
 
 **Consequence.** `profile`, `gitPolicy`, `docTrackingPolicy`, `reviewDepth`, `onDeviceGate`,
-`subagentBudget` and `executionMode` declare `options`. `scripts/validate.mjs` fails a malformed list
-the same way the loader would, and holds each of the seven to `scripts/resolve-knobs.mjs`'s `ROSTER` values, with
+`subagentBudget`, `handoffNotification` and `executionMode` declare `options`. `scripts/validate.mjs` fails a malformed list
+the same way the loader would, and holds each of the eight to `scripts/resolve-knobs.mjs`'s `ROSTER` values, with
 `auto` first on the two knobs whose fallback is a profile row.
 
 ## (h) A `--plugin-dir` load sees no configured values
@@ -455,6 +455,12 @@ instructions file lives at `.claude/CLAUDE.md`. CI runs both strict validations 
 test .` on 2.1.287 and 2.1.292. Whether `allowManagedModsOnly` refuses the whole `hooks.json` or
 only its `modules` cannot be checked without managed settings; doctor's `mod-inactive` candidate
 reports the effect either way.
+
+[Added 2026-10-16: the module also raises the `notify: terminal` lines `scripts/handoff-mark.mjs`
+prints, through `$.ui.notify`, in any session, joined or not. A Bash-tool child has no controlling
+terminal (`/dev/tty` opens with `ENXIO`), and writing the session's tty directly is denied by auto
+mode's classifier, so the module is the one path to the terminal. `$.ui.notify` writes through the
+user's `preferredNotifChannel`. Where a Claude Code build has no `$.ui.notify`, the relay does nothing; CI's two pinned versions lack the event, so `tests/mod/harness.ts` registers the handler only for `tests/mod/notify.test.ts`, which runs only where the CLI knows it.]
 
 ## (k) Headless `claude -p` as a driven session
 

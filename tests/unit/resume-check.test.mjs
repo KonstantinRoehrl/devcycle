@@ -454,3 +454,17 @@ test("a done cycle is reported as closed, not as a missing entry", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("reports the handoff row: pending and ready with their stamp, and no row as ready", () => {
+  const dir = makeTempDir("resume-check-");
+  const base = ["- stage: planning", `- root: ${dir}`, "- spec: none", "- plan: none", "- checklist: none"];
+  const out = (lines) => {
+    const r = run(makeState(dir, lines));
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    return r.stdout.trim().split("\n").at(-1);
+  };
+  assert.equal(out([...base, "- handoff: pending 2026-10-16T10:00:00Z"]), "handoff: pending 2026-10-16T10:00:00Z");
+  assert.equal(out([...base, "- handoff: ready 2026-10-16T11:00:00Z"]), "handoff: ready 2026-10-16T11:00:00Z");
+  assert.equal(out(base), "handoff: ready (no row)");
+  rmSync(dir, { recursive: true, force: true });
+});

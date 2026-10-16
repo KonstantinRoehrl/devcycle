@@ -2,12 +2,12 @@
 
 A Claude Code plugin that turns a one-line feature, bug, or refactor description into a
 verified, reviewed implementation on its own git branch. You type one command; devcycle asks
-clarifying questions to scope and brainstorm the work, designs a spec with you, plans it as
-parallel tasks, and implements them test-first with subagents running in parallel. It reviews
-the finished branch against the spec and — when the change is visible on screen — drives the
-running app through claude-in-chrome to auto-check every item a browser can confirm
-structurally, then walks you through the rest, since how it actually looks and feels is your
-verdict, not a script's.
+clarifying questions to scope and brainstorm the work, designs a spec with you (an independent
+reviewer checks its claims against your code before you approve it), plans it as parallel tasks,
+and implements them test-first with subagents running in parallel. It reviews the finished
+branch against the spec and — when the change is visible on screen — drives the running app
+through claude-in-chrome to auto-check every item a browser can confirm structurally, then walks
+you through the rest, since how it actually looks and feels is your verdict, not a script's.
 
 Beyond building the change, devcycle closes the loop around a pull request: it reads a PR's
 review comments and reconciles them into the right fixes and consented replies. And it
@@ -99,8 +99,9 @@ calls and tool results, it is not sandboxed, and `claude plugin validate <plugin
 every hook it registers and every engine call it makes. In every session it looks for a
 `.devcycle/state.md` in the working directory or a parent; where that file names an active run, it
 runs a short Node check (`node hooks/mod-sink.mjs check-joined`) to learn whether this session
-joined the run. Beyond that it acts only in a session that joined an active devcycle run, and what
-it writes are run-record rows of ids, counts and enum values.
+joined the run. Beyond that it acts only in a session that joined an active devcycle run, where
+what it writes are run-record rows of ids, counts and enum values, and in any session it relays the
+terminal notification `scripts/handoff-mark.mjs` asks for (`handoffNotification`).
 
 For the on-device verification stage's automatic checks, also install the claude-in-chrome
 plugin — Claude Code's integration with your own Chrome (without it, every checklist item
@@ -130,9 +131,11 @@ run `/clear` and then `/devcycle:continue`, so a cycle plays out as several shor
 rather than one long one.
 
 Execution can also walk its waves without you: when `/devcycle:continue` resumes at execution it
-asks whether to run them unattended (or follows the `executionMode` setting), then starts a driver
-that gives each wave a fresh session, watches it, and stops at the first thing that needs you — see
-[running execution unattended](docs/playbooks/executing-waves/unattended.md).
+asks whether to run them unattended (the `executionMode` setting only decides which answer comes
+first), then starts a driver that gives each wave a fresh session, watches it, and stops at the
+first thing that needs you — see [running execution unattended](docs/playbooks/executing-waves/unattended.md).
+Every handoff records when it is safe to `/clear`; resuming before it warns you, and the
+`handoffNotification` setting can ring your terminal or push a notification when it is.
 
 **Add `.devcycle/` to the target repo's `.gitignore`** — none of it belongs in git history.
 What devcycle attempts to commit *outside* that directory is `docTrackingPolicy`'s call.

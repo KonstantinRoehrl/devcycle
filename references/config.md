@@ -39,7 +39,7 @@ Only command text is templated — `${user_config.KEY}` substitutes in a command
 loads, never in a file a stage opens with Read — so knobs reach stages through one channel:
 
 - **Commands resolve.** Every entry command except `/devcycle:doctor`, which consumes no knob,
-  runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs"` with all fifteen rendered
+  runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs"` with all sixteen rendered
   placeholders as its first configuration step. That invocation is the only place a
   `${user_config.<key>}` may appear; `scripts/validate.mjs` fails one anywhere else. It prints
   `knobs: <key>=<value> …` in roster order and `explicit: <the keys that won at step 1>`. A
@@ -95,6 +95,7 @@ carry the same keys; without it the copies drift one release at a time.
 | `learnStalenessDays` | § Learn staleness | `14` |
 | `learnSessionCap` | § Learn staleness | `100` |
 | `subagentBudget` | `hooks/devcycle-mod.mjs` | `warn` |
+| `handoffNotification` | `references/handoff.md` | `off` |
 | `executionMode` | `references/drive.md` | `ask` |
 
 An unset knob renders as a literal `${user_config...}` placeholder, empty, or `auto`; the
@@ -146,8 +147,9 @@ workload-independent `## Cost by stage` / `## Cost by version` tables.
 
 **Never profile-conditional:** the state file, handoff blocks, evidence classes, the
 coordinator's green gate, the `gitPolicy` clamps, branch discipline, the one-`task-reviewer`
-floor on short paths, and the never-assume interview rule. A `lean` run may skip a stage; it
-never fakes one and never reports a gate as passed that did not run.
+floor on short paths, the brainstorm spec-claims review, and the never-assume interview rule. A
+`lean` run may skip a stage; it never fakes one and never reports a gate as passed that did not
+run.
 
 First-run configuration lives in `references/first-run-config.md`, which `/devcycle:cycle` loads
 only when its first-run test passes — no other stage loads it.

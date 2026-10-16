@@ -1986,11 +1986,14 @@ export function journalEvents(record) {
   return [...(record.events ?? []), ...deriveEvents(record)];
 }
 
+// Markers that a gate or review ran: neither is friction, whatever its result.
+const NEUTRAL_EVENTS = new Set(["gate-ran", "spec-review"]);
+
 export function impactScores(record, costByStage) {
   const all = journalEvents(record);
   const byKey = new Map();
   for (const e of all) {
-    if (e.event === "gate-ran") continue; // a neutral marker that a gate ran, not friction
+    if (NEUTRAL_EVENTS.has(e.event)) continue;
     const key = impactKey(e);
     if (!byKey.has(key))
       byKey.set(key, { key, event: e.event, stage: e.stage, frequency: 0, impact: 0, measurable: true });

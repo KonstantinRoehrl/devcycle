@@ -46,7 +46,7 @@ flowchart TD
     A_AUDIT -. "standalone — the audit stops here, it starts nothing" .-> AUDITSTOP(["findings document delivered"]):::tool
     A_AUDIT -. "each finding you act on starts its own new cycle" .-> CYCLE
 
-    BRAINSTORM("Brainstorm<br/>design dialogue · approaches · spec self-review · your approval"):::stage
+    BRAINSTORM("Brainstorm<br/>design dialogue · approaches · spec self-review · claims review · your approval"):::stage
     BRAINSTORM --> A_SPEC[("approved spec")]:::structural --> PLANNING
 
     PLANNING("Planning<br/>feasibility gate · dispatched research · task cut · dependencies · dispatch map"):::stage
@@ -148,7 +148,8 @@ see `docs/design/`.
    root-cause report that the fix's design builds on. A fix is never designed for an
    undiagnosed problem.
 4. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
-   spec you approve.
+   spec you approve. Before you are asked to approve it, an independent reviewer checks the spec's
+   claims about your repo against your code.
 5. **Planning** — a feasibility check, then an implementation plan that doubles as the
    execution strategy: the work is cut into small, self-contained tasks — each implementable
    from its own brief alone, so every subagent works with a small context — dependencies are
@@ -211,8 +212,9 @@ waves you can hand those stops to a driver instead — next section.
 
 ### Unattended execution
 
-Opt in when `/devcycle:continue` resumes at execution (or set `executionMode`) and that session
-starts `scripts/drive-execution.mjs`, which takes over the one stop that repeats inside execution:
+Opt in by answering **Start unattended** when `/devcycle:continue` resumes at execution (the
+`executionMode` setting only puts that answer first), and that session starts
+`scripts/drive-execution.mjs`, which takes over the one stop that repeats inside execution:
 the clear between waves. It starts a fresh `claude -p` session per wave — the
 session `/clear` plus `/devcycle:continue` would give you — and ends at the branch-review handoff,
 at the first gate that needs you, or at a stall or a cap. Branch review, on-device verification and
@@ -250,8 +252,13 @@ flowchart TD
 ```
 
 `--stop` — or a signal (Ctrl-C, `kill`) — stops the running session, writes its record and the
-run's result, releases the lock and exits 130. The next `/devcycle:continue` restarts an
-interrupted run and asks before resuming a stopped one.
+run's result, releases the lock and exits 130. The next `/devcycle:continue` asks the start confirm
+(`references/drive.md`) before restarting an interrupted run, and the stopped run's question before
+resuming a stopped one.
+
+If auto mode or another permission check denies the start, the session prints a `!` line for you
+to type, which runs the start as your own command. Once the driver holds its lock the session
+marks the handoff ready, so you can clear it and attach later with `/devcycle:continue`.
 
 ### What the coordinator does itself
 

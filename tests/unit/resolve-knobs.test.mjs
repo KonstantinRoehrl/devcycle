@@ -17,13 +17,13 @@ const STANDARD_DEFAULTS =
   "knobs: profile=standard gitPolicy=local-commits-only docTrackingPolicy=standard reviewDepth=single " +
   "crossModelReview=false onDeviceGate=human-required implementerModel=auto taskReviewerModel=auto " +
   "branchReviewModel=auto walkthroughModel=auto learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100 subagentBudget=warn " +
-  "executionMode=ask";
+  "handoffNotification=off executionMode=ask";
 
-test("the roster carries the 15 shipped knobs in config.md's roster order", () => {
+test("the roster carries the 16 shipped knobs in config.md's roster order", () => {
   assert.deepEqual(ROSTER.map(({ key }) => key), [
     "profile", "gitPolicy", "docTrackingPolicy", "reviewDepth", "crossModelReview", "onDeviceGate",
     "implementerModel", "taskReviewerModel", "branchReviewModel", "walkthroughModel",
-    "learnStalenessSessions", "learnStalenessDays", "learnSessionCap", "subagentBudget", "executionMode",
+    "learnStalenessSessions", "learnStalenessDays", "learnSessionCap", "subagentBudget", "handoffNotification", "executionMode",
   ]);
 });
 
@@ -173,6 +173,16 @@ test("compare leaves out executionMode, a live knob whose reader takes the fresh
   const { knobs } = resolveKnobs(with_({ executionMode: "unattended" }));
   assert.equal(knobs.executionMode, "unattended");
   assert.deepEqual(compareKnobs({ executionMode: "ask" }, knobs), []);
+});
+
+test("handoffNotification is a non-live enum, off unless set, and compares like any recorded knob", () => {
+  assert.deepEqual(ROSTER.find((e) => e.key === "handoffNotification"),
+    { key: "handoffNotification", kind: "enum", values: ["off", "terminal", "push", "both"], fallback: "off" });
+  assert.equal(resolveKnobs(with_({})).knobs.handoffNotification, "off");
+  const { knobs } = resolveKnobs(with_({ handoffNotification: "both" }));
+  assert.equal(knobs.handoffNotification, "both");
+  assert.deepEqual(compareKnobs({ handoffNotification: "off" }, knobs), [{ key: "handoffNotification", old: "off", new: "both" }]);
+  assert.deepEqual(compareKnobs({ subagentBudget: "warn" }, knobs), [], "a recorded line that predates the knob is never a difference");
 });
 
 test("the resolver's profile rows match config.md's profile matrix", () => {
