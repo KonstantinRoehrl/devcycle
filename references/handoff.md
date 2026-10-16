@@ -41,6 +41,18 @@ in a later `/devcycle:continue` session, whose cost would otherwise land in `una
 forward-fill to `devcycle:continue` — and a boundary that emits a handoff block without the record
 line leaves that stage's cost unattributable.
 
+**Mark the handoff ready, last.** After the state rewrite and that `stage` line, and before the
+block is emitted, run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action <clear|fresh|continue> --completed '<stage>'`,
+with `--action` from the boundary's context action below and, at a wave → wave boundary,
+`--completed 'wave <n> of <m>'`. It rewrites the state file's `handoff:` row, whose meaning
+`references/resume.md` § The state file owns, and prints the notifications the
+`handoffNotification` knob asks for. A `notify: terminal` line is the hooks module's to raise. Send
+a `notify: push <message>` line's message with the PushNotification tool, or, where the session has
+no such tool, say so in one line and go on: a missing notification never holds a handoff. In a
+driven session the call changes nothing, since the driver owns the wave → wave boundary of an
+unattended run.
+
 The run's `workload` record is not a boundary instruction: the `hooks/workload-sensor.mjs`
 commit-sensor refreshes it on each commit, so no `stage` boundary carries a step to write it.
 
@@ -108,6 +120,18 @@ anyway) before **any work past that boundary** begins — the next stage, or the
 within execution. Every boundary the table names is a boundary in this sense: finishing wave 1
 of 3 halts exactly as hard as finishing a stage, and dispatching wave 2's implementers is work
 past that boundary.
+
+**Never name the clear while work is in flight.** While any subagent or background task the
+current stage dispatched has not handed back, no message — a waiting message, a wave summary, a
+budget note — names `/clear`, `/devcycle:continue`, a fresh session or the context action. If
+anything is said, it is `still running: <n> pending — don't clear yet`. Safe to clear is what the
+`ready` mark records once the boundary completes, never a forecast. An unattended run's `--follow`
+and `--wait` watches are watches, not dispatched work.
+
+**Proceeding without a clear.** When this session goes on past a boundary — a `Continue` action,
+or the user telling it to continue anyway — run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --pending` before
+the next stage's first work.
 
 The gate is unconditional for the agent and overridable only by the user. The orchestrator may
 not decide on its own judgment that this particular boundary is cheap enough to run through —

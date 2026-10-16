@@ -2402,3 +2402,15 @@ test("opt-in integrity: only execution start writes the drive: row, only the fir
       assert.ok(!text.includes(ROW) && !text.includes(LINE), `${dir}/${name} writes the drive: row or the opt-in ledger line`);
     }
 });
+
+test("handoff.md marks the handoff ready last at every boundary, forbids naming the clear while work is in flight, and re-marks pending past a boundary", () => {
+  const t = read("references/handoff.md");
+  const ready = t.indexOf('scripts/handoff-mark.mjs" --state .devcycle/state.md --ready');
+  assert.ok(ready > -1, "handoff.md no longer runs handoff-mark.mjs --ready at the boundary");
+  assert.ok(ready > t.indexOf("Every boundary also appends one `stage` line"), "the ready mark must come after the run-record stage line");
+  assert.ok(ready < t.indexOf("`Context depth:` is measured"), "the ready mark must sit with the boundary sequence, before the block's field rules");
+  assert.ok(t.includes("PushNotification"), "handoff.md no longer says who sends a notify: push line");
+  const awaitSection = t.slice(t.indexOf("## Await the context action"));
+  assert.ok(awaitSection.includes("still running: <n> pending — don't clear yet"), "the in-flight rule is gone");
+  assert.ok(awaitSection.includes('scripts/handoff-mark.mjs" --state .devcycle/state.md --pending'), "proceeding past a boundary no longer re-marks pending");
+});

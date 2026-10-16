@@ -13,6 +13,7 @@ import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
 import { describe } from "./find-state-files.mjs";
 import { checkState } from "./resume-check.mjs";
+import { parseHandoff } from "./handoff-mark.mjs";
 import { ROSTER, compareKnobs, parseRecordedLine } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
@@ -272,6 +273,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   const result = {
     ok: true, action: "resume", state, knobDrift: [], branch: null, depth, wave: null, tasks: [], dispatchable: [],
     pendingDecision: null, drive: status.drive, entryLines: [], appended: [], depthBand: depth?.band ?? null,
+    handoff: { ...parseHandoff(field(stateText, "handoff")), ask: false },
   };
   // A stop on one task's pending decision names it, so the answer is recorded as that task's.
   const stop = (stopReason, stopDetail, stopTask = null) => ({ ...result, action: "stop", stopReason, stopDetail, stopTask });
@@ -301,7 +303,9 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   Object.assign(result, wavePosition(root, planText, map, lines));
   if (!drive) {
     const decision = driveAction(result.drive, driver, result.pendingDecision);
-    return { ...result, drive: decided(decision) };
+    // A recorded driver end or stop asks its own question instead (references/resume.md § The state file).
+    const ask = result.handoff.state === "pending" && decision.action !== "gate" && !(decision.action === "start" && driver.next !== "none");
+    return { ...result, handoff: { ...result.handoff, ask }, drive: decided(decision) };
   }
 
   // Drive mode: every gate continue would ask about is a stop (spec 4.B.3).

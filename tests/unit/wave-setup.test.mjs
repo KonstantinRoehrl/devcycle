@@ -593,3 +593,22 @@ test("continue keeps the session append as its own call beside wave-setup, and w
   const source = readFileSync(SCRIPT, "utf8");
   assert.ok(!source.includes("--kind session") && !source.includes("run-record"), "scripts/wave-setup.mjs appends or names the session row");
 });
+
+test("handoff: the row is carried, and the not-ready question is asked only where no other question or driver owns the session", () => {
+  const PENDING = "- handoff: pending 2026-10-16T10:00:00Z";
+  assert.deepEqual(setup(cycle()).handoff, { state: "ready", stamp: null, ask: false }, "no row reads as ready");
+  assert.deepEqual(setup(cycle({ state: ["- handoff: ready 2026-10-16T11:00:00Z"] })).handoff, { state: "ready", stamp: "2026-10-16T11:00:00Z", ask: false });
+  assert.deepEqual(setup(cycle({ state: [PENDING] })).handoff, { state: "pending", stamp: "2026-10-16T10:00:00Z", ask: true });
+  assert.equal(setup(cycle({ state: [PENDING] }), { knobsLine: knobsWith("manual") }).handoff.ask, true);
+  assert.equal(setup(cycle({ state: [PENDING, DRIVE_ROW] })).handoff.ask, true, "a start with no driver end yet still asks");
+  const restart = setup(ended(cycle({ state: [PENDING, DRIVE_ROW] }), runEnd("interrupted", { code: 130 })));
+  assert.deepEqual([restart.drive.action, restart.handoff.ask], ["start", false], "a recorded driver end asks its own question");
+  const gate = setup(ended(cycle({ state: [PENDING, DRIVE_ROW] }), runEnd("stalled", { code: 5 })));
+  assert.deepEqual([gate.drive.action, gate.handoff.ask], ["gate", false]);
+  const c = cycle({ state: [PENDING, DRIVE_ROW] });
+  withLock(c, () => {
+    const attach = setup(c);
+    assert.deepEqual([attach.drive.action, attach.handoff.ask], ["attach", false]);
+    assert.equal(driven(c).handoff.ask, false, "a driven session never asks");
+  });
+});

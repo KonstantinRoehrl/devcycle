@@ -33,30 +33,36 @@ execution start alone; the knob orders that question.
 
 **Budgets:** the `handoffNotification` flag line in each of the eight entry commands (+8) and its
 roster row in references/config.md (+1) move the figures below; every closure that cites
-references/config.md takes in that row too.
+references/config.md takes in that row too. The handoff-mark boundary rule, the in-flight rule and
+the same-session pending rule in references/handoff.md raise its bytes and every closure citing it.
 
 ```text
-budget: surface-budget.json surfaceTotal 6078
+budget: surface-budget.json surfaceTotal 6102
 budget: surface-budget.json commandMax 175
-budget: context-budget.json commands/continue.md 60276
-budget: context-budget.json commands/cycle.md 70880
+budget: context-budget.json commands/continue.md 62031
+budget: context-budget.json commands/cycle.md 72635
 budget: context-budget.json commands/learn.md 16775
 budget: context-budget.json commands/maintain.md 17954
 budget: context-budget.json commands/onboard.md 17063
 budget: context-budget.json commands/reconcile.md 24500
 budget: context-budget.json commands/review.md 25130
 budget: context-budget.json commands/verify.md 24228
-budget: context-budget.json playbooks/executing-waves.md 97201
-budget: context-budget.json playbooks/finishing-the-cycle.md 45923
+budget: context-budget.json playbooks/executing-waves.md 98956
+budget: context-budget.json playbooks/finishing-the-cycle.md 47678
 budget: context-budget.json playbooks/learning-from-sessions.md 62101
 budget: context-budget.json playbooks/maintaining-the-repo.md 64178
 budget: context-budget.json playbooks/onboarding-a-repo.md 30612
-budget: context-budget.json playbooks/planning-waves.md 69779
-budget: context-budget.json playbooks/receiving-review.md 108224
+budget: context-budget.json playbooks/planning-waves.md 71534
+budget: context-budget.json playbooks/receiving-review.md 109979
 budget: context-budget.json playbooks/reviewing-code.md 91723
-budget: context-budget.json playbooks/reviewing-the-branch.md 47386
-budget: context-budget.json playbooks/verifying-on-device.md 42910
+budget: context-budget.json playbooks/reviewing-the-branch.md 49141
+budget: context-budget.json playbooks/scoping-the-request.md 29670
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 83228
+budget: context-budget.json playbooks/taking-the-fast-path.md 50057
+budget: context-budget.json playbooks/verifying-on-device.md 44665
+budget: context-budget.json playbooks/writing-the-findings-document.md 61538
 budget: context-budget.json references/config.md 14343
+budget: context-budget.json references/handoff.md 10793
 ```
 
 ## 2026-10-16 — An independent spec-claims review before the brainstorm approval question (#304)
