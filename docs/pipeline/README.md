@@ -46,7 +46,7 @@ flowchart TD
     A_AUDIT -. "standalone — the audit stops here, it starts nothing" .-> AUDITSTOP(["findings document delivered"]):::tool
     A_AUDIT -. "each finding you act on starts its own new cycle" .-> CYCLE
 
-    BRAINSTORM("Brainstorm<br/>design dialogue · approaches · spec self-review · your approval"):::stage
+    BRAINSTORM("Brainstorm<br/>design dialogue · approaches · spec self-review · claims review · your approval"):::stage
     BRAINSTORM --> A_SPEC[("approved spec")]:::structural --> PLANNING
 
     PLANNING("Planning<br/>feasibility gate · dispatched research · task cut · dependencies · dispatch map"):::stage
@@ -148,7 +148,8 @@ see `docs/design/`.
    root-cause report that the fix's design builds on. A fix is never designed for an
    undiagnosed problem.
 4. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
-   spec you approve.
+   spec you approve. Before you are asked to approve it, an independent reviewer checks the spec's
+   claims about your repo against your code.
 5. **Planning** — a feasibility check, then an implementation plan that doubles as the
    execution strategy: the work is cut into small, self-contained tasks — each implementable
    from its own brief alone, so every subagent works with a small context — dependencies are

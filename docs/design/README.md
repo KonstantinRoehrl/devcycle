@@ -111,6 +111,7 @@ devcycle/                (public GitHub repo)
 │   ├── red-team-reviewer.md      # adversarial charter; read-only allowlist; spliced into
 │   │                             # review-panel's per-finding verification pass
 │   ├── history-inspector.md      # read-only git-history lens for /devcycle:maintain; bounded traversal
+│   ├── spec-reviewer.md          # read-only spec-claims check against live code, before brainstorm's approval question
 │   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
 │                                 # origin the browser guard below permits
 ├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05, 2026-10-07)
@@ -333,7 +334,8 @@ gated by `userConfig.crossModelReview`.
 - Playbooks: verb-first gerunds, listed in §3. They are addressed by path, never as
   `devcycle:<name>`, so a playbook name is never a user-typed string.
 - Agents: `devcycle:implementer`, `devcycle:task-reviewer`,
-  `devcycle:red-team-reviewer`, `devcycle:on-device-driver`, `devcycle:history-inspector`. The plugin id is not decoration:
+  `devcycle:red-team-reviewer`, `devcycle:on-device-driver`, `devcycle:history-inspector`,
+  `devcycle:spec-reviewer`. The plugin id is not decoration:
   the harness passes `<plugin>:<name>` as a subagent's `agent_type`, which is the spelling the
   browser guard's allowlist must carry (`docs/platform-notes.md` § (e)).
 - Hooks: four settings hooks and one hooks module — two guards, `block-main-thread-browser` and `block-destructive-git`, named for

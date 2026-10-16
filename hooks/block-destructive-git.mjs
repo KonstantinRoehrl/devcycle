@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // PreToolUse Bash hook (#165): a guarded dispatch must never run a destructive git command
-// against the shared checkout. agents/task-reviewer.md, agents/red-team-reviewer.md and
-// agents/implementer.md carry a prose ban and references/evidence.md forbids `git stash`, but
+// against the shared checkout. agents/task-reviewer.md, agents/red-team-reviewer.md,
+// agents/implementer.md and agents/spec-reviewer.md carry a prose ban and references/evidence.md
+// forbids `git stash`, but
 // `tools:` still grants full Bash and nothing intercepts the call — prose is exactly what failed in
 // the incident that destroyed an uncommitted round-2 diff. This is the structural backstop,
 // mirroring hooks/block-main-thread-browser.mjs: origin is read from the hook input's agent_type
@@ -27,8 +28,9 @@
 // command it runs; a command word that is a substitution naming git (`$(which git)`) is read as git,
 // and so is the variable `$GIT` as a command's first word (not behind a launcher); and `rtk` is a
 // transparent launcher whose git is classified like any other.
-// Scope is git-only; non-git commands (tests, greps) are allowed. Three dispatch origins are guarded
-// by the allowlist — task-reviewer, red-team-reviewer and, since #235, implementer — and the main
+// Scope is git-only; non-git commands (tests, greps) are allowed. Four dispatch origins are guarded
+// by the allowlist — task-reviewer, red-team-reviewer, since #235 implementer and, since #304,
+// spec-reviewer — and the main
 // thread (no agent_type) is guarded for `git stash` while a .devcycle/state.md above the call's cwd
 // reports a stage other than done, and for a branch-moving or tree-destroying git while a live driver
 // lock sits beside that state file; under either, a git whose subcommand it cannot read is denied,
@@ -71,10 +73,11 @@ const agentType = typeof rawAgentType === "string" ? rawAgentType.trim() : "";
 // The inverse of block-main-thread-browser.mjs's ALLOWED list: these origins are GUARDED. Both the
 // bare frontmatter name and the <plugin>:<name> spelling the harness passes are pinned (stripping a
 // prefix would admit another plugin's identically-named agent, widening a guard whose only job is to
-// narrow). tests/unit/golden-path.test.mjs ties this list to the three agents' name: frontmatter, so
-// a rename fails the suite instead of disarming. The implementer joined in #235: its contract was
-// already read-only apart from `git add -N`, so one allowlist serves all three.
-const GUARDED_AGENT_TYPES = ["task-reviewer", "devcycle:task-reviewer", "red-team-reviewer", "devcycle:red-team-reviewer", "implementer", "devcycle:implementer"];
+// narrow). tests/unit/golden-path.test.mjs ties this list to the four agents' name: frontmatter, so
+// a rename fails the suite instead of disarming. The implementer joined in #235 and the
+// spec-reviewer in #304: both contracts were already read-only apart from the implementer's
+// `git add -N`, so one allowlist serves all four.
+const GUARDED_AGENT_TYPES = ["task-reviewer", "devcycle:task-reviewer", "red-team-reviewer", "devcycle:red-team-reviewer", "implementer", "devcycle:implementer", "spec-reviewer", "devcycle:spec-reviewer"];
 const guarded = GUARDED_AGENT_TYPES.includes(agentType);
 
 const allow = () => process.exit(0); // no output = defer to normal permission flow

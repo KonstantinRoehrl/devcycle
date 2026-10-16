@@ -725,6 +725,18 @@ test("append: gate-ran and depth-breach are event values, and gate-ran carries a
   assert.notStrictEqual(ev("--event", "gate-ran", "--result", "maybe").status, 0);
 });
 
+test("append: spec-review is an event value and carries a pass|fail result", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-spec-review");
+  const ev = (...extra) => run(["append", "--run", runId, "--repo", "/tmp/demo-spec-review", "--kind", "event", "--stage", "brainstorm", ...extra], runs);
+  assert.strictEqual(ev("--event", "spec-review", "--result", "pass").status, 0);
+  const line = lastLine("/tmp/demo-spec-review", runId);
+  assert.strictEqual(line.event, "spec-review");
+  assert.strictEqual(line.result, "pass");
+  assert.strictEqual(ev("--event", "spec-review", "--result", "fail").status, 0);
+  assert.notStrictEqual(ev("--event", "spec-review", "--result", "findings").status, 0);
+});
+
 const TRACE = {
   kind: "agent-trace", runId: "0f1e2d3c4b5a6978", stage: "execution", agentId: "a27cbd72da7b3b62f",
   agentType: "devcycle:implementer", requestedModel: null, resolvedModel: "claude-sonnet-5-5", parentAgentId: null,

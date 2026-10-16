@@ -2113,6 +2113,28 @@ test("every shipped agent is named by DESIGN.md's blueprint, DESIGN.md §13, and
   }
 });
 
+// #304: the brainstorm stage's independent spec-claims review. Step 4 keeps the dispatch, its tier,
+// its order (after the claims lint, alongside upstream's builder check) and its recording, or fails.
+test("cycle.md's brainstorm step dispatches the spec-claims reviewer at the session tier and records it", () => {
+  const text = read("commands/cycle.md");
+  const start = text.indexOf("4. **brainstorm**");
+  const end = text.indexOf("5. **planning**", start);
+  assert.ok(start >= 0 && end > start, "commands/cycle.md must carry brainstorm as step 4, followed by planning as step 5");
+  const step = text.slice(start, end);
+  assert.match(step, /four notes/, "step 4 must say it adds four notes to upstream brainstorming");
+  assert.match(step, /dispatch\s+`devcycle:spec-reviewer`/i, "step 4 must dispatch devcycle:spec-reviewer");
+  assert.match(step, /session tier/, "the dispatch must name its model tier inline (validate.mjs check 23, #304)");
+  assert.match(step, /live code/, "the note must say the review checks claims against live code");
+  assert.match(step, /builder check/, "the review must run alongside upstream's builder check");
+  assert.match(step, /`spec-review` event\s+`references\/ledger\.md`/, "the result must be recorded as the spec-review run-record event ledger.md owns");
+  assert.match(step, /`spec:` line in the annotation\s+`references\/resume\.md`/, "the result must be recorded on the spec: line in the annotation resume.md owns");
+  assert.match(read("references/resume.md"), /- spec: <path or none> \[\(spec review: clean\|findings\)/, "resume.md's state template must define the spec: annotation");
+  assert.ok(
+    step.indexOf("authored-claims-check.mjs") < step.indexOf("devcycle:spec-reviewer"),
+    "the spec-claims review must be ordered after the authored-claims lint"
+  );
+});
+
 test("the browser guard is named by DESIGN.md's blueprint and the hub's inventory", () => {
   assert.match(read(DESIGN_DOC), /^├── hooks\//m, "DESIGN.md §3's tree must list hooks/");
   assert.match(
@@ -2132,7 +2154,7 @@ test("hooks.json loads the hooks module, and the hub's Hooks table carries a row
 
 // #165/#235 git guard: the same tie the browser guard has, so a guarded-agent rename fails the
 // suite instead of silently leaving a guarded origin unmatched. The GUARDED list must be exactly the
-// three guarded agents' frontmatter names and their <plugin>:-namespaced forms.
+// four guarded agents' frontmatter names and their <plugin>:-namespaced forms.
 const GIT_GUARD_SRC = "hooks/block-destructive-git.mjs";
 
 const guardedAgentTypes = () => {
@@ -2141,10 +2163,10 @@ const guardedAgentTypes = () => {
   return [...m[1].matchAll(/"([^"]+)"/g)].map(([, v]) => v);
 };
 
-test("the git guard's guarded list is the three guarded agents' names and their namespaced forms", () => {
+test("the git guard's guarded list is the four guarded agents' names and their namespaced forms", () => {
   const plugin = JSON.parse(read(".claude-plugin/plugin.json")).name;
   const expected = [];
-  for (const agent of ["agents/task-reviewer.md", "agents/red-team-reviewer.md", "agents/implementer.md"]) {
+  for (const agent of ["agents/task-reviewer.md", "agents/red-team-reviewer.md", "agents/implementer.md", "agents/spec-reviewer.md"]) {
     const name = read(agent).match(/^name:\s*(\S+)\s*$/m)?.[1];
     assert.ok(name, `${agent} must carry a frontmatter name:`);
     expected.push(name, `${plugin}:${name}`);
@@ -2152,7 +2174,7 @@ test("the git guard's guarded list is the three guarded agents' names and their 
   assert.deepEqual(
     guardedAgentTypes(),
     expected,
-    `${GIT_GUARD_SRC}'s GUARDED_AGENT_TYPES must be exactly the three guarded agents' frontmatter ` +
+    `${GIT_GUARD_SRC}'s GUARDED_AGENT_TYPES must be exactly the four guarded agents' frontmatter ` +
       "names and their namespaced forms — the harness passes the namespaced spelling (docs/platform-notes.md § (e)), " +
       "and drift from an agent's name: would leave that origin unguarded"
   );

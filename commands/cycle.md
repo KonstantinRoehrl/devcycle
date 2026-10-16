@@ -145,7 +145,7 @@ stages' single source of truth — `scripts/validate.mjs` reads its literal form
    on the `diagnosis:` line, and pinned precisely enough for planning to turn the reproduction into
    the fix task's failing test. How to fix it belongs to brainstorm, which takes the report as its
    context; if diagnosis overturns the confirmed scope, return to scoping.
-4. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified) with three notes on top. Ask
+4. **brainstorm** — `superpowers:brainstorming` (upstream, unmodified) with four notes on top. Ask
    in AskUserQuestion batches of 1–4 with concrete options plus Other, where upstream asks one
    question at a time. And gate upstream's "commit the design document to git" step per
    `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking: read `docTrackingPolicy` from the
@@ -154,8 +154,16 @@ stages' single source of truth — `scripts/validate.mjs` reads its literal form
    § Committing. Before that commit gate, run `node
    "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <spec-path>` — a blocking lint that
    flags an unguarded `path.ext:line` reference or a bare count claim, cleared by a
-   `(verified: <cmd>)` or `(assumption)` marker on the same or an adjacent line. An approved spec
-   transitions to planning below, never directly to upstream's writing-plans.
+   `(verified: <cmd>)` or `(assumption)` marker on the same or an adjacent line. Once the spec is
+   written and that lint passes, dispatch `devcycle:spec-reviewer` on the spec path at the
+   **session tier**, at the same time as upstream's builder check: that check reads the spec as a
+   builder would and takes its repo claims on trust, while this one checks them against
+   live code, so neither replaces the other. Fix its findings in the spec and rerun the lint; a finding
+   only the user can settle joins the builder check's questions in the one message that ends with
+   the approval question. Record the result on the state file's `spec:` line in the annotation
+   `references/resume.md` defines and, when a run record exists, as the `spec-review` event
+   `references/ledger.md` defines (`run-record.mjs append --kind event --stage brainstorm`).
+   An approved spec transitions to planning below, never directly to upstream's writing-plans.
 5. **planning** — wave-based plan.
 6. **execution**.
 7. **branch-review**.
