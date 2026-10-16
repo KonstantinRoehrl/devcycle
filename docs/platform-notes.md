@@ -460,7 +460,7 @@ reports the effect either way.
 prints, through `$.ui.notify`, in any session, joined or not. A Bash-tool child has no controlling
 terminal (`/dev/tty` opens with `ENXIO`), and writing the session's tty directly is denied by auto
 mode's classifier, so the module is the one path to the terminal. `$.ui.notify` writes through the
-user's `preferredNotifChannel`. Where a Claude Code build has no `$.ui.notify`, the relay does nothing.]
+user's `preferredNotifChannel`. Where a Claude Code build has no `$.ui.notify`, the relay does nothing; CI's two pinned versions lack the event, so `tests/mod/harness.ts` registers the handler only for `tests/mod/notify.test.ts`, which runs only where the CLI knows it.]
 
 ## (k) Headless `claude -p` as a driven session
 

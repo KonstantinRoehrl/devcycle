@@ -96,7 +96,7 @@ and silently runs every knob at its fallback. [`docs/platform-notes.md`](../plat
 | `learnStalenessDays` | Days since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer `0` or more (`0` nudges every cycle) | `14` |
 | `learnSessionCap` | How many sessions one `/devcycle:learn` run may mine | integer `1` or more (`0` is refused, not a no-op run) | `100` |
 | `subagentBudget` | What devcycle's hooks module does with a subagent past its context budget | `off` / `warn` / `enforce` | `warn` (from 15% of its window, a note on its next tool result and every fifth after; `enforce` also refuses reads at 20%) |
-| `handoffNotification` | Whether devcycle notifies you when a handoff is safe to clear and when an unattended run stops for you | `off` / `terminal` / `push` / `both` | `off` (`terminal` goes through Claude Code's own notification channel; `push` sends a push notification where the session can) |
+| `handoffNotification` | Whether devcycle notifies you when a handoff is safe to clear and when an unattended run stops for you | `off` / `terminal` / `push` / `both` | `off` (`terminal` goes through Claude Code's own notification channel and, like `both`'s terminal half, does nothing on a Claude Code build without `$.ui.notify`; `push` sends a push notification where the session can) |
 | `executionMode` | How `/devcycle:continue` runs the waves at execution start, until the cycle records its choice | `ask` / `manual` / `unattended` | `ask` (asks Start unattended or Walk the waves manually; `manual` walks them in the session; `unattended` asks with Start unattended first, since an unattended run always starts on your answer) |
 
 ## Other options

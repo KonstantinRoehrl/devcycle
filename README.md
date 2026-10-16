@@ -99,8 +99,9 @@ calls and tool results, it is not sandboxed, and `claude plugin validate <plugin
 every hook it registers and every engine call it makes. In every session it looks for a
 `.devcycle/state.md` in the working directory or a parent; where that file names an active run, it
 runs a short Node check (`node hooks/mod-sink.mjs check-joined`) to learn whether this session
-joined the run. Beyond that it acts only in a session that joined an active devcycle run, and what
-it writes are run-record rows of ids, counts and enum values.
+joined the run. Beyond that it acts only in a session that joined an active devcycle run, where
+what it writes are run-record rows of ids, counts and enum values, and in any session it relays the
+terminal notification `scripts/handoff-mark.mjs` asks for (`handoffNotification`).
 
 For the on-device verification stage's automatic checks, also install the claude-in-chrome
 plugin — Claude Code's integration with your own Chrome (without it, every checklist item

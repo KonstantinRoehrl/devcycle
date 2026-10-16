@@ -12,16 +12,16 @@ export const usage = (depth: number, model = HAIKU) =>
 
 export type World = {
   base?: string; nested?: string; cwd?: string; state?: string | null; joined?: boolean; mtime?: number;
-  statusThrows?: boolean; surfaces?: string[]; hangAppend?: boolean; root?: string | null; notifyDenies?: boolean;
+  statusThrows?: boolean; surfaces?: string[]; hangAppend?: boolean; root?: string | null; notifies?: boolean; notifyDenies?: boolean;
 };
 export type Run = { argv: string[]; init?: { stdin?: string } };
 export type Seen = {
   runs: Run[]; status: (string | undefined)[]; versionReads: number; exists: string[];
-  notified: { text: string; title?: string }[];
+  notified: { text: string; title?: string }[]; canNotify: boolean;
 };
 
 export function session(on: any, world: World = {}): Seen {
-  const seen: Seen = { runs: [], status: [], versionReads: 0, exists: [], notified: [] };
+  const seen: Seen = { runs: [], status: [], versionReads: 0, exists: [], notified: [], canNotify: true };
   const state = () => (world.state === undefined ? stateText() : world.state);
   on('session.version', () => {
     seen.versionReads += 1;
@@ -47,11 +47,13 @@ export function session(on: any, world: World = {}): Seen {
     seen.status.push(e.text);
     return { value: undefined };
   });
-  on('ui.notify', (_$: unknown, e: { text: string; title?: string }) => {
-    if (world.notifyDenies) return { deny: 'notifications refused' };
-    seen.notified.push({ text: e.text, title: e.title });
-    return { value: { isSent: true, channel: 'terminal_bell' } };
-  });
+  if (world.notifies) {
+    on('ui.notify', (_$: unknown, e: { text: string; title?: string }) => {
+      if (world.notifyDenies) return { deny: 'notifications refused' };
+      seen.notified.push({ text: e.text, title: e.title });
+      return { value: { isSent: true, channel: 'terminal_bell' } };
+    });
+  }
   on('process.run', (_$: unknown, e: Run) => {
     seen.runs.push(e);
     if (e.argv[2] === 'append' && world.hangAppend) return new Promise(() => {});
@@ -59,6 +61,20 @@ export function session(on: any, world: World = {}): Seen {
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } };
   });
   return seen;
+}
+
+// Starts the turn, which is also where the module loads. A Claude Code without the `ui.notify` event (CI's
+// 2.1.287 and 2.1.292 pins) refuses a handler for it there, at the first call on `$`, not at `on(...)`:
+// `canNotify` is then false and the test logs itself as skipped, the runner having no skip of its own.
+export async function startNotifying($: any, seen: Seen, name: string): Promise<boolean> {
+  try {
+    await $.turn.start({ text: 'go', turnId: 'm1' });
+  } catch (e) {
+    if (!String(e).includes('"ui.notify" is not an event')) throw e;
+    seen.canNotify = false;
+    console.log(`skipped (this Claude Code has no ui.notify event): ${name}`);
+  }
+  return seen.canNotify;
 }
 
 export type Engine = {

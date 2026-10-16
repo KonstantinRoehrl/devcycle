@@ -123,7 +123,7 @@ devcycle/                (public GitHub repo)
 │   ├── lib/run-context.mjs            # state file → active run → joined session, for the depth-sensor and the module's sink
 │   ├── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
 │   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent
-│   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter
+│   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter, handoff notification relay
 │   └── mod-sink.mjs              # the module's Node side: the joined check and agent-trace writes
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
 ├── scripts/                      # L4 — validate.mjs, doctor.mjs, dream.mjs, the checkers, bump-version.mjs
