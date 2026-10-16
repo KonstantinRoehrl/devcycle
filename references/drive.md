@@ -20,8 +20,8 @@ depth band, `pendingDecision` — then act on `drive.action`:
 | `drive.action` | What this session does |
 | --- | --- |
 | `attach` | A driver is running this cycle (`drive.lock` names its pid and log). Run steps 4–6 of the start path, with `--follow` given no `--since`, so it starts at the log's current end. |
-| `ask` | One AskUserQuestion — how execution runs: **Unattended** · **Walk the waves manually**. Write the row from the answer with `via=answer`, then act as `start` or `manual`. |
-| `start` | Write an `auto` row with `via=knob` when `drive.writeRow` is `auto`, then run the start path, asking nothing. |
+| `ask` | One AskUserQuestion — how execution runs: **Start unattended** · **Walk the waves manually**, with **Start unattended** marked recommended when `drive.recommend` is `unattended`. Write the row from the answer with `via=answer`, then run the start path or act as `manual`. |
+| `start` | The row is `auto`. Unless this session already answered a start question, first ask the start confirm, ONE AskUserQuestion: **Resume unattended** · **Walk the waves manually** · **Leave it stopped**, the last two as § Answering a stopped run says. Then run the start path. |
 | `gate` | The last run stopped for a person: ask the stopped run's question, then run the start path unless the answer left unattended. |
 | `manual` | Write a `manual` row with `via=knob` when `drive.writeRow` is `manual`, then walk the waves in this session: the rest of § Execution resume, as without a driver. |
 | `none` | A driven session (`--drive`): `commands/continue.md` § Drive mode governs, and nothing here applies. |
@@ -38,9 +38,13 @@ load each only when its action needs it.
 
 `<id>` is the `model` that `node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs" --json` prints,
 never self-report, and `<stamp>` is `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`. `via=answer`
-records the user's answer, `via=knob` the `executionMode` knob through `drive.writeRow`. Only the
-actions above write the row — `ask`, `start` and `manual` — and **Walk the waves manually** at a
-stopped run or when the start's sandbox approval is refused, which rewrites an `auto` row to `manual`. Write it by rewriting the
+records the user's answer; `via=knob` appears only on a `manual` row the
+`executionMode` knob wrote through `drive.writeRow`. No knob writes an `auto` row: an unattended run
+starts only on the user's answer in this session (`docs/decisions/README.md`, 2026-10-16 — An
+unattended start needs the user's answer in the session), and an `auto … via=knob` row written
+before then stays valid. Only `ask`'s answer, the `manual` action and **Walk the waves manually**
+— at a start confirm, at a stopped run, or when the start's sandbox approval is refused, which
+rewrites an `auto` row to `manual` — write the row. Write it by rewriting the
 state file in full with the row added; every other rewrite carries it forward
 (`references/resume.md` § The state file). A row outranks the knob: once it exists, a changed
 `executionMode` no longer decides.
@@ -56,7 +60,7 @@ any answer below.
 
 | reason | The question, and how its answer is recorded |
 | --- | --- |
-| `drive.gate.settled` true: `knob-drift`, `foreign-state`, `resume-check`, `branch`, `depth-at-start`, `no-driver`, `not-opted-in` | No question of its own: this session's own gates have just been computed and answered, so the stop is settled. Run the start path. |
+| `drive.gate.settled` true: `knob-drift`, `foreign-state`, `resume-check`, `branch`, `depth-at-start`, `no-driver`, `not-opted-in` | The stop is settled — this session's own gates have just been computed and answered — so its question is § Drive actions' start confirm, skipped when this session already answered a start question. Then run the start path. |
 | `needs-user` with `drive.gate.pendingDecision` set | The `pendingDecision` question of § Execution resume, asked here, or first in a manual walk; record `task=<n> event=user-decision outcome=task-<n>-review: <answer>`, which `references/resume.md` § Resuming a wave's per-task position reads as settling it. |
 | `needs-user` or `sweep-fallback`, `task` set otherwise — a blocked implementer, a retry cap, a refused commit, a human-required step, a sweep fallback | The stop's `detail` as the question; record `task=<n> event=user-decision outcome=<answer>`. |
 | `needs-user` or `sweep-fallback` with no `task` | The stop's `detail` as the question; record `task=drive event=user-decision outcome=<answer>`. |
@@ -87,11 +91,19 @@ In this order, never dispatching a task from this session:
    Bash tool's sandbox override, which asks the user to approve it. The start:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md --detach`.
    - It prints `{"pid":<n>,"log":".devcycle/drive.log","logOffset":<n>}` once the driver holds
-     its lock and has marked the previous result handled: keep `logOffset`.
+     its lock and has marked the previous result handled: keep `logOffset`, then mark the handoff
+     ready, since the work in flight is now the driver's and clearing this watcher is safe:
+     `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action started`.
    - The approval is refused or the override unavailable: print
      `node "<plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach`
      for a terminal that is not a Claude Code session, and offer **Walk the waves manually**; on
      that answer, run `--mark-handled` as § Answering a stopped run says before walking.
+   - The start is denied by a permission check, the auto-mode classifier included: print, for the
+     user to type in this session,
+     `! node "<absolute plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach`,
+     say that a command typed with `!` runs as the user's own, and offer **Walk the waves
+     manually**. When the user runs it, its JSON lands in the conversation: take `logOffset` from
+     it, mark the handoff ready as above, and continue at step 4.
    - Exit 3 is a refusal: report its message, which names the remedy, and stop. The result stays, so
      the next `/devcycle:continue` retries or asks again. Any other non-zero exit: report its
      message and stop.
@@ -121,9 +133,12 @@ When the `--wait` task returns, stop the follow monitor and act on the `next` it
   emit its execution → branch-review block.
 - `resume-stage` — the run left execution: emit the handoff into the stage the state file names.
 - any other — rerun `wave-setup.mjs` as § Execution resume runs it and act on its new
-  `drive.action`: a resumable end restarts through the start path, asking nothing, and a stop for
-  a person is a `gate`. After a `--stop` this session ran, report the stop and end instead; the
-  next `/devcycle:continue` asks.
+  `drive.action`. A resumable end restarts through the start path, with no start confirm when this
+  session answered a start question and with one when it only attached. A stop for a person is a
+  `gate`; when `drive.gate.settled` is false, first run
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action stopped --reason '<drive.gate.reason>'`
+  and relay its `notify:` lines as `references/handoff.md` § Handoff says. After a `--stop` this
+  session ran, report the stop and end instead; the next `/devcycle:continue` asks.
 
 **The watcher shares the account's limits.** Every `Monitor` expiry and every relayed line is a
 turn. A turn the usage limit rejects can leave the follow unarmed or the `--wait` notification

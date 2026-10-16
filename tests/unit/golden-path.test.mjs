@@ -2414,3 +2414,21 @@ test("handoff.md marks the handoff ready last at every boundary, forbids naming 
   assert.ok(awaitSection.includes("still running: <n> pending — don't clear yet"), "the in-flight rule is gone");
   assert.ok(awaitSection.includes('scripts/handoff-mark.mjs" --state .devcycle/state.md --pending'), "proceeding past a boundary no longer re-marks pending");
 });
+
+test("an unattended start needs the user's answer in the session; a denied start prints a ! line; no surface lets the knob start the driver", () => {
+  const drive = read("references/drive.md");
+  const actions = sectionText(drive, "drive-actions");
+  assert.ok(actions.includes("`drive.recommend`"), "the ask row no longer reads drive.recommend");
+  assert.ok(!actions.includes("asking nothing"), "a drive action still starts the driver asking nothing");
+  assert.ok(actions.includes("**Resume unattended** · **Walk the waves manually** · **Leave it stopped**"), "the start confirm is gone");
+  assert.ok(actions.includes("No knob writes an `auto` row"), "the drive: row prose still lets a knob write an auto row");
+  const start = sectionText(drive, "the-start-path");
+  assert.ok(start.includes('! node "<absolute plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach'),
+    "a denied start no longer prints the ! line");
+  assert.ok(start.includes('scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action started'), "the starting session no longer marks the handoff ready");
+  assert.ok(sectionText(drive, "when-the-run-ends").includes("--ready --action stopped --reason"), "a stop for the user no longer notifies");
+  const manifest = JSON.parse(read(".claude-plugin/plugin.json"));
+  assert.ok(!manifest.userConfig.executionMode.description.includes("starts the unattended driver, no question"),
+    "plugin.json still says the unattended knob starts the driver with no question");
+  assert.ok(!read("references/handoff.md").includes("`executionMode` knob they set"), "handoff.md still lets the knob opt a cycle in");
+});

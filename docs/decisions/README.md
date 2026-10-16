@@ -35,11 +35,12 @@ execution start alone; the knob orders that question.
 roster row in references/config.md (+1) move the figures below; every closure that cites
 references/config.md takes in that row too. The handoff-mark boundary rule, the in-flight rule and
 the same-session pending rule in references/handoff.md raise its bytes and every closure citing it.
+The start confirm, the ! fallback and the stop notice in references/drive.md move its closures again.
 
 ```text
-budget: surface-budget.json surfaceTotal 6102
+budget: surface-budget.json surfaceTotal 6117
 budget: surface-budget.json commandMax 175
-budget: context-budget.json commands/continue.md 62031
+budget: context-budget.json commands/continue.md 63739
 budget: context-budget.json commands/cycle.md 72635
 budget: context-budget.json commands/learn.md 16775
 budget: context-budget.json commands/maintain.md 17954
