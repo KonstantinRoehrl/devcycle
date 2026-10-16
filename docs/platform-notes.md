@@ -271,7 +271,7 @@ itself, then the real one. The installed file was restored afterwards and verifi
 **Exact result.** A plugin agent's `agent_type` is `<plugin>:<frontmatter name>` —
 `devcycle:on-device-driver` for this plugin's driver, read off the running harness. On the main
 thread the key is absent from the stdin JSON entirely, not an empty string. A second guard now relies on this: `hooks/block-destructive-git.mjs` denies destructive git from the
-`task-reviewer`/`red-team-reviewer`/`implementer` origins, pinning both the bare and
+`task-reviewer`/`red-team-reviewer`/`implementer`/`spec-reviewer` origins, pinning both the bare and
 `devcycle:`-namespaced spellings for the same reason the browser guard does. Its main-thread branch
 (the cycle-scoped `git stash` ban) reads `cwd` from the `PreToolUse` stdin JSON exactly as the
 commit-sensor reads it from `PostToolUse` stdin, through the shared `hooks/lib/find-state-file.mjs`.

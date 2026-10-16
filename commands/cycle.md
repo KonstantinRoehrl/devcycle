@@ -155,14 +155,14 @@ stages' single source of truth — `scripts/validate.mjs` reads its literal form
    "${CLAUDE_PLUGIN_ROOT}/scripts/authored-claims-check.mjs" <spec-path>` — a blocking lint that
    flags an unguarded `path.ext:line` reference or a bare count claim, cleared by a
    `(verified: <cmd>)` or `(assumption)` marker on the same or an adjacent line. Once the spec is
-   written and that lint passes, Dispatch `devcycle:spec-reviewer` on the spec path at the
+   written and that lint passes, dispatch `devcycle:spec-reviewer` on the spec path at the
    **session tier**, at the same time as upstream's builder check: that check reads the spec as a
    builder would and takes its repo claims on trust, while this one checks them against
    live code, so neither replaces the other. Fix its findings in the spec and rerun the lint; a finding
    only the user can settle joins the builder check's questions in the one message that ends with
-   the approval question. Record the result after the path on the state file's `spec:` line,
-   `(spec review: clean|findings)`, and, when a run record exists, as `run-record.mjs append --run
-   <run> --kind event --event spec-review --stage brainstorm --result <pass|fail>` (pass = clean).
+   the approval question. Record the result on the state file's `spec:` line in the annotation
+   `references/resume.md` defines and, when a run record exists, as the `spec-review` event
+   `references/ledger.md` defines (`run-record.mjs append --kind event --stage brainstorm`).
    An approved spec transitions to planning below, never directly to upstream's writing-plans.
 5. **planning** — wave-based plan.
 6. **execution**.

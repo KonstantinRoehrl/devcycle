@@ -4,10 +4,10 @@ A Claude Code plugin that turns a one-line feature, bug, or refactor description
 verified, reviewed implementation on its own git branch. You type one command; devcycle asks
 clarifying questions to scope and brainstorm the work, designs a spec with you (an independent
 reviewer checks its claims against your code before you approve it), plans it as parallel tasks,
-and implements them test-first with subagents running in parallel. It reviews the finished branch against the spec and — when the change is visible on screen — drives the
-running app through claude-in-chrome to auto-check every item a browser can confirm
-structurally, then walks you through the rest, since how it actually looks and feels is your
-verdict, not a script's.
+and implements them test-first with subagents running in parallel. It reviews the finished
+branch against the spec and — when the change is visible on screen — drives the running app
+through claude-in-chrome to auto-check every item a browser can confirm structurally, then walks
+you through the rest, since how it actually looks and feels is your verdict, not a script's.
 
 Beyond building the change, devcycle closes the loop around a pull request: it reads a PR's
 review comments and reconciles them into the right fixes and consented replies. And it

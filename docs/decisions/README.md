@@ -25,15 +25,15 @@ false repo claims that only a reviewer opening the code caught.
 (+8) and the reflowed never-profile-conditional sentence in references/config.md (+1) raise
 `surfaceTotal` 6022 → 6069 (+47). references/config.md's own bytes rise 14249 → 14283 (+34), and
 every closure citing it by the same 34 bytes. commands/cycle.md's closure also takes in its fourth
-note (69722 → 70728); commands/continue.md's (59988 → 60173) and playbooks/executing-waves.md's
+note (69722 → 70757); commands/continue.md's (59988 → 60213) and playbooks/executing-waves.md's
 (96948 → 97141) also take in the `spec-review` writer and event lines in references/ledger.md and
 the annotated `spec:` line in references/resume.md. Every moved entry carries its own `budget:`
 line below, at the figure `node scripts/validate.mjs` measured.
 
 ```text
 budget: surface-budget.json surfaceTotal 6069
-budget: context-budget.json commands/continue.md 60173
-budget: context-budget.json commands/cycle.md 70728
+budget: context-budget.json commands/continue.md 60213
+budget: context-budget.json commands/cycle.md 70757
 budget: context-budget.json commands/learn.md 16652
 budget: context-budget.json commands/maintain.md 17831
 budget: context-budget.json commands/onboard.md 16940

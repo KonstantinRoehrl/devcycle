@@ -26,7 +26,7 @@ transition, in this shape:
 - scope: <path or none>
 - audit: <path or none>
 - diagnosis: <path or none>
-- spec: <path or none> (spec review: clean|findings)
+- spec: <path or none> [(spec review: clean|findings) — only once brainstorm's review ran]
 - plan: <path or none>
 - plan-counts: planned=<n> waves=<n>
 - ledger: .devcycle/ledger.md
