@@ -1,5 +1,14 @@
 # Changelog
 
+An unattended run now starts only on your answer in the session: the `executionMode` setting's
+`unattended` value puts **Start unattended** first instead of skipping the question, so auto mode's
+classifier sees your consent and no longer denies the start (#357). When a permission check denies
+it anyway, the session prints a `!` line you can type to start it as your own command. Every
+handoff now records when it is safe to `/clear`; `/devcycle:continue` warns before resuming a stage
+whose previous session never reached its handoff, and no message names the clear while dispatched
+work is still running (#355). The new `handoffNotification` setting (`off`, `terminal`, `push`,
+`both`) tells you when a handoff is safe and when an unattended run stops for you.
+
 ## 0.25.0 — 2026-10-14
 
 - feat: ask the execution style at execution start, make unattended runs watchable and resumable (#348, #349, #351)

@@ -456,6 +456,12 @@ test .` on 2.1.287 and 2.1.292. Whether `allowManagedModsOnly` refuses the whole
 only its `modules` cannot be checked without managed settings; doctor's `mod-inactive` candidate
 reports the effect either way.
 
+[Added 2026-10-16: the module also raises the `notify: terminal` lines `scripts/handoff-mark.mjs`
+prints, through `$.ui.notify`, in any session, joined or not. A Bash-tool child has no controlling
+terminal (`/dev/tty` opens with `ENXIO`), and writing the session's tty directly is denied by auto
+mode's classifier, so the module is the one path to the terminal. `$.ui.notify` writes through the
+user's `preferredNotifChannel`. Where a Claude Code build has no `$.ui.notify`, the relay does nothing.]
+
 ## (k) Headless `claude -p` as a driven session
 
 **What was tried.** Headless probes on 2026-10-08 against the installed Claude Code (2.1.294),

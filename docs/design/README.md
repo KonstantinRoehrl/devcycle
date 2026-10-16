@@ -304,9 +304,10 @@ gated by `userConfig.crossModelReview`.
   by the hooks module through Claude Code's own notification channel; `push`, a push notification;
   or `both`. It is read from the cycle's `knobs:` line and is profile-independent, so it takes no `auto`.
 - `executionMode` (added 2026-10-13) is how `/devcycle:continue` runs the waves at execution start
-  while the cycle has no `drive:` row: `ask`, the default, asks Unattended or Walk the waves
-  manually; `manual` walks them in the session; `unattended` starts the driver. A recorded row
-  outranks it, and it is `live`, so a mid-cycle change is never knob drift. It takes no `auto`.
+  while the cycle has no `drive:` row: `ask`, the default, asks Start unattended or Walk the waves
+  manually; `manual` walks them in the session; `unattended` asks the same question with **Start
+  unattended** first, since an unattended run starts only on the user's answer in the session
+  (decision log, 2026-10-16). A recorded row outranks it, and it is `live`, so a mid-cycle change is never knob drift. It takes no `auto`.
 
 ---
 

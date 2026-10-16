@@ -130,9 +130,11 @@ run `/clear` and then `/devcycle:continue`, so a cycle plays out as several shor
 rather than one long one.
 
 Execution can also walk its waves without you: when `/devcycle:continue` resumes at execution it
-asks whether to run them unattended (or follows the `executionMode` setting), then starts a driver
-that gives each wave a fresh session, watches it, and stops at the first thing that needs you — see
-[running execution unattended](docs/playbooks/executing-waves/unattended.md).
+asks whether to run them unattended (the `executionMode` setting only decides which answer comes
+first), then starts a driver that gives each wave a fresh session, watches it, and stops at the
+first thing that needs you — see [running execution unattended](docs/playbooks/executing-waves/unattended.md).
+Every handoff records when it is safe to `/clear`; resuming before it warns you, and the
+`handoffNotification` setting can ring your terminal or push a notification when it is.
 
 **Add `.devcycle/` to the target repo's `.gitignore`** — none of it belongs in git history.
 What devcycle attempts to commit *outside* that directory is `docTrackingPolicy`'s call.

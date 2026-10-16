@@ -12,15 +12,17 @@ execution start, started by /devcycle:continue).
 Planning always ends with `Clear + /devcycle:continue`. When that `/devcycle:continue` resumes at
 `stage: execution`, it asks one question — how execution should run:
 
-- **Unattended** — the session records `- drive: auto model=<id> opted=<stamp> via=answer` in
+- **Start unattended** — the session records `- drive: auto model=<id> opted=<stamp> via=answer` in
   `.devcycle/state.md` (the model it runs on, as the depth probe reads it), starts the driver and
   watches it.
 - **Walk the waves manually** — it records `- drive: manual chosen=<stamp> via=answer` and walks
   the waves in that session, as before.
 
-The `executionMode` setting answers for you: `ask` (the default) asks, `unattended` opts every
-cycle in and `manual` walks every cycle, each recorded with `via=knob`. Once a cycle has its
-`drive:` row, the row decides and a changed setting does not. Only your answer or your setting opts
+The `executionMode` setting orders the question: `ask` (the default) asks, `unattended` asks with
+**Start unattended** first, and `manual` walks every cycle without asking, recorded with
+`via=knob`. An unattended run starts only on your answer in that session, so auto mode can see
+your consent; a new session resuming a run you already chose asks you to confirm it once. Once a
+cycle has its `drive:` row, the row decides and a changed setting does not. Only your answer opts
 a cycle in; no agent opts in, answers a gate for you, or starts a driver outside
 `/devcycle:continue`.
 
@@ -33,7 +35,8 @@ With a cycle opted in, every `/devcycle:continue` at execution start does one of
   instead), starts the driver with `--detach`, and prints an overview — `<W> waves · <T> tasks ·
   <C> committed — next: wave <w>`, then each wave's tasks. Inside Claude Code's Bash sandbox the
   start runs outside it, through one permission prompt; refused, you get the command for a terminal
-  that is not a Claude Code session, or the manual walk.
+  that is not a Claude Code session, or the manual walk. Denied by a permission check, auto mode's
+  included, you get a `!` line to type, which runs the start as your own command.
 - **Watch.** It follows the run under `Monitor` and relays one line per session start, commit,
   review verdict, user decision, intake bounce, finished wave, wait and stop, and waits for the end
   in a background task. The session edits nothing while the driver runs. Ask it to stop the run and
