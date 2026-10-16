@@ -2,7 +2,14 @@
 
 ## 0.26.0 — 2026-10-16
 
-- feat: review a spec against live code before approval and gate handoffs on readiness (#304, #355, #357)
+- feat(cycle): review a spec's repo claims against live code before approval (#304)
+- fix(drive): confirm unattended starts in the session and gate handoffs on readiness (#357, #355)
+
+The brainstorm stage now has an independent check before it asks you to approve a spec: after the
+spec is written and the claims lint passes, the new read-only `spec-reviewer` agent verifies every
+statement the spec makes about the repository (paths, symbols, flags, counts, current behavior)
+against the working tree, and its findings are fixed or surfaced first. It does not replace the
+lint; the two catch different things (#304).
 
 An unattended run now starts only on your answer in the session: the `executionMode` setting's
 `unattended` value puts **Start unattended** first instead of skipping the question, so auto mode's
