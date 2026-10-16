@@ -426,7 +426,7 @@ test("drive mode: a resumable cycle reports its opt-in, its model, its driver an
     const r = driven(c, { knobsLine: KNOBS });
     assert.equal(r.action, "resume");
     assert.deepEqual(r.drive, { opted: true, model: "claude-haiku-4-5", lock: { pid: process.pid, log: lock.log }, optInLogged: false,
-      row: "auto", mode: "ask", action: "none", writeRow: null, gate: null, result: r.drive.result });
+      row: "auto", mode: "ask", action: "none", writeRow: null, recommend: null, gate: null, result: r.drive.result });
     assert.deepEqual([r.drive.result.running, r.drive.result.pid], [true, process.pid]);
     assert.deepEqual([r.overview.committed, r.overview.nextWave, r.ledgerSlot], [1, 1, "fresh"]);
     assert.ok(!JSON.stringify(r).includes(driveTokenHash(TOKEN)), "wave-setup reports the lock's token hash");
@@ -451,22 +451,33 @@ test("drive.action: a live driver on this state file is attached to before knob 
   withLock(foreign, () => assert.equal(setup(foreign).stopReason, "foreign-state", "foreign-state no longer stops first"));
 });
 
-test("drive.action: a drive: row outranks the executionMode knob; with no row the knob asks, walks manually or starts", () => {
+test("drive.action: a drive: row outranks the executionMode knob; with no row the knob walks manually or asks, unattended leading the question", () => {
   assert.match(knobsWith("unattended"), / executionMode=unattended$/);
   const decide = (c, knobsLine) => {
     const r = setup(c, { knobsLine });
-    return [r.action, r.drive.row, r.drive.mode, r.drive.action, r.drive.writeRow];
+    return [r.action, r.drive.row, r.drive.mode, r.drive.action, r.drive.writeRow, r.drive.recommend];
   };
-  assert.deepEqual(decide(cycle(), KNOBS), ["resume", null, "ask", "ask", null]);
-  assert.deepEqual(decide(cycle(), null), ["resume", null, "ask", "ask", null], "no --knobs line reads as ask");
-  assert.deepEqual(decide(cycle(), KNOBS.replace("executionMode=ask", "executionMode=bogus")), ["resume", null, "ask", "ask", null]);
-  assert.deepEqual(decide(cycle(), knobsWith("manual")), ["resume", null, "manual", "manual", "manual"]);
-  assert.deepEqual(decide(cycle(), knobsWith("unattended")), ["resume", null, "unattended", "start", "auto"]);
-  assert.deepEqual(decide(cycle({ state: [MANUAL_ROW] }), knobsWith("unattended")), ["resume", "manual", "unattended", "manual", null]);
-  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), knobsWith("manual")), ["resume", "auto", "manual", "start", null]);
-  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), KNOBS), ["resume", "auto", "ask", "start", null]);
+  assert.deepEqual(decide(cycle(), KNOBS), ["resume", null, "ask", "ask", null, null]);
+  assert.deepEqual(decide(cycle(), null), ["resume", null, "ask", "ask", null, null], "no --knobs line reads as ask");
+  assert.deepEqual(decide(cycle(), KNOBS.replace("executionMode=ask", "executionMode=bogus")), ["resume", null, "ask", "ask", null, null]);
+  assert.deepEqual(decide(cycle(), knobsWith("manual")), ["resume", null, "manual", "manual", "manual", null]);
+  assert.deepEqual(decide(cycle(), knobsWith("unattended")), ["resume", null, "unattended", "ask", null, "unattended"],
+    "an unattended knob asks, Start unattended first — the start needs the user's answer in this session");
+  assert.deepEqual(decide(cycle({ state: [MANUAL_ROW] }), knobsWith("unattended")), ["resume", "manual", "unattended", "manual", null, null]);
+  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), knobsWith("manual")), ["resume", "auto", "manual", "start", null, null]);
+  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), KNOBS), ["resume", "auto", "ask", "start", null, null]);
   assert.deepEqual(setup(cycle({ state: [`- ${KNOBS}`] }), { knobsLine: knobsWith("unattended") }).knobDrift, [],
     "executionMode is live: a changed value is never knob drift");
+});
+
+test("drive.writeRow: no knob value and no driver end ever writes an auto row", () => {
+  const ends = [null, runEnd("stalled", { code: 5 }), runEnd("interrupted", { code: 130 }), runEnd("gate-stop", { code: 4, reason: "needs-user", detail: "x" })];
+  for (const mode of ["ask", "manual", "unattended"])
+    for (const end of ends) {
+      const c = end ? ended(cycle(), end) : cycle();
+      const r = setup(c, { knobsLine: knobsWith(mode) });
+      assert.notEqual(r.drive.writeRow, "auto", `${mode} / ${end?.outcome ?? "no end"}`);
+    }
 });
 
 test("drive.action: an auto style starts on no result, a resumable end or a crash, and gates on an end that needs an answer", () => {
@@ -486,7 +497,8 @@ test("drive.action: an auto style starts on no result, a resumable end or a cras
   assert.deepEqual([blocked.action, blocked.drive.action, blocked.drive.gate],
     ["resume", "gate", { reason: "needs-user", detail: "task 2: blocked", task: "2", settled: false, pendingDecision: null }]);
   const knob = setup(ended(cycle(), runEnd("stalled", { code: 5 })), { knobsLine: knobsWith("unattended") });
-  assert.deepEqual([knob.drive.action, knob.drive.writeRow, knob.drive.gate.reason], ["gate", "auto", "stalled"]);
+  assert.deepEqual([knob.drive.action, knob.drive.writeRow, knob.drive.gate.reason, knob.drive.recommend], ["gate", null, "stalled", null],
+    "the row comes from the gate question's answer, never from the knob");
   const manual = setup(ended(cycle({ state: [MANUAL_ROW] }), runEnd("stalled", { code: 5 })));
   assert.deepEqual([manual.drive.action, manual.drive.gate], ["manual", null]);
 });
