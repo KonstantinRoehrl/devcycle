@@ -212,8 +212,9 @@ waves you can hand those stops to a driver instead — next section.
 
 ### Unattended execution
 
-Opt in when `/devcycle:continue` resumes at execution (or set `executionMode`) and that session
-starts `scripts/drive-execution.mjs`, which takes over the one stop that repeats inside execution:
+Opt in by answering **Start unattended** when `/devcycle:continue` resumes at execution (the
+`executionMode` setting only puts that answer first), and that session starts
+`scripts/drive-execution.mjs`, which takes over the one stop that repeats inside execution:
 the clear between waves. It starts a fresh `claude -p` session per wave — the
 session `/clear` plus `/devcycle:continue` would give you — and ends at the branch-review handoff,
 at the first gate that needs you, or at a stall or a cap. Branch review, on-device verification and
@@ -251,8 +252,13 @@ flowchart TD
 ```
 
 `--stop` — or a signal (Ctrl-C, `kill`) — stops the running session, writes its record and the
-run's result, releases the lock and exits 130. The next `/devcycle:continue` restarts an
-interrupted run and asks before resuming a stopped one.
+run's result, releases the lock and exits 130. The next `/devcycle:continue` asks the start confirm
+(`references/drive.md`) before restarting an interrupted run, and the stopped run's question before
+resuming a stopped one.
+
+If auto mode or another permission check denies the start, the session prints a `!` line for you
+to type, which runs the start as your own command. Once the driver holds its lock the session
+marks the handoff ready, so you can clear it and attach later with `/devcycle:continue`.
 
 ### What the coordinator does itself
 

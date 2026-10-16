@@ -2,7 +2,8 @@
 // joined the active devcycle run it observes each subagent and writes one agent-trace run-record row
 // per finished subagent turn, under the agentId hooks/dispatch-sensor.mjs keys its agent-depth row by;
 // it bounds a subagent's context by the subagentBudget tier, and shows the coordinator's stage budget
-// on the status line. The engine's own forks (compaction, memory) are neither traced nor bounded.
+// on the status line. In any session it raises the terminal notifications scripts/handoff-mark.mjs
+// prints. The engine's own forks (compaction, memory) are neither traced nor bounded.
 // It runs without Node — nothing it imports may import a node: module, call require or import
 // dynamically — so the state file's run, the joined-run check and the run-record write go through
 // hooks/mod-sink.mjs, which it spawns. Settings hooks sit beneath it in one chain, so every hook that
@@ -166,8 +167,25 @@ async function updateMeter(st, $, e) {
     `files ${meter.files.size}/~${STAGE_FILES_READ} · ctx ${meter.percent ?? "–"}%`);
 }
 
+// scripts/handoff-mark.mjs prints one `notify: terminal <message>` line per handoff notification the
+// handoffNotification knob asks for. A Bash child has no terminal of its own, so the module raises it
+// through the person's notification channel; a Claude Code without $.ui.notify throws on the call, which
+// the catch below absorbs.
+const HANDOFF_MARK_CALL = /handoff-mark\.mjs/;
+const TERMINAL_NOTICE = /^notify: terminal (.+)$/gm;
+
+function relayNotifications($, e, result) {
+  try {
+    if (e.tool !== "Bash" || typeof e.command !== "string" || !HANDOFF_MARK_CALL.test(e.command)) return;
+    const stdout = result?.result?.stdout;
+    if (typeof stdout !== "string") return;
+    for (const [, message] of stdout.matchAll(TERMINAL_NOTICE)) $.ui.notify(message, { title: "devcycle" }).catch(() => {});
+  } catch { /* a notification never fails the call it rode on */ }
+}
+
 async function mainLoopToolCall(st, $, e, next) {
   const result = await next(e);
+  relayNotifications($, e, result);
   await afterMainLoopCall(st, $, e);
   return result;
 }

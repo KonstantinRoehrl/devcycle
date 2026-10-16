@@ -2402,3 +2402,76 @@ test("opt-in integrity: only execution start writes the drive: row, only the fir
       assert.ok(!text.includes(ROW) && !text.includes(LINE), `${dir}/${name} writes the drive: row or the opt-in ledger line`);
     }
 });
+
+test("handoff.md marks the handoff ready last at every boundary, forbids naming the clear while work is in flight, and re-marks pending past a boundary", () => {
+  const t = read("references/handoff.md");
+  const ready = t.indexOf('scripts/handoff-mark.mjs" --state .devcycle/state.md --ready');
+  assert.ok(ready > -1, "handoff.md no longer runs handoff-mark.mjs --ready at the boundary");
+  const stageLine = t.indexOf("Every boundary also appends one `stage` line");
+  assert.ok(stageLine > -1 && ready > stageLine, "the ready mark must come after the run-record stage line");
+  assert.ok(ready < t.indexOf("`Context depth:` is measured"), "the ready mark must sit with the boundary sequence, before the block's field rules");
+  assert.ok(t.includes("PushNotification"), "handoff.md no longer says who sends a notify: push line");
+  const awaitSection = t.slice(t.indexOf("## Await the context action"));
+  assert.ok(awaitSection.includes("still running: <n> pending — don't clear yet"), "the in-flight rule is gone");
+  assert.ok(awaitSection.includes('scripts/handoff-mark.mjs" --state .devcycle/state.md --pending'), "proceeding past a boundary no longer re-marks pending");
+});
+
+test("an unattended start needs the user's answer in the session; a denied start prints a ! line; no surface lets the knob start the driver", () => {
+  const drive = read("references/drive.md");
+  const actions = sectionText(drive, "drive-actions");
+  assert.ok(actions.includes("`drive.recommend`"), "the ask row no longer reads drive.recommend");
+  assert.ok(!actions.includes("asking nothing"), "a drive action still starts the driver asking nothing");
+  assert.ok(actions.includes("**Resume unattended** · **Walk the waves manually** · **Leave it stopped**"), "the start confirm is gone");
+  assert.ok(actions.includes("No knob writes an `auto` row"), "the drive: row prose still lets a knob write an auto row");
+  const start = sectionText(drive, "the-start-path");
+  assert.ok(start.includes('! node "<absolute plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach'),
+    "a denied start no longer prints the ! line");
+  assert.ok(start.includes('scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action started'), "the starting session no longer marks the handoff ready");
+  assert.ok(sectionText(drive, "when-the-run-ends").includes("--ready --action stopped --reason"), "a stop for the user no longer notifies");
+  const manifest = JSON.parse(read(".claude-plugin/plugin.json"));
+  assert.ok(!manifest.userConfig.executionMode.description.includes("starts the unattended driver, no question"),
+    "plugin.json still says the unattended knob starts the driver with no question");
+  assert.ok(!read("references/handoff.md").includes("`executionMode` knob they set"), "handoff.md still lets the knob opt a cycle in");
+});
+
+test("the stopped-run call in drive.md works with an empty detail and reads the push rule before relaying", () => {
+  const ends = sectionText(read("references/drive.md"), "when-the-run-ends").replace(/\s+/g, " ");
+  const call = ends.indexOf("--ready --action stopped");
+  assert.ok(call > -1, "drive.md no longer marks the handoff for a stop");
+  const after = ends.slice(call);
+  assert.ok(after.includes("omit `--reason` when `drive.gate.detail` is empty"), "an empty detail still has no way to send the stop notification");
+  assert.ok(after.includes("read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and relay"), "the watcher is no longer told to read the push rule before relaying");
+  assert.ok(!after.includes("no apostrophe ; & |"), "the inert-character list is back");
+});
+
+test("an answer that starts the driver on a state with no auto row writes the row first", () => {
+  const actions = sectionText(read("references/drive.md"), "drive-actions");
+  const gateRow = actions.split("\n").find((l) => l.startsWith("| `gate`"));
+  assert.ok(gateRow, "the drive actions table lost its gate row");
+  assert.ok(gateRow.includes("write the `auto` row first"), "the gate row no longer writes the auto row before the start path");
+  const flat = actions.replace(/\s+/g, " ");
+  const rowWriters = flat.indexOf("an answer that starts the driver on a state file with no `auto` row first writes the `auto` row with `via=answer`");
+  assert.ok(rowWriters > -1, "drive.md no longer says an answer that starts the driver writes the auto row first");
+  assert.ok(flat.slice(rowWriters).includes("**Resume unattended**, **Restart unattended**"), "the row-writer sentence no longer names the gate answers");
+});
+
+test("a closed cycle is never marked pending: continue.md stops on closed: before the --pending mark", () => {
+  const resume = sectionOf(read("commands/continue.md"), "Resume");
+  const closed = resume.indexOf("`closed:`");
+  const pending = resume.indexOf("handoff-mark.mjs\" --state <the chosen state file> --pending");
+  assert.ok(closed > -1 && pending > -1, "continue.md § Resume lost its closed: stop or its --pending mark");
+  assert.ok(closed < pending, "continue.md marks a stage pending before it stops on a closed cycle");
+});
+
+test("the handoff row: cycle and continue mark the stage pending, continue asks the not-ready question resume.md owns, and over budget waits for in-flight work", () => {
+  assert.ok(read("commands/cycle.md").includes('scripts/handoff-mark.mjs" --state .devcycle/state.md --pending'), "cycle.md no longer marks its first stage pending");
+  const cont = read("commands/continue.md");
+  assert.ok(cont.includes('scripts/handoff-mark.mjs" --state <the chosen state file> --pending'), "continue.md no longer marks the resumed stage pending");
+  assert.ok(cont.indexOf("--pending") > cont.indexOf("**Depth check first.**"), "continue.md marks pending before its depth check");
+  assert.ok(cont.includes("`handoff.ask`"), "continue.md § Execution resume no longer reads handoff.ask");
+  assert.ok(cont.includes("`handoff: pending`"), "continue.md step 2a no longer reads resume-check's handoff line");
+  const resume = read("references/resume.md");
+  assert.ok(resume.includes("**Resume anyway** · **Stop**"), "resume.md no longer holds the not-ready question");
+  assert.ok(resume.includes("Four optional rows sit outside the template"), "resume.md's optional-row count is stale");
+  assert.match(read("references/delegation.md"), /a stage never pauses mid-flight/, "the stage budget no longer says the boundary waits for in-flight work");
+});

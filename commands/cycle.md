@@ -45,6 +45,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --learnStalenessDays '${user_config.learnStalenessDays}' \
   --learnSessionCap '${user_config.learnSessionCap}' \
   --subagentBudget '${user_config.subagentBudget}' \
+  --handoffNotification '${user_config.handoffNotification}' \
   --executionMode '${user_config.executionMode}'
 ```
 
@@ -68,6 +69,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
    plugin identifier, and not `git rev-parse` because the installed plugin is not a git checkout:
    the git form answers about an unrelated enclosing repository, or fails outright. Then:
    `run-record.mjs append --run <that id> --kind session --sessionId "$CLAUDE_CODE_SESSION_ID"`.
+6. **Mark** the stage in progress:
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --pending`.
 
 While reading the plugin version, also run the evidence-contract staleness preflight: `node
 "${CLAUDE_PLUGIN_ROOT}/scripts/contract-staleness-check.mjs" --plugin-root "${CLAUDE_PLUGIN_ROOT}"

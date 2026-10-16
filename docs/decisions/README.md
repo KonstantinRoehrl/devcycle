@@ -5,6 +5,73 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-16 — An unattended start needs the user's answer in the session; handoffs record when they are safe (#357, #355)
+
+**Decision:** `/devcycle:continue` starts the unattended driver only in a session where the user
+answered a question whose chosen option starts or resumes the run. The `executionMode` knob's
+`unattended` value stays the user's standing preference: it puts **Start unattended** first and
+recommended, and no longer skips the question. No knob path writes an `auto` row. A start the
+auto-mode classifier or another permission check denies prints a `!` line the user can type in the
+same session. Separately, a new optional state-file row, `- handoff: pending|ready <stamp>`,
+written only by `scripts/handoff-mark.mjs`, records whether the last boundary completed. It is
+marked ready last at every boundary and checked by `/devcycle:continue`, which warns before
+resuming a stage whose previous session never reached its handoff. While dispatched work is in
+flight, no message names the clear. A new knob, `handoffNotification` (`off` | `terminal` |
+`push` | `both`, fallback `off`), notifies the user when a handoff is ready and when an unattended
+run stops for them. The value is `terminal`, not the approved spec's `bell`: the hooks module's
+`$.ui.notify` writes through the user's `preferredNotifChannel` (a bell in Terminal.app, a banner in
+iTerm2, kitty and Ghostty), so `bell` would overpromise. The spec text keeps `bell` because a
+planning artifact is not committed.
+
+**Why:** auto mode's classifier sees only the transcript. A start authorized by plugin config it
+never sees was denied as Instruction Poisoning on consecutive days (#357), while every start that
+followed an in-session answer passed. A consent that never reaches the transcript cannot be told
+apart from a fabricated one. Separately, a waiting message that forward-narrated "then `/clear` +
+`/devcycle:continue`" while subagents still ran was acted on mid-stage, and nothing on disk could
+show that the handoff had not happened (#355).
+
+**Supersedes:** the 2026-10-13 entry's opt-in clause, "It is the user's answer at **execution
+start**, or the `executionMode` knob the user set". The opt-in is now the user's answer at
+execution start alone; the knob orders that question.
+
+**Budgets:** the `handoffNotification` flag line in each of the eight entry commands (+8) and its
+roster row in references/config.md (+1) move the figures below; every closure that cites
+references/config.md takes in that row too. The handoff-mark boundary rule, the in-flight rule and
+the same-session pending rule in references/handoff.md raise its bytes and every closure citing it.
+The start confirm, the ! fallback and the stop notice in references/drive.md move its closures again.
+The not-ready question, the pending marks in commands/continue.md and commands/cycle.md, and the
+in-flight clause of references/delegation.md move commandMax and those closures.
+
+```text
+budget: surface-budget.json surfaceTotal 6141
+budget: surface-budget.json commandMax 181
+budget: context-budget.json commands/continue.md 65605
+budget: context-budget.json commands/cycle.md 74168
+budget: context-budget.json commands/learn.md 16775
+budget: context-budget.json commands/maintain.md 17954
+budget: context-budget.json commands/onboard.md 17063
+budget: context-budget.json commands/reconcile.md 24500
+budget: context-budget.json commands/review.md 25130
+budget: context-budget.json commands/verify.md 24228
+budget: context-budget.json playbooks/executing-waves.md 99063
+budget: context-budget.json playbooks/finishing-the-cycle.md 47785
+budget: context-budget.json playbooks/learning-from-sessions.md 62250
+budget: context-budget.json playbooks/maintaining-the-repo.md 64327
+budget: context-budget.json playbooks/onboarding-a-repo.md 30612
+budget: context-budget.json playbooks/planning-waves.md 71641
+budget: context-budget.json playbooks/receiving-review.md 111380
+budget: context-budget.json playbooks/reviewing-code.md 91872
+budget: context-budget.json playbooks/reviewing-the-branch.md 49248
+budget: context-budget.json playbooks/scoping-the-request.md 29777
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 84629
+budget: context-budget.json playbooks/taking-the-fast-path.md 50164
+budget: context-budget.json playbooks/verifying-on-device.md 44772
+budget: context-budget.json playbooks/writing-the-findings-document.md 61645
+budget: context-budget.json references/config.md 14343
+budget: context-budget.json references/delegation.md 10750
+budget: context-budget.json references/handoff.md 10793
+```
+
 ## 2026-10-16 — An independent spec-claims review before the brainstorm approval question (#304)
 
 **Decision:** brainstorm dispatches a new read-only agent, `devcycle:spec-reviewer`, at the session

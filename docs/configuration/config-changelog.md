@@ -151,6 +151,12 @@ marker with the version the change lands in, since only the release computes tha
   default: ask
   values: [ask, manual, unattended]
   note: "how /devcycle:continue runs the waves at execution start while the cycle has no drive: row; profile-independent, so it takes no auto"
+- version: "unreleased"
+  change: added
+  key: handoffNotification
+  default: off
+  values: [off, terminal, push, both]
+  note: "whether devcycle notifies the user when a handoff is safe to clear and when an unattended run stops for them; profile-independent, so it takes no auto"
 ```
 
 ## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)

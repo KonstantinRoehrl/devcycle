@@ -9,6 +9,7 @@ import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { field } from "./md-field.mjs";
 import { stageEntry, entryLines, CLOSED_STAGE, CLOSED_LINE, FALLBACK } from "./stage-entry.mjs";
 import { isMain } from "./is-main.mjs";
+import { parseHandoff } from "./handoff-mark.mjs";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -111,11 +112,12 @@ export function checkState(statePath) {
   }
 
   if (errors.length) return { ok: false, kind: "stale", errors };
-  if (stage === CLOSED_STAGE) return { ok: true, stage, lines: [CLOSED_LINE] };
+  const handoff = parseHandoff(field(text, "handoff"));
+  if (stage === CLOSED_STAGE) return { ok: true, stage, handoff, lines: [CLOSED_LINE] };
   try {
-    return { ok: true, stage, lines: entryLines(stageEntry(stage)) };
+    return { ok: true, stage, handoff, lines: entryLines(stageEntry(stage)) };
   } catch (err) {
-    return { ok: true, stage, lines: [`resume-check: no entry line — ${err.message}; fall back to ${FALLBACK}`] };
+    return { ok: true, stage, handoff, lines: [`resume-check: no entry line — ${err.message}; fall back to ${FALLBACK}`] };
   }
 }
 
@@ -153,6 +155,7 @@ function main(argv) {
   }
   console.log(`resume-check: ok — stage ${result.stage}, all recorded artifacts present`);
   for (const line of result.lines) console.log(line);
+  console.log(`handoff: ${result.handoff.state} ${result.handoff.stamp ?? "(no row)"}`);
 }
 
 if (isMain(import.meta.url, process.argv[1])) main(process.argv.slice(2));

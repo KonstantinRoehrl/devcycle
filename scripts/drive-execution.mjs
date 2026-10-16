@@ -246,7 +246,7 @@ const SANDBOX_REFUSAL =
 
 function checkEnvironment(root, state, opts) {
   if (!state.opted)
-    throw new Exit(3, "the state file has no `drive: auto` row — run /devcycle:continue and choose Unattended, or set executionMode");
+    throw new Exit(3, "the state file has no `drive: auto` row — run /devcycle:continue and answer Start unattended");
   if (state.stage !== "execution") throw new Exit(3, `the state is at stage ${state.stage}, not execution`);
   if (!RUN_ID.test(state.run ?? "")) throw new Exit(3, "the state file names no run id, so no drive record could be written");
   const model = opts.model ?? state.model;
