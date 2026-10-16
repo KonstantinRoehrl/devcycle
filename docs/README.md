@@ -113,6 +113,7 @@ The read-only or single-task subagents a stage dispatches.
 | [`red-team-reviewer`](../agents/red-team-reviewer.md) | Adversarial read-only charter, spliced into the panel's per-finding verification pass. |
 | [`on-device-driver`](../agents/on-device-driver.md) | Drives claude-in-chrome for the on-device stage; never decides whether an item passes. |
 | [`history-inspector`](../agents/history-inspector.md) | Read-only git-history lens for `/devcycle:maintain`. |
+| [`spec-reviewer`](../agents/spec-reviewer.md) | Read-only check of a written spec's repo claims against live code, before the brainstorm approval question. |
 
 ## References
 

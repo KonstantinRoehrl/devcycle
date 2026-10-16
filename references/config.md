@@ -146,8 +146,9 @@ workload-independent `## Cost by stage` / `## Cost by version` tables.
 
 **Never profile-conditional:** the state file, handoff blocks, evidence classes, the
 coordinator's green gate, the `gitPolicy` clamps, branch discipline, the one-`task-reviewer`
-floor on short paths, and the never-assume interview rule. A `lean` run may skip a stage; it
-never fakes one and never reports a gate as passed that did not run.
+floor on short paths, the brainstorm spec-claims review, and the never-assume interview rule. A
+`lean` run may skip a stage; it never fakes one and never reports a gate as passed that did not
+run.
 
 First-run configuration lives in `references/first-run-config.md`, which `/devcycle:cycle` loads
 only when its first-run test passes — no other stage loads it.

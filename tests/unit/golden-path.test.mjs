@@ -2113,6 +2113,27 @@ test("every shipped agent is named by DESIGN.md's blueprint, DESIGN.md §13, and
   }
 });
 
+// #304: the brainstorm stage's independent spec-claims review. Step 4 keeps the dispatch, its tier,
+// its order (after the claims lint, alongside upstream's builder check) and its recording, or fails.
+test("cycle.md's brainstorm step dispatches the spec-claims reviewer at the session tier and records it", () => {
+  const text = read("commands/cycle.md");
+  const start = text.indexOf("4. **brainstorm**");
+  const end = text.indexOf("5. **planning**", start);
+  assert.ok(start >= 0 && end > start, "commands/cycle.md must carry brainstorm as step 4, followed by planning as step 5");
+  const step = text.slice(start, end);
+  assert.match(step, /four notes/, "step 4 must say it adds four notes to upstream brainstorming");
+  assert.match(step, /Dispatch\s+`devcycle:spec-reviewer`/, "step 4 must dispatch devcycle:spec-reviewer");
+  assert.match(step, /session tier/, "the dispatch must name its model tier inline (validate.mjs check 23, #304)");
+  assert.match(step, /live code/, "the note must say the review checks claims against live code");
+  assert.match(step, /builder check/, "the review must run alongside upstream's builder check");
+  assert.match(step, /--event spec-review/, "the result must be recorded as a spec-review run-record event");
+  assert.match(step, /\(spec review: clean\|findings\)/, "the result must be recorded on the state file's spec: line");
+  assert.ok(
+    step.indexOf("authored-claims-check.mjs") < step.indexOf("devcycle:spec-reviewer"),
+    "the spec-claims review must be ordered after the authored-claims lint"
+  );
+});
+
 test("the browser guard is named by DESIGN.md's blueprint and the hub's inventory", () => {
   assert.match(read(DESIGN_DOC), /^├── hooks\//m, "DESIGN.md §3's tree must list hooks/");
   assert.match(

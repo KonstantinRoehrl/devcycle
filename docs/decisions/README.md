@@ -5,6 +5,53 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-16 — An independent spec-claims review before the brainstorm approval question (#304)
+
+**Decision:** brainstorm dispatches a new read-only agent, `devcycle:spec-reviewer`, at the session
+tier once the spec is written and the authored-claims lint passes, alongside upstream's builder
+check. It verifies the spec's repo claims against live code; its findings are fixed in the spec, and
+any only the user can settle join the builder check's single round of questions. The result is
+recorded on the state file's `spec:` line and as a neutral `spec-review` run-record event. It runs
+at every profile and adds no state-machine gate.
+
+**Why:** users kept answering the approval question with "review the spec against live code" (#304,
+with #325 and #339 as later evidence). Upstream superpowers 7.0.0's builder check covers whether a
+spec is plannable, but reads its repo claims on trust; this cycle's own first draft carried two
+false repo claims that only a reviewer opening the code caught.
+
+**Supersedes:** none.
+
+**Budgets:** the new agents/spec-reviewer.md (+38 lines), the fourth note in commands/cycle.md
+(+8) and the reflowed never-profile-conditional sentence in references/config.md (+1) raise
+`surfaceTotal` 6022 → 6069 (+47). references/config.md's own bytes rise 14249 → 14283 (+34), and
+every closure citing it by the same 34 bytes. commands/cycle.md's closure also takes in its fourth
+note (69722 → 70728); commands/continue.md's (59988 → 60173) and playbooks/executing-waves.md's
+(96948 → 97141) also take in the `spec-review` writer and event lines in references/ledger.md and
+the annotated `spec:` line in references/resume.md. Every moved entry carries its own `budget:`
+line below, at the figure `node scripts/validate.mjs` measured.
+
+```text
+budget: surface-budget.json surfaceTotal 6069
+budget: context-budget.json commands/continue.md 60173
+budget: context-budget.json commands/cycle.md 70728
+budget: context-budget.json commands/learn.md 16652
+budget: context-budget.json commands/maintain.md 17831
+budget: context-budget.json commands/onboard.md 16940
+budget: context-budget.json commands/reconcile.md 24377
+budget: context-budget.json commands/review.md 25007
+budget: context-budget.json commands/verify.md 24105
+budget: context-budget.json playbooks/executing-waves.md 97141
+budget: context-budget.json playbooks/finishing-the-cycle.md 45863
+budget: context-budget.json playbooks/learning-from-sessions.md 62041
+budget: context-budget.json playbooks/maintaining-the-repo.md 64118
+budget: context-budget.json playbooks/onboarding-a-repo.md 30552
+budget: context-budget.json playbooks/planning-waves.md 69719
+budget: context-budget.json playbooks/reviewing-code.md 91663
+budget: context-budget.json playbooks/reviewing-the-branch.md 47326
+budget: context-budget.json playbooks/verifying-on-device.md 42850
+budget: context-budget.json references/config.md 14283
+```
+
 ## 2026-10-13 — Unattended execution: chosen at execution start, started by /devcycle:continue
 
 **Decision:** a cycle's execution style is chosen when it reaches the execution stage, by the
