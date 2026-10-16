@@ -293,9 +293,18 @@ test("reviewer + reserved words around non-git commands stay allowed", () => {
     assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for reserved-word non-git: ${cmd}`);
 });
 
-test("all six guarded spellings are guarded", () => {
-  for (const origin of ["task-reviewer", "devcycle:task-reviewer", "red-team-reviewer", "devcycle:red-team-reviewer", "implementer", "devcycle:implementer"])
+test("all eight guarded spellings are guarded", () => {
+  for (const origin of ["task-reviewer", "devcycle:task-reviewer", "red-team-reviewer", "devcycle:red-team-reviewer", "implementer", "devcycle:implementer", "spec-reviewer", "devcycle:spec-reviewer"])
     assert.equal(decide(origin, "git checkout -- x"), "deny", `expected deny for origin: ${origin}`);
+});
+
+// #304: the brainstorm spec-claims reviewer inspects history to check a spec's claims, and shares
+// the checkout with the session that wrote the spec.
+test("spec-reviewer + destructive git is denied, inspection git is allowed", () => {
+  for (const cmd of ["git stash", "git checkout -- x", "git commit -m y", "git push"])
+    assert.equal(decide("devcycle:spec-reviewer", cmd), "deny", `expected deny for spec-reviewer: ${cmd}`);
+  for (const cmd of ["git log -3", "git show HEAD:README.md", "git diff", "git status", "git grep foo"])
+    assert.equal(decide("devcycle:spec-reviewer", cmd), "allow", `expected allow for spec-reviewer: ${cmd}`);
 });
 
 // #235: an implementer shares the checkout with its siblings, and agents/implementer.md already

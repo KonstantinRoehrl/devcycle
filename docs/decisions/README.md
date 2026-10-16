@@ -19,7 +19,7 @@ with #325 and #339 as later evidence). Upstream superpowers 7.0.0's builder chec
 spec is plannable, but reads its repo claims on trust; this cycle's own first draft carried two
 false repo claims that only a reviewer opening the code caught.
 
-**Supersedes:** none.
+**Supersedes:** the 2026-09-05 entry's three guarded origins for the git guard: it now guards four, the spec reviewer included, since that agent shares the checkout with the session that wrote the spec.
 
 **Budgets:** the new agents/spec-reviewer.md (+38 lines), the fourth note in commands/cycle.md
 (+8) and the reflowed never-profile-conditional sentence in references/config.md (+1) raise

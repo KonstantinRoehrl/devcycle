@@ -2153,7 +2153,7 @@ test("hooks.json loads the hooks module, and the hub's Hooks table carries a row
 
 // #165/#235 git guard: the same tie the browser guard has, so a guarded-agent rename fails the
 // suite instead of silently leaving a guarded origin unmatched. The GUARDED list must be exactly the
-// three guarded agents' frontmatter names and their <plugin>:-namespaced forms.
+// four guarded agents' frontmatter names and their <plugin>:-namespaced forms.
 const GIT_GUARD_SRC = "hooks/block-destructive-git.mjs";
 
 const guardedAgentTypes = () => {
@@ -2162,10 +2162,10 @@ const guardedAgentTypes = () => {
   return [...m[1].matchAll(/"([^"]+)"/g)].map(([, v]) => v);
 };
 
-test("the git guard's guarded list is the three guarded agents' names and their namespaced forms", () => {
+test("the git guard's guarded list is the four guarded agents' names and their namespaced forms", () => {
   const plugin = JSON.parse(read(".claude-plugin/plugin.json")).name;
   const expected = [];
-  for (const agent of ["agents/task-reviewer.md", "agents/red-team-reviewer.md", "agents/implementer.md"]) {
+  for (const agent of ["agents/task-reviewer.md", "agents/red-team-reviewer.md", "agents/implementer.md", "agents/spec-reviewer.md"]) {
     const name = read(agent).match(/^name:\s*(\S+)\s*$/m)?.[1];
     assert.ok(name, `${agent} must carry a frontmatter name:`);
     expected.push(name, `${plugin}:${name}`);
@@ -2173,7 +2173,7 @@ test("the git guard's guarded list is the three guarded agents' names and their 
   assert.deepEqual(
     guardedAgentTypes(),
     expected,
-    `${GIT_GUARD_SRC}'s GUARDED_AGENT_TYPES must be exactly the three guarded agents' frontmatter ` +
+    `${GIT_GUARD_SRC}'s GUARDED_AGENT_TYPES must be exactly the four guarded agents' frontmatter ` +
       "names and their namespaced forms — the harness passes the namespaced spelling (docs/platform-notes.md § (e)), " +
       "and drift from an agent's name: would leave that origin unguarded"
   );
