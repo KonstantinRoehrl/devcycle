@@ -74,7 +74,7 @@ skills-into-playbooks decision — see `docs/decisions/README.md` 2026-09-29.
 
   [Amended 2026-10-02: `enum` is still rejected, but the schema does take a value list —
   `options`, an array of strings — so allowed values no longer live only in description text.
-  The fixed-set knobs declare it — seven since `executionMode` joined them on 2026-10-13; see § (g)
+  The fixed-set knobs declare it — eight since `handoffNotification` joined them on 2026-10-16; see § (g)
   and `docs/decisions/README.md` 2026-10-02.]
 - Skills/commands must never treat `${user_config.KEY}` inline text as always-resolved. Required
   authoring pattern: quote the placeholder and instruct the model — "if this still reads as a
@@ -358,8 +358,8 @@ the plugin's minimum Claude Code version and the version CI pins. Only the valid
 bisected, not how each release renders the pick-list.
 
 **Consequence.** `profile`, `gitPolicy`, `docTrackingPolicy`, `reviewDepth`, `onDeviceGate`,
-`subagentBudget` and `executionMode` declare `options`. `scripts/validate.mjs` fails a malformed list
-the same way the loader would, and holds each of the seven to `scripts/resolve-knobs.mjs`'s `ROSTER` values, with
+`subagentBudget`, `handoffNotification` and `executionMode` declare `options`. `scripts/validate.mjs` fails a malformed list
+the same way the loader would, and holds each of the eight to `scripts/resolve-knobs.mjs`'s `ROSTER` values, with
 `auto` first on the two knobs whose fallback is a profile row.
 
 ## (h) A `--plugin-dir` load sees no configured values

@@ -247,6 +247,7 @@ gated by `userConfig.crossModelReview`.
   "learnStalenessDays": 14,
   "learnSessionCap": 100,
   "subagentBudget": "off | warn | enforce",
+  "handoffNotification": "off | terminal | push | both",
   "executionMode": "ask | manual | unattended"
 }
 ```
@@ -298,6 +299,10 @@ gated by `userConfig.crossModelReview`.
   adds a budget note to a subagent's next tool result once it passes 15% of its context window,
   then to every fifth one; `enforce` also refuses reads at 20%; `off` does neither. A fork or a
   teammate is never limited. It is profile-independent, so it takes no `auto`.
+- `handoffNotification` (added 2026-10-16) is whether devcycle tells the user that a handoff is
+  safe to clear, and that an unattended run stopped for them: `off`, the default; `terminal`, raised
+  by the hooks module through Claude Code's own notification channel; `push`, a push notification;
+  or `both`. It is read from the cycle's `knobs:` line and is profile-independent, so it takes no `auto`.
 - `executionMode` (added 2026-10-13) is how `/devcycle:continue` runs the waves at execution start
   while the cycle has no `drive:` row: `ask`, the default, asks Unattended or Walk the waves
   manually; `manual` walks them in the session; `unattended` starts the driver. A recorded row

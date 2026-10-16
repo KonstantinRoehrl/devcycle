@@ -140,6 +140,18 @@
         "unattended"
       ],
       "description": "How /devcycle:continue runs a cycle's waves at the start of its execution stage, while the cycle has recorded no choice. One of: ask (asks Unattended or Walk the waves manually), manual (walks the waves in the session, no question), unattended (starts the unattended driver, no question). A cycle's recorded choice outranks a later change. Profile-independent. Default: ask."
+    },
+    "handoffNotification": {
+      "type": "string",
+      "title": "Handoff notification",
+      "default": "off",
+      "options": [
+        "off",
+        "terminal",
+        "push",
+        "both"
+      ],
+      "description": "Whether devcycle tells you when a handoff is safe to clear and when an unattended run stops for you. One of: off (no notification), terminal (Claude Code's own notification channel: a bell in Terminal.app, a banner in iTerm2, kitty or Ghostty), push (a push notification, where the session can send one), both. A cycle keeps the value it recorded. Profile-independent. Default: off."
     }
   }
 }
