@@ -2434,6 +2434,16 @@ test("an unattended start needs the user's answer in the session; a denied start
   assert.ok(!read("references/handoff.md").includes("`executionMode` knob they set"), "handoff.md still lets the knob opt a cycle in");
 });
 
+test("the stopped-run call in drive.md works with an empty detail and reads the push rule before relaying", () => {
+  const ends = sectionText(read("references/drive.md"), "when-the-run-ends").replace(/\s+/g, " ");
+  const call = ends.indexOf("--ready --action stopped");
+  assert.ok(call > -1, "drive.md no longer marks the handoff for a stop");
+  const after = ends.slice(call);
+  assert.ok(after.includes("omit `--reason` when `drive.gate.detail` is empty"), "an empty detail still has no way to send the stop notification");
+  assert.ok(after.includes("read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and relay"), "the watcher is no longer told to read the push rule before relaying");
+  assert.ok(!after.includes("no apostrophe ; & |"), "the inert-character list is back");
+});
+
 test("an answer that starts the driver on a state with no auto row writes the row first", () => {
   const actions = sectionText(read("references/drive.md"), "drive-actions");
   const gateRow = actions.split("\n").find((l) => l.startsWith("| `gate`"));

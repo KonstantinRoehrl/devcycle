@@ -135,11 +135,12 @@ When the `--wait` task returns, stop the follow monitor and act on the `next` it
   `drive.action`. A resumable end restarts through the start path, with no start confirm when this
   session answered a start question and with one when it only attached. A stop for a person is a
   `gate`; when `drive.gate.settled` is false, first run
-  `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action stopped --reason '<drive.gate.detail: one line, no apostrophe ; & | $( or backtick>'`
-  and relay its `notify:` lines as `references/handoff.md` says. After a `--stop` this
-  session ran, report the stop and end instead; the next `/devcycle:continue` asks.
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action stopped --reason '<one apostrophe-free line you write from drive.gate.detail>'`
+  (omit `--reason` when `drive.gate.detail` is empty), then read
+  `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and relay the `notify:` lines as it says. After a
+  `--stop` this session ran, report it and end instead; the next `/devcycle:continue` asks.
 
 **The watcher shares the account's limits.** Every `Monitor` expiry and relayed line is a turn, and
 one the usage limit rejects can leave the follow unarmed or the `--wait` unhandled. The driver runs
-on; the next `/devcycle:continue` picks the run back up (`attach` while it runs, the end's action
-after). A long wait for a usage-limit reset is reported once, with its resume time, never polled.
+on; the next `/devcycle:continue` resumes it. A long wait for a usage-limit reset is reported once,
+with its resume time, never polled.

@@ -52,6 +52,20 @@ test("withHandoffRow on a CRLF file with no trailing newline adds one CRLF-termi
   assert.equal(added.replaceAll("\r\n", "").match(/[\r\n]/g), null, "a bare CR or LF is left in the file");
 });
 
+test("withHandoffRow takes the line ending from the row it extends, else from the file's first line terminator, else LF", () => {
+  const stamp = "2026-10-16T10:00:00Z";
+  const stray = "# s\n- run: r\n- request: a\r\nb\n- stage: execution\n";
+  assert.equal(withHandoffRow(stray, "ready", stamp), `${stray}- handoff: ready ${stamp}\n`);
+  const lfLast = "# s\r\n- run: r\r\n- stage: execution\n";
+  assert.equal(withHandoffRow(lfLast, "ready", stamp), `${lfLast}- handoff: ready ${stamp}\n`);
+  const crlfLast = "# s\n- run: r\n- stage: execution\r\n";
+  assert.equal(withHandoffRow(crlfLast, "ready", stamp), `${crlfLast}- handoff: ready ${stamp}\r\n`);
+  const crlfNoTerminator = "# s\r\n- run: r\r\n- stage: execution";
+  assert.equal(withHandoffRow(crlfNoTerminator, "ready", stamp), `${crlfNoTerminator}\r\n- handoff: ready ${stamp}`);
+  assert.equal(withHandoffRow("", "ready", stamp), `- handoff: ready ${stamp}\n`);
+  assert.equal(withHandoffRow("# s\r\nbody\r\n", "ready", stamp), `# s\r\nbody\r\n- handoff: ready ${stamp}\r\n`);
+});
+
 test("cli --pending on a CRLF state file leaves only CRLF line endings", () => {
   const p = stateFile(STATE.replaceAll("\n", "\r\n"));
   assert.equal(run(["--state", p, "--pending"]).status, 0);
@@ -102,6 +116,27 @@ test("cli --ready --action clear prints the notify lines after the mark; continu
   }
 });
 
+test("notifyLines: a stop with no detail drops the reason clause instead of printing a dangling comma", () => {
+  for (const reason of [undefined, null, ""])
+    assert.deepEqual(notifyLines({ knob: "push", action: "stopped", reason }), ["notify: push devcycle: unattended run stopped, needs you"], String(reason));
+});
+
+test("cli --ready --action stopped accepts a missing or empty --reason and still names a given one", () => {
+  const stopped = "devcycle: unattended run stopped, needs you";
+  const withReason = "devcycle: unattended run stopped — stalled, needs you";
+  for (const args of [[], ["--reason", ""], ["--reason", "  "], ["--reason"]]) {
+    const p = stateFile();
+    const r = run(["--state", p, "--ready", "--action", "stopped", ...args]);
+    assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
+    assert.deepEqual(r.stdout.trim().split("\n").slice(1), [`notify: terminal ${stopped}`, `notify: push ${stopped}`], args.join(" "));
+    assert.match(readFileSync(p, "utf8"), /^- handoff: ready \S+$/m);
+  }
+  const r = run(["--state", stateFile(), "--ready", "--action", "stopped", "--reason", "stalled"]);
+  assert.deepEqual(r.stdout.trim().split("\n").slice(1), [`notify: terminal ${withReason}`, `notify: push ${withReason}`]);
+  const empty = run(["--state", stateFile(), "--ready", "--action", "clear", "--completed", "x", "--reason", ""]);
+  assert.equal(empty.status, 1, "an empty --reason is still rejected for the other actions");
+});
+
 test("cli in a driven session writes nothing and says so", () => {
   const p = stateFile();
   const r = run(["--state", p, "--ready", "--action", "clear", "--completed", "wave 1 of 2"], { DEVCYCLE_DRIVE_TOKEN: "t" });
@@ -118,7 +153,8 @@ test("cli usage errors exit 1 naming what is wrong, and leave the file alone", (
     [["--state", p, "--ready"], "--ready needs --action"],
     [["--state", p, "--ready", "--action", "later"], "--ready needs --action"],
     [["--state", p, "--ready", "--action", "clear"], "--action clear needs --completed"],
-    [["--state", p, "--ready", "--action", "stopped"], "--action stopped needs --reason"],
+    [["--state", p, "--ready", "--action", "stopped", "--reason", "a\nb"], "--reason must be one line"],
+    [["--state", p, "--ready", "--action", "clear", "--completed", ""], "--completed requires a label"],
     [["--state", p, "--pending", "--action", "clear"], "--pending takes no --action, --completed or --reason"],
     [["--state", p, "--ready", "--action", "clear", "--completed", "a\nb"], "--completed must be one line"],
     [["--pending"], "--state is required"],

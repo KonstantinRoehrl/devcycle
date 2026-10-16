@@ -28,10 +28,11 @@ export function parseHandoff(value) {
 export function withHandoffRow(text, state, stamp) {
   const row = `- handoff: ${state} ${stamp}`;
   if (ROW.test(text)) return text.replace(ROW, row);
-  const eol = text.includes("\r\n") ? "\r\n" : "\n"; // a hand-edited or Windows-checkout file keeps its endings
   const last = [...text.matchAll(ANY_ROW)].at(-1);
+  const end = last ? last.index + last[0].length : text.length;
+  // The row it extends decides the ending, so one stray CRLF in a body line cannot change the file's style.
+  const eol = /^\r?\n/.exec(text.slice(end))?.[0] ?? /\r?\n/.exec(text)?.[0] ?? "\n";
   if (!last) return `${text}${text === "" || text.endsWith("\n") ? "" : eol}${row}${eol}`;
-  const end = last.index + last[0].length;
   return `${text.slice(0, end)}${eol}${row}${text.slice(end)}`;
 }
 
@@ -40,7 +41,7 @@ export function notifyLines({ knob, action, completed, reason }) {
   const message =
     action === "clear" ? `devcycle: ${completed} done — safe to /clear + /devcycle:continue`
     : action === "fresh" ? `devcycle: ${completed} done — safe to start a fresh session and run /devcycle:continue`
-    : action === "stopped" ? `devcycle: unattended run stopped — ${reason}, needs you`
+    : action === "stopped" ? `devcycle: unattended run stopped${reason ? ` — ${reason}` : ""}, needs you`
     : null;
   return message ? (CHANNELS[knob] ?? []).map((channel) => `notify: ${channel} ${message}`) : [];
 }
@@ -72,11 +73,11 @@ export function cli(argv, env = process.env) {
   if (pending === (flags["--ready"] === true)) throw new Error("pass exactly one of --pending and --ready");
   const action = requireValue(flags, "--action", "an action");
   const completed = requireValue(flags, "--completed", "a label");
-  const reason = requireValue(flags, "--reason", "a reason");
+  // A --stop from another terminal ends the run with no detail, and the stop still has to notify.
+  const reason = action === "stopped" && !flags["--reason"]?.trim() ? null : requireValue(flags, "--reason", "a reason");
   if (pending && (action || completed || reason)) throw new Error("--pending takes no --action, --completed or --reason");
   if (!pending && !ACTIONS.includes(action)) throw new Error(`--ready needs --action, one of ${ACTIONS.join(", ")}`);
   if ((action === "clear" || action === "fresh") && !completed) throw new Error(`--action ${action} needs --completed <what just finished>`);
-  if (action === "stopped" && !reason) throw new Error("--action stopped needs --reason <why the run stopped>");
   for (const [name, value] of [["--completed", completed], ["--reason", reason]])
     if (value && /[\r\n]/.test(value)) throw new Error(`${name} must be one line`);
   return markHandoff({ statePath, state: pending ? "pending" : "ready", action, completed, reason, env });
