@@ -2432,3 +2432,16 @@ test("an unattended start needs the user's answer in the session; a denied start
     "plugin.json still says the unattended knob starts the driver with no question");
   assert.ok(!read("references/handoff.md").includes("`executionMode` knob they set"), "handoff.md still lets the knob opt a cycle in");
 });
+
+test("the handoff row: cycle and continue mark the stage pending, continue asks the not-ready question resume.md owns, and over budget waits for in-flight work", () => {
+  assert.ok(read("commands/cycle.md").includes('scripts/handoff-mark.mjs" --state .devcycle/state.md --pending'), "cycle.md no longer marks its first stage pending");
+  const cont = read("commands/continue.md");
+  assert.ok(cont.includes('scripts/handoff-mark.mjs" --state <the chosen state file> --pending'), "continue.md no longer marks the resumed stage pending");
+  assert.ok(cont.indexOf("--pending") > cont.indexOf("**Depth check first.**"), "continue.md marks pending before its depth check");
+  assert.ok(cont.includes("`handoff.ask`"), "continue.md § Execution resume no longer reads handoff.ask");
+  assert.ok(cont.includes("`handoff: pending`"), "continue.md step 2a no longer reads resume-check's handoff line");
+  const resume = read("references/resume.md");
+  assert.ok(resume.includes("**Resume anyway** · **Stop**"), "resume.md no longer holds the not-ready question");
+  assert.ok(resume.includes("Four optional rows sit outside the template"), "resume.md's optional-row count is stale");
+  assert.match(read("references/delegation.md"), /a stage never pauses mid-flight/, "the stage budget no longer says the boundary waits for in-flight work");
+});

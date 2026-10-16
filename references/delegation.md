@@ -36,7 +36,9 @@ Within one stage, the coordinator is **over budget** once either counter trips:
 
 File reads are themselves tool calls, so the read counter binds first in a read-heavy stage.
 Over budget means two things: delegate whatever work remains that is not a duty above, and
-stop at the next boundary rather than continuing through it. Keep both counts yourself: the hooks
+stop at the next boundary rather than continuing through it.
+That boundary arrives only once every dispatch in flight has handed back: over budget never shortens
+that wait, and a stage never pauses mid-flight. Keep both counts yourself: the hooks
 module's stage meter shows them only on the human's status line. A subagent's budget is the
 `subagentBudget` knob's tier: `warn`, the default, only adds a finish-up note to its tool results;
 only `enforce` also refuses its reads; `off` does neither.

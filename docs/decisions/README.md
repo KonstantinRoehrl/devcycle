@@ -36,33 +36,36 @@ roster row in references/config.md (+1) move the figures below; every closure th
 references/config.md takes in that row too. The handoff-mark boundary rule, the in-flight rule and
 the same-session pending rule in references/handoff.md raise its bytes and every closure citing it.
 The start confirm, the ! fallback and the stop notice in references/drive.md move its closures again.
+The not-ready question, the pending marks in commands/continue.md and commands/cycle.md, and the
+in-flight clause of references/delegation.md move commandMax and those closures.
 
 ```text
-budget: surface-budget.json surfaceTotal 6117
-budget: surface-budget.json commandMax 175
-budget: context-budget.json commands/continue.md 63739
-budget: context-budget.json commands/cycle.md 72635
+budget: surface-budget.json surfaceTotal 6141
+budget: surface-budget.json commandMax 181
+budget: context-budget.json commands/continue.md 65605
+budget: context-budget.json commands/cycle.md 74168
 budget: context-budget.json commands/learn.md 16775
 budget: context-budget.json commands/maintain.md 17954
 budget: context-budget.json commands/onboard.md 17063
 budget: context-budget.json commands/reconcile.md 24500
 budget: context-budget.json commands/review.md 25130
 budget: context-budget.json commands/verify.md 24228
-budget: context-budget.json playbooks/executing-waves.md 98956
-budget: context-budget.json playbooks/finishing-the-cycle.md 47678
-budget: context-budget.json playbooks/learning-from-sessions.md 62101
-budget: context-budget.json playbooks/maintaining-the-repo.md 64178
+budget: context-budget.json playbooks/executing-waves.md 99063
+budget: context-budget.json playbooks/finishing-the-cycle.md 47785
+budget: context-budget.json playbooks/learning-from-sessions.md 62250
+budget: context-budget.json playbooks/maintaining-the-repo.md 64327
 budget: context-budget.json playbooks/onboarding-a-repo.md 30612
-budget: context-budget.json playbooks/planning-waves.md 71534
-budget: context-budget.json playbooks/receiving-review.md 109979
-budget: context-budget.json playbooks/reviewing-code.md 91723
-budget: context-budget.json playbooks/reviewing-the-branch.md 49141
-budget: context-budget.json playbooks/scoping-the-request.md 29670
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 83228
-budget: context-budget.json playbooks/taking-the-fast-path.md 50057
-budget: context-budget.json playbooks/verifying-on-device.md 44665
-budget: context-budget.json playbooks/writing-the-findings-document.md 61538
+budget: context-budget.json playbooks/planning-waves.md 71641
+budget: context-budget.json playbooks/receiving-review.md 111380
+budget: context-budget.json playbooks/reviewing-code.md 91872
+budget: context-budget.json playbooks/reviewing-the-branch.md 49248
+budget: context-budget.json playbooks/scoping-the-request.md 29777
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 84629
+budget: context-budget.json playbooks/taking-the-fast-path.md 50164
+budget: context-budget.json playbooks/verifying-on-device.md 44772
+budget: context-budget.json playbooks/writing-the-findings-document.md 61645
 budget: context-budget.json references/config.md 14343
+budget: context-budget.json references/delegation.md 10750
 budget: context-budget.json references/handoff.md 10793
 ```
 

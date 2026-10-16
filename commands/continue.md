@@ -68,7 +68,8 @@ without that line, skip this section. In drive mode:
    value): surface the specific finding and ask the user how to proceed rather than
    continuing on the stale record. On success it also prints the stage's `entry:` and `note:`
    lines; when the `note:` names a human-required step, re-walk that step on resume rather than
-   assuming a stale `state.md` already cleared it.
+   assuming a stale `state.md` already cleared it. On its last line, `handoff: pending`, ask the
+   not-ready question `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file holds.
 2b. Resolve knobs per the knob channel
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/config.md knob-channel`
    prints — only now, once the ownership check and `resume-check` have passed:
@@ -136,6 +137,7 @@ probe, and prints one JSON object. Every gate stays this command's; it reads the
 - `branch.verdict` `switch-needed` or `integration` → step 4's rules.
 - `depth.band` `over-budget` or `hard-stop` → § Resume's depth rule; `unknown` → proceed.
 - `pendingDecision`, unless `drive.gate` has it → that task's `exhausted-unresolved` loop is the user's decision.
+- `handoff.ask` → step 2a's not-ready question, before acting on `drive.action`.
 
 `drive.action` then decides, per `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/drive.md drive-actions`.
 At `manual` or `none`, announce the position from `tasks` (each task's `position` and `next`) and
@@ -163,6 +165,10 @@ and tell the user this session is already too deep to resume into — `/clear` f
 `/devcycle:continue` again. Resuming anyway is the user's explicit call, not yours. If the
 probe exits non-zero, say the depth could not be measured, name its one-line reason, and
 proceed — an unmeasurable depth is not a deep one.
+
+**Mark the stage in progress** before it does any work:
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state <the chosen state file> --pending`;
+in a driven session the call changes nothing.
 
 Continue at the recorded stage by following the `entry:` and `note:` lines step 2a's
 `resume-check.mjs` printed. If it printed `no entry line`, report its reason, then read

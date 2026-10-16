@@ -46,10 +46,11 @@ cycle appends to the same record rather than starting a second one.
 state file that has no `knobs:` line yet write it; every other stage rewrite carries it forward
 unchanged, like `kind:` and `plan-counts:`. `configured:` is carried forward the
 same way; the next section owns its forms.
-Three optional rows sit outside the template. Only `/devcycle:continue`'s knob comparison and the
-knob-change question it gates write or drop the two `knobs-` rows, and only `/devcycle:continue` at
-execution start writes or rewrites `drive:`; every other rewrite carries all three forward, and
-`/devcycle:cycle`'s `stage: done` reuse resets them with the rest.
+Four optional rows sit outside the template. Only `/devcycle:continue`'s knob comparison and the
+knob-change question it gates write or drop the two `knobs-` rows, only `/devcycle:continue` at
+execution start writes or rewrites `drive:`, and only `scripts/handoff-mark.mjs` writes `handoff:`;
+every other rewrite carries all four forward, and `/devcycle:cycle`'s `stage: done` reuse resets
+them with the rest.
 
 - `- knobs-declined: <a fresh knobs: line's values>` — global values the user chose not to apply.
   **Keep this cycle's values** writes it, replacing any earlier row. While a comparison's fresh
@@ -71,6 +72,19 @@ execution start writes or rewrites `drive:`; every other rewrite carries all thr
 - `- drive: …` — how this cycle's waves run, unattended or walked in an interactive session.
   `references/drive.md` owns its two forms and who writes them (`docs/decisions/README.md`,
   2026-10-13 — Unattended execution).
+- `- handoff: pending <stamp>` or `- handoff: ready <stamp>` — whether it is safe to clear.
+  `pending`: a session is working this stage and has not reached its boundary. `/devcycle:cycle`
+  writes it after its first state write, `/devcycle:continue` once its gates pass, and a session
+  that goes on past a boundary without a clear (`references/handoff.md` § Await the context action).
+  `ready`: the last boundary completed, marked last at every boundary (`references/handoff.md`
+  § Handoff), or `--detach` handed the work in flight to the driver (`references/drive.md` § The
+  start path). No row reads as ready, and a driven session never writes one. When
+  `scripts/resume-check.mjs` prints `handoff: pending`, or `scripts/wave-setup.mjs` reports
+  `handoff.ask`, `/devcycle:continue` asks the not-ready question, ONE AskUserQuestion: "The
+  previous session's <stage> never reached its handoff — dispatched work may still be running, or
+  that session ended mid-stage." — **Resume anyway** · **Stop**. **Stop** ends the session with
+  nothing written. It is never asked in drive mode, beside a running driver, or where a recorded
+  driver end or stop asks its own question: `wave-setup.mjs` leaves `handoff.ask` false for each.
 
 `updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`
 taken when the field is written — never a narrated or estimated time.
