@@ -124,7 +124,7 @@
       "properties": {
         "kind": { "const": "event" },
         "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
-        "event": { "enum": ["gate-fail", "gate-pass-clean", "gate-deferred-foreign-change", "user-correction-at-gate", "review-reject", "depth-breach", "gate-ran"] },
+        "event": { "enum": ["gate-fail", "gate-pass-clean", "gate-deferred-foreign-change", "user-correction-at-gate", "review-reject", "depth-breach", "gate-ran", "spec-review"] },
         "stage": {
           "enum": [
             "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",

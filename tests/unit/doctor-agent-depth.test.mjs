@@ -71,6 +71,17 @@ test("impactScores: a gate-ran event is a neutral marker, never an impact row", 
   assert.deepEqual(impactScores(record, {}).map((s) => s.event), []);
 });
 
+test("impactScores: a spec-review event is a neutral marker, while other brainstorm events still score", () => {
+  const record = {
+    events: [
+      { kind: "event", event: "spec-review", stage: "brainstorm", result: "fail", culprit: null, ts: "2026-10-16T07:00:00Z" },
+      { kind: "event", event: "user-correction-at-gate", stage: "brainstorm", culprit: null, ts: "2026-10-16T07:05:00Z" },
+    ],
+    stages: [],
+  };
+  assert.deepEqual(impactScores(record, {}).map((s) => s.event), ["user-correction-at-gate"]);
+});
+
 // The section as renderReport prints it: from its heading up to the next heading.
 function agentDepthSection(report) {
   const lines = report.split("\n");
