@@ -12,13 +12,16 @@ export const usage = (depth: number, model = HAIKU) =>
 
 export type World = {
   base?: string; nested?: string; cwd?: string; state?: string | null; joined?: boolean; mtime?: number;
-  statusThrows?: boolean; surfaces?: string[]; hangAppend?: boolean; root?: string | null;
+  statusThrows?: boolean; surfaces?: string[]; hangAppend?: boolean; root?: string | null; notifyDenies?: boolean;
 };
 export type Run = { argv: string[]; init?: { stdin?: string } };
-export type Seen = { runs: Run[]; status: (string | undefined)[]; versionReads: number; exists: string[] };
+export type Seen = {
+  runs: Run[]; status: (string | undefined)[]; versionReads: number; exists: string[];
+  notified: { text: string; title?: string }[];
+};
 
 export function session(on: any, world: World = {}): Seen {
-  const seen: Seen = { runs: [], status: [], versionReads: 0, exists: [] };
+  const seen: Seen = { runs: [], status: [], versionReads: 0, exists: [], notified: [] };
   const state = () => (world.state === undefined ? stateText() : world.state);
   on('session.version', () => {
     seen.versionReads += 1;
@@ -44,6 +47,11 @@ export function session(on: any, world: World = {}): Seen {
     seen.status.push(e.text);
     return { value: undefined };
   });
+  on('ui.notify', (_$: unknown, e: { text: string; title?: string }) => {
+    if (world.notifyDenies) return { deny: 'notifications refused' };
+    seen.notified.push({ text: e.text, title: e.title });
+    return { value: { isSent: true, channel: 'terminal_bell' } };
+  });
   on('process.run', (_$: unknown, e: Run) => {
     seen.runs.push(e);
     if (e.argv[2] === 'append' && world.hangAppend) return new Promise(() => {});
@@ -56,6 +64,7 @@ export function session(on: any, world: World = {}): Seen {
 export type Engine = {
   usage?: (index: number, agentId?: string) => ReturnType<typeof usage> | null; toolText?: string; toolError?: boolean;
   listed?: string[]; onTool?: (e: { tool: string; command?: string }) => void;
+  bashStdout?: (command: string) => string | undefined;
 };
 
 // The bottom of every chain: a spawned agent's id is its `description`, so a test names its agents.
@@ -82,6 +91,8 @@ export function engine(on: any, eng: Engine = {}) {
   on('turn.complete', () => ({ text: '' }));
   on('tool.call', (_$: unknown, e: { tool: string; command?: string }) => {
     eng.onTool?.(e);
+    const stdout = e.tool === 'Bash' && e.command !== undefined ? eng.bashStdout?.(e.command) : undefined;
+    if (stdout !== undefined) return { result: { stdout, stderr: '' }, text: stdout };
     return eng.toolError ? { isError: true, result: text, text } : { result: { text }, text };
   });
   on('session.measure', (_$: unknown, e: { changed: unknown[] }) => ({ changed: e.changed }));
