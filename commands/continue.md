@@ -166,16 +166,16 @@ and tell the user this session is already too deep to resume into — `/clear` f
 probe exits non-zero, say the depth could not be measured, name its one-line reason, and
 proceed — an unmeasurable depth is not a deep one.
 
-**Mark the stage in progress** before it does any work:
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state <the chosen state file> --pending`;
-in a driven session the call changes nothing.
+If `resume-check.mjs` printed `closed:`, the cycle is done — say so and stop, marking nothing.
+Otherwise **mark the stage in progress** before any work (no-op when driven):
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state <the chosen state file> --pending`.
 
-Continue at the recorded stage by following the `entry:` and `note:` lines step 2a's
-`resume-check.mjs` printed. If it printed `no entry line`, report its reason, then read
+Continue at the recorded stage by following the `entry:` and `note:` lines `resume-check.mjs`
+printed. If it printed `no entry line`, report its reason, then read
 `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § Resuming at the recorded stage, which names the
-file that owns the dispatch. If it printed `closed:`, the cycle is done — say so and stop.
+file that owns the dispatch.
 
-From there the pipeline behaves exactly as under `/devcycle:cycle`: state-file updates, and at
+From there the pipeline behaves as under `/devcycle:cycle`: state-file updates, and at
 every stage boundary read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and emit its block.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

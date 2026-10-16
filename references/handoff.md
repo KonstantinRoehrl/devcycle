@@ -44,14 +44,13 @@ line leaves that stage's cost unattributable.
 **Mark the handoff ready, last.** After the state rewrite and that `stage` line, and before the
 block is emitted, run
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action <clear|fresh|continue> --completed '<stage>'`,
-with `--action` from the boundary's context action below and, at a wave → wave boundary,
-`--completed 'wave <n> of <m>'`. It rewrites the state file's `handoff:` row, whose meaning
+with `--action` from the boundary's context action below (`started` and `stopped` are the driver
+paths `references/drive.md` owns) and, at a wave → wave boundary, `--completed 'wave <n> of <m>'`. It rewrites the state file's `handoff:` row, whose meaning
 `references/resume.md` § The state file owns, and prints the notifications the
 `handoffNotification` knob asks for. A `notify: terminal` line is the hooks module's to raise. Send
 a `notify: push <message>` line's message with the PushNotification tool, or, where the session has
-no such tool, say so in one line and go on: a missing notification never holds a handoff. In a
-driven session the call changes nothing, since the driver owns the wave → wave boundary of an
-unattended run.
+no such tool, say so and go on: a missing notification never holds a handoff. In a
+driven session the call changes nothing.
 
 The run's `workload` record is not a boundary instruction: the `hooks/workload-sensor.mjs`
 commit-sensor refreshes it on each commit, so no `stage` boundary carries a step to write it.

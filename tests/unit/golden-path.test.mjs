@@ -2407,7 +2407,8 @@ test("handoff.md marks the handoff ready last at every boundary, forbids naming 
   const t = read("references/handoff.md");
   const ready = t.indexOf('scripts/handoff-mark.mjs" --state .devcycle/state.md --ready');
   assert.ok(ready > -1, "handoff.md no longer runs handoff-mark.mjs --ready at the boundary");
-  assert.ok(ready > t.indexOf("Every boundary also appends one `stage` line"), "the ready mark must come after the run-record stage line");
+  const stageLine = t.indexOf("Every boundary also appends one `stage` line");
+  assert.ok(stageLine > -1 && ready > stageLine, "the ready mark must come after the run-record stage line");
   assert.ok(ready < t.indexOf("`Context depth:` is measured"), "the ready mark must sit with the boundary sequence, before the block's field rules");
   assert.ok(t.includes("PushNotification"), "handoff.md no longer says who sends a notify: push line");
   const awaitSection = t.slice(t.indexOf("## Await the context action"));
@@ -2431,6 +2432,25 @@ test("an unattended start needs the user's answer in the session; a denied start
   assert.ok(!manifest.userConfig.executionMode.description.includes("starts the unattended driver, no question"),
     "plugin.json still says the unattended knob starts the driver with no question");
   assert.ok(!read("references/handoff.md").includes("`executionMode` knob they set"), "handoff.md still lets the knob opt a cycle in");
+});
+
+test("an answer that starts the driver on a state with no auto row writes the row first", () => {
+  const actions = sectionText(read("references/drive.md"), "drive-actions");
+  const gateRow = actions.split("\n").find((l) => l.startsWith("| `gate`"));
+  assert.ok(gateRow, "the drive actions table lost its gate row");
+  assert.ok(gateRow.includes("write the `auto` row first"), "the gate row no longer writes the auto row before the start path");
+  const flat = actions.replace(/\s+/g, " ");
+  const rowWriters = flat.indexOf("an answer that starts the driver on a state file with no `auto` row first writes the `auto` row with `via=answer`");
+  assert.ok(rowWriters > -1, "drive.md no longer says an answer that starts the driver writes the auto row first");
+  assert.ok(flat.slice(rowWriters).includes("**Resume unattended**, **Restart unattended**"), "the row-writer sentence no longer names the gate answers");
+});
+
+test("a closed cycle is never marked pending: continue.md stops on closed: before the --pending mark", () => {
+  const resume = sectionOf(read("commands/continue.md"), "Resume");
+  const closed = resume.indexOf("`closed:`");
+  const pending = resume.indexOf("handoff-mark.mjs\" --state <the chosen state file> --pending");
+  assert.ok(closed > -1 && pending > -1, "continue.md § Resume lost its closed: stop or its --pending mark");
+  assert.ok(closed < pending, "continue.md marks a stage pending before it stops on a closed cycle");
 });
 
 test("the handoff row: cycle and continue mark the stage pending, continue asks the not-ready question resume.md owns, and over budget waits for in-flight work", () => {

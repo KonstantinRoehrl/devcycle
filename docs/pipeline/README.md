@@ -252,8 +252,9 @@ flowchart TD
 ```
 
 `--stop` — or a signal (Ctrl-C, `kill`) — stops the running session, writes its record and the
-run's result, releases the lock and exits 130. The next `/devcycle:continue` restarts an
-interrupted run and asks before resuming a stopped one.
+run's result, releases the lock and exits 130. The next `/devcycle:continue` asks the start confirm
+(`references/drive.md`) before restarting an interrupted run, and the stopped run's question before
+resuming a stopped one.
 
 If auto mode or another permission check denies the start, the session prints a `!` line for you
 to type, which runs the start as your own command. Once the driver holds its lock the session

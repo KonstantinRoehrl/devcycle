@@ -498,7 +498,7 @@ test("drive.action: an auto style starts on no result, a resumable end or a cras
     ["resume", "gate", { reason: "needs-user", detail: "task 2: blocked", task: "2", settled: false, pendingDecision: null }]);
   const knob = setup(ended(cycle(), runEnd("stalled", { code: 5 })), { knobsLine: knobsWith("unattended") });
   assert.deepEqual([knob.drive.action, knob.drive.writeRow, knob.drive.gate.reason, knob.drive.recommend], ["gate", null, "stalled", null],
-    "the row comes from the gate question's answer, never from the knob");
+    "the row is written from the gate question's answer (references/drive.md), never from the knob");
   const manual = setup(ended(cycle({ state: [MANUAL_ROW] }), runEnd("stalled", { code: 5 })));
   assert.deepEqual([manual.drive.action, manual.drive.gate], ["manual", null]);
 });

@@ -44,7 +44,8 @@ With a cycle opted in, every `/devcycle:continue` at execution start does one of
 - **Attach.** Run `/devcycle:continue` while a driver is running and it attaches: overview and
   watch, nothing else — no other gate is acted on beside a running driver.
 - **Restart.** A run that ended resumably — interrupted, crashed, a driver error, transient
-  failures past `--max-backoff` — is restarted without a question. Two such ends in a row with no
+  failures past `--max-backoff` — is restarted after the one start confirm, which
+  `references/drive.md` owns. Two such ends in a row with no
   progress become a question instead, so a run that fails the same way never loops.
 - **Ask.** A run that stopped for you — a gate, a stall, an environment failure, the dollar cap, or
   your own `--stop` — becomes one question, its first option the matching restart
@@ -180,7 +181,7 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
   confirm the pid is still the driver's, `--stop` sends none: either way it leaves the request on
   disk and exits 1, and the driver stops before its next session or within a minute of a wait. A
   bare `kill <PID>` or Ctrl-C still works and records `interrupted`, which the next
-  `/devcycle:continue` restarts without asking. A `kill -9`, crash or reboot leaves the lock
+  `/devcycle:continue` restarts after its start confirm. A `kill -9`, crash or reboot leaves the lock
   behind; it reads as a crash and is restarted, and the next driver on the same machine reclaims
   the lock, even when the host's name changed meanwhile. A lock the driver cannot check is never
   reclaimed — one written on another machine, in another container (another pid namespace), or by

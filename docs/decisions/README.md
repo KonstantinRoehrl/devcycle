@@ -18,7 +18,10 @@ marked ready last at every boundary and checked by `/devcycle:continue`, which w
 resuming a stage whose previous session never reached its handoff. While dispatched work is in
 flight, no message names the clear. A new knob, `handoffNotification` (`off` | `terminal` |
 `push` | `both`, fallback `off`), notifies the user when a handoff is ready and when an unattended
-run stops for them.
+run stops for them. The value is `terminal`, not the approved spec's `bell`: the hooks module's
+`$.ui.notify` writes through the user's `preferredNotifChannel` (a bell in Terminal.app, a banner in
+iTerm2, kitty and Ghostty), so `bell` would overpromise. The spec text keeps `bell` because a
+planning artifact is not committed.
 
 **Why:** auto mode's classifier sees only the transcript. A start authorized by plugin config it
 never sees was denied as Instruction Poisoning on consecutive days (#357), while every start that

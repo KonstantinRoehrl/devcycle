@@ -76,9 +76,9 @@ them with the rest.
   `pending`: a session is working this stage and has not reached its boundary. `/devcycle:cycle`
   writes it after its first state write, `/devcycle:continue` once its gates pass, and a session
   that goes on past a boundary without a clear (`references/handoff.md` § Await the context action).
-  `ready`: the last boundary completed, marked last at every boundary (`references/handoff.md`
-  § Handoff), or `--detach` handed the work in flight to the driver (`references/drive.md` § The
-  start path). No row reads as ready, and a driven session never writes one. When
+  `ready`: the last boundary completed (`references/handoff.md`), `--detach` handed the work in
+  flight to the driver, or the watcher found the run stopped for a person (both
+  `references/drive.md`). No row reads as ready, and a driven session never writes one. When
   `scripts/resume-check.mjs` prints `handoff: pending`, or `scripts/wave-setup.mjs` reports
   `handoff.ask`, `/devcycle:continue` asks the not-ready question, ONE AskUserQuestion: "The
   previous session's <stage> never reached its handoff — dispatched work may still be running, or
