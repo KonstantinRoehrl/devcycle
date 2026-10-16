@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.26.0 — 2026-10-16
+
+- feat: review a spec against live code before approval and gate handoffs on readiness (#304, #355, #357)
+
 An unattended run now starts only on your answer in the session: the `executionMode` setting's
 `unattended` value puts **Start unattended** first instead of skipping the question, so auto mode's
 classifier sees your consent and no longer denies the start (#357). When a permission check denies

@@ -151,7 +151,7 @@ marker with the version the change lands in, since only the release computes tha
   default: ask
   values: [ask, manual, unattended]
   note: "how /devcycle:continue runs the waves at execution start while the cycle has no drive: row; profile-independent, so it takes no auto"
-- version: "unreleased"
+- version: "0.26.0"
   change: added
   key: handoffNotification
   default: off
