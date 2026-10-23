@@ -115,7 +115,7 @@ test("every resume-table row maps a task's last ledger event to its next action,
     [[entry(2, "review-verdict", "rejected (green gate: 3 failing)")], "rejected", "fix"],
     [[entry(2, "review-verdict", "rejected (missing findings file)", ".devcycle/findings/2-round-1.md")], "missing-findings", "redispatch-reviewer"],
     [[entry(2, "report-received", "rejected (missing report file)", ".devcycle/reports/2.md")], "missing-report", "redispatch-implementer"],
-    [[entry(2, "review-verdict", "deferred (concurrent sibling edits)")], "deferred", "regate-after-quiesce"],
+    [[entry(2, "review-verdict", "deferred (concurrent sibling edits)")], "deferred", "commit"],
     [[committed(2)], "committed", "done"],
     [[entry(2, "dispatched", "sweep 4 targets")], "sweep-dispatched", "rerun-sweep"],
     [[entry(2, "dispatched", "sweep 4 targets"), entry(2, "review-verdict", "applied-none")], "sweep-decision", "needs-user"],
@@ -243,7 +243,7 @@ test("every uncommitted task carries its brief inputs and the round its next rev
   ], "a missing findings file keeps its round open; a green-gate rejection closes it");
   const deferred = setup(cycle({ ledger: [committed(1), entry(2, "review-verdict", "deferred (concurrent sibling edits)")] }));
   assert.deepEqual(deferred.tasks.map(inputs), [["1", "done", undefined, undefined, undefined],
-    ["2", "regate-after-quiesce", "green-green", "node --test tests/b.test.mjs", 1]]);
+    ["2", "commit", "green-green", "node --test tests/b.test.mjs", 1]]);
 });
 
 // playbooks/executing-waves.md § Wave formation: a task is ready once its dependencies are committed,
