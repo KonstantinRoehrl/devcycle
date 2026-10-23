@@ -580,7 +580,7 @@ test("append --kind triage writes a schema-valid triage line", () => {
   const r = run(["append", "--run", runId, "--kind", "triage",
     "--requestKind", "bug", "--entryStage", "brainstorm"], runs);
   assert.strictEqual(r.status, 0, r.stderr);
-  const lines = readFileSync(recordPath(realpathSync(process.cwd()), runId), "utf8")
+  const lines = readFileSync(recordPath(gitToplevel(process.cwd()), runId), "utf8")
     .split("\n").filter(Boolean).map(JSON.parse);
   const triage = lines.find((o) => o.kind === "triage");
   assert.deepStrictEqual(triage,
@@ -627,13 +627,13 @@ test("append --kind review-writeback writes a schema-valid marker line (document
   assert.deepEqual(validate(marker, sub), []);
 });
 
-test("gate-deferred-foreign-change is a valid run-record event (#167)", () => {
+test("gate-deferred-foreign-change stays a valid run-record event, so records written before the per-commit proof validate (#167, #324)", () => {
   const schema = JSON.parse(readFileSync(new URL("../fixtures/run-record.schema.json", import.meta.url), "utf8"));
   const eventSub = (schema.oneOf ?? []).find((s) => s.properties?.kind?.const === "event");
   assert.ok(eventSub, "run-record schema has no `event` sub-schema");
   assert.ok(
     eventSub.properties.event.enum.includes("gate-deferred-foreign-change"),
-    "the event enum must accept gate-deferred-foreign-change so step 6 can journal a sibling-caused deferral"
+    "the event enum must keep gate-deferred-foreign-change: run records written before the per-commit proof carry it"
   );
 });
 
