@@ -267,8 +267,9 @@ test("a red re-proof of a commit with another on top is the user's decision, nev
   }
 });
 
-// The way out of `unproven-commit`: the commit stays, so a later call re-proves it and records it once
-// the proof is green. A red capture whose output happens to print `# exit 0` is no proof meanwhile.
+// The flaky-gate recovery from `unproven-commit` only: the commit stays, so a later call whose gate turns
+// green re-proves it and records it. A red capture whose output happens to print `# exit 0` is no proof
+// meanwhile.
 test("an unproven commit is re-proven by the next call, never taken as proven from a red capture that printed `# exit 0`", () => {
   const fx = fixture();
   try {
@@ -281,6 +282,28 @@ test("an unproven commit is re-proven by the next call, never taken as proven fr
     const green = commitTask(fx);
     assert.deepEqual([green.out.action, green.out.gate, green.out.sha], ["already-committed", "pass", red.out.sha]);
     assert.equal(ledgerLines(fx).filter((l) => l.includes("event=committed")).length, 1);
+  } finally {
+    cleanup(fx);
+  }
+});
+
+// A deterministic red never recovers by itself: the proof is of the buried sha, not of a fix on top,
+// and the undo cannot win while another commit sits on it. Resetting it off the branch by hand does.
+test("a deterministically red commit with a fix committed on top keeps returning unproven-commit until it is reset away", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "src/a.txt", "broken\n");
+    const gate = `test "$(cat src/a.txt)" = fixed`;
+    const red = commitTask(fx, { testCmd: `git -C '${fx.dir}' commit --quiet --allow-empty -m 'chore: on top'; ${gate}` });
+    assert.equal(red.out.action, "unproven-commit", JSON.stringify(red.out));
+    writeInto(fx.dir, "src/a.txt", "fixed\n");
+    git(fx, "commit", "--quiet", "-m", "fix: the task's red", "--", "src/a.txt");
+    for (let call = 0; call < 2; call++)
+      assert.deepEqual([commitTask(fx, { testCmd: gate }).out.action, git(fx, "rev-parse", "HEAD~2")], ["unproven-commit", red.out.sha]);
+    assert.ok(!ledgerLines(fx).some((l) => l.includes("event=committed")));
+    git(fx, "reset", "-q", `${red.out.sha}~1`);
+    const after = commitTask(fx, { testCmd: gate });
+    assert.deepEqual([after.out.action, after.out.gate], ["committed", "pass"], JSON.stringify(after.out));
   } finally {
     cleanup(fx);
   }
@@ -456,6 +479,33 @@ test("a proof that could not run undoes the commit, spends no round and is the u
     cleanup(fx);
   }
 });
+
+// A commit the ledger already records is never undone by a re-proof: its `committed` line and run-record
+// commit row would then name a sha the branch no longer has.
+for (const [why, breakProof, testCmd, action] of [
+  ["could not run", (fx) => writeFileSync(join(fx.dir, ".git/worktrees"), "a file where git keeps worktree registrations\n"), "true", "proof-unrunnable"],
+  ["is red", () => {}, "exit 1", "unproven-commit"],
+])
+  test(`a re-proof of an already-recorded commit that ${why} leaves the branch, index, ledger and run record alone`, () => {
+    const fx = fixture();
+    try {
+      writeInto(fx.dir, "src/a.txt", "a1\n");
+      const sha = commitTask(fx).out.sha;
+      const [linesBefore, rowsBefore] = [ledgerLines(fx), rows(fx)];
+      rmSync(join(fx.dir, ".devcycle/evidence/1-gate.txt"));
+      rmSync(join(fx.dir, ".git/worktrees"), { recursive: true, force: true });
+      breakProof(fx);
+      const { status, out } = commitTask(fx, { testCmd });
+      assert.equal(status, 0);
+      assert.equal(head(fx), sha, "the recorded commit stays on the branch");
+      assert.deepEqual([out.action, out.gate, out.sha], [action, "fail", sha], JSON.stringify(out));
+      assert.equal(git(fx, "status", "--porcelain", "--", "src"), "");
+      assert.deepEqual(ledgerLines(fx), linesBefore);
+      assert.deepEqual(rows(fx), rowsBefore);
+    } finally {
+      cleanup(fx);
+    }
+  });
 
 test("a file the undone commit added is intent-to-add again, as the implementer left it", () => {
   const fx = fixture();

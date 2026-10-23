@@ -14,9 +14,10 @@ or defers a red to a concurrent sibling. Ignored `node_modules`, `.venv`, `venv`
 directories are linked into the worktree, workspace links in a `node_modules` pointed at the
 worktree's own packages and `.bin` links resolving through them. Known limits, each a
 `# devcycle-proof-limit:` line in the gate capture: an editable install in a linked `.venv`/`venv`
-pointing into the checkout, and submodules, which the worktree never populates, so a gate reading
-one is red there. A `vendor/` holding Composer path-repository links is linked whole and may read
-the checkout; that is documented here only. One lock beside the ledger serializes the calls, and a
+pointing into the checkout, a linked `vendor/`, whose Composer path-repository links may read the
+checkout, and submodules, which the worktree never populates, so a gate reading one is red there.
+A `.bin` link with an absolute target into the checkout reads it too; that is documented in
+`references/evidence.md` only. One lock beside the ledger serializes the calls, and a
 second one returns `busy`. The run-record schema keeps `gate-deferred-foreign-change`, so records
 written before stay valid; `task-commit.mjs` writes it for no ledger line, old or new.
 
@@ -29,7 +30,15 @@ own and its green is the commit's. A registration a crash leaves behind is left 
 
 **Amended (the user, 2026-10-23):** a proof that could not run is no longer treated like a red.
 The commit is undone as for one, but no round is spent and nothing is attributed to the task:
-`task-commit.mjs` returns `proof-unrunnable` with the reason, a user decision.
+`task-commit.mjs` returns `proof-unrunnable` with the reason, a user decision. A gate printing more
+than the capture's 256 MB buffer counts as could-not-run too. A re-proof of a commit the ledger
+already records as `committed` never undoes an unrunnable proof, since that line would then name a
+sha the branch no longer has: it returns `proof-unrunnable` and changes nothing.
+
+**Amended (branch review, 2026-10-23):** the same guard covers a red re-proof of a commit the ledger
+already records as `committed`. Design step 8 undid it, which left the `committed` line and the
+run-record row naming a sha the branch no longer has, and added a `rejected (green gate)` line
+after `committed`. It now returns `unproven-commit` and changes nothing; the user decides.
 
 **Budgets:** `references/evidence.md` grew 39 B (the proof-line bullet, the moved
 `foreign-change-check.mjs` invocation), charged to every closure that reads it: planning-waves,
@@ -43,21 +52,26 @@ fixes then added 136 B to `references/evidence.md` (what the known-limit line me
 every closure above that reads it whole — and receiving-review and sweeping-mechanical-changes, which
 had room before; executing-waves also carries its step 7 `unproven-commit` way out and
 `references/resume.md`'s restored `deferred` row. Those edits' three new lines raised
-`surfaceTotal` to 6146, and step 6's `proof-unrunnable` (+170 B, two lines) to 6148.
+`surfaceTotal` to 6146, and step 6's `proof-unrunnable` (+170 B, two lines) to 6148. The second
+review round's fixes added 156 B to `references/evidence.md` (the `vendor` and `.bin` limits),
+raising each closure above that reads it by that much, receiving-review and
+sweeping-mechanical-changes 162 B with `references/resume.md`'s +6 B; executing-waves rose 553 B,
+its step 6–7 account of an unproven commit's way out (+352 B) plus `references/ledger.md`'s +45 B.
+Their six new lines raised `surfaceTotal` to 6154.
 
 ```text
-budget: surface-budget.json surfaceTotal 6148
-budget: context-budget.json playbooks/executing-waves.md 99605
+budget: surface-budget.json surfaceTotal 6154
+budget: context-budget.json playbooks/executing-waves.md 100158
 budget: context-budget.json playbooks/learning-from-sessions.md 62274
 budget: context-budget.json playbooks/onboarding-a-repo.md 30636
-budget: context-budget.json playbooks/planning-waves.md 71988
-budget: context-budget.json playbooks/profiling-sessions.md 38802
-budget: context-budget.json playbooks/receiving-review.md 111514
-budget: context-budget.json playbooks/reviewing-code.md 92047
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 84787
-budget: context-budget.json playbooks/taking-the-fast-path.md 50330
-budget: context-budget.json playbooks/writing-the-findings-document.md 61811
-budget: context-budget.json references/evidence.md 12215
+budget: context-budget.json playbooks/planning-waves.md 72144
+budget: context-budget.json playbooks/profiling-sessions.md 38958
+budget: context-budget.json playbooks/receiving-review.md 111676
+budget: context-budget.json playbooks/reviewing-code.md 92203
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 84949
+budget: context-budget.json playbooks/taking-the-fast-path.md 50486
+budget: context-budget.json playbooks/writing-the-findings-document.md 61967
+budget: context-budget.json references/evidence.md 12371
 ```
 
 ## 2026-10-23 — `git worktree` stays denied to guarded dispatches (L16, #324)

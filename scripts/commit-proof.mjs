@@ -123,7 +123,8 @@ export function linkDependencyDirs(root, worktree) {
     if (basename(rel) === "node_modules") linkNodeModules(realRoot, worktree, join(root, rel), target);
     else {
       symlinkSync(join(root, rel), target);
-      if (basename(rel) !== "vendor") limits.push(...editableInstalls(realRoot, root, rel));
+      if (basename(rel) === "vendor") limits.push(`${rel} is linked whole: a Composer path repository in it can read the shared checkout`);
+      else limits.push(...editableInstalls(realRoot, root, rel));
     }
   }
   return limits;

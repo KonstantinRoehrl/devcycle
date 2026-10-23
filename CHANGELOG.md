@@ -5,12 +5,13 @@ task, runs the gate command in a scratch worktree checked out at that commit, an
 back if it fails, so a sibling task's half-finished edit can no longer fail a clean task (#324), and
 a pass always belongs to the commit that landed (#336). Ignored `node_modules`, `.venv`, `venv` and
 `vendor` directories are linked into that worktree, workspace packages included. The gate capture
-names the commit, tree and parent it proved, plus any known limit: an editable Python install
-pointing into your checkout, or submodules, which the worktree does not populate. `--subset-cmd`
-and the `deferred` result are gone; two new outcomes take their place: `busy` (another gate is
-running; call again), `unproven-commit` (a failed proof the branch has already moved past,
-left for you to decide) and `proof-unrunnable` (the proof could not run at all, e.g. a full disk:
-the commit is undone, the task is not blamed and you decide).
+names the commit, tree and parent it proved, plus any known limit: an editable Python install or a
+linked `vendor` (a Composer path repository) that can read your checkout, or submodules, which the
+worktree does not populate. `--subset-cmd` and the `deferred` result are gone; three new outcomes
+take their place: `busy` (another gate is running; call again), `unproven-commit` (a failed proof of
+a commit the branch has already moved past, or one already recorded, left for you to decide) and
+`proof-unrunnable` (the proof could not run at all, e.g. a full disk: the commit is undone unless
+already recorded, the task is not blamed and you decide).
 
 ## 0.26.0 — 2026-10-16
 

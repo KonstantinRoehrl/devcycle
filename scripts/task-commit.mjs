@@ -242,7 +242,8 @@ function recordCommit(ctx, sha) {
 }
 
 // The gate: `sha` proven in its own worktree, the capture naming the tree it ran against. Green records
-// the commit; red undoes it and rejects the accepted round, unless the branch has moved past it. An
+// the commit; red undoes it and rejects the accepted round, unless the branch has moved past it or the
+// ledger already records it, whose `committed` line would then name a sha the branch no longer has. An
 // undo resets the checked-out branch's index, so with another branch checked out a red stops at
 // `branch-mismatch` and the commit stays.
 function proveAndRecord(ctx, sha, action, result) {
@@ -250,6 +251,8 @@ function proveAndRecord(ctx, sha, action, result) {
   const { run, proof, limits, unrunnable } = proveCommit(root, sha, ctx.testCmd);
   const evidenceRef = writeCapture(root, gateCapture(task), [run], [proofLine(proof), ...limits.map((l) => `${LIMIT_PREFIX} ${l}`)]);
   if (run.status === 0) return result(action, { gate: "pass", sha, appended: recordCommit(ctx, sha) });
+  if (latestKeyed(ctx.ledgerPath, task, "committed")?.ref === sha)
+    return result(unrunnable ? "proof-unrunnable" : "unproven-commit", { gate: "fail", sha, ...(unrunnable && { reason: run.output.trim() }), appended: [] });
   const current = currentBranch(root);
   if (current !== ctx.branchName)
     return result("branch-mismatch", { gate: "fail", sha, recorded: ctx.branchName, current, appended: [] });

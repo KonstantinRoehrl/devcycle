@@ -188,3 +188,17 @@ test("a repo with submodules carries a known-limit note: the proof worktree does
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a linked vendor directory carries a known-limit note: a Composer path repository in it can read the shared checkout", () => {
+  const dir = repo();
+  try {
+    writeInto(dir, ".gitignore", "vendor/\n");
+    commitAll(dir, "chore: ignore vendor");
+    writeInto(dir, "vendor/autoload.php", "<?php\n");
+    const { run, limits } = proveCommit(dir, rev(dir, "HEAD"), "test -L vendor");
+    assert.equal(run.status, 0);
+    assert.deepEqual(limits, ["vendor is linked whole: a Composer path repository in it can read the shared checkout"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

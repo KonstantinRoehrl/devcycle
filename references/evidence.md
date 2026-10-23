@@ -101,7 +101,9 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   without the declaration is a defect.
 - A `<task-id>-gate.txt` ends `# devcycle-proof: sha=<sha> tree=<tree> parent=<parent>`, then one
   `# devcycle-proof-limit: <note>` per known limit: an editable install in a linked `.venv`/`venv`
-  (it reads the shared checkout), or submodules (never populated in the proof worktree).
+  or a linked `vendor` (a Composer path repository) reads the shared checkout, and submodules are
+  never populated in the proof worktree. A `node_modules/.bin` link with an absolute target into
+  the shared checkout reads it too, with no note.
 - A repo may own a required-checks manifest at `tests/fixtures/required-gate-checks.json`: a JSON
   array of substrings that every whole-gate `cmd:` must contain, enforced by
   `evidence-completeness-check.mjs` (overridable via `--required-checks <path>`) and, on a plan's
