@@ -324,3 +324,53 @@ test("two same-wave tasks whose Files prose both says \"e.g.\" are not a collisi
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a brace list collides with the plain path it expands to in a same-wave sibling", () => {
+  const { dir, planPath } = makeFixture([
+    "### Task 1: A",
+    "**Files:**",
+    "- Create: `dir/{a,b}.mjs`",
+    "",
+    "### Task 2: B",
+    "**Files:**",
+    "- Modify: `dir/a.mjs`",
+    "",
+    "## Dispatch Map",
+    "- Wave 1: Task 1, Task 2",
+    "",
+  ].join("\n"));
+  try {
+    let stderr = "";
+    assert.throws(() => {
+      execFileSync(process.execPath, [SCRIPT, planPath], PIPE);
+    }, (err) => {
+      stderr = (err.stdout ?? "") + (err.stderr ?? "");
+      return err.status === 1;
+    });
+    assert.match(stderr, /Wave 1 -- Task 1 and Task 2 both list dir\/a\.mjs/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("two same-wave tasks whose Files prose both says step/row are not a collision", () => {
+  const { dir, planPath } = makeFixture([
+    "### Task 1: A",
+    "**Files:**",
+    "- Modify: `scripts/one.mjs` (adds the step/row column)",
+    "",
+    "### Task 2: B",
+    "**Files:**",
+    "- Modify: `scripts/two.mjs` (reads the step/row column)",
+    "",
+    "## Dispatch Map",
+    "- Wave 1: Task 1, Task 2",
+    "",
+  ].join("\n"));
+  try {
+    const out = execFileSync(process.execPath, [SCRIPT, planPath], PIPE);
+    assert.match(out, /ok/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
