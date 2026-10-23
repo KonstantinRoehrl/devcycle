@@ -5,6 +5,20 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-23 — budget raised for the Files-block path grammar (#354)
+
+**Decision:** `tests/fixtures/context-budget.json` raises `playbooks/planning-waves.md`
+71641→71813, by exactly the bytes the task template's `**Files:**` clause adds.
+
+**Why:** a plan's `**Files:**` block is now read with brace lists expanded and with prose that
+merely contains a `/` rejected. Two of those rules change what a plan author must write — an
+extensionless path outside its `Create:`/`Modify:`/`Test:` list counts only as a code span — and
+the task template is the one place a plan author is told the block's grammar.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 71813
+```
+
 ## 2026-10-16 — An unattended start needs the user's answer in the session; handoffs record when they are safe (#357, #355)
 
 **Decision:** `/devcycle:continue` starts the unattended driver only in a session where the user

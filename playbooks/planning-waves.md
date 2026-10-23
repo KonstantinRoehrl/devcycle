@@ -84,7 +84,9 @@ version floors, dependency limits, naming and copy rules, platform requirements 
 copied verbatim, implicitly part of every task's requirements); and `## Quality Constraints` above.
 
 **Task template — each task carries, in this order:** an H3 `Task N: <Component Name>`; `**Files:**`
-(Create / Modify, with `path.py:123-145` line ranges where they help / Test); `**Interfaces:**` (Consumes
+(Create / Modify, with `path.py:123-145` line ranges where they help / Test; a `{a,b}` brace list
+declares one path per alternative, and outside the comma list right after a `Create:`/`Modify:`/`Test:`
+label an extensionless path counts only as a code span); `**Interfaces:**` (Consumes
 — what this task uses from earlier tasks, exact signatures; Produces — what later tasks rely on, exact
 function names and parameter and return types); the declaration lines below plus the
 `**Quality constraints:**` line above and a `**Lessons:**` line right after it — emitted empty by
