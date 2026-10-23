@@ -115,6 +115,10 @@ test("a green gate commits only the task's changed Files with the subject and th
     assert.deepEqual(events(fx), ["gate-pass-clean"]);
     assert.ok(rows(fx).some((r) => r.kind === "commit" && r.taskId === "1" && r.sha === out.sha));
     assert.deepEqual(out.appended, ["1/committed/0/0", "rr:event", "rr:commit"]);
+    assert.match(readFileSync(join(fx.dir, ".devcycle/evidence/1-gate.txt"), "utf8"), new RegExp(
+      `\\n# exit 0\\n# devcycle-proof: sha=${out.sha} tree=${git(fx, "rev-parse", "HEAD^{tree}")} parent=${git(fx, "rev-parse", "HEAD~1")}\\n$`));
+    assert.equal(git(fx, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1,
+      "the proof worktree is removed");
   } finally {
     cleanup(fx);
   }
@@ -288,34 +292,67 @@ test("a red gate after round 3's acceptance exhausts the review loop: a user dec
   }
 });
 
-test("a sibling-caused red with a green subset is deferred, never attributed", () => {
+// #324: a gate that observes the whole repo used to go red on a sibling's uncommitted edit. The proof
+// runs at the task's commit, where that edit does not exist.
+test("a sibling's uncommitted edit cannot redden the proof: the task commits and the edit stays dirty", () => {
   const fx = fixture();
   try {
     writeInto(fx.dir, "src/a.txt", "done\n");
     writeInto(fx.dir, "src/b.txt", "broken\n");
-    const before = head(fx);
-    const { out } = commitTask(fx, { testCmd: "grep -q fine src/b.txt", extra: ["--subset-cmd", "grep -q done src/a.txt"] });
-    assert.equal(out.action, "deferred");
-    assert.equal(out.gate, "deferred");
-    assert.equal(head(fx), before);
-    assert.match(ledgerLines(fx).at(-1), / task=1 event=review-verdict outcome=deferred \(concurrent sibling edits\) ref=\.devcycle\/evidence\/1-gate\.txt /);
-    assert.deepEqual(events(fx), ["gate-deferred-foreign-change"]);
-    assert.ok(!rows(fx).some((r) => r.kind === "verdict" && r.conformance === "fail"), "a deferral writes no conformance=fail line");
+    const { out } = commitTask(fx, { testCmd: "grep -q fine src/b.txt && grep -q done src/a.txt" });
+    assert.equal(out.action, "committed", JSON.stringify(out));
+    assert.equal(out.sha, head(fx));
+    assert.equal(git(fx, "diff", "--name-only"), "src/b.txt");
+    assert.deepEqual(events(fx), ["gate-pass-clean"]);
   } finally {
     cleanup(fx);
   }
 });
 
-test("a sibling-caused red whose subset is red too is the task's own; no pass row means no fail row", () => {
+test("a red proof undoes its commit: the branch is back at the parent and the edit stays, unstaged; no pass row means no fail row", () => {
   const fx = fixture({ acceptedRound: false });
   try {
     writeInto(fx.dir, "src/a.txt", "a1\n");
-    writeInto(fx.dir, "src/b.txt", "broken\n");
-    const { out } = commitTask(fx, { testCmd: "grep -q fine src/b.txt", extra: ["--subset-cmd", "grep -q done src/a.txt"] });
+    const before = head(fx);
+    const { out } = commitTask(fx, { testCmd: "grep -q done src/a.txt" });
     assert.equal(out.action, "gate-fail");
+    assert.equal(head(fx), before);
+    assert.equal(git(fx, "diff", "--name-only"), "src/a.txt");
+    assert.equal(git(fx, "diff", "--cached", "--name-only"), "");
     assert.match(ledgerLines(fx).at(-1), /outcome=rejected \(green gate: exit 1\)/);
     assert.deepEqual(events(fx), ["gate-fail"]);
     assert.ok(!rows(fx).some((r) => r.kind === "verdict"));
+  } finally {
+    cleanup(fx);
+  }
+});
+
+test("a file the undone commit added is intent-to-add again, as the implementer left it", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "docs/plan.md", PLAN.replace("- Modify: src/a.txt", "- Modify: src/a.txt\n- Create: src/new.txt"));
+    writeInto(fx.dir, "src/new.txt", "new\n");
+    git(fx, "add", "-N", "src/new.txt");
+    const { out } = commitTask(fx, { testCmd: "exit 1" });
+    assert.equal(out.action, "gate-fail");
+    assert.equal(git(fx, "ls-files", "src/new.txt"), "src/new.txt");
+    assert.equal(git(fx, "diff", "--name-only", "--", "src"), "src/new.txt");
+  } finally {
+    cleanup(fx);
+  }
+});
+
+test("a red proof the branch has moved past is the user's decision: the commit stays and nothing is recorded", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const linesBefore = ledgerLines(fx);
+    const { out } = commitTask(fx, { testCmd: `git -C '${fx.dir}' commit --quiet --allow-empty -m 'chore: on top'; exit 1` });
+    assert.equal(out.action, "unproven-commit", JSON.stringify(out));
+    assert.equal(out.gate, "fail");
+    assert.equal(git(fx, "rev-parse", "HEAD~1"), out.sha, "the unproven commit stays under the one made on top");
+    assert.deepEqual(ledgerLines(fx), linesBefore);
+    assert.deepEqual(events(fx), []);
   } finally {
     cleanup(fx);
   }
@@ -372,11 +409,25 @@ test("a review loop whose exhausted-unresolved status awaits the user is a user 
     writeInto(fx.dir, ".devcycle/findings/task-1-review-status.md", "status: exhausted-unresolved rounds: 3/3 residue: 1 carried-to: none\n");
     writeInto(fx.dir, "src/a.txt", "a1\n");
     const before = head(fx);
-    const { status, out } = commitTask(fx, { testCmd: "touch gate-ran" });
+    // An absolute path: the proof runs in a scratch worktree, where a relative one would land unseen.
+    const { status, out } = commitTask(fx, { testCmd: `touch '${join(fx.dir, "gate-ran")}'` });
     assert.equal(status, 0);
     assert.deepEqual([out.action, out.loopId], ["needs-user", "task-1-review"]);
     assert.equal(existsSync(join(fx.dir, "gate-ran")), false, "the gate is not run");
     assert.equal(head(fx), before);
+  } finally {
+    cleanup(fx);
+  }
+});
+
+test("a task with nothing to commit returns before any proof runs", () => {
+  const fx = fixture();
+  try {
+    const linesBefore = ledgerLines(fx);
+    const { out } = commitTask(fx, { testCmd: `touch '${join(fx.dir, "gate-ran")}'` });
+    assert.equal(out.action, "nothing-to-commit");
+    assert.equal(existsSync(join(fx.dir, "gate-ran")), false, "the gate is not run");
+    assert.deepEqual(ledgerLines(fx), linesBefore);
   } finally {
     cleanup(fx);
   }
@@ -420,8 +471,10 @@ test("a round-3 red gate whose status cannot be written appends no gate-fail lin
     acceptRound(fx, 3, 1, 1);
     mkdirSync(join(fx.dir, ".devcycle/findings/task-1-review-status.md/blocker"), { recursive: true });
     writeInto(fx.dir, "src/a.txt", "a1\n");
+    const before = head(fx);
     const { status, out } = commitTask(fx, { testCmd: "exit 1" });
     assert.equal(status, 3, JSON.stringify(out));
+    assert.equal(head(fx), before, "the red commit is undone before the status is written");
     assert.ok(!ledgerLines(fx).some((l) => l.includes("green gate")), "no gate-fail line without its status");
   } finally {
     cleanup(fx);
@@ -457,6 +510,7 @@ test("usage errors exit 2 and environment errors exit 3, both before anything is
       ["--trailers", "Devcycle-Task: forged/1"],
       ["--culprit", "not-a-real-culprit"],
       ["--bogus", "x"],
+      ["--subset-cmd", "true"],
     ]) {
       const { status, out } = commitTask(fx, { extra });
       assert.equal(status, 2, extra.join(" "));

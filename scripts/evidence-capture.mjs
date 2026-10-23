@@ -15,9 +15,11 @@ export function runShell(cwd, cmd) {
   return { cmd, status: r.status ?? 1, output: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
-export function writeCapture(root, rel, runs) {
+// `footer` lines follow the last run's `# exit <n>`, so the header stays the capture's first line.
+export function writeCapture(root, rel, runs, footer = []) {
   const abs = join(root, rel);
   mkdirSync(dirname(abs), { recursive: true });
-  atomicWrite(abs, runs.map((r) => `# devcycle-cmd: ${r.cmd}\n${r.output}# exit ${r.status}\n`).join("\n"));
+  const body = runs.map((r) => `# devcycle-cmd: ${r.cmd}\n${r.output}# exit ${r.status}\n`).join("\n");
+  atomicWrite(abs, body + footer.map((line) => `${line}\n`).join(""));
   return rel;
 }
