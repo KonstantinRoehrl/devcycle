@@ -6,10 +6,10 @@ const LABELS = new Set(["Create", "Modify", "Test"]);
 // (narrow-selector detection) and blast-radius-check.mjs (which extends it with a few more).
 export const TEST_FILE_SUFFIXES = [".test.mjs", ".test.js", ".test.ts", "_test.py"];
 
-// `trusted` skips only the path-shape gate — used by the explicit --files CSV, where the caller
-// has already asserted every token is a file, so a top-level extensionless name (Dockerfile,
-// Makefile, LICENSE) must survive. The **Files:**-block path leaves it off, keeping the gate that
-// rejects surrounding prose. The label and :N-M/`:` stripping are shared by both paths.
+// `trusted` skips the path-shape gate and the character denylist — used by the explicit --files CSV,
+// where the caller has already asserted every token is a file, so a top-level extensionless name
+// (Dockerfile, Makefile, LICENSE) must survive. The **Files:**-block path leaves it off, keeping the
+// gate that rejects surrounding prose. The label and line-anchor stripping are shared by both paths.
 // The trailing class includes `.` because an inline declaration ends its clause with one
 // ("Modify `scripts/a.mjs`. Test: ..."); a token that keeps it is a different string from its
 // bare twin, and wave-disjointness — which keys on the exact string — then misses the collision.
@@ -19,30 +19,103 @@ export const TEST_FILE_SUFFIXES = [".test.mjs", ".test.js", ".test.ts", "_test.p
 // On the trusted path there is no prose to disambiguate -- the caller asserted every token is a
 // file -- so the period always comes off: "CHANGELOG.md." kept it, and matchLessons (exact string
 // or glob) then withheld every lesson recorded against CHANGELOG.md.
-export function normalizeFileToken(raw, { trusted = false } = {}) {
+// `declared` marks a token extractFiles found right after its Create/Modify/Test label, where a
+// `/` alone makes a path (`bin/devcycle-root`, `commands/`). Anywhere else a `/` is as often prose
+// (`step/row`, `Keep/Drop`, `#!/usr/bin/env`), so an extensionless token counts only as one code
+// span: blast-radius-check greps for every declared basename, and `row` matched half the repo.
+const CODE_SPAN_RE = /^[(),.;:]*`[^`]+`[(),.;:]*$/;
+const LINE_ANCHOR_RE = /:\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$/;
+const EXTENSION_RE = /\.[A-Za-z0-9]+$/;
+// No repo path holds these, while code and template text does: `${CLAUDE_PLUGIN_ROOT}/x.md`, a
+// quoted string, a regex. Brackets, `$` and `+` stay allowed for target-repo routes (`app/[slug]/`).
+const NON_PATH_CHAR_RE = /["'\\`{}]/;
+
+export function normalizeFileToken(raw, { trusted = false, declared = false } = {}) {
   const text = String(raw);
+  const codeSpan = CODE_SPAN_RE.test(text);
   const stripsTrailingPeriod = trusted || text.includes("`") || text.includes("/");
-  let tok = text.replace(/^[`(),]+/, "").replace(stripsTrailingPeriod ? /[`(),.]+$/ : /[`(),]+$/, "");
-  tok = tok.replace(/:\d+-\d+$/, "").replace(/:$/, "");
+  let tok = text.replace(/^[`(),]+/, "").replace(stripsTrailingPeriod ? /[`(),.;:]+$/ : /[`(),;:]+$/, "");
+  tok = tok.replace(LINE_ANCHOR_RE, "");
   if (!tok || LABELS.has(tok) || tok === "-") return null;
-  if (!trusted && !/\//.test(tok) && !/\.[A-Za-z0-9]+$/.test(tok)) return null;
-  return tok;
+  if (trusted) return tok;
+  if (NON_PATH_CHAR_RE.test(tok)) return null;
+  const hasSlash = tok.includes("/");
+  if (declared) return hasSlash || EXTENSION_RE.test(tok) ? tok : null;
+  const hasExtension = EXTENSION_RE.test(tok.slice(tok.lastIndexOf("/") + 1));
+  return hasExtension || (codeSpan && hasSlash) ? tok : null;
 }
 
+// The index of the `}` closing the group that opens at `open`, or -1 when it never closes.
+function closingBrace(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+// Splits on the commas no brace group encloses. Text whose braces never balance splits on every
+// comma, as it did before brace lists existed, rather than becoming one piece.
+function splitOutsideBraces(text) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}") depth = Math.max(0, depth - 1);
+    else if (text[i] === "," && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return depth === 0 ? parts : text.split(",");
+}
+
+// Brace lists expand the way bash expands them, so `src/lib/{a,b}.ts` declares two files rather
+// than one string no path ever equals: task-commit then committed nothing for an accepted task.
+// Only a balanced group holding a top-level comma expands; `{a}`, `${VAR}` and `{1..3}` stay
+// literal, for the denylist above to reject.
+export function expandBraces(text) {
+  for (let open = text.indexOf("{"); open !== -1; open = text.indexOf("{", open + 1)) {
+    const close = closingBrace(text, open);
+    if (close === -1) continue;
+    const alternatives = splitOutsideBraces(text.slice(open + 1, close));
+    if (alternatives.length < 2) continue;
+    const head = text.slice(0, open);
+    const tails = expandBraces(text.slice(close + 1));
+    return alternatives.flatMap((alt) => expandBraces(alt).flatMap((mid) => tails.map((tail) => head + mid + tail)));
+  }
+  return [text];
+}
+
+// A token stays in declaration position while the list after its label continues: the previous
+// raw token ended in a comma (`- Create: commands/, skills/`).
 export function extractFiles(block) {
   const files = new Set();
+  let declared = false;
   for (const raw of block.split(/\s+/).filter(Boolean)) {
-    const tok = normalizeFileToken(raw);
-    if (tok) files.add(tok);
+    if (LABELS.has(raw.replace(/:$/, ""))) {
+      declared = true;
+      continue;
+    }
+    for (const piece of expandBraces(raw)) {
+      const tok = normalizeFileToken(piece, { declared });
+      if (tok) files.add(tok);
+    }
+    declared = declared && raw.endsWith(",");
   }
   return files;
 }
 
 export function parseFileList(csv) {
   const out = [];
-  for (const raw of String(csv).split(",")) {
-    const tok = normalizeFileToken(raw.trim(), { trusted: true });
-    if (tok) out.push(tok);
+  for (const raw of splitOutsideBraces(String(csv))) {
+    for (const piece of expandBraces(raw.trim())) {
+      const tok = normalizeFileToken(piece, { trusted: true });
+      if (tok) out.push(tok);
+    }
   }
   return out;
 }

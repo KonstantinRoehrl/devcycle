@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   normalizeFileToken,
+  expandBraces,
   extractFiles,
   parseFileList,
   taskBlocks,
@@ -277,4 +278,64 @@ test("the Verification gate is read from the header line only, never from a task
   const twoSpans = GATED_PLAN.replace(`\`${GATE}\``, "`npm test` and `npm run lint`");
   assert.equal(verificationGateField(twoSpans), "`npm test` and `npm run lint`");
   assert.equal(verificationGate(twoSpans), null);
+});
+
+test("expandBraces expands a comma group the way bash does and leaves every other brace literal", () => {
+  assert.deepEqual(expandBraces("src/lib/{a,b}.ts"), ["src/lib/a.ts", "src/lib/b.ts"]);
+  assert.deepEqual(expandBraces("a/{b,c}/{d,e}.mjs"), ["a/b/d.mjs", "a/b/e.mjs", "a/c/d.mjs", "a/c/e.mjs"]);
+  assert.deepEqual(expandBraces("a/{b,c/{d,e}}.mjs"), ["a/b.mjs", "a/c/d.mjs", "a/c/e.mjs"]);
+  // Code-span backticks and punctuation around the group survive, for normalizeFileToken to strip.
+  assert.deepEqual(expandBraces("`dir/{a,b}.mjs`."), ["`dir/a.mjs`.", "`dir/b.mjs`."]);
+  // No top-level comma, or no closing brace: not a list, so the text is returned as written.
+  for (const literal of ["{a}.mjs", "${CLAUDE_PLUGIN_ROOT}/x.md", "s/{1..3}.md", "s/{a,b.md"]) {
+    assert.deepEqual(expandBraces(literal), [literal], literal);
+  }
+});
+
+test("extractFiles expands a brace list into every path it declares", () => {
+  // task-commit stages only the paths in the map, so the unexpanded pattern committed nothing.
+  assert.deepEqual([...extractFiles("- Create: `src/lib/{a,b}.ts`")], ["src/lib/a.ts", "src/lib/b.ts"]);
+  assert.deepEqual([...extractFiles("- Modify: `a/{b,c}/{d,e}.mjs`.")],
+    ["a/b/d.mjs", "a/b/e.mjs", "a/c/d.mjs", "a/c/e.mjs"]);
+  assert.deepEqual([...extractFiles("- Modify: a/{b,c/{d,e}}.mjs")], ["a/b.mjs", "a/c/d.mjs", "a/c/e.mjs"]);
+  // A group with no comma stays literal, and a path still holding a brace is no repo path.
+  assert.deepEqual([...extractFiles("- Modify: `${CLAUDE_PLUGIN_ROOT}/x.md`, `src/{a}.ts`")], []);
+});
+
+test("extractFiles rejects prose that merely contains a slash, keeping the real path beside it", () => {
+  // blast-radius-check greps the repo for every declared file's basename, so `step/row` reported
+  // every file mentioning "row" as a referencer.
+  assert.deepEqual([...extractFiles("- Modify: `scripts/a.mjs` (adds the step/row column)")], ["scripts/a.mjs"]);
+  for (const prose of ["Keep/Drop", "9a/9b", "#!/usr/bin/env", "/10", "//", "`repoShape`/`issueBody`"]) {
+    assert.deepEqual([...extractFiles(`- Modify: \`scripts/a.mjs\` -- see ${prose} here`)], ["scripts/a.mjs"], prose);
+  }
+  // An identifier in a code span is no file either, or sibling tasks would collide on `main`.
+  assert.deepEqual([...extractFiles("- Modify: `scripts/a.mjs` -- exports `main` and `parseArgs`.")], ["scripts/a.mjs"]);
+});
+
+test("an extensionless path survives right after its label or as a code span, and nowhere else", () => {
+  assert.deepEqual([...extractFiles("- Modify: bin/devcycle-root")], ["bin/devcycle-root"]);
+  assert.deepEqual([...extractFiles("- Create: commands/, skills/")], ["commands/", "skills/"]);
+  assert.deepEqual([...extractFiles("- Create: {commands,skills}/")], ["commands/", "skills/"]);
+  assert.deepEqual([...extractFiles("- Modify: `scripts/a.mjs` (and `bin/devcycle-root`, its caller)")],
+    ["scripts/a.mjs", "bin/devcycle-root"]);
+  assert.deepEqual([...extractFiles("- Modify: `scripts/a.mjs` (under `docs/superpowers/`; untracked)")],
+    ["scripts/a.mjs", "docs/superpowers/"]);
+  // Bare in trailing prose it reads exactly like step/row, so it is not a declaration.
+  assert.deepEqual([...extractFiles("- Modify: `scripts/a.mjs` (and bin/devcycle-root)")], ["scripts/a.mjs"]);
+});
+
+test("target-repo path characters survive: brackets, dollar signs and plus signs", () => {
+  assert.deepEqual([...extractFiles("- Create: `app/[slug]/page.tsx`, `routes/$id.tsx`, `src/[id]/+page.svelte`")],
+    ["app/[slug]/page.tsx", "routes/$id.tsx", "src/[id]/+page.svelte"]);
+});
+
+test("a line anchor of any shape comes off the path, on both paths", () => {
+  assert.deepEqual([...extractFiles("- Modify: `scripts/doctor.mjs:565`, `scripts/wave-disjointness-check.mjs:24,31-43`")],
+    ["scripts/doctor.mjs", "scripts/wave-disjointness-check.mjs"]);
+  assert.equal(normalizeFileToken("scripts/a.mjs:7", { trusted: true }), "scripts/a.mjs");
+});
+
+test("parseFileList splits only on commas outside a brace list, then expands it", () => {
+  assert.deepEqual(parseFileList("src/{a,b}.ts, c.md"), ["src/a.ts", "src/b.ts", "c.md"]);
 });

@@ -497,3 +497,23 @@ test("in a driven session the commit still takes only the task's own Files: a di
     cleanup(fx);
   }
 });
+
+test("a brace-list Files path commits every file it expands to, and a re-run finds that commit", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "docs/plan.md", PLAN.replace("- Modify: src/a.txt", "- Modify: `dir/{a,b}.mjs`"));
+    writeInto(fx.dir, "dir/a.mjs", "a0\n");
+    writeInto(fx.dir, "dir/b.mjs", "b0\n");
+    commitAll(fx.dir, "chore: seed the brace-listed paths");
+    writeInto(fx.dir, "dir/a.mjs", "a1\n");
+    writeInto(fx.dir, "dir/b.mjs", "b1\n");
+    const { out } = commitTask(fx);
+    assert.equal(out.action, "committed", JSON.stringify(out));
+    assert.equal(git(fx, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"), "dir/a.mjs\ndir/b.mjs");
+    const again = commitTask(fx);
+    assert.equal(again.out.action, "already-committed", JSON.stringify(again.out));
+    assert.equal(again.out.sha, out.sha);
+  } finally {
+    cleanup(fx);
+  }
+});
