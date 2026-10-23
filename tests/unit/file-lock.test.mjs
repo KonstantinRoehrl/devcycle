@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { processStartTime, isLiveHolder, withFileLock } from "../../scripts/file-lock.mjs";
+import { LockTimeoutError, processStartTime, isLiveHolder, withFileLock } from "../../scripts/file-lock.mjs";
 
 const LOCK_MODULE = new URL("../../scripts/file-lock.mjs", import.meta.url).href;
 const ATOMIC_MODULE = new URL("../../scripts/atomic-write.mjs", import.meta.url).href;
@@ -75,6 +75,15 @@ test("withFileLock: a live holder is waited on until the timeout, then refused",
   assert.throws(() => withFileLock(target, () => "ran", { timeoutMs: 150, pollMs: 10 }),
     /^Error: file-lock: timed out waiting for .*ledger\.md\.lock$/);
   assert.deepEqual(JSON.parse(readFileSync(`${target}.lock`, "utf8")), live, "a live holder's lock is never removed");
+});
+
+test("withFileLock: a timeout is a LockTimeoutError naming its lock; an error fn throws is not", () => {
+  const target = join(makeTempDir("file-lock-"), "ledger.md");
+  writeFileSync(`${target}.lock`, JSON.stringify({ pid: process.pid, startTime: processStartTime(process.pid), hostname: "h" }));
+  assert.throws(() => withFileLock(target, () => "ran", { timeoutMs: 50, pollMs: 10 }),
+    (err) => err instanceof LockTimeoutError && err.lockPath === `${target}.lock`);
+  const other = join(makeTempDir("file-lock-"), "other.md");
+  assert.throws(() => withFileLock(other, () => { throw new Error("boom"); }), (err) => !(err instanceof LockTimeoutError));
 });
 
 test("withFileLock: concurrent read-modify-write cycles in separate processes lose no line", async () => {
