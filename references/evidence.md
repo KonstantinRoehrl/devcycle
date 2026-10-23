@@ -82,11 +82,9 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
 - The captured command for `-before.txt` and `-after.txt` is always the repo's whole
   verification gate. `node "${CLAUDE_PLUGIN_ROOT}/scripts/evidence-completeness-check.mjs" <report>`
   also mechanizes the narrow-selector subset of this rule — a `cmd:` naming one test file or
-  carrying a test-name filter flag. The concurrent-wave case — a whole-suite red caused by a
-  sibling's uncommitted edit rather than the task under review — is mechanized by **the
-  concurrent-sibling guard** `node "${CLAUDE_PLUGIN_ROOT}/scripts/foreign-change-check.mjs" <task files>`,
-  which `playbooks/executing-waves.md` step 6 runs on a green-gate failure to defer a
-  sibling-caused red instead of attributing it. The check also requires an `(exit <n>)` status —
+  carrying a test-name filter flag. The concurrent-wave case, a whole-suite red from a sibling's
+  uncommitted edit, can reach an implementer's capture but not the coordinator's gate, which
+  proves each commit in a scratch worktree. The check also requires an `(exit <n>)` status —
   read from the report line, not file contents — on any present `- Before:`/`- After:` line of
   any class; a `red-green`/`green-green` report additionally needs its `- After:` file to carry a
   test-runner summary line. The normal `red-green` case is a task whose own new tests fail that
@@ -101,6 +99,8 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   declaration with no `— <reason>` (the em-dash before the reason) is a hard error —
   `malformed narrowing declaration (needs "<selector/scope> — <reason>")`. Silently narrowing
   without the declaration is a defect.
+- A `<task-id>-gate.txt` ends `# devcycle-proof: sha=<sha> tree=<tree> parent=<parent>`, then one
+  `# devcycle-proof-limit: <note>` per known limit.
 - A repo may own a required-checks manifest at `tests/fixtures/required-gate-checks.json`: a JSON
   array of substrings that every whole-gate `cmd:` must contain, enforced by
   `evidence-completeness-check.mjs` (overridable via `--required-checks <path>`) and, on a plan's
@@ -159,8 +159,9 @@ report. Reject when:
   only when the verdict cites an evidence artifact
   (`.devcycle/evidence/<task-id>-flaky.txt`) carrying the failing test
   run against **clean HEAD** and against **the change** at the **same iteration count** with their
-  actual pass/fail counts (the "clean 20/20; change 6/20" shape), and the #167 foreign-change check
-  ruled out concurrent-sibling pollution. `evidence-completeness-check.mjs` bounces a line
+  actual pass/fail counts (the "clean 20/20; change 6/20" shape), and the #167 foreign-change check,
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/foreign-change-check.mjs" <task files>`, ruled out
+  concurrent-sibling pollution. `evidence-completeness-check.mjs` bounces a line
   pairing a failure word with pre-existing, unrelated or environmental (flaky alone suffices) unless
   negated ("no X", "X: none") or citing a non-empty `<task-id>-flaky.txt`.
 - a `- Narrowing:` declaration's reason does not hold up: accept a legitimate concurrent-wave

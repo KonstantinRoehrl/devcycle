@@ -1037,6 +1037,15 @@ test("the green gate step runs the script that journals both gate outcomes", () 
   assert.ok(commit.includes('event: "gate-pass-clean"'), "a clean green gate must append a gate-pass-clean event");
 });
 
+// #324: the proof runs in a scratch worktree detached at the task's commit, so step 6 no longer defers a red
+// to a concurrent sibling; it stays the coordinator's own call.
+test("step 6 proves the task's commit in a scratch worktree detached at it, on the main thread only", () => {
+  const gate = read("playbooks/executing-waves.md").match(/\*\*Green gate \(REQUIRED, deterministic\)\.\*\*[\s\S]*?\n7\. /)?.[0] ?? "";
+  assert.match(gate, /run `task-commit\.mjs` on the main thread,\s+never from a dispatch/);
+  assert.match(gate, /in a scratch worktree detached at that commit/);
+  assert.doesNotMatch(gate, /--subset-cmd|deferred|quiesce/);
+});
+
 test("the run-record write-site table declares the event kind", () => {
   const row = read("references/ledger.md").split("\n").find((l) => l.startsWith("| `event` |"));
   assert.ok(row, "references/ledger.md's write-site table has no row for the event kind");

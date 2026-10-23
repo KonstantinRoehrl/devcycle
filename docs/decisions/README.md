@@ -5,6 +5,49 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-23 — The green gate proves each task commit in a scratch worktree (#324, #336)
+
+**Decision:** `scripts/task-commit.mjs` commits an accepted task, then runs its gate command in a
+scratch worktree detached at that commit (`scripts/commit-proof.mjs`), and takes the commit back
+when that proof is red. It no longer takes `--subset-cmd`, runs `scripts/foreign-change-check.mjs`
+or defers a red to a concurrent sibling. Ignored `node_modules`, `.venv`, `venv` and `vendor`
+directories are linked into the worktree, workspace links in a `node_modules` pointed at the
+worktree's own packages; an editable install into the checkout is recorded in the gate capture as a
+known limit. One lock beside the ledger serializes the calls, and a second one returns `busy`. The
+run-record schema keeps `gate-deferred-foreign-change`, so records written before stay valid.
+
+**Why:** the gate ran in the shared checkout while siblings were still editing it. A red there with
+foreign dirty paths fell back to the task's own tests, which a sibling could redden too when they
+observe the whole repo (#324), and a green proved a tree holding unfinished sibling work, not the
+commit that landed (#336). A worktree at the commit holds no sibling edit, so its red is the task's
+own and its green is the commit's. A registration a crash leaves behind is left to git's own gc
+(`gc.worktreePruneExpire`). Supersedes the 2026-10-12 entry's `--subset-cmd`.
+
+```text
+budget: surface-budget.json surfaceTotal 6143
+budget: context-budget.json playbooks/executing-waves.md 99215
+budget: context-budget.json playbooks/learning-from-sessions.md 62274
+budget: context-budget.json playbooks/onboarding-a-repo.md 30636
+budget: context-budget.json playbooks/planning-waves.md 71852
+budget: context-budget.json playbooks/profiling-sessions.md 38666
+budget: context-budget.json playbooks/reviewing-code.md 91911
+budget: context-budget.json playbooks/taking-the-fast-path.md 50194
+budget: context-budget.json playbooks/writing-the-findings-document.md 61675
+budget: context-budget.json references/evidence.md 12079
+```
+
+## 2026-10-23 — `git worktree` stays denied to guarded dispatches (L16, #324)
+
+**Decision:** `hooks/block-destructive-git.mjs` keeps `worktree` out of its read-only set, so an
+implementer, task reviewer, red-team reviewer or spec reviewer is still denied every `git worktree`
+call. No hook behavior changes.
+
+**Why:** the per-commit proof is the coordinator's, run inside `scripts/task-commit.mjs`, and a
+script's own git calls are child processes the hook never sees: it judges Bash tool calls only.
+Guarded dispatches judge from the gate capture. `add` writes `.git/worktrees/`, `add -b`/`-B`
+creates or moves a branch, `remove --force` deletes a checkout's uncommitted work, and `prune`
+drops other worktrees' registrations.
+
 ## 2026-10-23 — budget raised for the Files-block path grammar (#354)
 
 **Decision:** `tests/fixtures/context-budget.json` raises `playbooks/planning-waves.md`

@@ -30,8 +30,8 @@ without that line, skip this section. In drive mode:
   then end the session. A `wave-setup.mjs` stop passes its `stopReason`, with `--task <stopTask>`
   when set. A later gate passes `branch`, `scope-change`, `sweep-fallback` or `needs-user` (an
   `exhausted-unresolved` loop, a blocked implementer, a retry cap, a refused commit — `task-commit.mjs`
-  `nothing-to-commit` or `commit-failed` —, a human-required step a `note:` names, an upstream
-  escalation at `thorough`), with `--task` when the gate is one task's; any other gate, `needs-user`.
+  `nothing-to-commit`, `commit-failed` or `unproven-commit` —, a human-required step a `note:` names,
+  an upstream escalation at `thorough`), with `--task` when the gate is one task's; any other gate, `needs-user`.
 - In the first driven session, the one whose `drive.optInLogged` is false, append
   `- [<stamp>] task=drive event=user-decision outcome=unattended (model=<drive.model>) ref=.devcycle/state.md`
   to the ledger right after executing-waves' pre-flight writes its preamble, before any dispatch.
