@@ -93,9 +93,32 @@ export function expandBraces(text) {
   return [text];
 }
 
-// A balanced group holding a top-level comma is one token even across spaces (`src/{a, b}.ts`):
+// Whether the text between a group's braces is a list of alternatives inside ONE path token: no
+// code, quote or parenthesis (a "(replace `const o = {`)" aside is prose), and no alternative
+// holding a space once trimmed, outside the groups nested in it.
+function isPathAlternatives(inner) {
+  if (/[`()"']/.test(inner)) return false;
+  const alternatives = splitOutsideBraces(inner);
+  return alternatives.length > 1 && alternatives.every((alt) => {
+    const text = alt.trim();
+    for (let i = 0; i < text.length; i++) {
+      if (/\s/.test(text[i])) return false;
+      if (text[i] !== "{") continue;
+      const close = closingBrace(text, i);
+      if (close === -1) continue;
+      const nested = text.slice(i + 1, close);
+      if (splitOutsideBraces(nested).length > 1 ? !isPathAlternatives(nested) : /\s/.test(nested)) return false;
+      i = close;
+    }
+    return true;
+  });
+}
+
+// A group that is an alternatives list is one token even across spaces (`src/{a, b}.ts`):
 // splitting on whitespace first left `src/{a,` and `b}.ts` to be rejected one by one, and the
-// group's files with them. A group never spans lines, so a stray `{` cannot swallow the block.
+// group's files with them. Any other `{` splits on whitespace as it always did: fused up to a
+// later `}`, a stray `{` in prose or a code span dropped every file between the two. A group never
+// spans lines, so a stray `{` cannot swallow the block.
 function splitTokens(line) {
   const tokens = [];
   let start = -1;
@@ -104,7 +127,9 @@ function splitTokens(line) {
       if (start === -1) start = i;
       if (line[i] === "{") {
         const close = closingBrace(line, i);
-        if (close !== -1 && splitOutsideBraces(line.slice(i + 1, close)).length > 1) i = close;
+        // A code span opened before this token is still open here, so its `{` is code, not a group.
+        const insideEarlierSpan = (line.slice(0, start).match(/`/g) ?? []).length % 2 === 1;
+        if (close !== -1 && !insideEarlierSpan && isPathAlternatives(line.slice(i + 1, close))) i = close;
       }
     } else if (start !== -1) {
       tokens.push(line.slice(start, i));
@@ -138,11 +163,15 @@ function isPathOnlyLine(line, tokens) {
 
 // A token is in declaration position right after its label's colon (or the bare label word), after a
 // comma, and after `and`/`+` following a declared path. A label ending its line with the colon
-// extends that over the path-only lines below it.
+// extends that over the path-only lines below it. After `and`/`+` a bare slash token (`bin/b`,
+// `skills/`) is still prose (`a.py and step/row`) unless the path before it was bare too -- a list
+// of one kind -- so only then does a `/` alone make it a path.
 export function extractFiles(block) {
   const files = new Set();
   let declared = false;
   let afterDeclaredPath = false;
+  let afterConjunction = false;
+  let precededByBarePath = false;
   let listOpen = false;
   for (const line of block.split("\n")) {
     const tokens = splitTokens(line);
@@ -155,6 +184,8 @@ export function extractFiles(block) {
       if (LABEL_TOKEN_RE.test(raw)) {
         declared = true;
         afterDeclaredPath = false;
+        afterConjunction = false;
+        precededByBarePath = false;
         const parenEnd = raw.includes(":") ? -1 : labelParentheticalEnd(tokens, i + 1);
         if (parenEnd !== -1) i = parenEnd;
         listOpen = (raw.includes(":") || parenEnd !== -1) && i === tokens.length - 1;
@@ -163,17 +194,23 @@ export function extractFiles(block) {
       if (isConjunction(raw) && (declared || afterDeclaredPath)) {
         declared = true;
         afterDeclaredPath = false;
+        afterConjunction = true;
         continue;
       }
+      const slashAloneMakesPath = declared && !(afterConjunction && !precededByBarePath);
       let accepted = false;
+      let allBare = true;
       for (const piece of expandBraces(raw)) {
-        const tok = /\s/.test(piece) ? null : normalizeFileToken(piece, { declared });
+        const tok = /\s/.test(piece) ? null : normalizeFileToken(piece, { declared: slashAloneMakesPath });
         if (tok) {
           files.add(tok);
           accepted = true;
+          allBare &&= !EXTENSION_RE.test(tok.slice(tok.lastIndexOf("/") + 1));
         }
       }
       afterDeclaredPath = declared && accepted;
+      precededByBarePath = afterDeclaredPath && allBare;
+      afterConjunction = false;
       declared = declared && raw.endsWith(",");
     }
   }

@@ -403,3 +403,39 @@ test("a label alone on its line opens declaration position for the path-only lin
   assert.deepEqual([...extractFiles("- Modify:\n  commands/\n\n  skills/")], ["commands/"]);
   assert.deepEqual([...extractFiles("- Modify:\n- Create: x.md\n  skills/")], ["x.md"]);
 });
+
+test("a stray open brace in a code span or parenthetical fuses nothing, so the files around it survive", () => {
+  // Fusing ran on any `{` with a later `}` and a comma between, blind to backticks and parentheses:
+  // everything between became one whitespace-bearing token and every file in it dropped.
+  assert.deepEqual([...extractFiles("- Modify: `src/a.ts` (opens the `{` block), `src/b.ts` (closes it with `}`)")],
+    ["src/a.ts", "src/b.ts"]);
+  assert.deepEqual([...extractFiles("- Modify: `a.ts` (replace `const o = {` in `b.ts` and `c.ts`, then add `x, y }`)")],
+    ["a.ts", "b.ts", "c.ts"]);
+  assert.deepEqual([...extractFiles("- Modify: {see `a/b.mjs`, and `c.mjs`}")], ["a/b.mjs"]);
+  // A real group later on the same line still expands.
+  assert.deepEqual([...extractFiles("- Modify: `a.ts` (replace `const o = {` here), `src/{x, y}.ts`")],
+    ["a.ts", "src/x.ts", "src/y.ts"]);
+});
+
+test("a brace group still fuses across spaces when it is an alternatives list inside one path", () => {
+  assert.deepEqual([...extractFiles("- Modify: { a , b }.ts")], ["a.ts", "b.ts"]);
+  assert.deepEqual([...extractFiles("- Modify: src/{a, b}.ts, lib/{c, d}.ts")],
+    ["src/a.ts", "src/b.ts", "lib/c.ts", "lib/d.ts"]);
+  assert.deepEqual([...extractFiles("- Modify: src/{a, b/{c, d}}.ts")], ["src/a.ts", "src/b/c.ts", "src/b/d.ts"]);
+});
+
+test("after and / + a bare extensionless slash token is a path only when it continues a list of bare paths", () => {
+  // `step/row` after a ticked or dotted path is prose, and blast-radius-check would grep for `row`.
+  assert.deepEqual([...extractFiles("- Modify: `a.py` and step/row")], ["a.py"]);
+  assert.deepEqual([...extractFiles("- Modify: `a.py` + step/row")], ["a.py"]);
+  assert.deepEqual([...extractFiles("- Modify: `a.py` and `b.py` and Keep/Drop")], ["a.py", "b.py"]);
+  assert.deepEqual([...extractFiles("- Modify: a.py and Keep/Drop")], ["a.py"]);
+  assert.deepEqual([...extractFiles("- Modify: a.py and step/row and foo/bar")], ["a.py"]);
+  // A list of the same kind keeps every member.
+  assert.deepEqual([...extractFiles("- Create: bin/a and bin/b")], ["bin/a", "bin/b"]);
+  assert.deepEqual([...extractFiles("- Create: bin/a + bin/b and bin/c")], ["bin/a", "bin/b", "bin/c"]);
+  assert.deepEqual([...extractFiles("- Create: commands/ and skills/")], ["commands/", "skills/"]);
+  // A ticked path after the conjunction is path-shaped on its own.
+  assert.deepEqual([...extractFiles("- Modify: a.py and `tests/x.mjs`")], ["a.py", "tests/x.mjs"]);
+  assert.deepEqual([...extractFiles("- Modify: a.py and `bin/devcycle-root`")], ["a.py", "bin/devcycle-root"]);
+});
