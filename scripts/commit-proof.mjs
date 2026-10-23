@@ -4,13 +4,15 @@
 // the coordinator; a guarded dispatch could not run it, since hooks/block-destructive-git.mjs denies
 // it `git worktree`. A worktree a crash leaves registered names a directory makeTempDir's exit
 // handler removes, and git's own gc prunes such registrations (gc.worktreePruneExpire).
-import { rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "./temp-dir.mjs";
 import { runShell } from "./evidence-capture.mjs";
 
 export const PROOF_PREFIX = "# devcycle-proof:";
 export const LIMIT_PREFIX = "# devcycle-proof-limit:";
+const DEPENDENCY_DIRS = new Set(["node_modules", ".venv", "venv", "vendor"]);
 
 const git = (cwd, args) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 
@@ -29,6 +31,98 @@ export function provesGreen(captureText, sha) {
   return lines.includes("# exit 0") && lines.some((l) => l.startsWith(`${PROOF_PREFIX} sha=${sha} `));
 }
 
+// The path inside the shared checkout a symlink resolves to, or null when it resolves outside it or
+// nowhere.
+function checkoutRelative(realRoot, linkPath) {
+  let real;
+  try {
+    real = realpathSync(linkPath);
+  } catch {
+    return null;
+  }
+  const rel = relative(realRoot, real);
+  return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : null;
+}
+
+// npm, yarn and pnpm link workspace packages from node_modules back into the checkout's own sources,
+// at its top level and under @scope/. Keyed by the entry's path inside node_modules.
+function workspaceLinks(realRoot, nodeModules) {
+  const links = new Map();
+  const visit = (rel) => {
+    for (const entry of readdirSync(join(nodeModules, rel), { withFileTypes: true })) {
+      const entryRel = join(rel, entry.name);
+      if (!rel && entry.isDirectory() && entry.name.startsWith("@")) visit(entryRel);
+      else if (entry.isSymbolicLink()) {
+        const inside = checkoutRelative(realRoot, join(nodeModules, entryRel));
+        if (inside !== null) links.set(entryRel, inside);
+      }
+    }
+  };
+  visit("");
+  return links;
+}
+
+// Linked whole, a node_modules holding workspace links would hand the proof the shared checkout's
+// uncommitted sources. Such a one is rebuilt as a real directory of per-entry links instead, each
+// in-checkout link pointed at the same path inside the worktree.
+function linkNodeModules(realRoot, worktree, source, target) {
+  const links = workspaceLinks(realRoot, source);
+  if (!links.size) return symlinkSync(source, target);
+  const scopes = new Set([...links.keys()].filter((k) => k.includes("/")).map((k) => k.split("/")[0]));
+  const build = (rel) => {
+    mkdirSync(join(target, rel), { recursive: true });
+    for (const name of readdirSync(join(source, rel))) {
+      const entryRel = join(rel, name);
+      if (links.has(entryRel)) symlinkSync(join(worktree, links.get(entryRel)), join(target, entryRel));
+      else if (!rel && scopes.has(name)) build(entryRel);
+      else symlinkSync(join(source, entryRel), join(target, entryRel));
+    }
+  };
+  build("");
+}
+
+// An editable install (`pip install -e`) points a venv back at the shared checkout's sources. It is
+// reported as a known limit of the proof, never rewritten.
+function editableInstalls(realRoot, root, venvRel) {
+  const venv = join(root, venvRel);
+  const sitePackages = [join(venv, "Lib", "site-packages")];
+  if (existsSync(join(venv, "lib")))
+    for (const python of readdirSync(join(venv, "lib"))) sitePackages.push(join(venv, "lib", python, "site-packages"));
+  const limits = [];
+  for (const dir of sitePackages.filter((d) => existsSync(d)))
+    for (const name of readdirSync(dir)) {
+      if (!/\.(pth|egg-link)$/.test(name) && !name.startsWith("__editable__")) continue;
+      const file = join(dir, name);
+      if (!lstatSync(file).isFile()) continue;
+      const text = readFileSync(file, "utf8");
+      if (text.includes(realRoot) || text.includes(root))
+        limits.push(`editable install ${relative(root, file)} points into the shared checkout`);
+    }
+  return limits;
+}
+
+// Ignored dependency directories at any depth, listed once by git: --directory collapses an ignored
+// directory to one entry, so nothing inside one is walked. Each is linked into the worktree at the
+// same path, unless that path exists there already or its parent does not. A link is a symlink, which
+// a `dir/` ignore pattern does not match, so the worktree's own `git status` lists it as untracked.
+export function linkDependencyDirs(root, worktree) {
+  const realRoot = realpathSync(root);
+  const dirs = gitOut(root, ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"])
+    .split("\0").filter((p) => p.endsWith("/")).map((p) => p.slice(0, -1))
+    .filter((p) => DEPENDENCY_DIRS.has(basename(p)));
+  const limits = [];
+  for (const rel of dirs) {
+    const target = join(worktree, rel);
+    if (existsSync(target) || !existsSync(dirname(target))) continue;
+    if (basename(rel) === "node_modules") linkNodeModules(realRoot, worktree, join(root, rel), target);
+    else {
+      symlinkSync(join(root, rel), target);
+      if (basename(rel) !== "vendor") limits.push(...editableInstalls(realRoot, root, rel));
+    }
+  }
+  return limits;
+}
+
 // Runs `testCmd` in a scratch worktree detached at `sha` and always removes it again. A worktree that
 // cannot be made is a failed run carrying the reason, never a throw: the caller undoes the commit
 // either way.
@@ -41,7 +135,8 @@ export function proveCommit(root, sha, testCmd) {
     const add = git(root, ["worktree", "add", "--quiet", "--detach", dir, sha]);
     if (add.status !== 0)
       return { proof, limits: [], run: { cmd: testCmd, status: add.status ?? 1, output: `devcycle: the proof worktree could not be made: ${(add.stderr ?? "").trim()}\n` } };
-    return { proof, limits: [], run: runShell(dir, testCmd) };
+    const limits = linkDependencyDirs(root, dir);
+    return { proof, limits, run: runShell(dir, testCmd) };
   } catch (err) {
     return { proof, limits: [], run: { cmd: testCmd, status: 1, output: `devcycle: the proof could not run: ${err.message}\n` } };
   } finally {

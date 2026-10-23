@@ -2,7 +2,7 @@
 // a throwaway repo; nothing reads this repo's own checkout.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { proofLine, proveCommit, provesGreen } from "../../scripts/commit-proof.mjs";
 import { makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
@@ -78,4 +78,56 @@ test("provesGreen: a capture proves a sha green only when its proof line names t
   assert.equal(provesGreen(`# devcycle-cmd: false\n# exit 1\n${line}\n`, sha), false);
   assert.equal(provesGreen(`# devcycle-cmd: true\n# exit 0\n${line}\n`, "d".repeat(40)), false);
   assert.equal(provesGreen("# devcycle-cmd: true\n# exit 0\n", sha), false, "a capture from before the proof names no sha");
+});
+
+test("ignored dependency directories, nested ones too, are linked into the proof worktree; other ignored ones are not", () => {
+  const dir = repo();
+  try {
+    writeInto(dir, ".gitignore", "node_modules/\nbuild/\n");
+    writeInto(dir, "packages/p/index.txt", "p\n");
+    commitAll(dir, "chore: a package");
+    writeInto(dir, "node_modules/k/index.txt", "dep\n");
+    writeInto(dir, "packages/p/node_modules/q/index.txt", "nested dep\n");
+    writeInto(dir, "build/out.txt", "build output\n");
+    const { run } = proveCommit(dir, rev(dir, "HEAD"), "cat node_modules/k/index.txt packages/p/node_modules/q/index.txt && test ! -e build");
+    assert.deepEqual([run.status, run.output], [0, "dep\nnested dep\n"]);
+    assert.equal(sh("cat", ["node_modules/k/index.txt"], { cwd: dir }), "dep\n", "removing the worktree leaves the linked directory alone");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a workspace link in node_modules, top-level or scoped, is pointed at the worktree's own copy of the package", () => {
+  const dir = repo();
+  try {
+    writeInto(dir, ".gitignore", "node_modules/\n");
+    writeInto(dir, "packages/p/index.txt", "committed p\n");
+    commitAll(dir, "chore: a workspace package");
+    writeInto(dir, "node_modules/k/index.txt", "dep\n");
+    mkdirSync(join(dir, "node_modules/@s"));
+    symlinkSync("../packages/p", join(dir, "node_modules/p"));
+    symlinkSync("../../packages/p", join(dir, "node_modules/@s/p"));
+    writeInto(dir, "packages/p/index.txt", "uncommitted p\n");
+    const { run } = proveCommit(dir, rev(dir, "HEAD"), "cat node_modules/p/index.txt node_modules/@s/p/index.txt node_modules/k/index.txt");
+    assert.deepEqual([run.status, run.output], [0, "committed p\ncommitted p\ndep\n"]);
+    assert.equal(readlinkSync(join(dir, "node_modules/p")), "../packages/p", "the shared checkout's own link is untouched");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an editable install pointing into the shared checkout is reported as a known limit, not rewritten", () => {
+  const dir = repo();
+  try {
+    writeInto(dir, ".gitignore", ".venv/\n");
+    commitAll(dir, "chore: ignore the venv");
+    const site = ".venv/lib/python3.12/site-packages";
+    writeInto(dir, `${site}/__editable__.p.pth`, `${join(dir, "packages/p")}\n`);
+    writeInto(dir, `${site}/other.pth`, "/usr/lib/elsewhere\n");
+    const { run, limits } = proveCommit(dir, rev(dir, "HEAD"), "test -L .venv");
+    assert.equal(run.status, 0);
+    assert.deepEqual(limits, [`editable install ${site}/__editable__.p.pth points into the shared checkout`]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
