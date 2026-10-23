@@ -137,15 +137,18 @@ exit 2 or 3 a stop.
    On failure, acceptance is blocked: no commit (it undoes its own), `gate-fail`, back to the
    implementer with the gate evidence its ledger line names, then the next round's review; after
    round 3, `needs-user`. `busy`: another call holds the gate; call again once it returns.
+   `proof-unrunnable`: the proof could not run (its `reason` says why); the commit is undone and
+   no round is spent → the user decides (driven: a `needs-user` stop).
 7. **Branch re-check, then commit.** The same call re-runs
    `git rev-parse --abbrev-ref HEAD` against the recorded `branch:` line immediately before
-   committing — `branch-mismatch` stops the run rather than committing to the wrong branch — then,
-   on acceptance: a local commit of the task's changed `**Files:**` with your subject, which matches
-   the `Commit-convention:` line. `already-committed`: an interrupted run had committed, and only its
-   missing lines were added once that commit was proven. `nothing-to-commit`, `commit-failed` (a
-   commit hook refused it) or `unproven-commit` (a red proof it could not undo, the branch having
-   moved past it) → the user decides (driven: a `needs-user` stop naming the action). The `PostToolUse` commit-sensor
-   records `workload` itself.
+   committing — `branch-mismatch` stops the run rather than committing or undoing on the wrong
+   branch — then, on acceptance: a local commit of the task's changed `**Files:**` with your
+   subject, which matches the `Commit-convention:` line. `already-committed`: an interrupted run
+   had committed, and only its missing lines were added once that commit was proven.
+   `nothing-to-commit`, `commit-failed` (a commit hook refused it) or `unproven-commit` (a red
+   proof it could not undo, the branch having moved past it) → the user decides (driven: a
+   `needs-user` stop naming the action); an unproven commit stays, and a later call re-proves it
+   and records it once green. The `PostToolUse` commit-sensor records `workload` itself.
 
 **Safety valve.** In a driven session (`/devcycle:continue --drive`), read `depthBand` after every
 task script: on `hard-stop`, dispatch no new task, finish the tasks in flight, then end the session

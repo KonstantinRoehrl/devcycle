@@ -116,6 +116,8 @@ function findTaskCommit(cwd, range, value, files) {
   return null;
 }
 
+const currentBranch = (root) => gitOut(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+
 const gateCapture = (task) => `.devcycle/evidence/${task}-gate.txt`;
 
 function provenAlready(root, task, sha) {
@@ -195,10 +197,7 @@ function reconcileGateRows(ctx) {
   const { ledgerPath, task, culprit } = ctx;
   const specs = [];
   for (const e of taskEntries(ledgerPath, task)) {
-    if (e.event !== "review-verdict" || !e.key) continue;
-    if (e.outcome === DEFERRED_OUTCOME)
-      specs.push(["event", { event: "gate-deferred-foreign-change", stage: "execution", task, ts: e.stamp }, ["event", "task", "ts"]]);
-    if (!e.outcome.startsWith(GATE_FAIL_PREFIX)) continue;
+    if (e.event !== "review-verdict" || !e.key || !e.outcome.startsWith(GATE_FAIL_PREFIX)) continue;
     specs.push(["event", { event: "gate-fail", stage: "execution", task, culprit, attributedBy: "coordinator", ts: e.stamp }, ["event", "task", "ts"]]);
     const round = Number(e.key.split("/")[2]);
     // Only a round whose own reviewer wrote conformance=pass gets the gate's conformance=fail line.
@@ -243,13 +242,20 @@ function recordCommit(ctx, sha) {
 }
 
 // The gate: `sha` proven in its own worktree, the capture naming the tree it ran against. Green records
-// the commit; red undoes it and rejects the accepted round, unless the branch has moved past it.
+// the commit; red undoes it and rejects the accepted round, unless the branch has moved past it. An
+// undo resets the checked-out branch's index, so with another branch checked out a red stops at
+// `branch-mismatch` and the commit stays.
 function proveAndRecord(ctx, sha, action, result) {
   const { root, task } = ctx;
-  const { run, proof, limits } = proveCommit(root, sha, ctx.testCmd);
+  const { run, proof, limits, unrunnable } = proveCommit(root, sha, ctx.testCmd);
   const evidenceRef = writeCapture(root, gateCapture(task), [run], [proofLine(proof), ...limits.map((l) => `${LIMIT_PREFIX} ${l}`)]);
   if (run.status === 0) return result(action, { gate: "pass", sha, appended: recordCommit(ctx, sha) });
+  const current = currentBranch(root);
+  if (current !== ctx.branchName)
+    return result("branch-mismatch", { gate: "fail", sha, recorded: ctx.branchName, current, appended: [] });
   if (!undoCommit(root, ctx.branchName, sha)) return result("unproven-commit", { gate: "fail", sha, appended: [] });
+  // A proof that never ran rejects no round: the user decides, and the accept still stands.
+  if (unrunnable) return result("proof-unrunnable", { gate: "fail", reason: run.output.trim(), appended: [] });
   const round = latestKeyed(ctx.ledgerPath, task, "review-round")?.round ?? 0;
   // A red gate rejects the round its reviewer accepted, so it counts toward the review loop's cap;
   // past it, the red gate is the one item left unresolved. The status goes before the gate's line,
@@ -275,7 +281,7 @@ function commitTask(ctx, files, branch, result) {
   if (blocker)
     throw new UsageError(`task ${task} has no open accept to commit (its latest verdict: ${blocker}) — a fix after a red gate needs the next round's review first`);
 
-  const current = gitOut(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  const current = currentBranch(root);
   if (current !== branch.name) return result("branch-mismatch", { recorded: branch.name, current, appended: [] });
   const { changed, toAdd } = changedTaskFiles(root, files);
   if (!changed.length) return result("nothing-to-commit", { appended: [] });

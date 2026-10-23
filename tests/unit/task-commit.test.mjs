@@ -267,6 +267,44 @@ test("a red re-proof of a commit with another on top is the user's decision, nev
   }
 });
 
+// The way out of `unproven-commit`: the commit stays, so a later call re-proves it and records it once
+// the proof is green. A red capture whose output happens to print `# exit 0` is no proof meanwhile.
+test("an unproven commit is re-proven by the next call, never taken as proven from a red capture that printed `# exit 0`", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const red = commitTask(fx, { testCmd: `git -C '${fx.dir}' commit --quiet --allow-empty -m 'chore: on top'; echo '# exit 0'; exit 1` });
+    assert.equal(red.out.action, "unproven-commit", JSON.stringify(red.out));
+    const still = commitTask(fx, { testCmd: "exit 1" });
+    assert.deepEqual([still.out.action, still.out.sha], ["unproven-commit", red.out.sha], "the red capture is not read as a proof");
+    assert.ok(!ledgerLines(fx).some((l) => l.includes("event=committed")));
+    const green = commitTask(fx);
+    assert.deepEqual([green.out.action, green.out.gate, green.out.sha], ["already-committed", "pass", red.out.sha]);
+    assert.equal(ledgerLines(fx).filter((l) => l.includes("event=committed")).length, 1);
+  } finally {
+    cleanup(fx);
+  }
+});
+
+test("a red re-proof while the checkout is on another branch leaves that branch's index and the recorded branch alone", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    git(fx, "commit", "--quiet", "-m", "feat: land task one", "--trailer", `Devcycle-Task: ${RUN}/1`, "--", "src/a.txt");
+    const sha = head(fx);
+    git(fx, "checkout", "-q", "-b", "elsewhere");
+    writeInto(fx.dir, "src/a.txt", "staged on elsewhere\n");
+    git(fx, "add", "src/a.txt");
+    const { out } = commitTask(fx, { testCmd: "exit 1" });
+    assert.deepEqual([out.action, out.recorded, out.current, out.sha], ["branch-mismatch", "feat/topic", "elsewhere", sha], JSON.stringify(out));
+    assert.equal(git(fx, "rev-parse", "feat/topic"), sha, "the recorded branch is not moved");
+    assert.equal(git(fx, "diff", "--cached", "--name-only"), "src/a.txt", "the other branch's staged change stays staged");
+    assert.ok(!ledgerLines(fx).some((l) => l.includes("green gate")));
+  } finally {
+    cleanup(fx);
+  }
+});
+
 test("a second call while a live process holds the proof lock is busy and touches nothing", () => {
   const fx = fixture();
   try {
@@ -394,6 +432,31 @@ test("a red proof undoes its commit: the branch is back at the parent and the ed
   }
 });
 
+test("a proof that could not run undoes the commit, spends no round and is the user's decision; a real red still spends one", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const before = head(fx);
+    const linesBefore = ledgerLines(fx);
+    writeFileSync(join(fx.dir, ".git/worktrees"), "a file where git keeps worktree registrations\n");
+    const { status, out } = commitTask(fx);
+    assert.equal(status, 0);
+    assert.deepEqual([out.action, out.gate], ["proof-unrunnable", "fail"], JSON.stringify(out));
+    assert.match(out.reason, /the proof worktree could not be made/);
+    assert.equal(head(fx), before, "the commit is undone");
+    assert.equal(git(fx, "diff", "--name-only"), "src/a.txt");
+    assert.equal(git(fx, "diff", "--cached", "--name-only"), "");
+    assert.deepEqual(ledgerLines(fx), linesBefore, "no review-verdict line");
+    assert.deepEqual(events(fx), []);
+    rmSync(join(fx.dir, ".git/worktrees"));
+    const red = commitTask(fx, { testCmd: "exit 1" });
+    assert.equal(red.out.action, "gate-fail");
+    assert.match(ledgerLines(fx).at(-1), /outcome=rejected \(green gate: exit 1\) .* key=1\/review-verdict\/1\/1$/);
+  } finally {
+    cleanup(fx);
+  }
+});
+
 test("a file the undone commit added is intent-to-add again, as the implementer left it", () => {
   const fx = fixture();
   try {
@@ -436,6 +499,21 @@ test("gate rows a crash cut off after their ledger line are written by the task'
     assert.equal(out.action, "committed");
     assert.deepEqual(events(fx).sort(), ["gate-fail", "gate-pass-clean"]);
     assert.ok(rows(fx).some((r) => r.kind === "verdict" && r.conformance === "fail"));
+  } finally {
+    cleanup(fx);
+  }
+});
+
+// A ledger from before the per-commit proof can hold a deferral; it decides nothing and gets no row.
+test("an old deferred ledger line neither blocks the commit nor gets a retired gate-deferred-foreign-change row", () => {
+  const fx = fixture();
+  try {
+    appendFileSync(join(fx.dir, ".devcycle/ledger.md"),
+      "- [2026-01-01T00:02:00Z] task=1 event=review-verdict outcome=deferred (concurrent sibling edits) ref=.devcycle/evidence/1-gate.txt key=1/review-verdict/1/1\n");
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const { out } = commitTask(fx);
+    assert.equal(out.action, "committed", JSON.stringify(out));
+    assert.deepEqual(events(fx), ["gate-pass-clean"]);
   } finally {
     cleanup(fx);
   }

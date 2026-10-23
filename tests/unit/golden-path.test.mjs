@@ -1043,6 +1043,7 @@ test("step 6 proves the task's commit in a scratch worktree detached at it, on t
   const gate = read("playbooks/executing-waves.md").match(/\*\*Green gate \(REQUIRED, deterministic\)\.\*\*[\s\S]*?\n7\. /)?.[0] ?? "";
   assert.match(gate, /run `task-commit\.mjs` on the main thread,\s+never from a dispatch/);
   assert.match(gate, /in a scratch worktree detached at that commit/);
+  assert.match(gate, /`proof-unrunnable`: the proof could not run[\s\S]*?no round is spent[\s\S]*?`needs-user`/);
   assert.doesNotMatch(gate, /--subset-cmd|deferred|quiesce/);
 });
 

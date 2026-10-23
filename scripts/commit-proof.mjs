@@ -1,10 +1,10 @@
 // Proves one commit green where no sibling's uncommitted edit can reach it (#324, #336): the gate
 // command runs in a scratch worktree detached at the commit, so a red there is the commit's own and
-// a green is a green of the commit that landed. scripts/task-commit.mjs is its one caller, run by
-// the coordinator; a guarded dispatch could not run it, since hooks/block-destructive-git.mjs denies
-// it `git worktree`. A worktree a crash leaves registered names a directory makeTempDir's exit
-// handler removes, and git's own gc prunes such registrations (gc.worktreePruneExpire).
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+// a green is a green of the commit that landed. scripts/task-commit.mjs is its one caller, and running
+// the gate, committing and the ledger are coordinator duties (references/delegation.md § Coordinator
+// duties), never a dispatch's. A worktree a crash leaves registered names a directory makeTempDir's
+// exit handler removes, and git's own gc prunes such registrations (gc.worktreePruneExpire).
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "./temp-dir.mjs";
@@ -13,6 +13,7 @@ import { runShell } from "./evidence-capture.mjs";
 export const PROOF_PREFIX = "# devcycle-proof:";
 export const LIMIT_PREFIX = "# devcycle-proof-limit:";
 const DEPENDENCY_DIRS = new Set(["node_modules", ".venv", "venv", "vendor"]);
+const SUBMODULE_LIMIT = "submodules (.gitmodules) are not populated in the proof worktree";
 
 const git = (cwd, args) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 
@@ -25,10 +26,12 @@ function gitOut(cwd, args) {
 
 export const proofLine = ({ sha, tree, parent }) => `${PROOF_PREFIX} sha=${sha} tree=${tree} parent=${parent}`;
 
-// A gate capture proves `sha` green when its proof line names that sha and its run exited 0.
+// A gate capture proves `sha` green when its proof line names that sha and the run's own exit line,
+// the one right before it, reads 0. The gate's output may print an exit line of its own.
 export function provesGreen(captureText, sha) {
   const lines = captureText.split("\n");
-  return lines.includes("# exit 0") && lines.some((l) => l.startsWith(`${PROOF_PREFIX} sha=${sha} `));
+  const at = lines.findIndex((l) => l.startsWith(`${PROOF_PREFIX} sha=${sha} `));
+  return at > 0 && lines[at - 1] === "# exit 0";
 }
 
 // The path inside the shared checkout a symlink resolves to, or null when it resolves outside it or
@@ -64,17 +67,20 @@ function workspaceLinks(realRoot, nodeModules) {
 
 // Linked whole, a node_modules holding workspace links would hand the proof the shared checkout's
 // uncommitted sources. Such a one is rebuilt as a real directory of per-entry links instead, each
-// in-checkout link pointed at the same path inside the worktree.
+// in-checkout link pointed at the same path inside the worktree. `.bin` is rebuilt too, its links
+// copied verbatim: a relative one (`../<package>/cli.js`) then resolves through the worktree's
+// retargeted package links rather than through the shared checkout's.
 function linkNodeModules(realRoot, worktree, source, target) {
   const links = workspaceLinks(realRoot, source);
   if (!links.size) return symlinkSync(source, target);
   const scopes = new Set([...links.keys()].filter((k) => k.includes("/")).map((k) => k.split("/")[0]));
   const build = (rel) => {
     mkdirSync(join(target, rel), { recursive: true });
-    for (const name of readdirSync(join(source, rel))) {
-      const entryRel = join(rel, name);
+    for (const entry of readdirSync(join(source, rel), { withFileTypes: true })) {
+      const entryRel = join(rel, entry.name);
       if (links.has(entryRel)) symlinkSync(join(worktree, links.get(entryRel)), join(target, entryRel));
-      else if (!rel && scopes.has(name)) build(entryRel);
+      else if (!rel && (scopes.has(entry.name) || (entry.name === ".bin" && entry.isDirectory()))) build(entryRel);
+      else if (rel === ".bin" && entry.isSymbolicLink()) symlinkSync(readlinkSync(join(source, entryRel)), join(target, entryRel));
       else symlinkSync(join(source, entryRel), join(target, entryRel));
     }
   };
@@ -123,9 +129,10 @@ export function linkDependencyDirs(root, worktree) {
   return limits;
 }
 
-// Runs `testCmd` in a scratch worktree detached at `sha` and always removes it again. A worktree that
-// cannot be made is a failed run carrying the reason, never a throw: the caller undoes the commit
-// either way.
+// Runs `testCmd` in a scratch worktree detached at `sha` and always removes it again. A proof that
+// cannot run — no worktree, temp dir, link or spawn — is a failed run carrying the reason and marked
+// `unrunnable`, never a throw: the caller undoes the commit either way, but a gate that never ran
+// says nothing about the task.
 export function proveCommit(root, sha, testCmd) {
   const [tree, parent = "none"] = gitOut(root, ["show", "-s", "--format=%T %P", sha]).trim().split(" ");
   const proof = { sha, tree, parent };
@@ -134,11 +141,11 @@ export function proveCommit(root, sha, testCmd) {
     dir = makeTempDir("devcycle-proof-");
     const add = git(root, ["worktree", "add", "--quiet", "--detach", dir, sha]);
     if (add.status !== 0)
-      return { proof, limits: [], run: { cmd: testCmd, status: add.status ?? 1, output: `devcycle: the proof worktree could not be made: ${(add.stderr ?? "").trim()}\n` } };
-    const limits = linkDependencyDirs(root, dir);
-    return { proof, limits, run: runShell(dir, testCmd) };
+      return { proof, limits: [], unrunnable: true, run: { cmd: testCmd, status: add.status ?? 1, output: `devcycle: the proof worktree could not be made: ${(add.stderr ?? "").trim()}\n` } };
+    const limits = [...(existsSync(join(dir, ".gitmodules")) ? [SUBMODULE_LIMIT] : []), ...linkDependencyDirs(root, dir)];
+    return { proof, limits, unrunnable: false, run: runShell(dir, testCmd) };
   } catch (err) {
-    return { proof, limits: [], run: { cmd: testCmd, status: 1, output: `devcycle: the proof could not run: ${err.message}\n` } };
+    return { proof, limits: [], unrunnable: true, run: { cmd: testCmd, status: 1, output: `devcycle: the proof could not run: ${err.message}\n` } };
   } finally {
     if (dir) {
       git(root, ["worktree", "remove", "--force", dir]);
