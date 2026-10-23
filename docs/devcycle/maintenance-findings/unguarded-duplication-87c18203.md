@@ -1,0 +1,11 @@
+# The retry cap of 2 is defined in three scripts and restated in resume.md, so writers and the resume reader can disagree
+- finding-kind: maintenance-finding
+- finding-id: unguarded-duplication:87c18203
+- culprit-kind: unguarded-duplication
+- severity: medium
+- confidence: verified
+- affected-files: scripts/wave-setup.mjs, scripts/task-verdict.mjs, scripts/task-intake.mjs, references/resume.md
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

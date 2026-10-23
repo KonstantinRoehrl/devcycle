@@ -1,0 +1,11 @@
+# Cost math and stat helpers live in the 3,757-line doctor.mjs and five scripts import the whole report module for them; pricing.mjs owns only the price table
+- finding-kind: maintenance-finding
+- finding-id: misplaced-owner:6c8d799d
+- culprit-kind: misplaced-owner
+- severity: medium
+- confidence: verified
+- affected-files: scripts/doctor.mjs, scripts/pricing.mjs, scripts/dream.mjs, scripts/drive-execution.mjs, scripts/dispatch-cost.mjs, scripts/learn-report.mjs, scripts/refresh-observed-models.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

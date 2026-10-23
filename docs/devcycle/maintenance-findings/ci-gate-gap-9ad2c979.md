@@ -1,0 +1,11 @@
+# The full-history secret scan is skipped whenever an earlier validate step fails
+- finding-kind: maintenance-finding
+- finding-id: ci-gate-gap:9ad2c979
+- culprit-kind: ci-gate-gap
+- severity: low
+- confidence: verified
+- affected-files: .github/workflows/validate.yml
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

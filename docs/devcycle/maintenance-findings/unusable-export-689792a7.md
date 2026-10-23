@@ -1,0 +1,11 @@
+# evidence-completeness-check.mjs runs its CLI at import time, so its CONTRACT_VERSION export cannot be imported
+- finding-kind: maintenance-finding
+- finding-id: unusable-export:689792a7
+- culprit-kind: unusable-export
+- severity: low
+- confidence: verified
+- affected-files: scripts/evidence-completeness-check.mjs, tests/unit/golden-path.test.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

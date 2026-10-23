@@ -1,0 +1,11 @@
+# Stale comments and line citations in doctor.mjs, evidence-completeness-check.mjs, temp-dir-check.mjs, mechanical-sweep.js and golden-path.test.mjs state premises the code no longer has
+- finding-kind: maintenance-finding
+- finding-id: stale-comment:2d51fa08
+- culprit-kind: stale-comment
+- severity: low
+- confidence: verified
+- affected-files: scripts/doctor.mjs, scripts/evidence-completeness-check.mjs, scripts/temp-dir-check.mjs, workflows/mechanical-sweep.js, tests/unit/golden-path.test.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

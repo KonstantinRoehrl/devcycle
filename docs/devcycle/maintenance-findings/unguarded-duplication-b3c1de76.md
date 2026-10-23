@@ -1,0 +1,11 @@
+# The runtime-surface directory list is hand-copied into four scripts with no test tying the copies together
+- finding-kind: maintenance-finding
+- finding-id: unguarded-duplication:b3c1de76
+- culprit-kind: unguarded-duplication
+- severity: medium
+- confidence: verified
+- affected-files: scripts/validate.mjs, scripts/duplication-check.mjs, scripts/xref-check.mjs, scripts/budget-fixture-check.mjs, scripts/citation-grammar.mjs, scripts/doc-paths.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 
