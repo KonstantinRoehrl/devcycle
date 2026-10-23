@@ -19,10 +19,13 @@ export const TEST_FILE_SUFFIXES = [".test.mjs", ".test.js", ".test.ts", "_test.p
 // On the trusted path there is no prose to disambiguate -- the caller asserted every token is a
 // file -- so the period always comes off: "CHANGELOG.md." kept it, and matchLessons (exact string
 // or glob) then withheld every lesson recorded against CHANGELOG.md.
-// `declared` marks a token extractFiles found right after its Create/Modify/Test label, where a
-// `/` alone makes a path (`bin/devcycle-root`, `commands/`). Anywhere else a `/` is as often prose
-// (`step/row`, `Keep/Drop`, `#!/usr/bin/env`), so an extensionless token counts only as one code
-// span: blast-radius-check greps for every declared basename, and `row` matched half the repo.
+// `declared` marks a token the author named on purpose, where a `/` alone makes a path
+// (`bin/devcycle-root`, `commands/`): extractFiles passes it for a token right after its
+// Create/Modify/Test label, and a caller that passes nothing -- blast-radius-check reading an
+// override -- is naming a file deliberately too. Anywhere else a `/` is as often prose
+// (`step/row`, `Keep/Drop`, `#!/usr/bin/env`), so extractFiles passes `declared: false` and an
+// extensionless token counts only as one code span: blast-radius-check greps for every declared
+// basename, and `row` matched half the repo.
 const CODE_SPAN_RE = /^[(),.;:]*`[^`]+`[(),.;:]*$/;
 const LINE_ANCHOR_RE = /:\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$/;
 const EXTENSION_RE = /\.[A-Za-z0-9]+$/;
@@ -30,7 +33,7 @@ const EXTENSION_RE = /\.[A-Za-z0-9]+$/;
 // quoted string, a regex. Brackets, `$` and `+` stay allowed for target-repo routes (`app/[slug]/`).
 const NON_PATH_CHAR_RE = /["'\\`{}]/;
 
-export function normalizeFileToken(raw, { trusted = false, declared = false } = {}) {
+export function normalizeFileToken(raw, { trusted = false, declared = true } = {}) {
   const text = String(raw);
   const codeSpan = CODE_SPAN_RE.test(text);
   const stripsTrailingPeriod = trusted || text.includes("`") || text.includes("/");
@@ -81,7 +84,7 @@ export function expandBraces(text) {
   for (let open = text.indexOf("{"); open !== -1; open = text.indexOf("{", open + 1)) {
     const close = closingBrace(text, open);
     if (close === -1) continue;
-    const alternatives = splitOutsideBraces(text.slice(open + 1, close));
+    const alternatives = splitOutsideBraces(text.slice(open + 1, close)).map((alt) => alt.trim());
     if (alternatives.length < 2) continue;
     const head = text.slice(0, open);
     const tails = expandBraces(text.slice(close + 1));
@@ -90,21 +93,89 @@ export function expandBraces(text) {
   return [text];
 }
 
-// A token stays in declaration position while the list after its label continues: the previous
-// raw token ended in a comma (`- Create: commands/, skills/`).
+// A balanced group holding a top-level comma is one token even across spaces (`src/{a, b}.ts`):
+// splitting on whitespace first left `src/{a,` and `b}.ts` to be rejected one by one, and the
+// group's files with them. A group never spans lines, so a stray `{` cannot swallow the block.
+function splitTokens(line) {
+  const tokens = [];
+  let start = -1;
+  for (let i = 0; i <= line.length; i++) {
+    if (i < line.length && !/\s/.test(line[i])) {
+      if (start === -1) start = i;
+      if (line[i] === "{") {
+        const close = closingBrace(line, i);
+        if (close !== -1 && splitOutsideBraces(line.slice(i + 1, close)).length > 1) i = close;
+      }
+    } else if (start !== -1) {
+      tokens.push(line.slice(start, i));
+      start = -1;
+    }
+  }
+  return tokens;
+}
+
+const LABEL_TOKEN_RE = /^\**(?:Create|Modify|Test)\**:?\**$/;
+const PARENTHETICAL_COLON_RE = /\)\**:\**$/;
+const isConjunction = (token) => token === "and" || token === "+";
+
+// The index of the token closing a `(...)` that opens at `tokens[from]` and is followed by the
+// label's colon (`Create (tracked, on disk):`), or -1: a parenthetical elsewhere opens nothing.
+function labelParentheticalEnd(tokens, from) {
+  if (!tokens[from]?.startsWith("(")) return -1;
+  let depth = 0;
+  for (let i = from; i < tokens.length; i++) {
+    for (const ch of tokens[i]) depth += ch === "(" ? 1 : ch === ")" ? -1 : 0;
+    if (depth <= 0) return PARENTHETICAL_COLON_RE.test(tokens[i]) ? i : -1;
+  }
+  return -1;
+}
+
+// A line the label's list may continue onto: bare paths only, no new bullet, no prose.
+function isPathOnlyLine(line, tokens) {
+  return tokens.length > 0 && !/^\s*-\s/.test(line) && tokens.every((token) =>
+    isConjunction(token) || expandBraces(token).every((piece) => normalizeFileToken(piece, { declared: true })));
+}
+
+// A token is in declaration position right after its label's colon (or the bare label word), after a
+// comma, and after `and`/`+` following a declared path. A label ending its line with the colon
+// extends that over the path-only lines below it.
 export function extractFiles(block) {
   const files = new Set();
   let declared = false;
-  for (const raw of block.split(/\s+/).filter(Boolean)) {
-    if (LABELS.has(raw.replace(/:$/, ""))) {
-      declared = true;
-      continue;
+  let afterDeclaredPath = false;
+  let listOpen = false;
+  for (const line of block.split("\n")) {
+    const tokens = splitTokens(line);
+    if (listOpen) {
+      listOpen = isPathOnlyLine(line, tokens);
+      declared = declared || listOpen;
     }
-    for (const piece of expandBraces(raw)) {
-      const tok = normalizeFileToken(piece, { declared });
-      if (tok) files.add(tok);
+    for (let i = 0; i < tokens.length; i++) {
+      const raw = tokens[i];
+      if (LABEL_TOKEN_RE.test(raw)) {
+        declared = true;
+        afterDeclaredPath = false;
+        const parenEnd = raw.includes(":") ? -1 : labelParentheticalEnd(tokens, i + 1);
+        if (parenEnd !== -1) i = parenEnd;
+        listOpen = (raw.includes(":") || parenEnd !== -1) && i === tokens.length - 1;
+        continue;
+      }
+      if (isConjunction(raw) && (declared || afterDeclaredPath)) {
+        declared = true;
+        afterDeclaredPath = false;
+        continue;
+      }
+      let accepted = false;
+      for (const piece of expandBraces(raw)) {
+        const tok = /\s/.test(piece) ? null : normalizeFileToken(piece, { declared });
+        if (tok) {
+          files.add(tok);
+          accepted = true;
+        }
+      }
+      afterDeclaredPath = declared && accepted;
+      declared = declared && raw.endsWith(",");
     }
-    declared = declared && raw.endsWith(",");
   }
   return files;
 }

@@ -256,6 +256,23 @@ test("a pair-form override whose test token is not a path is malformed, not a si
   assert.match(out, /malformed override/i);
 });
 
+// An override capture is a token the author named on purpose, so an extensionless file or a
+// directory is as valid there as in a Files block -- it was accepted before the Files-block
+// grammar learned to tell prose from paths, and must stay so.
+test("an override naming an unticked extensionless file is accepted, not malformed", () => {
+  const plan = planChanging("bin/devcycle-root", {
+    override: "- Blast-radius override: bin/devcycle-root — no referencers matter",
+  });
+  const repo = makeRepo({
+    "bin/devcycle-root": "#!/bin/sh\n",
+    "tests/unit/thing.test.mjs": '"../bin/devcycle-root"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
+  assert.doesNotMatch(out, /malformed override/);
+  assert.match(out, /override/i);
+});
+
 test("a non-test referencer not in any Files block now hard-fails", () => {
   const repo = makeRepo({
     "scripts/foo.mjs": "export const x = 1;\n",

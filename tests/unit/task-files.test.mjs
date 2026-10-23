@@ -339,3 +339,67 @@ test("a line anchor of any shape comes off the path, on both paths", () => {
 test("parseFileList splits only on commas outside a brace list, then expands it", () => {
   assert.deepEqual(parseFileList("src/{a,b}.ts, c.md"), ["src/a.ts", "src/b.ts", "c.md"]);
 });
+
+test("an omitted declared option judges a token by the declaration-position gate, the denylist still applying", () => {
+  // blast-radius-check normalizes an override capture with no options: a token the author named on
+  // purpose, so `bin/devcycle-root` is a path there even though extractFiles calls it prose in
+  // trailing text.
+  assert.equal(normalizeFileToken("bin/devcycle-root"), "bin/devcycle-root");
+  assert.equal(normalizeFileToken("commands/"), "commands/");
+  assert.equal(normalizeFileToken("bin/devcycle-root", { declared: false }), null);
+  assert.equal(normalizeFileToken("prose"), null);
+  for (const notAPath of ['"dir/x"', "a/{b}", "src\\a/b", "a`b/c", "${VAR}/x.md"]) {
+    assert.equal(normalizeFileToken(notAPath), null, notAPath);
+  }
+});
+
+test("a brace list with a space after the comma stays one token and expands to every file", () => {
+  // The whitespace split ran before the expansion, so `src/{a,` and `b}.ts` never met and the
+  // group vanished while the file beside it kept the block looking non-empty.
+  assert.deepEqual([...extractFiles("- Modify: `src/{a, b}.ts`, `x.md`")], ["src/a.ts", "src/b.ts", "x.md"]);
+  assert.deepEqual([...extractFiles("- Modify: src/{a, b}.ts")], ["src/a.ts", "src/b.ts"]);
+  assert.deepEqual([...extractFiles("- Create: src/{a,  b ,c}.ts, x.md")], ["src/a.ts", "src/b.ts", "src/c.ts", "x.md"]);
+  assert.deepEqual(expandBraces("src/{a, b}.ts"), ["src/a.ts", "src/b.ts"]);
+  assert.deepEqual(parseFileList("src/{a, b}.ts, c.md"), ["src/a.ts", "src/b.ts", "c.md"]);
+});
+
+test("an unbalanced brace does not swallow the rest of the line or the next line", () => {
+  assert.deepEqual([...extractFiles("- Modify: src/{a, then prose and `x.md`")], ["x.md"]);
+  assert.deepEqual([...extractFiles("- Modify: `scripts/z.mjs`, src/{a, then prose y/z\n- Test: `tests/z.test.mjs` }")],
+    ["scripts/z.mjs", "tests/z.test.mjs"]);
+});
+
+test("a label may carry bold markers or a parenthetical and still open declaration position", () => {
+  const cases = [
+    ["- Create (executable): bin/devcycle-root", ["bin/devcycle-root"]],
+    ["- Create (tracked, already on disk): bin/devcycle-root", ["bin/devcycle-root"]],
+    ["- **Create (executable):** bin/devcycle-root", ["bin/devcycle-root"]],
+    ["- **Modify:** commands/", ["commands/"]],
+    ["- **Modify**: commands/", ["commands/"]],
+    ["- **Modify** commands/", ["commands/"]],
+  ];
+  for (const [block, expected] of cases) assert.deepEqual([...extractFiles(block)], expected, block);
+  // A parenthetical that is not between a label and its colon opens nothing.
+  assert.deepEqual([...extractFiles("- Modify: `scripts/a.mjs` (executable): bin/devcycle-root")], ["scripts/a.mjs"]);
+});
+
+test("and / + after a declared path continue declaration position, and never after a rejected token", () => {
+  assert.deepEqual([...extractFiles("- Create: bin/a and bin/b")], ["bin/a", "bin/b"]);
+  assert.deepEqual([...extractFiles("- Create: bin/a + bin/b")], ["bin/a", "bin/b"]);
+  assert.deepEqual([...extractFiles("- Create: bin/a, and bin/b and bin/c")], ["bin/a", "bin/b", "bin/c"]);
+  assert.deepEqual([...extractFiles('- Create: "q" and bin/b')], []);
+  assert.deepEqual([...extractFiles("- Create: prose and bin/b")], []);
+  // The conjunction is never a file itself.
+  assert.deepEqual([...extractFiles("- Create: x.md and y.md")], ["x.md", "y.md"]);
+});
+
+test("a label alone on its line opens declaration position for the path-only lines after it", () => {
+  assert.deepEqual([...extractFiles("- Modify:\n  commands/\n  skills/")], ["commands/", "skills/"]);
+  assert.deepEqual([...extractFiles("- Modify:\n  commands/\n  skills/\n- Test: tests/x.test.mjs\n")],
+    ["commands/", "skills/", "tests/x.test.mjs"]);
+  // Prose ends it, so a later path-shaped word stays prose.
+  assert.deepEqual([...extractFiles("- Modify:\n  the plan/gate flow\n  commands/")], []);
+  // A blank line and a new bullet end it too.
+  assert.deepEqual([...extractFiles("- Modify:\n  commands/\n\n  skills/")], ["commands/"]);
+  assert.deepEqual([...extractFiles("- Modify:\n- Create: x.md\n  skills/")], ["x.md"]);
+});
