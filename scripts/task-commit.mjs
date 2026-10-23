@@ -8,13 +8,14 @@
 // Each commit carries a `Devcycle-Task: <run>/<task>` trailer, so a re-run after a crash finds it
 // and appends only the ledger and run-record lines still missing instead of committing twice.
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { requireValue } from "./cli-flags.mjs";
 import { taskFileMap } from "./task-files.mjs";
 import { field } from "./md-field.mjs";
 import { writeCapture } from "./evidence-capture.mjs";
-import { LIMIT_PREFIX, proofLine, proveCommit } from "./commit-proof.mjs";
+import { LIMIT_PREFIX, proofLine, proveCommit, provesGreen } from "./commit-proof.mjs";
+import { LockTimeoutError, withFileLock } from "./file-lock.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { gitToplevel, recordPath, validateCulprit } from "./run-record.mjs";
 import { isMain } from "./is-main.mjs";
@@ -30,6 +31,9 @@ const TRAILER_LINE = /^[A-Za-z][A-Za-z0-9-]*: \S/;
 const GATE_FAIL_PREFIX = "rejected (green gate:";
 // Read, never written: a ledger from before the per-commit proof can still hold one.
 const DEFERRED_OUTCOME = "deferred (concurrent sibling edits)";
+// One call proves at a time, from its commit through any undo. A second one returns `busy` rather
+// than blocking its caller for a whole gate run.
+const PROOF_LOCK_WAIT_MS = 2000;
 const FLAGS = {
   "--run": "value", "--task": "value", "--plan": "value", "--test-cmd": "value", "--subject": "value",
   "--culprit": "value", "--trailers": "value", "--ledger": "value",
@@ -113,6 +117,14 @@ function findTaskCommit(cwd, range, value, files) {
 }
 
 const gateCapture = (task) => `.devcycle/evidence/${task}-gate.txt`;
+
+function provenAlready(root, task, sha) {
+  try {
+    return provesGreen(readFileSync(join(root, gateCapture(task)), "utf8"), sha);
+  } catch {
+    return false;
+  }
+}
 
 // A red proof takes its commit back: the branch moves to the parent only while it still points at the
 // commit — a compare-and-swap, so a commit made on top since is never dropped — and the index entries
@@ -252,7 +264,10 @@ function proveAndRecord(ctx, sha, action, result) {
 function commitTask(ctx, files, branch, result) {
   const { root, task, run } = ctx;
   const found = findTaskCommit(root, sinceCut(root, branch.cut), `${run}/${task}`, files);
-  if (found) return result("already-committed", { gate: "pass", sha: found, appended: recordCommit(ctx, found) });
+  if (found) {
+    if (provenAlready(root, task, found)) return result("already-committed", { gate: "pass", sha: found, appended: recordCommit(ctx, found) });
+    return proveAndRecord(ctx, found, "already-committed", result);
+  }
   const entries = taskEntries(ctx.ledgerPath, task);
   const waiting = pendingReviewLoop(root, task, entries);
   if (waiting) return result("needs-user", { reason: "review loop exhausted-unresolved", loopId: waiting, appended: [] });
@@ -284,7 +299,13 @@ export function taskCommit(argv, cwd = process.cwd()) {
   if (!branch.name) throw new Error("the state file records no branch: line");
   const ctx = { ...args, root, branchName: branch.name, toplevel: gitToplevel(root), ledgerPath };
   const result = (action, extra) => ({ action, task: args.task, ...extra });
-  return commitTask(ctx, files, branch, result);
+  const lockTarget = join(dirname(ledgerPath), "task-commit");
+  try {
+    return withFileLock(lockTarget, () => commitTask(ctx, files, branch, result), { timeoutMs: PROOF_LOCK_WAIT_MS });
+  } catch (err) {
+    if (err instanceof LockTimeoutError && err.lockPath === `${lockTarget}.lock`) return result("busy", { appended: [] });
+    throw err;
+  }
 }
 
 if (isMain(import.meta.url, process.argv[1])) runTaskScript("task-commit", () => taskCommit(process.argv.slice(2)));

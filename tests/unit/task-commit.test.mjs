@@ -8,6 +8,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
+import { processStartTime } from "../../scripts/file-lock.mjs";
 import { gitToplevel, repoSlug } from "../../scripts/run-record.mjs";
 import { makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
 
@@ -212,22 +213,88 @@ test("a Files path deleted in the index is committed as a deletion", () => {
   }
 });
 
-test("a crash between the commit and its ledger line: the re-run finds the trailer and only appends", () => {
+test("a crash between the commit and its proof: the re-run proves the trailer commit, then only appends", () => {
   const fx = fixture();
   try {
     writeInto(fx.dir, "src/a.txt", "a1\n");
     git(fx, "commit", "--quiet", "-m", "feat: land task one", "--trailer", `Devcycle-Task: ${RUN}/1`, "--", "src/a.txt");
     const sha = head(fx);
-    const first = commitTask(fx, { testCmd: "exit 1" });
-    assert.equal(first.out.action, "already-committed", "the gate is not re-run for a commit that already landed");
+    const first = commitTask(fx);
+    assert.equal(first.out.action, "already-committed");
     assert.equal(first.out.sha, sha);
     assert.equal(head(fx), sha, "no second commit");
+    assert.match(readFileSync(join(fx.dir, ".devcycle/evidence/1-gate.txt"), "utf8"), new RegExp(`^# devcycle-proof: sha=${sha} `, "m"));
     assert.equal(ledgerLines(fx).filter((l) => l.includes("event=committed")).length, 1);
     assert.deepEqual(events(fx), ["gate-pass-clean"]);
-    const again = commitTask(fx);
-    assert.equal(again.out.action, "already-committed");
+    const again = commitTask(fx, { testCmd: "exit 1" });
+    assert.equal(again.out.action, "already-committed", "a commit its capture proves green is not proven again");
     assert.deepEqual(again.out.appended, [], "a second re-run appends nothing");
     assert.equal(ledgerLines(fx).filter((l) => l.includes("event=committed")).length, 1);
+  } finally {
+    cleanup(fx);
+  }
+});
+
+test("a crash before a red proof: the re-run undoes the trailer commit and rejects the round", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const parent = head(fx);
+    git(fx, "commit", "--quiet", "-m", "feat: land task one", "--trailer", `Devcycle-Task: ${RUN}/1`, "--", "src/a.txt");
+    const { out } = commitTask(fx, { testCmd: "exit 1" });
+    assert.equal(out.action, "gate-fail", JSON.stringify(out));
+    assert.equal(head(fx), parent);
+    assert.equal(git(fx, "diff", "--name-only"), "src/a.txt", "the task's edit stays in the work tree");
+    assert.match(ledgerLines(fx).at(-1), /outcome=rejected \(green gate: exit 1\)/);
+    assert.ok(!ledgerLines(fx).some((l) => l.includes("event=committed")));
+  } finally {
+    cleanup(fx);
+  }
+});
+
+test("a red re-proof of a commit with another on top is the user's decision, never undone", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    git(fx, "commit", "--quiet", "-m", "feat: land task one", "--trailer", `Devcycle-Task: ${RUN}/1`, "--", "src/a.txt");
+    const sha = head(fx);
+    git(fx, "commit", "--quiet", "--allow-empty", "-m", "chore: on top");
+    const { out } = commitTask(fx, { testCmd: "exit 1" });
+    assert.deepEqual([out.action, out.sha], ["unproven-commit", sha]);
+    assert.equal(git(fx, "rev-parse", "HEAD~1"), sha);
+  } finally {
+    cleanup(fx);
+  }
+});
+
+test("a second call while a live process holds the proof lock is busy and touches nothing", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const before = head(fx);
+    const lock = join(fx.dir, ".devcycle/task-commit.lock");
+    const live = JSON.stringify({ pid: process.pid, startTime: processStartTime(process.pid), hostname: "h" });
+    writeFileSync(lock, live);
+    const { status, out } = commitTask(fx);
+    assert.equal(status, 0);
+    assert.deepEqual([out.action, out.appended], ["busy", []]);
+    assert.equal(head(fx), before);
+    assert.equal(readFileSync(lock, "utf8"), live, "a live holder's lock is never removed");
+    rmSync(lock);
+    assert.equal(commitTask(fx).out.action, "committed");
+    assert.equal(existsSync(lock), false, "the call releases the lock it took");
+  } finally {
+    cleanup(fx);
+  }
+});
+
+test("a proof lock whose holder has exited is taken over", () => {
+  const fx = fixture();
+  try {
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const dead = spawnSync(process.execPath, ["-e", "0"]).pid;
+    writeFileSync(join(fx.dir, ".devcycle/task-commit.lock"), JSON.stringify({ pid: dead, startTime: "Mon Jan  1 00:00:00 1990", hostname: "h" }));
+    assert.equal(commitTask(fx).out.action, "committed");
   } finally {
     cleanup(fx);
   }
