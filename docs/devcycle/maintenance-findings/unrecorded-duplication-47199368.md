@@ -1,0 +1,11 @@
+# makeRepo names three different fixtures, one a copy, and git init plus identity is repeated inline in 15+ test sites
+- finding-kind: maintenance-finding
+- finding-id: unrecorded-duplication:47199368
+- culprit-kind: unrecorded-duplication
+- severity: low
+- confidence: verified
+- affected-files: tests/unit/helpers.mjs, tests/unit/foreign-change-check.test.mjs, tests/unit/blast-radius-check.test.mjs, tests/unit/validate.test.mjs, tests/unit/run-record.test.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

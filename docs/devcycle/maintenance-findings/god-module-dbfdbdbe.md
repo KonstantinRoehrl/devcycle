@@ -1,0 +1,11 @@
+# doctor.mjs mixes ingestion, CLI, scoring, tables, gh outer loop, rendering and issue drafts in one file; the split into doctor-format and doctor-overview is half done
+- finding-kind: maintenance-finding
+- finding-id: god-module:dbfdbdbe
+- culprit-kind: god-module
+- severity: medium
+- confidence: verified
+- affected-files: scripts/doctor.mjs, scripts/doctor-format.mjs, scripts/doctor-overview.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

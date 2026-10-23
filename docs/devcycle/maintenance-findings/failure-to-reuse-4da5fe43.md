@@ -1,0 +1,11 @@
+# Six check scripts paste the same flag-parse prologue and sorted recursive directory walk with differing, unnamed skip policies
+- finding-kind: maintenance-finding
+- finding-id: failure-to-reuse:4da5fe43
+- culprit-kind: failure-to-reuse
+- severity: low
+- confidence: verified
+- affected-files: scripts/dead-export-check.mjs, scripts/duplication-check.mjs, scripts/temp-dir-check.mjs, scripts/xref-check.mjs, scripts/blast-radius-check.mjs, scripts/redaction-check.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

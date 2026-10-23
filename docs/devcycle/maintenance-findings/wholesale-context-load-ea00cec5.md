@@ -1,0 +1,11 @@
+# commands/continue.md loads § Drive mode (22 of 181 lines) and two resume paths on every resume, though only --drive runs use drive mode
+- finding-kind: maintenance-finding
+- finding-id: wholesale-context-load:ea00cec5
+- culprit-kind: wholesale-context-load
+- severity: medium
+- confidence: verified
+- affected-files: commands/continue.md, references/drive.md
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

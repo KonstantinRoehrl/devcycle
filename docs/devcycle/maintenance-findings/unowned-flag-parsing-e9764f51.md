@@ -1,0 +1,11 @@
+# dream.mjs, run-record.mjs, bump-version.mjs and three more scripts hand-parse flags, so a misspelled or valueless flag is silently dropped
+- finding-kind: maintenance-finding
+- finding-id: unowned-flag-parsing:e9764f51
+- culprit-kind: unowned-flag-parsing
+- severity: medium
+- confidence: verified
+- affected-files: scripts/dream.mjs, scripts/run-record.mjs, scripts/bump-version.mjs, scripts/task-commit.mjs, scripts/drive-watch.mjs, scripts/plan-check.mjs, scripts/cli-flags.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

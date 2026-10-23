@@ -1,0 +1,11 @@
+# All four notify.test.ts tests return early on both CI pins and still pass, so the handoff-notification relay is never exercised in CI
+- finding-kind: maintenance-finding
+- finding-id: test-coverage-gap:8bbe9c22
+- culprit-kind: test-coverage-gap
+- severity: medium
+- confidence: verified
+- affected-files: tests/mod/notify.test.ts, tests/mod/harness.ts, hooks/devcycle-mod.mjs, .github/workflows/validate.yml
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 
