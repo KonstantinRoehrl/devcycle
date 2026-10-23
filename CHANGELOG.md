@@ -1,5 +1,12 @@
 # Changelog
 
+The execution stage's green gate now proves each task's own commit. `task-commit.mjs` commits the
+task, runs the gate command in a scratch worktree checked out at that commit, and takes the commit
+back if it fails, so a sibling task's half-finished edit can no longer fail a clean task (#324), and
+a pass always belongs to the commit that landed (#336). Ignored `node_modules`, `.venv`, `venv` and
+`vendor` directories are linked into that worktree, workspace packages included. The gate capture
+names the commit, tree and parent it proved. `--subset-cmd` and the `deferred` result are gone.
+
 ## 0.26.0 — 2026-10-16
 
 - feat(cycle): review a spec's repo claims against live code before approval (#304)

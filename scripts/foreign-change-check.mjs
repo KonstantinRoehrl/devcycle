@@ -2,8 +2,9 @@
 // #167: in a wave with concurrent, file-disjoint siblings sharing one checkout, a whole-suite red
 // can be caused by a sibling's uncommitted edit, not the task under review. Given the task's declared
 // Files, this reports every dirty/untracked path in the working tree that is NOT one of them — the
-// "foreign-change set". executing-waves.md step 6 consults it on a green-gate failure to decide
-// whether a red is the task's own or a sibling's. Language/repo-agnostic; `git status --porcelain`
+// "foreign-change set". A reviewer runs it before accepting a red as flaky (references/evidence.md
+// § Reviewer verdicts); the green gate no longer needs it, since it proves each commit in a scratch
+// worktree no sibling edit reaches. Language/repo-agnostic; `git status --porcelain`
 // already respects .gitignore. Reuses scripts/task-files.mjs's normalizeFileToken so a code-span- or
 // punctuation-wrapped task token matches the same way it does for blast-radius-check.
 import { spawnSync } from "node:child_process";
