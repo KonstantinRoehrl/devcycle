@@ -62,7 +62,9 @@ export function taskPosition(lines, { pendingLoop = null, retries = () => 0 } = 
   if (capped === "rejected (missing report file)") return { position: "missing-report", next: "redispatch-implementer" };
   if (capped === "rejected (intake bounce)") return { position: "intake-bounce", next: "fix" };
   if (event === "report-received" && outcome.startsWith("blocked")) return { position: "blocked", next: "needs-user" };
-  if (event === "review-verdict" && outcome.startsWith("deferred")) return { position: "deferred", next: "regate-after-quiesce" };
+  // A ledger from before the per-commit proof can end on a deferral. task-commit now proves the commit
+  // in its own worktree, where a sibling's edit cannot reach, so the task is simply committed again.
+  if (event === "review-verdict" && outcome.startsWith("deferred")) return { position: "deferred", next: "commit" };
   if (event === "review-verdict" && outcome.startsWith("accepted")) return { position: "accepted", next: "commit" };
   if (event === "review-verdict" && outcome.startsWith("rejected")) return { position: "rejected", next: "fix" };
   if (event === "review-round") return { position: "review-round", next: "redispatch-reviewer" };

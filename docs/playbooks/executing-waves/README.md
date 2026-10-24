@@ -31,9 +31,10 @@ exists before acting on the verdict. A non-zero verdict sends findings back to t
 implementer for a fix pass, bounded at three rounds per task, past which the task exits
 `exhausted-unresolved` and is surfaced to the user rather than committed as if it had passed.
 
-Acceptance still isn't automatic on a reviewer's approval: the coordinator re-runs the task's gate
-command itself and reads the exit status directly — the green gate — before re-checking the
-actual git branch against the recorded one and committing with a Conventional Commit subject.
+Acceptance still isn't automatic on a reviewer's approval: the coordinator re-checks the actual
+git branch against the recorded one, commits with a Conventional Commit subject, then re-runs the
+task's gate command itself against that commit and reads the exit status directly — the green
+gate — taking the commit back if it fails.
 Each commit's ledger entry, and the moment any task produces rendered changes, together drive two
 triggers this playbook owns: closing the wave once nothing in it remains undispatched, in review,
 or uncommitted, and generating or updating the on-device checklist the same wave a rendered change
@@ -48,7 +49,8 @@ runs the green gate and commits the task with a `Devcycle-Task:` trailer, findin
 of the same task instead of committing twice. Every ledger line they append carries an idempotency
 key, so a session that crashed mid-step re-runs it without duplicating a line. Implementers write
 their evidence through `capture-evidence.mjs` rather than by hand, and the green gate runs the
-task's gate command, with the task's own test run as the subset that attributes a red.
+task's gate command in a scratch worktree checked out at the task's commit, where no sibling's
+uncommitted edit reaches it.
 
 ## How it fits
 - Up: [the pipeline](../../pipeline/README.md) — where Execution sits, between Planning and
@@ -61,7 +63,7 @@ task's gate command, with the task's own test run as the subset that attributes 
 ```mermaid
 ---
 title: executing-waves — the per-task cycle inside one wave
-accDescr: Playbook-internal flowchart of one task's execution cycle, from wave formation through implementer dispatch, reviewer verdict with a bounded round loop, the coordinator's own green-gate re-run, commit, and the wave-boundary trigger that hands off to branch review.
+accDescr: Playbook-internal flowchart of one task's execution cycle, from wave formation through implementer dispatch, reviewer verdict with a bounded round loop, the commit, the coordinator's own green-gate re-run against it, and the wave-boundary trigger that hands off to branch review.
 ---
 flowchart TD
     FORM("Form a wave — every dependency-ready, file-disjoint task"):::stage
@@ -71,10 +73,10 @@ flowchart TD
     REVIEW --> VERDICT{"Verdict, within a 3-round cap?"}:::stage
     VERDICT -->|needs-changes| DISPATCH
     VERDICT -->|"cap reached"| EXHAUSTED("exhausted-unresolved — surfaced to the user, never committed"):::stage
-    VERDICT -->|accept| GATE{"Green gate — coordinator re-runs the gate command itself"}:::stage
-    GATE -->|fail| DISPATCH
-    GATE -->|pass| COMMIT("Re-check the branch, then commit with a Conventional Commit subject"):::stage
-    COMMIT --> LEDGER[("ledger.md — event=committed")]:::structural
+    VERDICT -->|accept| COMMIT("Re-check the branch, then commit with a Conventional Commit subject"):::stage
+    COMMIT --> GATE{"Green gate — coordinator re-runs the gate command at that commit"}:::stage
+    GATE -->|"fail — commit taken back"| DISPATCH
+    GATE -->|pass| LEDGER[("ledger.md — event=committed")]:::structural
     LEDGER --> BOUNDARY{"Wave empty — nothing dispatched, in review, or uncommitted?"}:::stage
     BOUNDARY -->|no| FORM
     BOUNDARY -->|yes| HANDOFF("Wave boundary — update state.md, hand off to branch review"):::stage

@@ -1037,6 +1037,30 @@ test("the green gate step runs the script that journals both gate outcomes", () 
   assert.ok(commit.includes('event: "gate-pass-clean"'), "a clean green gate must append a gate-pass-clean event");
 });
 
+// #324: the proof runs in a scratch worktree detached at the task's commit, so step 6 no longer defers a red
+// to a concurrent sibling; it stays the coordinator's own call.
+test("step 6 proves the task's commit in a scratch worktree detached at it, on the main thread only", () => {
+  const gate = read("playbooks/executing-waves.md").match(/\*\*Green gate \(REQUIRED, deterministic\)\.\*\*[\s\S]*?\n7\. /)?.[0] ?? "";
+  assert.match(gate, /run `task-commit\.mjs` on the main thread,\s+never from a dispatch/);
+  assert.match(gate, /in a scratch worktree detached at that commit/);
+  assert.match(gate, /`proof-unrunnable`: the proof could not run \(its\s+`reason`\s+says why\);\s+the commit is undone,\s+unless the ledger already records it,\s+and no round is spent\s+→\s+the user decides \(driven: a\s+`needs-user`\s+stop\)/);
+  assert.doesNotMatch(gate, /--subset-cmd|deferred|quiesce/);
+});
+
+// The way out of `unproven-commit` is the user's, and only a green gate recovers it unaided.
+test("step 7 says what an unproven commit is and how the user gets out of one", () => {
+  const step = read("playbooks/executing-waves.md").match(/\n7\. \*\*Branch re-check, then commit\.\*\*[\s\S]*?\n\n/)?.[0] ?? "";
+  assert.match(step, /`unproven-commit` \(a red or\s+unrunnable proof it could not undo, the branch having moved past the commit, or a red re-proof\s+of a commit the ledger records\)/);
+  assert.match(step, /An unproven commit stays on the branch and re-proves green only if the gate turns green\s+\(a flaky or environment-dependent gate\)\./);
+  assert.match(step, /A deterministically red one under another commit stays\s+`unproven-commit` even after a fix or revert on top: the user resets it off the branch by hand,\s+then calls\s+`task-commit` again\./);
+});
+
+test("the proof's known limits and an old deferral's resume row stay documented", () => {
+  assert.match(read("references/evidence.md"), /`# devcycle-proof-limit: <note>` per known limit: an editable install in a linked `\.venv`\/`venv`\s+or a linked `vendor` \(a Composer path repository\) reads the shared checkout, and submodules are\s+never populated in the proof worktree\./);
+  assert.match(read("references/resume.md"),
+    /\| `review-verdict outcome=deferred \(concurrent sibling edits\)` \| commit again; the proof no longer defers \(a record from before the per-commit proof\) \|/);
+});
+
 test("the run-record write-site table declares the event kind", () => {
   const row = read("references/ledger.md").split("\n").find((l) => l.startsWith("| `event` |"));
   assert.ok(row, "references/ledger.md's write-site table has no row for the event kind");

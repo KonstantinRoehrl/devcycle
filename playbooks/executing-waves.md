@@ -129,21 +129,30 @@ exit 2 or 3 a stop.
    failed green gate rejects its round too. A task that reaches round 3 without a commit exits
    `exhausted-unresolved` — `task-verdict.mjs` or `task-commit.mjs` writes that status — and is
    surfaced to the user as a decision, never committed as if it had passed.
-6. **Green gate (REQUIRED, deterministic).** On acceptance, run `task-commit.mjs` with the plan,
-   `--test-cmd "<gateCmd>"` and your subject, plus `--subset-cmd "<testCmd>"` when `testCmd` is non-null,
-   both from the wave setup; a task with no `gateCmd` passes `--test-cmd "<testCmd>"`.
-   It re-runs the test command itself and reads the exit status — never the implementer's word for it.
-   On failure, acceptance is blocked: no commit, `gate-fail`, back to the implementer with the gate
-   evidence its ledger line names, then the next round's review; after round 3, `needs-user`.
-   `deferred` means a concurrent sibling's edit caused the red: call it again once the wave quiesces.
+6. **Green gate (REQUIRED, deterministic).** On acceptance, run `task-commit.mjs` on the main thread,
+   never from a dispatch (a coordinator duty), with the plan, `--test-cmd "<gateCmd>"`
+   from the wave setup (no `gateCmd`: `"<testCmd>"`) and your subject. It commits the task, then
+   re-runs the test command itself and reads the exit status — never the implementer's word for it —
+   in a scratch worktree detached at that commit, which no sibling's uncommitted edit reaches.
+   On failure, acceptance is blocked: no commit (it undoes its own), `gate-fail`, back to the
+   implementer with the gate evidence its ledger line names, then the next round's review; after
+   round 3, `needs-user`. `busy`: another call holds the gate; call again once it returns.
+   `proof-unrunnable`: the proof could not run (its `reason` says why); the commit is undone,
+   unless the ledger already records it, and no round is spent → the user decides (driven: a
+   `needs-user` stop).
 7. **Branch re-check, then commit.** The same call re-runs
    `git rev-parse --abbrev-ref HEAD` against the recorded `branch:` line immediately before
-   committing — `branch-mismatch` stops the run rather than committing to the wrong branch — then,
-   on acceptance: a local commit of the task's changed `**Files:**` with your subject, which matches
-   the `Commit-convention:` line. `already-committed`: an interrupted run had committed, and only its
-   missing lines were added. `nothing-to-commit` or `commit-failed` (a commit hook refused it) → the
-   user decides (driven: a `needs-user` stop naming the action). The `PostToolUse` commit-sensor
-   records `workload` itself.
+   committing — `branch-mismatch` stops the run rather than committing or undoing on the wrong
+   branch — then, on acceptance: a local commit of the task's changed `**Files:**` with your
+   subject, which matches the `Commit-convention:` line. `already-committed`: an interrupted run
+   had committed, and only its missing lines were added once that commit was proven.
+   `nothing-to-commit`, `commit-failed` (a commit hook refused it) or `unproven-commit` (a red or
+   unrunnable proof it could not undo, the branch having moved past the commit, or a red re-proof
+   of a commit the ledger records) → the user decides (driven: a `needs-user` stop naming the
+   action). An unproven commit stays on the branch and re-proves green only if the gate turns green
+   (a flaky or environment-dependent gate). A deterministically red one under another commit stays
+   `unproven-commit` even after a fix or revert on top: the user resets it off the branch by hand,
+   then calls `task-commit` again. The `PostToolUse` commit-sensor records `workload` itself.
 
 **Safety valve.** In a driven session (`/devcycle:continue --drive`), read `depthBand` after every
 task script: on `hard-stop`, dispatch no new task, finish the tasks in flight, then end the session

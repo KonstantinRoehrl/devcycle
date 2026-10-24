@@ -5,6 +5,87 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-23 — The green gate proves each task commit in a scratch worktree (#324, #336)
+
+**Decision:** `scripts/task-commit.mjs` commits an accepted task, then runs its gate command in a
+scratch worktree detached at that commit (`scripts/commit-proof.mjs`), and takes the commit back
+when that proof is red. It no longer takes `--subset-cmd`, runs `scripts/foreign-change-check.mjs`
+or defers a red to a concurrent sibling. Ignored `node_modules`, `.venv`, `venv` and `vendor`
+directories are linked into the worktree, workspace links in a `node_modules` pointed at the
+worktree's own packages and `.bin` links resolving through them. Known limits, each a
+`# devcycle-proof-limit:` line in the gate capture: an editable install in a linked `.venv`/`venv`
+pointing into the checkout, a linked `vendor/`, whose Composer path-repository links may read the
+checkout, and submodules, which the worktree never populates, so a gate reading one is red there.
+A `.bin` link with an absolute target into the checkout reads it too; that is documented in
+`references/evidence.md` only. One lock beside the ledger serializes the calls, and a
+second one returns `busy`. The run-record schema keeps `gate-deferred-foreign-change`, so records
+written before stay valid; `task-commit.mjs` writes it for no ledger line, old or new.
+
+**Why:** the gate ran in the shared checkout while siblings were still editing it. A red there with
+foreign dirty paths fell back to the task's own tests, which a sibling could redden too when they
+observe the whole repo (#324), and a green proved a tree holding unfinished sibling work, not the
+commit that landed (#336). A worktree at the commit holds no sibling edit, so its red is the task's
+own and its green is the commit's. A registration a crash leaves behind is left to git's own gc
+(`gc.worktreePruneExpire`). Supersedes the 2026-10-12 entry's `--subset-cmd`.
+
+**Amended (the user, 2026-10-23):** a proof that could not run is no longer treated like a red.
+The commit is undone as for one, but no round is spent and nothing is attributed to the task:
+`task-commit.mjs` returns `proof-unrunnable` with the reason, a user decision. A gate printing more
+than the capture's 256 MB buffer counts as could-not-run too. A re-proof of a commit the ledger
+already records as `committed` never undoes an unrunnable proof, since that line would then name a
+sha the branch no longer has: it returns `proof-unrunnable` and changes nothing.
+
+**Amended (branch review, 2026-10-23):** the same guard covers a red re-proof of a commit the ledger
+already records as `committed`. Design step 8 undid it, which left the `committed` line and the
+run-record row naming a sha the branch no longer has, and added a `rejected (green gate)` line
+after `committed`. It now returns `unproven-commit` and changes nothing; the user decides.
+
+**Budgets:** `references/evidence.md` grew 39 B (the proof-line bullet, the moved
+`foreign-change-check.mjs` invocation), charged to every closure that reads it: planning-waves,
+profiling-sessions, reviewing-code, taking-the-fast-path and writing-the-findings-document, and
+evidence.md's own ceiling, each raised by that growth less its old headroom (+39, +20, +39, +30,
++30, +20). `references/commit-convention.md`'s invocation line grew 24 B, raising
+learning-from-sessions and onboarding-a-repo +24 each. executing-waves rose +152 for a 148 B
+closure growth: its own step 6–7 rewrite (+192 B) and both references, less
+`references/ledger.md`'s −107 B; its two new lines raised `surfaceTotal` +2. The branch review's
+fixes then added 136 B to `references/evidence.md` (what the known-limit line means), raising
+every closure above that reads it whole — and receiving-review and sweeping-mechanical-changes, which
+had room before; executing-waves also carries its step 7 `unproven-commit` way out and
+`references/resume.md`'s restored `deferred` row. Those edits' three new lines raised
+`surfaceTotal` to 6146, and step 6's `proof-unrunnable` (+170 B, two lines) to 6148. The second
+review round's fixes added 156 B to `references/evidence.md` (the `vendor` and `.bin` limits),
+raising each closure above that reads it by that much, receiving-review and
+sweeping-mechanical-changes 162 B with `references/resume.md`'s +6 B; executing-waves rose 553 B,
+its step 6–7 account of an unproven commit's way out (+352 B) plus `references/ledger.md`'s +45 B.
+Their six new lines raised `surfaceTotal` to 6154.
+
+```text
+budget: surface-budget.json surfaceTotal 6154
+budget: context-budget.json playbooks/executing-waves.md 100158
+budget: context-budget.json playbooks/learning-from-sessions.md 62274
+budget: context-budget.json playbooks/onboarding-a-repo.md 30636
+budget: context-budget.json playbooks/planning-waves.md 72144
+budget: context-budget.json playbooks/profiling-sessions.md 38958
+budget: context-budget.json playbooks/receiving-review.md 111676
+budget: context-budget.json playbooks/reviewing-code.md 92203
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 84949
+budget: context-budget.json playbooks/taking-the-fast-path.md 50486
+budget: context-budget.json playbooks/writing-the-findings-document.md 61967
+budget: context-budget.json references/evidence.md 12371
+```
+
+## 2026-10-23 — `git worktree` stays denied to guarded dispatches (L16, #324)
+
+**Decision:** `hooks/block-destructive-git.mjs` keeps `worktree` out of its read-only set, so an
+implementer, task reviewer, red-team reviewer or spec reviewer is still denied every `git worktree`
+call. No hook behavior changes.
+
+**Why:** the per-commit proof is the coordinator's, run inside `scripts/task-commit.mjs`, and a
+script's own git calls are child processes the hook never sees: it judges Bash tool calls only.
+Guarded dispatches judge from the gate capture. `add` writes `.git/worktrees/`, `add -b`/`-B`
+creates or moves a branch, `remove --force` deletes a checkout's uncommitted work, and `prune`
+drops other worktrees' registrations.
+
 ## 2026-10-23 — budget raised for the Files-block path grammar (#354)
 
 **Decision:** `tests/fixtures/context-budget.json` raises `playbooks/planning-waves.md`

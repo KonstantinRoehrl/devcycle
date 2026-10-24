@@ -190,7 +190,7 @@ and takes the generic rows.
 | `review-verdict outcome=accepted` | run the green gate, commit |
 | `review-verdict outcome=rejected` or `rejected (green gate: …)` | re-dispatch the implementer with the findings or gate evidence — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet, never a sweep re-run; the next review is the next round |
 | `review-verdict outcome=rejected (missing findings file)` | re-dispatch the **reviewer** for that round, not the implementer |
-| `review-verdict outcome=deferred (concurrent sibling edits)` | re-run the green gate once the wave quiesces (`playbooks/executing-waves.md` step 6), not a re-dispatch |
+| `review-verdict outcome=deferred (concurrent sibling edits)` | commit again; the proof no longer defers (a record from before the per-commit proof) |
 | `committed` | task done — move to the next task |
 | `user-decision` | carry out the decision its `outcome=` records (`next: "follow-decision"`) |
 | `dispatched outcome=sweep …` | no brief to re-dispatch: re-run the sweep bullets from the clean-targets check |

@@ -35,7 +35,9 @@
 // reports a stage other than done, and for a branch-moving or tree-destroying git while a live driver
 // lock sits beside that state file; under either, a git whose subcommand it cannot read is denied,
 // and under the lock so is a reset or clean whose options it cannot read. Every other origin is never
-// guarded.
+// guarded. `worktree` is never read-only here, not even for a scratch checkout: the per-commit proof
+// runs it inside scripts/task-commit.mjs, whose child processes a Bash-tool hook never sees, so no
+// dispatch needs it (docs/decisions/README.md, 2026-10-23 — `git worktree` stays denied).
 //
 // STATED BOUNDS (deliberately not covered). This is a proportionate backstop against a cooperative
 // dispatch running a plain destructive git, not a complete parser hardened against an adversary

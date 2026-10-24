@@ -293,6 +293,14 @@ test("reviewer + reserved words around non-git commands stay allowed", () => {
     assert.equal(decide(REVIEWER, cmd), "allow", `expected allow for reserved-word non-git: ${cmd}`);
 });
 
+// L16: the per-commit proof makes its worktree inside scripts/task-commit.mjs, out of this hook's
+// sight, so `worktree` stays out of the read-only set — even `list` (docs/decisions/README.md, 2026-10-23).
+test("every guarded origin is denied git worktree, a scratch checkout and a bare listing alike", () => {
+  for (const origin of [REVIEWER, IMPLEMENTER, "devcycle:red-team-reviewer", "devcycle:spec-reviewer"])
+    for (const cmd of ["git worktree add --detach /tmp/proof HEAD", "git worktree list"])
+      assert.equal(decide(origin, cmd), "deny", `expected deny for ${origin}: ${cmd}`);
+});
+
 test("all eight guarded spellings are guarded", () => {
   for (const origin of ["task-reviewer", "devcycle:task-reviewer", "red-team-reviewer", "devcycle:red-team-reviewer", "implementer", "devcycle:implementer", "spec-reviewer", "devcycle:spec-reviewer"])
     assert.equal(decide(origin, "git checkout -- x"), "deny", `expected deny for origin: ${origin}`);

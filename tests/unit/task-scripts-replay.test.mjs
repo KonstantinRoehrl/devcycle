@@ -268,22 +268,15 @@ test("SC4 replay: after a green-gate failure neither the closed round's verdict 
   }
 });
 
-test("SC4 replay: a sibling-caused red is deferred, then the quiesced wave commits", () => {
+test("SC4 replay: a sibling's mid-flight edit cannot redden the proof, so the task commits at once", () => {
   const fx = fixture();
   try {
     const expected = acceptedTask(fx, "1", "src/a.txt");
     writeInto(fx.dir, "src/b.txt", "broken by task 2, mid-flight\n");
-    const gate = ["grep -q fine src/b.txt", ["--subset-cmd", "grep -q done src/a.txt"]];
-    assert.equal(commitTask(fx, "1", ...gate).action, "deferred");
-    writeInto(fx.dir, "src/b.txt", "fine\n");
-    const commit = commitTask(fx, "1", ...gate);
+    const commit = commitTask(fx, "1", "grep -q fine src/b.txt && grep -q done src/a.txt");
     assert.equal(commit.action, "committed");
-    assert.deepEqual(ledger(fx, "1"), [
-      ...expected,
-      "task=1 event=review-verdict outcome=deferred (concurrent sibling edits) ref=.devcycle/evidence/1-gate.txt",
-      `task=1 event=committed outcome=green gate passed ref=${commit.sha}`,
-    ]);
-    assert.deepEqual(events(fx, "1"), ["gate-deferred-foreign-change", "gate-pass-clean"]);
+    assert.deepEqual(ledger(fx, "1"), [...expected, `task=1 event=committed outcome=green gate passed ref=${commit.sha}`]);
+    assert.deepEqual(events(fx, "1"), ["gate-pass-clean"]);
   } finally {
     fx.cleanup();
   }

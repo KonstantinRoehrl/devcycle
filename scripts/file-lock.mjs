@@ -28,6 +28,15 @@ export function isLiveHolder(holder) {
   return started === holder.startTime || gap <= START_TOLERANCE_MS;
 }
 
+// A timed-out wait, told apart from any error the locked function throws, and from another lock's
+// timeout, by the lock path it carries.
+export class LockTimeoutError extends Error {
+  constructor(lockPath) {
+    super(`file-lock: timed out waiting for ${lockPath}`);
+    this.lockPath = lockPath;
+  }
+}
+
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 function readHolder(lockPath) {
@@ -76,7 +85,7 @@ export function withFileLock(target, fn, { timeoutMs = 10000, pollMs = 25 } = {}
       unlinkIfPresent(lockPath);
       continue;
     }
-    if (Date.now() >= deadline) throw new Error(`file-lock: timed out waiting for ${lockPath}`);
+    if (Date.now() >= deadline) throw new LockTimeoutError(lockPath);
     sleep(pollMs);
   }
   try {
