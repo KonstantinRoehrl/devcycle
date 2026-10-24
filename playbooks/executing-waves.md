@@ -183,10 +183,11 @@ line is the state file's `run:` id; pre-flight steps 2–3 supply its `Branch:` 
 ## UI and on-device outcomes
 
 Never claim a rendered or on-device outcome from a script, test, or report. **Trigger: the moment a
-task produces rendered changes** — generate or update the on-device checklist in that same wave, never
+task produces rendered changes**, rendered as `${CLAUDE_PLUGIN_ROOT}/references/checklist.md` § Applicability
+defines it — generate or update the on-device checklist in that same wave, never
 deferred to the end of the wave or the branch. That trigger is this playbook's own; everything else about
-a checklist — its path and state-file record, its item shape, the dimensions it covers, and the
-`(auto)` boundary that decides what may ever be checked off without a human — is
+a checklist — its path and state-file record, its header lines, its item shape and tiers, the dimensions
+it covers, and the `(auto)` boundary that decides what may ever be checked off without a human — is
 `${CLAUDE_PLUGIN_ROOT}/references/checklist.md`: read it and follow it. The later walkthrough of that
 checklist is `playbooks/verifying-on-device.md`'s stage, on the same file.
 

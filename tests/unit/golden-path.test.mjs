@@ -1028,6 +1028,32 @@ test("harvested: verifying-on-device/no-script-checkoff — only a structural ch
   assert.match(v, /\*\*ONE question per checklist item, never batched\*\*/);
 });
 
+test("the checklist contract owns applicability, header lines, tiers, launch and verdicts; the playbooks cite it", () => {
+  const c = read("references/checklist.md");
+  for (const slug of ["applicability", "paths", "checklist-header", "item-shape", "dimensions", "tiers", "the-auto-boundary", "launch-contract", "verdicts"])
+    assert.ok(sectionText(c, slug) !== null, `references/checklist.md has no section slugged ${slug}`);
+  const applicability = sectionText(c, "applicability");
+  assert.match(applicability, /`nothing renders \(<reason>\)`/);
+  for (const kind of ["shared styles", "theme tokens", "build or bundler config", "asset pipelines", "templates", "i18n strings"])
+    assert.ok(applicability.includes(kind), `the conservative rule no longer counts ${kind} as rendered`);
+  assert.match(sectionText(c, "checklist-header"), /^Launch: <exact command\(s\)/m);
+  assert.match(sectionText(c, "checklist-header"), /^Ready: </m);
+  assert.match(sectionText(c, "item-shape"), /Tier: <structural \| agent-observable \| needs-eyes>/);
+  const tiers = sectionText(c, "tiers");
+  assert.match(tiers, /\*\*Tagging moves only toward the human\.\*\*/);
+  assert.match(tiers, /\*\*`\(auto\)` means passed, never failed\.\*\*/);
+  const launch = sectionText(c, "launch-contract");
+  assert.ok(launch.includes(".devcycle/on-device-launch.json"), "the launch record path changed");
+  assert.match(launch, /under every `onDeviceGate` value; the driver never launches/);
+  const verdicts = sectionText(c, "verdicts");
+  for (const v of ["`passed`", "`FAILED`", "`waived`", "`unverified`", "`(auto: <evidence path>)`", "`(confirmed from batch)`"])
+    assert.ok(verdicts.includes(v), `the verdict vocabulary lost ${v}`);
+  const source = sectionText(read("playbooks/verifying-on-device.md"), "checklist-source");
+  assert.match(source, /run § Applicability of `\$\{CLAUDE_PLUGIN_ROOT\}\/references\/checklist\.md`/);
+  assert.ok(!source.includes("pulls in no new surface"), "verifying-on-device.md restates the trace that checklist.md § Applicability owns");
+  assert.match(read("playbooks/executing-waves.md"), /`\$\{CLAUDE_PLUGIN_ROOT\}\/references\/checklist\.md`\s+§\s+Applicability/);
+});
+
 test("the green gate step runs the script that journals both gate outcomes", () => {
   const gate = read("playbooks/executing-waves.md").match(/\*\*Green gate \(REQUIRED, deterministic\)\.\*\*[\s\S]*?\n7\. /)?.[0] ?? "";
   assert.match(gate, /run `task-commit\.mjs`/, "the green gate step must run task-commit.mjs");

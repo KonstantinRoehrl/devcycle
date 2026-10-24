@@ -19,7 +19,9 @@ everything after is identical either way.
 
 **Plan-derived (in-cycle).** `playbooks/executing-waves.md` produced
 the checklist during execution; read its path from the `checklist:` field of
-`.devcycle/state.md`.
+`.devcycle/state.md`. When that field reads `none` because branch review's trace found a
+rendered surface, generate one diff-derived, as below, and write and record it where
+`${CLAUDE_PLUGIN_ROOT}/references/checklist.md` § Paths puts that case.
 
 **Diff-derived (standalone, `/devcycle:verify <branch>`).** No checklist exists yet: generate
 one from the branch, **automatically — there is no confirmation step**, because the branch is
@@ -28,16 +30,12 @@ the whole instruction.
 - *Base and changed files*: follow "Deriving a branch's file set" in
   `${CLAUDE_PLUGIN_ROOT}/references/branch.md`. Its merge-base guard is what keeps the
   walkthrough from being handed a file set built from local uncommitted edits.
-- *Affected UI areas*: from the changed files, trace routes, navigation, and component usage
-  outward — which screens render these components, which routes reach those screens —
-  repeating until an iteration pulls in no new surface. Items are written against those
-  surfaces, not against the changed files: a diff in a shared component is verified wherever
-  it renders.
-- *Generation*: follow `${CLAUDE_PLUGIN_ROOT}/references/checklist.md`. Its `Where:` and
-  `How to get there:` fields are REQUIRED here: without a plan, nothing else tells the human
-  where to look.
-- *Nothing renders*: if the traced set contains no rendered surface, write no checklist, and
-  report the stage not applicable with that reason — the same outcome the in-cycle skip has.
+- *Affected UI areas*: run § Applicability of `${CLAUDE_PLUGIN_ROOT}/references/checklist.md`
+  over that file set. On `nothing renders (<reason>)`, write no checklist and report the stage
+  not applicable with that reason.
+- *Generation*: follow `${CLAUDE_PLUGIN_ROOT}/references/checklist.md`, header lines and each
+  item's `Tier:` included. Its `Where:` and `How to get there:` fields are REQUIRED here: without
+  a plan, nothing else tells the human where to look.
 
 Generating the checklist needs only git refs; the walkthrough needs the branch's files on
 disk. When `<branch>` is not the current checkout, generate the checklist, say so plainly, and

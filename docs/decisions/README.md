@@ -29,12 +29,19 @@ on-device row. A cycle in flight sees its recorded values differ from `auto` onc
 and is asked about them; that is intended.
 
 **Budgets:** `references/model-routing.md`'s Auditability paragraph grew by one outcome form
-(#296), charged to every closure that reads it.
+(#296), charged to every closure that reads it. The § Applicability, § Checklist header, § Tiers,
+§ Launch contract and § Verdicts sections of references/checklist.md raise the runtime surface and
+the closures of the two playbooks that read it, playbooks/executing-waves.md and
+playbooks/verifying-on-device.md; moving the trace out of verifying-on-device.md offsets a little
+of that.
 
 ```text
 budget: context-budget.json references/model-routing.md 9168
 budget: context-budget.json playbooks/sweeping-mechanical-changes.md 85027
 budget: context-budget.json playbooks/taking-the-fast-path.md 50564
+budget: surface-budget.json surfaceTotal 6241
+budget: context-budget.json playbooks/executing-waves.md 105677
+budget: context-budget.json playbooks/verifying-on-device.md 50018
 ```
 
 ## 2026-10-23 — The green gate proves each task commit in a scratch worktree (#324, #336)
