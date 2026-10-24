@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.27.0 — 2026-10-24
+
+- feat(verify): run the driver first and skip on-device when nothing renders
+
+The execution stage's green gate now proves each task's own commit. `task-commit.mjs` commits the
+task, runs the gate command in a scratch worktree checked out at that commit, and takes the commit
+back if it fails, so a sibling task's half-finished edit can no longer fail a clean task (#324), and
+a pass always belongs to the commit that landed (#336). Ignored `node_modules`, `.venv`, `venv` and
+`vendor` directories are linked into that worktree, workspace packages included. The gate capture
+names the commit, tree and parent it proved, plus any known limit: an editable Python install or a
+linked `vendor` (a Composer path repository) that can read your checkout, or submodules, which the
+worktree does not populate. `--subset-cmd` and the `deferred` result are gone; three new outcomes
+take their place: `busy` (another gate is running; call again), `unproven-commit` (a failed proof of
+a commit the branch has already moved past, or one already recorded, left for you to decide) and
+`proof-unrunnable` (the proof could not run at all, e.g. a full disk: the commit is undone unless
+already recorded, the task is not blamed and you decide).
+
+`run-record.mjs`, `bump-version.mjs`, `dream.mjs` and `plan-check.mjs` now refuse an unrecognised
+flag, and a value flag given no value, with a non-zero exit that names the flag. Before, an unknown
+flag was dropped and a valueless one took the next flag as its value or fell back to a default: on
+the release path a misspelled `--dry-run` wrote `plugin.json` and `CHANGELOG.md` for real, and a
+malformed `--date` now fails before `plugin.json` is rewritten instead of after. `dream.mjs`
+also refuses a modifier its subcommand does not take (`--lessons audit --profile thorough`), and
+`run-record.mjs` refuses a stray argument instead of writing the row anyway. An empty session id
+still records, and `dream.mjs --match` still accepts an empty file list. `scripts/cli-flags.mjs`
+gains a `"repeat"` arity and an opt-in `requireValues` option for these four; no other script
+changes behaviour.
+
+Branch review now decides whether on-device applies: when execution recorded no checklist and
+nothing in the branch's diff renders (visual UI only; CLI output, docs, CI and tests do not), the
+cycle goes straight to finish through one clear, and the run record shows on-device as skipped
+(#368). The on-device stage launches the app itself from the checklist's new `Launch:` and
+`Ready:` lines and stops it again at the end, runs the browser driver first, and tags every item
+`structural`, `agent-observable` or `needs-eyes`: structural reads that hold are ticked `(auto)`,
+what the driver could only observe and every failure it saw come back as one batch of proposed
+verdicts for one answer, and only `needs-eyes` items are asked one by one (#367, #323 for web
+apps). Checklists also carry `Feasibility:` notes, give each axis of a verification matrix its own
+item, and record each verdict as `passed`, `FAILED`, `waived` or `unverified` (#338). `auto` on
+`onDeviceGate` and `reviewDepth` now means "pick for me": `onDeviceGate: auto` is that agent-first
+walk at every profile, so `lean` no longer implies `auto-ok`, and `reviewDepth: auto` measures the
+branch diff with the new `scripts/review-depth.mjs`, keeping `single` at `lean` and `panel` at
+`thorough` and picking `panel` for a large diff at `standard`; the new value `reviewDepth: profile`
+keeps the profile's row, and the review report gains a `Depth:` line. A cycle already in flight
+asks its knob-change question once after the upgrade. `references/model-routing.md`'s
+auditability list now names `model session (auto)` too (#296).
+
+A plan task's `**Files:**` block now yields real repo paths. `scripts/task-files.mjs`, the one owner
+of which files a task declares, expands brace lists (`src/lib/{a,b}.ts`), so `task-commit.mjs` no
+longer reports `nothing-to-commit` for an accepted task and an unattended run no longer ends in a
+false `needs-user` stop (#354). It strips line anchors (`scripts/doctor.mjs:565`) and no longer takes
+prose that merely contains a `/` (`Keep/Drop`, `9a/9b`) for a file, which stops
+`blast-radius-check.mjs` reporting referencers of a basename that is not a path.
+`playbooks/planning-waves.md` states the path grammar for plan authors (one fragment of #285).
+
 ## 0.26.0 — 2026-10-16
 
 - feat(cycle): review a spec's repo claims against live code before approval (#304)

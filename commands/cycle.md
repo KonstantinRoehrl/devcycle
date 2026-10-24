@@ -170,7 +170,7 @@ stages' single source of truth — `scripts/validate.mjs` reads its literal form
 5. **planning** — wave-based plan.
 6. **execution**.
 7. **branch-review**.
-8. **on-device** — skipped only when no rendered surface changed (record the skip in the handoff).
+8. **on-device** — branch review skips it when nothing renders (`references/checklist.md` § Applicability); it records the skip in its own handoff.
 9. **finish** — closing the state file with `stage: done`.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

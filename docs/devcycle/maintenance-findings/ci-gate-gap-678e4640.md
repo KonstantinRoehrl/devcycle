@@ -1,0 +1,11 @@
+# CONTRIBUTING's gate list contradicts its own intro and omits xref-check and dead-export-check, which CLAUDE.md lists, so the broken-reference check is gated by nothing
+- finding-kind: maintenance-finding
+- finding-id: ci-gate-gap:678e4640
+- culprit-kind: ci-gate-gap
+- severity: low
+- confidence: verified
+- affected-files: CONTRIBUTING.md, .claude/CLAUDE.md, scripts/xref-check.mjs, scripts/dead-export-check.mjs, .github/workflows/validate.yml
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

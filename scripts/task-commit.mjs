@@ -2,17 +2,20 @@
 // Commits one accepted execution-stage task: the coordinator's green gate and the acceptance commit
 // in one call (playbooks/executing-waves.md steps 6-7, references/commit-convention.md § The task
 // commit). The gate is this script's own run of the task's gate command (--test-cmd), never a
-// report's word; the task's own test run (--subset-cmd) decides whether a red is a sibling's.
+// report's word, against the commit it has just made: scripts/commit-proof.mjs runs it in a scratch
+// worktree detached at that commit, where no sibling's uncommitted edit reaches it, and a red proof
+// takes the commit back.
 // Each commit carries a `Devcycle-Task: <run>/<task>` trailer, so a re-run after a crash finds it
 // and appends only the ledger and run-record lines still missing instead of committing twice.
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { requireValue } from "./cli-flags.mjs";
 import { taskFileMap } from "./task-files.mjs";
 import { field } from "./md-field.mjs";
-import { runShell, writeCapture } from "./evidence-capture.mjs";
+import { writeCapture } from "./evidence-capture.mjs";
+import { LIMIT_PREFIX, proofLine, proveCommit, provesGreen } from "./commit-proof.mjs";
+import { LockTimeoutError, withFileLock } from "./file-lock.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { gitToplevel, recordPath, validateCulprit } from "./run-record.mjs";
 import { isMain } from "./is-main.mjs";
@@ -23,14 +26,17 @@ import {
   runTaskScript, taskEntries, taskFlags, workTreeRoot,
 } from "./task-ledger.mjs";
 
-const FOREIGN_CHANGE_CHECK = fileURLToPath(new URL("./foreign-change-check.mjs", import.meta.url));
 const TRAILER_KEY = "Devcycle-Task";
 const TRAILER_LINE = /^[A-Za-z][A-Za-z0-9-]*: \S/;
 const GATE_FAIL_PREFIX = "rejected (green gate:";
+// Read, never written: a ledger from before the per-commit proof can still hold one.
 const DEFERRED_OUTCOME = "deferred (concurrent sibling edits)";
+// One call proves at a time, from its commit through any undo. A second one returns `busy` rather
+// than blocking its caller for a whole gate run.
+const PROOF_LOCK_WAIT_MS = 2000;
 const FLAGS = {
   "--run": "value", "--task": "value", "--plan": "value", "--test-cmd": "value", "--subject": "value",
-  "--subset-cmd": "value", "--culprit": "value", "--trailers": "value", "--ledger": "value",
+  "--culprit": "value", "--trailers": "value", "--ledger": "value",
 };
 const REQUIRED = ["--run", "--task", "--plan", "--test-cmd", "--subject"];
 
@@ -48,7 +54,6 @@ function parseArgs(argv) {
   const args = {
     run: flags["--run"], task: flags["--task"], plan: flags["--plan"], testCmd: flags["--test-cmd"],
     subject: flags["--subject"],
-    subsetCmd: optionalFlag(flags, "--subset-cmd", "a command"),
     culprit: optionalFlag(flags, "--culprit", "a culprit slug") ?? "gate-caught-regression",
     trailers: (optionalFlag(flags, "--trailers", "trailer lines") ?? "").split("\n").map((l) => l.trim()).filter(Boolean),
     ledger: optionalFlag(flags, "--ledger"),
@@ -111,18 +116,34 @@ function findTaskCommit(cwd, range, value, files) {
   return null;
 }
 
-// executing-waves.md step 6: a whole-suite red is the task's own unless foreign-change-check reports a
-// sibling's edit and the task's file-scoped subset is green — then it is deferred, never attributed.
-function greenGate(cwd, { testCmd, subsetCmd, files }) {
-  const whole = runShell(cwd, testCmd);
-  if (whole.status === 0) return { gate: "pass", runs: [whole] };
-  const foreign = spawnSync(process.execPath, [FOREIGN_CHANGE_CHECK, ...files], { cwd, encoding: "utf8" });
-  if (foreign.error) throw new Error(`foreign-change-check did not run: ${foreign.error.message}`);
-  if (foreign.status === 0) return { gate: "fail", status: whole.status, runs: [whole] };
-  const subset = runShell(cwd, subsetCmd ?? testCmd);
-  return subset.status === 0
-    ? { gate: "deferred", runs: [whole, subset] }
-    : { gate: "fail", status: subset.status, runs: [whole, subset] };
+const currentBranch = (root) => gitOut(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+
+const gateCapture = (task) => `.devcycle/evidence/${task}-gate.txt`;
+
+function provenAlready(root, task, sha) {
+  try {
+    return provesGreen(readFileSync(join(root, gateCapture(task)), "utf8"), sha);
+  } catch {
+    return false;
+  }
+}
+
+// A red proof takes its commit back: the branch moves to the parent only while it still points at the
+// commit — a compare-and-swap, so a commit made on top since is never dropped — and the index entries
+// the commit changed return to the parent's, a file it added staying intent-to-add as the implementer
+// left it. The work tree is never touched: the task's edits stay for the fix round.
+function undoCommit(root, branchName, sha) {
+  const [parent] = gitOut(root, ["show", "-s", "--format=%P", sha]).trim().split(" ");
+  if (!parent) return false;
+  const moved = git(root, ["update-ref", "-m", "devcycle: undo a commit whose proof was red", `refs/heads/${branchName}`, parent, sha]);
+  if (moved.status !== 0) return false;
+  const paths = (filter) => gitOut(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", `--diff-filter=${filter}`, sha])
+    .split("\0").filter(Boolean);
+  const touched = paths("ACDMRT");
+  if (touched.length) gitOut(root, ["reset", "-q", parent, "--", ...touched]);
+  const added = paths("A");
+  if (added.length) gitOut(root, ["add", "-N", "--", ...added]);
+  return true;
 }
 
 // The task's changed Files the commit names, and those `git add` must take: all but a path already
@@ -176,10 +197,7 @@ function reconcileGateRows(ctx) {
   const { ledgerPath, task, culprit } = ctx;
   const specs = [];
   for (const e of taskEntries(ledgerPath, task)) {
-    if (e.event !== "review-verdict" || !e.key) continue;
-    if (e.outcome === DEFERRED_OUTCOME)
-      specs.push(["event", { event: "gate-deferred-foreign-change", stage: "execution", task, ts: e.stamp }, ["event", "task", "ts"]]);
-    if (!e.outcome.startsWith(GATE_FAIL_PREFIX)) continue;
+    if (e.event !== "review-verdict" || !e.key || !e.outcome.startsWith(GATE_FAIL_PREFIX)) continue;
     specs.push(["event", { event: "gate-fail", stage: "execution", task, culprit, attributedBy: "coordinator", ts: e.stamp }, ["event", "task", "ts"]]);
     const round = Number(e.key.split("/")[2]);
     // Only a round whose own reviewer wrote conformance=pass gets the gate's conformance=fail line.
@@ -190,10 +208,10 @@ function reconcileGateRows(ctx) {
   return appendRows(ctx, specs);
 }
 
-function recordGate(ctx, gate, evidenceRef, round) {
+function recordGate(ctx, status, evidenceRef, round) {
   const { ledgerPath, task } = ctx;
   const retry = nextRetry(ledgerPath, task, "review-verdict");
-  const outcome = gate.gate === "fail" ? `${GATE_FAIL_PREFIX} exit ${gate.status})` : DEFERRED_OUTCOME;
+  const outcome = `${GATE_FAIL_PREFIX} exit ${status})`;
   const line = appendLedgerLine(ledgerPath, { task, event: "review-verdict", outcome, ref: evidenceRef, round, retry });
   return [...(line.appended ? [ledgerKey({ task, event: "review-verdict", round, retry })] : []), ...reconcileGateRows(ctx)];
 }
@@ -223,63 +241,80 @@ function recordCommit(ctx, sha) {
   return [...appended, ...reconcileGateRows(ctx)];
 }
 
+// The gate: `sha` proven in its own worktree, the capture naming the tree it ran against. Green records
+// the commit; red undoes it and rejects the accepted round, unless the branch has moved past it or the
+// ledger already records it, whose `committed` line would then name a sha the branch no longer has. An
+// undo resets the checked-out branch's index, so with another branch checked out a red stops at
+// `branch-mismatch` and the commit stays.
+function proveAndRecord(ctx, sha, action, result) {
+  const { root, task } = ctx;
+  const { run, proof, limits, unrunnable } = proveCommit(root, sha, ctx.testCmd);
+  const evidenceRef = writeCapture(root, gateCapture(task), [run], [proofLine(proof), ...limits.map((l) => `${LIMIT_PREFIX} ${l}`)]);
+  if (run.status === 0) return result(action, { gate: "pass", sha, appended: recordCommit(ctx, sha) });
+  if (latestKeyed(ctx.ledgerPath, task, "committed")?.ref === sha)
+    return result(unrunnable ? "proof-unrunnable" : "unproven-commit", { gate: "fail", sha, ...(unrunnable && { reason: run.output.trim() }), appended: [] });
+  const current = currentBranch(root);
+  if (current !== ctx.branchName)
+    return result("branch-mismatch", { gate: "fail", sha, recorded: ctx.branchName, current, appended: [] });
+  if (!undoCommit(root, ctx.branchName, sha)) return result("unproven-commit", { gate: "fail", sha, appended: [] });
+  // A proof that never ran rejects no round: the user decides, and the accept still stands.
+  if (unrunnable) return result("proof-unrunnable", { gate: "fail", reason: run.output.trim(), appended: [] });
+  const round = latestKeyed(ctx.ledgerPath, task, "review-round")?.round ?? 0;
+  // A red gate rejects the round its reviewer accepted, so it counts toward the review loop's cap;
+  // past it, the red gate is the one item left unresolved. The status goes before the gate's line,
+  // so that line never stands without it as one more fix round; a crash between them leaves the
+  // accept to gate again.
+  const loopId = round >= ROUND_CAP ? exhaustReviewLoop(root, task, round, 1) : null;
+  const appended = recordGate(ctx, run.status, evidenceRef, round);
+  if (!loopId) return result("gate-fail", { gate: "fail", appended });
+  return result("needs-user", { gate: "fail", reason: "review loop exhausted-unresolved", loopId, appended });
+}
+
+function commitTask(ctx, files, branch, result) {
+  const { root, task, run } = ctx;
+  const found = findTaskCommit(root, sinceCut(root, branch.cut), `${run}/${task}`, files);
+  if (found) {
+    if (provenAlready(root, task, found)) return result("already-committed", { gate: "pass", sha: found, appended: recordCommit(ctx, found) });
+    return proveAndRecord(ctx, found, "already-committed", result);
+  }
+  const entries = taskEntries(ctx.ledgerPath, task);
+  const waiting = pendingReviewLoop(root, task, entries);
+  if (waiting) return result("needs-user", { reason: "review loop exhausted-unresolved", loopId: waiting, appended: [] });
+  const blocker = unaccepted(entries, task);
+  if (blocker)
+    throw new UsageError(`task ${task} has no open accept to commit (its latest verdict: ${blocker}) — a fix after a red gate needs the next round's review first`);
+
+  const current = currentBranch(root);
+  if (current !== branch.name) return result("branch-mismatch", { recorded: branch.name, current, appended: [] });
+  const { changed, toAdd } = changedTaskFiles(root, files);
+  if (!changed.length) return result("nothing-to-commit", { appended: [] });
+  if (toAdd.length) gitOut(root, ["add", "--", ...toAdd]);
+  const trailers = [...ctx.trailers, `${TRAILER_KEY}: ${run}/${task}`].flatMap((t) => ["--trailer", t]);
+  const commit = git(root, ["commit", "--quiet", "-m", ctx.subject, ...trailers, "--", ...changed]);
+  if (commit.status !== 0) {
+    process.stderr.write(commit.stderr ?? "");
+    return result("commit-failed", { appended: [] });
+  }
+  return proveAndRecord(ctx, gitOut(root, ["rev-parse", "HEAD"]).trim(), "committed", result);
+}
+
 export function taskCommit(argv, cwd = process.cwd()) {
   const args = parseArgs(argv);
   const root = workTreeRoot(cwd);
-  const ctx = {
-    ...args,
-    toplevel: gitToplevel(root),
-    ledgerPath: args.ledger ? resolve(cwd, args.ledger) : join(root, ".devcycle", "ledger.md"),
-  };
+  const ledgerPath = args.ledger ? resolve(cwd, args.ledger) : join(root, ".devcycle", "ledger.md");
   const files = taskFileMap(readText(resolve(cwd, args.plan), "plan")).get(Number(args.task));
   if (!files?.size) throw new UsageError(`task ${args.task} has no **Files:** block in ${args.plan}`);
   const branch = recordedBranch(readText(join(root, ".devcycle", "state.md"), "state file"));
   if (!branch.name) throw new Error("the state file records no branch: line");
+  const ctx = { ...args, root, branchName: branch.name, toplevel: gitToplevel(root), ledgerPath };
   const result = (action, extra) => ({ action, task: args.task, ...extra });
-  const branchMismatch = () => {
-    const current = gitOut(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
-    return current === branch.name ? null : result("branch-mismatch", { recorded: branch.name, current, appended: [] });
-  };
-
-  const found = findTaskCommit(root, sinceCut(root, branch.cut), `${args.run}/${args.task}`, files);
-  if (found) return result("already-committed", { gate: "pass", sha: found, appended: recordCommit(ctx, found) });
-  const entries = taskEntries(ctx.ledgerPath, args.task);
-  const waiting = pendingReviewLoop(root, args.task, entries);
-  if (waiting) return result("needs-user", { reason: "review loop exhausted-unresolved", loopId: waiting, appended: [] });
-  const blocker = unaccepted(entries, args.task);
-  if (blocker)
-    throw new UsageError(`task ${args.task} has no open accept to commit (its latest verdict: ${blocker}) — a fix after a red gate needs the next round's review first`);
-
-  const before = branchMismatch();
-  if (before) return before;
-  const gate = greenGate(root, { testCmd: args.testCmd, subsetCmd: args.subsetCmd, files: [...files] });
-  const evidenceRef = writeCapture(root, `.devcycle/evidence/${args.task}-gate.txt`, gate.runs);
-  if (gate.gate !== "pass") {
-    const round = latestKeyed(ctx.ledgerPath, args.task, "review-round")?.round ?? 0;
-    // A red gate rejects the round its reviewer accepted, so it counts toward the review loop's cap;
-    // past it, the red gate is the one item left unresolved. The status goes before the gate's line,
-    // so that line never stands without it as one more fix round; a crash between them leaves the
-    // accept to gate again.
-    const loopId = gate.gate === "fail" && round >= ROUND_CAP ? exhaustReviewLoop(root, args.task, round, 1) : null;
-    const appended = recordGate(ctx, gate, evidenceRef, round);
-    if (gate.gate === "deferred") return result("deferred", { gate: "deferred", appended });
-    if (!loopId) return result("gate-fail", { gate: "fail", appended });
-    return result("needs-user", { gate: "fail", reason: "review loop exhausted-unresolved", loopId, appended });
+  const lockTarget = join(dirname(ledgerPath), "task-commit");
+  try {
+    return withFileLock(lockTarget, () => commitTask(ctx, files, branch, result), { timeoutMs: PROOF_LOCK_WAIT_MS });
+  } catch (err) {
+    if (err instanceof LockTimeoutError && err.lockPath === `${lockTarget}.lock`) return result("busy", { appended: [] });
+    throw err;
   }
-
-  const after = branchMismatch();
-  if (after) return after;
-  const { changed, toAdd } = changedTaskFiles(root, files);
-  if (!changed.length) return result("nothing-to-commit", { gate: "pass", appended: [] });
-  if (toAdd.length) gitOut(root, ["add", "--", ...toAdd]);
-  const trailers = [...args.trailers, `${TRAILER_KEY}: ${args.run}/${args.task}`].flatMap((t) => ["--trailer", t]);
-  const commit = git(root, ["commit", "--quiet", "-m", args.subject, ...trailers, "--", ...changed]);
-  if (commit.status !== 0) {
-    process.stderr.write(commit.stderr ?? "");
-    return result("commit-failed", { gate: "pass", appended: [] });
-  }
-  const sha = gitOut(root, ["rev-parse", "HEAD"]).trim();
-  return result("committed", { gate: "pass", sha, appended: recordCommit(ctx, sha) });
 }
 
 if (isMain(import.meta.url, process.argv[1])) runTaskScript("task-commit", () => taskCommit(process.argv.slice(2)));

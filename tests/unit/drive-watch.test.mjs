@@ -189,7 +189,7 @@ test("the CLI refuses a usage error with exit 2", () => {
   const bad = [
     [], ["--status"], ["--status", "--wait", "--state", c.statePath], ["--follow", "--since", "-1", "--state", c.statePath],
     ["--status", "--since", "0", "--state", c.statePath], ["--status", "--state", c.statePath, "--bogus"],
-    ["--status", "--state", join(c.root, "nowhere", "state.md")],
+    ["--status", "--state", join(c.root, "nowhere", "state.md")], ["--status", "--state"],
   ];
   for (const args of bad) assert.equal(runSync(args).status, 2, `expected a usage error for ${JSON.stringify(args)}`);
 });

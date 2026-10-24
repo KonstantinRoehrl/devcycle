@@ -124,7 +124,7 @@
       "properties": {
         "kind": { "const": "event" },
         "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
-        "event": { "enum": ["gate-fail", "gate-pass-clean", "gate-deferred-foreign-change", "user-correction-at-gate", "review-reject", "depth-breach", "gate-ran", "spec-review"] },
+        "event": { "enum": ["gate-fail", "gate-pass-clean", "gate-deferred-foreign-change", "user-correction-at-gate", "review-reject", "depth-breach", "gate-ran", "spec-review", "review-depth"] },
         "stage": {
           "enum": [
             "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
@@ -135,6 +135,7 @@
         "culprit": { "type": ["string", "null"] },
         "attributedBy": { "enum": ["coordinator", "distillation"] },
         "result": { "enum": ["pass", "fail"] },
+        "reviewDepth": { "enum": ["single", "panel"] },
         "ts": { "type": "string", "format": "date-time" }
       },
       "required": ["kind", "runId", "event", "stage", "ts"],

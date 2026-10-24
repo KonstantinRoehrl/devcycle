@@ -262,3 +262,69 @@ test("release path: a real bump stamps the config changelog alongside plugin.jso
     "the release left a pending marker behind",
   );
 });
+
+// Flag errors are refused before any file is touched. The byte comparison is the proof: a check
+// that only asserted the exit status would pass against the old script, which exited 0 after a
+// misspelled --dry-run had already written the release.
+function releaseFixture() {
+  const dir = bumpFixture();
+  writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\n## 0.14.0 — 2026-08-19\n\n- old\n");
+  const snapshot = () => ["CHANGELOG.md", ".claude-plugin/plugin.json"].map((p) => readFileSync(join(dir, p)));
+  return { dir, before: snapshot(), snapshot };
+}
+
+const bump = (dir, args) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: "utf8" });
+
+test("a misspelled --dry-run is refused and writes nothing", () => {
+  const { dir, before, snapshot } = releaseFixture();
+  const r = bump(dir, ["--subject", "feat(x): y", "--dryrun"]);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "bump-version: unrecognised flag --dryrun\n");
+  assert.deepEqual(snapshot(), before);
+});
+
+test("a valueless --date is refused before anything is written, with or without --dry-run", () => {
+  for (const args of [["--subject", "feat(x): y", "--date"], ["--subject", "feat(x): y", "--date", "--dry-run"]]) {
+    const { dir, before, snapshot } = releaseFixture();
+    const r = bump(dir, args);
+    assert.equal(r.status, 1, args.join(" "));
+    assert.equal(r.stderr, "bump-version: --date requires a value\n");
+    assert.deepEqual(snapshot(), before);
+  }
+});
+
+test("--dry-run refuses a malformed --date like the real run and writes nothing", () => {
+  const { dir, before, snapshot } = releaseFixture();
+  const r = bump(dir, ["--subject", "fix: x", "--date", "2026-1-1", "--dry-run"]);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, 'bump-version: release date "2026-1-1" is not a YYYY-MM-DD date\n');
+  assert.deepEqual(snapshot(), before);
+});
+
+test("an empty --subject or --date is refused like a missing one", () => {
+  for (const [args, flag] of [[["--subject", "", "--dry-run"], "--subject"], [["--subject", "feat(x): y", "--date", " "], "--date"]]) {
+    const { dir, before, snapshot } = releaseFixture();
+    const r = bump(dir, args);
+    assert.equal(r.status, 1);
+    assert.equal(r.stderr, `bump-version: ${flag} requires a value\n`);
+    assert.deepEqual(snapshot(), before);
+  }
+});
+
+test("--notes-for takes no other flag", () => {
+  const { dir } = releaseFixture();
+  const r = bump(dir, ["--notes-for", "0.14.0", "--dry-run"]);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "bump-version: unrecognised flag --dry-run\n");
+  const ok = bump(dir, ["--notes-for", "0.14.0"]);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(ok.stdout, "- old\n");
+});
+
+test("a malformed --date is refused before plugin.json is rewritten", () => {
+  const { dir, before, snapshot } = releaseFixture();
+  const r = bump(dir, ["--subject", "feat(x): y", "--date", "2026-1-1"]);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, 'bump-version: release date "2026-1-1" is not a YYYY-MM-DD date\n');
+  assert.deepEqual(snapshot(), before);
+});

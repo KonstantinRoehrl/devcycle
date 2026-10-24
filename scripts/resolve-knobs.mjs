@@ -18,9 +18,9 @@ export const ROSTER = [
   { key: "profile", kind: "enum", values: ["lean", "standard", "thorough"], fallback: "standard" },
   { key: "gitPolicy", kind: "enum", values: ["local-commits-only", "push-allowed", "open-pr"], fallback: "local-commits-only" },
   { key: "docTrackingPolicy", kind: "enum", values: ["all-local", "standard", "all-tracked"], fallback: "standard" },
-  { key: "reviewDepth", kind: "enum", values: ["single", "panel"], fallback: profileRow("single", "single", "panel") },
+  { key: "reviewDepth", kind: "enum", values: ["auto", "profile", "single", "panel"], fallback: "auto", profileRow: profileRow("single", "single", "panel") },
   { key: "crossModelReview", kind: "boolean", fallback: "false" },
-  { key: "onDeviceGate", kind: "enum", values: ["human-required", "auto-ok"], fallback: profileRow("auto-ok", "human-required", "human-required") },
+  { key: "onDeviceGate", kind: "enum", values: ["auto", "human-required", "auto-ok"], fallback: "auto" },
   { key: "implementerModel", kind: "model", fallback: "auto" },
   { key: "taskReviewerModel", kind: "model", fallback: "auto" },
   { key: "branchReviewModel", kind: "model", fallback: "auto" },
@@ -36,7 +36,7 @@ export const ROSTER = [
 const ROSTER_KEYS = new Set(ROSTER.map(({ key }) => key));
 
 // An unset option renders as its literal placeholder -- even when the manifest declares a default
-// (docs/platform-notes.md) -- and `auto` is config.md's sanctioned "let the profile govern this".
+// (docs/platform-notes.md) -- and `auto` is config.md's sanctioned spelling of it: unset → the knob's fallback.
 export function isUnset(value) {
   const v = (value ?? "").trim();
   return v === "" || v === "auto" || v.startsWith("${user_config.");
@@ -76,23 +76,21 @@ function allowedSet(entry) {
   }
 }
 
-const fallbackFor = (entry, profile) => (typeof entry.fallback === "string" ? entry.fallback : entry.fallback[profile]);
-
 export function resolveKnobs(raw) {
   const knobs = {};
   const explicit = [];
   const warnings = [];
   const resolveOne = (entry, profile) => {
     const value = raw[entry.key];
-    if (isUnset(value)) return fallbackFor(entry, profile);
+    if (isUnset(value)) return entry.fallback;
     const normalized = inSet(entry, value);
     if (normalized !== null) {
       explicit.push(entry.key);
-      return normalized;
+      // `profile` is the one explicit value not kept verbatim: it names the profile's row.
+      return entry.profileRow && normalized === "profile" ? entry.profileRow[profile] : normalized;
     }
-    const fallback = fallbackFor(entry, profile);
-    warnings.push(`${entry.key}=${value.trim()} is not one of ${allowedSet(entry)}; using ${fallback}`);
-    return fallback;
+    warnings.push(`${entry.key}=${value.trim()} is not one of ${allowedSet(entry)}; using ${entry.fallback}`);
+    return entry.fallback;
   };
   const [profileEntry, ...rest] = ROSTER;
   knobs.profile = resolveOne(profileEntry, undefined);
@@ -117,15 +115,17 @@ export function parseRecordedLine(line) {
   return recorded;
 }
 
-// A recorded `auto` on a knob whose resolution never prints `auto` -- every knob but the four
-// `*Model` ones -- says "let the profile govern", not a value, so it is no difference. A live knob
-// is never a difference: keeping its recorded value would change nothing its reader does.
+// A recorded `auto` on a knob whose fallback is not `auto` is only the unset spelling, which that
+// knob's resolution never prints, so it is no difference. Where the fallback is `auto` -- the
+// `*Model` knobs, reviewDepth, onDeviceGate -- the line prints it, so a recorded `auto` is a value
+// like any other. A live knob is never a difference: keeping its recorded value would change
+// nothing its reader does.
 export function compareKnobs(recorded, knobs) {
   const changes = [];
   for (const entry of ROSTER) {
     if (entry.live || !Object.hasOwn(recorded, entry.key)) continue;
     const old = recorded[entry.key];
-    if (old === "auto" && entry.kind !== "model") continue;
+    if (old === "auto" && entry.fallback !== "auto") continue;
     const comparable = entry.kind === "model" && old !== "auto" ? parsePool(old).entries.join(",") : old;
     if (comparable !== knobs[entry.key]) changes.push({ key: entry.key, old, new: knobs[entry.key] });
   }

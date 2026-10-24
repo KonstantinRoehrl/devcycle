@@ -1899,6 +1899,79 @@ test("the default text report renders the reviewDepth cohort table", () => {
   assert.match(text, /unknown\s+n=\s*1/);
 });
 
+// D7: the cohort keys on the engine branch review ran, recorded as a `review-depth` event, so an
+// `auto` knob does not collapse every run into one bucket.
+const reviewDepthLines = (objects) => objects.map((o) => JSON.stringify(o)).join("\n") + "\n";
+const reviewDepthEvent = (runId, reviewDepth, ts) =>
+  ({ kind: "event", runId, event: "review-depth", stage: "branch-review", reviewDepth, ts });
+
+test("readRunRecords carries a run's last review-depth event onto every session window as resolvedReviewDepth", () => {
+  const dir = makeTempDir("runs-review-depth-");
+  const slug = join(dir, "repo");
+  mkdirSync(slug);
+  const [hashA, hashB, hashC] = ["sess-depth-a", "sess-depth-b", "sess-depth-c"]
+    .map((s) => createHash("sha256").update(s).digest("hex"));
+  writeFileSync(join(slug, "abc.jsonl"), reviewDepthLines([
+    { kind: "run", runId: "abc", schemaVersion: 1, pluginVersion: "0.27.0", knobs: { reviewDepth: "auto" } },
+    { kind: "session", runId: "abc", sessionHash: hashA },
+    reviewDepthEvent("abc", "single", "2026-10-24T10:00:00Z"),
+    { kind: "session", runId: "abc", sessionHash: hashB },
+    reviewDepthEvent("abc", "panel", "2026-10-24T11:00:00Z"),
+  ]));
+  writeFileSync(join(slug, "def.jsonl"), reviewDepthLines([
+    { kind: "run", runId: "def", schemaVersion: 1, pluginVersion: "0.26.0", knobs: { reviewDepth: "panel" } },
+    { kind: "session", runId: "def", sessionHash: hashC },
+  ]));
+  const records = readRunRecords(dir);
+  assert.strictEqual(records.get(hashA).resolvedReviewDepth, "panel", "the run's last review-depth event wins for every window, not just its own");
+  assert.strictEqual(records.get(hashB).resolvedReviewDepth, "panel");
+  assert.strictEqual(records.get(hashA).events.length, 1, "the event still lands in its own window's events");
+  assert.strictEqual(records.get(hashC).resolvedReviewDepth, null, "a run with no review-depth event resolves none");
+});
+
+test("readRunRecords keeps resolvedReviewDepth through a session-hash collision, whichever file is read first", () => {
+  const dir = makeTempDir("runs-review-depth-collision-");
+  const slug = join(dir, "repo");
+  mkdirSync(slug);
+  const hash = createHash("sha256").update("sess-depth-shared").digest("hex");
+  writeFileSync(join(slug, "abc.jsonl"), reviewDepthLines([
+    { kind: "run", runId: "abc", schemaVersion: 1, pluginVersion: "0.27.0", knobs: { reviewDepth: "auto" } },
+    { kind: "session", runId: "abc", sessionHash: hash },
+    reviewDepthEvent("abc", "single", "2026-10-24T10:00:00Z"),
+  ]));
+  writeFileSync(join(slug, "def.jsonl"), reviewDepthLines([
+    { kind: "run", runId: "def", schemaVersion: 1, pluginVersion: "0.27.0", knobs: { reviewDepth: "auto" } },
+    { kind: "session", runId: "def", sessionHash: hash },
+  ]));
+  assert.strictEqual(readRunRecords(dir).get(hash).resolvedReviewDepth, "single");
+});
+
+test("summarizeSession carries the run record's resolvedReviewDepth onto the summary, null without a record", () => {
+  const sessionId = "session-resolved-depth";
+  const hash = createHash("sha256").update(sessionId).digest("hex");
+  const record = {
+    runId: "abc", pluginVersion: "0.27.0", knobs: { reviewDepth: "auto" }, resolvedReviewDepth: "single",
+    stages: [], dispatches: [], verdicts: [],
+  };
+  const turns = [turn({ timestamp: "2026-10-24T10:15:00Z" })];
+  assert.strictEqual(summarizeSession(sessionId, turns, new Map([[hash, record]])).resolvedReviewDepth, "single");
+  assert.strictEqual(summarizeSession(sessionId, turns).resolvedReviewDepth, null);
+});
+
+test("reviewDepthCohortTable keys on the resolved review depth, falling back to the minted knob for older runs", () => {
+  const rows = reviewDepthCohortTable([
+    { knobs: { reviewDepth: "auto" }, resolvedReviewDepth: "panel", costByStage: { a: 1.0 }, medianDepth: 10 },
+    { knobs: { reviewDepth: "auto" }, resolvedReviewDepth: "single", costByStage: { a: 2.0 }, medianDepth: 10 },
+    { knobs: { reviewDepth: "panel" }, resolvedReviewDepth: null, costByStage: { a: 3.0 }, medianDepth: 10 },
+  ]);
+  assert.deepStrictEqual(rows.map((r) => [r.reviewDepth, r.sessions]), [["panel", 2], ["single", 1]]);
+});
+
+test("impactScores: a review-depth event is a neutral marker, never an impact row", () => {
+  const record = { events: [reviewDepthEvent("abc", "panel", "2026-10-24T10:00:00Z")], stages: [] };
+  assert.deepEqual(impactScores(record, {}).map((s) => s.event), []);
+});
+
 test("--json carries review_depth_cohorts alongside version_cohorts", () => {
   const json = buildJsonReport([
     { knobs: { reviewDepth: "panel" }, costByStage: { a: 1.0 }, medianDepth: 10,

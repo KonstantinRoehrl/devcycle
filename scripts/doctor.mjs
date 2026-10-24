@@ -557,18 +557,18 @@ export function cohortTable(summaries) {
 }
 
 // The reviewDepth-cohort counterpart to versionCohorts/cohortTable above: same shape, grouped
-// by the resolved value of the `reviewDepth` knob (the knob most directly tied to review rigor,
-// and the one already exercised by this cycle's single/panel distinction) instead of
-// pluginVersion, so a knob's effect on review rounds/cost is visible the same way a version's
-// is. Reuses aggregateQuality rather than re-deriving its arithmetic. A session with no knob
-// data (pre branch-fix-2-3's --knob wiring, or a run that never resolved the knob) buckets
-// under "unknown" — same convention cohortTable's own "unknown" version bucket already uses,
-// never dropped silently.
+// by the review engine a run's branch review actually ran (its `review-depth` event) instead of
+// pluginVersion, so single against panel shows in review rounds/cost the same way a version
+// does. The minted knob cannot key it: `auto` would put every run in one bucket. A run with no
+// such event (one that predates it) falls back to its minted `reviewDepth` knob. Reuses
+// aggregateQuality rather than re-deriving its arithmetic. A session with neither (pre
+// branch-fix-2-3's --knob wiring) buckets under "unknown" — same convention cohortTable's own
+// "unknown" version bucket already uses, never dropped silently.
 export function reviewDepthCohortTable(summaries) {
   const settled = summaries.filter((s) => !s.inFlight);
   const cohorts = new Map();
   for (const s of settled) {
-    const key = s.knobs?.reviewDepth ?? "unknown";
+    const key = s.resolvedReviewDepth ?? s.knobs?.reviewDepth ?? "unknown";
     if (!cohorts.has(key)) cohorts.set(key, { sessions: 0, dollars: [], depths: [], qualities: [] });
     const c = cohorts.get(key);
     c.sessions++;
@@ -968,8 +968,10 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
       // correlation the schema supports (session lines carry no timestamp; Task 37 dropped
       // firstSeen/lastSeen as dead fields). The run line's runId/pluginVersion/profile/knobs/
       // schemaMismatch are file-scoped, not window-scoped: they apply to every window in the
-      // file and do not reset on a `session` line.
+      // file and do not reset on a `session` line. So is resolvedReviewDepth, the last
+      // `review-depth` event's engine, whichever window that event fell in.
       let runId = null, pluginVersion = null, profile = null, knobs = null, schemaMismatch, triage = null;
+      let resolvedReviewDepth = null;
       let current = null;
       // The driver appends its `drive` row after the session it ran has ended, so the row is run-scoped
       // like `triage`, not window-scoped.
@@ -991,7 +993,10 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
-        else if (o.kind === "event") { if (current) windows.get(current).events.push(o); }
+        else if (o.kind === "event") {
+          if (o.event === "review-depth") resolvedReviewDepth = o.reviewDepth ?? resolvedReviewDepth;
+          if (current) windows.get(current).events.push(o);
+        }
         else if (o.kind === "workload") { if (current) windows.get(current).workloads.push(o); }
         else if (o.kind === "lens-cost") { if (current) windows.get(current).lensCosts.push(o); }
         else if (o.kind === "agent-depth") { if (current) windows.get(current).agentDepths.push(o); }
@@ -1022,7 +1027,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
       for (const [h, w] of windows) {
         // The run's workload is the last workload line written for the session (a rerun overwrites
         // an earlier estimate); null when the run wrote none (GC3 — workload-unknown, not zero).
-        const rec = { runId, pluginVersion, profile, knobs, schemaMismatch, triage, ...w,
+        const rec = { runId, pluginVersion, profile, knobs, resolvedReviewDepth, schemaMismatch, triage, ...w,
           workload: w.workloads.at(-1) ?? null, planningRuns: h === planningWindow ? [planningRun] : [],
           traceRuns: h === firstWindow ? [traceRun] : [],
           drive: drives.length ? "auto" : "manual", driveRuns: h === firstWindow ? [{ runId, rows: drives }] : [] };
@@ -1043,6 +1048,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
               driveRuns: [...prior.driveRuns, ...rec.driveRuns],
               drive: prior.drive === "auto" || rec.drive === "auto" ? "auto" : "manual",
               triage: rec.triage ?? prior.triage ?? null,
+              resolvedReviewDepth: rec.resolvedReviewDepth ?? prior.resolvedReviewDepth ?? null,
               workload: rec.workload ?? prior.workload ?? null }
           : rec);
       }
@@ -1315,6 +1321,9 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     profile: profile ?? "unknown",
     pluginVersion: pluginVersion ?? "unknown",
     knobs,
+    // The engine the run's branch review ran (readRunRecords' resolvedReviewDepth); null before
+    // the review-depth event existed, so the cohort falls back to the knob above.
+    resolvedReviewDepth: record?.resolvedReviewDepth ?? null,
     // The full session id is still in hand here and the record is already resolved; a summary
     // carries only `id: sessionId.slice(0, 8)`, so nothing downstream could redo this join.
     runId: record?.runId ?? null,
@@ -1986,8 +1995,9 @@ export function journalEvents(record) {
   return [...(record.events ?? []), ...deriveEvents(record)];
 }
 
-// Markers that a gate or review ran: neither is friction, whatever its result.
-const NEUTRAL_EVENTS = new Set(["gate-ran", "spec-review"]);
+// Markers that a gate or review ran, or which review engine ran: none is friction, whatever its
+// result.
+const NEUTRAL_EVENTS = new Set(["gate-ran", "spec-review", "review-depth"]);
 
 export function impactScores(record, costByStage) {
   const all = journalEvents(record);
@@ -2738,8 +2748,9 @@ const GLOSSES = {
     "How many subagents were dispatched, and how many inherited the caller's model instead of " +
     "naming one.",
   "appendix-cohorts-by-reviewdepth":
-    "The same cohort cut keyed by the `reviewDepth` knob rather than the version, so the other " +
-    "lever on review rigor is visible too.",
+    "The same cohort cut keyed by the review engine each run's branch review ran (the " +
+    "`reviewDepth` knob for older runs) rather than the version, so the other lever on review " +
+    "rigor is visible too.",
   "appendix-total-cost-by-version":
     "Total spend per version — the volume figure the per-cycle medians above deliberately leave out.",
   "appendix-per-session-detail":

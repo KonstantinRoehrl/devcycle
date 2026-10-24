@@ -1,0 +1,11 @@
+# golden-path C3 leg 2 decides 'has a non-test importer' by raw substring, while dead-export-check owns a real import parser
+- finding-kind: maintenance-finding
+- finding-id: weak-gate:a2c6849c
+- culprit-kind: weak-gate
+- severity: low
+- confidence: verified
+- affected-files: tests/unit/golden-path.test.mjs, scripts/dead-export-check.mjs, scripts/temp-dir-check.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

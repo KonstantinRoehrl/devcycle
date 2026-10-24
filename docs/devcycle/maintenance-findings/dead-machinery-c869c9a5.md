@@ -1,0 +1,11 @@
+# doctor --drift cannot fire (all 30 config-changelog records are 'added') yet is advertised as a headline invocation and a standing learn step
+- finding-kind: maintenance-finding
+- finding-id: dead-machinery:c869c9a5
+- culprit-kind: dead-machinery
+- severity: low
+- confidence: verified
+- affected-files: scripts/doctor.mjs, docs/configuration/config-changelog.md, commands/doctor.md, playbooks/learning-from-sessions.md
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

@@ -102,8 +102,10 @@ compaction is the point, not a reduction in what the stage does.
    itself and reads the exit status before accepting. Neither the implementer's
    evidence files nor a reviewer's accept verdict is sufficient — both judge a
    report, not the repo. Upstream has no coordinator-side re-run (see (d)2).
-   Since 2026-10-08 the gate, its foreign-change deferral, the branch re-check
-   and the commit are one script the coordinator runs, `scripts/task-commit.mjs`.
+   Since 2026-10-08 the gate, the branch re-check and the commit are one script
+   the coordinator runs, `scripts/task-commit.mjs`; since 2026-10-23 it proves
+   the commit in a scratch worktree detached at it, so a concurrent sibling's
+   edit can no longer redden the gate.
 3. **Ledger at `.devcycle/ledger.md`**, one appended line per event with all four
    fields required, over the six-value event enum
    (`dispatched|report-received|review-round|review-verdict|committed|user-decision`).

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./is-main.mjs";
+import { parseFlags } from "./cli-flags.mjs";
 import { field } from "./md-field.mjs";
 import { parseDispatchMap } from "./task-files.mjs";
 import { codeBlocksLeg } from "./lint-plan-code-blocks.mjs";
@@ -83,15 +84,16 @@ function printNotes(notes, { listAll }) {
 }
 
 function main(argv) {
-  const positionals = [];
-  let only;
-  let verbose = false;
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--only") only = argv[++i] ?? die("--only needs a leg name");
-    else if (argv[i] === "--verbose") verbose = true;
-    else if (argv[i].startsWith("--")) die(`unknown flag "${argv[i]}" — ${USAGE}`);
-    else positionals.push(argv[i]);
+  let parsed;
+  try {
+    parsed = parseFlags(argv, { "--only": "value", "--verbose": "none" },
+      { allowPositionals: true, requireValues: "nonEmpty" });
+  } catch (e) {
+    die(`${e.message} — ${USAGE}`);
   }
+  const { flags, positionals } = parsed;
+  const only = flags["--only"];
+  const verbose = flags["--verbose"] === true;
   const [planPath, repoRoot = process.cwd()] = positionals;
   if (!planPath) die(USAGE);
   if (only && !(only in LEGS)) die(`unknown leg "${only}" — one of ${Object.keys(LEGS).join(", ")}`);

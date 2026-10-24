@@ -1,0 +1,11 @@
+# validate.mjs runs ~28 checks inside one 1,200-line block with shared closure state, so no check is testable on its own
+- finding-kind: maintenance-finding
+- finding-id: missing-seam:9fc76eca
+- culprit-kind: missing-seam
+- severity: medium
+- confidence: verified
+- affected-files: scripts/validate.mjs, tests/unit/helpers.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

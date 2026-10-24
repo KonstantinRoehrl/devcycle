@@ -181,3 +181,56 @@ test("a bare list of flag names is refused, because it cannot declare arity", ()
 test("a flag declared with an arity that is neither kind is refused", () => {
   assert.throws(() => parseFlags(["--dir", "x"], { "--dir": "path" }), /--dir declares an unknown arity/);
 });
+
+// run-record passes `--knob KEY=VALUE` once per knob; a last-wins "value" flag kept only the last.
+const REPEATING = { "--knob": "repeat", "--run": "value" };
+
+test("a repeat flag keeps every occurrence in argv order, in either form", () => {
+  const { flags } = parseFlags(["--knob", "a=1", "--run", "r", "--knob=b=2"], REPEATING);
+  assert.deepEqual(flags, { "--knob": ["a=1", "b=2"], "--run": "r" });
+  assert.deepEqual(parseFlags(["--knob=k=v=w"], REPEATING).flags, { "--knob": ["k=v=w"] });
+});
+
+test("a repeat flag given once is still an array, and an absent one is absent", () => {
+  assert.deepEqual(parseFlags(["--knob", "a=1"], REPEATING).flags, { "--knob": ["a=1"] });
+  assert.equal("--knob" in parseFlags(["--run", "r"], REPEATING).flags, false);
+});
+
+test("without requireValues a valueless flag still comes back undefined", () => {
+  assert.deepEqual(parseFlags(["--run"], REPEATING).flags, { "--run": undefined });
+  assert.deepEqual(parseFlags(["--knob", "--run", "r"], REPEATING).flags, { "--knob": [undefined], "--run": "r" });
+});
+
+test('requireValues "present" refuses a missing value and accepts an empty one', () => {
+  const present = { requireValues: "present" };
+  assert.throws(() => parseFlags(["--run"], REPEATING, present), /^Error: --run requires a value$/);
+  assert.throws(() => parseFlags(["--run", "--knob", "a=1"], REPEATING, present), /^Error: --run requires a value$/);
+  assert.throws(() => parseFlags(["--knob", "a=1", "--knob"], REPEATING, present), /^Error: --knob requires a value$/);
+  assert.deepEqual(parseFlags(["--run", ""], REPEATING, present).flags, { "--run": "" });
+  assert.deepEqual(parseFlags(["--run="], REPEATING, present).flags, { "--run": "" });
+});
+
+test('requireValues "nonEmpty" also refuses a blank value, in either form', () => {
+  const nonEmpty = { requireValues: "nonEmpty" };
+  assert.throws(() => parseFlags(["--run", ""], REPEATING, nonEmpty), /^Error: --run requires a value$/);
+  assert.throws(() => parseFlags(["--run=  "], REPEATING, nonEmpty), /^Error: --run requires a value$/);
+  assert.throws(() => parseFlags(["--knob", "a=1", "--knob", " "], REPEATING, nonEmpty), /^Error: --knob requires a value$/);
+  assert.deepEqual(parseFlags(["--run", "r"], REPEATING, nonEmpty).flags, { "--run": "r" });
+});
+
+test("requireValues never asks a valueless flag for a value", () => {
+  assert.deepEqual(
+    parseFlags(["--json"], WITH_VALUELESS, { requireValues: "nonEmpty" }).flags, { "--json": true });
+});
+
+test("an unrecognised flag still wins over a missing value", () => {
+  assert.throws(() => parseFlags(["--run", "--bogus"], REPEATING, { requireValues: "present" }),
+    /unrecognised flag --bogus/);
+});
+
+test("a requireValues rule that is neither kind is refused", () => {
+  assert.throws(() => parseFlags(["--run", "r"], REPEATING, { requireValues: "always" }),
+    /requireValues must be "present" or "nonEmpty", got "always"/);
+  assert.throws(() => parseFlags(["--run", "r"], REPEATING, { requireValues: true }),
+    /requireValues must be "present" or "nonEmpty", got true/);
+});

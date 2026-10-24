@@ -1,0 +1,11 @@
+# The Conventional Commit grammar exists in three copies with two scope charsets and no parity test
+- finding-kind: maintenance-finding
+- finding-id: unguarded-duplication:3d630384
+- culprit-kind: unguarded-duplication
+- severity: low
+- confidence: verified
+- affected-files: .github/workflows/validate.yml, scripts/bump-version.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

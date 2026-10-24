@@ -1,0 +1,11 @@
+# CI-hardening conventions (SHA pins, contents: read, concurrency) are asserted for only some workflows, not validate.yml or prepare-release.yml
+- finding-kind: maintenance-finding
+- finding-id: ci-gate-gap:1ec3fb3e
+- culprit-kind: ci-gate-gap
+- severity: low
+- confidence: verified
+- affected-files: tests/unit/workflows.test.mjs, scripts/validate.mjs, .github/workflows/validate.yml, .github/workflows/prepare-release.yml
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

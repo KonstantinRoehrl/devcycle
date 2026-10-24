@@ -119,7 +119,8 @@ Upstream's Model Selection tiers are background only; these predicates
 decide. Auditability: every dispatch's ledger event records the decision and
 its inputs — `outcome=model fast:<resolved id> (auto: files=3, deps=none,
 steps=specified)` or `outcome=model session (auto: escalated on files=9)` for
-derived choices, `outcome=model <id> (pinned)` for explicit config. A pooled
+derived choices, `outcome=model session (auto)` for an unset knob passed to the module
+anyway, `outcome=model <id> (pinned)` for explicit config. A pooled
 pick records `outcome=model <id> (pooled: rung <n>/<len>)`, gaining
 `, clamped from <requested-id>` when the ceiling moved it; a clamped pin records
 `outcome=model <id> (pinned, clamped from <requested-id>)`; a fall-through to no

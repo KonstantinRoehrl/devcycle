@@ -17,17 +17,15 @@ models and review depth and the on-device gate by their stages).
    knob's allowed set. It beats the profile and any documented default, for as
    long as it stays configured. For a `*Model` knob the allowed set includes an
    ordered, comma-separated pool of ids as well as a single id —
-   `references/model-routing.md` owns what a pool means.
+   `references/model-routing.md` owns what a pool means. `reviewDepth`'s `profile` is
+   the one value not kept verbatim: it resolves to the profile's branch-review row.
 2. **Everything else falls back** — a literal placeholder and `auto` are unset, a
-   value outside the knob's allowed set is invalid, and both take the same route.
-   `auto` is sanctioned on every knob, not only the `*Model` ones: it is how a user
-   says *let the profile govern this* without deleting the key. Where a stage playbook
-   enumerates a knob's allowed values (e.g. `single` | `panel`), that names what the
-   knob resolves *to* — `auto` is settled here, before that enumeration applies, and
-   is never the invalid case. A knob with a row in the profile matrix below falls
-   back to that row's column value; every other knob — `gitPolicy`,
-   `crossModelReview`, and the `*Model` knobs (whose unset value is `auto`, derived
-   per `references/model-routing.md`) — falls back to its own documented default.
+   value outside the knob's allowed set is invalid, and both take the same route to
+   the knob's fallback in § The knob roster. `auto` is sanctioned on every knob: it is
+   how a user hands the choice back without deleting the key, and is never the invalid
+   case. On `reviewDepth` and `onDeviceGate` the fallback is `auto` itself, a pick their
+   owning playbook makes at stage time; on the `*Model` knobs it is derived per
+   `references/model-routing.md`.
 3. **`profile` itself** takes the same two steps: a literal placeholder or a value
    outside `lean | standard | thorough` is unset, and falls back to `standard`.
 
@@ -84,9 +82,9 @@ carry the same keys; without it the copies drift one release at a time.
 | `profile` | § The profile, below | `standard` |
 | `gitPolicy` | `playbooks/finishing-the-cycle.md` | `local-commits-only` |
 | `docTrackingPolicy` | § Doc tracking, below | `standard` |
-| `reviewDepth` | `playbooks/reviewing-the-branch.md` | the profile's branch-review row |
+| `reviewDepth` | `playbooks/reviewing-the-branch.md` | `auto` — sized per `playbooks/reviewing-code.md` § 3 |
 | `crossModelReview` | `playbooks/reviewing-the-branch.md` | `false` |
-| `onDeviceGate` | `playbooks/verifying-on-device.md` | the profile's on-device row |
+| `onDeviceGate` | `playbooks/verifying-on-device.md` | `auto` — agent first, per `playbooks/verifying-on-device.md` § The gate |
 | `implementerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
 | `taskReviewerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
 | `branchReviewModel` | `playbooks/reviewing-the-branch.md` | `auto` — the session's own model |
@@ -114,7 +112,6 @@ of knob values; `references/resume.md` owns its forms.
 | --- | --- | --- | --- |
 | planning / execution engine | devcycle-native compact | devcycle-native compact | upstream overlays |
 | branch review engine (`reviewDepth`) | `single` | `single` | `panel` |
-| on-device gate (`onDeviceGate`) | `auto-ok` | `human-required` | `human-required` |
 | evidence tail in reports | 10 lines | 20 lines | 50 lines |
 | branch-review round cap | 2 | 3 | 5 |
 | audit depth | named criteria, ranked findings | full criteria sweep | full sweep + adversarial verification |

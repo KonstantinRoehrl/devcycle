@@ -54,12 +54,12 @@ working-tree artifacts a reviewer reads from the checkout, not history.
 ## The task commit
 
 `playbooks/executing-waves.md` commits each accepted task, green gate included, with
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/task-commit.mjs" --run <id> --task <id> --plan <path> --test-cmd "<cmd>" --subject "<subject>" [--subset-cmd "<cmd>"] [--trailers "<Key: value lines>"]`.
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/task-commit.mjs" --run <id> --task <id> --plan <path> --test-cmd "<cmd>" --subject "<subject>" [--trailers "<Key: value lines>"]`.
 It commits the task's changed `**Files:**` under § Scoping the commit with the subject as given, and
 adds `Devcycle-Task: <run-id>/<task-id>` to git's trailer block after any `--trailers` the convention
 carries, such as `Co-Authored-By:`. A trailer, because the subject is the repo's convention; the run
 id, because task numbers repeat across cycles on one branch. A re-run that finds a commit since the
-branch cut carrying the trailer and touching only the task's files appends the ledger and run-record
-lines it still lacks instead of committing again. It refuses (exit 2) a task with no open accept (a
-red gate closes one) unless the user decided its review loop later, and returns `needs-user` without
-running the gate while that loop awaits the user.
+branch cut carrying the trailer and touching only the task's files proves it unless its gate capture
+already does, then appends the ledger and run-record lines it lacks instead of committing again. It
+refuses (exit 2) a task with no open accept (a red gate closes one) unless the user decided its
+review loop later, and returns `needs-user` without running the gate while that loop awaits the user.

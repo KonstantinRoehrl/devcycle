@@ -236,9 +236,9 @@ gated by `userConfig.crossModelReview`.
   "profile": "lean | standard | thorough",
   "gitPolicy": "local-commits-only | push-allowed | open-pr",
   "docTrackingPolicy": "standard | all-local | all-tracked",
-  "reviewDepth": "single | panel | auto",
+  "reviewDepth": "auto | profile | single | panel",
   "crossModelReview": false,
-  "onDeviceGate": "human-required | auto-ok | auto",
+  "onDeviceGate": "auto | human-required | auto-ok",
   "implementerModel": "auto | <model id>",
   "taskReviewerModel": "auto | <model id>",
   "branchReviewModel": "auto | <model id>",
@@ -252,9 +252,9 @@ gated by `userConfig.crossModelReview`.
 }
 ```
 
-- `profile` (added 2026-07-26) is the preset behind the rest: every other option keeps its
-  own shipped default, and any option left at that default takes the profile's column value
-  instead (matrix and resolution order in `references/config.md`). It is what the
+- `profile` (added 2026-07-26) is the preset behind the rest: it sets the stage dimensions of
+  the matrix in `references/config.md`, and an option left at its shipped default never pins
+  one of them (matrix and resolution order in `references/config.md`). It is what the
   first-run walkthrough asks about — one question, not the four-knob batch, which stays
   available behind a *customize* answer.
 - The model options are four flat string keys — the plugin manifest's `userConfig` schema
@@ -263,13 +263,15 @@ gated by `userConfig.crossModelReview`.
 - Model options default to `auto`: the coordinator derives the model per task from
   plan-observable attributes and logs the derivation in the ledger. An explicitly configured
   model id is binding — used verbatim, never overridden.
-- `reviewDepth` and `onDeviceGate` also accept `auto` (added 2026-07-26): it hands the knob
-  back to the profile's column, the same route an unset knob takes — the escape hatch for a
-  user upgrading from an older config whose explicit value would otherwise shadow the profile
-  forever (resolution order in `references/config.md`).
+- `reviewDepth` and `onDeviceGate` ship `auto` as their default, and since 2026-10-24 it means
+  "pick for me", as on the model options: `reviewDepth: auto` measures a branch diff and picks
+  `single` or `panel` within the profile's bounds (`playbooks/reviewing-code.md` § 3), and
+  `onDeviceGate: auto` runs the browser driver first, leaving the human the batch of proposed
+  verdicts and the `needs-eyes` items (`playbooks/verifying-on-device.md` § The gate).
+  `reviewDepth: profile` keeps the profile's branch-review row; `onDeviceGate` has no profile
+  row (decision log, 2026-10-24).
 - Shipped defaults: `gitPolicy: local-commits-only` (most conservative), `reviewDepth: auto`
-  and `onDeviceGate: auto` (each the profile's row), `crossModelReview: false`, all four model
-  options `auto`.
+  and `onDeviceGate: auto`, `crossModelReview: false`, all four model options `auto`.
 - Values reach stages through one channel (added 2026-09-29): every entry command except
   `/devcycle:doctor` runs `scripts/resolve-knobs.mjs` with the rendered placeholders and stages
   read the `knobs:` line it prints (`references/config.md` § Knob channel).

@@ -1,0 +1,11 @@
+# The supported Claude Code floor 2.1.287 is restated in five places with no parity check
+- finding-kind: maintenance-finding
+- finding-id: unguarded-duplication:3b5e6a30
+- culprit-kind: unguarded-duplication
+- severity: low
+- confidence: verified
+- affected-files: hooks/devcycle-mod.mjs, .github/workflows/validate.yml, scripts/doctor.mjs, tests/mod/guard.test.ts, README.md
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 

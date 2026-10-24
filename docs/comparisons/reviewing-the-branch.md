@@ -20,14 +20,15 @@ how many rounds the findings loop gets.
 
 | profile | default `reviewDepth` | engine | upstream guidance in play | round cap |
 | --- | --- | --- | --- | --- |
-| `lean` | `single` | this skill's spec-compliance layer + upstream reviewer guidance | yes | 2 |
-| `standard` | `single` | same | yes | 3 |
-| `thorough` | `panel` | `workflows/review-panel.js` | only if the panel degrades to `single` | 5 |
+| `lean` | `auto` → `single` | this skill's spec-compliance layer + upstream reviewer guidance | yes | 2 |
+| `standard` | `auto` → `single`, or `panel` on a large diff | same, or `workflows/review-panel.js` | yes, on the `single` path | 3 |
+| `thorough` | `auto` → `panel` | `workflows/review-panel.js` | only if the panel degrades to `single` | 5 |
 
-An explicitly configured `reviewDepth` wins verbatim over the profile column, so a `lean`
-run can be pinned to `panel` and a `thorough` run to `single`; the profile only supplies
-the default. Resolution order comes from `references/config.md`, the model tiers from
-`references/model-routing.md`.
+Since 2026-10-24 the default `auto` sizes the review from the branch diff within the profile's
+bounds (`playbooks/reviewing-code.md` § 3 owns the rule), and `reviewDepth: profile` takes the
+profile's row, as the unset knob used to. An explicitly configured `single` or `panel` wins
+verbatim, so a `lean` run can be pinned to `panel` and a `thorough` run to `single`. Resolution
+order comes from `references/config.md`, the model tiers from `references/model-routing.md`.
 
 ## (a) Upstream's share — referenced, never restated (at every profile)
 
@@ -56,7 +57,8 @@ Unless a line says otherwise, it holds at every profile.
 - **A pipeline gate, not a habit.** This is the mandatory whole-branch review stage between
   execution and finishing, with its inputs deliberately limited to the branch, the spec
   path, and the ledger path, and with a handoff block and the branch-review → on-device
-  context action. Upstream prescribes cadence but no pipeline placement.
+  context action — or, when the branch renders nothing, the skip straight to finish.
+  Upstream prescribes cadence but no pipeline placement.
 - **Profile-keyed hybrid engine.** `reviewDepth` resolves per the table above:
   `single` → this skill's spec-compliance layer plus upstream's reviewer guidance;
   `panel` → `workflows/review-panel.js` (lens reviewers for spec compliance /
@@ -105,10 +107,10 @@ Unless a line says otherwise, it holds at every profile.
   when `branchReviewModel` resolves to an explicit id it is exported as
   `DEVCYCLE_PANEL_MODEL` before invoking the panel, since omitting it would silently
   replace the user's binding choice with the CLI default.
-- **Producer-side routing of the next stage's model.** The handoff carries
+- **Producer-side routing of the next stage's model.** A handoff to on-device carries
   `Start the fresh session on <model>` (resolved from `walkthroughModel`) because the
   on-device session's model is chosen by whoever launches it — an instruction inside that
-  session would arrive too late.
+  session would arrive too late. A skip to finish carries no such line.
 - **Plain-language findings**: symptom first, mechanism second.
 
 ## (c) Conflicts and resolutions

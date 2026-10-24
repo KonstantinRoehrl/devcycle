@@ -23,11 +23,12 @@ tails. The dimension-by-dimension matrix — every stage dimension against all t
 lives in [`references/config.md`](../../references/config.md) § The profile, which owns it.
 
 Resolution order, in one rule: **an option you configured explicitly wins verbatim, always;
-anything left at its default takes the profile's column value.** So the `Default` column in the
-table below is really the `standard` column of the profile matrix `references/config.md` owns —
-switch to `thorough` and the branch review becomes `panel` on its own, unless you pinned
-`reviewDepth: single` yourself, in which case your value stands and the profile never moves it. A
-`profile` that is unset or set to anything outside the three reads as `standard`.
+an option left at its default never pins anything the profile governs.** The profile sets the
+stage dimensions in the matrix `references/config.md` owns, and `reviewDepth`'s default, `auto`,
+sizes the branch review within the profile's bounds — switch to `thorough` and the branch review
+becomes `panel` on its own, unless you pinned `reviewDepth: single` yourself, in which case your
+value stands and the profile never moves it. A `profile` that is unset or set to anything outside
+the three reads as `standard`.
 
 What the profile never touches: the state file, handoff blocks, evidence classes, the
 coordinator's green gate re-run, the `gitPolicy` clamps, branch discipline, the
@@ -43,18 +44,19 @@ you answered "use defaults, don't ask again" — and an explicit option wins ver
 forever. Set `profile: thorough` on top of that and the branch review stays `single`, with
 nothing to tell you why.
 
-Two of the four can shadow a profile, because only they have a row in the profile matrix
-`references/config.md` owns: `reviewDepth` and `onDeviceGate`. (`gitPolicy` and
-`crossModelReview` are outside the profile, so an explicit value there shadows nothing and
-needs no change.) Hand a shadowing option back to the profile by setting it to `auto`:
+Only `reviewDepth` can shadow a profile, because it is the one option with a row in the profile
+matrix `references/config.md` owns. (`gitPolicy`, `crossModelReview` and `onDeviceGate` are
+outside the profile, so an explicit value there shadows nothing; an old explicit
+`onDeviceGate: human-required` still makes every item yours, and `auto` is what puts the agent
+first.) Hand `reviewDepth` back to the profile's row by setting it to `profile`:
 
 ```
-claude plugin install devcycle@devcycle --config reviewDepth=auto --config onDeviceGate=auto
+claude plugin install devcycle@devcycle --config reviewDepth=profile
 ```
 
-`auto` is a value, not a deletion — it means "let the profile govern this", the same way it
-already does for the four model options — so the option stays visible in
-`/plugin configure` and you can pin it again later.
+`profile` takes the profile's branch-review row as it is; `auto`, the default, sizes the review
+from the branch diff within the profile's bounds instead. Either is a value, not a deletion, so
+the option stays visible in `/plugin configure` and you can pin it again later.
 
 To spot a shadowing option, read the `explicit:` line the entry command prints next to
 `knobs:` — it names every option that won because you configured it.
@@ -85,9 +87,9 @@ and silently runs every knob at its fallback. [`docs/platform-notes.md`](../plat
 | `profile` | Cost against rigor, across every stage at once | `lean` / `standard` / `thorough` | `standard` |
 | `gitPolicy` | What the finish stage may do with git | `local-commits-only` / `push-allowed` / `open-pr` | `local-commits-only` |
 | `docTrackingPolicy` | What devcycle attempts to commit (the repo's `.gitignore` still decides what lands) | `standard` / `all-local` / `all-tracked` | `standard` |
-| `reviewDepth` | How the branch review runs | `single` / `panel` / `auto` | `auto` (the profile's row) |
+| `reviewDepth` | How the branch review runs | `auto` / `profile` / `single` / `panel` | `auto` (sized from the branch diff within the profile's bounds; `profile` takes the profile's row) |
 | `crossModelReview` | Adds a second-model lens to the panel | `true` / `false` | `false` |
-| `onDeviceGate` | Whether a human must finish the on-device checklist | `human-required` / `auto-ok` / `auto` | `auto` (the profile's row) |
+| `onDeviceGate` | Who settles the on-device checklist | `auto` / `human-required` / `auto-ok` | `auto` (the agent checks first; you judge the rest) |
 | `implementerModel` | Model for implementer subagents | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
 | `taskReviewerModel` | Model for per-task reviewers | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
 | `branchReviewModel` | Model for the whole-branch review | `auto` / model id / comma-separated pool | `auto` (inherits your session's model; set a model id to pin) |
@@ -115,9 +117,14 @@ repo's default branch (direct pushes there are never allowed) — and falls back
 `local-commits-only` behavior for that run if either is true, stating why in the finish
 stage's output. `local-commits-only` is unaffected either way; it never pushes.
 
-**`reviewDepth`** picks the branch-review engine — `single` at `lean` and `standard`,
-`panel` at `thorough`, unless you set it yourself (or set it to `auto`, which hands it back
-to the profile). `single` runs the review's two to five criteria lenses as inline read-only
+**`reviewDepth`** picks the branch-review engine. `auto`, the default, sizes it from the
+branch diff: always `single` at `lean`, always `panel` at `thorough`, and at `standard` `panel`
+once the diff passes the size thresholds `scripts/review-depth.mjs` names (lockfiles and
+generated files left out), `single` otherwise. A review with no diff to measure — a repo audit,
+`/devcycle:maintain`, a path review — takes the profile's row, and so does `profile`, set
+explicitly; `single` and `panel` pin the engine. [`playbooks/reviewing-code.md`](../../playbooks/reviewing-code.md)
+§ 3 owns the rule, and the review report's `Depth:` line says which engine was picked and why.
+`single` runs the review's two to five criteria lenses as inline read-only
 reviewers, then re-verifies each finding against the code — a complete review in its own
 right, not a degraded panel. Claude Code's built-in `code-review` skill is
 user-invocation-only, so an agent cannot launch it; if you have run it on the branch
@@ -130,15 +137,22 @@ merged into one report — slower and more expensive, harder to fool. With
 `crossModelReview: true` the panel adds one more lens run by a non-Claude model via the
 `codex` CLI, if installed — a hedge against blind spots one model family might share.
 
-**`onDeviceGate`** governs the last verification. The checklist is hybrid by design:
-items a browser can structurally verify are auto-checked through claude-in-chrome — Claude
-Code driving your own authenticated Chrome (install the plugin and grant the extension the
-page's site permissions; without it, nothing is auto-checked and every item is yours);
-the rest need a human. `human-required` (what `standard` and `thorough` take) blocks the
-pipeline until you've walked every human item; `auto-ok` — `lean`'s value — lets it finish
-once the auto-checkable items pass, explicitly
-listing what remains unverified — it skips the human, it never fakes the checkmarks. As with
-`reviewDepth`, `auto` hands the choice back to the profile.
+**`onDeviceGate`** governs the last verification. The stage launches the app itself, and every
+checklist item is tagged by what can settle it: `structural` (DOM, CSS values, exact text), which
+a browser can confirm; `agent-observable` (a request fired, a clean console, a route, a state
+that persists), which a browser can watch but not judge alone; and `needs-eyes` (how it looks and
+feels), which only you can judge. The browser is claude-in-chrome — Claude Code driving your own
+authenticated Chrome (install the plugin and grant the extension the page's site permissions;
+without it, nothing is auto-checked and every item is yours). `auto`, the default, runs the agent
+first: structural items that hold are ticked `(auto)`, the agent-observable items and any failure
+it saw come to you as one batch of proposed verdicts to confirm, and the `needs-eyes` items are
+asked one by one. `human-required` asks you every item, one by one. `auto-ok` lets the agent pass
+close the stage unless it saw a failure, explicitly listing what remains unverified — it skips
+the human, it never fakes the checkmarks. No profile sets this option, so a `lean` run that
+should close on the agent pass sets `auto-ok` itself. [`references/checklist.md`](../../references/checklist.md)
+owns the tiers and verdicts, [`playbooks/verifying-on-device.md`](../../playbooks/verifying-on-device.md)
+§ The gate what each value does. A branch with nothing that renders skips the stage in branch
+review, so this option never comes into play there.
 
 The four **model options** trade cost against capability per role. They default to
 `auto`: for implementers and task reviewers the coordinator derives the model per task

@@ -5,6 +5,153 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-24 — `auto` picks for me on onDeviceGate and reviewDepth; on-device skips from branch review (#368, #367, #338, #296, #323)
+
+**Decision:** `auto` on `onDeviceGate` and `reviewDepth` now means *pick for me*, as it already
+did on the four `*Model` knobs. Both knobs fall back to `auto` itself, and the owning playbook
+decides at stage time; neither falls back to a profile row any more. `onDeviceGate: auto` has the
+agent launch the app and settle what it can. The human then answers one batch of proposed verdicts
+and the items that need eyes. `human-required` and `auto-ok` keep their meanings.
+`reviewDepth: auto` sizes a ref-range review from its diff (`playbooks/reviewing-code.md` § 3).
+A new explicit value, `profile`, takes the profile's branch-review row, which is what unset used
+to do. The profile matrix in `references/config.md` loses its on-device row, so `lean` no longer
+implies `auto-ok`. Branch review now decides whether anything renders
+(`references/checklist.md` § Applicability) and, when nothing does, hands straight to finish.
+
+**Why:** users read `onDeviceGate: auto` as "automate where possible", but it meant "take the
+profile's row", while the same word meant "pick for me" on the model knobs (#367). Under the
+default gate the human answered one question per item, including items a DOM read settles (#367,
+#323). A cycle with nothing to render still paid a whole session to say so (#368).
+
+**Supersedes:** `references/config.md` § Knob resolution step 2's reading of `auto` as *let the
+profile govern this* (the 2026-07-27 entry) for these two knobs, and the profile matrix's
+on-device row. A cycle in flight sees its recorded values differ from `auto` once after upgrading
+and is asked about them; that is intended.
+
+**Budgets:** `references/model-routing.md`'s Auditability paragraph grew by one outcome form
+(#296), charged to every closure that reads it. The § Applicability, § Checklist header, § Tiers,
+§ Launch contract and § Verdicts sections of references/checklist.md raise the runtime surface and
+the closures of the two playbooks that read it, playbooks/executing-waves.md and
+playbooks/verifying-on-device.md; moving the trace out of verifying-on-device.md offsets a little
+of that. `reviewDepth: auto`'s rule in playbooks/reviewing-code.md § 3 and its depth line in
+§ 4, branch review's depth line, report line and `review-depth` append, and the ledger's
+`review-depth` value grow the two review playbooks and every closure citing them or
+references/ledger.md; branch review's § Configuration drops its `single` | `panel` enumeration. The on-device walkthrough's six steps, its gate table and its four-verdict results template grow playbooks/verifying-on-device.md and its closure (commands/verify.md's refs-only closure counts only cited references, so it does not move); the driver's target and Bash lines change in place. The on-device skip puts its decision and procedure in playbooks/reviewing-the-branch.md § Handoff, which now also reads references/checklist.md § Applicability, and gives references/handoff.md a second block exception, a zero-width stage-line sentence and one boundary row, so every closure that reads handoff.md whole grows with it; the playbook's compaction-hint bullet, which the handoff table already covers, is dropped.
+
+```text
+budget: context-budget.json references/model-routing.md 9168
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 85568
+budget: context-budget.json playbooks/taking-the-fast-path.md 51105
+budget: surface-budget.json surfaceTotal 6333
+budget: context-budget.json playbooks/executing-waves.md 106413
+budget: context-budget.json playbooks/verifying-on-device.md 53541
+budget: context-budget.json commands/continue.md 66274
+budget: context-budget.json playbooks/reviewing-code.md 93332
+budget: context-budget.json playbooks/reviewing-the-branch.md 52843
+budget: context-budget.json commands/cycle.md 74652
+budget: context-budget.json playbooks/finishing-the-cycle.md 48132
+budget: context-budget.json playbooks/planning-waves.md 72500
+budget: context-budget.json playbooks/receiving-review.md 112110
+budget: context-budget.json playbooks/scoping-the-request.md 30309
+budget: context-budget.json playbooks/writing-the-findings-document.md 62508
+budget: context-budget.json references/handoff.md 11283
+```
+
+## 2026-10-23 — The green gate proves each task commit in a scratch worktree (#324, #336)
+
+**Decision:** `scripts/task-commit.mjs` commits an accepted task, then runs its gate command in a
+scratch worktree detached at that commit (`scripts/commit-proof.mjs`), and takes the commit back
+when that proof is red. It no longer takes `--subset-cmd`, runs `scripts/foreign-change-check.mjs`
+or defers a red to a concurrent sibling. Ignored `node_modules`, `.venv`, `venv` and `vendor`
+directories are linked into the worktree, workspace links in a `node_modules` pointed at the
+worktree's own packages and `.bin` links resolving through them. Known limits, each a
+`# devcycle-proof-limit:` line in the gate capture: an editable install in a linked `.venv`/`venv`
+pointing into the checkout, a linked `vendor/`, whose Composer path-repository links may read the
+checkout, and submodules, which the worktree never populates, so a gate reading one is red there.
+A `.bin` link with an absolute target into the checkout reads it too; that is documented in
+`references/evidence.md` only. One lock beside the ledger serializes the calls, and a
+second one returns `busy`. The run-record schema keeps `gate-deferred-foreign-change`, so records
+written before stay valid; `task-commit.mjs` writes it for no ledger line, old or new.
+
+**Why:** the gate ran in the shared checkout while siblings were still editing it. A red there with
+foreign dirty paths fell back to the task's own tests, which a sibling could redden too when they
+observe the whole repo (#324), and a green proved a tree holding unfinished sibling work, not the
+commit that landed (#336). A worktree at the commit holds no sibling edit, so its red is the task's
+own and its green is the commit's. A registration a crash leaves behind is left to git's own gc
+(`gc.worktreePruneExpire`). Supersedes the 2026-10-12 entry's `--subset-cmd`.
+
+**Amended (the user, 2026-10-23):** a proof that could not run is no longer treated like a red.
+The commit is undone as for one, but no round is spent and nothing is attributed to the task:
+`task-commit.mjs` returns `proof-unrunnable` with the reason, a user decision. A gate printing more
+than the capture's 256 MB buffer counts as could-not-run too. A re-proof of a commit the ledger
+already records as `committed` never undoes an unrunnable proof, since that line would then name a
+sha the branch no longer has: it returns `proof-unrunnable` and changes nothing.
+
+**Amended (branch review, 2026-10-23):** the same guard covers a red re-proof of a commit the ledger
+already records as `committed`. Design step 8 undid it, which left the `committed` line and the
+run-record row naming a sha the branch no longer has, and added a `rejected (green gate)` line
+after `committed`. It now returns `unproven-commit` and changes nothing; the user decides.
+
+**Budgets:** `references/evidence.md` grew 39 B (the proof-line bullet, the moved
+`foreign-change-check.mjs` invocation), charged to every closure that reads it: planning-waves,
+profiling-sessions, reviewing-code, taking-the-fast-path and writing-the-findings-document, and
+evidence.md's own ceiling, each raised by that growth less its old headroom (+39, +20, +39, +30,
++30, +20). `references/commit-convention.md`'s invocation line grew 24 B, raising
+learning-from-sessions and onboarding-a-repo +24 each. executing-waves rose +152 for a 148 B
+closure growth: its own step 6–7 rewrite (+192 B) and both references, less
+`references/ledger.md`'s −107 B; its two new lines raised `surfaceTotal` +2. The branch review's
+fixes then added 136 B to `references/evidence.md` (what the known-limit line means), raising
+every closure above that reads it whole — and receiving-review and sweeping-mechanical-changes, which
+had room before; executing-waves also carries its step 7 `unproven-commit` way out and
+`references/resume.md`'s restored `deferred` row. Those edits' three new lines raised
+`surfaceTotal` to 6146, and step 6's `proof-unrunnable` (+170 B, two lines) to 6148. The second
+review round's fixes added 156 B to `references/evidence.md` (the `vendor` and `.bin` limits),
+raising each closure above that reads it by that much, receiving-review and
+sweeping-mechanical-changes 162 B with `references/resume.md`'s +6 B; executing-waves rose 553 B,
+its step 6–7 account of an unproven commit's way out (+352 B) plus `references/ledger.md`'s +45 B.
+Their six new lines raised `surfaceTotal` to 6154.
+
+```text
+budget: surface-budget.json surfaceTotal 6154
+budget: context-budget.json playbooks/executing-waves.md 100158
+budget: context-budget.json playbooks/learning-from-sessions.md 62274
+budget: context-budget.json playbooks/onboarding-a-repo.md 30636
+budget: context-budget.json playbooks/planning-waves.md 72144
+budget: context-budget.json playbooks/profiling-sessions.md 38958
+budget: context-budget.json playbooks/receiving-review.md 111676
+budget: context-budget.json playbooks/reviewing-code.md 92203
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 84949
+budget: context-budget.json playbooks/taking-the-fast-path.md 50486
+budget: context-budget.json playbooks/writing-the-findings-document.md 61967
+budget: context-budget.json references/evidence.md 12371
+```
+
+## 2026-10-23 — `git worktree` stays denied to guarded dispatches (L16, #324)
+
+**Decision:** `hooks/block-destructive-git.mjs` keeps `worktree` out of its read-only set, so an
+implementer, task reviewer, red-team reviewer or spec reviewer is still denied every `git worktree`
+call. No hook behavior changes.
+
+**Why:** the per-commit proof is the coordinator's, run inside `scripts/task-commit.mjs`, and a
+script's own git calls are child processes the hook never sees: it judges Bash tool calls only.
+Guarded dispatches judge from the gate capture. `add` writes `.git/worktrees/`, `add -b`/`-B`
+creates or moves a branch, `remove --force` deletes a checkout's uncommitted work, and `prune`
+drops other worktrees' registrations.
+
+## 2026-10-23 — budget raised for the Files-block path grammar (#354)
+
+**Decision:** `tests/fixtures/context-budget.json` raises `playbooks/planning-waves.md`
+71641→71813, by exactly the bytes the task template's `**Files:**` clause adds.
+
+**Why:** a plan's `**Files:**` block is now read with brace lists expanded and with prose that
+merely contains a `/` rejected. Two of those rules change what a plan author must write — an
+extensionless path outside its `Create:`/`Modify:`/`Test:` list counts only as a code span — and
+the task template is the one place a plan author is told the block's grammar.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 71813
+```
+
 ## 2026-10-16 — An unattended start needs the user's answer in the session; handoffs record when they are safe (#357, #355)
 
 **Decision:** `/devcycle:continue` starts the unattended driver only in a session where the user
@@ -1831,7 +1978,7 @@ at it rather than carrying a copy.
 ## 2026-07-27 — `auto` releases a knob back to the profile; the upgrade trap is asked about, not fixed silently
 
 *(Partly superseded 2026-09-29, above: the upgrade offer and its `· profile-asked` marker are
-retired; `auto` as "let the profile govern" still holds.)*
+retired; and 2026-10-24, above: `auto` on these two knobs now means "pick for me".)*
 
 **Decision:** `auto` becomes a sanctioned value on the two profile-covered behavioral knobs
 (`reviewDepth`, `onDeviceGate`), meaning "let the profile govern this" — the same convention

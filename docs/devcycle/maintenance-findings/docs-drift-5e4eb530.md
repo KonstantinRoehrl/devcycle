@@ -1,0 +1,11 @@
+# plugin.json says walkthroughModel/branchReviewModel pools route by task complexity; they always land on the top rung
+- finding-kind: maintenance-finding
+- finding-id: docs-drift:5e4eb530
+- culprit-kind: docs-drift
+- severity: medium
+- confidence: verified
+- affected-files: .claude-plugin/plugin.json, references/model-routing.md, scripts/model-pool.mjs
+- first-seen: 2026-10-23
+- last-seen: 2026-10-23
+- passes: 1
+- verify: 
