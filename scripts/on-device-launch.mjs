@@ -2,7 +2,7 @@
 // The on-device stage's launch, ready poll and teardown (references/checklist.md § Launch contract).
 // Every process it starts is recorded under .devcycle/, so a later session can stop what an
 // earlier one left running.
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -27,6 +27,20 @@ export function readRecord(dir) {
   return record;
 }
 
+// The process's start time as ps prints it, or null when no such process exists. Recorded at start
+// and compared at stop, because a recorded pid can outlive a reboot and then belong to a stranger.
+export function processFingerprint(pid) {
+  try {
+    return execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C" },
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function startProcess({ cmd, dir }) {
   const record = readRecord(dir);
   mkdirSync(join(dir, ".devcycle"), { recursive: true });
@@ -44,7 +58,7 @@ export function startProcess({ cmd, dir }) {
   child.once("error", () => {});
   if (!child.pid) throw new Error(`could not start sh -c ${JSON.stringify(cmd)}`);
   child.unref();
-  record.processes.push({ pid: child.pid, cmd, log, startedAt: now() });
+  record.processes.push({ pid: child.pid, cmd, log, startedAt: now(), fingerprint: processFingerprint(child.pid) });
   atomicWrite(recordPath(dir), JSON.stringify(record, null, 2) + "\n");
   return { pid: child.pid, log };
 }
@@ -73,12 +87,28 @@ function logMatches(dir, processes, pattern) {
   return hit ? `${hit.log} matched /${pattern.source}/` : null;
 }
 
+const sendSignal = (pid, signal) => process.kill(pid, signal);
+
+// A group that answers with anything but ESRCH is still there: EPERM is what macOS returns for a
+// moment while a group dies.
+function groupAlive(pid, kill = sendSignal) {
+  try {
+    kill(-pid, 0);
+    return true;
+  } catch (err) {
+    return err.code !== "ESRCH";
+  }
+}
+
 export async function waitReady({ dir, url, logMatch, timeoutMs = DEFAULT_TIMEOUT_S * 1000, intervalMs = 500 }) {
   if (!url === !logMatch) throw new Error("pass exactly one of url and logMatch");
   const pattern = logMatch ? new RegExp(logMatch) : null;
   const started = Date.now();
   for (;;) {
     const { processes } = readRecord(dir);
+    // A crashed launch fails fast, and an answer then comes from something the launch did not start.
+    if (processes.length > 0 && !processes.some(({ pid }) => groupAlive(pid)))
+      return { ready: false, waitedMs: Date.now() - started, detail: `the launched process exited — ${lastLogLines(dir, processes)}` };
     const detail = url ? await urlAnswers(url) : logMatches(dir, processes, pattern);
     const waitedMs = Date.now() - started;
     if (detail) return { ready: true, waitedMs, detail };
@@ -89,9 +119,9 @@ export async function waitReady({ dir, url, logMatch, timeoutMs = DEFAULT_TIMEOU
 
 // false when the group is gone; any other failure (EPERM: the pid now leads someone else's group)
 // must stop the teardown rather than read as stopped.
-function signalGroup(pid, signal) {
+function signalGroup(pid, signal, kill) {
   try {
-    process.kill(-pid, signal);
+    kill(-pid, signal);
     return true;
   } catch (err) {
     if (err.code === "ESRCH") return false;
@@ -99,13 +129,25 @@ function signalGroup(pid, signal) {
   }
 }
 
-export async function stopAll(dir) {
+// kill, fingerprint and onSkipped are injectable so a test can stage a dying group and a reused pid.
+// onSkipped(pid) hears of each recorded pid that is alive but is no longer the process the launch
+// started; none of those is signalled.
+export async function stopAll(dir, { kill = sendSignal, fingerprint = processFingerprint, onSkipped = () => {} } = {}) {
   const { processes } = readRecord(dir);
-  const signalled = processes.map(({ pid }) => pid).filter((pid) => signalGroup(pid, "SIGTERM"));
-  const alive = (pid) => signalGroup(pid, 0);
+  const ours = processes.filter(({ pid, fingerprint: recorded }) => {
+    const current = fingerprint(pid);
+    if (current !== null && current === recorded) return true;
+    if (groupAlive(pid, kill)) onSkipped(pid);
+    return false;
+  });
+  const signalled = ours.map(({ pid }) => pid).filter((pid) => signalGroup(pid, "SIGTERM", kill));
+  const alive = (pid) => groupAlive(pid, kill);
   const deadline = Date.now() + STOP_GRACE_MS;
   while (signalled.some(alive) && Date.now() < deadline) await sleep(100);
-  for (const pid of signalled.filter(alive)) signalGroup(pid, "SIGKILL");
+  // Best effort: a group that still answers EPERM is already exiting.
+  for (const pid of signalled.filter(alive)) {
+    try { kill(-pid, "SIGKILL"); } catch { /* exiting */ }
+  }
   rmSync(recordPath(dir), { force: true });
   return { stopped: signalled.length, alreadyGone: processes.length - signalled.length };
 }
@@ -139,8 +181,11 @@ async function main(argv) {
     if (r.ready) return { out: `ready (${r.detail}, ${waited}s)` };
     return { code: 1, err: `on-device-launch: not ready after ${waited}s — ${r.detail}; start the app yourself or fix Launch:` };
   }
-  const { stopped } = await stopAll(dir);
-  return { out: stopped === 0 ? "nothing to stop" : `stopped ${stopped} process(es)` };
+  const skipped = [];
+  const { stopped } = await stopAll(dir, { onSkipped: (pid) => skipped.push(pid) });
+  const lines = [stopped === 0 ? "nothing to stop" : `stopped ${stopped} process(es)`];
+  for (const pid of skipped) lines.push(`left ${pid} alone: it is not the process the launch started (the pid was reused)`);
+  return { out: lines.join("\n") };
 }
 
 if (isMain(import.meta.url, process.argv[1])) {

@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { execFile, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { readRecord, startProcess, stopAll, waitReady } from "../../scripts/on-device-launch.mjs";
+import { processFingerprint, readRecord, startProcess, stopAll, waitReady } from "../../scripts/on-device-launch.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/on-device-launch.mjs");
 const RECORD = ".devcycle/on-device-launch.json";
@@ -51,6 +51,8 @@ test("startProcess records a detached process group, and stopAll stops all of it
     const [entry] = readRecord(dir).processes;
     assert.deepEqual({ pid: entry.pid, cmd: entry.cmd, log: entry.log }, { pid, cmd, log });
     assert.match(entry.startedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    assert.equal(entry.fingerprint, processFingerprint(pid), "the record carries the process's start-time fingerprint");
+    assert.ok(entry.fingerprint, "the fingerprint is not empty");
     const grandchild = await readPidFile(join(dir, "child.pid"));
     assert.deepEqual(await stopAll(dir), { stopped: 1, alreadyGone: 0 });
     assert.ok(await gone(pid), "the launched shell outlived stop");
@@ -118,6 +120,99 @@ test("stopAll counts a recorded process that already exited as gone, and removes
   assert.equal(existsSync(join(dir, RECORD)), false);
 });
 
+const writeRecord = (dir, processes) => {
+  mkdirSync(join(dir, ".devcycle"), { recursive: true });
+  writeFileSync(join(dir, RECORD), JSON.stringify({ processes }));
+};
+const errno = (code) => Object.assign(new Error(code), { code });
+const FINGERPRINT = "Sat Oct 24 10:00:00 2026";
+
+test("stopAll reads EPERM while a group is dying as still exiting, not as a failure", async () => {
+  const dir = makeTempDir("on-device-launch-");
+  writeRecord(dir, [{ pid: 424242, cmd: "x", log: ".devcycle/on-device-launch-1.log", startedAt: "2026-10-24T00:00:00Z", fingerprint: FINGERPRINT }]);
+  const sent = [];
+  let probes = 0;
+  const kill = (target, signal) => {
+    sent.push(signal);
+    if (signal !== 0) return;
+    if (++probes === 1) throw errno("EPERM");
+    throw errno("ESRCH");
+  };
+  assert.deepEqual(await stopAll(dir, { kill, fingerprint: () => FINGERPRINT }), { stopped: 1, alreadyGone: 0 });
+  assert.equal(sent[0], "SIGTERM");
+  assert.ok(probes >= 2, "the EPERM probe was followed by another one");
+  assert.ok(!sent.includes("SIGKILL"), "the group left on its own, so nothing was force-killed");
+  assert.equal(existsSync(join(dir, RECORD)), false);
+});
+
+test("stopAll still refuses a group it cannot signal at SIGTERM (EPERM: someone else's group)", async () => {
+  const dir = makeTempDir("on-device-launch-");
+  writeRecord(dir, [{ pid: 424242, cmd: "x", log: ".devcycle/on-device-launch-1.log", startedAt: "2026-10-24T00:00:00Z", fingerprint: FINGERPRINT }]);
+  const kill = (target, signal) => { if (signal === "SIGTERM") throw errno("EPERM"); };
+  await assert.rejects(stopAll(dir, { kill, fingerprint: () => FINGERPRINT }), /cannot signal process group 424242 \(EPERM\)/);
+  assert.ok(existsSync(join(dir, RECORD)), "the record stays so the user can see what was left");
+});
+
+test("stopAll leaves alone a live process whose start time is not the recorded one, and says so", async () => {
+  const dir = makeTempDir("on-device-launch-");
+  const stranger = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+  try {
+    writeRecord(dir, [{ pid: stranger.pid, cmd: "x", log: ".devcycle/on-device-launch-1.log", startedAt: "2026-10-24T00:00:00Z", fingerprint: "Thu Jan  1 00:00:00 1970" }]);
+    const skipped = [];
+    assert.deepEqual(await stopAll(dir, { onSkipped: (pid) => skipped.push(pid) }), { stopped: 0, alreadyGone: 1 });
+    assert.deepEqual(skipped, [stranger.pid]);
+    assert.ok(alive(stranger.pid), "a process that is not the recorded one must not be signalled");
+    assert.equal(existsSync(join(dir, RECORD)), false);
+  } finally {
+    process.kill(-stranger.pid, "SIGKILL");
+  }
+});
+
+test("stopAll never signals blind: a live pid whose start time cannot be read is left alone", async () => {
+  const dir = makeTempDir("on-device-launch-");
+  writeRecord(dir, [{ pid: 424242, cmd: "x", log: ".devcycle/on-device-launch-1.log", startedAt: "2026-10-24T00:00:00Z", fingerprint: FINGERPRINT }]);
+  const sent = [];
+  const skipped = [];
+  const kill = (target, signal) => { sent.push(signal); };
+  assert.deepEqual(await stopAll(dir, { kill, fingerprint: () => null, onSkipped: (pid) => skipped.push(pid) }), { stopped: 0, alreadyGone: 1 });
+  assert.deepEqual(skipped, [424242]);
+  assert.deepEqual(sent, [0], "only the liveness probe was sent");
+});
+
+test("stopAll does not mention a recorded pid that is simply gone", async () => {
+  const dir = makeTempDir("on-device-launch-");
+  writeRecord(dir, [{ pid: 424242, cmd: "x", log: ".devcycle/on-device-launch-1.log", startedAt: "2026-10-24T00:00:00Z", fingerprint: FINGERPRINT }]);
+  const skipped = [];
+  const kill = () => { throw errno("ESRCH"); };
+  assert.deepEqual(await stopAll(dir, { kill, fingerprint: () => null, onSkipped: (pid) => skipped.push(pid) }), { stopped: 0, alreadyGone: 1 });
+  assert.deepEqual(skipped, []);
+});
+
+test("waitReady fails at once when the launched process exited, even if another server answers the url", async () => {
+  const dir = makeTempDir("on-device-launch-");
+  const server = await listen((req, res) => res.end("the older server"));
+  try {
+    const { pid } = startProcess({ cmd: "echo 'Error: listen EADDRINUSE :::5173'; exit 1", dir });
+    assert.ok(await gone(pid));
+    const r = await waitReady({ dir, url: `http://127.0.0.1:${server.address().port}/`, timeoutMs: 10000, intervalMs: 50 });
+    assert.equal(r.ready, false);
+    assert.ok(r.waitedMs < 2000, `took ${r.waitedMs} ms`);
+    assert.match(r.detail, /launched process exited/);
+    assert.match(r.detail, /EADDRINUSE/);
+  } finally {
+    shut(server);
+  }
+});
+
+test("waitReady fails fast with the log tail when the launched process crashes before it is ready", async () => {
+  const dir = makeTempDir("on-device-launch-");
+  startProcess({ cmd: "echo 'TypeError: cannot read config'; exit 1", dir });
+  const r = await waitReady({ dir, url: `http://127.0.0.1:${await closedPort()}/`, timeoutMs: 10000, intervalMs: 50 });
+  assert.equal(r.ready, false);
+  assert.ok(r.waitedMs < 2000, `took ${r.waitedMs} ms of a 10000 ms timeout`);
+  assert.match(r.detail, /launched process exited — TypeError: cannot read config/);
+});
+
 test("the CLI starts, reports readiness and stops; a second stop has nothing to stop", async () => {
   const dir = makeTempDir("on-device-launch-");
   const server = await listen((req, res) => res.end("ok"));
@@ -136,6 +231,19 @@ test("the CLI starts, reports readiness and stops; a second stop has nothing to 
   } finally {
     await stopAll(dir);
     shut(server);
+  }
+});
+
+test("the CLI's stop names a recorded pid it left alone because the process is no longer the one it started", async () => {
+  const dir = makeTempDir("on-device-launch-");
+  const stranger = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+  try {
+    writeRecord(dir, [{ pid: stranger.pid, cmd: "x", log: ".devcycle/on-device-launch-1.log", startedAt: "2026-10-24T00:00:00Z", fingerprint: "Thu Jan  1 00:00:00 1970" }]);
+    const stop = await run(["stop", "--dir", dir]);
+    assert.deepEqual([stop.status, stop.stdout], [0, `nothing to stop\nleft ${stranger.pid} alone: it is not the process the launch started (the pid was reused)\n`]);
+    assert.ok(alive(stranger.pid));
+  } finally {
+    process.kill(-stranger.pid, "SIGKILL");
   }
 });
 
