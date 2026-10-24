@@ -42,6 +42,14 @@ keeps the profile's row, and the review report gains a `Depth:` line. A cycle al
 asks its knob-change question once after the upgrade. `references/model-routing.md`'s
 auditability list now names `model session (auto)` too (#296).
 
+A plan task's `**Files:**` block now yields real repo paths. `scripts/task-files.mjs`, the one owner
+of which files a task declares, expands brace lists (`src/lib/{a,b}.ts`), so `task-commit.mjs` no
+longer reports `nothing-to-commit` for an accepted task and an unattended run no longer ends in a
+false `needs-user` stop (#354). It strips line anchors (`scripts/doctor.mjs:565`) and no longer takes
+prose that merely contains a `/` (`Keep/Drop`, `9a/9b`) for a file, which stops
+`blast-radius-check.mjs` reporting referencers of a basename that is not a path.
+`playbooks/planning-waves.md` states the path grammar for plan authors (one fragment of #285).
+
 ## 0.26.0 — 2026-10-16
 
 - feat(cycle): review a spec's repo claims against live code before approval (#304)
