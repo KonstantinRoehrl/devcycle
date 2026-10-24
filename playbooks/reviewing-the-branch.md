@@ -7,7 +7,7 @@ branch does, against the spec that ordered it, before on-device verification or 
 the ledger path (`.devcycle/ledger.md`). These three are ALL the review needs — the
 fresh-context rule that makes that deliberate is owned by
 `playbooks/reviewing-code.md`. One further read serves the handoff, not the
-review: the `checklist:` line of `.devcycle/state.md`, which this stage's handoff carries forward.
+review: the `checklist:` line of `.devcycle/state.md`, which § Handoff's on-device decision reads.
 
 This stage, and every agent it dispatches, reports per
 `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
@@ -152,9 +152,32 @@ symptom first; jargon only where it adds precision.
 
 ## Handoff
 
-When the gate passes, set `stage: on-device` in `.devcycle/state.md` — the stage the next
-session resumes at — then emit the block per
-`${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with:
+When the gate passes, decide where the cycle goes next. **Skip on-device only when both signals
+agree:** the state file's `checklist:` reads `none` (no task reported on-device items), and
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/checklist.md applicability`,
+applied over `<base>..<branch>`, returns `nothing renders (<reason>)`. A checklist path means
+on-device without a trace; a trace that finds a rendered surface, or any doubt, means on-device
+too.
+
+**On a skip:**
+
+1. Take one stamp `<t>` from `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`. Append this
+   stage's own `stage` line per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`
+   (`--stage branch-review --outcome complete`, `--endedAt <t>`), then on-device's:
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs" append --run <state.run> --kind stage --stage on-device --outcome skipped --startedAt <t> --endedAt <t>`.
+2. Rewrite `.devcycle/state.md` to `stage: finish` and
+   `checklist: none — on-device not applicable (<reason>)`.
+3. Emit this stage's block; on-device emits none. Stage completed: `branch-review`. Artifacts:
+   the review report location, the branch, and `on-device: none (no rendered surface)`.
+   Carry-overs: the accepted non-blocking findings (or `none`), then
+   `on-device skipped: <reason>`. Context action: `Clear + /devcycle:continue`. The block carries
+   no `Start the fresh session …` line, and its ready mark is
+   `--action clear --completed branch-review`.
+
+**Otherwise,** set `stage: on-device` in `.devcycle/state.md` — the stage the next session
+resumes at — and, when its `checklist:` reads `none`, rewrite that line to
+`checklist: none — trace found a rendered surface (<surfaces>); on-device generates one`. Then
+emit the block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with:
 
 - Stage completed: `branch-review`
 - Artifacts: the review report location and the branch
@@ -162,9 +185,6 @@ session resumes at — then emit the block per
   session on <model>.` — this stage's job, because the on-device session's model is chosen by
   whoever launches it. `<model>` is whatever the `knobs:` line's `walkthroughModel`
   resolves to per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`, named by its present id.
-- Compaction hint: n/a — clears (`Fresh session` boundary). When the state file records
-  `checklist: none` (no rendered surface produced a checklist), record instead the marker
-  `checklist: none — on-device stage will judge applicability`.
 
 An `exhausted-unresolved` verdict at the cap still emits this stage's block — the outcome IS
 the stage result. Keep `stage: branch-review` in `.devcycle/state.md` so the cycle resumes here

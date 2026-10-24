@@ -36,18 +36,25 @@ playbooks/verifying-on-device.md; moving the trace out of verifying-on-device.md
 of that. `reviewDepth: auto`'s rule in playbooks/reviewing-code.md § 3 and its depth line in
 § 4, branch review's depth line, report line and `review-depth` append, and the ledger's
 `review-depth` value grow the two review playbooks and every closure citing them or
-references/ledger.md; branch review's § Configuration drops its `single` | `panel` enumeration. The on-device walkthrough's six steps, its gate table and its four-verdict results template grow playbooks/verifying-on-device.md and its closure (commands/verify.md's refs-only closure counts only cited references, so it does not move); the driver's target and Bash lines change in place.
+references/ledger.md; branch review's § Configuration drops its `single` | `panel` enumeration. The on-device walkthrough's six steps, its gate table and its four-verdict results template grow playbooks/verifying-on-device.md and its closure (commands/verify.md's refs-only closure counts only cited references, so it does not move); the driver's target and Bash lines change in place. The on-device skip puts its decision and procedure in playbooks/reviewing-the-branch.md § Handoff, which now also reads references/checklist.md § Applicability, and gives references/handoff.md a second block exception, a zero-width stage-line sentence and one boundary row, so every closure that reads handoff.md whole grows with it; the playbook's compaction-hint bullet, which the handoff table already covers, is dropped.
 
 ```text
 budget: context-budget.json references/model-routing.md 9168
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 85027
-budget: context-budget.json playbooks/taking-the-fast-path.md 50564
-budget: surface-budget.json surfaceTotal 6308
-budget: context-budget.json playbooks/executing-waves.md 105872
-budget: context-budget.json playbooks/verifying-on-device.md 53000
-budget: context-budget.json commands/continue.md 65733
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 85568
+budget: context-budget.json playbooks/taking-the-fast-path.md 51105
+budget: surface-budget.json surfaceTotal 6333
+budget: context-budget.json playbooks/executing-waves.md 106413
+budget: context-budget.json playbooks/verifying-on-device.md 53541
+budget: context-budget.json commands/continue.md 66274
 budget: context-budget.json playbooks/reviewing-code.md 93332
-budget: context-budget.json playbooks/reviewing-the-branch.md 49752
+budget: context-budget.json playbooks/reviewing-the-branch.md 52843
+budget: context-budget.json commands/cycle.md 74652
+budget: context-budget.json playbooks/finishing-the-cycle.md 48132
+budget: context-budget.json playbooks/planning-waves.md 72500
+budget: context-budget.json playbooks/receiving-review.md 112110
+budget: context-budget.json playbooks/scoping-the-request.md 30309
+budget: context-budget.json playbooks/writing-the-findings-document.md 62508
+budget: context-budget.json references/handoff.md 11283
 ```
 
 ## 2026-10-23 — The green gate proves each task commit in a scratch worktree (#324, #336)

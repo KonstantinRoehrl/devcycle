@@ -956,13 +956,58 @@ test("harvested: reviewing-the-branch/engine-selection — the report's engine v
   assert.ok(t.includes("- Rounds: <n> of <cap>"), "the rounds line changed");
   assert.match(t, /its value is one of the five above — no\s+variants/);
   assert.match(t, /Start the fresh\s+session on <model>\./);
-  assert.ok(t.includes("checklist: none — on-device stage will judge applicability"), "the checklist-none compaction branch is gone");
+  assert.ok(t.includes("checklist: none — trace found a rendered surface (<surfaces>); on-device generates one"), "the trace-found checklist marker is gone");
+  assert.ok(!t.includes("on-device stage will judge applicability"), "branch review still leaves the on-device decision to the on-device stage");
 });
 
 test("harvested: reviewing-the-branch/graceful-degradation — the fallback is disclosed and recorded verbatim", () => {
   assert.match(read("playbooks/reviewing-the-branch.md"), /record the engine line it returns \*\*verbatim\*\*/);
   assert.match(read("playbooks/reviewing-code.md"), /\*\*`panel→single` degradation is a first-class path, not an apology\.\*\*/);
   assert.match(read("playbooks/reviewing-code.md"), /a\s+fallback presented as a panel run makes the review unauditable/);
+});
+
+test("branch review skips on-device only when no checklist exists and nothing renders, and its own block carries the skip", () => {
+  const handoff = sectionText(read("playbooks/reviewing-the-branch.md"), "handoff") ?? "";
+  assert.ok(
+    handoff.includes('`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/checklist.md applicability`'),
+    "branch review's handoff no longer applies references/checklist.md § Applicability"
+  );
+  assert.match(handoff, /\*\*Skip\s+on-device\s+only\s+when\s+both\s+signals\s+agree:\*\*/, "the two-signal skip rule is gone");
+  const skipAt = handoff.indexOf("**On a skip:**");
+  const otherwiseAt = handoff.indexOf("**Otherwise,**");
+  assert.ok(skipAt > -1 && otherwiseAt > skipAt, "the skip path no longer precedes the on-device path");
+  const skip = handoff.slice(skipAt, otherwiseAt);
+  assert.ok(skip.includes("--kind stage --stage on-device --outcome skipped --startedAt <t> --endedAt <t>"), "the skipped stage's zero-width stage line is gone");
+  assert.ok(skip.includes("`checklist: none — on-device not applicable (<reason>)`"), "the skip's state-file marker is gone");
+  assert.ok(skip.includes("`on-device: none (no rendered surface)`"), "the skip block's on-device artifact is gone");
+  assert.ok(skip.includes("`on-device skipped: <reason>`"), "the skip block's carry-over is gone");
+  assert.ok(skip.includes("`Clear + /devcycle:continue`"), "the skip boundary no longer clears");
+  assert.ok(skip.includes("--action clear --completed branch-review"), "the skip boundary's ready mark is gone");
+  assert.doesNotMatch(skip, /Start the fresh\s+session on <model>\./, "the skip block names a model for a session that never runs");
+  assert.match(handoff.slice(otherwiseAt), /followed by `Start the fresh\s+session on <model>\.`/, "the on-device path lost its model line");
+
+  const h = read("references/handoff.md");
+  assert.match(h, /\*\*Two\s+exceptions,\s+and\s+only\s+these\.\*\*/, "handoff.md no longer names two block exceptions");
+  assert.match(
+    h,
+    /a\s+stage\s+an\s+earlier\s+stage\s+judged\s+inapplicable\s+before\s+entry\s+emits\s+no\s+block/,
+    "handoff.md no longer exempts a stage skipped before entry from emitting its own block"
+  );
+  assert.match(h, /zero-width\s+window/, "the skipped stage's zero-width stage line is gone from the boundary rule");
+  assert.ok(
+    h.includes("| branch-review → finish (no rendered surface) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |"),
+    "the skip boundary's row is gone"
+  );
+
+  const onDevice = cycleRoutes().get("on-device") ?? "";
+  assert.ok(onDevice.includes("`references/checklist.md` § Applicability"), "cycle.md's on-device step no longer names who decides the skip");
+  const stageNotes = JSON.parse(read("references/stages.json"));
+  assert.match(stageNotes["branch-review"].note, /decides whether on-device applies/, "the branch-review re-entry note no longer names the skip decision");
+  assert.match(
+    stageNotes["on-device"].note,
+    /human-required step/,
+    "commands/continue.md re-walks a step on resume only when the stage's note names a human-required step"
+  );
 });
 
 test("reviewing-code § 3 owns reviewDepth: auto measures a ref range, and branch review records what ran", () => {
