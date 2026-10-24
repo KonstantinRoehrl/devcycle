@@ -359,8 +359,8 @@ bisected, not how each release renders the pick-list.
 
 **Consequence.** `profile`, `gitPolicy`, `docTrackingPolicy`, `reviewDepth`, `onDeviceGate`,
 `subagentBudget`, `handoffNotification` and `executionMode` declare `options`. `scripts/validate.mjs` fails a malformed list
-the same way the loader would, and holds each of the eight to `scripts/resolve-knobs.mjs`'s `ROSTER` values, with
-`auto` first on the two knobs whose fallback is a profile row.
+the same way the loader would, and holds each of the eight to exactly `scripts/resolve-knobs.mjs`'s `ROSTER` values, in
+order.
 
 ## (h) A `--plugin-dir` load sees no configured values
 

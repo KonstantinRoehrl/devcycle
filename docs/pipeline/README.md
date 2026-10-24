@@ -71,13 +71,13 @@ flowchart TD
     CHK --> A_CHK[("on-device checklist")]:::structural
     A_EXEC --> BREVIEW
 
-    BREVIEW("Branch review<br/>fresh reviewer, or panel + red-team verification"):::stage
+    BREVIEW("Branch review<br/>fresh reviewer, or panel + red-team verification · decides whether on-device applies"):::stage
     BREVIEW --> A_BREV[("review verdict")]:::structural
     A_BREV -->|"findings — bounded rounds"| IMPL
     A_BREV -->|accepted| ONDEV
     A_BREV -. "nothing renders — on-device skipped" .-> FINISH
 
-    ONDEV("On-device verification<br/>checklist source · (auto) structural checks · one item per question"):::stage
+    ONDEV("On-device verification<br/>launches the app · driver first · one batch to confirm · needs-eyes items one per question"):::stage
     A_CHK -.-> ONDEV
     ONDEV --> A_ONDEV[("results report")]:::structural
     A_ONDEV -->|"in cycle"| FINISH
@@ -167,10 +167,15 @@ see `docs/design/`.
    is committed.
 7. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole
    branch against the spec: everything the spec asked for is there, nothing it didn't ask
-   for crept in.
+   for crept in. By default the review is sized from the diff: one reviewer, or a panel —
+   always at `thorough`, and at `standard` for a large branch (see `docs/configuration/`).
+   Once it passes, it decides whether on-device applies: a branch with no checklist whose diff
+   renders nothing goes straight to finish.
 8. **On-device verification** — for changes a human can see: a checklist of outcomes to
-   confirm on the running app. What a browser can structurally verify (DOM, CSS values,
-   exact text) is auto-checked through claude-in-chrome and tagged `(auto)`; everything
+   confirm on the running app, which the stage launches for you and stops again at the end.
+   The browser driver goes first through claude-in-chrome: what it can verify structurally
+   (DOM, CSS values, exact text) is ticked `(auto)`, and what it can only observe (a request,
+   the console, a route) comes back as proposed verdicts you confirm in one answer. Everything
    a script cannot truly see — feel, alignment, smoothness, legibility — is walked with you
    one item at a time. The checklist comes from the plan during execution — or, for a branch
    nobody planned in this session, from that branch's diff traced out to the screens it

@@ -5,9 +5,11 @@ verified, reviewed implementation on its own git branch. You type one command; d
 clarifying questions to scope and brainstorm the work, designs a spec with you (an independent
 reviewer checks its claims against your code before you approve it), plans it as parallel tasks,
 and implements them test-first with subagents running in parallel. It reviews the finished
-branch against the spec and — when the change is visible on screen — drives the running app
-through claude-in-chrome to auto-check every item a browser can confirm structurally, then walks
-you through the rest, since how it actually looks and feels is your verdict, not a script's.
+branch against the spec and — when the change is visible on screen — launches the app and drives
+it through claude-in-chrome first: what a browser can confirm structurally is checked off, what
+it can only observe comes back as proposed verdicts you confirm in one answer, and only how it
+looks and feels is asked item by item, since that verdict is yours, not a script's. A branch
+with nothing on screen skips that stage.
 
 Beyond building the change, devcycle closes the loop around a pull request: it reads a PR's
 review comments and reconciles them into the right fixes and consented replies. And it
@@ -103,9 +105,9 @@ joined the run. Beyond that it acts only in a session that joined an active devc
 what it writes are run-record rows of ids, counts and enum values, and in any session it relays the
 terminal notification `scripts/handoff-mark.mjs` asks for (`handoffNotification`).
 
-For the on-device verification stage's automatic checks, also install the claude-in-chrome
-plugin — Claude Code's integration with your own Chrome (without it, every checklist item
-falls to you).
+For the on-device verification stage's agent pass, also install the claude-in-chrome
+plugin — Claude Code's integration with your own Chrome (without it, the stage still launches
+the app, but every checklist item falls to you).
 
 ## Use
 
@@ -119,7 +121,8 @@ What to expect: devcycle first judges how developed your description is (a rough
 with a scope interview; a detailed ticket skips ahead). Questions come in small batches with
 concrete options to pick from, never one-at-a-time trickles. You approve the spec, then the
 plan; implementation, testing, and review then run without you; at the end you get a branch
-(and, for UI work, a short guided walkthrough of what to check on the running app).
+(and, for UI work, a short walkthrough of the running app: one batch of proposed verdicts to
+confirm, then the items only your eyes can judge).
 
 The pipeline saves its position to files under `.devcycle/` at every stage boundary, so it
 survives `/clear`, compaction, and new sessions — resume any time with `/devcycle:continue`.
