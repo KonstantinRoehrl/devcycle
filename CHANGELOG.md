@@ -13,6 +13,17 @@ a commit the branch has already moved past, or one already recorded, left for yo
 `proof-unrunnable` (the proof could not run at all, e.g. a full disk: the commit is undone unless
 already recorded, the task is not blamed and you decide).
 
+`run-record.mjs`, `bump-version.mjs`, `dream.mjs` and `plan-check.mjs` now refuse an unrecognised
+flag, and a value flag given no value, with a non-zero exit that names the flag. Before, an unknown
+flag was dropped and a valueless one took the next flag as its value or fell back to a default: on
+the release path a misspelled `--dry-run` wrote `plugin.json` and `CHANGELOG.md` for real, and a
+malformed `--date` now fails before `plugin.json` is rewritten instead of after. `dream.mjs`
+also refuses a modifier its subcommand does not take (`--lessons audit --profile thorough`), and
+`run-record.mjs` refuses a stray argument instead of writing the row anyway. An empty session id
+still records, and `dream.mjs --match` still accepts an empty file list. `scripts/cli-flags.mjs`
+gains a `"repeat"` arity and an opt-in `requireValues` option for these four; no other script
+changes behaviour.
+
 ## 0.26.0 — 2026-10-16
 
 - feat(cycle): review a spec's repo claims against live code before approval (#304)
