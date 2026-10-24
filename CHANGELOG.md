@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.27.0 — 2026-10-24
+
+- feat(verify): run the driver first and skip on-device when nothing renders
+
 The execution stage's green gate now proves each task's own commit. `task-commit.mjs` commits the
 task, runs the gate command in a scratch worktree checked out at that commit, and takes the commit
 back if it fails, so a sibling task's half-finished edit can no longer fail a clean task (#324), and

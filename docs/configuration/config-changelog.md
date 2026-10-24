@@ -157,12 +157,12 @@ marker with the version the change lands in, since only the release computes tha
   default: off
   values: [off, terminal, push, both]
   note: "whether devcycle notifies the user when a handoff is safe to clear and when an unattended run stops for them; profile-independent, so it takes no auto"
-- version: "unreleased"
+- version: "0.27.0"
   change: added
   key: reviewDepth
   values: [auto, profile, single, panel]
   note: "new value profile takes the profile's branch-review row, which was the unset behaviour; auto, still the default and the unset spelling, now sizes the engine from a branch review's diff instead, so a stored auto at standard gets the panel for a large diff"
-- version: "unreleased"
+- version: "0.27.0"
   change: added
   key: onDeviceGate
   values: [auto, human-required, auto-ok]
