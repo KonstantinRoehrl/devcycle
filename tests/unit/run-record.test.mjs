@@ -738,6 +738,21 @@ test("append: spec-review is an event value and carries a pass|fail result", () 
   assert.notStrictEqual(ev("--event", "spec-review", "--result", "findings").status, 0);
 });
 
+test("append: review-depth is an event value and carries the engine branch review ran", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-review-depth");
+  const ev = (...extra) => run(["append", "--run", runId, "--repo", "/tmp/demo-review-depth", "--kind", "event",
+    "--event", "review-depth", "--stage", "branch-review", ...extra], runs);
+  assert.strictEqual(ev("--reviewDepth", "panel").status, 0);
+  const line = lastLine("/tmp/demo-review-depth", runId);
+  assert.strictEqual(line.event, "review-depth");
+  assert.strictEqual(line.reviewDepth, "panel");
+  assert.strictEqual(ev("--reviewDepth", "single").status, 0);
+  const unresolved = ev("--reviewDepth", "auto");
+  assert.notStrictEqual(unresolved.status, 0, "the event records the engine that ran, never the unresolved knob");
+  assert.match(unresolved.stderr, /"reviewDepth" value "auto" is not one of single \| panel/);
+});
+
 const TRACE = {
   kind: "agent-trace", runId: "0f1e2d3c4b5a6978", stage: "execution", agentId: "a27cbd72da7b3b62f",
   agentType: "devcycle:implementer", requestedModel: null, resolvedModel: "claude-sonnet-5-5", parentAgentId: null,
