@@ -11,6 +11,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { now } from "./stamp.mjs";
 import { gitToplevel } from "./git-identity.mjs";
+import { parseFlags } from "./cli-flags.mjs";
 
 export { gitToplevel };
 
@@ -113,21 +114,51 @@ function die(msg) {
   process.exit(1);
 }
 
-function parseArgs(argv) {
+// One flag map per subcommand, so a flag the subcommand never reads is refused rather than dropped.
+// `append` declares every field any kind's schema declares, not just the chosen kind's: the kind is
+// itself an argv value, so the parse cannot know it yet. A typo fails here as unrecognised; a real
+// field of another kind still reaches validate() and its "not declared for kind" message.
+const NEW_FLAGS = {
+  "--plugin-version": "value", "--plugin-sha": "value", "--profile": "value", "--startedAt": "value",
+  "--repo": "value", "--knob": "repeat",
+};
+const WORKLOAD_FLAGS = {
+  "--run": "value", "--base": "value", "--requestKind": "value", "--planned-task-count": "value",
+  "--wave-count": "value", "--repo": "value",
+};
+function appendFlags() {
+  const fields = JSON.parse(readFileSync(SCHEMA_PATH, "utf8")).oneOf
+    .flatMap((s) => Object.keys(s.properties ?? {}));
+  return {
+    ...Object.fromEntries(fields.map((f) => [`--${f}`, "value"])),
+    "--run": "value", "--kind": "value", "--repo": "value", "--sessionId": "value",
+    "--knob": "repeat", "--json": "repeat",
+  };
+}
+
+// "present", not "nonEmpty": an empty value is a value here, so a cycle start whose
+// CLAUDE_CODE_SESSION_ID is unset still records its session, as it always has.
+function parseArgs(argv, knownFlags) {
+  let parsed;
+  try {
+    parsed = parseFlags(argv, knownFlags, { requireValues: "present" });
+  } catch (e) {
+    die(e.message);
+  }
   const flags = {}, knobs = {}, objects = {};
-  for (let i = 0; i < argv.length; i++) {
-    if (!argv[i].startsWith("--")) continue;
-    const name = argv[i].slice(2), value = argv[i + 1];
-    if (name === "knob" || name === "json") {
-      const eq = value?.indexOf("=") ?? -1;
-      if (eq < 1) die(`--${name} requires KEY=VALUE, got "${value ?? ""}"`);
-      const key = value.slice(0, eq), raw = value.slice(eq + 1);
+  for (const [flag, value] of Object.entries(parsed.flags)) {
+    const name = flag.slice(2);
+    if (name !== "knob" && name !== "json") {
+      flags[name] = value;
+      continue;
+    }
+    for (const pair of value) {
+      const eq = pair.indexOf("=");
+      if (eq < 1) die(`--${name} requires KEY=VALUE, got "${pair}"`);
+      const key = pair.slice(0, eq), raw = pair.slice(eq + 1);
       if (name === "knob") knobs[key] = raw;
       else objects[key] = JSON.parse(raw);
-    } else {
-      flags[name] = value;
     }
-    i++;
   }
   return { flags, knobs, objects };
 }
@@ -165,7 +196,9 @@ export function diffStats(base, cwd = process.cwd()) {
 
 function main() {
   const [sub, ...rest] = process.argv.slice(2);
-  const { flags, knobs, objects } = parseArgs(rest);
+  const knownFlags = { new: NEW_FLAGS, append: appendFlags(), workload: WORKLOAD_FLAGS }[sub];
+  if (!knownFlags) die("usage: run-record.mjs <new|append|workload> [flags]");
+  const { flags, knobs, objects } = parseArgs(rest, knownFlags);
   const toplevel = flags.repo ?? gitToplevel(process.cwd());
   const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex",
     "filesChanged", "filesCreated", "filesDeleted", "insertions", "deletions",
