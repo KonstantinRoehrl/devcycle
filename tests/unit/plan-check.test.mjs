@@ -111,11 +111,27 @@ test("a failing run lists every note without --verbose", () => {
   assert.doesNotMatch(r.stderr, COUNT_LINE);
 });
 
+// The wording moved with the parse: scripts/cli-flags.mjs owns "unrecognised flag", and the usage
+// line still follows it.
 test("an unknown flag is a usage error that names --verbose", () => {
   const r = run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])), { args: ["--bogus"] });
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /unknown flag "--bogus"/);
+  assert.match(r.stderr, /unrecognised flag --bogus/);
   assert.match(r.stderr, /--verbose/);
+});
+
+test("an empty --only is a usage error, not a run of every leg", () => {
+  const r = run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])), { args: ["--only", ""] });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^plan-check: --only requires a value — usage: /);
+  assert.equal(r.stdout, "");
+});
+
+// Exited 1 before too, as "--only needs a leg name"; the message now comes from the owner.
+test("a valueless --only names itself rather than taking the next flag as a leg", () => {
+  const r = run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])), { args: ["--only", "--verbose"] });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^plan-check: --only requires a value — usage: /);
 });
 
 // The leg names on every "plan-check: <leg>: …" line a failing run printed.

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync, copyFileSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, existsSync, realpathSync, mkdirSync, copyFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -417,7 +417,7 @@ test("culprit lookup fails cleanly, not with a stack trace, when culprits.json i
   // validateCulprit() resolves both tests/fixtures/run-record.schema.json and
   // references/culprits.json relative to the script's own location, so the script needs to run
   // from a tree shaped like the repo's — but only those fixtures plus the script's own imports
-  // (stamp.mjs, git-identity.mjs), not a full copy of the working tree (which would drag
+  // (stamp.mjs, git-identity.mjs, cli-flags.mjs), not a full copy of the working tree (which would drag
   // gitignored local files into /tmp and leave them there).
   const treeDir = realpathSync(makeTempDir("rr-vocab-tree-"));
   try {
@@ -427,6 +427,7 @@ test("culprit lookup fails cleanly, not with a stack trace, when culprits.json i
     copyFileSync(join(REPO_ROOT, "scripts/run-record.mjs"), join(treeDir, "scripts/run-record.mjs"));
     copyFileSync(join(REPO_ROOT, "scripts/stamp.mjs"), join(treeDir, "scripts/stamp.mjs"));
     copyFileSync(join(REPO_ROOT, "scripts/git-identity.mjs"), join(treeDir, "scripts/git-identity.mjs"));
+    copyFileSync(join(REPO_ROOT, "scripts/cli-flags.mjs"), join(treeDir, "scripts/cli-flags.mjs"));
     copyFileSync(
       join(REPO_ROOT, "tests/fixtures/run-record.schema.json"),
       join(treeDir, "tests/fixtures/run-record.schema.json")
@@ -847,4 +848,104 @@ test("writeLine is exported and appends one validated row to the run's record", 
   writeLine("/tmp/demo-drive", DRIVE_ROW.runId, DRIVE_ROW);
   const rows = readFileSync(recordPath("/tmp/demo-drive", DRIVE_ROW.runId), "utf8").trim().split("\n").map((l) => JSON.parse(l));
   assert.deepEqual(rows, [DRIVE_ROW]);
+});
+
+// Each subcommand parses its argv through scripts/cli-flags.mjs, so a flag it never reads is an
+// error instead of a value that silently vanishes from the row.
+const MINT = ["new", "--plugin-version", "0.13.0", "--plugin-sha", "ded29c6", "--profile", "standard"];
+
+test("new refuses an unrecognised flag and writes no run line", () => {
+  const runs = makeTempDir("runs-");
+  const r = run([...MINT, "--repo", "/tmp/demo-flags1", "--nonexistent-flag", "x"], runs);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "run-record: unrecognised flag --nonexistent-flag\n");
+  assert.deepEqual(readdirSync(runs), []);
+});
+
+test("a valueless flag is refused instead of swallowing the next flag as its value", () => {
+  const runs = makeTempDir("runs-");
+  const r = run(["append", "--run", "0f1e2d3c4b5a6978", "--kind", "session", "--sessionId",
+    "--repo", "/tmp/demo-flags2"], runs);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "run-record: --sessionId requires a value\n");
+  assert.equal(existsSync(recordPath("/tmp/demo-flags2", "0f1e2d3c4b5a6978")), false);
+});
+
+test("an empty value is still a value, so an unset session id records as before", () => {
+  const runs = makeTempDir("runs-");
+  const r = run(["append", "--run", "0f1e2d3c4b5a6978", "--kind", "session", "--sessionId", "",
+    "--repo", "/tmp/demo-flags3"], runs);
+  assert.equal(r.status, 0, r.stderr);
+  const row = JSON.parse(readFileSync(recordPath("/tmp/demo-flags3", "0f1e2d3c4b5a6978"), "utf8"));
+  assert.equal(row.sessionHash, hashSession(""));
+});
+
+test("append refuses a bare positional and writes no row", () => {
+  const runs = makeTempDir("runs-");
+  const r = run(["append", "--run", "0f1e2d3c4b5a6978", "--kind", "event", "--event", "gate-ran",
+    "--stage", "planning", "--result", "pass", "stray", "--repo", "/tmp/demo-flags4"], runs);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, 'run-record: unexpected argument "stray"\n');
+  assert.equal(existsSync(recordPath("/tmp/demo-flags4", "0f1e2d3c4b5a6978")), false);
+});
+
+test("a defaulted flag given with no value is refused rather than defaulted", () => {
+  const runs = makeTempDir("runs-");
+  const mint = run([...MINT, "--repo", "/tmp/demo-flags5", "--startedAt"], runs);
+  assert.equal(mint.status, 1);
+  assert.equal(mint.stderr, "run-record: --startedAt requires a value\n");
+  const workload = run(["workload", "--run", "0f1e2d3c4b5a6978", "--base", "HEAD", "--requestKind", "bug",
+    "--repo", "/tmp/demo-flags5", "--planned-task-count"], runs);
+  assert.equal(workload.status, 1);
+  assert.equal(workload.stderr, "run-record: --planned-task-count requires a value\n");
+  assert.deepEqual(readdirSync(runs), []);
+});
+
+// These two already exited non-zero, later and in other words: validate() caught the typo'd field,
+// and the enum check caught the --stage that swallowed --kind. The parse now names the flag.
+test("a misspelled append field is refused at parse, naming the flag", () => {
+  const runs = makeTempDir("runs-");
+  const r = run(["append", "--run", "0f1e2d3c4b5a6978", "--kind", "event", "--event", "gate-ran",
+    "--stagee", "planning", "--repo", "/tmp/demo-flags6"], runs);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "run-record: unrecognised flag --stagee\n");
+});
+
+test("a field declared only for another kind still fails with the kind's own message", () => {
+  const runs = makeTempDir("runs-");
+  const r = run(["append", "--run", "0f1e2d3c4b5a6978", "--kind", "session", "--sessionId", "s",
+    "--lens", "bugs", "--repo", "/tmp/demo-flags7"], runs);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^run-record: field "lens" is not declared for kind "session"/);
+});
+
+test("an unknown subcommand prints the usage line, including names inherited from Object.prototype", () => {
+  const runs = makeTempDir("runs-");
+  for (const sub of ["bogus", "constructor", "toString", "hasOwnProperty"]) {
+    const r = run([sub], runs);
+    assert.equal(r.status, 1, sub);
+    assert.equal(r.stderr, "run-record: usage: run-record.mjs <new|append|workload> [flags]\n", sub);
+  }
+});
+
+test("a value flag followed by another flag names the valueless one", () => {
+  const runs = makeTempDir("runs-");
+  const r = run(["append", "--run", "0f1e2d3c4b5a6978", "--stage", "--kind", "event",
+    "--event", "gate-ran", "--repo", "/tmp/demo-flags8"], runs);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "run-record: --stage requires a value\n");
+});
+
+test("a cycle-start mint with one --knob per knob still records every knob", () => {
+  const runs = makeTempDir("runs-");
+  const knobs = {
+    gitPolicy: "open-pr", reviewDepth: "auto", crossModelReview: "false", onDeviceGate: "auto",
+    implementerModel: "auto", taskReviewerModel: "auto", branchReviewModel: "auto",
+    walkthroughModel: "auto", subagentBudget: "warn",
+  };
+  const r = run([...MINT, "--repo", "/tmp/demo-flags9",
+    ...Object.entries(knobs).flatMap(([k, v]) => ["--knob", `${k}=${v}`])], runs);
+  assert.equal(r.status, 0, r.stderr);
+  const row = JSON.parse(readFileSync(recordPath("/tmp/demo-flags9", r.stdout.trim()), "utf8"));
+  assert.deepEqual(row.knobs, knobs);
 });

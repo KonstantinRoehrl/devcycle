@@ -3166,3 +3166,45 @@ test("--routing-advisories cannot be combined with another subcommand", () => {
   // order too, so the order they were typed in never decides which one runs.
   assert.match(res.stderr, /--staleness and --routing-advisories cannot be combined/);
 });
+
+// Each subcommand parses argv with only the flags its handler reads (scripts/cli-flags.mjs), so a
+// modifier it does not take, or a value flag given no value, is refused rather than ignored or
+// defaulted. dream-subcommands.test.mjs pins every subcommand's flag map; these pin the CLI's exit.
+test("cli: a modifier the subcommand does not take is refused, not ignored", () => {
+  const learnings = makeTempDir("dream-learnings-");
+  const r = run(["--lessons", "audit", "--profile", "thorough"], REPO_ROOT, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "dream: unrecognised flag --profile\n");
+  assert.equal(r.stdout, "");
+});
+
+test("cli: a valueless --profile is refused instead of becoming standard", () => {
+  const r = run(["--check-recurrence", "--profile"], REPO_ROOT, { DEVCYCLE_RUNS_DIR: makeTempDir("dream-runs-") });
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "dream: --profile requires a value\n");
+  assert.equal(r.stdout, "");
+});
+
+test("cli: a valueless --since is refused instead of reading the whole journal", () => {
+  const r = run(["--journal-events", "--since"], REPO_ROOT, { DEVCYCLE_RUNS_DIR: makeTempDir("dream-runs-") });
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "dream: --since requires a value\n");
+});
+
+// Exited 1 before too, as "--legacy-similar requires a title argument"; the owner now words it.
+test("cli: an empty subcommand value is refused by the parse", () => {
+  const r = run(["--legacy-similar", ""], REPO_ROOT);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, "dream: --legacy-similar requires a value\n");
+});
+
+// The one carve-out: --match's lists come straight from a task's Files block, and an empty list
+// is a legitimate "none", so --match refuses only a missing value.
+test("cli: --match still accepts an empty file list, and refuses a missing one", () => {
+  const learnings = makeTempDir("dream-learnings-");
+  const ok = run(["--match", "--stage", "execution", "--files", ""], REPO_ROOT, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.equal(ok.status, 0, ok.stderr);
+  const bad = run(["--match", "--stage", "execution", "--files"], REPO_ROOT, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.equal(bad.status, 1);
+  assert.equal(bad.stderr, "dream: --files requires a value\n");
+});

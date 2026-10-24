@@ -10,7 +10,12 @@
 // meaning. Every declared flag names one of these, because the alternative -- a default -- is what
 // this module got wrong: a flat list of names had no room to say "takes no value", so every flag
 // was treated as value-taking and a valueless one swallowed the bare path meant for --dir.
-const ARITIES = new Set(["value", "none"]);
+// `"repeat"` takes a value like `"value"` but keeps every occurrence, in argv order, as an array:
+// run-record's `--knob KEY=VALUE` is passed once per knob, and a last-wins `"value"` would keep one.
+const ARITIES = new Set(["value", "none", "repeat"]);
+
+// What `requireValues` may ask for. Opt-in so the consumers written before it keep their behaviour.
+const VALUE_RULES = new Set(["present", "nonEmpty"]);
 
 // Parses both calling conventions the scripts use -- the space form (`--file x`) and the equals
 // form (`--file=x`) -- and returns non-flag tokens separately so a caller taking a positional path
@@ -28,9 +33,19 @@ const ARITIES = new Set(["value", "none"]);
 // rule therefore lives here rather than in each consumer's memory. `allowPositionals` opts in the
 // one script that genuinely takes one, lint-plan-code-blocks, which takes a plan path alongside
 // --dir; every other consumer inherits the safe default.
-export function parseFlags(argv, knownFlags, { allowPositionals = false } = {}) {
+//
+// `requireValues` moves the missing-value check into the parse, for a CLI whose every value flag
+// needs one: `"present"` refuses a value flag given with none (the last token, or followed by
+// another flag), and `"nonEmpty"` also refuses a blank one -- the unset shell variable in
+// `--date "$day"`. Absent, a valueless flag still comes back `undefined` for the caller to judge
+// with requireValue, which is what lets a flag like dream's `--files` take an empty list.
+export function parseFlags(argv, knownFlags, { allowPositionals = false, requireValues } = {}) {
   if (knownFlags === null || typeof knownFlags !== "object" || Array.isArray(knownFlags))
     throw new Error('knownFlags must map each flag to its arity: { "--dir": "value", "--json": "none" }');
+  if (requireValues !== undefined && !VALUE_RULES.has(requireValues))
+    throw new Error(`requireValues must be "present" or "nonEmpty", got ${JSON.stringify(requireValues)}`);
+  const missing = (value) =>
+    value === undefined || (requireValues === "nonEmpty" && value.trim() === "");
   const flags = {};
   const positionals = [];
   for (let i = 0; i < argv.length; i++) {
@@ -52,7 +67,7 @@ export function parseFlags(argv, knownFlags, { allowPositionals = false } = {}) 
       // teaches the wrong shape, and that same operator writes `--json true` next time -- which
       // is indistinguishable from a bare path.
       if (arity === "none") throw new Error(`${name} takes no value`);
-      flags[name] = arg.slice(eq + 1);
+      store(flags, name, arity, arg.slice(eq + 1));
       continue;
     }
     // Presence is the whole meaning, so the following token is left alone. That is what lets
@@ -66,10 +81,16 @@ export function parseFlags(argv, knownFlags, { allowPositionals = false } = {}) 
     // A value that is itself another flag means this flag's value is missing, not that the next
     // flag's token belongs to this one.
     if (next !== undefined && !next.startsWith("--")) {
-      flags[name] = next;
+      store(flags, name, arity, next);
       i++;
     } else {
-      flags[name] = undefined;
+      store(flags, name, arity, undefined);
+    }
+  }
+  if (requireValues) {
+    for (const [name, value] of Object.entries(flags)) {
+      if (knownFlags[name] === "none") continue;
+      if ([value].flat().some(missing)) throw new Error(`${name} requires a value`);
     }
   }
   // Checked after the whole vector is walked, so an unrecognised flag later in argv still reports
@@ -78,6 +99,11 @@ export function parseFlags(argv, knownFlags, { allowPositionals = false } = {}) 
   if (!allowPositionals && positionals.length)
     throw new Error(`unexpected argument "${positionals[0]}"`);
   return { flags, positionals };
+}
+
+function store(flags, name, arity, value) {
+  if (arity === "repeat") (flags[name] ??= []).push(value);
+  else flags[name] = value;
 }
 
 // A flag's value must be explicit and non-empty: a missing value (the flag was the last token, or

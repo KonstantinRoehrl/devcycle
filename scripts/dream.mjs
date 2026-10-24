@@ -819,76 +819,49 @@ export function alwaysLoadedNetBytes(candidates, root) {
 // concrete "made room this run" signal spec §7's gate turns on.
 const hasSameRunRetirement = (candidates) => (candidates.evictions ?? []).length > 0;
 
-function main() {
-  const argv = process.argv.slice(2);
-  const root = process.cwd();
+// §9's guard requirement covers every subcommand against every other, not only the pairs
+// someone thought of: each handler below dispatches and returns, so an unguarded combination
+// silently runs one and omits the other's output entirely — read by a caller parsing for that
+// output's key, the omission reads as a confident (and wrong) answer. Enumerated once rather
+// than pairwise, which cost five lines per flag added.
+const SUBCOMMANDS = [
+  "--plan", "--commit-checkpoint", "--check-suppressed", "--extract", "--check-observations",
+  "--record-promotion", "--record-lifecycle", "--consolidate", "--check-recurrence", "--journal-events", "--legacy-similar",
+  "--novel-slugs", "--lessons", "--render-report", "--match", "--lesson",
+  "--observations-deduped", "--plan-landing", "--staleness", "--routing-advisories",
+];
 
-  // §9's guard requirement covers every subcommand against every other, not only the pairs
-  // someone thought of: each handler below dispatches and returns, so an unguarded combination
-  // silently runs one and omits the other's output entirely — read by a caller parsing for that
-  // output's key, the omission reads as a confident (and wrong) answer. Enumerated once rather
-  // than pairwise, which cost five lines per flag added.
-  const SUBCOMMANDS = [
-    "--plan", "--commit-checkpoint", "--check-suppressed", "--extract", "--check-observations",
-    "--record-promotion", "--record-lifecycle", "--consolidate", "--check-recurrence", "--journal-events", "--legacy-similar",
-    "--novel-slugs", "--lessons", "--render-report", "--match", "--lesson",
-    "--observations-deduped", "--plan-landing", "--staleness", "--routing-advisories",
-  ];
-  const present = SUBCOMMANDS.filter((f) => argv.includes(f));
-  if (present.length > 1) {
-    console.error(`dream: ${present.join(" and ")} cannot be combined`);
-    process.exit(1);
-  }
+const USAGE =
+  "usage: dream.mjs --plan [--cap N] [--include-oversized] | --extract <session-id> [--include-oversized] | " +
+  "--commit-checkpoint <iso> | --record-promotion <json> | " +
+  "--record-lifecycle <json> | --consolidate <culprit-id> | " +
+  "--check-recurrence [--run-checks] [--profile <lean|standard|thorough>] | --check-suppressed <culprit-id> | " +
+  "--check-observations <slice-id> | " +
+  "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --observations-deduped | --lessons <stage> | " +
+  "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
+  "--render-report <candidates.json> [--outcome] [--profile <lean|standard|thorough>] | " +
+  "--routing-advisories | " +
+  "--plan-landing --stage <stage> --line \"<lesson line>\" [--store repo|user-repo|user-global] | " +
+  "--staleness [--max-sessions N] [--max-days M] [--cap N]";
 
-  const hasPlan = argv.includes("--plan");
-  const hasCheckRecurrence = argv.includes("--check-recurrence");
-  // A modifier, not a subcommand: deliberately outside SUBCOMMANDS so it does not trip the
-  // mutual-exclusivity check above.
-  const hasRunChecks = argv.includes("--run-checks");
-  // The severity percentile the propose gate reads is the profile's; an absent or malformed
-  // --profile degrades to "standard" (reinforcement-policy.mjs maps an unknown profile to it too).
-  const profileIdx = argv.indexOf("--profile");
-  const profile = profileIdx !== -1 && argv[profileIdx + 1] && !argv[profileIdx + 1].startsWith("--")
-    ? argv[profileIdx + 1]
-    : "standard";
-  const commitIdx = argv.indexOf("--commit-checkpoint");
-  const hasCommit = commitIdx !== -1;
-  const suppressedIdx = argv.indexOf("--check-suppressed");
-  const hasSuppressed = suppressedIdx !== -1;
-  const extractIdx = argv.indexOf("--extract");
-  const hasExtract = extractIdx !== -1;
-  const observationsIdx = argv.indexOf("--check-observations");
-  const hasCheckObservations = observationsIdx !== -1;
-  const r = argv.indexOf("--record-promotion");
-  const hasRecord = r !== -1;
+// The severity percentile the propose gate reads is the profile's; an absent --profile is
+// "standard" (reinforcement-policy.mjs maps an unknown profile to it too). A present but empty one
+// is refused at parse, like every other valueless flag.
+const profileOf = (flags) => flags["--profile"] ?? "standard";
 
-  if (hasExtract) {
-    try {
-      process.stdout.write(
-        extractSession({
-          repoRoot: root,
-          projectsDir: resolveProjectsRoot(),
-          sessionId: argv[extractIdx + 1],
-          // The session id is positional and parseFlags refuses bare positionals, so presence is
-          // tested directly rather than by wrapping this branch in a flag parse.
-          includeOversized: argv.includes("--include-oversized"),
-        }),
-      );
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-    return;
-  }
-
-  if (hasPlan) {
-    try {
-      const { flags } = parseFlags(argv, {
-        "--plan": "none", "--cap": "value", "--include-oversized": "none",
-        // Tolerated before this branch parsed anything, and must stay tolerated: it is a modifier,
-        // not a subcommand, so it never trips the mutual-exclusivity guard above either.
-        "--run-checks": "none",
-      });
+// One entry per subcommand: the flags its handler actually reads, each with its arity, and the
+// handler. Each subcommand's flags are parsed strictly, so a modifier another subcommand takes
+// (`--lessons audit --profile x`) is an error rather than a silent no-op. Every value flag must be
+// non-empty — an unset shell variable fails here — except where an entry says otherwise.
+const HANDLERS = {
+  "--plan": {
+    flags: {
+      "--plan": "none", "--cap": "value", "--include-oversized": "none",
+      // Tolerated before this branch parsed anything, and must stay tolerated: it is a modifier,
+      // not a subcommand, so it never trips the mutual-exclusivity guard either. Nothing reads it.
+      "--run-checks": "none",
+    },
+    run(flags, { root }) {
       const cap = requireCount(flags, "--cap") ?? CAP;
       const plan = planCorpus({
         repoRoot: root,
@@ -899,178 +872,152 @@ function main() {
         writeCache: true,
       });
       console.log(JSON.stringify(plan, null, 2));
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-    return;
-  }
+    },
+  },
 
-  if (hasCommit) {
-    try {
-      commitCheckpoint(root, argv[commitIdx + 1]);
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-    console.log("checkpoint: ok");
-    return;
-  }
+  "--extract": {
+    flags: { "--extract": "value", "--include-oversized": "none" },
+    run(flags, { root }) {
+      process.stdout.write(
+        extractSession({
+          repoRoot: root,
+          projectsDir: resolveProjectsRoot(),
+          sessionId: flags["--extract"],
+          includeOversized: flags["--include-oversized"] === true,
+        }),
+      );
+    },
+  },
 
-  if (hasRecord && argv[r + 1]) {
-    try {
-      console.log(recordPromotion(root, JSON.parse(argv[r + 1])));
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-    return;
-  }
+  "--commit-checkpoint": {
+    flags: { "--commit-checkpoint": "value" },
+    run(flags, { root }) {
+      commitCheckpoint(root, flags["--commit-checkpoint"]);
+      console.log("checkpoint: ok");
+    },
+  },
+
+  "--record-promotion": {
+    flags: { "--record-promotion": "value" },
+    run(flags, { root }) {
+      console.log(recordPromotion(root, JSON.parse(flags["--record-promotion"])));
+    },
+  },
 
   // A retirement/revert is written through the promotions store's own lifecycle writer, which tags
-  // it so it never reads back as a landing. Mirrors --record-promotion's guard/parse/print style.
-  const lifecycleIdx = argv.indexOf("--record-lifecycle");
-  if (lifecycleIdx !== -1) {
-    try {
-      const arg = argv[lifecycleIdx + 1];
-      if (!arg) throw new Error("--record-lifecycle requires a JSON record argument");
-      console.log(recordLifecycle(root, JSON.parse(arg)));
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-    return;
-  }
+  // it so it never reads back as a landing. Mirrors --record-promotion's parse/print style.
+  "--record-lifecycle": {
+    flags: { "--record-lifecycle": "value" },
+    run(flags, { root }) {
+      console.log(recordLifecycle(root, JSON.parse(flags["--record-lifecycle"])));
+    },
+  },
 
   // A win's graduation transition: folding it into a playbook's default flow or a scaffold marks
   // its promotion record consolidated (a later human act, so it mutates the record on disk). Legal
-  // only for a not-yet-consolidated win; planConsolidation owns that rule. Mirrors
-  // --record-lifecycle's guard/parse/print shape.
-  const consolidateIdx = argv.indexOf("--consolidate");
-  if (consolidateIdx !== -1) {
-    try {
-      const culpritId = argv[consolidateIdx + 1];
-      if (!culpritId) throw new Error("--consolidate requires a culprit-id argument");
+  // only for a not-yet-consolidated win; planConsolidation owns that rule.
+  "--consolidate": {
+    flags: { "--consolidate": "value" },
+    run(flags, { root }) {
+      const culpritId = flags["--consolidate"];
       const rec = findPromotionById(readPromotions(root), culpritId);
       if (!rec) throw new Error(`no promotion record found for culprit-id "${culpritId}"`);
       const decision = planConsolidation(rec);
       if (!decision.ok) throw new Error(decision.reason);
       console.log(consolidatePromotion(root, culpritId, new Date().toISOString().slice(0, 10)));
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-    return;
-  }
+    },
+  },
 
   // Gives readObservations a real caller: the Map dispatch verifies the slice it just wrote
   // via this subcommand rather than the skill re-reading the file itself ("the skill invokes
   // the CLI, not the module"). Reports pass/fail only — never the records themselves, which
   // would put a subject or a quote into this session's own transcript.
-  if (hasCheckObservations) {
-    try {
-      const sliceId = argv[observationsIdx + 1];
-      if (!sliceId) throw new Error("--check-observations requires a session id argument");
-      const records = readObservations(root, sliceId);
+  "--check-observations": {
+    flags: { "--check-observations": "value" },
+    run(flags, { root }) {
+      const records = readObservations(root, flags["--check-observations"]);
       const rejection = records.map(winGroundingRejection).find(Boolean);
       if (rejection) throw new Error(rejection);
       console.log("observations: ok");
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-    return;
-  }
+    },
+  },
 
   // The shared verification engine (scripts/verification.mjs) is the one owner of the recurrence
   // math — this prints its full output: `{ scoreboard, candidates, resolvedIn }`. The engine's 2nd
   // argument is the events ARRAY (it does `journalEvents.filter(...)`), and the installed version is
   // the running plugin's own manifest, never an env var.
-  if (hasCheckRecurrence) {
-    try {
+  "--check-recurrence": {
+    flags: { "--check-recurrence": "none", "--run-checks": "none", "--profile": "value" },
+    run(flags, { root }) {
       console.log(
         JSON.stringify(
           verify(readPromotions(root), journalEvents({ toplevel: root }).events, installedVersion(),
-            { root, profile, ...(hasRunChecks ? { runCheck: defaultRunCheck } : {}) }),
+            { root, profile: profileOf(flags), ...(flags["--run-checks"] ? { runCheck: defaultRunCheck } : {}) }),
           null,
           2,
         ),
       );
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-    return;
-  }
+    },
+  },
 
   // The reduce stage's suppression check, called by the skill as a subcommand — the skill
   // invokes the CLI, not the module. The verdict is an equality test on a culprit-id, so the
   // id is safe to print: an id is matched in the promotion store and never against transcript
   // text, which is what makes echoing it unable to self-seed a later run.
-  if (hasSuppressed) {
-    try {
-      const culpritId = argv[suppressedIdx + 1];
-      if (!culpritId) throw new Error("--check-suppressed requires a culprit-id argument");
+  "--check-suppressed": {
+    flags: { "--check-suppressed": "value" },
+    // The one entry that takes positionals, so the message below names the real mistake rather
+    // than the owner's generic "unexpected argument".
+    allowPositionals: true,
+    run(flags, { root, positionals }) {
       // A culprit-id is a single token. Extra argv elements mean the caller passed something
       // else — most plausibly an unquoted title the shell split — and answering for the first
       // element alone would report on an id that was never actually checked.
-      const trailing = [];
-      for (let i = suppressedIdx + 2; i < argv.length && !argv[i].startsWith("--"); i++) trailing.push(argv[i]);
-      if (trailing.length)
+      if (positionals.length)
         throw new Error("--check-suppressed requires a single culprit-id argument, not several");
-      console.log(JSON.stringify({ suppressed: suppressedByCulpritId(culpritId, readPromotions(root)) }));
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-    return;
-  }
+      console.log(JSON.stringify({ suppressed: suppressedByCulpritId(flags["--check-suppressed"], readPromotions(root)) }));
+    },
+  },
 
-  if (argv.includes("--journal-events")) {
-    try {
-      const sinceIdx = argv.indexOf("--since");
-      const { journalEmpty, events } = journalEvents({
-        toplevel: root, since: sinceIdx === -1 ? null : argv[sinceIdx + 1],
-      });
+  "--journal-events": {
+    flags: { "--journal-events": "none", "--since": "value" },
+    run(flags, { root }) {
+      const { journalEmpty, events } = journalEvents({ toplevel: root, since: flags["--since"] ?? null });
       const byCulprit = Object.fromEntries([...eventsByCulprit(events)].map(([k, v]) => [k, v]));
       console.log(JSON.stringify({ journalEmpty, events, byCulprit }, null, 2));
-    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
-    return;
-  }
+    },
+  },
 
-  if (argv.includes("--novel-slugs")) {
-    try {
+  "--novel-slugs": {
+    flags: { "--novel-slugs": "none" },
+    run(flags, { root }) {
       console.log(JSON.stringify({ slugs: novelSlugs(readPromotions(root)) }));
-    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
-    return;
-  }
+    },
+  },
 
   // The reduce stage's deduped view of the observation store: one utterance mined across sibling
   // session files collapses to a single record here, so occurrence counts are not inflated. It
   // legitimately reads content, unlike --check-observations, which only reports pass/fail.
-  if (argv.includes("--observations-deduped")) {
-    try {
+  "--observations-deduped": {
+    flags: { "--observations-deduped": "none" },
+    run(flags, { root }) {
       console.log(JSON.stringify(readAllObservations(root), null, 2));
-    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
-    return;
-  }
+    },
+  },
 
-  const legacyIdx = argv.indexOf("--legacy-similar");
-  if (legacyIdx !== -1) {
-    try {
-      const title = argv[legacyIdx + 1];
-      if (!title) throw new Error("--legacy-similar requires a title argument");
+  "--legacy-similar": {
+    flags: { "--legacy-similar": "value" },
+    run(flags, { root }) {
       console.log(JSON.stringify({
-        hints: legacySimilar(title, readPromotions(root)).map((p) => ({ path: p.path, title: p.title })),
+        hints: legacySimilar(flags["--legacy-similar"], readPromotions(root)).map((p) => ({ path: p.path, title: p.title })),
       }));
-    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
-    return;
-  }
+    },
+  },
 
-  const lessonsIdx = argv.indexOf("--lessons");
-  if (lessonsIdx !== -1) {
-    try {
-      const stage = argv[lessonsIdx + 1];
+  "--lessons": {
+    flags: { "--lessons": "value" },
+    run(flags, { root }) {
+      const stage = flags["--lessons"];
       if (!STAGES.includes(stage))
         throw new Error(`unknown stage "${stage}" — must be one of: ${STAGES.join(", ")}`);
       process.stdout.write(renderLessons(stage, {
@@ -1078,18 +1025,18 @@ function main() {
         userRepo: readSection(userRepoStorePath(root), stage),
         userGlobal: readSection(userGlobalStorePath(), stage),
       }));
-    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
-    return;
-  }
+    },
+  },
 
-  const matchIdx = argv.indexOf("--match");
-  if (matchIdx !== -1) {
-    try {
-      const KNOWN = {
-        "--match": "none", "--stage": "value", "--files": "value",
-        "--culprits": "value", "--keywords": "value",
-      };
-      const { flags } = parseFlags(argv, KNOWN);
+  "--match": {
+    flags: {
+      "--match": "none", "--stage": "value", "--files": "value",
+      "--culprits": "value", "--keywords": "value",
+    },
+    // "present", not "nonEmpty": the playbooks pass a task's file list straight through, and an
+    // empty list is a legitimate "none" for each of the three lists.
+    requireValues: "present",
+    run(flags, { root }) {
       const stage = flags["--stage"];
       if (!STAGES.includes(stage)) throw new Error(`--match needs a valid --stage (one of ${STAGES.join(", ")})`);
       const files = parseFileList(flags["--files"] ?? "");
@@ -1106,44 +1053,34 @@ function main() {
       );
       const combined = [out, maint].filter((s) => s && s.length).join("\n");
       if (combined) process.stdout.write(combined + "\n");
-      return;
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-  }
+    },
+  },
 
-  const lessonPullIdx = argv.indexOf("--lesson");
-  if (lessonPullIdx !== -1) {
-    try {
-      const id = argv[lessonPullIdx + 1];
+  "--lesson": {
+    flags: { "--lesson": "value" },
+    run(flags, { root }) {
+      const id = flags["--lesson"];
       const rec = findPromotionById(readPromotions(root), id);
+      // Unprefixed, unlike every other refusal here: the pull hint a brief carries prints this line
+      // as-is, and tests pin it.
       if (!rec) { console.error(`no record for ${id}`); process.exit(1); }
       process.stdout.write(readFileSync(join(root, rec.path), "utf8"));
-      return;
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-  }
+    },
+  },
 
-  const renderIdx = argv.indexOf("--render-report");
-  if (renderIdx !== -1) {
-    try {
-      const path = argv[renderIdx + 1];
-      if (!path) throw new Error("--render-report requires a candidate file path");
-      const candidates = JSON.parse(readFileSync(path, "utf8"));
+  "--render-report": {
+    flags: { "--render-report": "value", "--outcome": "none", "--profile": "value" },
+    run(flags, { root }) {
+      const candidates = JSON.parse(readFileSync(flags["--render-report"], "utf8"));
       const budget = budgetStatus(alwaysLoadedNetBytes(candidates, root), hasSameRunRetirement(candidates));
       // Spec §7's hard gate: refuse growth past the always-loaded ceiling unless this run also
       // reclaims room (a same-run eviction/retirement). The report is never even written for a
       // refused run — the byte figure and the ceiling are named so the caller can act.
-      if (!budget.withinBudget) {
-        console.error(
-          `dream: always-loaded budget exceeded — this run adds ${budget.netBytes} net bytes, past the ` +
+      if (!budget.withinBudget)
+        throw new Error(
+          `always-loaded budget exceeded — this run adds ${budget.netBytes} net bytes, past the ` +
             `${ALWAYS_LOADED_CEILING}-byte ceiling; retire a lesson in the same run to make room`,
         );
-        process.exit(1);
-      }
       const promotions = readPromotions(root);
       // The period is the corpus window the candidates already describe; the baseline is every
       // session behind it, which is what prices a prevented culprit. It is aggregated once here and
@@ -1168,7 +1105,7 @@ function main() {
         promotions,
         journalEvents({ toplevel: root }).events,
         installedVersion(),
-        { root, costByKey, profile },
+        { root, costByKey, profile: profileOf(flags) },
       );
       const ledger = periodLedger({
         period: aggregateKeys(windows.period.summaries),
@@ -1182,42 +1119,37 @@ function main() {
       });
       const advisories = advisoriesFor(root, resolveProjectsRoot(), readPolicy());
       process.stdout.write(renderLearnReport({
-        candidates, promotions, outcome: argv.includes("--outcome"),
+        candidates, promotions, outcome: flags["--outcome"] === true,
         verification, budget, ledger, routingAdvisories: advisories,
       }));
-    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
-    return;
-  }
+    },
+  },
 
-  if (argv.includes("--routing-advisories")) {
-    try {
+  "--routing-advisories": {
+    flags: { "--routing-advisories": "none" },
+    run(flags, { root }) {
       const advisories = advisoriesFor(root, resolveProjectsRoot(), readPolicy());
       // The artifact body only: playbooks/learning-from-sessions.md captures this stdout, writes
       // docs/devcycle/routing-advisories.md, and owns the commit — so nothing here writes a file.
       process.stdout.write(`# Routing advisories\n\n${routingAdvisoriesSection(advisories)}\n`);
-    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
-    return;
-  }
+    },
+  },
 
   // The eviction tie-break has one owner: this module. It used to ship twice — as
   // lessons.mjs's planLanding and as prose telling the model to apply the same ordering by
   // hand — and only the unreachable copy was tested. The culprit-id is read off the line
   // rather than passed alongside it: a separate argument could disagree with the line it
   // describes.
-  const planLandingIdx = argv.indexOf("--plan-landing");
-  if (planLandingIdx !== -1) {
-    try {
-      const flag = (name) => {
-        const i = argv.indexOf(name);
-        return i === -1 ? null : argv[i + 1] ?? null;
-      };
-      const stage = flag("--stage");
+  "--plan-landing": {
+    flags: { "--plan-landing": "none", "--stage": "value", "--line": "value", "--store": "value" },
+    run(flags, { root }) {
+      const stage = flags["--stage"];
       if (!stage || !STAGES.includes(stage))
         throw new Error(`--stage must name a stage in the enum, got ${stage ?? "nothing"}`);
-      const line = flag("--line");
+      const line = flags["--line"];
       const culpritId = line ? lessonId(line) : null;
       if (!culpritId) throw new Error("--line requires a lesson line ending in a [culprit-id]");
-      const store = flag("--store") ?? "repo";
+      const store = flags["--store"] ?? "repo";
       const paths = {
         repo: () => repoStorePath(root),
         "user-repo": () => userRepoStorePath(root),
@@ -1232,23 +1164,17 @@ function main() {
         events: journalEvents({ toplevel: root }).events,
         promotions: readPromotions(root),
       })));
-    } catch (e) {
-      console.error(`dream: ${e.message}`);
-      process.exit(1);
-    }
-    return;
-  }
+    },
+  },
 
   // The staleness probe finishing-the-cycle.md runs at cycle end: reads the distilling
   // checkpoint's own `last-run:` (learning-from-sessions.md owns that file) and reports whether
   // enough unmined sessions or days have accrued to warrant another /devcycle:learn pass. It is a
   // read-only nudge — it advances no checkpoint and mines nothing. Reuses planCandidates (QC2)
   // for the unmined-session count rather than re-walking transcripts.
-  if (argv.includes("--staleness")) {
-    try {
-      const { flags } = parseFlags(argv, {
-        "--staleness": "none", "--max-sessions": "value", "--max-days": "value", "--cap": "value",
-      });
+  "--staleness": {
+    flags: { "--staleness": "none", "--max-sessions": "value", "--max-days": "value", "--cap": "value" },
+    run(flags, { root }) {
       const cap = requireCount(flags, "--cap") ?? CAP;
       // Floor 0, not 1: both flags carry a user-settable knob (learnStalenessSessions,
       // learnStalenessDays) whose zero means "nudge me every cycle", and the finish stage that
@@ -1273,23 +1199,41 @@ function main() {
       console.log(JSON.stringify(
         { stale, unminedSessions, daysSince, lastRun: literal, threshold: { maxSessions, maxDays } },
         null, 2));
-    } catch (e) { console.error(`dream: ${e.message}`); process.exit(1); }
-    return;
-  }
+    },
+  },
+};
 
-  console.error(
-    "usage: dream.mjs --plan [--cap N] [--include-oversized] | --extract <session-id> [--include-oversized] | " +
-      "--commit-checkpoint <iso> | --record-promotion <json> | " +
-      "--record-lifecycle <json> | --consolidate <culprit-id> | " +
-      "--check-recurrence [--run-checks] | --check-suppressed <culprit-id> | --check-observations <slice-id> | " +
-      "--journal-events [--since <iso>] | --legacy-similar <title> | --novel-slugs | --observations-deduped | --lessons <stage> | " +
-      "--match --stage <stage> --files <csv> [--culprits <csv>] [--keywords <csv>] | --lesson <id> | " +
-      "--render-report <candidates.json> [--outcome] [--profile <lean|standard|thorough>] | " +
-      "--routing-advisories | " +
-      "--plan-landing --stage <stage> --line \"<lesson line>\" [--store repo|user-repo|user-global] | " +
-      "--staleness [--max-sessions N] [--max-days M] [--cap N]",
-  );
-  process.exit(1);
+// Picks the one subcommand argv names and parses argv with that subcommand's flags. Pure — no
+// handler runs — so a test can replay every documented invocation without touching a store.
+// Returns null when argv names no subcommand; throws when it names several, or when the parse
+// refuses a flag. The scan is an exact-token match, as it always was; the parse is the strict step.
+export function selectSubcommand(argv) {
+  const present = SUBCOMMANDS.filter((f) => argv.includes(f));
+  if (present.length > 1) throw new Error(`${present.join(" and ")} cannot be combined`);
+  if (present.length === 0) return null;
+  const [name] = present;
+  const { flags: knownFlags, allowPositionals = false, requireValues = "nonEmpty" } = HANDLERS[name];
+  const { flags, positionals } = parseFlags(argv, knownFlags, { allowPositionals, requireValues });
+  return { name, flags, positionals };
+}
+
+// The table and SUBCOMMANDS are two spellings of one set. The list stays a literal because the
+// guard's message order and a golden-path check both read it, so a test compares the two.
+export const HANDLER_NAMES = Object.keys(HANDLERS);
+
+function main() {
+  const argv = process.argv.slice(2);
+  try {
+    const selected = selectSubcommand(argv);
+    if (!selected) {
+      console.error(USAGE);
+      process.exit(1);
+    }
+    HANDLERS[selected.name].run(selected.flags, { root: process.cwd(), positionals: selected.positionals });
+  } catch (e) {
+    console.error(`dream: ${e.message}`);
+    process.exit(1);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
