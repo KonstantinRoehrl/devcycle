@@ -17,6 +17,9 @@
 //   --dry-run          print "<level> <version>" and change nothing
 //   --notes-for <ver>  print that version's CHANGELOG section and exit (used at tag time)
 //   --date <YYYY-MM-DD>  the release date stamped on the CHANGELOG heading; defaults to today (UTC)
+//
+// --notes-for is its own mode and takes no other flag. Every other flag is refused as unrecognised,
+// and a flag with no value (or a blank one) is refused too, each with exit 1.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseFlags } from "./cli-flags.mjs";
@@ -69,10 +72,15 @@ export function notesForVersion(changelog, version) {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export const changelogWithSection = (changelog, version, notes, date) => {
-  // Refused rather than written: a malformed date produces a heading that check 19 rejects and
-  // that releaseDates() cannot parse, and the failure would only surface at the next release.
+// Refused rather than written: a malformed date produces a heading that check 19 rejects and
+// that releaseDates() cannot parse, and the failure would only surface at the next release.
+// Its own function so --dry-run, which never reaches changelogWithSection, can predict the refusal.
+const assertIsoDate = (date) => {
   if (!ISO_DATE.test(String(date))) throw new Error(`release date "${date}" is not a YYYY-MM-DD date`);
+};
+
+export const changelogWithSection = (changelog, version, notes, date) => {
+  assertIsoDate(date);
   return changelog.replace(/^# Changelog\n/, `# Changelog\n\n## ${version} — ${date}\n\n${notes}\n`);
 };
 
@@ -123,6 +131,7 @@ function main() {
   // Defaults to today in UTC. The flag exists so tests pin a date instead of depending on
   // when they run; the release workflow leaves it off and stamps the day it stages the release.
   const date = flags["--date"] ?? new Date().toISOString().slice(0, 10);
+  assertIsoDate(date);
 
   const level = bumpLevel([subject]);
   const plugin = JSON.parse(readFileSync(PLUGIN_PATH, "utf8"));

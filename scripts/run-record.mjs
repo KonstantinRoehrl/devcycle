@@ -196,8 +196,11 @@ export function diffStats(base, cwd = process.cwd()) {
 
 function main() {
   const [sub, ...rest] = process.argv.slice(2);
-  const knownFlags = { new: NEW_FLAGS, append: appendFlags(), workload: WORKLOAD_FLAGS }[sub];
-  if (!knownFlags) die("usage: run-record.mjs <new|append|workload> [flags]");
+  // Own keys only: a bare `{...}[sub]` resolves "constructor" to Object's function, which would
+  // reach parseFlags as a flag map. A getter keeps append's schema read off the other subcommands.
+  const flagMaps = { new: () => NEW_FLAGS, append: appendFlags, workload: () => WORKLOAD_FLAGS };
+  if (!Object.hasOwn(flagMaps, sub)) die("usage: run-record.mjs <new|append|workload> [flags]");
+  const knownFlags = flagMaps[sub]();
   const { flags, knobs, objects } = parseArgs(rest, knownFlags);
   const toplevel = flags.repo ?? gitToplevel(process.cwd());
   const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex",

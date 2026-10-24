@@ -919,6 +919,15 @@ test("a field declared only for another kind still fails with the kind's own mes
   assert.match(r.stderr, /^run-record: field "lens" is not declared for kind "session"/);
 });
 
+test("an unknown subcommand prints the usage line, including names inherited from Object.prototype", () => {
+  const runs = makeTempDir("runs-");
+  for (const sub of ["bogus", "constructor", "toString", "hasOwnProperty"]) {
+    const r = run([sub], runs);
+    assert.equal(r.status, 1, sub);
+    assert.equal(r.stderr, "run-record: usage: run-record.mjs <new|append|workload> [flags]\n", sub);
+  }
+});
+
 test("a value flag followed by another flag names the valueless one", () => {
   const runs = makeTempDir("runs-");
   const r = run(["append", "--run", "0f1e2d3c4b5a6978", "--stage", "--kind", "event",

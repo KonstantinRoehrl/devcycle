@@ -293,6 +293,14 @@ test("a valueless --date is refused before anything is written, with or without 
   }
 });
 
+test("--dry-run refuses a malformed --date like the real run and writes nothing", () => {
+  const { dir, before, snapshot } = releaseFixture();
+  const r = bump(dir, ["--subject", "fix: x", "--date", "2026-1-1", "--dry-run"]);
+  assert.equal(r.status, 1);
+  assert.equal(r.stderr, 'bump-version: release date "2026-1-1" is not a YYYY-MM-DD date\n');
+  assert.deepEqual(snapshot(), before);
+});
+
 test("an empty --subject or --date is refused like a missing one", () => {
   for (const [args, flag] of [[["--subject", "", "--dry-run"], "--subject"], [["--subject", "feat(x): y", "--date", " "], "--date"]]) {
     const { dir, before, snapshot } = releaseFixture();
