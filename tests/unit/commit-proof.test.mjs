@@ -70,7 +70,8 @@ test("a proof that cannot even make its temp directory is a failed run, never a 
     assert.equal(run.status, 1);
     assert.match(run.output, /^devcycle: the proof could not run: /);
   } finally {
-    process.env.TMPDIR = saved;
+    if (saved === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = saved;
     rmSync(dir, { recursive: true, force: true });
   }
 });
