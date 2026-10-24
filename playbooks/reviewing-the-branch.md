@@ -20,7 +20,7 @@ Read every knob and the profile from the `knobs:` line per
 `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob channel; none of the resolution is repeated
 here. What this stage consumes:
 
-- `reviewDepth` — `single` | `panel`; it picks the engine.
+- `reviewDepth` — picks the engine, by the rule `playbooks/reviewing-code.md` § 3 owns.
 - `crossModelReview` — `true` | `false`.
 - `branchReviewModel` — routed per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`. What it
   resolves to — an explicit model id, binding, or the session tier — is what every rule below
@@ -44,7 +44,14 @@ front. A match that comes back empty adds no such block.
 
 Invoke it with `scope: {ref: "<base>..<branch>"}`, the spec path as `specPath`, and this
 stage's criteria — what the spec requires and forbids, plus the default criteria set — and
-record the engine line it returns **verbatim** in the report below.
+record the engine line it returns **verbatim** in the report below, with its depth line. The
+depth is picked once, in round 1, over the whole branch; rounds 2..N re-run that engine. In
+cycle (the state file names a `run:`), append what round 1 ran once its engine returns —
+`single` after a `panel→single` degradation:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs" append --run <state.run> --kind event --event review-depth --stage branch-review --reviewDepth <single|panel>
+```
 
 **Dirty-tree backstop.** The reviewers this stage dispatches are read-only; snapshot `git status
 --porcelain` before each subagent and check it again after. The backstop itself — what a tree left
@@ -127,6 +134,7 @@ unconditional — it holds at every profile, and the cap's own value never softe
 ```markdown
 ## Branch review report
 - Engine: <single | single + user-run code-review | panel | panel [+ cross-model lens] | panel→single (panel unavailable: <reason>)>
+- Depth: <auto → <depth> (<why>) | single (set) | panel (set)>
 - Branch: <base>..<branch>
 - Spec: <path>
 - Rounds: <n> of <cap>
@@ -137,7 +145,8 @@ unconditional — it holds at every profile, and the cap's own value never softe
 ```
 
 The engine line records what actually ran, and its value is one of the five above — no
-variants. `[severity]` is one of the four values `references/findings.md` defines; the
+variants. The depth line says how that engine was picked, worded per
+`playbooks/reviewing-code.md` § 4. `[severity]` is one of the four values `references/findings.md` defines; the
 carry-overs line holds exactly the non-blocking ones. Findings in plain everyday language,
 symptom first; jargon only where it adds precision.
 

@@ -33,15 +33,21 @@ and is asked about them; that is intended.
 § Launch contract and § Verdicts sections of references/checklist.md raise the runtime surface and
 the closures of the two playbooks that read it, playbooks/executing-waves.md and
 playbooks/verifying-on-device.md; moving the trace out of verifying-on-device.md offsets a little
-of that.
+of that. `reviewDepth: auto`'s rule in playbooks/reviewing-code.md § 3 and its depth line in
+§ 4, branch review's depth line, report line and `review-depth` append, and the ledger's
+`review-depth` value grow the two review playbooks and every closure citing them or
+references/ledger.md; branch review's § Configuration drops its `single` | `panel` enumeration.
 
 ```text
 budget: context-budget.json references/model-routing.md 9168
 budget: context-budget.json playbooks/sweeping-mechanical-changes.md 85027
 budget: context-budget.json playbooks/taking-the-fast-path.md 50564
-budget: surface-budget.json surfaceTotal 6241
-budget: context-budget.json playbooks/executing-waves.md 105677
+budget: surface-budget.json surfaceTotal 6270
+budget: context-budget.json playbooks/executing-waves.md 105872
 budget: context-budget.json playbooks/verifying-on-device.md 50018
+budget: context-budget.json commands/continue.md 65733
+budget: context-budget.json playbooks/reviewing-code.md 93332
+budget: context-budget.json playbooks/reviewing-the-branch.md 49752
 ```
 
 ## 2026-10-23 — The green gate proves each task commit in a scratch worktree (#324, #336)

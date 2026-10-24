@@ -965,6 +965,25 @@ test("harvested: reviewing-the-branch/graceful-degradation — the fallback is d
   assert.match(read("playbooks/reviewing-code.md"), /a\s+fallback presented as a panel run makes the review unauditable/);
 });
 
+test("reviewing-code § 3 owns reviewDepth: auto measures a ref range, and branch review records what ran", () => {
+  const code = read("playbooks/reviewing-code.md");
+  const engine = code.slice(code.indexOf("## 3. Engine selection"), code.indexOf("## 4. "));
+  assert.ok(engine.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/review-depth.mjs" --base "$base" --branch "$branch" --profile <profile>'),
+    "§ 3 no longer measures an auto ref-range review through review-depth.mjs");
+  assert.match(engine, /`auto` at `repo` or `files` scope has no diff to measure, so it takes the profile's\s+branch-review row/);
+  assert.match(engine, /A failed measurement \(the script exits 1\) takes the profile's branch-review row too/);
+  assert.ok(code.includes("`Depth: auto → panel (612 changed lines > 400; profile standard)`"), "§ 4 lost the depth line's example");
+  const branch = read("playbooks/reviewing-the-branch.md");
+  assert.ok(!branch.includes("- `reviewDepth` — `single` | `panel`"), "§ Configuration still enumerates what § 3 owns");
+  assert.match(branch, /- `reviewDepth` — [^\n]*`playbooks\/reviewing-code\.md` § 3/);
+  assert.ok(branch.includes("- Depth: <auto → <depth> (<why>) | single (set) | panel (set)>"), "the report template has no depth line");
+  assert.ok(branch.includes("--kind event --event review-depth --stage branch-review --reviewDepth <single|panel>"),
+    "branch review no longer records the engine that ran");
+  const row = read("references/ledger.md").split("\n").find((l) => l.startsWith("| `event` |"));
+  assert.match(row, /`review-depth` once per in-cycle branch review/);
+  assert.match(row, /`playbooks\/reviewing-the-branch\.md` \(`review-depth`\) \|$/);
+});
+
 test("harvested: scoping-interview/batched-questions — research precedes the batch, and the fallback keeps its shape", () => {
   const t = read("playbooks/scoping-the-request.md");
   assert.match(t, /Never one question per message/);
