@@ -1043,8 +1043,24 @@ test("harvested: verifying-on-device/no-script-checkoff — only a structural ch
   assert.match(c, /may be\s+checked off with the tag `\(auto\)`/);
   assert.match(c, /When claude-in-chrome is not\s+available, nothing is auto-checked: every item stays a human item/);
   const v = read("playbooks/verifying-on-device.md");
-  assert.match(v, /`human-required`: the stage is complete ONLY when every non-`\(auto\)` item has a human\s+verdict/);
-  assert.match(v, /\*\*ONE question per checklist item, never batched\*\*/);
+  assert.match(v, /\| `human-required` \|[^\n]*\| every item has a human verdict \|/);
+  assert.match(v, /\*\*ONE question per checklist item, never batched\*\* for every `needs-eyes` item, and for\s+every item under `human-required`/);
+});
+
+test("harvested: verifying-on-device/launch-and-teardown — the coordinator launches, the driver goes first, and teardown always runs", () => {
+  const v = read("playbooks/verifying-on-device.md");
+  const walk = v.match(/\n## The walkthrough\n[\s\S]*?(?=\n## )/)?.[0] ?? "";
+  assert.match(walk,
+    /\n1\. \*\*Launch\.\*\*[\s\S]*\n2\. \*\*Agent pass\*\*[\s\S]*\n3\. \*\*Announce the gate\.\*\*[\s\S]*\n4\. \*\*Batch\*\*[\s\S]*\n5\. \*\*Human pass\*\*[\s\S]*\n6\. \*\*Teardown\.\*\*/,
+    "the walkthrough must run D5's six steps in order");
+  for (const section of ["launch-contract", "tiers"])
+    assert.ok(walk.includes(`read-section.mjs" references/checklist.md ${section}`), `the walkthrough must read checklist.md § ${section}`);
+  assert.ok(walk.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/on-device-launch.mjs" stop'), "teardown must run the launch script's stop");
+  assert.match(walk, /\*\*No driver\*\*/);
+  assert.doesNotMatch(v, /does not build, serve, or launch anything/, "the stage launches the app now");
+  const driver = read("agents/on-device-driver.md");
+  assert.doesNotMatch(driver, /a command that starts the app/, "the driver is handed a launched URL, never a launch command");
+  assert.match(driver, /\*\*Never launch anything, and never write to git\.\*\*/);
 });
 
 test("the checklist contract owns applicability, header lines, tiers, launch and verdicts; the playbooks cite it", () => {
