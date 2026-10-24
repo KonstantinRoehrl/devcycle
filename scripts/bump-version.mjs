@@ -19,6 +19,7 @@
 //   --date <YYYY-MM-DD>  the release date stamped on the CHANGELOG heading; defaults to today (UTC)
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { parseFlags } from "./cli-flags.mjs";
 
 const PLUGIN_PATH = ".claude-plugin/plugin.json";
 const CHANGELOG_PATH = "CHANGELOG.md";
@@ -92,47 +93,52 @@ export function changelogWithReleasedMarkers(text, version) {
   return text.slice(0, fence.index) + stamped + text.slice(fence.index + fence[0].length);
 }
 
+// --notes-for is a mode of its own and takes no other flag: the tag-time call passes it alone, so
+// anything beside it is a typo rather than a modifier. A misspelled --dry-run in release mode is the
+// costly one -- it used to be ignored, and the "dry run" rewrote plugin.json and CHANGELOG.md.
+const NOTES_FLAGS = { "--notes-for": "value" };
+const RELEASE_FLAGS = { "--subject": "value", "--date": "value", "--dry-run": "none" };
+
 function main() {
   const argv = process.argv.slice(2);
+  const notesMode = argv.some((a) => a === "--notes-for" || a.startsWith("--notes-for="));
+  // "nonEmpty": an unset shell variable (`--date "$day"`) must fail here, before any file is written.
+  const { flags } = parseFlags(argv, notesMode ? NOTES_FLAGS : RELEASE_FLAGS, { requireValues: "nonEmpty" });
 
-  const notesIdx = argv.indexOf("--notes-for");
-  if (notesIdx !== -1) {
-    const version = argv[notesIdx + 1];
-    if (!version) throw new Error("--notes-for requires a version");
+  if (notesMode) {
+    const version = flags["--notes-for"];
     const notes = notesForVersion(readFileSync(CHANGELOG_PATH, "utf8"), version);
     if (!notes) throw new Error(`CHANGELOG.md has no section for ${version}`);
     console.log(notes);
     return;
   }
 
-  const subjectIdx = argv.indexOf("--subject");
-  const subject = subjectIdx === -1 ? "" : argv[subjectIdx + 1];
+  const subject = flags["--subject"];
   if (!subject) throw new Error("--subject requires the release PR title");
   // Refused rather than silently treated as a patch: a title outside the convention is
   // invisible to versioning, so the release would ship with no bump and no entry.
   if (!releasingSubjects([subject]).length)
     throw new Error(`release title "${subject}" is not a Conventional Commit`);
 
-  const dateIdx = argv.indexOf("--date");
   // Defaults to today in UTC. The flag exists so tests pin a date instead of depending on
   // when they run; the release workflow leaves it off and stamps the day it stages the release.
-  const date = dateIdx === -1 ? new Date().toISOString().slice(0, 10) : argv[dateIdx + 1];
+  const date = flags["--date"] ?? new Date().toISOString().slice(0, 10);
 
   const level = bumpLevel([subject]);
   const plugin = JSON.parse(readFileSync(PLUGIN_PATH, "utf8"));
   const version = nextVersion(plugin.version, level);
 
-  if (argv.includes("--dry-run")) {
+  if (flags["--dry-run"]) {
     console.log(`${level} ${version}`);
     return;
   }
 
+  // Built before anything is written: changelogWithSection refuses a malformed --date, and that
+  // refusal used to land after plugin.json was rewritten, leaving a half-written release behind.
+  const changelog = changelogWithSection(readFileSync(CHANGELOG_PATH, "utf8"), version, `- ${subject}`, date);
   plugin.version = version;
   writeFileSync(PLUGIN_PATH, JSON.stringify(plugin, null, 2) + "\n");
-  writeFileSync(
-    CHANGELOG_PATH,
-    changelogWithSection(readFileSync(CHANGELOG_PATH, "utf8"), version, `- ${subject}`, date),
-  );
+  writeFileSync(CHANGELOG_PATH, changelog);
   // The one step docs/configuration/config-changelog.md:12-13 promises and nobody used to perform: a record
   // written before its release carries `version: "unreleased"` until the release computes the number.
   // Skipped when the file is absent so the script stays runnable against a minimal fixture.
@@ -144,5 +150,13 @@ function main() {
   console.log(version);
 }
 
-// CLI only, so the pure helpers above stay importable by tests.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
+// CLI only, so the pure helpers above stay importable by tests. A refused run prints one prefixed
+// line rather than a stack trace, which reads as a crash in the release workflow's log.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    main();
+  } catch (e) {
+    console.error(`bump-version: ${e.message}`);
+    process.exit(1);
+  }
+}
