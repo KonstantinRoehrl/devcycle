@@ -5,6 +5,58 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-24 — `auto` picks for me on onDeviceGate and reviewDepth; on-device skips from branch review (#368, #367, #338, #296, #323)
+
+**Decision:** `auto` on `onDeviceGate` and `reviewDepth` now means *pick for me*, as it already
+did on the four `*Model` knobs. Both knobs fall back to `auto` itself, and the owning playbook
+decides at stage time; neither falls back to a profile row any more. `onDeviceGate: auto` has the
+agent launch the app and settle what it can. The human then answers one batch of proposed verdicts
+and the items that need eyes. `human-required` and `auto-ok` keep their meanings.
+`reviewDepth: auto` sizes a ref-range review from its diff (`playbooks/reviewing-code.md` § 3).
+A new explicit value, `profile`, takes the profile's branch-review row, which is what unset used
+to do. The profile matrix in `references/config.md` loses its on-device row, so `lean` no longer
+implies `auto-ok`. Branch review now decides whether anything renders
+(`references/checklist.md` § Applicability) and, when nothing does, hands straight to finish.
+
+**Why:** users read `onDeviceGate: auto` as "automate where possible", but it meant "take the
+profile's row", while the same word meant "pick for me" on the model knobs (#367). Under the
+default gate the human answered one question per item, including items a DOM read settles (#367,
+#323). A cycle with nothing to render still paid a whole session to say so (#368).
+
+**Supersedes:** `references/config.md` § Knob resolution step 2's reading of `auto` as *let the
+profile govern this* (the 2026-07-27 entry) for these two knobs, and the profile matrix's
+on-device row. A cycle in flight sees its recorded values differ from `auto` once after upgrading
+and is asked about them; that is intended.
+
+**Budgets:** `references/model-routing.md`'s Auditability paragraph grew by one outcome form
+(#296), charged to every closure that reads it. The § Applicability, § Checklist header, § Tiers,
+§ Launch contract and § Verdicts sections of references/checklist.md raise the runtime surface and
+the closures of the two playbooks that read it, playbooks/executing-waves.md and
+playbooks/verifying-on-device.md; moving the trace out of verifying-on-device.md offsets a little
+of that. `reviewDepth: auto`'s rule in playbooks/reviewing-code.md § 3 and its depth line in
+§ 4, branch review's depth line, report line and `review-depth` append, and the ledger's
+`review-depth` value grow the two review playbooks and every closure citing them or
+references/ledger.md; branch review's § Configuration drops its `single` | `panel` enumeration. The on-device walkthrough's six steps, its gate table and its four-verdict results template grow playbooks/verifying-on-device.md and its closure (commands/verify.md's refs-only closure counts only cited references, so it does not move); the driver's target and Bash lines change in place. The on-device skip puts its decision and procedure in playbooks/reviewing-the-branch.md § Handoff, which now also reads references/checklist.md § Applicability, and gives references/handoff.md a second block exception, a zero-width stage-line sentence and one boundary row, so every closure that reads handoff.md whole grows with it; the playbook's compaction-hint bullet, which the handoff table already covers, is dropped.
+
+```text
+budget: context-budget.json references/model-routing.md 9168
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 85568
+budget: context-budget.json playbooks/taking-the-fast-path.md 51105
+budget: surface-budget.json surfaceTotal 6333
+budget: context-budget.json playbooks/executing-waves.md 106413
+budget: context-budget.json playbooks/verifying-on-device.md 53541
+budget: context-budget.json commands/continue.md 66274
+budget: context-budget.json playbooks/reviewing-code.md 93332
+budget: context-budget.json playbooks/reviewing-the-branch.md 52843
+budget: context-budget.json commands/cycle.md 74652
+budget: context-budget.json playbooks/finishing-the-cycle.md 48132
+budget: context-budget.json playbooks/planning-waves.md 72500
+budget: context-budget.json playbooks/receiving-review.md 112110
+budget: context-budget.json playbooks/scoping-the-request.md 30309
+budget: context-budget.json playbooks/writing-the-findings-document.md 62508
+budget: context-budget.json references/handoff.md 11283
+```
+
 ## 2026-10-23 — The green gate proves each task commit in a scratch worktree (#324, #336)
 
 **Decision:** `scripts/task-commit.mjs` commits an accepted task, then runs its gate command in a
@@ -1926,7 +1978,7 @@ at it rather than carrying a copy.
 ## 2026-07-27 — `auto` releases a knob back to the profile; the upgrade trap is asked about, not fixed silently
 
 *(Partly superseded 2026-09-29, above: the upgrade offer and its `· profile-asked` marker are
-retired; `auto` as "let the profile govern" still holds.)*
+retired; and 2026-10-24, above: `auto` on these two knobs now means "pick for me".)*
 
 **Decision:** `auto` becomes a sanctioned value on the two profile-covered behavioral knobs
 (`reviewDepth`, `onDeviceGate`), meaning "let the profile govern this" — the same convention

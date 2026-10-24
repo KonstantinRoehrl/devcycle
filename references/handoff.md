@@ -7,12 +7,14 @@ At every boundary: update `.devcycle/state.md`, then emit the handoff block as t
 stage's final output. **One block per completed stage, no batching:** when several
 stages complete in a single response or session, each stage still emits its own
 `## Handoff` block, in order, at that stage's end — never one merged or summary
-block for the run. A stage that is skipped or judged not applicable (e.g.
-on-device with no rendered surface) still emits its block: the skip IS the stage
-outcome. **One exception, and only this one:** the stage must have been entered
-and judged inapplicable. A cycle kind that never routes to a stage at all emits
-nothing for it — a feature or refactor cycle, which never enters diagnosis, emits
-no diagnosis block. The finish stage emits the pipeline's final block. The block shape:
+block for the run. A stage that is entered, then skipped or judged not applicable,
+still emits its block: the skip IS the stage outcome. **Two exceptions, and only
+these.** A cycle kind that never routes to a stage at all emits nothing for it — a
+feature or refactor cycle, which never enters diagnosis, emits no diagnosis block.
+And a stage an earlier stage judged inapplicable before entry emits no block of its
+own: the judging stage's block carries the skip and its reason, as branch review's
+does for on-device when nothing renders (`playbooks/reviewing-the-branch.md`
+§ Handoff). The finish stage emits the pipeline's final block. The block shape:
 
 ```markdown
 ## Handoff
@@ -39,7 +41,9 @@ this stage), never the boundary time.
 stage entry makes it span the stage's work — including a stage entered in one session and completed
 in a later `/devcycle:continue` session, whose cost would otherwise land in `unattributed` or
 forward-fill to `devcycle:continue` — and a boundary that emits a handoff block without the record
-line leaves that stage's cost unattributable.
+line leaves that stage's cost unattributable. A stage skipped before entry is the one case with two
+lines at one boundary: the judging stage's own, then the skipped stage's, outcome `skipped`, whose
+`startedAt` and `endedAt` are both the boundary time — a zero-width window that is charged nothing.
 
 **Mark the handoff ready, last.** After the state rewrite and that `stage` line, and before the
 block is emitted, run
@@ -85,6 +89,7 @@ column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, 
 | wave → wave (within execution) | Clear + `/devcycle:continue` | n/a — clears (unattended: the driver's next session is the clear) | n/a — clears |
 | execution → branch-review | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
 | branch-review → on-device | Fresh session | n/a — clears | n/a — clears |
+| branch-review → finish (no rendered surface) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
 | fast-path → finish | Clear + `/devcycle:continue` | branch, what changed | the implementation conversation |
 | sweep → finish | Clear + `/devcycle:continue` | branch, sweep report path | per-file sweep output |
 | on-device → finish | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |

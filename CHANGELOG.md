@@ -24,6 +24,24 @@ still records, and `dream.mjs --match` still accepts an empty file list. `script
 gains a `"repeat"` arity and an opt-in `requireValues` option for these four; no other script
 changes behaviour.
 
+Branch review now decides whether on-device applies: when execution recorded no checklist and
+nothing in the branch's diff renders (visual UI only; CLI output, docs, CI and tests do not), the
+cycle goes straight to finish through one clear, and the run record shows on-device as skipped
+(#368). The on-device stage launches the app itself from the checklist's new `Launch:` and
+`Ready:` lines and stops it again at the end, runs the browser driver first, and tags every item
+`structural`, `agent-observable` or `needs-eyes`: structural reads that hold are ticked `(auto)`,
+what the driver could only observe and every failure it saw come back as one batch of proposed
+verdicts for one answer, and only `needs-eyes` items are asked one by one (#367, #323 for web
+apps). Checklists also carry `Feasibility:` notes, give each axis of a verification matrix its own
+item, and record each verdict as `passed`, `FAILED`, `waived` or `unverified` (#338). `auto` on
+`onDeviceGate` and `reviewDepth` now means "pick for me": `onDeviceGate: auto` is that agent-first
+walk at every profile, so `lean` no longer implies `auto-ok`, and `reviewDepth: auto` measures the
+branch diff with the new `scripts/review-depth.mjs`, keeping `single` at `lean` and `panel` at
+`thorough` and picking `panel` for a large diff at `standard`; the new value `reviewDepth: profile`
+keeps the profile's row, and the review report gains a `Depth:` line. A cycle already in flight
+asks its knob-change question once after the upgrade. `references/model-routing.md`'s
+auditability list now names `model session (auto)` too (#296).
+
 ## 0.26.0 — 2026-10-16
 
 - feat(cycle): review a spec's repo claims against live code before approval (#304)

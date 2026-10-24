@@ -47,8 +47,8 @@ directly.
 | [`executing-waves`](playbooks/executing-waves/README.md) | Parallel subagent execution with green gate, ledger, and commit discipline. |
 | [`reviewing-code`](playbooks/reviewing-code/README.md) | The shared review engine: lens construction, engine selection, adversarial verification, dedup, and ranking. |
 | [`writing-the-findings-document`](playbooks/writing-the-findings-document/README.md) | The ranked findings document an audit run or a `/devcycle:maintain` pass ends in, plus the opt-in filing step onto an open PR. |
-| [`reviewing-the-branch`](playbooks/reviewing-the-branch/README.md) | The whole-branch review gate — spec-compliance layer and bounded rounds, over the shared review engine. |
-| [`verifying-on-device`](playbooks/verifying-on-device/README.md) | Human-verified checklist for rendered and on-device outcomes. |
+| [`reviewing-the-branch`](playbooks/reviewing-the-branch/README.md) | The whole-branch review gate — spec-compliance layer and bounded rounds, over the shared review engine — and the call whether on-device applies: a branch with nothing on screen goes straight to finish. |
+| [`verifying-on-device`](playbooks/verifying-on-device/README.md) | Launches the app, lets the browser driver settle what it can, and asks you one batch of proposed verdicts plus the items only your eyes can judge. |
 | [`finishing-the-cycle`](playbooks/finishing-the-cycle/README.md) | Resolves the effective git policy and hands back, pushes, or opens the PR. |
 | [`taking-the-fast-path`](playbooks/taking-the-fast-path/README.md) | Mini-cycle for confirmed-trivial requests. |
 | [`sweeping-mechanical-changes`](playbooks/sweeping-mechanical-changes/README.md) | Triage-confirmed bulk sweep behind a blast-radius gate. |
@@ -66,7 +66,7 @@ run locally.
 
 | Component | What it does |
 | --- | --- |
-| [`workflows/review-panel.js`](../workflows/review-panel.js) | Multi-lens read-only review engine for `reviewDepth: panel`. |
+| [`workflows/review-panel.js`](../workflows/review-panel.js) | Multi-lens read-only review engine that runs when the review depth is `panel`, set or picked by `reviewDepth: auto`. |
 | [`workflows/mechanical-sweep.js`](../workflows/mechanical-sweep.js) | Pilot-first bulk edit engine behind the sweep path. |
 | [`workflows/lib/agent-cli.js`](../workflows/lib/agent-cli.js) | The subprocess layer both workflow engines share to drive `claude` in print mode. |
 | [`scripts/self-dev-check.mjs`](../scripts/self-dev-check.mjs) | The self-development landing guard, inert unless the repo under work is this plugin's own source: `--preflight` records what the installed copy holds when a run starts and reports how far it has drifted from the repo, `--assert` fails the finish stage when an expected deliverable is absent from the branch or the installed copy was written to during the run, and `--plugin-digest` mints the run record's content-based plugin identifier. |
@@ -83,6 +83,8 @@ run locally.
 | [`scripts/capture-evidence.mjs`](../scripts/capture-evidence.mjs) | Runs a task's gate command, or an explicit one, and writes its evidence capture with the command it ran as the header, then prints the report lines to copy. |
 | [`scripts/drive-signal.mjs`](../scripts/drive-signal.mjs) | A driven session's only channel to its driver: writes `.devcycle/drive-stop.json` with a named stop reason and a one-line detail. |
 | [`scripts/drive-execution.mjs`](../scripts/drive-execution.mjs) | The unattended-execution driver: started by `/devcycle:continue` once the user opts in at execution start, runs one fresh `claude -p` session per wave until branch review, stopping at the first gate that needs the user; POSIX only ([`playbooks/executing-waves/unattended.md`](playbooks/executing-waves/unattended.md)). |
+| [`scripts/review-depth.mjs`](../scripts/review-depth.mjs) | Picks the review engine for `reviewDepth: auto` at `branch` scope: `single` at `lean` and `panel` at `thorough`; at `standard` it measures the branch diff's changed lines and files, lockfiles and generated files left out, and prints `single` or `panel` with its reason. `playbooks/reviewing-code.md` § 3 owns when it runs. |
+| [`scripts/on-device-launch.mjs`](../scripts/on-device-launch.mjs) | The on-device stage's launch record: `start` runs a checklist's `Launch:` command in the background, `ready` waits for its `Ready:` check, and `stop` ends every process recorded under `.devcycle/`, an earlier session's leftovers included. |
 | [`bin/devcycle-root`](../bin/devcycle-root) | Prints this plugin's installed root. Claude Code puts `<plugin>/bin` on PATH, so plugin scripts named `"$(devcycle-root)/scripts/<name>.mjs"` resolve from any shell — including a dispatched subagent's, where `${CLAUDE_PLUGIN_ROOT}` is empty. Quote the substitution as shown, or a plugin root containing a space is word-split. |
 
 ## Hooks

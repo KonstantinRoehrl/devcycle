@@ -79,10 +79,11 @@
       "default": "auto",
       "options": [
         "auto",
+        "profile",
         "single",
         "panel"
       ],
-      "description": "Branch review engine. auto (default) defers to the profile's branch-review row (single at lean and standard, panel at thorough); set → this value, verbatim, and the profile never moves it. One of: auto, single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass), panel (multi-lens review panel workflow). Default: auto."
+      "description": "Branch review engine. auto (default) sizes it from the branch's diff: always single at lean, always panel at thorough, and at standard panel only for a large diff; a review of the whole repo or of paths takes the profile's row. profile → the profile's branch-review row (single at lean and standard, panel at thorough). single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass) or panel (multi-lens review panel workflow) → that engine, verbatim. One of: auto, profile, single, panel. Default: auto."
     },
     "crossModelReview": {
       "type": "boolean",
@@ -99,7 +100,7 @@
         "human-required",
         "auto-ok"
       ],
-      "description": "Whether the on-device checklist closes only via a human walkthrough. auto (default) defers to the profile's on-device row (auto-ok at lean, human-required at standard and thorough); set → this value, verbatim, and the profile never moves it. One of: auto, human-required, auto-ok. Default: auto."
+      "description": "Who judges the on-device checklist. auto (default): the agent launches the app and checks what it can, and you answer one batch of its proposed verdicts plus a question for each item that needs your eyes. human-required: you judge every item, one question each. auto-ok: the agent's pass may close the stage unless it saw a failure, and what it could not check is reported unverified. The profile never sets it. One of: auto, human-required, auto-ok. Default: auto."
     },
     "learnStalenessSessions": {
       "type": "number",

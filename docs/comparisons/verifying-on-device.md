@@ -29,6 +29,15 @@ its new home.
 This skill is now the on-device **stage** only: walkthrough, gate, handoff. It consumes the
 checklist it no longer produces.
 
+## Scope change, 2026-10-24 — launch, driver first, and the skip
+
+The stage now launches the app itself, runs `devcycle:on-device-driver` before any question,
+and asks the human one batch of proposed verdicts plus the `needs-eyes` items one by one; the
+launch contract, the item tiers and the verdict vocabulary are `references/checklist.md`'s.
+Deciding that nothing renders moved to `devcycle:reviewing-the-branch`, which skips this stage
+outright; this stage judges applicability itself only when no earlier stage did, as on
+standalone `/devcycle:verify`. The (b) and (c) entries below are restated for it.
+
 ## Engine per profile
 
 Devcycle-native at every profile — no upstream skill is loaded or overlaid at any of them.
@@ -37,12 +46,13 @@ discipline unconditionally, never profile-conditionally.
 
 | profile | engine | upstream loaded? | `onDeviceGate` default |
 | --- | --- | --- | --- |
-| `lean` | devcycle-native | no | `auto-ok` |
-| `standard` | devcycle-native | no | `human-required` |
-| `thorough` | devcycle-native | no | `human-required` |
+| `lean` | devcycle-native | no | `auto` |
+| `standard` | devcycle-native | no | `auto` |
+| `thorough` | devcycle-native | no | `auto` |
 
-An explicitly configured `onDeviceGate` wins verbatim over the profile column, per
-`references/config.md`. The profile changes the gate's **closing condition** and nothing
+Since 2026-10-24 the profile sets no `onDeviceGate` value: `auto`, the agent first and the human
+for the rest, is the default at every profile, and a `lean` run that should close on the agent
+pass sets `auto-ok` itself. The gate changes the stage's **closing condition** and nothing
 else: it never changes what is reported, and `auto-ok` never licenses reporting a
 walkthrough that did not run as done.
 
@@ -63,26 +73,31 @@ its gate function, red-flags list, or rationalization table.
 
 - **The fresh-session walkthrough.** It runs after the branch review with only the
   checklist path and the branch as context — nothing from the implementation conversation.
-- **One question per checklist item, never batched.** Each question covers exactly one item
-  and tells the human how to observe it (where to click, which viewport, which theme), and
-  waits for the verdict before the next. See (c)1.
+- **One question per `needs-eyes` item, never batched.** Each such question covers exactly
+  one item and tells the human how to observe it (where to click, which viewport, which theme),
+  and waits for the verdict before the next; under `human-required` every item is asked this
+  way. What the driver could observe instead arrives as one batch of proposed verdicts the
+  human confirms or overrides. See (c)1.
 - **An agent-actionable results report**, one line per item, plain language and symptom
-  first, recording passed / FAILED, what the user saw instead, and a severity.
+  first, recording each verdict from a fixed set: passed, FAILED with what the user saw
+  instead and a severity, waived with a reason, or unverified.
 - **Producer-side model routing.** The walkthrough's model cannot be chosen from inside the
   session that already exists, so the recommendation travels in the branch-review handoff
   as `Start the fresh session on <model>`, resolved from `walkthroughModel` per
   `references/model-routing.md`; where that knob derives rather than pins, the walkthrough takes
   the fast tier, since it is interview mechanics. No upstream analogue.
-- **The `onDeviceGate` conditional.** `human-required`: the stage is complete only when
-  every non-`(auto)` item has a human verdict. `auto-ok`: the checklist may close without a
-  human pass once all structurally verifiable items are `(auto)`-checked, with the rest left
-  unchecked and listed in the handoff as unverified residue. The relaxation is of the
-  closing condition only — the handoff always states which happened, a human pass or a
-  close without one and what stayed unverified, and no checkmark is ever faked.
+- **The `onDeviceGate` conditional.** `auto`: complete once every item has an `(auto)` tick,
+  a confirmed batch verdict, or a per-item human verdict. `human-required`: complete only when
+  every item has a human verdict. `auto-ok`: the agent pass may close the stage unless it
+  observed a failure, with every item lacking an `(auto)` tick listed in the handoff as
+  unverified residue. The relaxation is of the closing condition only — the handoff always
+  states which happened, a human pass or a close without one and what stayed unverified, and
+  no checkmark is ever faked.
 - **Pipeline integration.** `.devcycle/state.md` set to `stage: finish`, the handoff block
   per `references/handoff.md`, artifacts being the checklist and results-report paths — or
-  `none (no rendered surface)` when the stage judges itself not applicable, which still
-  emits a block, since the skip IS the stage outcome.
+  `none (no rendered surface)` when this stage still judges itself not applicable, which
+  emits a block of its own. In a cycle, branch review usually makes that call first and skips
+  the stage, carrying the skip in its own handoff.
 
 ## (c) Conflicts and resolutions
 
@@ -90,11 +105,13 @@ Both are unconditional — neither is scoped to a profile.
 
 1. **One-question-per-item vs the batched-interview standard.** The devcycle-wide interview
    discipline, carried by `scoping-interview`, batches questions via AskUserQuestion. This
-   skill mandates the opposite for walkthroughs: one question per checklist item, never
-   batched, because findings quality drops when items are bundled. **Resolution:** the
-   walkthrough interview is an explicit, scoped exception, stated in the skill as its own
-   rule keyed to the observable situation of walking a checklist; the general batching rule
-   is untouched everywhere else.
+   skill mandates the opposite for walkthroughs: one question per `needs-eyes` item (every
+   item under `human-required`), never batched, because findings quality drops when items are
+   bundled. **Resolution:** the walkthrough interview is an explicit, scoped exception, stated
+   in the skill as its own rule keyed to the observable situation of walking a checklist; the
+   general batching rule is untouched everywhere else. The batch of proposed verdicts is not a
+   breach of the exception: it carries only what the driver observed, never an item that
+   needs eyes.
 2. **Upstream's "run the command to verify" vs items no command can verify.** Upstream's
    frame assumes every claim has a proving command; rendered-output claims often do not.
    **Resolution:** the `(auto)` boundary splits the checklist — command-provable items

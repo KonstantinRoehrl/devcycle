@@ -789,6 +789,7 @@ test("harvested: executing-waves/model-routing — every escalation trigger and 
   assert.match(t, /a prior review\s+round on this task returned blocking findings \(escalate on retry, never on\s+the first attempt\)/);
   assert.ok(t.includes("outcome=model session (auto: escalated on files=9)"), "the derived-escalation audit shape changed");
   assert.ok(t.includes("outcome=model <id> (pinned)"), "the pinned audit shape changed");
+  assert.ok(t.includes("`outcome=model session (auto)`"), "Auditability omits the outcome scripts/model-pool.mjs prints for an unset knob (#296)");
   assert.match(t, /escalation always names the signal that fired/);
 });
 
@@ -955,13 +956,77 @@ test("harvested: reviewing-the-branch/engine-selection — the report's engine v
   assert.ok(t.includes("- Rounds: <n> of <cap>"), "the rounds line changed");
   assert.match(t, /its value is one of the five above — no\s+variants/);
   assert.match(t, /Start the fresh\s+session on <model>\./);
-  assert.ok(t.includes("checklist: none — on-device stage will judge applicability"), "the checklist-none compaction branch is gone");
+  assert.ok(t.includes("checklist: none — trace found a rendered surface (<surfaces>); on-device generates one"), "the trace-found checklist marker is gone");
+  assert.ok(!t.includes("on-device stage will judge applicability"), "branch review still leaves the on-device decision to the on-device stage");
 });
 
 test("harvested: reviewing-the-branch/graceful-degradation — the fallback is disclosed and recorded verbatim", () => {
   assert.match(read("playbooks/reviewing-the-branch.md"), /record the engine line it returns \*\*verbatim\*\*/);
   assert.match(read("playbooks/reviewing-code.md"), /\*\*`panel→single` degradation is a first-class path, not an apology\.\*\*/);
   assert.match(read("playbooks/reviewing-code.md"), /a\s+fallback presented as a panel run makes the review unauditable/);
+});
+
+test("branch review skips on-device only when no checklist exists and nothing renders, and its own block carries the skip", () => {
+  const handoff = sectionText(read("playbooks/reviewing-the-branch.md"), "handoff") ?? "";
+  assert.ok(
+    handoff.includes('`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/checklist.md applicability`'),
+    "branch review's handoff no longer applies references/checklist.md § Applicability"
+  );
+  assert.match(handoff, /\*\*Skip\s+on-device\s+only\s+when\s+both\s+signals\s+agree:\*\*/, "the two-signal skip rule is gone");
+  const skipAt = handoff.indexOf("**On a skip:**");
+  const otherwiseAt = handoff.indexOf("**Otherwise,**");
+  assert.ok(skipAt > -1 && otherwiseAt > skipAt, "the skip path no longer precedes the on-device path");
+  const skip = handoff.slice(skipAt, otherwiseAt);
+  assert.ok(skip.includes("--kind stage --stage on-device --outcome skipped --startedAt <t> --endedAt <t>"), "the skipped stage's zero-width stage line is gone");
+  assert.ok(skip.includes("`checklist: none — on-device not applicable (<reason>)`"), "the skip's state-file marker is gone");
+  assert.ok(skip.includes("`on-device: none (no rendered surface)`"), "the skip block's on-device artifact is gone");
+  assert.ok(skip.includes("`on-device skipped: <reason>`"), "the skip block's carry-over is gone");
+  assert.ok(skip.includes("`Clear + /devcycle:continue`"), "the skip boundary no longer clears");
+  assert.ok(skip.includes("--action clear --completed branch-review"), "the skip boundary's ready mark is gone");
+  assert.doesNotMatch(skip, /Start the fresh\s+session on <model>\./, "the skip block names a model for a session that never runs");
+  assert.match(handoff.slice(otherwiseAt), /followed by `Start the fresh\s+session on <model>\.`/, "the on-device path lost its model line");
+
+  const h = read("references/handoff.md");
+  assert.match(h, /\*\*Two\s+exceptions,\s+and\s+only\s+these\.\*\*/, "handoff.md no longer names two block exceptions");
+  assert.match(
+    h,
+    /a\s+stage\s+an\s+earlier\s+stage\s+judged\s+inapplicable\s+before\s+entry\s+emits\s+no\s+block/,
+    "handoff.md no longer exempts a stage skipped before entry from emitting its own block"
+  );
+  assert.match(h, /zero-width\s+window/, "the skipped stage's zero-width stage line is gone from the boundary rule");
+  assert.ok(
+    h.includes("| branch-review → finish (no rendered surface) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |"),
+    "the skip boundary's row is gone"
+  );
+
+  const onDevice = cycleRoutes().get("on-device") ?? "";
+  assert.ok(onDevice.includes("`references/checklist.md` § Applicability"), "cycle.md's on-device step no longer names who decides the skip");
+  const stageNotes = JSON.parse(read("references/stages.json"));
+  assert.match(stageNotes["branch-review"].note, /decides whether on-device applies/, "the branch-review re-entry note no longer names the skip decision");
+  assert.match(
+    stageNotes["on-device"].note,
+    /human-required step/,
+    "commands/continue.md re-walks a step on resume only when the stage's note names a human-required step"
+  );
+});
+
+test("reviewing-code § 3 owns reviewDepth: auto measures a ref range, and branch review records what ran", () => {
+  const code = read("playbooks/reviewing-code.md");
+  const engine = code.slice(code.indexOf("## 3. Engine selection"), code.indexOf("## 4. "));
+  assert.ok(engine.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/review-depth.mjs" --base "$base" --branch "$branch" --profile <profile>'),
+    "§ 3 no longer measures an auto ref-range review through review-depth.mjs");
+  assert.match(engine, /`auto` at `repo` or `files` scope has no diff to measure, so it takes the profile's\s+branch-review row/);
+  assert.match(engine, /A failed measurement \(the script exits 1\) takes the profile's branch-review row too/);
+  assert.ok(code.includes("`Depth: auto → panel (612 changed lines > 400; profile standard)`"), "§ 4 lost the depth line's example");
+  const branch = read("playbooks/reviewing-the-branch.md");
+  assert.ok(!branch.includes("- `reviewDepth` — `single` | `panel`"), "§ Configuration still enumerates what § 3 owns");
+  assert.match(branch, /- `reviewDepth` — [^\n]*`playbooks\/reviewing-code\.md` § 3/);
+  assert.ok(branch.includes("- Depth: <auto → <depth> (<why>) | single (set) | panel (set)>"), "the report template has no depth line");
+  assert.ok(branch.includes("--kind event --event review-depth --stage branch-review --reviewDepth <single|panel>"),
+    "branch review no longer records the engine that ran");
+  const row = read("references/ledger.md").split("\n").find((l) => l.startsWith("| `event` |"));
+  assert.match(row, /`review-depth` once per in-cycle branch review/);
+  assert.match(row, /`playbooks\/reviewing-the-branch\.md` \(`review-depth`\) \|$/);
 });
 
 test("harvested: scoping-interview/batched-questions — research precedes the batch, and the fallback keeps its shape", () => {
@@ -1023,8 +1088,50 @@ test("harvested: verifying-on-device/no-script-checkoff — only a structural ch
   assert.match(c, /may be\s+checked off with the tag `\(auto\)`/);
   assert.match(c, /When claude-in-chrome is not\s+available, nothing is auto-checked: every item stays a human item/);
   const v = read("playbooks/verifying-on-device.md");
-  assert.match(v, /`human-required`: the stage is complete ONLY when every non-`\(auto\)` item has a human\s+verdict/);
-  assert.match(v, /\*\*ONE question per checklist item, never batched\*\*/);
+  assert.match(v, /\| `human-required` \|[^\n]*\| every item has a human verdict \|/);
+  assert.match(v, /\*\*ONE question per checklist item, never batched\*\* for every `needs-eyes` item, and for\s+every item under `human-required`/);
+});
+
+test("harvested: verifying-on-device/launch-and-teardown — the coordinator launches, the driver goes first, and teardown always runs", () => {
+  const v = read("playbooks/verifying-on-device.md");
+  const walk = v.match(/\n## The walkthrough\n[\s\S]*?(?=\n## )/)?.[0] ?? "";
+  assert.match(walk,
+    /\n1\. \*\*Launch\.\*\*[\s\S]*\n2\. \*\*Agent pass\*\*[\s\S]*\n3\. \*\*Announce the gate\.\*\*[\s\S]*\n4\. \*\*Batch\*\*[\s\S]*\n5\. \*\*Human pass\*\*[\s\S]*\n6\. \*\*Teardown\.\*\*/,
+    "the walkthrough must run D5's six steps in order");
+  for (const section of ["launch-contract", "tiers"])
+    assert.ok(walk.includes(`read-section.mjs" references/checklist.md ${section}`), `the walkthrough must read checklist.md § ${section}`);
+  assert.ok(walk.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/on-device-launch.mjs" stop'), "teardown must run the launch script's stop");
+  assert.match(walk, /\*\*No driver\*\*/);
+  assert.doesNotMatch(v, /does not build, serve, or launch anything/, "the stage launches the app now");
+  const driver = read("agents/on-device-driver.md");
+  assert.doesNotMatch(driver, /a command that starts the app/, "the driver is handed a launched URL, never a launch command");
+  assert.match(driver, /\*\*Never launch anything, and never write to git\.\*\*/);
+});
+
+test("the checklist contract owns applicability, header lines, tiers, launch and verdicts; the playbooks cite it", () => {
+  const c = read("references/checklist.md");
+  for (const slug of ["applicability", "paths", "checklist-header", "item-shape", "dimensions", "tiers", "the-auto-boundary", "launch-contract", "verdicts"])
+    assert.ok(sectionText(c, slug) !== null, `references/checklist.md has no section slugged ${slug}`);
+  const applicability = sectionText(c, "applicability");
+  assert.match(applicability, /`nothing renders \(<reason>\)`/);
+  for (const kind of ["shared styles", "theme tokens", "build or bundler config", "asset pipelines", "templates", "i18n strings"])
+    assert.ok(applicability.includes(kind), `the conservative rule no longer counts ${kind} as rendered`);
+  assert.match(sectionText(c, "checklist-header"), /^Launch: <exact command\(s\)/m);
+  assert.match(sectionText(c, "checklist-header"), /^Ready: </m);
+  assert.match(sectionText(c, "item-shape"), /Tier: <structural \| agent-observable \| needs-eyes>/);
+  const tiers = sectionText(c, "tiers");
+  assert.match(tiers, /\*\*Tagging moves only toward the human\.\*\*/);
+  assert.match(tiers, /\*\*`\(auto\)` means passed, never failed\.\*\*/);
+  const launch = sectionText(c, "launch-contract");
+  assert.ok(launch.includes(".devcycle/on-device-launch.json"), "the launch record path changed");
+  assert.match(launch, /under every `onDeviceGate` value; the driver never launches/);
+  const verdicts = sectionText(c, "verdicts");
+  for (const v of ["`passed`", "`FAILED`", "`waived`", "`unverified`", "`(auto: <evidence path>)`", "`(confirmed from batch)`"])
+    assert.ok(verdicts.includes(v), `the verdict vocabulary lost ${v}`);
+  const source = sectionText(read("playbooks/verifying-on-device.md"), "checklist-source");
+  assert.match(source, /run § Applicability of `\$\{CLAUDE_PLUGIN_ROOT\}\/references\/checklist\.md`/);
+  assert.ok(!source.includes("pulls in no new surface"), "verifying-on-device.md restates the trace that checklist.md § Applicability owns");
+  assert.match(read("playbooks/executing-waves.md"), /`\$\{CLAUDE_PLUGIN_ROOT\}\/references\/checklist\.md`\s+§\s+Applicability/);
 });
 
 test("the green gate step runs the script that journals both gate outcomes", () => {

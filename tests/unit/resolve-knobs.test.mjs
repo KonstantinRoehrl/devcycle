@@ -14,8 +14,8 @@ const argv = (raw) => ROSTER.flatMap(({ key }) => [`--${key}`, raw[key]]);
 const cli = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
 
 const STANDARD_DEFAULTS =
-  "knobs: profile=standard gitPolicy=local-commits-only docTrackingPolicy=standard reviewDepth=single " +
-  "crossModelReview=false onDeviceGate=human-required implementerModel=auto taskReviewerModel=auto " +
+  "knobs: profile=standard gitPolicy=local-commits-only docTrackingPolicy=standard reviewDepth=auto " +
+  "crossModelReview=false onDeviceGate=auto implementerModel=auto taskReviewerModel=auto " +
   "branchReviewModel=auto walkthroughModel=auto learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100 subagentBudget=warn " +
   "handoffNotification=off executionMode=ask";
 
@@ -41,14 +41,39 @@ test("an all-unset invocation resolves every knob to its standard fallback, noth
   }
 });
 
-test("reviewDepth and onDeviceGate follow each profile column when unset", () => {
-  const expected = { lean: ["single", "auto-ok"], standard: ["single", "human-required"], thorough: ["panel", "human-required"] };
-  for (const [profile, [reviewDepth, onDeviceGate]] of Object.entries(expected)) {
+test("reviewDepth and onDeviceGate list auto first and fall back to it; no knob falls back to a profile row", () => {
+  assert.deepEqual(ROSTER.find((e) => e.key === "reviewDepth"), {
+    key: "reviewDepth", kind: "enum", values: ["auto", "profile", "single", "panel"], fallback: "auto",
+    profileRow: { lean: "single", standard: "single", thorough: "panel" },
+  });
+  assert.deepEqual(ROSTER.find((e) => e.key === "onDeviceGate"),
+    { key: "onDeviceGate", kind: "enum", values: ["auto", "human-required", "auto-ok"], fallback: "auto" });
+  assert.ok(ROSTER.every((e) => typeof e.fallback === "string"), "a knob still falls back to a profile row");
+});
+
+test("reviewDepth and onDeviceGate resolve to auto on every profile when unset", () => {
+  for (const profile of ["lean", "standard", "thorough"]) {
     const { knobs, explicit } = resolveKnobs(with_({ profile }));
-    assert.equal(knobs.reviewDepth, reviewDepth, profile);
-    assert.equal(knobs.onDeviceGate, onDeviceGate, profile);
+    assert.equal(knobs.reviewDepth, "auto", profile);
+    assert.equal(knobs.onDeviceGate, "auto", profile);
     assert.deepEqual(explicit, ["profile"]);
   }
+});
+
+test("reviewDepth=profile is explicit and resolves to the profile's branch-review row", () => {
+  for (const [profile, reviewDepth] of Object.entries({ lean: "single", standard: "single", thorough: "panel" })) {
+    const { knobs, explicit, warnings } = resolveKnobs(with_({ profile, reviewDepth: "profile" }));
+    assert.equal(knobs.reviewDepth, reviewDepth, profile);
+    assert.deepEqual(explicit, ["profile", "reviewDepth"]);
+    assert.deepEqual(warnings, []);
+  }
+});
+
+test("profile is no value of onDeviceGate: it warns and falls back to auto", () => {
+  const { knobs, explicit, warnings } = resolveKnobs(with_({ onDeviceGate: "profile" }));
+  assert.equal(knobs.onDeviceGate, "auto");
+  assert.deepEqual(explicit, []);
+  assert.deepEqual(warnings, ["onDeviceGate=profile is not one of auto | human-required | auto-ok; using auto"]);
 });
 
 test("an explicit in-set value wins verbatim over the profile row", () => {
@@ -60,9 +85,9 @@ test("an explicit in-set value wins verbatim over the profile row", () => {
 
 test("an out-of-set value warns naming knob, value, allowed set and fallback, then falls back", () => {
   const { knobs, explicit, warnings } = resolveKnobs(with_({ profile: "thorough", reviewDepth: "deep" }));
-  assert.equal(knobs.reviewDepth, "panel");
+  assert.equal(knobs.reviewDepth, "auto");
   assert.deepEqual(explicit, ["profile"]);
-  assert.deepEqual(warnings, ["reviewDepth=deep is not one of single | panel; using panel"]);
+  assert.deepEqual(warnings, ["reviewDepth=deep is not one of auto | profile | single | panel; using auto"]);
 });
 
 test("an invalid profile falls back to standard with a warning", () => {
@@ -122,6 +147,7 @@ test("a printed knobs: line round-trips to no change over the out-of-set and edg
     with_({ profile: "lean" }),
     with_({ profile: "thorough", reviewDepth: "single", gitPolicy: "open-pr" }),
     with_({ profile: "thorough", reviewDepth: "deep" }),
+    with_({ profile: "thorough", reviewDepth: "profile", onDeviceGate: "auto-ok" }),
     with_({ profile: "extreme", gitPolicy: "yolo", crossModelReview: "yes" }),
     with_({ learnStalenessSessions: "0", learnStalenessDays: "007" }),
     with_({ learnSessionCap: "0", learnStalenessDays: "2.5" }),
@@ -155,9 +181,20 @@ test("compare reports exactly the differing keys, and nothing on agreement", () 
   assert.deepEqual(compareKnobs({ gitPolicy: "local-commits-only", profile: "standard" }, knobs), [{ key: "gitPolicy", old: "local-commits-only", new: "open-pr" }]);
 });
 
-test("compare skips a recorded auto on a profile-governed knob but not on a *Model knob", () => {
-  const { knobs } = resolveKnobs(with_({ implementerModel: "claude-x" }));
-  assert.deepEqual(compareKnobs({ reviewDepth: "auto", implementerModel: "auto" }, knobs), [{ key: "implementerModel", old: "auto", new: "claude-x" }]);
+test("compare skips a recorded auto only on a knob whose resolution never prints auto", () => {
+  const { knobs } = resolveKnobs(with_({ implementerModel: "claude-x", reviewDepth: "panel", gitPolicy: "open-pr" }));
+  assert.deepEqual(compareKnobs({ gitPolicy: "auto", reviewDepth: "auto", onDeviceGate: "auto", implementerModel: "auto" }, knobs), [
+    { key: "reviewDepth", old: "auto", new: "panel" },
+    { key: "implementerModel", old: "auto", new: "claude-x" },
+  ]);
+});
+
+test("a knobs: line recorded before auto meant pick-for-me differs from the new defaults on both knobs", () => {
+  const { knobs } = resolveKnobs(UNSET);
+  assert.deepEqual(compareKnobs(parseRecordedLine("- knobs: reviewDepth=single onDeviceGate=human-required"), knobs), [
+    { key: "reviewDepth", old: "single", new: "auto" },
+    { key: "onDeviceGate", old: "human-required", new: "auto" },
+  ]);
 });
 
 test("compare leaves out a live knob, whose reader takes the global value and never the knobs: line", () => {
@@ -185,7 +222,7 @@ test("handoffNotification is a non-live enum, off unless set, and compares like 
   assert.deepEqual(compareKnobs({ subagentBudget: "warn" }, knobs), [], "a recorded line that predates the knob is never a difference");
 });
 
-test("the resolver's profile rows match config.md's profile matrix", () => {
+test("reviewDepth's profile row matches config.md's profile matrix, which has no on-device row", () => {
   const config = readFileSync("references/config.md", "utf8");
   const row = (label) => {
     const line = config.split("\n").find((l) => l.startsWith(`| ${label} |`));
@@ -193,9 +230,8 @@ test("the resolver's profile rows match config.md's profile matrix", () => {
     const [lean, standard, thorough] = line.split("|").slice(2, 5).map((c) => c.trim().replace(/`/g, ""));
     return { lean, standard, thorough };
   };
-  const fallback = (key) => ROSTER.find((e) => e.key === key).fallback;
-  assert.deepEqual(fallback("reviewDepth"), row("branch review engine (`reviewDepth`)"));
-  assert.deepEqual(fallback("onDeviceGate"), row("on-device gate (`onDeviceGate`)"));
+  assert.deepEqual(ROSTER.find((e) => e.key === "reviewDepth").profileRow, row("branch review engine (`reviewDepth`)"));
+  assert.ok(!config.split("\n").some((l) => l.startsWith("| on-device gate")), "config.md's profile matrix still carries an on-device row");
 });
 
 test("cli: an all-unset invocation prints the knobs and explicit lines and exits 0", () => {

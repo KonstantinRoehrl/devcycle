@@ -17,10 +17,13 @@
     "entry": "playbooks/executing-waves.md",
     "note": "resume each task from its last ledger event, per the per-task table in references/resume.md § Resuming a wave's per-task position"
   },
-  "branch-review": { "entry": "playbooks/reviewing-the-branch.md", "note": "" },
+  "branch-review": {
+    "entry": "playbooks/reviewing-the-branch.md",
+    "note": "at gate pass its § Handoff decides whether on-device applies; a skip records on-device as skipped and moves the cycle to finish"
+  },
   "on-device": {
     "entry": "playbooks/verifying-on-device.md",
-    "note": "its checklist walkthrough is a human-required step when onDeviceGate is human-required"
+    "note": "its walkthrough is a human-required step: the human answers the driver's batch and every needs-eyes item when onDeviceGate is auto, every item when it is human-required, and only observed failures when it is auto-ok"
   },
   "fast-path": { "entry": "playbooks/taking-the-fast-path.md", "note": "re-enter through its Resume section" },
   "sweep": { "entry": "playbooks/sweeping-mechanical-changes.md", "note": "re-enter through its Resume section" },

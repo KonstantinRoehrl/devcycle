@@ -14,9 +14,9 @@ ONE AskUserQuestion over `profile` — the preset that sizes cost against rigor 
 every stage:
 
 - **`standard` (recommended)** — the default; picking it is also "use defaults, don't
-  ask again". Devcycle-native engines, single-reviewer branch review, human-required
-  on-device gate.
-- **`lean`** — fewer review rounds, shorter evidence tails, `auto-ok` on-device gate.
+  ask again". Devcycle-native engines, a single reviewer on branch review unless the
+  diff is large.
+- **`lean`** — fewer review rounds, shorter evidence tails.
 - **`thorough`** — upstream overlays, review panel, deepest audits.
 - **customize individual knobs** — take the five-knob path below instead.
 
@@ -41,12 +41,12 @@ answer matches its default, nothing is written. The five:
 - `docTrackingPolicy` — what devcycle attempts to commit in a host repo (`standard`
   recommended · `all-local` · `all-tracked`); the repo's own `.gitignore` always wins.
   Outside the profile matrix, like `gitPolicy`.
-- `reviewDepth` — branch review engine (`auto` recommended — the profile picks · `single` ·
-  `panel`).
+- `reviewDepth` — branch review engine (`auto` recommended — sized from the diff ·
+  `profile` · `single` · `panel`).
 - `crossModelReview` — add a cross-model lens to the review panel (`false` recommended ·
   `true`).
-- `onDeviceGate` — whether the on-device checklist closes only via a human walkthrough
-  (`auto` recommended — the profile picks · `human-required` · `auto-ok`).
+- `onDeviceGate` — who judges the on-device checklist (`auto` recommended — the agent
+  checks first, you judge the rest · `human-required` · `auto-ok`).
 
 Model knobs are excluded either way: models are chosen automatically per task unless you pin
 one in `/plugin configure`.

@@ -114,8 +114,24 @@ lens, and its Abstraction section applies when that criterion is confirmed.
 
 ## 3. Engine selection
 
-Keyed to the `knobs:` line's `reviewDepth`. **`panel`** runs
-the constructed lenses through the workflow:
+Keyed to the `knobs:` line's `reviewDepth`, by this rule, which every caller of the engine follows:
+
+- `single` or `panel` runs that engine. `profile` arrives already resolved to one of them.
+- `auto` at `branch` scope measures the diff and runs the engine it prints:
+
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/review-depth.mjs" --base "$base" --branch "$branch" --profile <profile>
+  ```
+
+  `lean` always gets `single` and `thorough` always `panel`. `standard` gets `panel` past the
+  script's changed-line or changed-file threshold and `single` below it; the script owns both
+  thresholds and the lockfiles and generated files it leaves out.
+- `auto` at `repo` or `files` scope has no diff to measure, so it takes the profile's
+  branch-review row (`references/config.md` § The profile).
+- A failed measurement (the script exits 1) takes the profile's branch-review row too, and the
+  depth line (§ 4) says why.
+
+**`panel`** runs the constructed lenses through the workflow:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js" '{"scope":{"ref":"<base>..<branch>"},"specPath":"<path>","lenses":[{"key":"<key>","charter":"<charter>"}],"crossModel":<crossModelReview>,"maxChunks":<profile ceiling>}'
@@ -207,6 +223,10 @@ dependency in the finding itself; the findings document carries it into its orde
 playbook: findings in `references/findings.md`'s shape plus an **engine line** naming what ran —
 `single`, `single + user-run code-review`, `panel`, `panel [+ cross-model lens]` when the
 cross-model lens ran, or `panel→single (panel unavailable: <reason>)` — recorded verbatim, no
-variants. The rounds-and-cap loop, spec-requirement enumeration, the ledger cross-check and every
+variants — and a **depth line** saying how that engine was picked: `Depth: auto → ` followed by
+the script's line, e.g. `Depth: auto → panel (612 changed lines > 400; profile standard)`;
+`Depth: auto → <single | panel> (profile row; <why it was not measured>)`; or
+`Depth: <single | panel> (set)`. An audit run states the same line in its coverage statement.
+The rounds-and-cap loop, spec-requirement enumeration, the ledger cross-check and every
 state-file and handoff duty belong to that stage. An audit run or a `/devcycle:maintain` pass then
 reads `${CLAUDE_PLUGIN_ROOT}/playbooks/writing-the-findings-document.md`, at every scope.
