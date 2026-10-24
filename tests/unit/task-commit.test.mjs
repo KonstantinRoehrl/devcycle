@@ -706,6 +706,7 @@ test("usage errors exit 2 and environment errors exit 3, both before anything is
       ["--culprit", "not-a-real-culprit"],
       ["--bogus", "x"],
       ["--subset-cmd", "true"],
+      ["--culprit"],
     ]) {
       const { status, out } = commitTask(fx, { extra });
       assert.equal(status, 2, extra.join(" "));
