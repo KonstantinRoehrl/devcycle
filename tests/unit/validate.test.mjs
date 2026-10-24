@@ -250,13 +250,12 @@ const withUserConfig = (dir, userConfig) =>
   );
 const stringKnob = (fields) => ({ type: "string", title: "Knob", description: "Fixture knob.", ...fields });
 
-// The five fixed-set knobs as `/plugin configure` must list them: the resolver's values, with
-// `auto` first on the two knobs whose fallback is a profile row.
+// The five fixed-set knobs as `/plugin configure` must list them: exactly the resolver's values.
 const FIXED_SET_OPTIONS = {
   profile: { default: "standard", options: ["lean", "standard", "thorough"] },
   gitPolicy: { default: "local-commits-only", options: ["local-commits-only", "push-allowed", "open-pr"] },
   docTrackingPolicy: { default: "standard", options: ["all-local", "standard", "all-tracked"] },
-  reviewDepth: { default: "auto", options: ["auto", "single", "panel"] },
+  reviewDepth: { default: "auto", options: ["auto", "profile", "single", "panel"] },
   onDeviceGate: { default: "auto", options: ["auto", "human-required", "auto-ok"] },
 };
 const fixedSetKnobs = (overrides = {}) =>
@@ -287,8 +286,8 @@ test("manifest check: a fixed-set knob whose options differ from the resolver's 
     ["missing", "profile", { default: "standard" }],
     ["a value short", "gitPolicy", { default: "local-commits-only", options: ["local-commits-only", "open-pr"] }],
     ["out of order", "docTrackingPolicy", { default: "standard", options: ["standard", "all-local", "all-tracked"] }],
-    ["no auto on a profile-governed knob", "reviewDepth", { default: "single", options: ["single", "panel"] }],
-    ["auto on a knob the profile does not govern", "profile", { default: "auto", options: ["auto", "lean", "standard", "thorough"] }],
+    ["reviewDepth without its profile value", "reviewDepth", { default: "auto", options: ["auto", "single", "panel"] }],
+    ["auto on a knob whose values lack it", "profile", { default: "auto", options: ["auto", "lean", "standard", "thorough"] }],
   ]) {
     const dir = makePluginFixture();
     withUserConfig(dir, fixedSetKnobs({ [key]: fields }));

@@ -789,6 +789,7 @@ test("harvested: executing-waves/model-routing — every escalation trigger and 
   assert.match(t, /a prior review\s+round on this task returned blocking findings \(escalate on retry, never on\s+the first attempt\)/);
   assert.ok(t.includes("outcome=model session (auto: escalated on files=9)"), "the derived-escalation audit shape changed");
   assert.ok(t.includes("outcome=model <id> (pinned)"), "the pinned audit shape changed");
+  assert.ok(t.includes("`outcome=model session (auto)`"), "Auditability omits the outcome scripts/model-pool.mjs prints for an unset knob (#296)");
   assert.match(t, /escalation always names the signal that fired/);
 });
 

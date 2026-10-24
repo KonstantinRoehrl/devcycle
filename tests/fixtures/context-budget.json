@@ -19,8 +19,8 @@
   "playbooks/reviewing-code.md": 92203,
   "playbooks/reviewing-the-branch.md": 49248,
   "playbooks/scoping-the-request.md": 29777,
-  "playbooks/sweeping-mechanical-changes.md": 84949,
-  "playbooks/taking-the-fast-path.md": 50486,
+  "playbooks/sweeping-mechanical-changes.md": 85027,
+  "playbooks/taking-the-fast-path.md": 50564,
   "playbooks/verifying-on-device.md": 44772,
   "playbooks/writing-the-findings-document.md": 61967,
   "references/branch.md": 6844,
@@ -28,6 +28,6 @@
   "references/delegation.md": 10750,
   "references/evidence.md": 12371,
   "references/handoff.md": 10793,
-  "references/model-routing.md": 9090,
+  "references/model-routing.md": 9168,
   "references/output.md": 756
 }

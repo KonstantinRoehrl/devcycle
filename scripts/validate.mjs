@@ -128,15 +128,14 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
             fail(`plugin.json: userConfig.${knob}.options: default ${JSON.stringify(spec.default)} is not one of ${opts.join(", ")}`);
         }
       }
-      // A fixed-set knob's pick-list is exactly the resolver's value set, with `auto` first when
-      // the profile supplies the fallback — the resolver owns the set, the manifest mirrors it.
-      for (const { key, kind, values, fallback } of ROSTER) {
+      // A fixed-set knob's pick-list is exactly the resolver's value set — the resolver owns the
+      // set, the manifest mirrors it.
+      for (const { key, kind, values } of ROSTER) {
         const spec = plugin.userConfig[key];
         if (kind !== "enum" || !spec) continue;
-        const expected = typeof fallback === "object" ? ["auto", ...values] : values;
-        if (JSON.stringify(spec.options) !== JSON.stringify(expected))
+        if (JSON.stringify(spec.options) !== JSON.stringify(values))
           fail(
-            `plugin.json: userConfig.${key}.options must be [${expected.join(", ")}] to match ` +
+            `plugin.json: userConfig.${key}.options must be [${values.join(", ")}] to match ` +
               `scripts/resolve-knobs.mjs's ROSTER, got ${spec.options === undefined ? "none" : JSON.stringify(spec.options)}`
           );
       }
