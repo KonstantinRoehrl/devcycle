@@ -1207,6 +1207,31 @@ test("the driver keeps .devcycle/drive-progress.json on the run: running per ses
   }
 });
 
+test("--mark-handled clears the band of a run that ended complete and keeps the result as the handled one", async () => {
+  const root = makeCycle();
+  const r = await drive(root, [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual([readProgress(root)?.state, readProgress(root)?.outcome], ["ended", "complete"], "the band's data is the run's end until continue handles it");
+  const mark = spawnSync(process.execPath, [DRIVER, "--mark-handled", "--state", statePathOf(root)], { cwd: root, encoding: "utf8" });
+  assert.equal(mark.status, 0, mark.stdout + mark.stderr);
+  assert.equal(existsSync(join(root, ".devcycle", "drive-progress.json")), false, "the band outlived the handled end");
+  assert.equal(readHandledResult(root).outcome, "complete");
+  assert.equal(classifyDrive({ statePath: statePathOf(root) }).next, "none");
+});
+
+// The band says "run /devcycle:continue" for an ended run until continue handles it; the two ends that
+// hand off to a later stage are handled by the handoff itself, so the doc must run the command there.
+test("references/drive.md marks a run that ended complete or left execution as handled once its handoff is emitted", () => {
+  const doc = readFileSync(fileURLToPath(new URL("../../references/drive.md", import.meta.url)), "utf8");
+  const ends = doc.split(/^## /m).find((section) => section.startsWith("When the run ends"));
+  assert.ok(ends, "references/drive.md has no `## When the run ends` section");
+  for (const next of ["branch-review", "resume-stage"]) {
+    const bullet = ends.split(/^- /m).find((b) => b.startsWith(`\`${next}\``));
+    assert.ok(bullet, `§ When the run ends has no \`${next}\` bullet`);
+    assert.ok(bullet.includes("--mark-handled"), `the \`${next}\` bullet never marks the end handled, so the band keeps saying the run is waiting for continue`);
+  }
+});
+
 test("a stop for the user leaves the progress file stopped with the stop's reason and detail, and the task's step, round and rejections", async () => {
   const root = makeCycle();
   const review = [

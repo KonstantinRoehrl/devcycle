@@ -1021,8 +1021,8 @@ export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, si
   return 0;
 }
 
-// /devcycle:continue's hand-off once it has acted on a result: a gate answered, or a restart begun. The
-// drive band goes with it.
+// /devcycle:continue's hand-off once it has acted on a result: a gate answered, a restart begun, or the
+// handoff after a completed run emitted. The drive band goes with it.
 function markHandled(state) {
   const root = dirname(dirname(resolve(state)));
   removeProgress(root);

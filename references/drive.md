@@ -100,8 +100,7 @@ In this order, never dispatching a task from this session:
      `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action started`.
    - The approval is refused or the override unavailable: print
      `node "<plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach --plugins <drive.plugins>`
-     for a terminal that is not a Claude Code session, and offer **Walk the waves manually**; on
-     that answer, run `--mark-handled` as § Answering a stopped run says before walking.
+     for a terminal that is not a Claude Code session, and offer **Walk the waves manually**.
    - The start is denied by a permission check, the auto-mode classifier included: print, for the
      user to type in this session,
      `! node "<absolute plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach --plugins <drive.plugins>`,
@@ -137,9 +136,9 @@ In this order, never dispatching a task from this session:
 
 When the `--wait` task returns, stop any follow monitor and act on the `next` its JSON carries:
 
-- `branch-review` — the run is complete. Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and
-  emit its execution → branch-review block.
-- `resume-stage` — the run left execution: emit the handoff into the stage the state file names.
+- `branch-review` — the run is complete. Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, emit its
+  execution → branch-review block, then `--mark-handled` (§ Answering a stopped run).
+- `resume-stage` — the run left execution: emit the handoff into the stage the state file names, then `--mark-handled`.
 - any other — rerun `wave-setup.mjs` as § Execution resume runs it and act on its new
   `drive.action`. A resumable end restarts through the start path, with no start confirm when this
   session answered a start question and with one when it only attached. A stop for a person is a
