@@ -14,7 +14,7 @@ finished waves, waits and stops, and `all` adds every task outcome, batched per 
 sessions start with no MCP servers and only devcycle, superpowers and the plugins the live knob
 `drivePlugins` names (`none` by default; `all` restores the full surface). A driven run's effort is
 resolved once, recorded on the `drive:` row and passed to every session as `--effort` and
-`CLAUDE_EFFORT`. Three coordinator turns per task fold into the scripts before them:
+`CLAUDE_CODE_EFFORT_LEVEL`. Three coordinator turns per task fold into the scripts before them:
 `task-dispatch.mjs` fills the implementer brief's lessons, `task-intake.mjs --compose-review`
 writes the reviewer brief at `lean` and `standard`, and an accepted `task-verdict.mjs` commits the
 task. `scripts/doctor.mjs` counts turns per stage and execution main turns per task, the figure the
@@ -41,7 +41,22 @@ model's `modelSettings` `effortLevel`, else `effortLevel`, reading local, projec
 in that order, else `default`; a value outside `low|medium|high|xhigh|max` is unresolvable and
 stops the start. At the driver, `--effort` outranks the row's `effort=`, which outranks a resolution
 at driver start for a row written without one (never written back), and `default` passes no
-`--effort` and removes `CLAUDE_EFFORT` from the session's environment.
+`--effort` and no `CLAUDE_CODE_EFFORT_LEVEL`. The session's environment never carries `CLAUDE_EFFORT`:
+Claude Code writes it as output for the Bash and hook children of the launching session, which is why
+the resolver reads it, and reads nothing back; `CLAUDE_CODE_EFFORT_LEVEL` is the inbound override, so
+the driver sets it to the `--effort` level, or removes it at `default`, and an ambient value cannot
+beat the flag.
+
+**Doctor figures:** `turnsByStage` counts model requests, not transcript records: Claude Code writes
+one record per content block, so a request with thinking, text and a tool call is three records
+sharing a `requestId`, and counting records overstated a real session by about a third. The older
+`mainTurns`/`subagentTurns` counters stay record counts, as their tests pin. `turnsPerTask` and
+`execMainTurnsPerTask` count each run's planned tasks once: the workload sensor writes the same
+`plannedTaskCount` into every session window of a run, so summing per session divided a run split
+across N sessions by N times its tasks. Stage attribution in `attributeForwardFill` changed with the
+driven-session fixture: a repeat of the current skill tag no longer resets the signalled stage, which
+moves the historical cost-by-stage split of every forward-filled session (one real session moved
+from $3.34 to $0.67 "resumed (stage unknown)").
 
 **Band data owner:** the driver writes `.devcycle/drive-progress.json` on every log line and on a
 heartbeat, from `scripts/wave-setup.mjs`'s wave and task positions, so nothing re-derives them; the
