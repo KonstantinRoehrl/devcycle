@@ -248,7 +248,9 @@ gated by `userConfig.crossModelReview`.
   "learnSessionCap": 100,
   "subagentBudget": "off | warn | enforce",
   "handoffNotification": "off | terminal | push | both",
-  "executionMode": "ask | manual | unattended"
+  "executionMode": "ask | manual | unattended",
+  "driveWatch": "end | wave | all",
+  "drivePlugins": "none | all | <plugin name>,…"
 }
 ```
 
@@ -310,6 +312,11 @@ gated by `userConfig.crossModelReview`.
   manually; `manual` walks them in the session; `unattended` asks the same question with **Start
   unattended** first, since an unattended run starts only on the user's answer in the session
   (decision log, 2026-10-16). A recorded row outranks it, and it is `live`, so a mid-cycle change is never knob drift. It takes no `auto`.
+- `driveWatch` and `drivePlugins` (added 2026-10-25) shape an unattended run. `driveWatch` is how
+  much of it the starting session relays: `end`, the default, only its end, while the hooks
+  module's band shows progress; `wave`; or `all`. `drivePlugins` is which plugins its sessions load
+  besides devcycle and superpowers: `none`, the default; a comma-separated list of names; or `all`,
+  the full surface with MCP servers. Both are `live`, read at each start (decision log, 2026-10-25).
 
 ---
 

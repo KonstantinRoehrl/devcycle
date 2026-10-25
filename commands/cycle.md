@@ -46,7 +46,9 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --learnSessionCap '${user_config.learnSessionCap}' \
   --subagentBudget '${user_config.subagentBudget}' \
   --handoffNotification '${user_config.handoffNotification}' \
-  --executionMode '${user_config.executionMode}'
+  --executionMode '${user_config.executionMode}' \
+  --driveWatch '${user_config.driveWatch}' \
+  --drivePlugins '${user_config.drivePlugins}'
 ```
 
 2. **First-run test.** Only when the state file's `configured:` reads `no` **and** the `explicit:`

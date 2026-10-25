@@ -69,9 +69,10 @@ configuration step (`/devcycle:continue` only once its ownership check and `resu
 passed) and prints one `knobs:` line; each stage reads its values from that line. Inside a
 cycle the state file keeps a `- knobs:` copy, and `/devcycle:continue` asks before applying a
 value you changed mid-cycle; a "keep" holds until you change the value again. The exceptions are
-`subagentBudget`, whose global value the hooks module reads, and `executionMode`, whose fresh value
-`/devcycle:continue` reads at execution start until the cycle records its choice: it asks about
-neither, and a "keep" cannot hold them. Values are
+`subagentBudget`, whose global value the hooks module reads; `executionMode`, whose fresh value
+`/devcycle:continue` reads at execution start until the cycle records its choice; and `driveWatch`
+and `drivePlugins`, whose fresh values it reads each time it starts an unattended run: it asks
+about none of them, and a "keep" cannot hold them. Values are
 global, as `/plugin configure` stores them: a repo's old `configured:` values are shown once as a
 drift notice, never applied, then dropped from the state file.
 [`references/config.md`](../../references/config.md) § Knob channel owns the details.
@@ -100,10 +101,12 @@ and silently runs every knob at its fallback. [`docs/platform-notes.md`](../plat
 | `subagentBudget` | What devcycle's hooks module does with a subagent past its context budget | `off` / `warn` / `enforce` | `warn` (from 15% of its window, a note on its next tool result and every fifth after; `enforce` also refuses reads at 20%) |
 | `handoffNotification` | Whether devcycle notifies you when a handoff is safe to clear and when an unattended run stops for you | `off` / `terminal` / `push` / `both` | `off` (`terminal` goes through Claude Code's own notification channel and, like `both`'s terminal half, does nothing on a Claude Code build without `$.ui.notify`; `push` sends a push notification where the session can) |
 | `executionMode` | How `/devcycle:continue` runs the waves at execution start, until the cycle records its choice | `ask` / `manual` / `unattended` | `ask` (asks Start unattended or Walk the waves manually; `manual` walks them in the session; `unattended` asks with Start unattended first, since an unattended run always starts on your answer) |
+| `driveWatch` | How much of an unattended run the session that started it relays to you; each relayed line costs a model turn | `end` / `wave` / `all` | `end` (only the run's end, while the band above the prompt shows progress; `wave` adds session starts, finished waves, waits and stops; `all` adds every task outcome) |
+| `drivePlugins` | Which plugins an unattended run's sessions load besides devcycle and superpowers; they start with no MCP servers | `none` / `all` / comma-separated plugin names | `none` (`all` gives them every plugin and MCP server your own sessions load) |
 
 ## Other options
 
-The remaining fifteen knobs above are secondary to `profile` — most runs never touch them.
+The remaining seventeen knobs above are secondary to `profile` — most runs never touch them.
 
 **`gitPolicy`** is the pipeline's blast radius: `local-commits-only` means it only ever
 commits on a local branch and hands it to you (never pushes); `push-allowed` lets it push

@@ -142,6 +142,23 @@
       ],
       "description": "How /devcycle:continue runs a cycle's waves at the start of its execution stage, while the cycle has recorded no choice. One of: ask (asks Start unattended or Walk the waves manually), manual (walks the waves in the session, no question), unattended (asks the same question with Start unattended first and recommended: an unattended run always starts on your answer in the session). A cycle's recorded choice outranks a later change. Profile-independent. Default: ask."
     },
+    "driveWatch": {
+      "type": "string",
+      "title": "Drive watch",
+      "default": "end",
+      "options": [
+        "end",
+        "wave",
+        "all"
+      ],
+      "description": "How much of an unattended run the session that started it relays to you while it runs; each relayed line costs a model turn. One of: end (only the run's end; the band above the prompt shows progress), wave (also session starts, finished waves, waits and stops, for a session that shows no band), all (every task outcome too). Read at each start. Profile-independent. Default: end."
+    },
+    "drivePlugins": {
+      "type": "string",
+      "title": "Drive plugins",
+      "default": "none",
+      "description": "Which plugins an unattended run's sessions load besides devcycle and superpowers, which they always keep; they start with no MCP servers. One of: none (no others), a comma-separated list of plugin names (those too), all (every plugin and MCP server your own sessions load). Read at each start. Profile-independent. Default: none."
+    },
     "handoffNotification": {
       "type": "string",
       "title": "Handoff notification",

@@ -14,7 +14,7 @@ import { field } from "./md-field.mjs";
 import { describe } from "./find-state-files.mjs";
 import { checkState } from "./resume-check.mjs";
 import { parseHandoff } from "./handoff-mark.mjs";
-import { ROSTER, compareKnobs, parseRecordedLine } from "./resolve-knobs.mjs";
+import { compareKnobs, parseRecordedLine, resolveKnobs } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
 import { ledgerPlan, nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
@@ -37,7 +37,6 @@ export const RETRY_CAP = 2;
 const CAPPED_OUTCOMES = ["rejected (intake bounce)", "rejected (missing report file)", "rejected (missing findings file)"];
 const SWEEP_TOKEN = /\bsweep\b|\bapplied-none\b|\bdirty-targets\b/;
 const IMPLEMENTER_NEXT = new Set(["dispatch-implementer", "redispatch-implementer", "fix"]);
-const MODE_KNOB = ROSTER.find(({ key }) => key === "executionMode");
 // The stops continue's own gates compute and answer on the very call that reads the driver's result,
 // so a driver that stopped on one needs no question of its own.
 const SETTLED_REASONS = new Set(["knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start", "no-driver", "not-opted-in"]);
@@ -128,11 +127,8 @@ const realPath = (p) => {
   }
 };
 
-// The fresh executionMode, read from the --knobs line; a missing or unknown value is the knob's fallback.
-function executionMode(knobsLine) {
-  const value = knobsLine ? parseRecordedLine(knobsLine).executionMode : undefined;
-  return MODE_KNOB.values.includes(value) ? value : MODE_KNOB.fallback;
-}
+// The fresh live knobs, resolved from the --knobs line; a missing or unknown value is the knob's fallback.
+const liveKnobs = (knobsLine) => resolveKnobs(knobsLine ? parseRecordedLine(knobsLine) : {}).knobs;
 
 // The reported drive status, and the live lock's token hash, which is never reported.
 function driveStatus(root, statePath, stateText, lines, knobsLine) {
@@ -142,9 +138,10 @@ function driveStatus(root, statePath, stateText, lines, knobsLine) {
   const holder = live && realPath(resolve(root, live.state ?? "")) === realPath(statePath) ? live : null;
   const optInLogged = lines.some((l) => l.task === "drive" && l.event === "user-decision");
   const lock = holder ? { pid: holder.pid, log: holder.log } : null;
+  const { executionMode: mode, driveWatch: watch, drivePlugins: plugins } = liveKnobs(knobsLine);
   return {
     drive: { opted: /^auto\b/.test(row), ...(model ? { model } : {}), lock, optInLogged, row: row.match(/^(auto|manual)\b/)?.[1] ?? null,
-      mode: executionMode(knobsLine) },
+      mode, watch, plugins },
     tokenHash: holder?.tokenHash ?? null,
   };
 }
