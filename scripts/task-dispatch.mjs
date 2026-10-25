@@ -25,11 +25,15 @@ const ROLES = new Set(["implementer", "reviewer"]);
 const LESSONS_LINE_RE = /^\*\*Lessons:\*\*.*$/m;
 const LESSONS_HEADER = "**Lessons:** (pull a full record with its --lesson hint only if you are about to work in the area it names)";
 
-// The round's findings path, as references/delegation.md names it: a file already there before its
-// reviewer is dispatched is an earlier reviewer's, never this one's verdict.
+// The round's findings path, as references/delegation.md names it: the reviewer writes its verdict
+// there, and task-verdict reads it back.
+export const roundFindingsPath = (task, round) => `.devcycle/findings/${task}-round-${round}.md`;
+
+// A file already at the round's findings path before its reviewer is dispatched is an earlier
+// reviewer's, never this one's verdict.
 function setAsideFindings(root, task, round, retry) {
-  const stem = join(root, `.devcycle/findings/${task}-round-${round}`);
-  if (existsSync(`${stem}.md`)) renameSync(`${stem}.md`, `${stem}.stale-${retry}.md`);
+  const path = join(root, roundFindingsPath(task, round));
+  if (existsSync(path)) renameSync(path, path.replace(/\.md$/, `.stale-${retry}.md`));
 }
 
 // An implementer brief's `**Lessons:**` line, filled in place with the execution lessons its task's

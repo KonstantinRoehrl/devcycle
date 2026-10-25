@@ -165,3 +165,120 @@ test("intake holds the report's cmd: to the task's gate, read through the ledger
   assert.equal(r.out.action, "bounce");
   assert.ok(r.out.findings.some((x) => /cmd: is not the task's gate command — gate: npm run gate \| cmd: npm test/.test(x)), r.out.findings.join("\n"));
 });
+
+const IMPLEMENTER_BRIEF = [
+  "# Implementer brief — Task 5", "", "**Task id:** 5", "", "## Global Constraints", "", "- Keep the CLI contract.", "",
+  "## Quality Constraints (this task's)", "", "- QC1 — Reuse the repo's owners.", "", "### Task 5: T", "", "**Files:**",
+  "- Modify: src/a.mjs", "- Test: tests/a.test.mjs", "**Evidence:** red-green", "**Quality constraints:** QC1", "",
+  "- [ ] step one", "", "**Gate command:** `npm test`", "",
+].join("\n");
+
+// A task the ledger's plan names, with its implementer brief where task-dispatch wrote it.
+function planned() {
+  const f = fixture();
+  writeInto(f.repo, "docs/plan.md", ["# P", "", "**Verification gate:** `npm test`", "", "### Task 5: T", "**Files:**",
+    "- Modify: src/a.mjs", "- Test: tests/a.test.mjs", "**Evidence:** red-green", "**Quality constraints:** QC1", "",
+    "## Dispatch Map", "", "- Wave 1: Task 5", ""].join("\n"));
+  writeInto(f.repo, ".devcycle/briefs/5-implementer.md", IMPLEMENTER_BRIEF);
+  writeInto(f.repo, ".devcycle/reports/5.md", report());
+  return f;
+}
+const ledgerText = ({ repo }) => readFileSync(join(repo, ".devcycle/ledger.md"), "utf8");
+
+test("--compose-review writes the reviewer brief and dispatches the task's next review round", () => {
+  const f = planned();
+  const r = intake(f, ["--compose-review"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.action, "review");
+  assert.deepEqual(
+    [r.out.reviewBriefPath, r.out.findingsPath, r.out.reviewRound],
+    [".devcycle/briefs/5-reviewer-round-1.md", ".devcycle/findings/5-round-1.md", 1],
+  );
+  assert.deepEqual(r.out.appended, ["5/report-received/0/0", "rr:dispatch", "5/review-round/1/0"]);
+  assert.match(ledgerTail(f), / task=5 event=review-round outcome=round 1 ref=\.devcycle\/briefs\/5-reviewer-round-1\.md key=5\/review-round\/1\/0$/);
+  assert.equal(readFileSync(join(f.repo, r.out.reviewBriefPath), "utf8"), [
+    "# Task-reviewer brief — Task 5, round 1",
+    "",
+    "**Task id:** 5",
+    "**Round:** 1",
+    "**Evidence class:** red-green",
+    "",
+    "Review task 5's uncommitted diff against its implementer brief. Read-only, apart from writing your findings file.",
+    "",
+    "- The implementer brief (task steps, pinned interfaces, constraints): `.devcycle/briefs/5-implementer.md`",
+    "- The implementer's report: `.devcycle/reports/5.md`",
+    "- Evidence files: `.devcycle/evidence/5-before.txt` and `.devcycle/evidence/5-after.txt`",
+    "- The task's files:",
+    "  - `src/a.mjs`",
+    "  - `tests/a.test.mjs`",
+    "",
+    "Produce the diff yourself: first `git add -N` the task's new (untracked) files from the list above, or they are " +
+      "invisible to diff, then `git diff -U10 HEAD -- <the files above>`. Other tasks may be in flight in this working " +
+      "tree; judge only these files.",
+    "",
+    "Write your verdict block to `.devcycle/findings/5-round-1.md` in the shape `\"$(devcycle-root)/references/evidence.md\"` " +
+      "§ Reviewer verdicts defines, and return only the task-reviewer envelope.",
+    "",
+    "## Global Constraints",
+    "",
+    "- Keep the CLI contract.",
+    "",
+    "## Quality Constraints (this task's)",
+    "",
+    "- QC1 — Reuse the repo's owners.",
+    "",
+    "**Quality constraints:** QC1",
+    "",
+  ].join("\n"));
+});
+
+test("a --compose-review re-run points at the round already dispatched and writes nothing", () => {
+  const f = planned();
+  const first = intake(f, ["--compose-review"]);
+  assert.equal(first.out.reviewBriefPath, ".devcycle/briefs/5-reviewer-round-1.md");
+  const brief = readFileSync(join(f.repo, first.out.reviewBriefPath), "utf8");
+  writeInto(f.repo, first.out.findingsPath, "Verdict: accept\n");
+  const ledgerBefore = ledgerText(f);
+  const again = intake(f, ["--compose-review"]);
+  assert.equal(again.status, 0, again.stderr);
+  assert.deepEqual(again.out.appended, []);
+  assert.deepEqual(
+    [again.out.reviewBriefPath, again.out.findingsPath, again.out.reviewRound],
+    [first.out.reviewBriefPath, first.out.findingsPath, 1],
+  );
+  assert.equal(ledgerText(f), ledgerBefore);
+  assert.equal(readFileSync(join(f.repo, first.out.findingsPath), "utf8"), "Verdict: accept\n");
+  assert.deepEqual(readdirSync(join(f.repo, ".devcycle/findings")), ["5-round-1.md"]);
+  assert.equal(readFileSync(join(f.repo, first.out.reviewBriefPath), "utf8"), brief);
+});
+
+test("a later round's brief names the fix-pass brief and the rejection, and keeps the first brief's constraints", () => {
+  const f = planned();
+  appendFileSync(join(f.repo, ".devcycle/ledger.md"), [
+    `- [${STARTED}] task=5 event=report-received outcome=complete ref=.devcycle/reports/5.md key=5/report-received/0/0`,
+    `- [${STARTED}] task=5 event=review-round outcome=round 1 ref=.devcycle/briefs/5-reviewer-round-1.md key=5/review-round/1/0`,
+    `- [${STARTED}] task=5 event=review-verdict outcome=rejected ref=.devcycle/findings/5-round-1.md key=5/review-verdict/1/0`,
+    `- [${STARTED}] task=5 event=dispatched outcome=implementer retry 1 ref=.devcycle/briefs/5-implementer-round-1.md key=5/dispatched/1/1`,
+    "",
+  ].join("\n"));
+  writeInto(f.repo, ".devcycle/briefs/5-implementer-round-1.md", "# Implementer fix pass — Task 5, round 1\n");
+  const r = intake(f, ["--compose-review"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.round, r.out.reviewRound, r.out.reviewBriefPath], [1, 2, ".devcycle/briefs/5-reviewer-round-2.md"]);
+  const brief = readFileSync(join(f.repo, r.out.reviewBriefPath), "utf8");
+  assert.match(brief, /^- The implementer brief \(task steps, pinned interfaces, constraints\): `\.devcycle\/briefs\/5-implementer\.md`$/m);
+  assert.match(brief, /^- The latest fix-pass brief: `\.devcycle\/briefs\/5-implementer-round-1\.md`$/m);
+  assert.match(brief, /^- Round 1 was rejected by `\.devcycle\/findings\/5-round-1\.md`: confirm each blocking finding there is resolved$/m);
+  assert.match(brief, /^Write your verdict block to `\.devcycle\/findings\/5-round-2\.md` /m);
+  assert.match(brief, /^- QC1 — Reuse the repo's owners\.$/m);
+});
+
+test("--compose-review on a bounce writes no review round and adds no review fields", () => {
+  const f = planned();
+  writeInto(f.repo, ".devcycle/reports/5.md", report("renamed src/a.mjs:12 for clarity"));
+  const r = intake(f, ["--compose-review"]);
+  assert.equal(r.out.action, "bounce");
+  assert.equal("reviewBriefPath" in r.out, false);
+  assert.doesNotMatch(ledgerText(f), /event=review-round/);
+  assert.equal(existsSync(join(f.repo, ".devcycle/briefs/5-reviewer-round-1.md")), false);
+});

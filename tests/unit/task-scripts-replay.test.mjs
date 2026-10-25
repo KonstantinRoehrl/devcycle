@@ -357,3 +357,32 @@ test("SC4 replay: an earlier cycle's exhausted review loop of the same task numb
     fx.cleanup();
   }
 });
+
+// Fold B (playbooks/executing-waves.md step 4 at lean/standard): intake --compose-review writes the
+// lines and rows intake then task-dispatch --role reviewer write, once, and its re-run writes nothing.
+test("SC4 replay: intake --compose-review writes what intake and the reviewer dispatch wrote", () => {
+  const rows = (fx) => readFileSync(join(fx.runsDir, repoSlug(gitToplevel(fx.dir)), `${RUN}.jsonl`), "utf8").split("\n")
+    .filter(Boolean).map((l) => JSON.parse(l)).map(({ startedAt, endedAt, ts, ...row }) => row);
+  const unfolded = fixture();
+  const folded = fixture();
+  try {
+    const expected = acceptedTask(unfolded, "1", "src/a.txt");
+    dispatchImplementer(folded, "1");
+    const report = implement(folded, "1", "src/a.txt");
+    const composeReview = () => call(folded, "task-intake", ["--task", "1", "--report", report, "--status", "complete",
+      "--agent-type", "devcycle:implementer", "--model", "claude-haiku-4-5", "--model-source", "explicit",
+      "--agent-id", "a10f1e2d3c4b5a697", "--compose-review"]);
+    const first = composeReview();
+    assert.equal(first.reviewBriefPath, ".devcycle/briefs/1-reviewer-round-1.md");
+    const linesOnce = readFileSync(join(folded.dir, ".devcycle/ledger.md"), "utf8");
+    const again = composeReview();
+    assert.deepEqual(again.appended, []);
+    assert.equal(readFileSync(join(folded.dir, ".devcycle/ledger.md"), "utf8"), linesOnce);
+    assert.equal(review(folded, "1", 1, "accept").action, "accepted");
+    assert.deepEqual(ledger(folded, "1"), expected);
+    assert.deepEqual(rows(folded), rows(unfolded));
+  } finally {
+    unfolded.cleanup();
+    folded.cleanup();
+  }
+});
