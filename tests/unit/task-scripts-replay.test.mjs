@@ -447,3 +447,23 @@ test("fold 3: the folded call run again after a crash writes nothing new and rep
     fx.cleanup();
   }
 });
+
+test("fold 3: an accept recorded without the commit, then the call re-run with the commit flags, commits once", () => {
+  const fx = fixture();
+  try {
+    reviewedTask(fx, "1", "src/a.txt");
+    assert.equal(review(fx, "1", 1, "accept").action, "accepted");
+    const recorded = runRecordRows(fx);
+    const together = foldedVerdict(fx, "1", "true");
+    assert.deepEqual([together.action, together.verdict.retry], ["committed", 0]);
+    assert.deepEqual(together.appended.filter((key) => key.startsWith("1/review-verdict") || key === "rr:verdict"), [],
+      "the recorded accept is not written again");
+    assert.equal(readFileSync(join(fx.dir, ".devcycle/ledger.md"), "utf8").match(/event=review-verdict/g).length, 1);
+    assert.deepEqual(runRecordRows(fx, together.sha).slice(0, recorded.length), recorded);
+    const again = foldedVerdict(fx, "1", "true");
+    assert.deepEqual([again.action, again.sha, again.appended], ["already-committed", together.sha, []]);
+    assert.equal(readFileSync(join(fx.dir, ".devcycle/ledger.md"), "utf8").match(/event=committed/g).length, 1);
+  } finally {
+    fx.cleanup();
+  }
+});

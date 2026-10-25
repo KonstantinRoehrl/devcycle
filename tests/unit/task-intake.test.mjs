@@ -282,3 +282,31 @@ test("--compose-review on a bounce writes no review round and adds no review fie
   assert.doesNotMatch(ledgerText(f), /event=review-round/);
   assert.equal(existsSync(join(f.repo, ".devcycle/briefs/5-reviewer-round-1.md")), false);
 });
+
+// The brief a task-dispatch writes for `brief`, then the reviewer brief --compose-review composes from it.
+function composedFrom(brief) {
+  const f = planned();
+  writeInto(f.repo, ".devcycle/briefs/5-implementer.md", brief);
+  const r = intake(f, ["--compose-review"]);
+  assert.equal(r.status, 0, r.stderr);
+  return readFileSync(join(f.repo, r.out.reviewBriefPath), "utf8");
+}
+
+test("the reviewer brief carries constraints written as bold labels with bullets, and stops at the next block", () => {
+  const brief = composedFrom([
+    "# Implementer brief — Task 5", "", "**Task id:** 5", "",
+    "**Global constraints:**", "- Keep the CLI contract.", "- No new dependencies.", "",
+    "**Quality constraints:** QC1", "- QC1 — Reuse the repo's owners.", "**Files:**", "- Modify: src/a.mjs", "",
+    "- [ ] step one", "", "**Gate command:** `npm test`", "",
+  ].join("\n"));
+  assert.match(brief, /^\*\*Global constraints:\*\*\n- Keep the CLI contract\.\n- No new dependencies\.$/m);
+  assert.match(brief, /^\*\*Quality constraints:\*\* QC1\n- QC1 — Reuse the repo's owners\.$/m);
+  assert.doesNotMatch(brief, /none in the implementer brief|Modify: src\/a\.mjs\n[\s\S]*step one|Gate command/);
+  assert.doesNotMatch(brief, /^- \[ \] step one$/m);
+});
+
+test("a brief whose constraints are in no recognised form never claims it has none", () => {
+  const brief = composedFrom("# Implementer brief — Task 5\n\n**Task id:** 5\n\nConstraints: keep the CLI contract.\n\n- [ ] step one\n");
+  assert.doesNotMatch(brief, /none in the implementer brief/);
+  assert.match(brief, /^\*\*Constraints:\*\* none extracted — read the implementer brief for constraints$/m);
+});

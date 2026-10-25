@@ -46,16 +46,22 @@ function lintFindings(root, reportRel, text, { task, ledger }) {
 }
 
 // The task's constraints, verbatim from its implementer brief, where playbooks/executing-waves.md
-// step 2 slices them in: its Global/Quality Constraints sections and its `**Quality constraints:**`
-// lines. A section runs to the next heading; the gate line task-dispatch appends is no constraint.
+// step 2 slices them in, under whatever form it gives them: its Global/Quality Constraints sections
+// and its `**Global constraints:**` / `**Quality constraints:**` labels. A section runs to the next
+// heading; a label's block runs over the bullets directly beneath it, to the next blank line, heading
+// or bold label. The gate line task-dispatch appends is no constraint.
 const CONSTRAINTS_HEADING_RE = /^## (Global|Quality) Constraints\b/i;
+const CONSTRAINTS_LABEL_RE = /^\*\*(Global|Quality) constraints:\*\*/i;
+const BOLD_LABEL_RE = /^\*\*[^*]+:\*\*/;
 function constraintsOf(briefText) {
   const kept = [];
   let inSection = false;
+  let inLabelBlock = false;
   for (const line of briefText.split("\n")) {
     if (/^#{1,3} /.test(line)) inSection = CONSTRAINTS_HEADING_RE.test(line);
+    if (!line.trim() || /^#{1,3} /.test(line) || BOLD_LABEL_RE.test(line)) inLabelBlock = CONSTRAINTS_LABEL_RE.test(line);
     if (line.startsWith("**Gate command:**")) continue;
-    if (inSection || line.startsWith("**Quality constraints:**")) kept.push(line);
+    if (inSection || inLabelBlock) kept.push(line);
   }
   return kept.join("\n").trim();
 }
@@ -98,7 +104,7 @@ function reviewerBrief({ root, ledger, task, round, reportRel, report, findingsP
     `Write your verdict block to ${code(findingsPath)} in the shape \`"$(devcycle-root)/references/evidence.md"\` ` +
       "§ Reviewer verdicts defines, and return only the task-reviewer envelope.",
     "",
-    constraints || "**Constraints:** none in the implementer brief",
+    constraints || "**Constraints:** none extracted — read the implementer brief for constraints",
     "",
   ].join("\n");
 }

@@ -117,9 +117,26 @@ function commitArgv(flags) {
   return argv;
 }
 
+// A commit that failed after the verdict was recorded: carries what the verdict wrote, so the failure
+// output does not read as though nothing was.
+class CommitFailed extends Error {
+  constructor(cause, verdictFields, appended) {
+    super(cause.message, { cause });
+    this.verdictFields = verdictFields;
+    this.appended = appended;
+  }
+}
+
 // The commit's result, with the verdict it followed under `verdict` and the verdict's keys first.
-const committed = (commit, verdictFields, appended) =>
-  ({ ...commit, verdict: verdictFields, appended: [...appended, ...commit.appended] });
+function committed(commit, cwd, verdictFields, appended) {
+  let result;
+  try {
+    result = taskCommit(commit, cwd);
+  } catch (err) {
+    throw new CommitFailed(err, verdictFields, appended);
+  }
+  return { ...result, verdict: verdictFields, appended: [...appended, ...result.appended] };
+}
 
 export function verdict(argv, cwd = process.cwd()) {
   const flags = taskFlags(argv, FLAGS, REQUIRED);
@@ -146,7 +163,7 @@ export function verdict(argv, cwd = process.cwd()) {
   // and task-commit.mjs's own re-run adds only what the commit still lacks.
   const accept = commit && closing?.event === "committed" && later.findLast((e) => e.event === "review-verdict" && e.outcome === "accepted");
   if (accept)
-    return committed(taskCommit(commit, cwd),
+    return committed(commit, cwd,
       { verdict: "accept", round, retry: Number(accept.key.split("/")[3]), findingsPath: accept.ref, blocking: 0, culprit: null }, []);
   if (closing)
     throw new UsageError(`round ${round} of task ${task} is closed: its verdict was acted on (${closing.event} ${closing.outcome})`);
@@ -185,7 +202,7 @@ export function verdict(argv, cwd = process.cwd()) {
   const result = { ...base, verdict: parsed.verdict, culprit: parsed.culprit, blocking: parsed.blocking, appended };
   if (accepted)
     return commit
-      ? committed(taskCommit(commit, cwd), { verdict: parsed.verdict, round, retry, findingsPath: findingsRel, blocking: parsed.blocking, culprit: parsed.culprit }, appended)
+      ? committed(commit, cwd, { verdict: parsed.verdict, round, retry, findingsPath: findingsRel, blocking: parsed.blocking, culprit: parsed.culprit }, appended)
       : { ...result, action: "accepted" };
 
   // The ledger line's own stamp is the event's time, so a re-run that finds that line writes the
@@ -197,4 +214,19 @@ export function verdict(argv, cwd = process.cwd()) {
   return { ...result, action: "needs-user", reason: "review loop exhausted-unresolved", loopId };
 }
 
-if (isMain(import.meta.url, process.argv[1])) runTaskScript("task-verdict", () => verdict(process.argv.slice(2)));
+// A failed commit is runTaskScript's failure output, with the recorded verdict beside the error.
+function verdictOrCommitFailure(argv) {
+  try {
+    return verdict(argv);
+  } catch (err) {
+    if (!(err instanceof CommitFailed)) throw err;
+    const usage = err.cause instanceof UsageError;
+    process.exitCode = usage ? 2 : 3;
+    return {
+      ok: false, action: usage ? "usage-error" : "environment-error",
+      error: `task-verdict: ${err.message}`, verdict: err.verdictFields, appended: err.appended,
+    };
+  }
+}
+
+if (isMain(import.meta.url, process.argv[1])) runTaskScript("task-verdict", () => verdictOrCommitFailure(process.argv.slice(2)));

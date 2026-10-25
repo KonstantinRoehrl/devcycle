@@ -324,3 +324,23 @@ test("with the commit flags, a verdict other than accepted reads exactly as with
   assert.deepEqual(r.out.appended, ["5/review-verdict/1/0", "rr:verdict", "rr:event"]);
   assert.equal(r.out.gate, undefined, "no commit was attempted");
 });
+
+test("an accepted verdict whose commit fails still prints the verdict it recorded, with the commit's error", () => {
+  const f = fixture();
+  writeInto(f.repo, ".devcycle/findings/5-round-1.md", ACCEPT);
+  writeInto(f.repo, "docs/plan.md", "# P\n\n### Task 5: T\n**Evidence:** red-green\n\n## Dispatch Map\n\n- Wave 1: Task 5\n");
+  const first = verdict(f, 1, COMMIT_FLAGS);
+  assert.equal(first.status, 2, JSON.stringify(first.out));
+  assert.equal(first.out.ok, false);
+  assert.match(first.out.error, /^task-verdict: task 5 has no \*\*Files:\*\* block in docs\/plan\.md$/);
+  assert.deepEqual(first.out.appended, ["5/review-verdict/1/0", "rr:verdict"]);
+  assert.deepEqual(first.out.verdict,
+    { verdict: "accept", round: 1, retry: 0, findingsPath: ".devcycle/findings/5-round-1.md", blocking: 0, culprit: null });
+  assert.match(ledgerTail(f), / event=review-verdict outcome=accepted .* key=5\/review-verdict\/1\/0$/);
+
+  const again = verdict(f, 1, COMMIT_FLAGS);
+  assert.equal(again.status, 2);
+  assert.deepEqual(again.out.appended, [], "the re-run writes the verdict nothing twice");
+  assert.equal(readFileSync(ledgerPath(f), "utf8").match(/event=review-verdict/g).length, 1);
+  assert.equal(rows(f).length, 1);
+});
