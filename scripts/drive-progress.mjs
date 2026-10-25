@@ -18,6 +18,10 @@ const STEPS = {
   rejected: "fixing", "intake-bounce": "fixing", accepted: "committing", deferred: "committing", committed: "committed",
 };
 
+// An implementer dispatched after a rejection or an intake bounce is a fix pass: it writes a fresh
+// `dispatched` line, so the rejection is only visible in the task's own ledger lines.
+const IMPLEMENTER_POSITIONS = new Set(["dispatched", "missing-report"]);
+
 // The round of the task's latest review-round line, read as nextReviewRound reads it; 0 before any.
 function roundOf(entries) {
   const last = entries.findLastIndex((e) => e.event === "review-round");
@@ -34,7 +38,10 @@ export function buildProgress({ run, plan }) {
   if (!plan) return { ...head, currentWave: null, committed: 0, total: 0, waves: [] };
   const taskOf = (task) => {
     const entries = plan.entries.get(task) ?? [];
-    return { task, step: STEPS[plan.positions.get(task)?.position] ?? "needs-user", round: roundOf(entries), rejections: rejectionsOf(entries) };
+    const position = plan.positions.get(task)?.position;
+    const rejections = rejectionsOf(entries);
+    const step = rejections > 0 && IMPLEMENTER_POSITIONS.has(position) ? STEPS.rejected : STEPS[position] ?? "needs-user";
+    return { task, step, round: roundOf(entries), rejections };
   };
   const { overview } = plan;
   return {

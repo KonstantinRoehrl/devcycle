@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
 import { buildProgress, PROGRESS_REL, removeProgress, writeProgress } from "../../scripts/drive-progress.mjs";
-import { planProgress } from "../../scripts/wave-setup.mjs";
+import { planProgress, taskPosition } from "../../scripts/wave-setup.mjs";
 import { writeInto } from "./helpers.mjs";
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
@@ -73,6 +73,28 @@ test("a task's round is its latest review round, and its rejections count review
     { wave: 2, committed: 0, tasks: [{ task: "7", step: "fixing", round: 2, rejections: 3 }, { task: "8", step: "pending", round: 0, rejections: 0 }] },
   ] });
   assert.match(updatedAt, ISO);
+});
+
+// The step buildProgress reports for one task whose ledger lines are `entries`, positioned as wave-setup positions them.
+const stepOf = (entries) => {
+  const plan = {
+    overview: { waves: 1, tasks: 1, committed: 0, nextWave: 1, perWave: [{ wave: 1, tasks: ["9"], committed: 0 }] },
+    positions: new Map([["9", taskPosition(entries)]]), entries: new Map([["9", entries]]),
+  };
+  return buildProgress({ run: RUN, plan }).waves[0].tasks[0];
+};
+
+test("an implementer dispatched after a rejection or an intake bounce is a fix pass, fixing for its whole run; a first dispatch stays implementing", () => {
+  const reviewed = [
+    entry(9, "dispatched", "model sonnet"), entry(9, "report-received", "complete"),
+    entry(9, "review-round", "round 1", "9/review-round/1/0"), entry(9, "review-verdict", "rejected", "9/review-verdict/1/0"),
+  ];
+  assert.deepEqual(stepOf([...reviewed, entry(9, "dispatched", "model sonnet", "9/dispatched/2/0")]),
+    { task: "9", step: "fixing", round: 1, rejections: 1 });
+  assert.deepEqual(stepOf([entry(9, "dispatched", "model sonnet"), entry(9, "report-received", "rejected (intake bounce)", "9/report-received/1/0"),
+    entry(9, "dispatched", "model sonnet", "9/dispatched/2/0")]), { task: "9", step: "fixing", round: 0, rejections: 1 });
+  assert.deepEqual(stepOf([entry(9, "dispatched", "model sonnet")]), { task: "9", step: "implementing", round: 0, rejections: 0 });
+  assert.equal(stepOf([...reviewed, entry(9, "dispatched", "model sonnet", "9/dispatched/2/0"), entry(9, "report-received", "complete", "9/report-received/2/0")]).step, "reviewing");
 });
 
 test("with no usable plan the file still carries the run state, with no waves", () => {
