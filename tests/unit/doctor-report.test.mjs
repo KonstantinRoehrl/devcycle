@@ -347,6 +347,17 @@ test("stage percentages of the window sum to one hundred", () => {
   assert.equal(Math.round(rows.reduce((n, r) => n + r.pctOfWindow, 0)), 100);
 });
 
+test("the window table counts turns per stage and keeps a stage whose turns were all unpriced", () => {
+  const rows = stageWindowTable([
+    sum({ costByStage: { execution: 4 }, turnsByStage: { execution: { main: 6, subagent: 2 }, "branch-review": { main: 3, subagent: 1 } } }),
+    sum({ id: "b", costByStage: { execution: 2 }, turnsByStage: { execution: { main: 1, subagent: 0 } } }),
+  ], [sum({ id: "p", costByStage: { execution: 3 } })]);
+  assert.deepEqual(
+    rows.map((r) => [r.stage, r.total, r.mainTurns, r.subagentTurns, r.priced, r.trend]),
+    [["execution", 6, 7, 2, true, "up"], ["branch-review", 0, 3, 1, false, "n/a (unpriced)"]],
+  );
+});
+
 const VOCAB = [
   { slug: "partial-evidence-capture", kind: "friction", desc: "Captured evidence covered less than the whole verification gate command." },
   { slug: "first-round-clean-accept", kind: "win", desc: "A task passed review and the green gate on its first round, with no rework." },
@@ -1038,6 +1049,8 @@ test("every rendered metric column in the pre-existing tables is tagged observed
   assert.match(version, /\| Sessions \(observed\) \| Cycles \(observed\) \| Median \$\/cycle \(derived\) \|/,
     "Sessions/Cycles/Median $/cycle are not tagged");
   assert.match(version, /Δ vs previous \(derived\)/, "Δ vs previous is not tagged");
+  assert.match(version, /\| Turns\/task \(derived\) \| Exec main turns\/task \(derived\) \| Δ vs previous \(derived\) \|/,
+    "Exec main turns/task is missing, untagged, or not beside Turns/task");
   assert.match(version, /Priciest stage \(derived\)/, "Priciest stage is not tagged");
   assert.match(version, /Median depth \(derived\)/, "Median depth is not tagged");
   assert.match(version, /Quality \(derived\)/, "Quality is not tagged");
@@ -1061,7 +1074,7 @@ test("every rendered metric column in the pre-existing tables is tagged observed
   );
   assert.match(
     window,
-    /\| Cost \(observed\) \| % of window \(derived\) \| Median depth \(derived\) \| Trend vs previous window \(derived\) \|/,
+    /\| Cost \(observed\) \| Turns main\/sub \(observed\) \| % of window \(derived\) \| Median depth \(derived\) \| Trend vs previous window \(derived\) \|/,
     "Cost by stage (this window) columns are not tagged",
   );
 
@@ -1130,6 +1143,7 @@ test("the report renders no path, no session id, and no machine identity", () =>
 const coverageSession = (over = {}) => sum({
   profile: "thorough", knobs: { reviewDepth: "panel" },
   turns: 20, mainTurns: 15, subagentTurns: 5, maxDepth: 60000,
+  turnsByStage: { execution: { main: 10, subagent: 4 }, planning: { main: 5, subagent: 1 } },
   models: { "claude-opus-5": 1 }, tools: { Read: 2 },
   ...over,
 });
@@ -1156,6 +1170,8 @@ const COVERAGE_CORPUS = [
     carryWeighted: { Read: 900, Bash: 400 },
     dispatches: { total: 5, withoutModel: 2 },
     unpriced: { "some-unpriced-model": 3 },
+    // Its unpriced requests worked in a stage nothing was paid for: a window row at $0.0000, no Overview row.
+    turnsByStage: { execution: { main: 10, subagent: 4 }, planning: { main: 2, subagent: 1 }, "branch-review": { main: 3, subagent: 0 } },
     attributionSource: "forward-filled",
     cacheBand: { point: 4, low: 3, high: 6, fallbackShare: 0.5, collapsed: false },
     impact: [{ key: "partial-evidence-capture", event: "gate-fail", stage: "execution", frequency: 2, impact: 6 }],
@@ -1195,10 +1211,10 @@ test("every legacy line-class still has a home in the rendered report", () => {
     "- 1 session(s) still in flight (newest record < 30 min old) — in-flight sessions have only part of their cost recorded",
     // Cost by version — the whole row, out to its last cell: a needle that stopped at the depth
     // column still matched after the Quality and Shipped columns were deleted.
-    `| 0.12.0 (inferred: 3 requests on a model with no exact price excluded) | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | not compared (⚠ unpriced) | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
+    `| 0.12.0 (inferred: 3 requests on a model with no exact price excluded) | thorough | 4 | 4 | $15.00 | $0.2000 | $6.65 | — | — | not compared (⚠ unpriced) | execution | 40000 | ${COVERAGE_QUALITY_TEXT} | — |`,
     // Cost by stage, across versions and within this window
     "| execution | $10.00 (n=3) | $5.00 (n=4) | down | 3% |",
-    "| execution | $147.00 | 81.7% | 40000 | n/a (no window) |",
+    "| execution | $147.00 | 80/32 | 81.7% | 40000 | n/a (no window) |",
     // Your culprits — out to the row's end, for the same reason as the cohort row above: a
     // needle that stopped at the Δ column still matched after the Trend column was deleted.
     "| partial-evidence-capture | $6.00 | 2 | first seen | insufficient data | 0.12.0..0.12.0 | legacy |",
@@ -1266,7 +1282,7 @@ test("the Shipped cell renders the culprit id the version's promotion recorded",
   }));
   assert.ok(
     out.includes(
-      "| 0.12.0 | thorough | 3 | 3 | $1.00 | — | — | — | first seen | execution | 40000 | " +
+      "| 0.12.0 | thorough | 3 | 3 | $1.00 | — | — | — | — | first seen | execution | 40000 | " +
         "unavailable (no run record) | partial-evidence-capture |",
     ),
     "the cohort row does not carry the culprit its version shipped",
@@ -2409,6 +2425,13 @@ test("a version with unpriced requests reads ⚠ and not compared in the Overvie
   assert.ok(!/-100\.0%/.test(overviewSection(out)));
   assert.match(out, /\| 0\.12\.0 \(inferred: [^|]+\| thorough \| [^\n]*\| not compared \(⚠ unpriced\) \| execution \|/);
   assert.match(trendSection(out), /Trust: ⚠ Δ withheld for 0\.12\.0/);
+});
+
+test("a stage with turns but no priced cost is in the window table and not in the Overview", () => {
+  const out = renderReport(COVERAGE_CORPUS, ctx());
+  assert.ok(out.includes("| branch-review | $0.0000 | 3/0 | 0.0% | 40000 | n/a (no window) |"), "the turns-only stage has no window row");
+  assert.ok(!tableRows(overviewSection(out), "Stage").some((cells) => cells[0] === "branch-review"),
+    "the Overview, a dollar view, shows a stage nothing was paid for");
 });
 
 test("an in-flight session is in no overview figure and is named in the reconciliation line", () => {
