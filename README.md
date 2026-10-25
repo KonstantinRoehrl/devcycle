@@ -137,6 +137,8 @@ Execution can also walk its waves without you: when `/devcycle:continue` resumes
 asks whether to run them unattended (the `executionMode` setting only decides which answer comes
 first), then starts a driver that gives each wave a fresh session, watches it, and stops at the
 first thing that needs you — see [running execution unattended](docs/playbooks/executing-waves/unattended.md).
+A band above the prompt shows the run's progress without spending a model turn.
+
 Every handoff records when it is safe to `/clear`; resuming before it warns you, and the
 `handoffNotification` setting can ring your terminal or push a notification when it is.
 

@@ -31,12 +31,15 @@ load each only when its action needs it.
 
 **The `drive:` row.** It takes exactly one of two forms:
 
-- `- drive: auto model=<id> opted=<stamp> via=<answer|knob>` — the waves run unattended;
+- `- drive: auto model=<id> effort=<level|default> opted=<stamp> via=<answer|knob>` — the waves run unattended;
 - `- drive: manual chosen=<stamp> via=<answer|knob>` — they are walked in an interactive session.
 
-`<id>` is the `model` that `node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs" --json` prints,
-never self-report, and `<stamp>` is `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`. `via=answer`
-records the user's answer; `via=knob` appears only on a `manual` row the
+`<id>` and `<level>` are the `model` and `effort` that
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs" --json` prints, never self-report. An `effort`
+of `null` stops the start: write no row, and tell the user the `effortProblem` it prints beside it.
+A row without `effort=` stays valid: the driver resolves it at each start and never writes it back.
+`<stamp>` is `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`. `via=answer` records the user's
+answer; `via=knob` appears only on a `manual` row the
 `executionMode` knob wrote through `drive.writeRow`. No knob writes an `auto` row: an unattended run
 starts only on the user's answer in this session (`docs/decisions/README.md`, 2026-10-16 — An
 unattended start needs the user's answer in the session), and an `auto … via=knob` row written
@@ -88,19 +91,20 @@ In this order, never dispatching a task from this session:
    name the archive it prints.
 3. **Start the driver.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --check-sandbox`
    first. When it prints `{"sandboxed":true}`, run the start below outside the sandbox through the
-   Bash tool's sandbox override, which asks the user to approve it. The start:
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md --detach`.
+   Bash tool's sandbox override, which asks the user to approve it. The start, `<drive.plugins>`
+   being `wave-setup.mjs`'s `drive.plugins`:
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --state .devcycle/state.md --detach --plugins <drive.plugins>`.
    - It prints `{"pid":<n>,"log":".devcycle/drive.log","logOffset":<n>}` once the driver holds
      its lock and has marked the previous result handled: keep `logOffset`, then mark the handoff
      ready:
      `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action started`.
    - The approval is refused or the override unavailable: print
-     `node "<plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach`
+     `node "<plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach --plugins <drive.plugins>`
      for a terminal that is not a Claude Code session, and offer **Walk the waves manually**; on
      that answer, run `--mark-handled` as § Answering a stopped run says before walking.
    - The start is denied by a permission check, the auto-mode classifier included: print, for the
      user to type in this session,
-     `! node "<absolute plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach`,
+     `! node "<absolute plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach --plugins <drive.plugins>`,
      say that a command typed with `!` runs as the user's own, and offer **Walk the waves
      manually**. When the user runs it, its JSON lands in the conversation: take `logOffset` from
      it, mark the handoff ready as above, and continue at step 4.
@@ -109,24 +113,29 @@ In this order, never dispatching a task from this session:
 4. **Print the overview** from `wave-setup.mjs`'s `overview`:
    `<W> waves · <T> tasks · <C> committed — next: wave <w>`, then one line per wave,
    `wave <w>: tasks <ids> (<c>/<n> committed)`.
-5. **Arm the watches.** Progress:
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --follow --state .devcycle/state.md --since <logOffset>`
-   under `Monitor` with its maximum timeout. Relay each line it prints to the user as one line,
-   without its ` @<offset>` tail; a `wait:` line names when the run resumes, and is relayed once.
-   On each expiry, re-arm it with `--since` set to the last line's `@<offset>`. The end:
+5. **Arm the watches.** The end:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --wait --state .devcycle/state.md`
    as a background Bash task; when it returns, follow
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/drive.md when-the-run-ends`.
-   Where neither tool exists, print `tail -f .devcycle/drive.log` and that Ctrl-C stops watching,
-   never the driver.
-6. **Stand down.** Edit no file, commit nothing, walk no wave. When the user asks to stop the run,
-   run `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --stop --state .devcycle/state.md`:
-   the run ends `stopped`. Exit 1 means the signal
-   was not delivered: report its message — the driver stops before its next session.
+   Progress, per `wave-setup.mjs`'s `drive.watch`: at `end`, arm nothing more and tell the user in
+   one line that the band above the prompt shows the run, and `driveWatch` `wave` or `all` relays it
+   here instead. Otherwise arm
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --follow --state .devcycle/state.md --since <logOffset> --level <drive.watch>`
+   under `Monitor` with its maximum timeout. Relay each line it prints to the user as one line,
+   without its ` @<offset>` tail; a `wait:` line names when the run resumes, and is relayed once.
+   On each expiry, re-arm it with `--since` set to the last line's `@<offset>`. Where neither tool
+   exists, print `tail -f .devcycle/drive.log` and that Ctrl-C stops watching, never the driver.
+6. **Stand down.** Edit no file, commit nothing, walk no wave. An `/effort` change after the start
+   does not reach the run. When the user asks where the run is, run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --status --state .devcycle/state.md`
+   and summarise it. When the user asks to stop the run, run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --stop --state .devcycle/state.md`:
+   the run ends `stopped`. Exit 1 means the signal was not delivered: report its message — the
+   driver stops before its next session.
 
 ## When the run ends
 
-When the `--wait` task returns, stop the follow monitor and act on the `next` its JSON carries:
+When the `--wait` task returns, stop any follow monitor and act on the `next` its JSON carries:
 
 - `branch-review` — the run is complete. Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and
   emit its execution → branch-review block.

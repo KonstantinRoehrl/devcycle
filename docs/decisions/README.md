@@ -51,11 +51,15 @@ hooks module reads only that file, never the log or the ledger.
 (+16) and, in references/config.md, their two roster rows and the four-knob live sentence (+3)
 raise the runtime surface, `commandMax` (commands/continue.md is the longest command) and every
 closure that reads references/config.md; continue.md's live-knob sentence is reworded in place.
+references/drive.md grows (+9) by its row's `effort=` and the `null`-effort rule, `--plugins` on
+the start commands, a step 5 that arms the follow only above `driveWatch: end`, and step 6's
+`--status` answer and `/effort` line, raising the runtime surface and the closure of
+commands/continue.md, the one entry point that reads it.
 
 ```text
-budget: surface-budget.json surfaceTotal 6352
+budget: surface-budget.json surfaceTotal 6361
 budget: surface-budget.json commandMax 183
-budget: context-budget.json commands/continue.md 66407
+budget: context-budget.json commands/continue.md 67270
 budget: context-budget.json commands/cycle.md 74899
 budget: context-budget.json commands/learn.md 16837
 budget: context-budget.json commands/maintain.md 18016
