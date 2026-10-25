@@ -9,13 +9,16 @@ import { classifyDrive, LOG_REL } from "./drive-result.mjs";
 import { isMain } from "./is-main.mjs";
 
 export const LOG_TAIL_LINES = 40;
+export const WATCH_LEVELS = ["end", "wave", "all"];
 // Ample for LOG_TAIL_LINES driver lines; a longer run of raw stderr is cut rather than read whole.
 const TAIL_BYTES = 64 * 1024;
 const DRIVER_PREFIX = /^\[drive [^\]]*\] /;
 const ERROR_PREFIX = "drive-execution: ";
-const LEDGER_LINE = /^session \d+ · \d+ tool calls · task=\S+ event=(\S+) outcome=(.*)$/;
+const LEDGER_LINE = /^session \d+ · \d+ tool calls · task=(\S+) event=(\S+) outcome=(.*)$/;
 const REPORTED_EVENTS = new Set(["committed", "review-verdict", "user-decision"]);
-const USAGE = "drive-watch: usage: drive-watch.mjs (--status | --follow [--since <bytes>] | --wait) --state <path>";
+const REVIEW_ROUND = /^round (\d+)$/;
+const USAGE =
+  "drive-watch: usage: drive-watch.mjs (--status | --follow [--since <bytes>] [--level <end|wave|all>] | --wait) --state <path>";
 
 const logOf = (statePath) => join(dirname(dirname(resolve(statePath))), LOG_REL);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -44,16 +47,63 @@ function readFrom(path, start) {
   }
 }
 
-export function reportedLine(rawLine) {
-  if (rawLine.startsWith(ERROR_PREFIX)) return rawLine;
+function driverMessage(rawLine) {
   const prefix = rawLine.match(DRIVER_PREFIX);
-  if (!prefix) return null;
-  const message = rawLine.slice(prefix[0].length);
-  const entry = message.match(LEDGER_LINE);
-  if (entry) return REPORTED_EVENTS.has(entry[1]) || entry[2].startsWith("rejected (intake bounce)") ? message : null;
-  const reported = /^session \d+ starts — /.test(message) || /^wave \d+ of \d+ complete$/.test(message) ||
-    message.startsWith("wait: ") || message.startsWith("stopped for you — ");
-  return reported ? message : null;
+  return prefix ? rawLine.slice(prefix[0].length) : null;
+}
+
+const isMilestone = (message) => /^session \d+ starts — /.test(message) || /^wave \d+ of \d+ complete$/.test(message) ||
+  message.startsWith("wait: ") || message.startsWith("stopped for you — ");
+
+// `end` relays only the driver's own errors (follow adds the end line), `wave` adds the run's
+// milestones, and `all` adds each task's outcomes.
+export function reportedLine(rawLine, level = "all") {
+  if (rawLine.startsWith(ERROR_PREFIX)) return rawLine;
+  const message = level === "end" ? null : driverMessage(rawLine);
+  if (message === null) return null;
+  if (isMilestone(message)) return message;
+  const entry = level === "all" && message.match(LEDGER_LINE);
+  return entry && (REPORTED_EVENTS.has(entry[2]) || entry[3].startsWith("rejected (intake bounce)")) ? message : null;
+}
+
+// One follow's memory: a repeated `wait:` line is printed once, and at `all` a task's accepted
+// verdict is held and its commit line says how many review rounds this follow saw. A follow that
+// joined after the task's round 1 cannot count them, so its commit line carries no count.
+export function createRelay(level = "all") {
+  if (!WATCH_LEVELS.includes(level))
+    throw new Error(`unknown watch level ${JSON.stringify(level)}: expected one of ${WATCH_LEVELS.join(", ")}`);
+  let lastWait = null;
+  const rounds = new Map();
+  const batched = (message) => {
+    const entry = message.match(LEDGER_LINE);
+    if (!entry) return message;
+    const [, task, event, outcome] = entry;
+    if (event === "review-verdict" && outcome.startsWith("accepted")) return null;
+    if (event !== "committed") return message;
+    const seen = rounds.get(task);
+    rounds.delete(task);
+    if (!seen?.fromFirst) return `task ${task} committed`;
+    return `task ${task} committed (${seen.highest} review round${seen.highest === 1 ? "" : "s"})`;
+  };
+  const countRound = (rawLine) => {
+    const entry = driverMessage(rawLine)?.match(LEDGER_LINE);
+    const round = entry?.[2] === "review-round" && Number(entry[3].match(REVIEW_ROUND)?.[1]);
+    if (!round) return;
+    const seen = rounds.get(entry[1]) ?? { fromFirst: false, highest: 0 };
+    rounds.set(entry[1], { fromFirst: seen.fromFirst || round === 1, highest: Math.max(seen.highest, round) });
+  };
+  return {
+    push(rawLine) {
+      if (level === "all") countRound(rawLine);
+      const message = reportedLine(rawLine, level);
+      if (message === null) return null;
+      if (message.startsWith("wait: ")) {
+        if (message === lastWait) return null;
+        lastWait = message;
+      }
+      return level === "all" ? batched(message) : message;
+    },
+  };
 }
 
 function logTail(path) {
@@ -71,15 +121,16 @@ export function statusReport({ statePath }) {
   return withTail(classifyDrive({ statePath }), statePath);
 }
 
-export async function follow({ statePath, since = null, pollMs = 2000, write = (s) => process.stdout.write(s) }) {
+export async function follow({ statePath, since = null, pollMs = 2000, level = "all", write = (s) => process.stdout.write(s) }) {
   const path = logOf(statePath);
+  const relay = createRelay(level);
   let offset = since ?? logSize(path);
   const drain = () => {
     if (logSize(path) < offset) offset = 0;
     const bytes = readFrom(path, offset);
     let start = 0;
     for (let nl = bytes.indexOf(0x0a); nl !== -1; nl = bytes.indexOf(0x0a, start)) {
-      const message = reportedLine(bytes.toString("utf8", start, nl));
+      const message = relay.push(bytes.toString("utf8", start, nl));
       start = nl + 1;
       if (message !== null) write(`${message} @${offset + start}\n`);
     }
@@ -106,7 +157,9 @@ export async function waitForEnd({ statePath, pollMs = 30_000 }) {
   }
 }
 
-const KNOWN_FLAGS = { "--status": "none", "--follow": "none", "--wait": "none", "--since": "value", "--state": "value" };
+const KNOWN_FLAGS = {
+  "--status": "none", "--follow": "none", "--wait": "none", "--since": "value", "--level": "value", "--state": "value",
+};
 const MODES = ["--status", "--follow", "--wait"];
 
 function parseArgs(argv) {
@@ -118,7 +171,11 @@ function parseArgs(argv) {
   if (!existsSync(statePath)) throw new Error(`no state file at ${statePath}`);
   const since = requireCount(flags, "--since", { min: 0, noun: "a byte offset" });
   if (since !== undefined && modes[0] !== "--follow") throw new Error("--since applies to --follow only");
-  return { mode: modes[0], statePath, since: since ?? null };
+  const level = requireValue(flags, "--level", `one of ${WATCH_LEVELS.join(" | ")}`);
+  if (level !== undefined && modes[0] !== "--follow") throw new Error("--level applies to --follow only");
+  if (level !== undefined && !WATCH_LEVELS.includes(level))
+    throw new Error(`--level requires one of ${WATCH_LEVELS.join(" | ")}, got ${JSON.stringify(level)}`);
+  return { mode: modes[0], statePath, since: since ?? null, level: level ?? "all" };
 }
 
 async function main(argv) {
@@ -130,9 +187,9 @@ async function main(argv) {
     console.error(USAGE);
     return 2;
   }
-  const { mode, statePath, since } = args;
+  const { mode, statePath, since, level } = args;
   const pollMs = Number(process.env.DEVCYCLE_DRIVE_POLL_MS) || undefined;
-  if (mode === "--follow") await follow({ statePath, since, pollMs });
+  if (mode === "--follow") await follow({ statePath, since, pollMs, level });
   else console.log(JSON.stringify(mode === "--wait" ? await waitForEnd({ statePath, pollMs }) : statusReport({ statePath })));
   return 0;
 }
