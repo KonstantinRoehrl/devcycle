@@ -52,7 +52,7 @@ two logs never merge. One row per write site, not a restatement of `tests/fixtur
 | `stage` | at every stage boundary | `references/handoff.md` |
 | `dispatch` | once per implementer dispatch, at step 4 (report received) — never at step 3 (dispatch), since `endedAt`/`outcome`/round/retry are unknown until the envelope returns | `scripts/task-intake.mjs` |
 | `verdict` | once per review round, at step 5 (after `event=review-verdict`) — never at step 4, since `round`/`blockingCount`/`conformance` are unknown until review runs | `scripts/task-verdict.mjs`, `scripts/task-commit.mjs` |
-| `commit` | once per task commit, at step 7 | `scripts/task-commit.mjs` |
+| `commit` | once per task commit, at step 7 | `scripts/task-commit.mjs`, run in-process by `scripts/task-verdict.mjs` on an accepted verdict |
 | `drive` | once per driven session, at its end; read by `scripts/doctor.mjs` | `scripts/drive-execution.mjs` |
 | `triage` | once per cycle, right after the triage confirmation | `commands/cycle.md` |
 | `agent-depth` | once per finished subagent, on every `SubagentStop` from a session with a `session` row in the run `.devcycle/state.md` names — a kind of its own, separate from `dispatch`, so an implementer dispatch is never counted twice | `hooks/dispatch-sensor.mjs` |
@@ -70,19 +70,23 @@ run-record row — and `depthBand`) and exits non-zero only on a usage (2) or en
 
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs" --run <run-id> --task <id> --role implementer|reviewer [--round <n>] [--model-decision "<decision>"]`,
   the brief on stdin, immediately before each dispatch: writes it to
-  `.devcycle/briefs/<id>-<role>[-round-<n>].md`, appends `dispatched` (`outcome=model <decision>`, the
+  `.devcycle/briefs/<id>-<role>[-round-<n>].md` (an implementer's with its `**Lessons:**` line filled
+  from the task's matched lessons), appends `dispatched` (`outcome=model <decision>`, the
   `references/model-routing.md` audit shape; `outcome=implementer retry <k>` without the flag)
   or `review-round` (`outcome=round <n>`) with that path as `ref=`, and keeps the dispatch's start
-  time for its `dispatch` row. A reviewer dispatch refuses any round but the task's next, and
-  first moves aside a findings file already at that round's path.
-- `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-intake.mjs" --run <run-id> --task <id> --report <path> --status complete|blocked --agent-type <type> --model <id> --model-source explicit|inherited [--agent-id <id>]`
+  time, which an implementer's `dispatch` row takes. A reviewer dispatch refuses any round but the
+  task's next, and first moves aside a findings file already at that round's path.
+- `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-intake.mjs" --run <run-id> --task <id> --report <path> --status complete|blocked --agent-type <type> --model <id> --model-source explicit|inherited [--agent-id <id>] [--compose-review]`
   once the implementer's envelope returns, against the task's latest `dispatched` line:
   `status: blocked` appends `report-received outcome=blocked` (action `needs-user`); a missing report,
   or one with no `- Evidence:` line, appends `outcome=rejected (missing report file)` (`missing-report`);
   a report failing `authored-claims-check.mjs` or `evidence-completeness-check.mjs --task <id>` (its
   `cmd:` held to the task's gate through this ledger's plan) appends `outcome=rejected (intake bounce)` with its findings file as `ref=` (`bounce`); a clean one appends
-  `outcome=complete` (`review`). All but a missing report write the `dispatch` row.
-- `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-verdict.mjs" --run <run-id> --task <id> --round <n> --findings <path> --evidence-class red-green|green-green|convention`
+  `outcome=complete` (`review`). All but a missing report write the `dispatch` row. With
+  `--compose-review`, `review` also composes the reviewer brief and runs the reviewer dispatch above
+  in-process, adding `reviewBriefPath`, `findingsPath` and `reviewRound`; a `review-round` for that
+  round already after the latest `report-received` makes it write nothing and print those paths.
+- `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-verdict.mjs" --run <run-id> --task <id> --round <n> --findings <path> --evidence-class red-green|green-green|convention [--plan <path> --test-cmd "<cmd>" --subject "<subject>" [--trailers "<lines>"] [--culprit <slug>]]`
   once the reviewer's envelope returns, against that round's `review-round` line (exit 2 once a later
   task line it did not write acted on it): a findings file missing, empty or malformed (no `Verdict:`
   outside a fenced quote — a whole-file fence is none — or two that disagree, `needs-changes` lacking
@@ -90,4 +94,7 @@ run-record row — and `depthBand`) and exits non-zero only on a usage (2) or en
   `review-verdict outcome=rejected (missing findings file)` (`missing-findings`); else `outcome=accepted`
   or `rejected`, the `verdict` row and, on `needs-changes`, the `review-reject` event row (`accepted` /
   `rejected`). A rejected round 3 writes the exhausted-unresolved status `references/resume.md` reads;
-  either script returns `needs-user` at a retry cap.
+  either script returns `needs-user` at a retry cap. Given the task commit's `--plan`, `--test-cmd`
+  and `--subject` (`references/commit-convention.md` § The task commit), an `accepted` verdict runs
+  that commit in-process and prints its result, the verdict's own fields under `verdict`; part of
+  that set is a usage error.

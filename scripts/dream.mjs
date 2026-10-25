@@ -14,8 +14,8 @@ import { claudeProjectsDir } from "./depth-probe.mjs";
 import { aggregateKeys, culpritCostByKey, periodLedger } from "./impact-ledger.mjs";
 import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, consolidatePromotion, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
-import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, matchLessons, renderMatch, planLanding, planConsolidation, MATCH_CAP } from "./lessons.mjs";
-import { readMaintenanceFindings, matchMaintenanceFindings, renderMaintenanceMatches } from "./maintenance-findings.mjs";
+import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, planLanding, planConsolidation } from "./lessons.mjs";
+import { matchedLessons } from "./lesson-match.mjs";
 import { parseFileList } from "./task-files.mjs";
 import { parseFlags, requireCount } from "./cli-flags.mjs";
 import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
@@ -1039,20 +1039,13 @@ const HANDLERS = {
     run(flags, { root }) {
       const stage = flags["--stage"];
       if (!STAGES.includes(stage)) throw new Error(`--match needs a valid --stage (one of ${STAGES.join(", ")})`);
-      const files = parseFileList(flags["--files"] ?? "");
-      const culprits = parseFileList(flags["--culprits"] ?? "");
-      const keywords = (flags["--keywords"] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-      const lessonLines = [
-        ...readSection(repoStorePath(root), stage),
-        ...readSection(userRepoStorePath(root), stage),
-        ...readSection(userGlobalStorePath(), stage),
-      ];
-      const out = renderMatch(matchLessons({ lessonLines, promotions: readPromotions(root), files, culprits, keywords }));
-      const maint = renderMaintenanceMatches(
-        matchMaintenanceFindings({ records: readMaintenanceFindings(root), files, cap: MATCH_CAP }),
-      );
-      const combined = [out, maint].filter((s) => s && s.length).join("\n");
-      if (combined) process.stdout.write(combined + "\n");
+      const matched = matchedLessons({
+        root, stage,
+        files: parseFileList(flags["--files"] ?? ""),
+        culprits: parseFileList(flags["--culprits"] ?? ""),
+        keywords: (flags["--keywords"] ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+      });
+      if (matched) process.stdout.write(matched + "\n");
     },
   },
 

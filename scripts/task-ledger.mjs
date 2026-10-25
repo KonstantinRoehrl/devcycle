@@ -11,7 +11,7 @@ import { now } from "./stamp.mjs";
 import { parseFlags, requireCount } from "./cli-flags.mjs";
 import { recordPath, subSchemaFor, validate, validateCulprit, writeLine } from "./run-record.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
-import { gateCommand } from "./task-files.mjs";
+import { gateCommand, taskFileMap } from "./task-files.mjs";
 
 const SCHEMA_PATH = new URL("../tests/fixtures/run-record.schema.json", import.meta.url);
 const LEDGER_LINE_RE = /^- \[([^\]]+)\] task=(\S+) event=(\S+) outcome=(.*?) ref=(\S+)(?: key=(\S+))?$/;
@@ -41,15 +41,27 @@ export function ledgerPlan(ledgerPath) {
   return ledgerText(ledgerPath).match(LEDGER_PLAN_RE)?.[1] ?? null;
 }
 
-// A task's gate command through the ledger's plan, or null when there is none to resolve: no plan
-// named, no plan file, or a task id that is no plan task number (`fast`, `sweep`).
-export function taskGate(ledgerPath, task) {
+// The ledger's plan text for a plan task, or null when there is none to read: no plan named, no
+// plan file, or a task id that is no plan task number (`fast`, `sweep`).
+function taskPlanText(ledgerPath, task) {
   const plan = ledgerPlan(ledgerPath);
   if (!plan || !/^\d+$/.test(task)) return null;
   // The preamble's path is relative to the checkout whose .devcycle/ holds the ledger.
   const planPath = isAbsolute(plan) ? plan : join(dirname(dirname(ledgerPath)), plan);
-  if (!existsSync(planPath)) return null;
-  return gateCommand(readFileSync(planPath, "utf8"), Number(task));
+  return existsSync(planPath) ? readFileSync(planPath, "utf8") : null;
+}
+
+// A task's gate command through the ledger's plan, or null when there is none to resolve.
+export function taskGate(ledgerPath, task) {
+  const text = taskPlanText(ledgerPath, task);
+  return text === null ? null : gateCommand(text, Number(task));
+}
+
+// A task's **Files:** set through the ledger's plan, or null when there is no plan to read or the
+// task declares none.
+export function taskFiles(ledgerPath, task) {
+  const text = taskPlanText(ledgerPath, task);
+  return text === null ? null : (taskFileMap(text).get(Number(task)) ?? null);
 }
 
 export const MISSING_FINDINGS = "rejected (missing findings file)";

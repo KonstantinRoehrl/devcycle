@@ -3,8 +3,8 @@
 // window. The depth gate calls this file directly so it no longer loads doctor's import closure;
 // `doctor.mjs --depth` stays as an adapter over the same functions.
 import { existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { claudeConfigHome, resolveEffort } from "./claude-settings.mjs";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { isMain } from "./is-main.mjs";
@@ -16,10 +16,9 @@ export { ASSUMED_WINDOW, budgetBand, contextDepth, windowFor };
 // Every counter on them is zero, so they are skipped outright rather than reported unpriced.
 export const SYNTHETIC_MODEL = "<synthetic>";
 
-// Where Claude Code keeps its session transcripts: <config home>/projects, the config home being
-// CLAUDE_CONFIG_DIR when set and ~/.claude otherwise.
+// Where Claude Code keeps its session transcripts: <config home>/projects.
 export function claudeProjectsDir(env = process.env) {
-  return join(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "projects");
+  return join(claudeConfigHome(env), "projects");
 }
 
 // Recursively collects .jsonl transcript files under dir. Returns null when dir is simply
@@ -132,6 +131,11 @@ function main(argv) {
   } catch (e) {
     console.error(`depth-probe: ${e.message}`);
     process.exit(1);
+  }
+  // The drive row records this effort beside the model (references/drive.md § Drive actions).
+  if (json) {
+    const { effort, problem } = resolveEffort({ env: process.env, cwd: process.cwd(), model: r.model });
+    r = { ...r, effort, effortProblem: problem ?? null };
   }
   console.log(json ? JSON.stringify(r) : depthLine(r));
 }

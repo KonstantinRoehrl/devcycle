@@ -224,7 +224,9 @@ the clear between waves. It starts a fresh `claude -p` session per wave — the
 session `/clear` plus `/devcycle:continue` would give you — and ends at the branch-review handoff,
 at the first gate that needs you, or at a stall or a cap. Branch review, on-device verification and
 finish stay yours. The starting session watches the run, restarts a resumable end and asks you
-about any other. How it runs, and how to watch and stop it:
+about any other. Each driven session starts lean — no MCP servers, only the plugins execution
+needs — at the effort recorded when you opted in, and a band above the prompt shows the run's
+progress without spending a model turn. How it runs, and how to watch and stop it:
 [`docs/playbooks/executing-waves/unattended.md`](../playbooks/executing-waves/unattended.md).
 
 ```mermaid

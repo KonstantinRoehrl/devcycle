@@ -102,8 +102,12 @@ every hook it registers and every engine call it makes. In every session it look
 `.devcycle/state.md` in the working directory or a parent; where that file names an active run, it
 runs a short Node check (`node hooks/mod-sink.mjs check-joined`) to learn whether this session
 joined the run. Beyond that it acts only in a session that joined an active devcycle run, where
-what it writes are run-record rows of ids, counts and enum values, and in any session it relays the
-terminal notification `scripts/handoff-mark.mjs` asks for (`handoffNotification`).
+what it writes are run-record rows of ids, counts and enum values. In any session it also relays the
+terminal notification `scripts/handoff-mark.mjs` asks for (`handoffNotification`), and, where it finds
+a `.devcycle/state.md`, checks the one file `.devcycle/drive-progress.json` beside it about every 300
+ms (reading it only when it changed) to draw the drive band above the prompt while an unattended run's
+driver is running or an ended run awaits `/devcycle:continue`; that file is written by the
+unattended-run driver, and the band spends no model turn.
 
 For the on-device verification stage's agent pass, also install the claude-in-chrome
 plugin — Claude Code's integration with your own Chrome (without it, the stage still launches
@@ -137,6 +141,8 @@ Execution can also walk its waves without you: when `/devcycle:continue` resumes
 asks whether to run them unattended (the `executionMode` setting only decides which answer comes
 first), then starts a driver that gives each wave a fresh session, watches it, and stops at the
 first thing that needs you — see [running execution unattended](docs/playbooks/executing-waves/unattended.md).
+A band above the prompt shows the run's progress without spending a model turn.
+
 Every handoff records when it is safe to `/clear`; resuming before it warns you, and the
 `handoffNotification` setting can ring your terminal or push a notification when it is.
 

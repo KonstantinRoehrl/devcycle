@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { createHash } from "node:crypto";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
+import { readSection } from "../../scripts/read-section.mjs";
 import { DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
 import { classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
@@ -54,11 +55,11 @@ function makeCycle({ branch = "feat/drive", stage = "execution", drive = `- driv
 
 // One isolated world per scenario: its own HOME (the sandbox probe writes under ~/.claude), runs dir,
 // scenario and call log, and a `claude` on PATH that is the stub. DEVCYCLE_NESTED_RUN is set on
-// purpose — the driver must strip it from every session it starts. CLAUDECODE and a
-// DEVCYCLE_DRIVE_TOKEN, which a suite run inside Claude Code or a driven session inherits, and
-// CLAUDE_CONFIG_DIR, which would point the driver at the real transcripts, are dropped: only the
-// tests that are about them set them. `prelude` runs in the fake `claude` before the stub does.
-const { CLAUDECODE: _claudeCode, CLAUDE_CONFIG_DIR: _configDir, DEVCYCLE_DRIVE_TOKEN: _driveToken, ...BASE_ENV } = process.env;
+// purpose — the driver must strip it from every session it starts. CLAUDECODE, CLAUDE_EFFORT,
+// CLAUDE_CODE_EFFORT_LEVEL and a DEVCYCLE_DRIVE_TOKEN, which a suite run inside Claude Code or a
+// driven session inherits, and CLAUDE_CONFIG_DIR, which would point the driver at the real transcripts
+// and settings, are dropped: only the tests that are about them set them. `prelude` runs in the fake `claude` before the stub does.
+const { CLAUDECODE: _claudeCode, CLAUDE_CONFIG_DIR: _configDir, CLAUDE_EFFORT: _effort, CLAUDE_CODE_EFFORT_LEVEL: _effortLevel, DEVCYCLE_DRIVE_TOKEN: _driveToken, ...BASE_ENV } = process.env;
 function harness(scenario = [], env = {}, { prelude = "" } = {}) {
   const dir = makeTempDir("devcycle-drive-test-");
   const home = join(dir, "home");
@@ -151,14 +152,179 @@ test("drives one fresh session per wave until the state reaches branch-review, w
 });
 
 test("each session is claude -p on the drive prompt with auto permissions, stream-json and an explicit model, and never sees DEVCYCLE_NESTED_RUN", async () => {
-  const root = makeCycle();
+  const root = makeCycle({ drive: `- drive: auto model=${MODEL} effort=high opted=2026-10-08T00:00:00Z via=answer` });
   const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
   assert.equal(r.code, 0, r.out);
-  assert.deepEqual(r.calls[0].argv, ["-p", "/devcycle:continue --drive .devcycle/state.md", "--model", MODEL,
-    "--permission-mode", "auto", "--output-format", "stream-json", "--verbose"]);
+  assert.deepEqual(r.calls[0].argv, ["-p", "/devcycle:continue --drive .devcycle/state.md", "--model", MODEL, "--effort", "high",
+    "--permission-mode", "auto", "--output-format", "stream-json", "--verbose",
+    "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']);
+  assert.equal(r.calls[0].effort, "high", "the session's CLAUDE_CODE_EFFORT_LEVEL disagrees with its --effort");
   assert.equal(r.calls[0].nested, false, "DEVCYCLE_NESTED_RUN reached the driven session");
   const pinned = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--model", "claude-opus-5-5"] });
   assert.equal(pinned.calls[0].argv[pinned.calls[0].argv.indexOf("--model") + 1], "claude-opus-5-5");
+});
+
+const PLUGIN_LIST = readFileSync(fileURLToPath(new URL("../fixtures/plugin-list.json", import.meta.url)), "utf8");
+const NO_MCP = ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}'];
+const startLine = (log) => log.split("\n").find((l) => l.includes("] session 1 starts"));
+
+test("a driven session starts with no MCP servers and only the kept plugins, and the plugin list never spends a scenario step", async () => {
+  const root = makeCycle();
+  const r = await drive(root, [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }],
+    { flags: ["--plugins", "impeccable", "--max-usd", "5"], env: { STUB_CLAUDE_PLUGIN_LIST: PLUGIN_LIST } });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.calls.length, 2, "the plugin list call consumed a scenario step or landed in the call log");
+  const argv = r.calls[0].argv;
+  const surface = argv.slice(argv.indexOf("--verbose") + 1, argv.indexOf("--max-budget-usd"));
+  assert.deepEqual(surface.slice(0, 4), [...NO_MCP, "--settings"]);
+  assert.deepEqual(JSON.parse(surface[4]).enabledPlugins,
+    { "token-optimizer@alexgreensh-token-optimizer": false, "engineering@synced": false });
+  assert.equal(surface.length, 5);
+  assert.deepEqual(r.calls[1].argv.slice(argv.indexOf("--verbose") + 1, argv.indexOf("--max-budget-usd")), surface, "the list is read once and every session gets the same surface");
+  const log = readFileSync(join(root, ".devcycle", "drive.log"), "utf8");
+  assert.match(startLine(log), new RegExp(`session 1 starts — wave 1, model ${MODEL}, effort \\S+, plugins devcycle,impeccable,superpowers, mcp none$`));
+  assert.doesNotMatch(log, /plugin list unavailable/);
+});
+
+test("--plugins all restores today's surface: no MCP restriction, no plugin override", async () => {
+  const root = makeCycle();
+  const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }], { flags: ["--plugins", "all"], env: { STUB_CLAUDE_PLUGIN_LIST: PLUGIN_LIST } });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.calls[0].argv.at(-1), "--verbose");
+  assert.ok(!r.calls[0].argv.includes("--settings") && !r.calls[0].argv.includes("--strict-mcp-config"), r.calls[0].argv.join(" "));
+  assert.match(startLine(readFileSync(join(root, ".devcycle", "drive.log"), "utf8")), /, plugins all, mcp all$/);
+});
+
+test("an unreadable plugin list never stops a run: the MCP restriction stays, plugins are not overridden, and the log says so once", async () => {
+  const root = makeCycle();
+  const missing = join(makeTempDir("devcycle-drive-plugins-"), "no-list.json");
+  const r = await drive(root, [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }],
+    { env: { DEVCYCLE_DRIVE_PLUGIN_LIST: missing } });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.calls.length, 2);
+  for (const c of r.calls) assert.deepEqual(c.argv.slice(c.argv.indexOf("--verbose") + 1), NO_MCP);
+  const log = readFileSync(join(root, ".devcycle", "drive.log"), "utf8");
+  assert.equal(log.split("plugin list unavailable — full plugin surface").length - 1, 1, log);
+  assert.ok(log.indexOf("plugin list unavailable") < log.indexOf("session 1 starts"), "the note was not logged before the first session");
+  assert.match(startLine(log), /, plugins all, mcp none$/);
+});
+
+test("--dry-run reads the plugin list, so its command is the argv a session would get", () => {
+  const listFile = join(makeTempDir("devcycle-drive-plugins-"), "list.json");
+  writeFileSync(listFile, PLUGIN_LIST);
+  const r = dryRun(makeCycle(), [], { DEVCYCLE_DRIVE_PLUGIN_LIST: listFile });
+  assert.equal(r.code, 0, r.out);
+  const command = JSON.parse(r.out.trim().split("\n").at(-1)).command;
+  assert.deepEqual(command.slice(command.indexOf("--verbose") + 1, command.indexOf("--verbose") + 5), [...NO_MCP, "--settings"]);
+  assert.deepEqual(Object.keys(JSON.parse(command.at(-1)).enabledPlugins),
+    ["impeccable@impeccable", "token-optimizer@alexgreensh-token-optimizer", "engineering@synced"]);
+});
+
+test("--plugins refuses a value outside none, all, or a comma-separated list of plugin names, with exit 2", () => {
+  for (const value of ["two words", "none,impeccable", "a,,b", " "]) {
+    const r = dryRun(makeCycle(), ["--plugins", value]);
+    assert.equal(r.code, 2, `${JSON.stringify(value)}: ${r.out}`);
+    assert.match(r.out, /^drive-execution: --plugins requires none, all, or a comma-separated list of plugin names/m);
+  }
+});
+
+const effortRow = (effort) => `- drive: auto model=${MODEL} effort=${effort} opted=2026-10-08T00:00:00Z via=answer`;
+const startsLine = (root) => readFileSync(join(root, ".devcycle", "drive.log"), "utf8").split("\n").find((l) => l.includes("] session 1 starts"));
+
+test("effort comes from --effort, else the drive row's effort=, else the settings at driver start, which are never written back", async () => {
+  const legacy = makeCycle();
+  writeInto(legacy, ".claude/settings.json", JSON.stringify({ modelSettings: { [MODEL]: { effortLevel: "xhigh" } }, effortLevel: "low" }));
+  const resolved = await drive(legacy, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(resolved.code, 0, resolved.out);
+  assert.deepEqual(resolved.calls[0].argv.slice(4, 6), ["--effort", "xhigh"]);
+  assert.equal(resolved.calls[0].effort, "xhigh", "the session's CLAUDE_CODE_EFFORT_LEVEL disagrees with its --effort");
+  assert.match(startsLine(legacy), new RegExp(`session 1 starts — wave 1, model ${MODEL}, effort xhigh`));
+  assert.doesNotMatch(readFileSync(join(legacy, ".devcycle", "state.md"), "utf8"), /effort=/, "the resolved effort was written back to the row");
+
+  const inherited = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review" }], { env: { CLAUDE_EFFORT: "low" } });
+  assert.deepEqual(inherited.calls[0].argv.slice(4, 6), ["--effort", "low"], "the launching session's CLAUDE_EFFORT was not resolved");
+
+  const recorded = makeCycle({ drive: effortRow("medium") });
+  // xhigh, not max: Claude Code drops a settings file's max, so a file cannot carry a level above it.
+  writeInto(recorded, ".claude/settings.json", JSON.stringify({ effortLevel: "xhigh" }));
+  const fromRow = await drive(recorded, [{ ledger: DONE, stage: "branch-review" }], { env: { CLAUDE_EFFORT: "low" } });
+  assert.deepEqual(fromRow.calls[0].argv.slice(4, 6), ["--effort", "medium"]);
+  assert.equal(fromRow.calls[0].effort, "medium");
+
+  const flagged = await drive(makeCycle({ drive: effortRow("medium") }), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--effort", "max"] });
+  assert.deepEqual(flagged.calls[0].argv.slice(4, 6), ["--effort", "max"]);
+  assert.equal(flagged.calls[0].effort, "max");
+});
+
+test("a max in the settings is not an effort the launching session runs at, so a row without effort= starts at the default", async () => {
+  const root = makeCycle();
+  writeInto(root, ".claude/settings.json", JSON.stringify({ effortLevel: "max" }));
+  const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(r.code, 0, r.out);
+  assert.ok(!r.calls[0].argv.includes("--effort"), r.calls[0].argv.join(" "));
+  assert.match(startsLine(root), /effort default/);
+});
+
+test("effort default passes no --effort and keeps an inherited effort override from every session", async () => {
+  const fromRow = await drive(makeCycle({ drive: effortRow("default") }),
+    [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }],
+    { env: { CLAUDE_EFFORT: "high", CLAUDE_CODE_EFFORT_LEVEL: "high" } });
+  assert.equal(fromRow.code, 0, fromRow.out);
+  assert.equal(fromRow.calls.length, 2);
+  for (const c of fromRow.calls) {
+    assert.ok(!c.argv.includes("--effort"), c.argv.join(" "));
+    assert.equal(c.effort, null, "a session inherited the driver's CLAUDE_CODE_EFFORT_LEVEL");
+    assert.equal(c.outputEffort, null, "a session inherited the driver's CLAUDE_EFFORT");
+  }
+  const flagged = await drive(makeCycle({ drive: effortRow("high") }), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--effort", "default"] });
+  assert.ok(!flagged.calls[0].argv.includes("--effort"), flagged.calls[0].argv.join(" "));
+  assert.equal(flagged.calls[0].effort, null);
+  const overridden = await drive(makeCycle({ drive: effortRow("default") }), [{ ledger: DONE, stage: "branch-review" }],
+    { env: { CLAUDE_CODE_EFFORT_LEVEL: "low" } });
+  assert.equal(overridden.calls[0].effort, null, "a default-effort session kept the driver's CLAUDE_CODE_EFFORT_LEVEL");
+  // Nothing set anywhere: the harness drops CLAUDE_EFFORT, and neither its HOME nor the checkout holds settings.
+  const unset = makeCycle();
+  const r = await drive(unset, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.ok(!r.calls[0].argv.includes("--effort"), r.calls[0].argv.join(" "));
+  assert.match(startsLine(unset), /, effort default/);
+});
+
+test("a session's effort override is the --effort level whatever the driver's own environment holds, and CLAUDE_EFFORT never reaches it", async () => {
+  // CLAUDE_CODE_EFFORT_LEVEL is the variable Claude Code reads to override a session's effort;
+  // CLAUDE_EFFORT is only output into a session's Bash and hook children.
+  const inherited = await drive(makeCycle({ drive: effortRow("high") }), [{ ledger: DONE, stage: "branch-review" }],
+    { env: { CLAUDE_CODE_EFFORT_LEVEL: "low", CLAUDE_EFFORT: "low" } });
+  assert.equal(inherited.code, 0, inherited.out);
+  assert.deepEqual(inherited.calls[0].argv.slice(4, 6), ["--effort", "high"]);
+  assert.equal(inherited.calls[0].effort, "high", "the driver's CLAUDE_CODE_EFFORT_LEVEL beat the session's --effort");
+  assert.equal(inherited.calls[0].outputEffort, null, "the driver's CLAUDE_EFFORT reached the session");
+
+  const flagged = await drive(makeCycle({ drive: effortRow("low") }), [{ ledger: DONE, stage: "branch-review" }],
+    { flags: ["--effort", "max"], env: { CLAUDE_CODE_EFFORT_LEVEL: "low" } });
+  assert.equal(flagged.calls[0].effort, "max");
+  assert.equal(flagged.calls[0].outputEffort, null);
+});
+
+test("an effort the driver cannot use refuses the start with exit 3 naming where it came from; a bad --effort is a usage error", () => {
+  const unusable = makeCycle();
+  writeInto(unusable, ".claude/settings.json", JSON.stringify({ effortLevel: "turbo" }));
+  const unresolvable = dryRun(unusable);
+  assert.equal(unresolvable.code, 3, unresolvable.out);
+  assert.match(unresolvable.out, /^drive-execution: the effort level cannot be resolved: effortLevel in \S+\/\.claude\/settings\.json is "turbo", not one of low, medium, high, xhigh — correct it, or pass --effort <low\|medium\|high\|xhigh\|max\|default>$/m);
+
+  const overridden = dryRun(unusable, ["--effort", "low"]);
+  assert.equal(overridden.code, 0, overridden.out);
+  assert.deepEqual(JSON.parse(overridden.out.trim().split("\n").at(-1)).command.slice(3, 7), ["--model", MODEL, "--effort", "low"]);
+
+  const badRow = dryRun(makeCycle({ drive: effortRow("turbo") }));
+  assert.equal(badRow.code, 3, badRow.out);
+  assert.ok(badRow.out.includes("drive-execution: the drive row records effort=turbo, not one of low, medium, high, xhigh, max, default — pass --effort <low|medium|high|xhigh|max|default>"), badRow.out);
+
+  for (const value of ["turbo", "HIGH", " "]) {
+    const r = dryRun(makeCycle(), ["--effort", value]);
+    assert.equal(r.code, 2, `${JSON.stringify(value)}: ${r.out}`);
+    assert.match(r.out, /^drive-execution: --effort requires one of low \| medium \| high \| xhigh \| max \| default/m);
+  }
 });
 
 test("each session gets this driver's own token, whose hash and only its hash the lock holds; every run draws a new one", async () => {
@@ -497,6 +663,33 @@ test("--detach returns only once the driver it started has handed off the previo
   }
 });
 
+// The fake claude notes the pid of whoever ran `plugin list`: its parent, which is the driver.
+function listReaders(root, flags) {
+  const readers = join(makeTempDir("devcycle-drive-plugins-"), "readers.txt");
+  const h = harness([{ ledger: DONE, stage: "branch-review" }], {}, {
+    prelude: `import { appendFileSync } from "node:fs";\nif (process.argv[2] === "plugin") appendFileSync(${JSON.stringify(readers)}, process.ppid + "\\n");\n`,
+  });
+  const r = spawnSync(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, ...flags], { cwd: root, env: h.env, encoding: "utf8" });
+  return { r, h, reads: () => (existsSync(readers) ? readFileSync(readers, "utf8").split("\n").filter(Boolean).map(Number) : []) };
+}
+
+test("the plugin list is read once per driver run: a detached start reads it in the driver it starts, not in its own pre-flight, and a user's --dry-run still reads it", async () => {
+  const root = makeCycle();
+  const detached = listReaders(root, ["--detach"]);
+  let pid = null;
+  try {
+    assert.equal(detached.r.status, 0, detached.r.stdout + detached.r.stderr);
+    pid = JSON.parse(detached.r.stdout).pid;
+    await waitFor(() => isDead(pid), 30000);
+    assert.deepEqual(detached.reads(), [pid], "the detaching parent read the plugin list, or the driver did not");
+  } finally {
+    if (pid && !isDead(pid)) process.kill(-pid, "SIGKILL");
+  }
+  const dry = listReaders(makeCycle(), ["--detach", "--dry-run"]);
+  assert.equal(dry.r.status, 0, dry.r.stdout + dry.r.stderr);
+  assert.equal(dry.reads().length, 1, "--dry-run must read the list to print the argv a session gets");
+});
+
 // The child runs the pre-flight the parent just passed, so the refusal here is one only the child
 // meets: the lock module fails closed on a reclaim a dead starter left half-done (scripts/drive-lock.mjs).
 test("--detach relays a driver that fails to start: its own stderr lines from this run, and its exit code", () => {
@@ -597,7 +790,7 @@ test("pre-flight refuses the default branch, an integration branch, a branch oth
 // no longer gates a start; a nested `claude -p` must still never inherit it.
 test("a start from inside a Claude Code session with a `drive: auto` row is admitted, and no session it starts sees CLAUDECODE", async () => {
   const seen = join(makeTempDir("devcycle-drive-env-"), "claudecode.log");
-  const prelude = `require("node:fs").appendFileSync(${JSON.stringify(seen)}, (process.env.CLAUDECODE ?? "absent") + "\\n");\n`;
+  const prelude = `if (process.argv[2] !== "plugin") require("node:fs").appendFileSync(${JSON.stringify(seen)}, (process.env.CLAUDECODE ?? "absent") + "\\n");\n`;
   const inSession = { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "the-continue-session" };
   const h = harness([{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }], inSession, { prelude });
   const r = await startDriver(makeCycle(), h).result();
@@ -813,10 +1006,12 @@ test("--stop writes the stop request and SIGTERMs the driver, which records stop
 test("--mark-handled hands off the result once continue has acted on it, says whether there was one, and needs --state", () => {
   const root = makeCycle();
   writeInto(root, RESULT_REL, JSON.stringify({ code: 4, outcome: "gate-stop", reason: "needs-user", noProgressEnds: 0 }));
+  writeInto(root, ".devcycle/drive-progress.json", "{}\n");
   const mark = (args) => spawnSync(process.execPath, [DRIVER, "--mark-handled", ...args], { cwd: root, encoding: "utf8" });
   const first = mark(["--state", statePathOf(root)]);
   assert.equal(first.status, 0, first.stdout + first.stderr);
   assert.deepEqual(JSON.parse(first.stdout), { handled: true });
+  assert.equal(existsSync(join(root, ".devcycle", "drive-progress.json")), false, "the drive band outlived the handled result");
   assert.equal(readDriveResult(root), null);
   assert.equal(readHandledResult(root).outcome, "gate-stop");
   assert.equal(classifyDrive({ statePath: statePathOf(root) }).next, "none");
@@ -989,4 +1184,155 @@ test("a driver that finds a stop request on disk ends as stopped before its next
   } finally {
     if (d.child.exitCode === null) d.child.kill("SIGKILL");
   }
+});
+
+const readProgress = (root) => {
+  try {
+    return JSON.parse(readFileSync(join(root, ".devcycle", "drive-progress.json"), "utf8"));
+  } catch {
+    return null;
+  }
+};
+const driveLogOf = (root) => (existsSync(join(root, ".devcycle", "drive.log")) ? readFileSync(join(root, ".devcycle", "drive.log"), "utf8") : "");
+const timeless = ({ startedAt: _s, updatedAt: _u, ...rest }) => rest;
+const setClock = (path, ms) => {
+  writeFileSync(`${path}.tmp`, String(ms));
+  renameSync(`${path}.tmp`, path);
+};
+const PROGRESS_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+test("the driver keeps .devcycle/drive-progress.json on the run: running per session, waiting with its deadline and a heartbeat, then ended complete", async () => {
+  const root = makeCycle();
+  const dir = makeTempDir("devcycle-drive-progress-");
+  const clock = join(dir, "clock");
+  const t0 = Math.floor(Date.now() / 1000) * 1000;
+  setClock(clock, t0);
+  // Each session's fake claude records the progress file as the session finds it.
+  const snaps = join(dir, "snaps.jsonl");
+  const prelude = `if (process.argv[2] !== "plugin") { const fs = require("node:fs"); let p = "null\\n"; ` +
+    `try { p = fs.readFileSync(".devcycle/drive-progress.json", "utf8"); } catch {} fs.appendFileSync(${JSON.stringify(snaps)}, p); }\n`;
+  const h = harness([
+    { ledger: [line(1, "dispatched")], rateLimitInSec: 60 },
+    { ledger: [DONE[0], line(2, "dispatched"), DONE[1]], stage: "branch-review" },
+  ], { DEVCYCLE_DRIVE_CLOCK_FILE: clock, DEVCYCLE_DRIVE_SLICE_MS: "5", DEVCYCLE_DRIVE_HEARTBEAT_MS: "50" }, { prelude });
+  const driver = startDriver(root, h);
+  try {
+    await waitFor(() => driveLogOf(root).includes("] wait: "));
+    const waiting = readProgress(root);
+    assert.equal(waiting?.state, "waiting", JSON.stringify(waiting));
+    assert.equal(waiting.session, 1);
+    assert.equal(waiting.waitWhat, "usage limit until its reset");
+    assert.equal(waiting.waitUntil, driveLogOf(root).match(/wait: usage limit until its reset — resuming at (\S+)/)[1]);
+    assert.equal(Date.parse(waiting.waitUntil), t0 + 120_000, "the deadline is the limit's reset plus the driver's one-minute margin");
+    assert.deepEqual(waiting.waves[0].tasks, [{ task: "1", step: "implementing", round: 0, rejections: 0 }]);
+    // The clock stands still, so nothing is logged while it waits: only the heartbeat can move updatedAt.
+    const refreshed = await new Promise((done) => {
+      const until = Date.now() + 3000;
+      const poll = () => {
+        const p = readProgress(root);
+        if (p && p.updatedAt !== waiting.updatedAt) done(p);
+        else if (Date.now() > until) done(null);
+        else setTimeout(poll, 25);
+      };
+      poll();
+    });
+    assert.equal(refreshed?.state, "waiting", "no heartbeat refreshed updatedAt while the driver waited with nothing to log");
+    setClock(clock, t0 + 10 * 60_000);
+    const r = await driver.result();
+    assert.equal(r.code, 0, r.out);
+    const log = driveLogOf(root);
+    const effort = log.match(/\] session 1 starts — .*, effort ([^,]+),/)[1];
+    const [atSession1, atSession2, ...more] = readFileSync(snaps, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.deepEqual(more, [], "a fake claude ran more than twice");
+    const pending = { v: 1, state: "running", model: MODEL, effort, waitUntil: null, waitWhat: null, stopDetail: null, outcome: null, total: 2 };
+    assert.deepEqual(timeless(atSession1), { ...pending, session: 1, currentWave: 1, committed: 0, waves: [
+      { wave: 1, committed: 0, tasks: [{ task: "1", step: "pending", round: 0, rejections: 0 }] },
+      { wave: 2, committed: 0, tasks: [{ task: "2", step: "pending", round: 0, rejections: 0 }] },
+    ] });
+    assert.deepEqual(timeless(atSession2), { ...pending, session: 2, currentWave: 1, committed: 0, waves: [
+      { wave: 1, committed: 0, tasks: [{ task: "1", step: "implementing", round: 0, rejections: 0 }] },
+      { wave: 2, committed: 0, tasks: [{ task: "2", step: "pending", round: 0, rejections: 0 }] },
+    ] });
+    const final = readProgress(root);
+    assert.deepEqual(timeless(final), { ...pending, state: "ended", outcome: "complete", session: 2, currentWave: null, committed: 2, waves: [
+      { wave: 1, committed: 1, tasks: [{ task: "1", step: "committed", round: 0, rejections: 0 }] },
+      { wave: 2, committed: 1, tasks: [{ task: "2", step: "committed", round: 0, rejections: 0 }] },
+    ] });
+    assert.match(final.startedAt, PROGRESS_ISO);
+    assert.equal(final.startedAt, atSession1.startedAt, "startedAt moved during the run");
+    assert.match(final.updatedAt, PROGRESS_ISO);
+  } finally {
+    driver.child.kill("SIGKILL");
+  }
+});
+
+test("--mark-handled clears the band of a run that ended complete and keeps the result as the handled one", async () => {
+  const root = makeCycle();
+  const r = await drive(root, [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual([readProgress(root)?.state, readProgress(root)?.outcome], ["ended", "complete"], "the band's data is the run's end until continue handles it");
+  const mark = spawnSync(process.execPath, [DRIVER, "--mark-handled", "--state", statePathOf(root)], { cwd: root, encoding: "utf8" });
+  assert.equal(mark.status, 0, mark.stdout + mark.stderr);
+  assert.equal(existsSync(join(root, ".devcycle", "drive-progress.json")), false, "the band outlived the handled end");
+  assert.equal(readHandledResult(root).outcome, "complete");
+  assert.equal(classifyDrive({ statePath: statePathOf(root) }).next, "none");
+});
+
+// The band says "run /devcycle:continue" for an ended run until continue handles it; the two ends that
+// hand off to a later stage are handled by the handoff itself, so the doc must run the command there.
+test("references/drive.md, read as the When the run ends section alone, carries the full command that marks a completed run's end handled", () => {
+  const ends = readSection("references/drive.md", "when-the-run-ends");
+  const bullets = ends.split(/^- /m);
+  const branchReview = bullets.find((b) => b.startsWith("`branch-review`"));
+  assert.ok(branchReview, "§ When the run ends has no `branch-review` bullet");
+  assert.ok(
+    branchReview.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --mark-handled --state .devcycle/state.md'),
+    "the `branch-review` bullet names no runnable --mark-handled command, and a session that loaded this section alone has none to run",
+  );
+  const resumeStage = bullets.find((b) => b.startsWith("`resume-stage`"));
+  assert.ok(resumeStage, "§ When the run ends has no `resume-stage` bullet");
+  assert.match(resumeStage, /--mark-handled|same command/, "the `resume-stage` bullet never marks the end handled, so the band keeps saying the run is waiting for continue");
+});
+
+test("references/drive.md marks the previous result handled when a refused sandbox approval ends in Walk the waves manually", () => {
+  const refused = readSection("references/drive.md", "the-start-path")
+    .split(/^ {3}- /m)
+    .find((b) => b.startsWith("The approval is refused"));
+  assert.ok(refused, "the start path has no refused-approval bullet");
+  assert.match(refused, /Walk the waves\s+manually/, "the refused-approval bullet no longer offers Walk the waves manually");
+  assert.match(
+    refused,
+    /--mark-handled|Answering a stopped run/,
+    "the refused-approval Walk-manually answer leaves the previous run's result unhandled, so the band keeps showing it for the whole manual walk",
+  );
+});
+
+test("a stop for the user leaves the progress file stopped with the stop's reason and detail, and the task's step, round and rejections", async () => {
+  const root = makeCycle();
+  const review = [
+    "task=1 event=dispatched outcome=ok ref=none",
+    "task=1 event=report-received outcome=complete ref=none",
+    "task=1 event=review-round outcome=round 1 ref=none key=1/review-round/1/0",
+    "task=1 event=review-verdict outcome=rejected ref=none key=1/review-verdict/1/0",
+    "task=1 event=report-received outcome=rejected (intake bounce) ref=none key=1/report-received/2/0",
+    "task=1 event=review-round outcome=round 2 ref=none key=1/review-round/2/0",
+    "task=1 event=review-verdict outcome=rejected (missing findings file) ref=none key=1/review-verdict/2/0",
+  ];
+  const r = await drive(root, [{ ledger: review, stop: { reason: "needs-user", detail: "task 1: a decision" } }]);
+  assert.equal(r.code, 4, r.out);
+  const p = readProgress(root);
+  assert.equal(p?.state, "stopped", JSON.stringify(p));
+  assert.equal(p.stopDetail, "needs-user: task 1: a decision");
+  assert.match(driveLogOf(root), /stopped for you — needs-user: task 1: a decision\n/);
+  assert.equal(p.outcome, null);
+  assert.equal(p.session, 1);
+  assert.equal(p.currentWave, 1);
+  assert.deepEqual(p.waves[0].tasks, [{ task: "1", step: "reviewing", round: 2, rejections: 2 }]);
+});
+
+test("--dry-run writes no progress file", () => {
+  const root = makeCycle();
+  const r = dryRun(root);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(existsSync(join(root, ".devcycle", "drive-progress.json")), false);
 });

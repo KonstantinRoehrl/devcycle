@@ -13,7 +13,7 @@ import { RETRY_CAP, taskPosition, waveSetup } from "../../scripts/wave-setup.mjs
 import { DRIVE_LOCK_REL, acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 import { RESULT_REL } from "../../scripts/drive-result.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
-import { reviewLoopId } from "../../scripts/task-verdict.mjs";
+import { reviewLoopId } from "../../scripts/review-loop.mjs";
 import { ROSTER, formatKnobsLine, resolveKnobs } from "../../scripts/resolve-knobs.mjs";
 
 const ROOT = process.cwd();
@@ -426,7 +426,7 @@ test("drive mode: a resumable cycle reports its opt-in, its model, its driver an
     const r = driven(c, { knobsLine: KNOBS });
     assert.equal(r.action, "resume");
     assert.deepEqual(r.drive, { opted: true, model: "claude-haiku-4-5", lock: { pid: process.pid, log: lock.log }, optInLogged: false,
-      row: "auto", mode: "ask", action: "none", writeRow: null, recommend: null, gate: null, result: r.drive.result });
+      row: "auto", mode: "ask", watch: "end", plugins: "none", action: "none", writeRow: null, recommend: null, gate: null, result: r.drive.result });
     assert.deepEqual([r.drive.result.running, r.drive.result.pid], [true, process.pid]);
     assert.deepEqual([r.overview.committed, r.overview.nextWave, r.ledgerSlot], [1, 1, "fresh"]);
     assert.ok(!JSON.stringify(r).includes(driveTokenHash(TOKEN)), "wave-setup reports the lock's token hash");
@@ -452,7 +452,7 @@ test("drive.action: a live driver on this state file is attached to before knob 
 });
 
 test("drive.action: a drive: row outranks the executionMode knob; with no row the knob walks manually or asks, unattended leading the question", () => {
-  assert.match(knobsWith("unattended"), / executionMode=unattended$/);
+  assert.match(knobsWith("unattended"), / executionMode=unattended\b/);
   const decide = (c, knobsLine) => {
     const r = setup(c, { knobsLine });
     return [r.action, r.drive.row, r.drive.mode, r.drive.action, r.drive.writeRow, r.drive.recommend];
@@ -468,6 +468,23 @@ test("drive.action: a drive: row outranks the executionMode knob; with no row th
   assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), KNOBS), ["resume", "auto", "ask", "start", null, null]);
   assert.deepEqual(setup(cycle({ state: [`- ${KNOBS}`] }), { knobsLine: knobsWith("unattended") }).knobDrift, [],
     "executionMode is live: a changed value is never knob drift");
+});
+
+test("drive.watch and drive.plugins: the fresh values on every call, the fallback when absent or invalid, never knob drift", () => {
+  const fresh = formatKnobsLine(resolveKnobs({ ...UNSET, driveWatch: "wave", drivePlugins: "context7,figma" }).knobs);
+  const read = (c, knobsLine) => {
+    const r = setup(c, { knobsLine });
+    return [r.drive.watch, r.drive.plugins];
+  };
+  assert.deepEqual(read(cycle(), fresh), ["wave", "context7,figma"]);
+  assert.deepEqual(read(cycle({ state: [DRIVE_ROW] }), fresh), ["wave", "context7,figma"], "a drive: row hides the fresh values");
+  assert.deepEqual(read(cycle(), KNOBS), ["end", "none"]);
+  assert.deepEqual(read(cycle(), null), ["end", "none"], "no --knobs line reads as the fallbacks");
+  assert.deepEqual(read(cycle(), "knobs: profile=standard executionMode=ask"), ["end", "none"], "a line from before the two knobs reads as the fallbacks");
+  assert.deepEqual(read(cycle(), fresh.replace("driveWatch=wave", "driveWatch=loud").replace("drivePlugins=context7,figma", "drivePlugins=none,figma")),
+    ["end", "none"]);
+  assert.deepEqual(setup(cycle({ state: [`- ${KNOBS}`] }), { knobsLine: fresh }).knobDrift, [],
+    "driveWatch and drivePlugins are live: a changed value is never knob drift");
 });
 
 test("drive.writeRow: no knob value and no driver end ever writes an auto row", () => {

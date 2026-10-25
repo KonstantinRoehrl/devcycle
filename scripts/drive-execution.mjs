@@ -13,22 +13,27 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import agentCli from "../workflows/lib/agent-cli.js";
 import { defaultBranches, isProtectedBranch } from "./branch-names.mjs";
+import { EFFORT_LEVELS, resolveEffort } from "./claude-settings.mjs";
 import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
+import { buildProgress, removeProgress, writeProgress } from "./drive-progress.mjs";
 import { holderLiveness, LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
-import { follow, statusReport, waitForEnd } from "./drive-watch.mjs";
+import { readPluginList, surfaceArgs } from "./drive-surface.mjs";
+import { follow, statusReport, WATCH_LEVELS, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
 import { gitToplevel, hashSession } from "./run-record.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { PRICING } from "./pricing.mjs";
+import { allowedSet, inSet, ROSTER } from "./resolve-knobs.mjs";
 import { now } from "./stamp.mjs";
 import { parseDispatchMap, taskFileMap } from "./task-files.mjs";
 import { appendRunRecordOnce, ledgerPlan, parseLedgerLine } from "./task-ledger.mjs";
+import { planProgress } from "./wave-setup.mjs";
 
 const { spawnStreaming, killGroup } = agentCli;
 
@@ -42,6 +47,9 @@ const RUN_ID = /^[0-9a-f]{16}$/;
 // text: a session silent this long is taken to be held by a limit. DEVCYCLE_DRIVE_IDLE_MS shortens
 // it for tests.
 const IDLE_LIMIT_MS = Number(process.env.DEVCYCLE_DRIVE_IDLE_MS) || 30 * 60_000;
+// How often the drive band's progress file is rewritten while nothing is logged: the band reads a file
+// 120 s old as a silent driver. DEVCYCLE_DRIVE_HEARTBEAT_MS shortens it for tests.
+const HEARTBEAT_MS = Number(process.env.DEVCYCLE_DRIVE_HEARTBEAT_MS) || 30_000;
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
 const SIGNAL_GRACE_MS = 10_000;
 const DETACH_POLL_MS = 50;
@@ -77,6 +85,7 @@ const DEAREST_MODEL = Object.keys(PRICING.models).reduce((a, b) => (PRICING.mode
 const KNOWN_FLAGS = {
   "--state": "value",
   "--model": "value",
+  "--effort": "value",
   "--max-usd": "value",
   "--max-stalls": "value",
   "--max-churn": "value",
@@ -91,7 +100,15 @@ const KNOWN_FLAGS = {
   "--follow": "none",
   "--wait": "none",
   "--since": "value",
+  "--plugins": "value",
+  "--level": "value",
 };
+
+// The drivePlugins knob's own check, so the flag the start path passes reads exactly as the knob does.
+const DRIVE_PLUGINS = ROSTER.find(({ key }) => key === "drivePlugins");
+
+// "default" leaves the effort to Claude Code: no --effort, and no CLAUDE_CODE_EFFORT_LEVEL in a session's env.
+const EFFORT_CHOICES = [...EFFORT_LEVELS, "default"];
 
 class Exit extends Error {
   constructor(code, message) {
@@ -106,6 +123,13 @@ function parseArgs(argv) {
   if (watches.length > 1) throw new Error("--status, --follow and --wait are exclusive");
   const since = requireCount(flags, "--since", { min: 0, noun: "a byte offset" });
   if (since !== undefined && watches[0] !== "--follow") throw new Error("--since applies to --follow only");
+  const level = requireValue(flags, "--level", `one of ${WATCH_LEVELS.join(" | ")}`);
+  if (level !== undefined && watches[0] !== "--follow") throw new Error("--level applies to --follow only");
+  if (level !== undefined && !WATCH_LEVELS.includes(level))
+    throw new Error(`--level requires one of ${WATCH_LEVELS.join(" | ")}, got ${JSON.stringify(level)}`);
+  const pluginsValue = requireValue(flags, "--plugins", allowedSet(DRIVE_PLUGINS));
+  const plugins = pluginsValue === undefined ? DRIVE_PLUGINS.fallback : inSet(DRIVE_PLUGINS, pluginsValue);
+  if (plugins === null) throw new Error(`--plugins requires ${allowedSet(DRIVE_PLUGINS)}, got ${JSON.stringify(pluginsValue)}`);
   const checkSandbox = "--check-sandbox" in flags;
   const state = requireValue(flags, "--state");
   if (!state && !checkSandbox) throw new Error("--state <path to .devcycle/state.md> is required");
@@ -113,13 +137,19 @@ function parseArgs(argv) {
   const maxUsd = usd === undefined ? undefined : Number(usd);
   if (maxUsd !== undefined && !(maxUsd > 0))
     throw new Error(`--max-usd requires a positive dollar amount, got ${JSON.stringify(usd)}`);
+  const effort = requireValue(flags, "--effort", `one of ${EFFORT_CHOICES.join(" | ")}`);
+  if (effort !== undefined && !EFFORT_CHOICES.includes(effort))
+    throw new Error(`--effort requires one of ${EFFORT_CHOICES.join(" | ")}, got ${JSON.stringify(effort)}`);
   return {
     watch: watches[0] ?? null,
     since: since ?? null,
+    level: level ?? "all",
+    plugins,
     checkSandbox,
     state,
     maxUsd,
     model: requireValue(flags, "--model", "a model id"),
+    effort,
     maxStalls: requireCount(flags, "--max-stalls") ?? 2,
     maxChurn: requireCount(flags, "--max-churn") ?? 3,
     maxBackoffMs: (requireCount(flags, "--max-backoff", { min: 0 }) ?? 360) * 60_000,
@@ -142,6 +172,7 @@ function readState(statePath) {
     run: first("run"),
     opted: /^auto\b/.test(drive),
     model: drive.match(/\bmodel=(\S+)/)?.[1] ?? null,
+    effort: drive.match(/\beffort=(\S+)/)?.[1] ?? null,
   };
 }
 
@@ -244,6 +275,21 @@ const SANDBOX_REFUSAL =
   "the Claude Code Bash sandbox blocks ~/.claude — /devcycle:continue retries the start outside the sandbox through a " +
   'permission prompt; from a terminal, use one that is not a Claude Code session ("!" runs inside the session)';
 
+// --effort beats the row's effort=, and a row written before effort= was recorded is resolved here
+// from the settings, never written back (docs/decisions/README.md, 2026-10-25).
+function driveEffort(root, state, opts, model) {
+  const override = `pass --effort <${EFFORT_CHOICES.join("|")}>`;
+  if (opts.effort) return opts.effort;
+  if (state.effort) {
+    if (!EFFORT_CHOICES.includes(state.effort))
+      throw new Exit(3, `the drive row records effort=${state.effort}, not one of ${EFFORT_CHOICES.join(", ")} — ${override}`);
+    return state.effort;
+  }
+  const { effort, problem } = resolveEffort({ env: process.env, cwd: root, model });
+  if (effort === null) throw new Exit(3, `the effort level cannot be resolved: ${problem} — correct it, or ${override}`);
+  return effort;
+}
+
 function checkEnvironment(root, state, opts) {
   if (!state.opted)
     throw new Exit(3, "the state file has no `drive: auto` row — run /devcycle:continue and answer Start unattended");
@@ -270,8 +316,9 @@ function checkEnvironment(root, state, opts) {
   }
   const refusal = modelRefusal(model);
   if (refusal) throw new Exit(3, refusal);
+  const effort = driveEffort(root, state, opts, model);
   if (sandboxed()) throw new Exit(3, SANDBOX_REFUSAL);
-  return { model, planText, plan: state.plan, run: state.run, leftAlone };
+  return { model, effort, planText, plan: state.plan, run: state.run, leftAlone };
 }
 
 function release(ctx) {
@@ -282,7 +329,7 @@ function release(ctx) {
 // Fail closed: every refusal exits 3 and leaves no lock behind — and leaves the last run's result and
 // a stop request where they are, since only a run that starts supersedes them. The checks come
 // before the lock, so a lock naming a driver means its pre-flight passed, which detach relies on.
-function preflight(opts) {
+function preflight(opts, { readList = true } = {}) {
   let statePath;
   try {
     statePath = realpathSync(resolve(opts.state));
@@ -297,6 +344,8 @@ function preflight(opts) {
   const holder = readLiveDriveLock(root);
   if (holder) throw new Exit(3, heldBy(holder));
   Object.assign(ctx, checkEnvironment(root, readState(statePath), opts));
+  // Read once per run, before the lock, so --dry-run's command is the argv a session gets.
+  if (readList) ctx.surface = surfaceArgs({ drivePlugins: opts.plugins, list: readPluginList({ bin: opts.bin, cwd: root }) });
   if (opts.dryRun) return ctx;
   const got = acquireDriveLock(root, { statePath: ctx.stateRel, logPath: LOG_REL, tokenHash: driveTokenHash(ctx.token) });
   if (!got.ok) throw new Exit(3, heldBy(got.holder));
@@ -313,8 +362,9 @@ function preflight(opts) {
 }
 
 function sessionArgs(ctx, opts, spent) {
-  const args = ["-p", `/devcycle:continue --drive ${ctx.stateRel}`, "--model", ctx.model,
-    "--permission-mode", "auto", "--output-format", "stream-json", "--verbose"];
+  const args = ["-p", `/devcycle:continue --drive ${ctx.stateRel}`, "--model", ctx.model];
+  if (ctx.effort !== "default") args.push("--effort", ctx.effort);
+  args.push("--permission-mode", "auto", "--output-format", "stream-json", "--verbose", ...ctx.surface.args);
   if (opts.maxUsd !== undefined) args.push("--max-budget-usd", Math.max(opts.maxUsd - spent, 0.01).toFixed(2));
   return args;
 }
@@ -327,6 +377,13 @@ function childEnv(ctx) {
   // /devcycle:continue starts the driver from inside its own session.
   delete env.DEVCYCLE_NESTED_RUN;
   delete env.CLAUDECODE;
+  // CLAUDE_CODE_EFFORT_LEVEL is the variable Claude Code reads to override a session's effort, and
+  // it likely beats --effort: set it to the level --effort passes — or drop an inherited one at
+  // default — so the flag and the override never disagree. CLAUDE_EFFORT is only output, set in a
+  // session's Bash and hook children, and would misreport the session's effort if it stayed.
+  if (ctx.effort === "default") delete env.CLAUDE_CODE_EFFORT_LEVEL;
+  else env.CLAUDE_CODE_EFFORT_LEVEL = ctx.effort;
+  delete env.CLAUDE_EFFORT;
   return env;
 }
 
@@ -738,6 +795,35 @@ function makeLog(root) {
   };
 }
 
+// The drive band's data (scripts/drive-progress.mjs), rewritten before every log line and on a
+// heartbeat. The band is a view of the run: a write that fails never stops it, and the next line or
+// beat writes it again.
+function trackProgress(ctx) {
+  const run = { state: "running", session: 0, model: ctx.model, effort: ctx.effort, startedAt: ctx.startedAt,
+    waitUntil: null, waitWhat: null, stopDetail: null, outcome: null };
+  const write = () => {
+    try {
+      writeProgress(ctx.root, buildProgress({ run, plan: planProgress({ root: ctx.root, statePath: ctx.statePath }) }));
+    } catch {
+      // Left as it was.
+    }
+  };
+  const heartbeat = setInterval(write, HEARTBEAT_MS);
+  heartbeat.unref();
+  return {
+    run,
+    write,
+    stop: () => clearInterval(heartbeat),
+    // A stop for the user is `stopped`, with the line the log printed; every other end is `ended`, with
+    // the outcome the result file records.
+    end: (end, outcome) => {
+      Object.assign(run, { waitUntil: null, waitWhat: null },
+        end.outcome === "gate-stop" ? { state: "stopped", stopDetail: `${end.reason}: ${end.detail}` } : { state: "ended", outcome });
+      write();
+    },
+  };
+}
+
 const OUTCOME_OF = { interrupted: "interrupted", environment: "environment", stalled: "stalled", budget: "budget" };
 const ended = (code, outcome, detail = "") => ({ code, outcome, reason: null, detail, task: null });
 
@@ -746,7 +832,7 @@ function endOf(verdict) {
   return { ...ended(verdict.code, OUTCOME_OF[verdict.exitReason], verdict.message ?? ""), reason: verdict.reason ?? null };
 }
 
-async function walk(ctx, opts, log, trap) {
+async function walk(ctx, opts, log, trap, runState) {
   let stalls = 0;
   let churn = 0;
   let spent = 0;
@@ -772,7 +858,9 @@ async function walk(ctx, opts, log, trap) {
     const before = progressOf(entriesBefore);
     const waveAtStart = inFlightFiles(ctx.planText, entriesBefore).wave;
     const startedAt = now();
-    log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}`);
+    Object.assign(runState, { state: "running", session: n, waitUntil: null, waitWhat: null });
+    if (n === 1 && ctx.surface.note) log(ctx.surface.note);
+    log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}, effort ${ctx.effort}, plugins ${ctx.surface.plugins}, mcp ${ctx.surface.mcp}`);
     const s = await runSession(ctx, opts.bin, sessionArgs(ctx, opts, spent), log, n);
     const entriesAfter = ledgerEntries(ctx.root, ctx.plan);
     const after = progressOf(entriesAfter);
@@ -793,7 +881,8 @@ async function walk(ctx, opts, log, trap) {
     if (verdict.code !== null) return endOf(verdict);
     if (verdict.wait) {
       const deadline = clockNow() + verdict.wait.ms;
-      log(`wait: ${verdict.wait.what} — resuming at ${new Date(deadline).toISOString()}`);
+      Object.assign(runState, { state: "waiting", waitUntil: new Date(deadline).toISOString(), waitWhat: verdict.wait.what });
+      log(`wait: ${verdict.wait.what} — resuming at ${runState.waitUntil}`);
       await waitUntil(trap, deadline, ctx.root);
       if (verdict.wait.charged) waited += verdict.wait.ms;
     }
@@ -811,6 +900,7 @@ function recordEnd(ctx, end, startedAt) {
     progressed, noProgressEnds: noProgressEndsAfter(ctx.root, { progressed, outcome, reason: end.reason }),
   });
   rmSync(request, { force: true });
+  return outcome;
 }
 
 async function drive(opts) {
@@ -822,18 +912,24 @@ async function drive(opts) {
   const trap = trapSignals(ctx);
   const startedAt = now();
   ctx.startedAt = startedAt;
+  const progress = trackProgress(ctx);
+  const log = makeLog(ctx.root);
   let end = ended(1, "failed");
   try {
     writeCrashedResult(ctx.root, { startedAt, progressed: false });
-    end = await walk(ctx, opts, makeLog(ctx.root), trap);
+    end = await walk(ctx, opts, (msg) => {
+      progress.write();
+      log(msg);
+    }, trap, progress.run);
     return end.code;
   } catch (err) {
     end = ended(1, "failed", err.message);
     throw err;
   } finally {
+    progress.stop();
     trap.dispose();
     try {
-      recordEnd(ctx, end, startedAt);
+      progress.end(end, recordEnd(ctx, end, startedAt));
     } finally {
       release(ctx);
     }
@@ -856,9 +952,10 @@ function relayRefusal(root, logOffset) {
 // no terminal's hangup reaches it, unlike a `nohup … &` child of the caller's session. It returns
 // only once the child holds the lock and has handed off the last run's result, so a watch armed next
 // never reads a run not yet begun as ended; however long that takes, since a driver left running
-// unreported runs unwatched. The child's pre-flight is bounded, so the wait ends.
+// unreported runs unwatched. The child's pre-flight is bounded, so the wait ends. The plugin list is
+// the child's to read: its fallback note reaches the log, and a hung `claude plugin list` is waited on once.
 async function detach(opts, argv) {
-  const { root } = preflight({ ...opts, dryRun: true });
+  const { root } = preflight({ ...opts, dryRun: true }, { readList: false });
   const logPath = join(root, LOG_REL);
   const logOffset = existsSync(logPath) ? statSync(logPath).size : 0;
   // The child renames the result away, or replaces it with its own: either changes its inode.
@@ -929,9 +1026,11 @@ export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, si
   return 0;
 }
 
-// /devcycle:continue's hand-off once it has acted on a result: a gate answered, or a restart begun.
+// /devcycle:continue's hand-off once it has acted on a result: a gate answered, a restart begun, or the
+// handoff after a completed run emitted. The drive band goes with it.
 function markHandled(state) {
   const root = dirname(dirname(resolve(state)));
+  removeProgress(root);
   console.log(JSON.stringify({ handled: markResultHandled(root) }));
   return 0;
 }
@@ -947,7 +1046,7 @@ async function main(argv) {
   if (opts.watch) {
     const pollMs = Number(process.env.DEVCYCLE_DRIVE_POLL_MS) || undefined;
     const statePath = opts.state;
-    if (opts.watch === "--follow") await follow({ statePath, since: opts.since, pollMs });
+    if (opts.watch === "--follow") await follow({ statePath, since: opts.since, pollMs, level: opts.level });
     else console.log(JSON.stringify(opts.watch === "--wait" ? await waitForEnd({ statePath, pollMs }) : statusReport({ statePath })));
     return 0;
   }

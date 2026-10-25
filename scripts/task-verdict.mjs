@@ -6,13 +6,16 @@
 // A rejected round 3 is the review loop's exhaustion: its status file is written per
 // references/loops.md and the task becomes a user decision (references/resume.md). task-commit.mjs
 // writes the same status when the green gate rejects round 3's acceptance.
+// Given task-commit.mjs's --plan, --test-cmd and --subject, an accepted verdict commits in the same
+// call, and the result is the commit's with this verdict under `verdict`.
 // Contract: references/ledger.md § Task scripts.
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { atomicWrite } from "./atomic-write.mjs";
 import { gitToplevel } from "./git-identity.mjs";
 import { isMain } from "./is-main.mjs";
+import { ROUND_CAP, exhaustReviewLoop } from "./review-loop.mjs";
 import { validateCulprit } from "./run-record.mjs";
+import { commitArgs, taskCommit } from "./task-commit.mjs";
 import {
   MISSING_FINDINGS, UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, countFlag, latestKeyed, ledgerKey,
   nextRetry, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot,
@@ -20,12 +23,14 @@ import {
 
 const FLAGS = {
   "--run": "value", "--task": "value", "--round": "value", "--findings": "value", "--evidence-class": "value",
-  "--ledger": "value",
+  "--ledger": "value", "--plan": "value", "--test-cmd": "value", "--subject": "value", "--trailers": "value",
+  "--culprit": "value",
 };
 const REQUIRED = ["--run", "--task", "--round", "--findings", "--evidence-class"];
+const COMMIT_FLAGS = ["--plan", "--test-cmd", "--subject", "--trailers", "--culprit"];
+const COMMIT_REQUIRED = ["--plan", "--test-cmd", "--subject"];
 const EVIDENCE_CLASSES = new Set(["red-green", "green-green", "convention"]);
 const RETRY_CAP = 2;
-export const ROUND_CAP = 3;
 // The review-verdict outcomes this script writes; task-commit.mjs's green-gate lines share the event.
 const OWN_OUTCOMES = new Set(["accepted", "rejected", MISSING_FINDINGS]);
 // Blocking-ness is derived from severity (references/findings.md § Severity): critical and high block.
@@ -98,38 +103,39 @@ function verdictRetry(ledger, task, later, outcome) {
   return written?.outcome === outcome ? Number(written.key.split("/")[3]) : nextRetry(ledger, task, "review-verdict");
 }
 
-export const reviewLoopId = (task) => `task-${task}-review`;
-
-// references/loops.md § Where the status lives: the task's review loop ran out of rounds with
-// `residue` blocking items unresolved. Returns the loop id the user's decision names.
-export function exhaustReviewLoop(root, task, round, residue) {
-  const loopId = reviewLoopId(task);
-  mkdirSync(join(root, ".devcycle/findings"), { recursive: true });
-  atomicWrite(join(root, `.devcycle/findings/${loopId}-status.md`),
-    `status: exhausted-unresolved rounds: ${round}/${ROUND_CAP} residue: ${residue} carried-to: none\n`);
-  return loopId;
+// task-commit.mjs's argv for the commit an accept runs in-process, checked as that script checks it;
+// null when no commit flag is given. A flag's `=` form keeps a value that starts with `--` its own.
+function commitArgv(flags) {
+  const given = COMMIT_FLAGS.filter((name) => Object.hasOwn(flags, name));
+  if (!given.length) return null;
+  const missing = COMMIT_REQUIRED.filter((name) => !given.includes(name));
+  if (missing.length)
+    throw new UsageError(`${given.join(", ")} needs ${missing.join(", ").replace(/, ([^,]+)$/, " and $1")} too: an accepted verdict commits only given --plan, --test-cmd and --subject`);
+  const argv = ["--run", flags["--run"], "--task", flags["--task"], ...[...given, ...(Object.hasOwn(flags, "--ledger") ? ["--ledger"] : [])]
+    .map((name) => (flags[name] === undefined ? name : `${name}=${flags[name]}`))];
+  commitArgs(argv);
+  return argv;
 }
 
-// A rejection — the reviewer's or the green gate's, never a missing findings file — at or past the
-// round cap: the line each exhaustion of the loop writes right after its status file.
-const exhausts = (e) => e.event === "review-verdict" && e.outcome.startsWith("rejected") &&
-  !e.outcome.startsWith(MISSING_FINDINGS) && Number(e.key?.split("/")[2]) >= ROUND_CAP;
-
-// references/resume.md § Exhausted-unresolved: the loop id while the task's review loop waits on the
-// user, else null. `entries` are the task's ledger lines of this cycle, in file order. The status file
-// is keyed by a task id every cycle reuses and carries no time, so it counts only for an exhaustion
-// this ledger holds, and only while no decision on the loop follows the latest one.
-export function pendingReviewLoop(root, task, entries) {
-  const loopId = reviewLoopId(task);
-  let status;
-  try {
-    status = readFileSync(join(root, `.devcycle/findings/${loopId}-status.md`), "utf8");
-  } catch {
-    return null;
+// A commit that failed after the verdict was recorded: carries what the verdict wrote, so the failure
+// output does not read as though nothing was.
+class CommitFailed extends Error {
+  constructor(cause, verdictFields, appended) {
+    super(cause.message, { cause });
+    this.verdictFields = verdictFields;
+    this.appended = appended;
   }
-  if (!/^status:\s*exhausted-unresolved\b/m.test(status)) return null;
-  const decided = entries.findLastIndex((e) => e.event === "user-decision" && e.outcome.includes(loopId));
-  return entries.findLastIndex(exhausts) > decided ? loopId : null;
+}
+
+// The commit's result, with the verdict it followed under `verdict` and the verdict's keys first.
+function committed(commit, cwd, verdictFields, appended) {
+  let result;
+  try {
+    result = taskCommit(commit, cwd);
+  } catch (err) {
+    throw new CommitFailed(err, verdictFields, appended);
+  }
+  return { ...result, verdict: verdictFields, appended: [...appended, ...result.appended] };
 }
 
 export function verdict(argv, cwd = process.cwd()) {
@@ -141,6 +147,7 @@ export function verdict(argv, cwd = process.cwd()) {
   const round = countFlag(flags, "--round", 1);
   if (!EVIDENCE_CLASSES.has(evidenceClass))
     throw new UsageError(`--evidence-class must be red-green, green-green or convention, got "${evidenceClass}"`);
+  const commit = commitArgv(flags);
 
   const root = workTreeRoot(cwd);
   const ledger = flags["--ledger"] ?? join(root, ".devcycle/ledger.md");
@@ -152,6 +159,12 @@ export function verdict(argv, cwd = process.cwd()) {
   // own: the green gate's rejection of it, the fix's dispatch — the round is closed, and reading it
   // again would hand what followed it, an unreviewed fix among them, that round's accept.
   const closing = later.find((e) => !(e.event === "review-verdict" && OWN_OUTCOMES.has(e.outcome)));
+  // A commit call re-run once the round's accept committed: the accept stands as the ledger holds it,
+  // and task-commit.mjs's own re-run adds only what the commit still lacks.
+  const accept = commit && closing?.event === "committed" && later.findLast((e) => e.event === "review-verdict" && e.outcome === "accepted");
+  if (accept)
+    return committed(commit, cwd,
+      { verdict: "accept", round, retry: Number(accept.key.split("/")[3]), findingsPath: accept.ref, blocking: 0, culprit: null }, []);
   if (closing)
     throw new UsageError(`round ${round} of task ${task} is closed: its verdict was acted on (${closing.event} ${closing.outcome})`);
   const findingsRel = relative(root, resolve(cwd, flags["--findings"]));
@@ -187,7 +200,10 @@ export function verdict(argv, cwd = process.cwd()) {
   row("verdict", { taskId: task, round, blockingCount: parsed.blocking, evidenceClass, conformance: accepted ? "pass" : "fail" },
     ["taskId", "round", "conformance"]);
   const result = { ...base, verdict: parsed.verdict, culprit: parsed.culprit, blocking: parsed.blocking, appended };
-  if (accepted) return { ...result, action: "accepted" };
+  if (accepted)
+    return commit
+      ? committed(commit, cwd, { verdict: parsed.verdict, round, retry, findingsPath: findingsRel, blocking: parsed.blocking, culprit: parsed.culprit }, appended)
+      : { ...result, action: "accepted" };
 
   // The ledger line's own stamp is the event's time, so a re-run that finds that line writes the
   // same row and is skipped, while a later round's rejection — a new line, a review round later and
@@ -198,4 +214,19 @@ export function verdict(argv, cwd = process.cwd()) {
   return { ...result, action: "needs-user", reason: "review loop exhausted-unresolved", loopId };
 }
 
-if (isMain(import.meta.url, process.argv[1])) runTaskScript("task-verdict", () => verdict(process.argv.slice(2)));
+// A failed commit is runTaskScript's failure output, with the recorded verdict beside the error.
+function verdictOrCommitFailure(argv) {
+  try {
+    return verdict(argv);
+  } catch (err) {
+    if (!(err instanceof CommitFailed)) throw err;
+    const usage = err.cause instanceof UsageError;
+    process.exitCode = usage ? 2 : 3;
+    return {
+      ok: false, action: usage ? "usage-error" : "environment-error",
+      error: `task-verdict: ${err.message}`, verdict: err.verdictFields, appended: err.appended,
+    };
+  }
+}
+
+if (isMain(import.meta.url, process.argv[1])) runTaskScript("task-verdict", () => verdictOrCommitFailure(process.argv.slice(2)));

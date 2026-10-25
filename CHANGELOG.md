@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.28.0 — 2026-10-25
+
+- feat(drive): cut driven-run cost with a lean surface, explicit effort and a drive band (#372, #373, #375, #374)
+
+An unattended run now costs fewer model turns and tells you less often. The session that started the
+run used to relay every task outcome to you, each relay a model turn; the new `driveWatch` knob
+(`end`, the default, `wave` or `all`) sets how much it relays, and at `end` only the run's end comes
+through (#372). Progress shows instead on a band above the prompt, drawn by the hooks module from
+`.devcycle/drive-progress.json`: the wave strip, the current wave's task rows with a rejection count,
+and a banner for waiting on a usage limit, stopped for you, ended, or a driver that has gone silent.
+It redraws on its own with no model turn, narrows to fit the terminal and clears once a completed
+run's handoff is emitted.
+
+Driven sessions start on a lean surface: only devcycle and superpowers load, with no MCP servers,
+unless the new `drivePlugins` knob names more (a comma-separated list, or `all`), and the plugin list
+is read once per detached start (#373). Their effort is explicit too: it is resolved at the start,
+recorded as `effort=` on the `drive:` row, and passed through `CLAUDE_CODE_EFFORT_LEVEL`, with
+`default` leaving it to Claude Code. A `max` set only in a settings file is skipped rather than
+inherited, and a start that cannot resolve an effort stops and says why (#375).
+
+The per-task coordinator work moves into scripts, a slice of #374. `task-intake` composes the
+reviewer brief, `task-dispatch` fills the implementer brief's lessons, and `task-verdict` now owns the
+green-gate commit, with the review-loop helpers they share in `review-loop.mjs`; a failed in-process
+commit is reported with its verdict. `doctor` counts cost, depth and turns per model request instead
+of per transcript record, counts each run's planned tasks once, and reports turns per stage and main
+turns per task during execution, so its figures no longer overstate a request that logged several
+records.
+
 ## 0.27.0 — 2026-10-24
 
 - feat(verify): run the driver first and skip on-device when nothing renders

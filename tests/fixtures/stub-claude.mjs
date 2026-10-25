@@ -2,9 +2,10 @@
 // `--claude`; it never calls a model. Each invocation plays the next step of the JSON array named by
 // STUB_CLAUDE_SCENARIO — editing the state file, the ledger and drive-stop.json the way a driven
 // session would, then printing stream-json events — and first appends what it was given (its argv,
-// whether DEVCYCLE_NESTED_RUN reached it, its pid, the DEVCYCLE_DRIVE_TOKEN it was handed and the
-// drive lock's tokenHash at that moment, and its clock reading) to the JSONL file named by
-// STUB_CLAUDE_CALLS.
+// whether DEVCYCLE_NESTED_RUN reached it, its pid, the DEVCYCLE_DRIVE_TOKEN it was handed, the
+// CLAUDE_CODE_EFFORT_LEVEL override that sets its effort (`effort`) and any CLAUDE_EFFORT, which Claude
+// Code only outputs and never reads (`outputEffort`), the drive lock's tokenHash at that moment, and its
+// clock reading) to the JSONL file named by STUB_CLAUDE_CALLS.
 //
 // A step's keys, all optional: `plugins` (the init event's list; default devcycle only),
 // `pluginErrors`, `ledger` (lines appended after a `- [<stamp>] ` prefix), `stage` (rewrites the
@@ -32,6 +33,13 @@ function clockNow() {
   return Date.now();
 }
 
+// `claude plugin list --json`, which the driver runs once before its first session: answered from
+// STUB_CLAUDE_PLUGIN_LIST outside the scenario, so it neither plays a step nor lands in the call log.
+if (process.argv[2] === "plugin" && process.argv[3] === "list") {
+  process.stdout.write(process.env.STUB_CLAUDE_PLUGIN_LIST ?? "[]");
+  process.exit(0);
+}
+
 const steps = JSON.parse(readFileSync(process.env.STUB_CLAUDE_SCENARIO, "utf8"));
 const callsPath = process.env.STUB_CLAUDE_CALLS;
 const n = existsSync(callsPath) ? readFileSync(callsPath, "utf8").split("\n").filter(Boolean).length : 0;
@@ -44,7 +52,8 @@ try {
   // No lock: a dry run, or a test that drives without one.
 }
 appendFileSync(callsPath, JSON.stringify({ argv, nested: "DEVCYCLE_NESTED_RUN" in process.env, pid: process.pid,
-  token: process.env.DEVCYCLE_DRIVE_TOKEN ?? null, lockTokenHash, clock: clockNow() }) + "\n");
+  token: process.env.DEVCYCLE_DRIVE_TOKEN ?? null, effort: process.env.CLAUDE_CODE_EFFORT_LEVEL ?? null,
+  outputEffort: process.env.CLAUDE_EFFORT ?? null, lockTokenHash, clock: clockNow() }) + "\n");
 if (step.noInit) process.exit(step.exitCode ?? 1);
 
 const prompt = argv[argv.indexOf("-p") + 1] ?? "";

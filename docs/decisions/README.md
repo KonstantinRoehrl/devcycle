@@ -5,6 +5,104 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-25 — Driven-run economy: a drive band instead of relayed turns, a lean driven surface, explicit effort, folded task scripts (#372, #373, #375, #374)
+
+**Decision:** Watching an unattended run costs no model turn: devcycle's hooks module draws the
+run's progress in a band above the prompt. How much the starting session still relays is the live
+knob `driveWatch`: `end`, the default, relays only the run's end, `wave` adds session starts,
+finished waves, waits and stops, and `all` adds every task outcome, batched per task. Driven
+sessions start with no MCP servers and only devcycle, superpowers and the plugins the live knob
+`drivePlugins` names (`none` by default; `all` restores the full surface). A driven run's effort is
+resolved once, recorded on the `drive:` row and passed to every session as `--effort` and
+`CLAUDE_CODE_EFFORT_LEVEL`. Three coordinator turns per task fold into the scripts before them:
+`task-dispatch.mjs` fills the implementer brief's lessons, `task-intake.mjs --compose-review`
+writes the reviewer brief at `lean` and `standard`, and an accepted `task-verdict.mjs` commits the
+task. `scripts/doctor.mjs` counts turns per stage and execution main turns per task, the figure the
+folds move.
+
+**Why:** a cycle costs roughly turns × context depth, since every turn re-reads its whole context
+from the prompt cache. On 0.27.0, as the issues report it: relaying a run cost one main-loop turn
+per line, about as much as a whole driven wave (#372); every driven session carried every plugin's
+skills and hooks and every MCP server in each turn's prefix, and dropping the unused ones cut a
+bare repo's first-turn prompt from about 32.0k to 28.1k tokens (#373); the execution coordinator
+spent about eight main turns per task, several of them a script call that only fed the next (#374);
+and a driven run's effort was inherited from the launching session's environment and recorded
+nowhere (#375).
+
+**Lean surface, not --bare:** `--bare` and `--safe-mode` disable installed plugins' hooks, which
+carry devcycle's agent tracing and subagent budget governor, and `--setting-sources` without the
+user source would drop the user's permissions and devcycle's own enablement. So a driven session
+gets `--strict-mcp-config` with an empty `--mcp-config`, and a `--settings` override whose
+`enabledPlugins` turns off every listed plugin outside the keep set; when the plugin list cannot be
+read, it starts with the full plugin surface and the log says so.
+
+**Effort precedence:** `scripts/claude-settings.mjs` resolves effort from `CLAUDE_EFFORT`, else the
+model's `modelSettings` `effortLevel`, else `effortLevel`, reading local, project and user settings
+in that order, else `default`; a value outside `low|medium|high|xhigh|max` is unresolvable and
+stops the start; a settings file takes `low|medium|high|xhigh` only, since Claude Code drops its `max`,
+so a `max` there is skipped and the next source decides. At the driver, `--effort` outranks the row's `effort=`, which outranks a resolution
+at driver start for a row written without one (never written back), and `default` passes no
+`--effort` and no `CLAUDE_CODE_EFFORT_LEVEL`. The session's environment never carries `CLAUDE_EFFORT`:
+Claude Code writes it as output for the Bash and hook children of the launching session, which is why
+the resolver reads it, and reads nothing back; `CLAUDE_CODE_EFFORT_LEVEL` is the inbound override, so
+the driver sets it to the `--effort` level, or removes it at `default`, and an ambient value cannot
+beat the flag.
+
+**Doctor figures:** every per-turn figure counts model requests, not transcript records: Claude Code
+writes one record per content block, so a request with thinking, text and a tool call is three
+records sharing a `requestId`, and counting records overstated a real session's cost about 2.9 times
+and its turns by about a third. `collapseRequests` in `scripts/doctor.mjs` merges a request's records
+once (first record's stage and time, the greatest `output_tokens`' usage, every record's content),
+so turns, dollars, depth bands and `turnsByStage` share one unit. Historical `$/turn` and cost
+figures therefore drop for sessions with multi-block requests. `turnsPerTask` and
+`execMainTurnsPerTask` count each run's planned tasks once: the workload sensor writes the same
+`plannedTaskCount` into every session window of a run, so summing per session divided a run split
+across N sessions by N times its tasks. Stage attribution in `attributeForwardFill` changed with the
+driven-session fixture: a repeat of the current skill tag no longer resets the signalled stage, which
+moves the historical cost-by-stage split of every forward-filled session (one real session moved
+from $3.34 to $0.67 "resumed (stage unknown)").
+
+**Band data owner:** the driver writes `.devcycle/drive-progress.json` on every log line and on a
+heartbeat, from `scripts/wave-setup.mjs`'s wave and task positions, so nothing re-derives them; the
+hooks module reads only that file, never the log or the ledger.
+
+**Budgets:** the `driveWatch` and `drivePlugins` flag lines in each entry command's resolver block
+(+16) and, in references/config.md, their two roster rows and the four-knob live sentence (+3)
+raise the runtime surface, `commandMax` (commands/continue.md is the longest command) and every
+closure that reads references/config.md; continue.md's live-knob sentence is reworded in place.
+references/drive.md grows (+9) by its row's `effort=` and the `null`-effort rule, `--plugins` on
+the start commands, a step 5 that arms the follow only above `driveWatch: end`, and step 6's
+`--status` answer and `/effort` line, raising the runtime surface and the closure of
+commands/continue.md, the one entry point that reads it.
+The folded per-task cycle drops executing-waves' hand-run lessons bullet and grows its steps 4–6 by
+the `--compose-review` and verdict-commit calls, and references/ledger.md § Task scripts and
+references/commit-convention.md § The task commit each name those folds, moving every closure that
+cites either; planning-waves' Lessons sentence loses a line.
+
+```text
+budget: surface-budget.json surfaceTotal 6376
+budget: surface-budget.json commandMax 183
+budget: context-budget.json commands/continue.md 67339
+budget: context-budget.json commands/cycle.md 75775
+budget: context-budget.json commands/learn.md 16837
+budget: context-budget.json commands/maintain.md 18016
+budget: context-budget.json commands/onboard.md 17125
+budget: context-budget.json commands/reconcile.md 24562
+budget: context-budget.json commands/review.md 25192
+budget: context-budget.json commands/verify.md 24290
+budget: context-budget.json playbooks/executing-waves.md 107886
+budget: context-budget.json playbooks/finishing-the-cycle.md 48285
+budget: context-budget.json playbooks/learning-from-sessions.md 62422
+budget: context-budget.json playbooks/maintaining-the-repo.md 64373
+budget: context-budget.json playbooks/onboarding-a-repo.md 30784
+budget: context-budget.json playbooks/planning-waves.md 72657
+budget: context-budget.json playbooks/receiving-review.md 112263
+budget: context-budget.json playbooks/reviewing-code.md 93485
+budget: context-budget.json playbooks/reviewing-the-branch.md 52996
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 85748
+budget: context-budget.json playbooks/verifying-on-device.md 53694
+```
+
 ## 2026-10-24 — `auto` picks for me on onDeviceGate and reviewDepth; on-device skips from branch review (#368, #367, #338, #296, #323)
 
 **Decision:** `auto` on `onDeviceGate` and `reviewDepth` now means *pick for me*, as it already

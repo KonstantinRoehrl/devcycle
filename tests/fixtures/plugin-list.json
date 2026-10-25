@@ -1,0 +1,9 @@
+[
+  { "id": "devcycle@devcycle", "scope": "user", "enabled": true, "projectEnabled": false },
+  { "id": "frontend-design@claude-plugins-official", "scope": "user", "enabled": false, "projectEnabled": false },
+  { "id": "impeccable@impeccable", "scope": "user", "enabled": true, "projectEnabled": false },
+  { "id": "superpowers@claude-plugins-official", "scope": "user", "enabled": true, "projectEnabled": false },
+  { "id": "superpowers@superpowers-marketplace", "scope": "user", "enabled": false, "projectEnabled": false },
+  { "id": "token-optimizer@alexgreensh-token-optimizer", "scope": "user", "enabled": true, "projectEnabled": false },
+  { "id": "engineering@synced", "scope": "synced", "enabled": true }
+]

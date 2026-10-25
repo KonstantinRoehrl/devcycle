@@ -36,6 +36,7 @@ import { eachRecord } from "../../scripts/jsonl.mjs";
 import { readPromotions, recordPromotion } from "../../scripts/promotions.mjs";
 import { repoSlug, hashSession } from "../../scripts/run-record.mjs";
 import { readPolicy } from "../../scripts/reinforcement-policy.mjs";
+import { recordMaintenanceFinding } from "../../scripts/maintenance-findings.mjs";
 
 const SCRIPT = new URL("../../scripts/dream.mjs", import.meta.url).pathname;
 // This repo itself, for the criteria that must run against its real promotion records.
@@ -3207,4 +3208,24 @@ test("cli: --match still accepts an empty file list, and refuses a missing one",
   const bad = run(["--match", "--stage", "execution", "--files"], REPO_ROOT, { DEVCYCLE_LEARNINGS_DIR: learnings });
   assert.equal(bad.status, 1);
   assert.equal(bad.stderr, "dream: --files requires a value\n");
+});
+
+// The --match body lives in lesson-match.mjs; the CLI prints its string plus one newline, byte for byte.
+test("cli: --match prints a file's lessons, then its persisting maintenance findings, newline-terminated", () => {
+  const root = realpathSync(makeTempDir("dream-match-bytes-"));
+  const learnings = makeTempDir("dream-match-bytes-learn-");
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/lessons.md"), "# Lessons\n\n## execution\n- Guard the thing [novel:guard-thing]\n");
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-16-guard-thing.md"),
+    "# Guard the thing\n- affected-files: scripts/*.mjs\n- culprit-id: novel:guard-thing\n");
+  recordMaintenanceFinding(root, {
+    findingKind: "maintenance-finding", findingId: "dead-abstraction:beef0001", culpritKind: "dead-abstraction",
+    title: "pass-through wrapper", severity: "high", confidence: "verified",
+    affectedFiles: ["scripts/x.mjs"], firstSeen: "2026-08-10", lastSeen: "2026-08-22", passes: 3,
+  });
+  const r = run(["--match", "--stage", "execution", "--files", "scripts/x.mjs"], root, { DEVCYCLE_LEARNINGS_DIR: learnings });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout,
+    '- Guard the thing [novel:guard-thing] → node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lesson novel:guard-thing\n' +
+    "- known dead-abstraction concern, persisting since 2026-08-10 (3 passes): pass-through wrapper [dead-abstraction:beef0001]\n");
 });

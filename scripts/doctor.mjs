@@ -415,6 +415,26 @@ export function lifecycle(versionsSeen, band, releaseDatesMap) {
   return preBand && newestSeen === preBand ? "unresolved" : "legacy";
 }
 
+// A run's workload record: every session window of one run carries the same line (the workload
+// sensor rewrites it on each HEAD-advancing commit), so the first member that has one stands for
+// the run. null when no member wrote one.
+function runWorkload(members) {
+  return members.map((m) => m.workload).find((w) => w) ?? null;
+}
+
+// Planned tasks across sessions, each run counted once however many of its sessions carry the
+// workload line. A session with no runId cannot be matched to a run, so it counts on its own.
+function plannedTasksAcrossRuns(sessions) {
+  const byRun = new Map();
+  let tasks = 0;
+  for (const s of sessions) {
+    if (!s.runId) tasks += s.workload?.plannedTaskCount ?? 0;
+    else byRun.set(s.runId, [...(byRun.get(s.runId) ?? []), s]);
+  }
+  for (const members of byRun.values()) tasks += runWorkload(members)?.plannedTaskCount ?? 0;
+  return tasks;
+}
+
 // One row per distinct run, joining the run's member sessions into a run-level record. Sessions
 // with no runId stay observational and never enter a run (GC5). version/profile come from the
 // first member that actually reported one (not "unknown"); the workload fields come from the
@@ -431,7 +451,7 @@ export function runAggregates(summaries) {
     members.map((m) => m[key]).find((v) => v && v !== "unknown") ?? "unknown";
   const out = [];
   for (const [runId, members] of byRun) {
-    const wl = members.map((m) => m.workload).find((w) => w) ?? null;
+    const wl = runWorkload(members);
     const changedLines = wl ? wl.insertions + wl.deletions : null;
     const qualities = members.map((m) => m.quality).filter(Boolean);
     out.push({
@@ -900,6 +920,34 @@ function isTurn(r) {
   return r.type === "assistant" && r.message && r.message.usage && r.message.model !== SYNTHETIC_MODEL;
 }
 
+// Claude Code writes one assistant record per content block, so a request of thinking + text +
+// tool_use is three records sharing one requestId and one usage block. Every per-turn, dollar and
+// depth figure is counted per request, so this is the one place the records collapse. A request
+// takes its first record's fields (stage, timestamp, side), the usage of the record with the most
+// output tokens, and the content of all its records; a record with neither a requestId nor a
+// message.id stands for itself. In the local transcripts checked, a request's records carried
+// identical usage; taking the greatest output_tokens is the guard for streaming partials, on the
+// assumption that the final block carries the final usage.
+function collapseRequests(records) {
+  const byKey = new Map();
+  const requests = [];
+  for (const r of records) {
+    const id = r.requestId ?? r.message.id;
+    const key = id ? `${r.isSidechain ? "subagent" : "main"}\0${id}` : null;
+    const request = key === null ? undefined : byKey.get(key);
+    if (!request) {
+      const first = { ...r, message: { ...r.message } };
+      if (key !== null) byKey.set(key, first);
+      requests.push(first);
+      continue;
+    }
+    if ((r.message.usage.output_tokens ?? 0) > (request.message.usage.output_tokens ?? 0)) request.message.usage = r.message.usage;
+    if (Array.isArray(r.message.content))
+      request.message.content = [...(Array.isArray(request.message.content) ? request.message.content : []), ...r.message.content];
+  }
+  return requests;
+}
+
 // Who made the request: the dispatched agent type when attributed, otherwise which side of
 // the main/subagent split it came from.
 function agentTypeOf(r) {
@@ -928,10 +976,12 @@ function attributeForwardFill(turns) {
   for (const indices of byTranscript.values()) {
     let current, signalled = null;
     for (const i of indices) {
-      if (turns[i].attributionSkill) { current = turns[i].attributionSkill; signalled = null; }
+      // Claude Code stamps the running skill's tag on every turn of its invocation, so only a
+      // different tag starts a new entry; a repeat of the current one keeps the signalled stage.
+      if (turns[i].attributionSkill && turns[i].attributionSkill !== current) { current = turns[i].attributionSkill; signalled = null; }
       if (current && ENTRY_TAGS.has(current)) {
-        // From the signal turn onward the stage is the signal's stage, until the next explicit
-        // tag or signal; turns before any signal are labelled unknown, never guessed.
+        // From the signal turn onward the stage is the signal's stage, until a different
+        // tag or the next signal; turns before any signal are labelled unknown, never guessed.
         signalled = stageSignal(turns[i]) ?? signalled;
         effective[i] = signalled ?? UNKNOWN_STAGE[current];
       } else {
@@ -1175,12 +1225,12 @@ function culpritsByKey(record) {
 }
 
 export function summarizeSession(sessionId, records, runRecords = new Map()) {
-  const turns = records.filter(isTurn);
-  const depths = turns.map((r) => contextDepth(r.message.usage));
+  const blocks = records.filter(isTurn);
   const tools = {};
   const models = {};
   const costByModel = {};
   const costByStage = {};
+  const turnsByStage = {};
   const costByAgentType = {};
   const costByLens = {};
   const unpriced = {};
@@ -1217,8 +1267,12 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   // knob data (pre branch-fix-2-3's --knob wiring, or a run that never resolved the knob)
   // reads as absent, never an error.
   const knobs = record?.knobs ?? null;
-  const attributed = attributeFromRecord(turns, attributionRecord) ??
-    attributeForwardFill(turns).map((skill, i) => ({ ...turns[i], stage: skill, attributionSource: "forward-filled" }));
+  const attributed = attributeFromRecord(blocks, attributionRecord) ??
+    attributeForwardFill(blocks).map((skill, i) => ({ ...blocks[i], stage: skill, attributionSource: "forward-filled" }));
+  // Attribution runs over the records, so a stage signal in a later block is not read back onto an
+  // earlier one; the request then lands in the stage its first record was attributed to.
+  const turns = collapseRequests(attributed);
+  const depths = turns.map((r) => contextDepth(r.message.usage));
   // Session-level rollup of the same source attributeFromRecord already decided per turn: this
   // session's whole attribution came from the run record only when one was found and it actually
   // covered the session with stages — the exact condition attributeFromRecord itself guards on
@@ -1235,9 +1289,11 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   // One entry per tool call (not per turn — a turn can carry several), the shape
   // emitComplianceCandidates' C1 check needs.
   const toolCallEvents = [];
-  turns.forEach((r, i) => {
+  turns.forEach((r) => {
     const model = r.message.model;
     if (model) models[model] = (models[model] ?? 0) + 1;
+    const stage = r.stage ?? "unattributed";
+    (turnsByStage[stage] ??= { main: 0, subagent: 0 })[r.isSidechain ? "subagent" : "main"] += 1;
     const dollars = costUSD(r.message.usage, model);
     if (dollars === null) {
       const estimate = provisionalCostUSD(r.message.usage, model);
@@ -1251,7 +1307,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     } else {
       totalCost += dollars;
       bump(costByModel, model, dollars);
-      bump(costByStage, attributed[i].stage ?? "unattributed", dollars);
+      bump(costByStage, stage, dollars);
       bump(costByAgentType, agentTypeOf(r), dollars);
       priced.push(r);
     }
@@ -1306,6 +1362,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     costUSD: totalCost,
     costByModel,
     costByStage,
+    turnsByStage,
     costByAgentType,
     costByLens,
     agentDepths: record?.agentDepths ?? [],
@@ -2262,9 +2319,13 @@ export function versionProfileTable(summaries, promotions = []) {
     // workload-less sessions inflate the rate (issue #114). Scope both the summed turns and the
     // planned-task count to sessions that carry a workload record — the runs where task data
     // exists — so the figure reflects only those. null (never 0) when no such session (QC1).
+    // Exec main turns/task, the coordinator turns the per-task folds remove, shares both.
     const taskBearing = g.members.filter((s) => s.workload);
-    const tasks = taskBearing.reduce((n, s) => n + (s.workload?.plannedTaskCount ?? 0), 0);
+    // Planned tasks are counted once per run: a run split over several sessions repeats its
+    // workload line on each of them, and summing those would divide the figure by the session count.
+    const tasks = plannedTasksAcrossRuns(taskBearing);
     const taskTurns = taskBearing.reduce((n, s) => n + (s.mainTurns ?? 0) + (s.subagentTurns ?? 0), 0);
+    const execMainTurns = taskBearing.reduce((n, s) => n + (s.turnsByStage?.execution?.main ?? 0), 0);
     return {
       version: g.version,
       profile: g.profile,
@@ -2274,6 +2335,7 @@ export function versionProfileTable(summaries, promotions = []) {
       dollarsPerMainTurn: mainTurns ? mainDollars / mainTurns : null,
       dollarsPerSubTurn: subagentTurns ? subDollars / subagentTurns : null,
       turnsPerTask: tasks ? taskTurns / tasks : null,
+      execMainTurnsPerTask: tasks ? execMainTurns / tasks : null,
       delta: { state: "first-seen", pct: null },
       priciestStage: priciest ? priciest[0] : null,
       medianDepth: depths.length ? median(depths) : null,
@@ -2334,21 +2396,28 @@ export function stageByVersionTable(summaries) {
 export function stageWindowTable(summaries, previousSummaries) {
   const noWindow = previousSummaries === null || previousSummaries === undefined;
   const stageTotal = (list, stage) => list.reduce((n, s) => n + (s.costByStage?.[stage] ?? 0), 0);
-  const stages = new Set(summaries.flatMap((s) => Object.keys(s.costByStage ?? {})));
+  // A count needs no price, so a stage whose turns were all unpriced still gets a row, at $0.00.
+  const inStage = (s, stage) => s.costByStage?.[stage] !== undefined || s.turnsByStage?.[stage] !== undefined;
+  const stages = new Set(summaries.flatMap((s) => [...Object.keys(s.costByStage ?? {}), ...Object.keys(s.turnsByStage ?? {})]));
   const rows = [...stages].map((stage) => {
     const total = stageTotal(summaries, stage);
     const before = noWindow ? null : stageTotal(previousSummaries, stage);
+    const priced = summaries.some((s) => s.costByStage?.[stage] !== undefined);
     const depths = summaries
-      .filter((s) => s.costByStage?.[stage] !== undefined && typeof s.medianDepth === "number")
+      .filter((s) => inStage(s, stage) && typeof s.medianDepth === "number")
       .map((s) => s.medianDepth);
     return {
       stage,
       total,
+      priced,
+      mainTurns: summaries.reduce((n, s) => n + (s.turnsByStage?.[stage]?.main ?? 0), 0),
+      subagentTurns: summaries.reduce((n, s) => n + (s.turnsByStage?.[stage]?.subagent ?? 0), 0),
       pctOfWindow: 0,
       medianDepth: depths.length ? median(depths) : null,
-      // No window to compare against is not a 0% move, and a stage the previous window never
-      // paid for is new rather than up by everything it now costs.
-      trend: noWindow ? "n/a (no window)" : before === 0 ? "first seen" : costTrend(total, before),
+      // No window to compare against is not a 0% move, a stage the previous window never paid
+      // for is new rather than up by everything it now costs, and an unpriced stage has no cost
+      // to compare.
+      trend: noWindow ? "n/a (no window)" : !priced ? "n/a (unpriced)" : before === 0 ? "first seen" : costTrend(total, before),
     };
   });
   const windowTotal = rows.reduce((n, r) => n + r.total, 0);
@@ -2791,7 +2860,8 @@ export function overviewInput(summaries, scope) {
     cohorts: cohortTable(settled),
     profileRows: versionProfileTable(settled),
     stageByVersion: stageByVersionTable(settled),
-    stageWindow: stageWindowTable(settled, null),
+    // The Overview is a dollar view: a stage with turns but no priced cost stays in the window table.
+    stageWindow: stageWindowTable(settled, null).filter((r) => r.priced),
     direction: corpusDirectionOfTravel(runAggregates(settled)),
     shares: { inferredUnknownDollars: inferredUnknownDollars(settled) },
     inFlight: { sessions: inFlight.length, dollars: inFlight.reduce((n, s) => n + sessionDollars(s), 0) },
@@ -3027,8 +3097,9 @@ export function renderReport(summaries, ctx) {
   section("## Cost by version", "cost-by-version");
   L.push(...markdownTable(
     ["Version", "Profile", "Sessions (observed)", "Cycles (observed)", "Median $/cycle (derived)",
-      "$/main-turn (derived)", "$/sub-turn (derived)", "Turns/task (derived)", "Δ vs previous (derived)",
-      "Priciest stage (derived)", "Median depth (derived)", "Quality (derived)", "Shipped (observed)"],
+      "$/main-turn (derived)", "$/sub-turn (derived)", "Turns/task (derived)", "Exec main turns/task (derived)",
+      "Δ vs previous (derived)", "Priciest stage (derived)", "Median depth (derived)", "Quality (derived)",
+      "Shipped (observed)"],
     versionProfileTable(summaries, promotions).map((r) => [
       withInferredNote(r.version, r),
       r.profile,
@@ -3038,6 +3109,7 @@ export function renderReport(summaries, ctx) {
       r.dollarsPerMainTurn === null ? null : usd(r.dollarsPerMainTurn),
       r.dollarsPerSubTurn === null ? null : usd(r.dollarsPerSubTurn),
       r.turnsPerTask === null ? null : r.turnsPerTask.toFixed(1),
+      r.execMainTurnsPerTask === null ? null : r.execMainTurnsPerTask.toFixed(1),
       deltaText(r.delta),
       r.priciestStage,
       r.medianDepth,
@@ -3081,10 +3153,10 @@ export function renderReport(summaries, ctx) {
 
   section("### Cost by stage (this window)", "cost-by-stage-window");
   L.push(...markdownTable(
-    ["Stage", "Cost (observed)", "% of window (derived)", "Median depth (derived)",
+    ["Stage", "Cost (observed)", "Requests main/sub (observed)", "% of window (derived)", "Median depth (derived)",
       "Trend vs previous window (derived)"],
     stageWindowTable(summaries, previousSummaries).map((r) => [
-      r.stage, usd(r.total), `${r.pctOfWindow.toFixed(1)}%`, r.medianDepth, r.trend,
+      r.stage, usd(r.total), `${r.mainTurns}/${r.subagentTurns}`, `${r.pctOfWindow.toFixed(1)}%`, r.medianDepth, r.trend,
     ]),
     "no stage cost recorded in this window",
   ));

@@ -1154,6 +1154,24 @@ test("step 6 proves the task's commit in a scratch worktree detached at it, on t
   assert.doesNotMatch(gate, /--subset-cmd|deferred|quiesce/);
 });
 
+// #374: two coordinator turns per task fold into the scripts before them — intake writes the reviewer brief at
+// lean/standard, and the verdict call carries the commit's flags; task-dispatch fills the brief's lessons.
+test("the per-task cycle folds the reviewer brief into intake and the commit into an accepted verdict", () => {
+  const waves = read("playbooks/executing-waves.md");
+  const intake = waves.match(/\n4\. \*\*Intake\.\*\*[\s\S]*?\n5\. /)?.[0] ?? "";
+  assert.match(intake, /At `lean` \/ `standard` add\s+`--compose-review`/, "step 4 must fold the reviewer brief into intake");
+  const review = waves.match(/\n5\. \*\*Dispatch devcycle:task-reviewer\*\*[\s\S]*?\n6\. /)?.[0] ?? "";
+  assert.match(review, /Dispatch the file at intake's `reviewBriefPath`/);
+  assert.match(review, /`task-verdict\.mjs --round <n> --findings <that path> --evidence-class <evidenceClass> --plan <plan> --test-cmd "<gateCmd>" --subject "<subject>"`/,
+    "step 5's verdict call must carry the commit's flags");
+  assert.ok(!waves.includes("--match --stage execution"), "step 2 still resolves lessons by hand; task-dispatch.mjs fills them");
+  assert.match(read("playbooks/planning-waves.md"), /filled with the task's matched lessons by `task-dispatch\.mjs`/);
+  assert.match(read("references/commit-convention.md"), /an accepted verdict commits in-process/);
+  const scripts = read("references/ledger.md");
+  assert.match(scripts, /\[--agent-id <id>\] \[--compose-review\]/);
+  assert.doesNotMatch(scripts, /keeps the dispatch's start\s+time for its `dispatch` row/, "only an implementer's start time feeds a dispatch row");
+});
+
 // The way out of `unproven-commit` is the user's, and only a green gate recovers it unaided.
 test("step 7 says what an unproven commit is and how the user gets out of one", () => {
   const step = read("playbooks/executing-waves.md").match(/\n7\. \*\*Branch re-check, then commit\.\*\*[\s\S]*?\n\n/)?.[0] ?? "";
