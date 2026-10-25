@@ -920,6 +920,34 @@ function isTurn(r) {
   return r.type === "assistant" && r.message && r.message.usage && r.message.model !== SYNTHETIC_MODEL;
 }
 
+// Claude Code writes one assistant record per content block, so a request of thinking + text +
+// tool_use is three records sharing one requestId and one usage block. Every per-turn, dollar and
+// depth figure is counted per request, so this is the one place the records collapse. A request
+// takes its first record's fields (stage, timestamp, side), the usage of the record with the most
+// output tokens, and the content of all its records; a record with neither a requestId nor a
+// message.id stands for itself. In the local transcripts checked, a request's records carried
+// identical usage; taking the greatest output_tokens is the guard for streaming partials, on the
+// assumption that the final block carries the final usage.
+function collapseRequests(records) {
+  const byKey = new Map();
+  const requests = [];
+  for (const r of records) {
+    const id = r.requestId ?? r.message.id;
+    const key = id ? `${r.isSidechain ? "subagent" : "main"}\0${id}` : null;
+    const request = key === null ? undefined : byKey.get(key);
+    if (!request) {
+      const first = { ...r, message: { ...r.message } };
+      if (key !== null) byKey.set(key, first);
+      requests.push(first);
+      continue;
+    }
+    if ((r.message.usage.output_tokens ?? 0) > (request.message.usage.output_tokens ?? 0)) request.message.usage = r.message.usage;
+    if (Array.isArray(r.message.content))
+      request.message.content = [...(Array.isArray(request.message.content) ? request.message.content : []), ...r.message.content];
+  }
+  return requests;
+}
+
 // Who made the request: the dispatched agent type when attributed, otherwise which side of
 // the main/subagent split it came from.
 function agentTypeOf(r) {
@@ -1197,8 +1225,7 @@ function culpritsByKey(record) {
 }
 
 export function summarizeSession(sessionId, records, runRecords = new Map()) {
-  const turns = records.filter(isTurn);
-  const depths = turns.map((r) => contextDepth(r.message.usage));
+  const blocks = records.filter(isTurn);
   const tools = {};
   const models = {};
   const costByModel = {};
@@ -1240,8 +1267,12 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   // knob data (pre branch-fix-2-3's --knob wiring, or a run that never resolved the knob)
   // reads as absent, never an error.
   const knobs = record?.knobs ?? null;
-  const attributed = attributeFromRecord(turns, attributionRecord) ??
-    attributeForwardFill(turns).map((skill, i) => ({ ...turns[i], stage: skill, attributionSource: "forward-filled" }));
+  const attributed = attributeFromRecord(blocks, attributionRecord) ??
+    attributeForwardFill(blocks).map((skill, i) => ({ ...blocks[i], stage: skill, attributionSource: "forward-filled" }));
+  // Attribution runs over the records, so a stage signal in a later block is not read back onto an
+  // earlier one; the request then lands in the stage its first record was attributed to.
+  const turns = collapseRequests(attributed);
+  const depths = turns.map((r) => contextDepth(r.message.usage));
   // Session-level rollup of the same source attributeFromRecord already decided per turn: this
   // session's whole attribution came from the run record only when one was found and it actually
   // covered the session with stages — the exact condition attributeFromRecord itself guards on
@@ -1258,21 +1289,11 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   // One entry per tool call (not per turn — a turn can carry several), the shape
   // emitComplianceCandidates' C1 check needs.
   const toolCallEvents = [];
-  const countedRequests = new Set();
-  turns.forEach((r, i) => {
+  turns.forEach((r) => {
     const model = r.message.model;
     if (model) models[model] = (models[model] ?? 0) + 1;
-    // turnsByStage counts model REQUESTS, whereas mainTurns/subagentTurns count transcript RECORDS:
-    // Claude Code writes one assistant record per content block, so a thinking + text + tool_use
-    // request is three records sharing one requestId. A record with no request id stands for itself.
-    const stage = attributed[i].stage ?? "unattributed";
-    const side = r.isSidechain ? "subagent" : "main";
-    const requestId = r.requestId ?? r.message.id;
-    const requestKey = requestId ? `${stage}\0${side}\0${requestId}` : null;
-    if (requestKey === null || !countedRequests.has(requestKey)) {
-      if (requestKey !== null) countedRequests.add(requestKey);
-      (turnsByStage[stage] ??= { main: 0, subagent: 0 })[side] += 1;
-    }
+    const stage = r.stage ?? "unattributed";
+    (turnsByStage[stage] ??= { main: 0, subagent: 0 })[r.isSidechain ? "subagent" : "main"] += 1;
     const dollars = costUSD(r.message.usage, model);
     if (dollars === null) {
       const estimate = provisionalCostUSD(r.message.usage, model);
@@ -1286,7 +1307,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     } else {
       totalCost += dollars;
       bump(costByModel, model, dollars);
-      bump(costByStage, attributed[i].stage ?? "unattributed", dollars);
+      bump(costByStage, stage, dollars);
       bump(costByAgentType, agentTypeOf(r), dollars);
       priced.push(r);
     }

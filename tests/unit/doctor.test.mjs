@@ -213,8 +213,55 @@ test("turnsByStage counts a model request once, though Claude Code writes one re
   const count = (by, side) => Object.values(by).reduce((n, t) => n + t[side], 0);
   assert.equal(count(s.turnsByStage, "main"), 4, "req-1, msg-1, and the two id-less records");
   assert.equal(count(s.turnsByStage, "subagent"), 1, "req-2");
-  assert.equal(s.mainTurns, 7, "the record-based counters are unchanged");
+  // Counted by request now, like turnsByStage: this fixture's multi-record requests collapsed (7 -> 4, 2 -> 1).
+  assert.equal(s.mainTurns, 4);
+  assert.equal(s.subagentTurns, 1);
+});
+
+test("every per-turn and dollar figure counts a request once, though it spans three records", () => {
+  const onePriced = costUSD(usage(10, 100, 1000, 20), "claude-opus-5");
+  const callRecord = (name) => turn({
+    requestId: "req-1",
+    message: { model: "claude-opus-5", usage: usage(10, 100, 1000, 20), content: [{ type: "tool_use", name, input: {} }] },
+  });
+  const s = summarizeSession("sess-abcdef123456", [
+    turn({ requestId: "req-1" }), callRecord("Bash"), callRecord("Read"),
+  ]);
+  assert.equal(s.turns, 1);
+  assert.equal(s.mainTurns, 1);
+  assert.equal(s.subagentTurns, 0);
+  assert.equal(s.costUSD, onePriced);
+  assert.equal(Object.values(s.costByStage).reduce((n, d) => n + d, 0), onePriced);
+  assert.equal(Object.values(s.bandCounts).reduce((n, c) => n + c, 0), 1);
+  assert.equal(Object.values(s.turnsByStage).reduce((n, t) => n + t.main, 0), 1);
+  assert.deepEqual(s.tools, { Bash: 1, Read: 1 }, "the tool calls of every record of the request still count");
+});
+
+test("a request whose records disagree on usage is priced at the record with the most output tokens", () => {
+  const partial = (output) => turn({ requestId: "req-1", message: { model: "claude-opus-5", usage: usage(10, 100, 1000, output) } });
+  const final = costUSD(usage(10, 100, 1000, 500), "claude-opus-5");
+  for (const records of [[partial(1), partial(40), partial(500)], [partial(500), partial(1), partial(40)]]) {
+    const s = summarizeSession("sess-abcdef123456", records);
+    assert.equal(s.mainTurns, 1);
+    assert.equal(s.costUSD, final);
+  }
+});
+
+test("records with neither a requestId nor a message id each count as their own request", () => {
+  const s = summarizeSession("sess-abcdef123456", [turn({}), turn({}), turn({ isSidechain: true }), turn({ isSidechain: true })]);
+  assert.equal(s.mainTurns, 2);
   assert.equal(s.subagentTurns, 2);
+  assert.equal(s.costUSD, 4 * costUSD(usage(10, 100, 1000, 20), "claude-opus-5"));
+});
+
+test("a request whose records straddle a stage change counts once, in its first record's stage", () => {
+  const s = summarizeSession("sess-abcdef123456", [
+    turn({ attributionSkill: "devcycle:continue", requestId: "req-1" }),
+    toolTurn("Read", { file_path: "/x/.claude/plugins/cache/devcycle/devcycle/0.27.0/playbooks/executing-waves.md" },
+      { attributionSkill: "devcycle:continue", requestId: "req-1" }),
+  ]);
+  assert.deepEqual(s.turnsByStage, { "resumed (stage unknown)": { main: 1, subagent: 0 } });
+  assert.deepEqual(Object.keys(s.costByStage), ["resumed (stage unknown)"]);
 });
 
 test("a skill tag stamped on every turn of its invocation keeps the stage its signal set; a different tag resets it", () => {
