@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Commits one accepted execution-stage task: the coordinator's green gate and the acceptance commit
 // in one call (playbooks/executing-waves.md steps 6-7, references/commit-convention.md § The task
-// commit). The gate is this script's own run of the task's gate command (--test-cmd), never a
+// commit), run on its own or by task-verdict.mjs for the verdict it accepts. The gate is this
+// script's own run of the task's gate command (--test-cmd), never a
 // report's word, against the commit it has just made: scripts/commit-proof.mjs runs it in a scratch
 // worktree detached at that commit, where no sibling's uncommitted edit reaches it, and a red proof
 // takes the commit back.
@@ -20,7 +21,7 @@ import { eachRecord } from "./jsonl.mjs";
 import { gitToplevel, recordPath, validateCulprit } from "./run-record.mjs";
 import { isMain } from "./is-main.mjs";
 import { INTEGRATION_BRANCHES, defaultBranches } from "./branch-names.mjs";
-import { ROUND_CAP, exhaustReviewLoop, pendingReviewLoop, reviewLoopId } from "./task-verdict.mjs";
+import { ROUND_CAP, exhaustReviewLoop, pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
 import {
   MISSING_FINDINGS, UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, latestKeyed, ledgerKey, nextRetry,
   runTaskScript, taskEntries, taskFlags, workTreeRoot,
@@ -49,7 +50,9 @@ function optionalFlag(flags, name, noun) {
   }
 }
 
-function parseArgs(argv) {
+// The flags as this script takes them, checked; task-verdict.mjs checks its commit flags with it
+// before it writes the verdict an accepted commit follows.
+export function commitArgs(argv) {
   const flags = taskFlags(argv, FLAGS, REQUIRED);
   const args = {
     run: flags["--run"], task: flags["--task"], plan: flags["--plan"], testCmd: flags["--test-cmd"],
@@ -299,7 +302,7 @@ function commitTask(ctx, files, branch, result) {
 }
 
 export function taskCommit(argv, cwd = process.cwd()) {
-  const args = parseArgs(argv);
+  const args = commitArgs(argv);
   const root = workTreeRoot(cwd);
   const ledgerPath = args.ledger ? resolve(cwd, args.ledger) : join(root, ".devcycle", "ledger.md");
   const files = taskFileMap(readText(resolve(cwd, args.plan), "plan")).get(Number(args.task));

@@ -3,6 +3,8 @@
 // engine's answers beneath every hook. Register both before the test's first call on `$`. A missing
 // state file (`state: null`) is one `fs.stat` rejects, as the engine's does. The state file lives at
 // /repo, which by default is also the repo root, the directory holding `.git` (`root: null`: none).
+// `progress` is the text of the driver's progress file beside it (absent unless given), `progressMtime`
+// its mtime.
 export const RUN = '00000000000000a1';
 // A 200k window: over budget from 30k, hard stop from 40k.
 export const HAIKU = 'claude-haiku-4-5-20251001';
@@ -13,7 +15,9 @@ export const usage = (depth: number, model = HAIKU) =>
 export type World = {
   base?: string; nested?: string; cwd?: string; state?: string | null; joined?: boolean; mtime?: number;
   statusThrows?: boolean; surfaces?: string[]; hangAppend?: boolean; root?: string | null; notifies?: boolean; notifyDenies?: boolean;
+  progress?: string | null; progressMtime?: number;
 };
+export const PROGRESS = '/repo/.devcycle/drive-progress.json';
 export type Run = { argv: string[]; init?: { stdin?: string } };
 export type Seen = {
   runs: Run[]; status: (string | undefined)[]; versionReads: number; exists: string[];
@@ -37,10 +41,12 @@ export function session(on: any, world: World = {}): Seen {
     const root = world.root === undefined ? '/repo' : world.root;
     return { value: (state() !== null && e.path === '/repo/.devcycle/state.md') || (root !== null && e.path === `${root}/.git`) };
   });
-  on('fs.read', () => ({ value: state() ?? '' }));
-  on('fs.stat', () => {
-    if (state() === null) throw new Error('ENOENT: no such file or directory');
-    return { value: { kind: 'file', size: 1, mtimeMs: world.mtime ?? 1, isLink: false } };
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: (e.path === PROGRESS ? world.progress : state()) ?? '' }));
+  on('fs.stat', (_$: unknown, e: { path: string }) => {
+    const progress = e.path === PROGRESS;
+    const text = progress ? (world.progress ?? null) : state();
+    if (text === null) throw new Error('ENOENT: no such file or directory');
+    return { value: { kind: 'file', size: progress ? text.length : 1, mtimeMs: (progress ? world.progressMtime : world.mtime) ?? 1, isLink: false } };
   });
   on('ui.status', (_$: unknown, e: { text: string | undefined }) => {
     if (world.statusThrows) throw new Error('status line unavailable');
@@ -113,6 +119,7 @@ export function engine(on: any, eng: Engine = {}) {
   });
   on('session.measure', (_$: unknown, e: { changed: unknown[] }) => ({ changed: e.changed }));
   on('session.end', (_$: unknown, e: { sessionId: string }) => ({ sessionId: e.sessionId }));
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }));
   return asked;
 }
 

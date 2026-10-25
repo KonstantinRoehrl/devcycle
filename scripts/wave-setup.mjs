@@ -14,12 +14,12 @@ import { field } from "./md-field.mjs";
 import { describe } from "./find-state-files.mjs";
 import { checkState } from "./resume-check.mjs";
 import { parseHandoff } from "./handoff-mark.mjs";
-import { ROSTER, compareKnobs, parseRecordedLine } from "./resolve-knobs.mjs";
+import { compareKnobs, parseRecordedLine, resolveKnobs } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
 import { ledgerPlan, nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
 import { ledgerSlotState } from "./ledger-slot.mjs";
-import { pendingReviewLoop, reviewLoopId } from "./task-verdict.mjs";
+import { pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
 import { driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
 import { classifyDrive } from "./drive-result.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";
@@ -37,7 +37,6 @@ export const RETRY_CAP = 2;
 const CAPPED_OUTCOMES = ["rejected (intake bounce)", "rejected (missing report file)", "rejected (missing findings file)"];
 const SWEEP_TOKEN = /\bsweep\b|\bapplied-none\b|\bdirty-targets\b/;
 const IMPLEMENTER_NEXT = new Set(["dispatch-implementer", "redispatch-implementer", "fix"]);
-const MODE_KNOB = ROSTER.find(({ key }) => key === "executionMode");
 // The stops continue's own gates compute and answer on the very call that reads the driver's result,
 // so a driver that stopped on one needs no question of its own.
 const SETTLED_REASONS = new Set(["knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start", "no-driver", "not-opted-in"]);
@@ -128,11 +127,8 @@ const realPath = (p) => {
   }
 };
 
-// The fresh executionMode, read from the --knobs line; a missing or unknown value is the knob's fallback.
-function executionMode(knobsLine) {
-  const value = knobsLine ? parseRecordedLine(knobsLine).executionMode : undefined;
-  return MODE_KNOB.values.includes(value) ? value : MODE_KNOB.fallback;
-}
+// The fresh live knobs, resolved from the --knobs line; a missing or unknown value is the knob's fallback.
+const liveKnobs = (knobsLine) => resolveKnobs(knobsLine ? parseRecordedLine(knobsLine) : {}).knobs;
 
 // The reported drive status, and the live lock's token hash, which is never reported.
 function driveStatus(root, statePath, stateText, lines, knobsLine) {
@@ -142,9 +138,10 @@ function driveStatus(root, statePath, stateText, lines, knobsLine) {
   const holder = live && realPath(resolve(root, live.state ?? "")) === realPath(statePath) ? live : null;
   const optInLogged = lines.some((l) => l.task === "drive" && l.event === "user-decision");
   const lock = holder ? { pid: holder.pid, log: holder.log } : null;
+  const { executionMode: mode, driveWatch: watch, drivePlugins: plugins } = liveKnobs(knobsLine);
   return {
     drive: { opted: /^auto\b/.test(row), ...(model ? { model } : {}), lock, optInLogged, row: row.match(/^(auto|manual)\b/)?.[1] ?? null,
-      mode: executionMode(knobsLine) },
+      mode, watch, plugins },
     tokenHash: holder?.tokenHash ?? null,
   };
 }
@@ -199,6 +196,22 @@ function overviewOf({ waves, positions }) {
     waves: perWave.length, tasks: perWave.flatMap((w) => w.tasks).length, committed: perWave.reduce((n, w) => n + w.committed, 0),
     nextWave: perWave.find((w) => w.committed < w.tasks.length)?.wave ?? null, perWave,
   };
+}
+
+// The drive band's view of the plan (scripts/drive-progress.mjs): the overview and every Dispatch Map
+// task's position with its ledger lines, read as waveSetup reads them. null when the state names no
+// plan with a Dispatch Map, or the ledger slot is a previous cycle's.
+export function planProgress({ root, statePath, ledgerPath = null }) {
+  const stateText = readFileSync(resolve(statePath), "utf8");
+  const plan = known(field(stateText, "plan"));
+  const slot = ledgerSlotState({ root, plan, run: known(field(stateText, "run")) });
+  const planText = readPlan(root, plan);
+  if (!plan || slot === "stale" || !parseDispatchMap(planText)) return null;
+  const ledger = ledgerPath ? resolve(ledgerPath) : join(root, ".devcycle", "ledger.md");
+  const lines = readLedger(ledger, plan, slot);
+  const map = mapPositions(root, planText, lines, ledger);
+  const byTask = Map.groupBy(lines, (l) => l.task);
+  return { overview: overviewOf(map), positions: map.positions, entries: new Map([...map.positions.keys()].map((task) => [task, byTask.get(task) ?? []])) };
 }
 
 function wavePosition(root, planText, { waves, positions }, lines) {

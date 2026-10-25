@@ -948,7 +948,8 @@ const expandsIntoData = (text, scan, sub) =>
 // written out literally would not show the segment classifier — so it no longer trips the wire
 // (#276: `git diff --stat -- f; echo "checked at $(date)"`), whatever else that command's words
 // name: a driven session's `task-commit.mjs --test-cmd "TMPDIR=$(mktemp -d); node --test
-// tests/unit/block-destructive-git.test.mjs" --subject "…checkout…"` runs no git through it. Every
+// tests/unit/block-destructive-git.test.mjs" --subject "…checkout…"`, or the same flags on the
+// task-verdict.mjs call that commits an accept, runs no git through it. Every
 // other substitution keeps the wire over the whole command, where git and its subcommand may sit on
 // opposite sides of it (`$(which git) stash`, `git $(echo stash)`). A `complex` line keeps it too:
 // there the scanner's view of where a substitution ends may not be the shell's. So does a command

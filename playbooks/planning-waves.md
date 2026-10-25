@@ -90,9 +90,8 @@ label an extensionless path counts only as a code span); `**Interfaces:**` (Cons
 — what this task uses from earlier tasks, exact signatures; Produces — what later tasks rely on, exact
 function names and parameter and return types); the declaration lines below plus the
 `**Quality constraints:**` line above and a `**Lessons:**` line right after it — emitted empty by
-planning and filled by `playbooks/executing-waves.md`'s brief-slice from
-`--match`; then `- [ ]` steps carrying the actual code, the exact command,
-and the expected output inline.
+planning and filled with the task's matched lessons by `task-dispatch.mjs` at dispatch; then
+`- [ ]` steps carrying the actual code, the exact command, and the expected output inline.
 
 **No placeholders.** Every step carries the actual content the implementer needs; none of these may
 appear: "TBD", "TODO", "implement later", "fill in details"; "add appropriate error handling" / "add

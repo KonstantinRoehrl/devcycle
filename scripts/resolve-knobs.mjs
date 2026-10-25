@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Resolves devcycle's userConfig knobs from the placeholders an entry command renders. Only command
 // text is templated -- a playbook or reference a stage opens with Read never sees a substituted
-// value -- so every entry command passes all sixteen rendered placeholders here and stages read the
+// value -- so every entry command passes all eighteen rendered placeholders here and stages read the
 // printed `knobs:` line. references/config.md states the resolution order; this file is its
 // executable form, and ROSTER is the roster's fifth hand-kept copy that golden-path holds in parity.
 // Its enum `values` own each fixed set: validate.mjs holds plugin.json's `options` lists to them.
@@ -31,6 +31,8 @@ export const ROSTER = [
   { key: "subagentBudget", kind: "enum", values: ["off", "warn", "enforce"], fallback: "warn", live: true },
   { key: "handoffNotification", kind: "enum", values: ["off", "terminal", "push", "both"], fallback: "off" },
   { key: "executionMode", kind: "enum", values: ["ask", "manual", "unattended"], fallback: "ask", live: true },
+  { key: "driveWatch", kind: "enum", values: ["end", "wave", "all"], fallback: "end", live: true },
+  { key: "drivePlugins", kind: "list", fallback: "none", live: true },
 ];
 
 const ROSTER_KEYS = new Set(ROSTER.map(({ key }) => key));
@@ -43,7 +45,7 @@ export function isUnset(value) {
 }
 
 // The value's normalized in-set form, or null when it lies outside the knob's allowed set.
-function inSet(entry, value) {
+export function inSet(entry, value) {
   const v = value.trim();
   switch (entry.kind) {
     case "enum":
@@ -58,12 +60,16 @@ function inSet(entry, value) {
       const pool = parsePool(v);
       return pool.kind === "unset" || pool.entries.some((id) => /\s/.test(id)) ? null : pool.entries.join(",");
     }
+    case "list":
+      // `none` and `all` are whole values, never members of a list.
+      if (v === "none" || v === "all") return v;
+      return /^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$/.test(v) && !v.split(",").some((name) => name === "none" || name === "all") ? v : null;
     default:
       throw new Error(`unknown knob kind ${entry.kind}`);
   }
 }
 
-function allowedSet(entry) {
+export function allowedSet(entry) {
   switch (entry.kind) {
     case "enum":
       return entry.values.join(" | ");
@@ -71,6 +77,8 @@ function allowedSet(entry) {
       return "true | false";
     case "count":
       return `a whole number of at least ${entry.min}`;
+    case "list":
+      return "none, all, or a comma-separated list of plugin names";
     default:
       return "auto, a model id, or a comma-separated pool of ids";
   }

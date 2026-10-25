@@ -123,10 +123,11 @@ devcycle/                (public GitHub repo)
 │   ├── lib/run-context.mjs            # state file → active run → joined session, for the depth-sensor and the module's sink
 │   ├── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
 │   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent
-│   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter, handoff notification relay
+│   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter, handoff notification relay, drive band
 │   └── mod-sink.mjs              # the module's Node side: the joined check and agent-trace writes
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
 ├── scripts/                      # L4 — validate.mjs, doctor.mjs, dream.mjs, the checkers, bump-version.mjs
+├── types/index.d.ts              # the hooks module's $.state contract, named by plugin.json "types"
 ├── workflows/                    # L4
 │   ├── lib/agent-cli.js          # shared subprocess layer: tagged logger, run(), claudeStructured()
 │   ├── review-panel.js           # multi-lens review → adversarial verify → dedup → reconcile
@@ -248,7 +249,9 @@ gated by `userConfig.crossModelReview`.
   "learnSessionCap": 100,
   "subagentBudget": "off | warn | enforce",
   "handoffNotification": "off | terminal | push | both",
-  "executionMode": "ask | manual | unattended"
+  "executionMode": "ask | manual | unattended",
+  "driveWatch": "end | wave | all",
+  "drivePlugins": "none | all | <plugin name>,…"
 }
 ```
 
@@ -310,6 +313,11 @@ gated by `userConfig.crossModelReview`.
   manually; `manual` walks them in the session; `unattended` asks the same question with **Start
   unattended** first, since an unattended run starts only on the user's answer in the session
   (decision log, 2026-10-16). A recorded row outranks it, and it is `live`, so a mid-cycle change is never knob drift. It takes no `auto`.
+- `driveWatch` and `drivePlugins` (added 2026-10-25) shape an unattended run. `driveWatch` is how
+  much of it the starting session relays: `end`, the default, only its end, while the hooks
+  module's band shows progress; `wave`; or `all`. `drivePlugins` is which plugins its sessions load
+  besides devcycle and superpowers: `none`, the default; a comma-separated list of names; or `all`,
+  the full surface with MCP servers. Both are `live`, read at each start (decision log, 2026-10-25).
 
 ---
 

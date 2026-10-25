@@ -48,7 +48,9 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --learnSessionCap '${user_config.learnSessionCap}' \
   --subagentBudget '${user_config.subagentBudget}' \
   --handoffNotification '${user_config.handoffNotification}' \
-  --executionMode '${user_config.executionMode}'
+  --executionMode '${user_config.executionMode}' \
+  --driveWatch '${user_config.driveWatch}' \
+  --drivePlugins '${user_config.drivePlugins}'
 ```
 
 Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md`. It starts no cycle and writes no

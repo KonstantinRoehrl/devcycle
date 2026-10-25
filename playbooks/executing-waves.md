@@ -79,8 +79,9 @@ exit 2 or 3 a stop.
 2. **Slice the brief**, carrying exactly: the task's id (the plan's task number); `**Files:**`
    (create/modify/test); `**Interfaces:**` (consumes/produces, exact signatures); `**Dependencies:**`; the
    `**Evidence:**` class from the plan; an `**Evidence tail:** <N>` line, `<N>` from the profile; the
-   task's steps; the `**Gate command:**` line, which `task-dispatch.mjs` appends itself, never sliced by
-   hand; the global constraints and pinned interfaces that apply; the task's quality constraints
+   task's steps; its `**Lessons:**` line, which `task-dispatch.mjs` fills with the matched lessons, and
+   the `**Gate command:**` line it appends, neither sliced by hand; the global constraints and pinned
+   interfaces that apply; the task's quality constraints
    resolved; and one read, `"$(devcycle-root)/references/delegation.md"` § Read discipline.
    Nothing else, and nothing restated that a named reference owns —
    `references/evidence.md` owns the evidence classes, the evidence file paths (keyed
@@ -91,7 +92,6 @@ exit 2 or 3 a stop.
      (`references/quality-criteria.md`'s cost rule); `none`, or no such section, adds nothing.
    - **Preload what the evidence class needs:** splice exactly what
      `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Preloading a class into a brief names.
-   - **Resolve lessons:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match --stage execution --files "<this task's **Files:** list>"` and splice its output verbatim into the brief's `**Lessons:**` block — only the matched lines this task's files name, **never a whole stage section**. Empty output → `**Lessons:** none`. Each line ends with a `--lesson <id>` pull hint; the block header tells the worker to pull the full record **only if about to work in the area the lesson names**.
    - **Name plugin scripts through the shim, quoted:** a brief writes a plugin script as
      `"$(devcycle-root)/scripts/<name>.mjs"` — quoted, since the word-split substitution tears a
      plugin root containing a space — never as a literal `${CLAUDE_PLUGIN_ROOT}` path, which is
@@ -108,9 +108,12 @@ exit 2 or 3 a stop.
    on-device count is what triggers the checklist below.
 4. **Intake.** `task-intake.mjs`, given the envelope's `report:` path and `status:` and the task
    notification's agent id as `--agent-id`, checks the report against its evidence class and lints
-   it — the envelope's `report:` field is a claim, not proof. `review` → step 5. `bounce` or `missing-report` → back to the implementer with
-   its `findings`, no reviewer dispatch. `needs-user` → the user decides (driven: a `needs-user`
-   stop). The coordinator neither produces nor reads the task diff; step 5 does both.
+   it — the envelope's `report:` field is a claim, not proof. At `lean` / `standard` add
+   `--compose-review`: a `review` result then also writes step 5's reviewer brief and its
+   `review-round` line, and prints `reviewBriefPath`, `findingsPath` and `reviewRound`. `review` →
+   step 5. `bounce` or `missing-report` → back to the implementer with its `findings`, no reviewer
+   dispatch. `needs-user` → the user decides (driven: a `needs-user` stop). The coordinator neither
+   produces nor reads the task diff; step 5 does both.
 5. **Dispatch devcycle:task-reviewer** (read-only apart from its own findings file), on the model
    `references/model-routing.md` resolves, with the brief, the report path, the task's file list, the
    two evidence-file paths the report names, and the task's constraints block, instructing it to
@@ -118,8 +121,11 @@ exit 2 or 3 a stop.
    `git diff -U10 HEAD -- <files>`. It returns the task-reviewer envelope `references/delegation.md`
    defines; the reviewer writes its verdict block to `.devcycle/findings/<task-id>-round-<n>.md`
    itself (the dispatch supplies the path and round n).
-   Give its brief to `task-dispatch.mjs --role reviewer --round <n>` the same way first; read the
-   verdict with `task-verdict.mjs --round <n> --findings <that path> --evidence-class <evidenceClass>`.
+   Dispatch the file at intake's `reviewBriefPath`; when intake printed none (at `thorough`, a
+   `missing-findings` re-dispatch, the `dispatch-reviewer` resume position), give its brief to
+   `task-dispatch.mjs --role reviewer --round <n>` the same way first. Read the verdict with
+   `task-verdict.mjs --round <n> --findings <that path> --evidence-class <evidenceClass> --plan <plan> --test-cmd "<gateCmd>" --subject "<subject>"`
+   (plus `--trailers` when the convention carries any), which commits an accepted task in-process.
    The wave setup's `tasks[]` gives each uncommitted task its `reviewRound`, `evidenceClass`, `testCmd`
    and `gateCmd`.
    `accepted` → step 6. `rejected` → the findings path back to the implementer (step 3), then the
@@ -129,9 +135,9 @@ exit 2 or 3 a stop.
    failed green gate rejects its round too. A task that reaches round 3 without a commit exits
    `exhausted-unresolved` — `task-verdict.mjs` or `task-commit.mjs` writes that status — and is
    surfaced to the user as a decision, never committed as if it had passed.
-6. **Green gate (REQUIRED, deterministic).** On acceptance, run `task-commit.mjs` on the main thread,
-   never from a dispatch (a coordinator duty), with the plan, `--test-cmd "<gateCmd>"`
-   from the wave setup (no `gateCmd`: `"<testCmd>"`) and your subject. It commits the task, then
+6. **Green gate (REQUIRED, deterministic).** On acceptance, step 5's verdict call has run `task-commit.mjs` on the main thread,
+   never from a dispatch (a coordinator duty), with `--test-cmd "<gateCmd>"`
+   from the wave setup (no `gateCmd`: `"<testCmd>"`), and printed its result. It commits the task, then
    re-runs the test command itself and reads the exit status — never the implementer's word for it —
    in a scratch worktree detached at that commit, which no sibling's uncommitted edit reaches.
    On failure, acceptance is blocked: no commit (it undoes its own), `gate-fail`, back to the
@@ -139,7 +145,8 @@ exit 2 or 3 a stop.
    round 3, `needs-user`. `busy`: another call holds the gate; call again once it returns.
    `proof-unrunnable`: the proof could not run (its `reason` says why); the commit is undone,
    unless the ledger already records it, and no round is spent → the user decides (driven: a
-   `needs-user` stop).
+   `needs-user` stop). Calling again after `busy` or `proof-unrunnable`, or for a review loop the
+   user decided, runs `task-commit.mjs` alone with the same flags.
 7. **Branch re-check, then commit.** The same call re-runs
    `git rev-parse --abbrev-ref HEAD` against the recorded `branch:` line immediately before
    committing — `branch-mismatch` stops the run rather than committing or undoing on the wrong

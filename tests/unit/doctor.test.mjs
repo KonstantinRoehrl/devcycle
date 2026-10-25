@@ -180,6 +180,106 @@ test("a resumed session re-attributes from the first stage signal onward — a R
   assert.ok(s.costByStage.execution > s.costByStage["resumed (stage unknown)"], "the signal turn and its successors are execution");
 });
 
+test("summarizeSession counts every turn per stage, main and subagent apart, priced or not", () => {
+  const s = summarizeSession("sess-abcdef123456", [
+    turn({ attributionSkill: "devcycle:continue" }),
+    toolTurn("Read", { file_path: "/x/.claude/plugins/cache/devcycle/devcycle/0.27.0/playbooks/executing-waves.md" }),
+    turn({ message: { model: "claude-mythos-9", usage: usage(10, 100, 1000, 20) } }),
+    turn({ isSidechain: true, agentId: "agent-1", attributionSkill: "devcycle:continue" }),
+    turn({ isSidechain: true, agentId: "agent-1" }),
+  ]);
+  assert.deepEqual(s.turnsByStage, {
+    "resumed (stage unknown)": { main: 1, subagent: 2 },
+    execution: { main: 2, subagent: 0 },
+  });
+  assert.deepEqual(s.unpriced, { "claude-mythos-9": 1 }, "the unpriced turn is counted, though it carries no cost");
+});
+
+test("turnsByStage counts a model request once, though Claude Code writes one record per content block", () => {
+  // One request of thinking + text + tool_use is three assistant records sharing a requestId (and
+  // an identical usage block); records without any request id each stand for their own request.
+  const block = (requestId, over = {}) => turn({ requestId, ...over });
+  const s = summarizeSession("sess-abcdef123456", [
+    block("req-1"),
+    block("req-1"),
+    block("req-1"),
+    block("req-2", { isSidechain: true, agentId: "agent-1" }),
+    block("req-2", { isSidechain: true, agentId: "agent-1" }),
+    turn({ message: { id: "msg-1", model: "claude-opus-5", usage: usage(10, 100, 1000, 20) } }),
+    turn({ message: { id: "msg-1", model: "claude-opus-5", usage: usage(10, 100, 1000, 20) } }),
+    turn({}),
+    turn({}),
+  ]);
+  const count = (by, side) => Object.values(by).reduce((n, t) => n + t[side], 0);
+  assert.equal(count(s.turnsByStage, "main"), 4, "req-1, msg-1, and the two id-less records");
+  assert.equal(count(s.turnsByStage, "subagent"), 1, "req-2");
+  // Counted by request now, like turnsByStage: this fixture's multi-record requests collapsed (7 -> 4, 2 -> 1).
+  assert.equal(s.mainTurns, 4);
+  assert.equal(s.subagentTurns, 1);
+});
+
+test("every per-turn and dollar figure counts a request once, though it spans three records", () => {
+  const onePriced = costUSD(usage(10, 100, 1000, 20), "claude-opus-5");
+  const callRecord = (name) => turn({
+    requestId: "req-1",
+    message: { model: "claude-opus-5", usage: usage(10, 100, 1000, 20), content: [{ type: "tool_use", name, input: {} }] },
+  });
+  const s = summarizeSession("sess-abcdef123456", [
+    turn({ requestId: "req-1" }), callRecord("Bash"), callRecord("Read"),
+  ]);
+  assert.equal(s.turns, 1);
+  assert.equal(s.mainTurns, 1);
+  assert.equal(s.subagentTurns, 0);
+  assert.equal(s.costUSD, onePriced);
+  assert.equal(Object.values(s.costByStage).reduce((n, d) => n + d, 0), onePriced);
+  assert.equal(Object.values(s.bandCounts).reduce((n, c) => n + c, 0), 1);
+  assert.equal(Object.values(s.turnsByStage).reduce((n, t) => n + t.main, 0), 1);
+  assert.deepEqual(s.tools, { Bash: 1, Read: 1 }, "the tool calls of every record of the request still count");
+});
+
+test("a request whose records disagree on usage is priced at the record with the most output tokens", () => {
+  const partial = (output) => turn({ requestId: "req-1", message: { model: "claude-opus-5", usage: usage(10, 100, 1000, output) } });
+  const final = costUSD(usage(10, 100, 1000, 500), "claude-opus-5");
+  for (const records of [[partial(1), partial(40), partial(500)], [partial(500), partial(1), partial(40)]]) {
+    const s = summarizeSession("sess-abcdef123456", records);
+    assert.equal(s.mainTurns, 1);
+    assert.equal(s.costUSD, final);
+  }
+});
+
+test("records with neither a requestId nor a message id each count as their own request", () => {
+  const s = summarizeSession("sess-abcdef123456", [turn({}), turn({}), turn({ isSidechain: true }), turn({ isSidechain: true })]);
+  assert.equal(s.mainTurns, 2);
+  assert.equal(s.subagentTurns, 2);
+  assert.equal(s.costUSD, 4 * costUSD(usage(10, 100, 1000, 20), "claude-opus-5"));
+});
+
+test("a request whose records straddle a stage change counts once, in its first record's stage", () => {
+  const s = summarizeSession("sess-abcdef123456", [
+    turn({ attributionSkill: "devcycle:continue", requestId: "req-1" }),
+    toolTurn("Read", { file_path: "/x/.claude/plugins/cache/devcycle/devcycle/0.27.0/playbooks/executing-waves.md" },
+      { attributionSkill: "devcycle:continue", requestId: "req-1" }),
+  ]);
+  assert.deepEqual(s.turnsByStage, { "resumed (stage unknown)": { main: 1, subagent: 0 } });
+  assert.deepEqual(Object.keys(s.costByStage), ["resumed (stage unknown)"]);
+});
+
+test("a skill tag stamped on every turn of its invocation keeps the stage its signal set; a different tag resets it", () => {
+  const tagged = (skill = "devcycle:continue") => ({ attributionSkill: skill });
+  const s = summarizeSession("sess-abcdef123456", [
+    turn(tagged()),
+    toolTurn("Read", { file_path: "/x/.claude/plugins/cache/devcycle/devcycle/0.27.0/playbooks/executing-waves.md" }, tagged()),
+    turn(tagged()),
+    turn(tagged()),
+    turn(tagged("devcycle:cycle")),
+  ]);
+  assert.deepEqual(s.turnsByStage, {
+    "resumed (stage unknown)": { main: 1, subagent: 0 },
+    execution: { main: 3, subagent: 0 },
+    "entry (stage unknown)": { main: 1, subagent: 0 },
+  });
+});
+
 test("a Bash read of a playbook and a Bash heredoc that writes the state file are stage signals too", () => {
   const bashRead = summarizeSession("sess-abcdef123456", [
     turn({ attributionSkill: "devcycle:continue" }),
@@ -2346,6 +2446,23 @@ test("versionProfileTable keeps Turns/task null, never 0, when no session carrie
   assert.equal(row.turnsPerTask, null);
 });
 
+test("versionProfileTable divides execution main turns by the planned tasks Turns/task divides by", () => {
+  const withWorkload = vpSum({
+    id: "w", mainTurns: 20, subagentTurns: 10,
+    turnsByStage: { planning: { main: 8, subagent: 2 }, execution: { main: 12, subagent: 8 } },
+    workload: { requestKind: "feature", plannedTaskCount: 3, insertions: 1, deletions: 1 },
+  });
+  const withoutWorkload = vpSum({ id: "n", mainTurns: 100, turnsByStage: { execution: { main: 100, subagent: 0 } } });
+  const [row] = versionProfileTable([withWorkload, withoutWorkload]);
+  assert.equal(row.turnsPerTask, 10);
+  assert.equal(row.execMainTurnsPerTask, 4);
+});
+
+test("versionProfileTable keeps Exec main turns/task null, never 0, when no session carries task data", () => {
+  const [row] = versionProfileTable([vpSum({ id: "a", mainTurns: 5, turnsByStage: { execution: { main: 5, subagent: 0 } } })]);
+  assert.equal(row.execMainTurnsPerTask, null);
+});
+
 test("lifecycle only emits the three states the corpus can currently evidence", () => {
   const dates = new Map([
     ["0.13.0", "2026-08-10"], ["0.14.0", "2026-08-15"], ["0.14.1", "2026-08-18"],
@@ -3300,6 +3417,70 @@ test("cli: the Overview's low-n marks and rising note follow the report's own ba
     assert.match(section, /^\| execution \| \$[\d.]+ \| [\d.]+% \| up \|$/m);
     assert.match(section, /^- execution: .*0\.3\.0 \$[\d.]+ \(n=3\) · 0\.4\.0 \$[\d.]+ \(n=2, low n\)$/m);
     assert.match(section, /^- Steadily rising: execution$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    cleanup();
+  }
+});
+
+// A driven session as the driver leaves it: started by `claude -p` (entrypoint sdk-cli), every
+// record stamped with the skill it runs, a subagent transcript beside it, and a run record whose
+// window holds the workload sensor's line but no stage line yet, so attribution forward-fills.
+const DRIVEN_SESSION = "sess-driven00001";
+function drivenCorpusDir(runsDir) {
+  const dir = makeTempDir("doctor-driven-");
+  const proj = join(dir, "-driven-project");
+  mkdirSync(join(proj, DRIVEN_SESSION, "subagents"), { recursive: true });
+  const at = (minute) => `2026-10-20T10:${String(minute).padStart(2, "0")}:00.000Z`;
+  const driven = (minute, over = {}) => turn({
+    sessionId: DRIVEN_SESSION, entrypoint: "sdk-cli", attributionSkill: "devcycle:continue",
+    attributionPlugin: "devcycle", timestamp: at(minute), ...over,
+  });
+  const readPlaybook = {
+    model: "claude-opus-5", usage: usage(10, 100, 1000, 20),
+    content: [{ type: "tool_use", name: "Read", input: { file_path: "/h/.claude/plugins/cache/devcycle/devcycle/0.27.0/playbooks/executing-waves.md" } }],
+  };
+  const main = [
+    { type: "user", sessionId: DRIVEN_SESSION, entrypoint: "sdk-cli", timestamp: at(0),
+      message: { role: "user", content: "<command-message>devcycle:continue</command-message>\n<command-name>/devcycle:continue</command-name>\n<command-args>--drive .devcycle/state.md</command-args>" } },
+    driven(1),
+    driven(2, { message: readPlaybook }),
+    ...[3, 4, 5, 6].map((m) => driven(m)),
+  ];
+  const sub = [7, 8].map((m) => driven(m, { isSidechain: true, agentId: "agent-impl1" }));
+  const jsonl = (objects) => objects.map((o) => JSON.stringify(o)).join("\n") + "\n";
+  writeFileSync(join(proj, `${DRIVEN_SESSION}.jsonl`), jsonl(main));
+  writeFileSync(join(proj, DRIVEN_SESSION, "subagents", "agent-impl1.jsonl"), jsonl(sub));
+  const runId = "0123456789abcdef";
+  mkdirSync(join(runsDir, "repo"), { recursive: true });
+  writeFileSync(join(runsDir, "repo", `${runId}.jsonl`), jsonl([
+    { kind: "run", runId, schemaVersion: 1, pluginVersion: "0.27.0", profile: "standard", knobs: {} },
+    { kind: "session", runId, sessionHash: createHash("sha256").update(DRIVEN_SESSION).digest("hex") },
+    { kind: "workload", runId, requestKind: "feature", insertions: 40, deletions: 4, plannedTaskCount: 2, waveCount: 1 },
+  ]));
+  return dir;
+}
+
+test("cli: a driven session is counted, its execution main turns per task included", () => {
+  const { env, cwd, cleanup } = streamIsolation();
+  const dir = drivenCorpusDir(env.DEVCYCLE_RUNS_DIR);
+  try {
+    const json = run(["--dir", dir, "--json"], env, cwd);
+    const markdown = run(["--dir", dir], env, cwd);
+    assert.equal(json.status, 0, json.stderr);
+    assert.equal(markdown.status, 0, markdown.stderr);
+    const out = JSON.parse(json.stdout);
+    assert.equal(out.sessions.length, 1, "the driven session was filtered out of the corpus");
+    assert.deepEqual(out.sessions[0].turnsByStage, {
+      "resumed (stage unknown)": { main: 1, subagent: 2 },
+      execution: { main: 5, subagent: 0 },
+    });
+    const row = out.version_profile_cohorts.find((r) => r.version === "0.27.0" && r.profile === "standard");
+    assert.ok(row, `no 0.27.0 standard row: ${JSON.stringify(out.version_profile_cohorts)}`);
+    assert.equal(row.turnsPerTask, 4);
+    assert.equal(row.execMainTurnsPerTask, 2.5);
+    assert.match(markdown.stdout, /^\| 0\.27\.0 \| standard \| [^\n]*\| 4\.0 \| 2\.5 \| /m);
+    assert.match(markdown.stdout, /^\| execution \| \$[\d.]+ \| 5\/0 \| /m);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     cleanup();

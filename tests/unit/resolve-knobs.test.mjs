@@ -17,13 +17,14 @@ const STANDARD_DEFAULTS =
   "knobs: profile=standard gitPolicy=local-commits-only docTrackingPolicy=standard reviewDepth=auto " +
   "crossModelReview=false onDeviceGate=auto implementerModel=auto taskReviewerModel=auto " +
   "branchReviewModel=auto walkthroughModel=auto learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100 subagentBudget=warn " +
-  "handoffNotification=off executionMode=ask";
+  "handoffNotification=off executionMode=ask driveWatch=end drivePlugins=none";
 
-test("the roster carries the 16 shipped knobs in config.md's roster order", () => {
+test("the roster carries the 18 shipped knobs in config.md's roster order", () => {
   assert.deepEqual(ROSTER.map(({ key }) => key), [
     "profile", "gitPolicy", "docTrackingPolicy", "reviewDepth", "crossModelReview", "onDeviceGate",
     "implementerModel", "taskReviewerModel", "branchReviewModel", "walkthroughModel",
     "learnStalenessSessions", "learnStalenessDays", "learnSessionCap", "subagentBudget", "handoffNotification", "executionMode",
+    "driveWatch", "drivePlugins",
   ]);
 });
 
@@ -201,7 +202,7 @@ test("compare leaves out a live knob, whose reader takes the global value and ne
   const { knobs } = resolveKnobs(with_({ gitPolicy: "open-pr", subagentBudget: "enforce" }));
   assert.deepEqual(compareKnobs({ subagentBudget: "warn" }, knobs), []);
   assert.deepEqual(compareKnobs({ subagentBudget: "warn", gitPolicy: "local-commits-only" }, knobs), [{ key: "gitPolicy", old: "local-commits-only", new: "open-pr" }]);
-  assert.deepEqual(ROSTER.filter((e) => e.live).map(({ key }) => key), ["subagentBudget", "executionMode"]);
+  assert.deepEqual(ROSTER.filter((e) => e.live).map(({ key }) => key), ["subagentBudget", "executionMode", "driveWatch", "drivePlugins"]);
 });
 
 test("compare leaves out executionMode, a live knob whose reader takes the fresh value", () => {
@@ -210,6 +211,27 @@ test("compare leaves out executionMode, a live knob whose reader takes the fresh
   const { knobs } = resolveKnobs(with_({ executionMode: "unattended" }));
   assert.equal(knobs.executionMode, "unattended");
   assert.deepEqual(compareKnobs({ executionMode: "ask" }, knobs), []);
+});
+
+test("driveWatch and drivePlugins are live knobs closing the roster, and compare leaves them out", () => {
+  assert.deepEqual(ROSTER.slice(-2), [
+    { key: "driveWatch", kind: "enum", values: ["end", "wave", "all"], fallback: "end", live: true },
+    { key: "drivePlugins", kind: "list", fallback: "none", live: true },
+  ]);
+  const { knobs, explicit } = resolveKnobs(with_({ driveWatch: "wave", drivePlugins: "context7,figma" }));
+  assert.deepEqual([knobs.driveWatch, knobs.drivePlugins, explicit], ["wave", "context7,figma", ["driveWatch", "drivePlugins"]]);
+  assert.deepEqual(parseRecordedLine(formatKnobsLine(knobs)).drivePlugins, "context7,figma", "a name list round-trips through the knobs: line");
+  assert.deepEqual(compareKnobs({ driveWatch: "end", drivePlugins: "none" }, knobs), []);
+});
+
+test("a list knob takes none, all or a comma-separated name list; anything else warns and falls back to none", () => {
+  for (const value of ["none", "all", "context7", "context7,figma", "my.plugin_2-x", " figma "])
+    assert.equal(resolveKnobs(with_({ drivePlugins: value })).knobs.drivePlugins, value.trim(), value);
+  for (const value of ["context7, figma", "context7,", ",figma", "none,figma", "figma,all", "figma;rm"]) {
+    const { knobs, explicit, warnings } = resolveKnobs(with_({ drivePlugins: value }));
+    assert.deepEqual([knobs.drivePlugins, explicit], ["none", []], value);
+    assert.deepEqual(warnings, [`drivePlugins=${value} is not one of none, all, or a comma-separated list of plugin names; using none`], value);
+  }
 });
 
 test("handoffNotification is a non-live enum, off unless set, and compares like any recorded knob", () => {
@@ -280,6 +302,14 @@ test("cli: --compare prints nothing for a subagentBudget-only difference, but st
 
 test("cli: --compare prints nothing for an executionMode-only difference", () => {
   const r = cli([...argv(with_({ executionMode: "unattended" })), "--compare", "- knobs: profile=standard executionMode=manual"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
+});
+
+test("cli: driveWatch and drivePlugins print on the knobs: line, and --compare prints nothing for them", () => {
+  const raw = with_({ driveWatch: "all", drivePlugins: "figma" });
+  assert.match(cli(argv(raw)).stdout.split("\n")[0], / executionMode=ask driveWatch=all drivePlugins=figma$/);
+  const r = cli([...argv(raw), "--compare", "- knobs: profile=standard driveWatch=end drivePlugins=none"]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "");
 });

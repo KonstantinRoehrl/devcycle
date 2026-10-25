@@ -357,3 +357,113 @@ test("SC4 replay: an earlier cycle's exhausted review loop of the same task numb
     fx.cleanup();
   }
 });
+
+// Fold B (playbooks/executing-waves.md step 4 at lean/standard): intake --compose-review writes the
+// lines and rows intake then task-dispatch --role reviewer write, once, and its re-run writes nothing.
+test("SC4 replay: intake --compose-review writes what intake and the reviewer dispatch wrote", () => {
+  const rows = (fx) => readFileSync(join(fx.runsDir, repoSlug(gitToplevel(fx.dir)), `${RUN}.jsonl`), "utf8").split("\n")
+    .filter(Boolean).map((l) => JSON.parse(l)).map(({ startedAt, endedAt, ts, ...row }) => row);
+  const unfolded = fixture();
+  const folded = fixture();
+  try {
+    const expected = acceptedTask(unfolded, "1", "src/a.txt");
+    dispatchImplementer(folded, "1");
+    const report = implement(folded, "1", "src/a.txt");
+    const composeReview = () => call(folded, "task-intake", ["--task", "1", "--report", report, "--status", "complete",
+      "--agent-type", "devcycle:implementer", "--model", "claude-haiku-4-5", "--model-source", "explicit",
+      "--agent-id", "a10f1e2d3c4b5a697", "--compose-review"]);
+    const first = composeReview();
+    assert.equal(first.reviewBriefPath, ".devcycle/briefs/1-reviewer-round-1.md");
+    const linesOnce = readFileSync(join(folded.dir, ".devcycle/ledger.md"), "utf8");
+    const again = composeReview();
+    assert.deepEqual(again.appended, []);
+    assert.equal(readFileSync(join(folded.dir, ".devcycle/ledger.md"), "utf8"), linesOnce);
+    assert.equal(review(folded, "1", 1, "accept").action, "accepted");
+    assert.deepEqual(ledger(folded, "1"), expected);
+    assert.deepEqual(rows(folded), rows(unfolded));
+  } finally {
+    unfolded.cleanup();
+    folded.cleanup();
+  }
+});
+
+// Fold 3 (the driven-run economy spec, § 5): an accepted verdict given task-commit.mjs's flags commits
+// in the same call. The ledger and run record must read as the two calls left them, modulo the commit
+// sha and the times; and the folded call run again after a crash adds nothing.
+const foldedVerdict = (fx, task, testCmd) =>
+  call(fx, "task-verdict", ["--task", task, "--round", "1", "--findings", `.devcycle/findings/${task}-round-1.md`,
+    "--evidence-class", "red-green", "--plan", "docs/plan.md", "--test-cmd", testCmd, "--subject", `feat: land task ${task}`]);
+
+// Up to step 5's verdict: the accepted round's lines, the findings file written, the verdict not yet read.
+function reviewedTask(fx, task, file) {
+  dispatchImplementer(fx, task);
+  assert.equal(intake(fx, task, implement(fx, task, file)).action, "review");
+  dispatchReviewer(fx, task, 1);
+  writeInto(fx.dir, `.devcycle/findings/${task}-round-1.md`, "Verdict: accept\n");
+}
+
+const runRecordRows = (fx, sha) =>
+  readFileSync(join(fx.runsDir, repoSlug(gitToplevel(fx.dir)), `${RUN}.jsonl`), "utf8").split("\n").filter(Boolean)
+    .map((l) => JSON.parse(l)).map(({ ts, startedAt, endedAt, ...row }) => (sha && row.sha === sha ? { ...row, sha: "<sha>" } : row));
+
+test("fold 3: the folded verdict-and-commit writes the ledger lines and run-record rows the two calls write", () => {
+  for (const [testCmd, action] of [["true", "committed"], ["exit 1", "gate-fail"]]) {
+    const unfolded = fixture();
+    const folded = fixture();
+    try {
+      reviewedTask(unfolded, "1", "src/a.txt");
+      assert.equal(review(unfolded, "1", 1, "accept").action, "accepted");
+      const apart = commitTask(unfolded, "1", testCmd);
+      reviewedTask(folded, "1", "src/a.txt");
+      const together = foldedVerdict(folded, "1", testCmd);
+      assert.equal(apart.action, action);
+      assert.equal(together.action, action);
+      assert.deepEqual(together.verdict, { verdict: "accept", round: 1, retry: 0, findingsPath: ".devcycle/findings/1-round-1.md", blocking: 0, culprit: null });
+      assert.deepEqual(together.appended, ["1/review-verdict/1/0", "rr:verdict", ...apart.appended]);
+      const bare = (out) => (l) => (out.sha ? l.replace(out.sha, "<sha>") : l);
+      assert.deepEqual(ledger(folded, "1").map(bare(together)), ledger(unfolded, "1").map(bare(apart)));
+      assert.deepEqual(runRecordRows(folded, together.sha), runRecordRows(unfolded, apart.sha));
+    } finally {
+      unfolded.cleanup();
+      folded.cleanup();
+    }
+  }
+});
+
+test("fold 3: the folded call run again after a crash writes nothing new and reports the commit already made", () => {
+  const fx = fixture();
+  try {
+    reviewedTask(fx, "1", "src/a.txt");
+    const first = foldedVerdict(fx, "1", "true");
+    assert.equal(first.action, "committed");
+    const ledgerBefore = readFileSync(join(fx.dir, ".devcycle/ledger.md"), "utf8");
+    const rowsBefore = runRecordRows(fx, first.sha);
+    const again = foldedVerdict(fx, "1", "true");
+    assert.deepEqual([again.action, again.sha, again.appended], ["already-committed", first.sha, []]);
+    assert.deepEqual(again.verdict, first.verdict);
+    assert.equal(readFileSync(join(fx.dir, ".devcycle/ledger.md"), "utf8"), ledgerBefore);
+    assert.deepEqual(runRecordRows(fx, first.sha), rowsBefore);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("fold 3: an accept recorded without the commit, then the call re-run with the commit flags, commits once", () => {
+  const fx = fixture();
+  try {
+    reviewedTask(fx, "1", "src/a.txt");
+    assert.equal(review(fx, "1", 1, "accept").action, "accepted");
+    const recorded = runRecordRows(fx);
+    const together = foldedVerdict(fx, "1", "true");
+    assert.deepEqual([together.action, together.verdict.retry], ["committed", 0]);
+    assert.deepEqual(together.appended.filter((key) => key.startsWith("1/review-verdict") || key === "rr:verdict"), [],
+      "the recorded accept is not written again");
+    assert.equal(readFileSync(join(fx.dir, ".devcycle/ledger.md"), "utf8").match(/event=review-verdict/g).length, 1);
+    assert.deepEqual(runRecordRows(fx, together.sha).slice(0, recorded.length), recorded);
+    const again = foldedVerdict(fx, "1", "true");
+    assert.deepEqual([again.action, again.sha, again.appended], ["already-committed", together.sha, []]);
+    assert.equal(readFileSync(join(fx.dir, ".devcycle/ledger.md"), "utf8").match(/event=committed/g).length, 1);
+  } finally {
+    fx.cleanup();
+  }
+});

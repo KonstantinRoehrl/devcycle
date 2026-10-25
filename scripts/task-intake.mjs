@@ -3,6 +3,7 @@
 // evidence line, runs the two report lints a reviewer would otherwise spend a round on, and writes
 // the `report-received` ledger line and the `dispatch` run-record row for the task's latest
 // dispatch. The envelope's `status:` arrives as --status, since the report itself carries none.
+// With --compose-review, a report bound for review also gets its reviewer brief and dispatch here.
 // Contract: references/ledger.md § Task scripts; resume rows and retry caps: references/resume.md.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -12,15 +13,17 @@ import { atomicWrite } from "./atomic-write.mjs";
 import { authoredClaimsLeg } from "./authored-claims-check.mjs";
 import { gitToplevel } from "./git-identity.mjs";
 import { isMain } from "./is-main.mjs";
+import { field } from "./md-field.mjs";
 import { now } from "./stamp.mjs";
+import { dispatch, roundFindingsPath } from "./task-dispatch.mjs";
 import {
-  UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, latestKeyed, ledgerKey, retryCount, runTaskScript,
-  taskFlags, workTreeRoot,
+  UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, latestKeyed, ledgerKey, nextReviewRound, retryCount,
+  runTaskScript, taskEntries, taskFiles, taskFlags, taskGate, workTreeRoot,
 } from "./task-ledger.mjs";
 
 const FLAGS = {
   "--run": "value", "--task": "value", "--report": "value", "--status": "value", "--agent-type": "value",
-  "--model": "value", "--model-source": "value", "--agent-id": "value", "--ledger": "value",
+  "--model": "value", "--model-source": "value", "--agent-id": "value", "--ledger": "value", "--compose-review": "none",
 };
 const REQUIRED = ["--run", "--task", "--report", "--status", "--agent-type", "--model", "--model-source"];
 const EVIDENCE_COMPLETENESS = fileURLToPath(new URL("./evidence-completeness-check.mjs", import.meta.url));
@@ -40,6 +43,86 @@ function lintFindings(root, reportRel, text, { task, ledger }) {
   const ec = spawnSync(process.execPath, args, { cwd: root, encoding: "utf8" });
   if (ec.status !== 0) findings.push(...ec.stderr.split("\n").filter(Boolean));
   return findings;
+}
+
+// The task's constraints, verbatim from its implementer brief, where playbooks/executing-waves.md
+// step 2 slices them in, under whatever form it gives them: its Global/Quality Constraints sections
+// and its `**Global constraints:**` / `**Quality constraints:**` labels. A section runs to the next
+// heading; a label's block runs over the bullets directly beneath it, to the next blank line, heading
+// or bold label. The gate line task-dispatch appends is no constraint.
+const CONSTRAINTS_HEADING_RE = /^## (Global|Quality) Constraints\b/i;
+const CONSTRAINTS_LABEL_RE = /^\*\*(Global|Quality) constraints:\*\*/i;
+const BOLD_LABEL_RE = /^\*\*[^*]+:\*\*/;
+function constraintsOf(briefText) {
+  const kept = [];
+  let inSection = false;
+  let inLabelBlock = false;
+  for (const line of briefText.split("\n")) {
+    if (/^#{1,3} /.test(line)) inSection = CONSTRAINTS_HEADING_RE.test(line);
+    if (!line.trim() || /^#{1,3} /.test(line) || BOLD_LABEL_RE.test(line)) inLabelBlock = CONSTRAINTS_LABEL_RE.test(line);
+    if (line.startsWith("**Gate command:**")) continue;
+    if (inSection || inLabelBlock) kept.push(line);
+  }
+  return kept.join("\n").trim();
+}
+
+// A report's `- Before:`/`- After:` value is "<path> (exit <n>)" (references/evidence.md § Task report).
+const evidenceFile = (report, key) => field(report, key)?.split(/\s+/)[0].replaceAll("`", "") || null;
+
+// The reviewer brief playbooks/executing-waves.md step 5 prescribes, from the ledger, the plan and
+// the two files the implementer left: no coordinator slicing between intake and the review.
+function reviewerBrief({ root, ledger, task, round, reportRel, report, findingsPath, dispatched }) {
+  const first = latestKeyed(ledger, task, "dispatched", { round: 0 }) ?? dispatched;
+  const firstAbs = join(root, first.ref);
+  const constraints = existsSync(firstAbs) ? constraintsOf(readFileSync(firstAbs, "utf8")) : "";
+  const files = [...(taskFiles(ledger, task) ?? [])];
+  const evidenceClass = taskGate(ledger, task)?.evidenceClass;
+  const rejected = round > 1 ? latestKeyed(ledger, task, "review-verdict", { round: round - 1 }) : null;
+  const evidence = ["Before", "After"].map((key) => evidenceFile(report, key)).filter(Boolean);
+  const code = (path) => `\`${path}\``;
+  return [
+    `# Task-reviewer brief — Task ${task}, round ${round}`,
+    "",
+    `**Task id:** ${task}`,
+    `**Round:** ${round}`,
+    ...(evidenceClass ? [`**Evidence class:** ${evidenceClass}`] : []),
+    "",
+    `Review task ${task}'s uncommitted diff against its implementer brief. Read-only, apart from writing your findings file.`,
+    "",
+    `- The implementer brief (task steps, pinned interfaces, constraints): ${code(first.ref)}`,
+    ...(dispatched.ref !== first.ref ? [`- The latest fix-pass brief: ${code(dispatched.ref)}`] : []),
+    ...(rejected ? [`- Round ${round - 1} was rejected by ${code(rejected.ref)}: confirm each blocking finding there is resolved`] : []),
+    `- The implementer's report: ${code(reportRel)}`,
+    `- Evidence files: ${evidence.length ? evidence.map(code).join(" and ") : "none named in the report"}`,
+    "- The task's files:",
+    ...(files.length ? files.map((f) => `  - ${code(f)}`) : ["  - the implementer brief's **Files:** list (the plan names none for this task)"]),
+    "",
+    "Produce the diff yourself: first `git add -N` the task's new (untracked) files from the list above, or they are " +
+      "invisible to diff, then `git diff -U10 HEAD -- <the files above>`. Other tasks may be in flight in this working " +
+      "tree; judge only these files.",
+    "",
+    `Write your verdict block to ${code(findingsPath)} in the shape \`"$(devcycle-root)/references/evidence.md"\` ` +
+      "§ Reviewer verdicts defines, and return only the task-reviewer envelope.",
+    "",
+    constraints || "**Constraints:** none extracted — read the implementer brief for constraints",
+    "",
+  ].join("\n");
+}
+
+// The review step 4 hands on, dispatched here through task-dispatch's own reviewer path, so its
+// ledger line and findings set-aside stay that script's. A round already dispatched since the latest
+// report makes this a re-run: it points at that round's brief and writes nothing.
+function composeReview({ root, ledger, run, task, cwd, ledgerFlag, reportRel, report, dispatched }) {
+  const entries = taskEntries(ledger, task);
+  const round = nextReviewRound(entries);
+  const findingsPath = roundFindingsPath(task, round);
+  const since = entries.slice(entries.findLastIndex((e) => e.event === "report-received") + 1);
+  const sent = since.find((e) => e.event === "review-round" && Number(e.key?.split("/")[2]) === round);
+  if (sent) return { reviewBriefPath: sent.ref, findingsPath, reviewRound: round, appended: [] };
+  const brief = reviewerBrief({ root, ledger, task, round, reportRel, report, findingsPath, dispatched });
+  const argv = ["--run", run, "--task", task, "--role", "reviewer", "--round", String(round), ...(ledgerFlag ? ["--ledger", ledgerFlag] : [])];
+  const { briefPath, appended } = dispatch(argv, brief, cwd);
+  return { reviewBriefPath: briefPath, findingsPath, reviewRound: round, appended };
 }
 
 export function intake(argv, cwd = process.cwd()) {
@@ -103,7 +186,9 @@ export function intake(argv, cwd = process.cwd()) {
   }
   ledgerLine("complete", reportRel);
   dispatchRow("complete");
-  return { ...base, action: "review", appended };
+  if (!flags["--compose-review"]) return { ...base, action: "review", appended };
+  const review = composeReview({ root, ledger, run, task, cwd, ledgerFlag: flags["--ledger"], reportRel, report: text, dispatched });
+  return { ...base, action: "review", ...review, appended: [...appended, ...review.appended] };
 }
 
 if (isMain(import.meta.url, process.argv[1])) runTaskScript("task-intake", () => intake(process.argv.slice(2)));

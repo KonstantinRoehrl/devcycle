@@ -17,9 +17,13 @@ function repoWithLedger() {
   return repo;
 }
 
-// No session id reaches the script, so the depth probe never reads a real transcript.
+// No session id reaches the script, so the depth probe never reads a real transcript, and the user
+// lesson stores an implementer brief is filled from are empty.
 function childEnv() {
-  const env = { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("task-dispatch-runs-"), CLAUDE_DOCTOR_PROJECTS: makeTempDir("task-dispatch-projects-") };
+  const env = {
+    ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("task-dispatch-runs-"), CLAUDE_DOCTOR_PROJECTS: makeTempDir("task-dispatch-projects-"),
+    DEVCYCLE_LEARNINGS_DIR: makeTempDir("task-dispatch-learnings-"),
+  };
   delete env.CLAUDE_CODE_SESSION_ID;
   return env;
 }
@@ -37,7 +41,7 @@ test("an implementer dispatch writes the brief, its start time and the dispatche
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.out, {
     ok: true, appended: ["5/dispatched/0/0"], action: "dispatch", task: "5", role: "implementer", round: 0, retry: 0,
-    briefPath: ".devcycle/briefs/5-implementer.md", depthBand: "unknown",
+    briefPath: ".devcycle/briefs/5-implementer.md", lessons: null, depthBand: "unknown",
   });
   assert.equal(readFileSync(join(repo, ".devcycle/briefs/5-implementer.md"), "utf8"), "# Brief for task 5\n");
   const { startedAt } = JSON.parse(readFileSync(join(repo, ".devcycle/dispatch/5-implementer-0-0.json"), "utf8"));
@@ -177,16 +181,59 @@ test("an implementer brief ends with the task's resolved gate command", () => {
   const repo = gatedRepo();
   const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n");
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"), "# Brief for task 5\n\n**Gate command:** `npm run gate`\n");
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"), "# Brief for task 5\n\n**Lessons:** none\n\n**Gate command:** `npm run gate`\n");
 });
 
 test("a fix-pass brief carries the gate line too; a reviewer brief and an ungated task get none", () => {
   const repo = gatedRepo();
   dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--round", "1"], "# Fix pass");
-  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer-round-1.md"), "# Fix pass\n\n**Gate command:** `npm run gate`\n");
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer-round-1.md"), "# Fix pass\n\n**Lessons:** none\n\n**Gate command:** `npm run gate`\n");
   dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"], "# Review brief\n");
   assert.equal(briefAt(repo, ".devcycle/briefs/5-reviewer-round-1.md"), "# Review brief\n");
   const plain = repoWithLedger();
   dispatch(plain, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n");
   assert.equal(briefAt(plain, ".devcycle/briefs/5-implementer.md"), "# Brief for task 5\n");
+});
+
+const LESSON_HEADER = "**Lessons:** (pull a full record with its --lesson hint only if you are about to work in the area it names)";
+const GUARD = '- Guard the thing [novel:guard-thing] → node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lesson novel:guard-thing';
+
+// A gated repo whose execution lesson names the task's file, src/a.mjs.
+function lessonRepo() {
+  const repo = gatedRepo();
+  mkdirSync(join(repo, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(repo, "docs/devcycle/lessons.md"), "# Lessons\n\n## execution\n- Guard the thing [novel:guard-thing]\n");
+  writeFileSync(join(repo, "docs/devcycle/promotions/2026-08-16-guard-thing.md"),
+    "# Guard the thing\n- affected-files: src/*.mjs\n- culprit-id: novel:guard-thing\n");
+  return repo;
+}
+
+test("an implementer brief's **Lessons:** line is filled in place with the lessons its task's files match", () => {
+  const repo = lessonRepo();
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n**Lessons:**\n\n- [ ] Step 1\n");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.lessons, 1);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"),
+    `# Brief for task 5\n${LESSON_HEADER}\n${GUARD}\n\n- [ ] Step 1\n\n**Gate command:** \`npm run gate\`\n`);
+});
+
+test("a filled **Lessons:** line with nothing matched reads none; with no plan to read the brief is left as composed", () => {
+  const repo = gatedRepo();
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n**Lessons:**\n- [ ] Step 1\n");
+  assert.equal(r.out.lessons, 0);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"), "# Brief for task 5\n**Lessons:** none\n- [ ] Step 1\n\n**Gate command:** `npm run gate`\n");
+  const plain = repoWithLedger();
+  const unplanned = dispatch(plain, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n**Lessons:**\n");
+  assert.equal(unplanned.out.lessons, null);
+  assert.equal(briefAt(plain, ".devcycle/briefs/5-implementer.md"), "# Brief for task 5\n**Lessons:**\n");
+});
+
+test("an ungated plan task's brief gets its lessons block last; a reviewer brief is never filled", () => {
+  const repo = lessonRepo();
+  writeFileSync(join(repo, "docs/plan.md"), GATED_PLAN.replace("**Verification gate:** `npm run gate`\n", ""));
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n");
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"), `# Brief for task 5\n\n${LESSON_HEADER}\n${GUARD}\n`);
+  const reviewer = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"], "# Review brief\n**Lessons:**\n");
+  assert.equal("lessons" in reviewer.out, false);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-reviewer-round-1.md"), "# Review brief\n**Lessons:**\n");
 });

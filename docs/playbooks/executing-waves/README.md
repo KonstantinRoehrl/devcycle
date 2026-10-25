@@ -21,7 +21,7 @@ dependencies are already committed AND whose files overlap no other candidate or
 joins the same wave, executed by readiness rather than written order. Each task then runs its own
 cycle: the brief is sliced down to exactly what that implementer needs — its id, Files,
 Interfaces, Dependencies, evidence class and tail length, quality constraints resolved to
-verbatim lines, matched lessons, and the gate command `task-dispatch.mjs` appends to the brief
+verbatim lines, and the matched lessons and gate command `task-dispatch.mjs` adds to the brief
 file it writes — and that file is dispatched to a fresh `devcycle:implementer`, never
 carrying prior tasks' history. Once its report file is confirmed to exist and carry the fields
 its evidence class requires, a `devcycle:task-reviewer` (read-only apart from its own findings
@@ -44,7 +44,8 @@ lands, never deferred to the end. At the last wave's boundary, execution updates
 Each step's bookkeeping runs through one script, so a session spends one call where it used to
 spend several: `wave-setup.mjs` hands `/devcycle:continue` the wave's resume position as one JSON
 object, `task-dispatch.mjs` writes a brief and its ledger line, `task-intake.mjs` checks and lints
-the implementer's report, `task-verdict.mjs` records the reviewer's verdict, and `task-commit.mjs`
+the implementer's report and, at `lean` and `standard`, writes the reviewer's brief too, and
+`task-verdict.mjs` records the reviewer's verdict and, on acceptance, runs `task-commit.mjs`, which
 runs the green gate and commits the task with a `Devcycle-Task:` trailer, finding an earlier commit
 of the same task instead of committing twice. Every ledger line they append carries an idempotency
 key, so a session that crashed mid-step re-runs it without duplicating a line. Implementers write
