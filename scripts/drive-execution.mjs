@@ -13,6 +13,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import agentCli from "../workflows/lib/agent-cli.js";
 import { defaultBranches, isProtectedBranch } from "./branch-names.mjs";
+import { EFFORT_LEVELS, resolveEffort } from "./claude-settings.mjs";
 import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
@@ -77,6 +78,7 @@ const DEAREST_MODEL = Object.keys(PRICING.models).reduce((a, b) => (PRICING.mode
 const KNOWN_FLAGS = {
   "--state": "value",
   "--model": "value",
+  "--effort": "value",
   "--max-usd": "value",
   "--max-stalls": "value",
   "--max-churn": "value",
@@ -92,6 +94,9 @@ const KNOWN_FLAGS = {
   "--wait": "none",
   "--since": "value",
 };
+
+// "default" leaves the effort to Claude Code: no --effort, and no CLAUDE_EFFORT in a session's env.
+const EFFORT_CHOICES = [...EFFORT_LEVELS, "default"];
 
 class Exit extends Error {
   constructor(code, message) {
@@ -113,6 +118,9 @@ function parseArgs(argv) {
   const maxUsd = usd === undefined ? undefined : Number(usd);
   if (maxUsd !== undefined && !(maxUsd > 0))
     throw new Error(`--max-usd requires a positive dollar amount, got ${JSON.stringify(usd)}`);
+  const effort = requireValue(flags, "--effort", `one of ${EFFORT_CHOICES.join(" | ")}`);
+  if (effort !== undefined && !EFFORT_CHOICES.includes(effort))
+    throw new Error(`--effort requires one of ${EFFORT_CHOICES.join(" | ")}, got ${JSON.stringify(effort)}`);
   return {
     watch: watches[0] ?? null,
     since: since ?? null,
@@ -120,6 +128,7 @@ function parseArgs(argv) {
     state,
     maxUsd,
     model: requireValue(flags, "--model", "a model id"),
+    effort,
     maxStalls: requireCount(flags, "--max-stalls") ?? 2,
     maxChurn: requireCount(flags, "--max-churn") ?? 3,
     maxBackoffMs: (requireCount(flags, "--max-backoff", { min: 0 }) ?? 360) * 60_000,
@@ -142,6 +151,7 @@ function readState(statePath) {
     run: first("run"),
     opted: /^auto\b/.test(drive),
     model: drive.match(/\bmodel=(\S+)/)?.[1] ?? null,
+    effort: drive.match(/\beffort=(\S+)/)?.[1] ?? null,
   };
 }
 
@@ -244,6 +254,21 @@ const SANDBOX_REFUSAL =
   "the Claude Code Bash sandbox blocks ~/.claude — /devcycle:continue retries the start outside the sandbox through a " +
   'permission prompt; from a terminal, use one that is not a Claude Code session ("!" runs inside the session)';
 
+// --effort beats the row's effort=, and a row written before effort= was recorded is resolved here
+// from the settings, never written back (docs/decisions/README.md, 2026-10-25).
+function driveEffort(root, state, opts, model) {
+  const override = `pass --effort <${EFFORT_CHOICES.join("|")}>`;
+  if (opts.effort) return opts.effort;
+  if (state.effort) {
+    if (!EFFORT_CHOICES.includes(state.effort))
+      throw new Exit(3, `the drive row records effort=${state.effort}, not one of ${EFFORT_CHOICES.join(", ")} — ${override}`);
+    return state.effort;
+  }
+  const { effort, problem } = resolveEffort({ env: process.env, cwd: root, model });
+  if (effort === null) throw new Exit(3, `the effort level cannot be resolved: ${problem} — correct it, or ${override}`);
+  return effort;
+}
+
 function checkEnvironment(root, state, opts) {
   if (!state.opted)
     throw new Exit(3, "the state file has no `drive: auto` row — run /devcycle:continue and answer Start unattended");
@@ -270,8 +295,9 @@ function checkEnvironment(root, state, opts) {
   }
   const refusal = modelRefusal(model);
   if (refusal) throw new Exit(3, refusal);
+  const effort = driveEffort(root, state, opts, model);
   if (sandboxed()) throw new Exit(3, SANDBOX_REFUSAL);
-  return { model, planText, plan: state.plan, run: state.run, leftAlone };
+  return { model, effort, planText, plan: state.plan, run: state.run, leftAlone };
 }
 
 function release(ctx) {
@@ -313,8 +339,9 @@ function preflight(opts) {
 }
 
 function sessionArgs(ctx, opts, spent) {
-  const args = ["-p", `/devcycle:continue --drive ${ctx.stateRel}`, "--model", ctx.model,
-    "--permission-mode", "auto", "--output-format", "stream-json", "--verbose"];
+  const args = ["-p", `/devcycle:continue --drive ${ctx.stateRel}`, "--model", ctx.model];
+  if (ctx.effort !== "default") args.push("--effort", ctx.effort);
+  args.push("--permission-mode", "auto", "--output-format", "stream-json", "--verbose");
   if (opts.maxUsd !== undefined) args.push("--max-budget-usd", Math.max(opts.maxUsd - spent, 0.01).toFixed(2));
   return args;
 }
@@ -327,6 +354,9 @@ function childEnv(ctx) {
   // /devcycle:continue starts the driver from inside its own session.
   delete env.DEVCYCLE_NESTED_RUN;
   delete env.CLAUDECODE;
+  // Set to the level --effort passes, so the flag and the inherited variable never disagree.
+  if (ctx.effort === "default") delete env.CLAUDE_EFFORT;
+  else env.CLAUDE_EFFORT = ctx.effort;
   return env;
 }
 
@@ -772,7 +802,7 @@ async function walk(ctx, opts, log, trap) {
     const before = progressOf(entriesBefore);
     const waveAtStart = inFlightFiles(ctx.planText, entriesBefore).wave;
     const startedAt = now();
-    log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}`);
+    log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}, effort ${ctx.effort}`);
     const s = await runSession(ctx, opts.bin, sessionArgs(ctx, opts, spent), log, n);
     const entriesAfter = ledgerEntries(ctx.root, ctx.plan);
     const after = progressOf(entriesAfter);

@@ -54,11 +54,11 @@ function makeCycle({ branch = "feat/drive", stage = "execution", drive = `- driv
 
 // One isolated world per scenario: its own HOME (the sandbox probe writes under ~/.claude), runs dir,
 // scenario and call log, and a `claude` on PATH that is the stub. DEVCYCLE_NESTED_RUN is set on
-// purpose — the driver must strip it from every session it starts. CLAUDECODE and a
+// purpose — the driver must strip it from every session it starts. CLAUDECODE, CLAUDE_EFFORT and a
 // DEVCYCLE_DRIVE_TOKEN, which a suite run inside Claude Code or a driven session inherits, and
-// CLAUDE_CONFIG_DIR, which would point the driver at the real transcripts, are dropped: only the
-// tests that are about them set them. `prelude` runs in the fake `claude` before the stub does.
-const { CLAUDECODE: _claudeCode, CLAUDE_CONFIG_DIR: _configDir, DEVCYCLE_DRIVE_TOKEN: _driveToken, ...BASE_ENV } = process.env;
+// CLAUDE_CONFIG_DIR, which would point the driver at the real transcripts and settings, are dropped:
+// only the tests that are about them set them. `prelude` runs in the fake `claude` before the stub does.
+const { CLAUDECODE: _claudeCode, CLAUDE_CONFIG_DIR: _configDir, CLAUDE_EFFORT: _effort, DEVCYCLE_DRIVE_TOKEN: _driveToken, ...BASE_ENV } = process.env;
 function harness(scenario = [], env = {}, { prelude = "" } = {}) {
   const dir = makeTempDir("devcycle-drive-test-");
   const home = join(dir, "home");
@@ -151,14 +151,83 @@ test("drives one fresh session per wave until the state reaches branch-review, w
 });
 
 test("each session is claude -p on the drive prompt with auto permissions, stream-json and an explicit model, and never sees DEVCYCLE_NESTED_RUN", async () => {
-  const root = makeCycle();
+  const root = makeCycle({ drive: `- drive: auto model=${MODEL} effort=high opted=2026-10-08T00:00:00Z via=answer` });
   const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
   assert.equal(r.code, 0, r.out);
-  assert.deepEqual(r.calls[0].argv, ["-p", "/devcycle:continue --drive .devcycle/state.md", "--model", MODEL,
+  assert.deepEqual(r.calls[0].argv, ["-p", "/devcycle:continue --drive .devcycle/state.md", "--model", MODEL, "--effort", "high",
     "--permission-mode", "auto", "--output-format", "stream-json", "--verbose"]);
+  assert.equal(r.calls[0].effort, "high", "the session's CLAUDE_EFFORT disagrees with its --effort");
   assert.equal(r.calls[0].nested, false, "DEVCYCLE_NESTED_RUN reached the driven session");
   const pinned = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--model", "claude-opus-5-5"] });
   assert.equal(pinned.calls[0].argv[pinned.calls[0].argv.indexOf("--model") + 1], "claude-opus-5-5");
+});
+
+const effortRow = (effort) => `- drive: auto model=${MODEL} effort=${effort} opted=2026-10-08T00:00:00Z via=answer`;
+const startsLine = (root) => readFileSync(join(root, ".devcycle", "drive.log"), "utf8").split("\n").find((l) => l.includes("] session 1 starts"));
+
+test("effort comes from --effort, else the drive row's effort=, else the settings at driver start, which are never written back", async () => {
+  const legacy = makeCycle();
+  writeInto(legacy, ".claude/settings.json", JSON.stringify({ modelSettings: { [MODEL]: { effortLevel: "xhigh" } }, effortLevel: "low" }));
+  const resolved = await drive(legacy, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(resolved.code, 0, resolved.out);
+  assert.deepEqual(resolved.calls[0].argv.slice(4, 6), ["--effort", "xhigh"]);
+  assert.equal(resolved.calls[0].effort, "xhigh", "the session's CLAUDE_EFFORT disagrees with its --effort");
+  assert.match(startsLine(legacy), new RegExp(`session 1 starts — wave 1, model ${MODEL}, effort xhigh`));
+  assert.doesNotMatch(readFileSync(join(legacy, ".devcycle", "state.md"), "utf8"), /effort=/, "the resolved effort was written back to the row");
+
+  const inherited = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review" }], { env: { CLAUDE_EFFORT: "low" } });
+  assert.deepEqual(inherited.calls[0].argv.slice(4, 6), ["--effort", "low"], "the launching session's CLAUDE_EFFORT was not resolved");
+
+  const recorded = makeCycle({ drive: effortRow("medium") });
+  writeInto(recorded, ".claude/settings.json", JSON.stringify({ effortLevel: "max" }));
+  const fromRow = await drive(recorded, [{ ledger: DONE, stage: "branch-review" }], { env: { CLAUDE_EFFORT: "low" } });
+  assert.deepEqual(fromRow.calls[0].argv.slice(4, 6), ["--effort", "medium"]);
+  assert.equal(fromRow.calls[0].effort, "medium");
+
+  const flagged = await drive(makeCycle({ drive: effortRow("medium") }), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--effort", "max"] });
+  assert.deepEqual(flagged.calls[0].argv.slice(4, 6), ["--effort", "max"]);
+  assert.equal(flagged.calls[0].effort, "max");
+});
+
+test("effort default passes no --effort and keeps an inherited CLAUDE_EFFORT from every session", async () => {
+  const fromRow = await drive(makeCycle({ drive: effortRow("default") }),
+    [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }], { env: { CLAUDE_EFFORT: "high" } });
+  assert.equal(fromRow.code, 0, fromRow.out);
+  assert.equal(fromRow.calls.length, 2);
+  for (const c of fromRow.calls) {
+    assert.ok(!c.argv.includes("--effort"), c.argv.join(" "));
+    assert.equal(c.effort, null, "a session inherited the driver's CLAUDE_EFFORT");
+  }
+  const flagged = await drive(makeCycle({ drive: effortRow("high") }), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--effort", "default"] });
+  assert.ok(!flagged.calls[0].argv.includes("--effort"), flagged.calls[0].argv.join(" "));
+  assert.equal(flagged.calls[0].effort, null);
+  // Nothing set anywhere: the harness drops CLAUDE_EFFORT, and neither its HOME nor the checkout holds settings.
+  const unset = makeCycle();
+  const r = await drive(unset, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.ok(!r.calls[0].argv.includes("--effort"), r.calls[0].argv.join(" "));
+  assert.match(startsLine(unset), /, effort default/);
+});
+
+test("an effort the driver cannot use refuses the start with exit 3 naming where it came from; a bad --effort is a usage error", () => {
+  const unusable = makeCycle();
+  writeInto(unusable, ".claude/settings.json", JSON.stringify({ effortLevel: "turbo" }));
+  const unresolvable = dryRun(unusable);
+  assert.equal(unresolvable.code, 3, unresolvable.out);
+  assert.match(unresolvable.out, /^drive-execution: the effort level cannot be resolved: effortLevel in \S+\/\.claude\/settings\.json is "turbo", not one of low, medium, high, xhigh, max — correct it, or pass --effort <low\|medium\|high\|xhigh\|max\|default>$/m);
+
+  const overridden = dryRun(unusable, ["--effort", "low"]);
+  assert.equal(overridden.code, 0, overridden.out);
+  assert.deepEqual(JSON.parse(overridden.out.trim().split("\n").at(-1)).command.slice(3, 7), ["--model", MODEL, "--effort", "low"]);
+
+  const badRow = dryRun(makeCycle({ drive: effortRow("turbo") }));
+  assert.equal(badRow.code, 3, badRow.out);
+  assert.ok(badRow.out.includes("drive-execution: the drive row records effort=turbo, not one of low, medium, high, xhigh, max, default — pass --effort <low|medium|high|xhigh|max|default>"), badRow.out);
+
+  for (const value of ["turbo", "HIGH", " "]) {
+    const r = dryRun(makeCycle(), ["--effort", value]);
+    assert.equal(r.code, 2, `${JSON.stringify(value)}: ${r.out}`);
+    assert.match(r.out, /^drive-execution: --effort requires one of low \| medium \| high \| xhigh \| max \| default/m);
+  }
 });
 
 test("each session gets this driver's own token, whose hash and only its hash the lock holds; every run draws a new one", async () => {

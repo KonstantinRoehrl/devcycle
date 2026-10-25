@@ -120,6 +120,34 @@ test("cli: the session's transcript is found under CLAUDE_CONFIG_DIR's projects 
   assert.equal(JSON.parse(r.stdout).depth, 600);
 });
 
+// The drive row's effort= is this field (references/drive.md § Drive actions). The checkout and the
+// config home are temp, and CLAUDE_EFFORT is dropped unless a case sets it, so no real setting is read.
+test("cli: --json adds the effort resolved for the probed model", () => {
+  const cwd = makeTempDir("depth-probe-cwd");
+  mkdirSync(join(cwd, ".claude"));
+  const file = join(cwd, "t.jsonl");
+  writeJsonl(file, [assistant("claude-opus-5", usage(100, 200, 300, 5), "2026-10-07T07:00:00Z")]);
+  const { CLAUDE_EFFORT: _effort, ...env } = process.env;
+  const probe = (settings, extra = {}) => {
+    writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify(settings));
+    const r = spawnSync(process.execPath, [SCRIPT, "--transcript", file, "--json"], {
+      cwd, encoding: "utf8",
+      env: { ...env, HOME: makeTempDir("depth-probe-home"), CLAUDE_CONFIG_DIR: makeTempDir("depth-probe-config"), ...extra },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  };
+  const perModel = probe({ modelSettings: { "claude-opus-5": { effortLevel: "xhigh" } }, effortLevel: "low" });
+  assert.equal(perModel.depth, 600);
+  assert.equal(perModel.effort, "xhigh");
+  assert.equal(perModel.effortProblem, null);
+  assert.equal(probe({ effortLevel: "low" }, { CLAUDE_EFFORT: "medium" }).effort, "medium");
+  assert.equal(probe({}).effort, "default");
+  const unresolvable = probe({ effortLevel: "turbo" });
+  assert.equal(unresolvable.effort, null, "an unresolvable effort is printed as null, not refused");
+  assert.match(unresolvable.effortProblem, /^effortLevel in \S+\/\.claude\/settings\.json is "turbo", not one of low, medium, high, xhigh, max$/);
+});
+
 test("depthLine: an assumed window is labelled with the file that would fix it", () => {
   const line = depthLine({ depth: 600, model: "claude-mythos-9", window: ASSUMED_WINDOW, windowAssumed: true, fraction: 0.0006, band: "ok" });
   assert.equal(line, "depth: 600 tokens (0.1% of 1000000, model claude-mythos-9, window assumed — model not in scripts/pricing.mjs) — band: ok");
