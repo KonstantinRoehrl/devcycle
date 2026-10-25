@@ -195,6 +195,28 @@ test("summarizeSession counts every turn per stage, main and subagent apart, pri
   assert.deepEqual(s.unpriced, { "claude-mythos-9": 1 }, "the unpriced turn is counted, though it carries no cost");
 });
 
+test("turnsByStage counts a model request once, though Claude Code writes one record per content block", () => {
+  // One request of thinking + text + tool_use is three assistant records sharing a requestId (and
+  // an identical usage block); records without any request id each stand for their own request.
+  const block = (requestId, over = {}) => turn({ requestId, ...over });
+  const s = summarizeSession("sess-abcdef123456", [
+    block("req-1"),
+    block("req-1"),
+    block("req-1"),
+    block("req-2", { isSidechain: true, agentId: "agent-1" }),
+    block("req-2", { isSidechain: true, agentId: "agent-1" }),
+    turn({ message: { id: "msg-1", model: "claude-opus-5", usage: usage(10, 100, 1000, 20) } }),
+    turn({ message: { id: "msg-1", model: "claude-opus-5", usage: usage(10, 100, 1000, 20) } }),
+    turn({}),
+    turn({}),
+  ]);
+  const count = (by, side) => Object.values(by).reduce((n, t) => n + t[side], 0);
+  assert.equal(count(s.turnsByStage, "main"), 4, "req-1, msg-1, and the two id-less records");
+  assert.equal(count(s.turnsByStage, "subagent"), 1, "req-2");
+  assert.equal(s.mainTurns, 7, "the record-based counters are unchanged");
+  assert.equal(s.subagentTurns, 2);
+});
+
 test("a skill tag stamped on every turn of its invocation keeps the stage its signal set; a different tag resets it", () => {
   const tagged = (skill = "devcycle:continue") => ({ attributionSkill: skill });
   const s = summarizeSession("sess-abcdef123456", [

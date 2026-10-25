@@ -231,6 +231,36 @@ test("a promotion carrying no culprit id contributes nothing rather than an empt
   assert.deepEqual(row.shipped, []);
 });
 
+// The workload sensor rewrites plannedTaskCount on every HEAD-advancing commit, so every session
+// window of one run carries the same line: a run's planned tasks must be counted once, not once
+// per session. Three 6-turn execution sessions of one 3-task run are 18 turns over 3 tasks.
+test("versionProfileTable counts a run's planned tasks once across its task-bearing sessions", () => {
+  const workload = { plannedTaskCount: 3 };
+  const session = (id, runId) => sum({
+    id, runId, workload, mainTurns: 6, subagentTurns: 0, turnsByStage: { execution: { main: 6, subagent: 0 } },
+  });
+  const [oneRun] = versionProfileTable([session("aaaaaaaa", "r1"), session("bbbbbbbb", "r1"), session("cccccccc", "r1")]);
+  assert.equal(oneRun.execMainTurnsPerTask, 6);
+  assert.equal(oneRun.turnsPerTask, 6);
+  // Distinct runs add: 36 turns over 6 tasks.
+  const [twoRuns] = versionProfileTable([
+    session("aaaaaaaa", "r1"), session("bbbbbbbb", "r1"), session("cccccccc", "r1"),
+    session("dddddddd", "r2"), session("eeeeeeee", "r2"), session("ffffffff", "r2"),
+  ]);
+  assert.equal(twoRuns.execMainTurnsPerTask, 6);
+  assert.equal(twoRuns.turnsPerTask, 6);
+  const [uneven] = versionProfileTable([session("aaaaaaaa", "r1"), session("bbbbbbbb", "r1"), session("dddddddd", "r2")]);
+  assert.equal(uneven.execMainTurnsPerTask, 3, "18 turns over 6 tasks: r1 counted once and r2 counted once");
+  // A session with no runId cannot be de-duplicated: each counts on its own.
+  const [noRun] = versionProfileTable([session("aaaaaaaa", null), session("bbbbbbbb", null)]);
+  assert.equal(noRun.execMainTurnsPerTask, 2);
+  assert.equal(noRun.turnsPerTask, 2);
+  // null, never 0, when no session carries a workload.
+  const [none] = versionProfileTable([sum({ mainTurns: 6 })]);
+  assert.equal(none.execMainTurnsPerTask, null);
+  assert.equal(none.turnsPerTask, null);
+});
+
 test("versionProfileTable emits stratified $/turn that reconstructs cost, never blended", () => {
   const s = sum({ id:"aaaa", runId:"r".repeat(16), pluginVersion:"0.14.3", profile:"thorough",
     costUSD:15, mainTurns:100, subagentTurns:50,
@@ -1074,7 +1104,7 @@ test("every rendered metric column in the pre-existing tables is tagged observed
   );
   assert.match(
     window,
-    /\| Cost \(observed\) \| Turns main\/sub \(observed\) \| % of window \(derived\) \| Median depth \(derived\) \| Trend vs previous window \(derived\) \|/,
+    /\| Cost \(observed\) \| Requests main\/sub \(observed\) \| % of window \(derived\) \| Median depth \(derived\) \| Trend vs previous window \(derived\) \|/,
     "Cost by stage (this window) columns are not tagged",
   );
 

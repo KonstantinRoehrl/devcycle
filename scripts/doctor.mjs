@@ -415,6 +415,26 @@ export function lifecycle(versionsSeen, band, releaseDatesMap) {
   return preBand && newestSeen === preBand ? "unresolved" : "legacy";
 }
 
+// A run's workload record: every session window of one run carries the same line (the workload
+// sensor rewrites it on each HEAD-advancing commit), so the first member that has one stands for
+// the run. null when no member wrote one.
+function runWorkload(members) {
+  return members.map((m) => m.workload).find((w) => w) ?? null;
+}
+
+// Planned tasks across sessions, each run counted once however many of its sessions carry the
+// workload line. A session with no runId cannot be matched to a run, so it counts on its own.
+function plannedTasksAcrossRuns(sessions) {
+  const byRun = new Map();
+  let tasks = 0;
+  for (const s of sessions) {
+    if (!s.runId) tasks += s.workload?.plannedTaskCount ?? 0;
+    else byRun.set(s.runId, [...(byRun.get(s.runId) ?? []), s]);
+  }
+  for (const members of byRun.values()) tasks += runWorkload(members)?.plannedTaskCount ?? 0;
+  return tasks;
+}
+
 // One row per distinct run, joining the run's member sessions into a run-level record. Sessions
 // with no runId stay observational and never enter a run (GC5). version/profile come from the
 // first member that actually reported one (not "unknown"); the workload fields come from the
@@ -431,7 +451,7 @@ export function runAggregates(summaries) {
     members.map((m) => m[key]).find((v) => v && v !== "unknown") ?? "unknown";
   const out = [];
   for (const [runId, members] of byRun) {
-    const wl = members.map((m) => m.workload).find((w) => w) ?? null;
+    const wl = runWorkload(members);
     const changedLines = wl ? wl.insertions + wl.deletions : null;
     const qualities = members.map((m) => m.quality).filter(Boolean);
     out.push({
@@ -1238,11 +1258,21 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
   // One entry per tool call (not per turn — a turn can carry several), the shape
   // emitComplianceCandidates' C1 check needs.
   const toolCallEvents = [];
+  const countedRequests = new Set();
   turns.forEach((r, i) => {
     const model = r.message.model;
     if (model) models[model] = (models[model] ?? 0) + 1;
-    const stageTurns = (turnsByStage[attributed[i].stage ?? "unattributed"] ??= { main: 0, subagent: 0 });
-    stageTurns[r.isSidechain ? "subagent" : "main"] += 1;
+    // turnsByStage counts model REQUESTS, whereas mainTurns/subagentTurns count transcript RECORDS:
+    // Claude Code writes one assistant record per content block, so a thinking + text + tool_use
+    // request is three records sharing one requestId. A record with no request id stands for itself.
+    const stage = attributed[i].stage ?? "unattributed";
+    const side = r.isSidechain ? "subagent" : "main";
+    const requestId = r.requestId ?? r.message.id;
+    const requestKey = requestId ? `${stage}\0${side}\0${requestId}` : null;
+    if (requestKey === null || !countedRequests.has(requestKey)) {
+      if (requestKey !== null) countedRequests.add(requestKey);
+      (turnsByStage[stage] ??= { main: 0, subagent: 0 })[side] += 1;
+    }
     const dollars = costUSD(r.message.usage, model);
     if (dollars === null) {
       const estimate = provisionalCostUSD(r.message.usage, model);
@@ -2270,7 +2300,9 @@ export function versionProfileTable(summaries, promotions = []) {
     // exists — so the figure reflects only those. null (never 0) when no such session (QC1).
     // Exec main turns/task, the coordinator turns the per-task folds remove, shares both.
     const taskBearing = g.members.filter((s) => s.workload);
-    const tasks = taskBearing.reduce((n, s) => n + (s.workload?.plannedTaskCount ?? 0), 0);
+    // Planned tasks are counted once per run: a run split over several sessions repeats its
+    // workload line on each of them, and summing those would divide the figure by the session count.
+    const tasks = plannedTasksAcrossRuns(taskBearing);
     const taskTurns = taskBearing.reduce((n, s) => n + (s.mainTurns ?? 0) + (s.subagentTurns ?? 0), 0);
     const execMainTurns = taskBearing.reduce((n, s) => n + (s.turnsByStage?.execution?.main ?? 0), 0);
     return {
@@ -3100,7 +3132,7 @@ export function renderReport(summaries, ctx) {
 
   section("### Cost by stage (this window)", "cost-by-stage-window");
   L.push(...markdownTable(
-    ["Stage", "Cost (observed)", "Turns main/sub (observed)", "% of window (derived)", "Median depth (derived)",
+    ["Stage", "Cost (observed)", "Requests main/sub (observed)", "% of window (derived)", "Median depth (derived)",
       "Trend vs previous window (derived)"],
     stageWindowTable(summaries, previousSummaries).map((r) => [
       r.stage, usd(r.total), `${r.mainTurns}/${r.subagentTurns}`, `${r.pctOfWindow.toFixed(1)}%`, r.medianDepth, r.trend,
