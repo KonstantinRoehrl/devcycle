@@ -20,7 +20,7 @@ import { eachRecord } from "./jsonl.mjs";
 import { gitToplevel, recordPath, validateCulprit } from "./run-record.mjs";
 import { isMain } from "./is-main.mjs";
 import { INTEGRATION_BRANCHES, defaultBranches } from "./branch-names.mjs";
-import { ROUND_CAP, exhaustReviewLoop, pendingReviewLoop, reviewLoopId } from "./task-verdict.mjs";
+import { ROUND_CAP, exhaustReviewLoop, pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
 import {
   MISSING_FINDINGS, UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, latestKeyed, ledgerKey, nextRetry,
   runTaskScript, taskEntries, taskFlags, workTreeRoot,

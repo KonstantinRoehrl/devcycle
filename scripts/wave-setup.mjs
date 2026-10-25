@@ -19,7 +19,7 @@ import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
 import { ledgerPlan, nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
 import { ledgerSlotState } from "./ledger-slot.mjs";
-import { pendingReviewLoop, reviewLoopId } from "./task-verdict.mjs";
+import { pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
 import { driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
 import { classifyDrive } from "./drive-result.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";

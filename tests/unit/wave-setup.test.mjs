@@ -13,7 +13,7 @@ import { RETRY_CAP, taskPosition, waveSetup } from "../../scripts/wave-setup.mjs
 import { DRIVE_LOCK_REL, acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 import { RESULT_REL } from "../../scripts/drive-result.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
-import { reviewLoopId } from "../../scripts/task-verdict.mjs";
+import { reviewLoopId } from "../../scripts/review-loop.mjs";
 import { ROSTER, formatKnobsLine, resolveKnobs } from "../../scripts/resolve-knobs.mjs";
 
 const ROOT = process.cwd();

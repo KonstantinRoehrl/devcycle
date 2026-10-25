@@ -7,11 +7,11 @@
 // references/loops.md and the task becomes a user decision (references/resume.md). task-commit.mjs
 // writes the same status when the green gate rejects round 3's acceptance.
 // Contract: references/ledger.md § Task scripts.
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { atomicWrite } from "./atomic-write.mjs";
 import { gitToplevel } from "./git-identity.mjs";
 import { isMain } from "./is-main.mjs";
+import { ROUND_CAP, exhaustReviewLoop } from "./review-loop.mjs";
 import { validateCulprit } from "./run-record.mjs";
 import {
   MISSING_FINDINGS, UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, countFlag, latestKeyed, ledgerKey,
@@ -25,7 +25,6 @@ const FLAGS = {
 const REQUIRED = ["--run", "--task", "--round", "--findings", "--evidence-class"];
 const EVIDENCE_CLASSES = new Set(["red-green", "green-green", "convention"]);
 const RETRY_CAP = 2;
-export const ROUND_CAP = 3;
 // The review-verdict outcomes this script writes; task-commit.mjs's green-gate lines share the event.
 const OWN_OUTCOMES = new Set(["accepted", "rejected", MISSING_FINDINGS]);
 // Blocking-ness is derived from severity (references/findings.md § Severity): critical and high block.
@@ -96,40 +95,6 @@ function linesSince(ledger, task, reviewRound) {
 function verdictRetry(ledger, task, later, outcome) {
   const written = later.findLast((e) => e.event === "review-verdict" && e.key);
   return written?.outcome === outcome ? Number(written.key.split("/")[3]) : nextRetry(ledger, task, "review-verdict");
-}
-
-export const reviewLoopId = (task) => `task-${task}-review`;
-
-// references/loops.md § Where the status lives: the task's review loop ran out of rounds with
-// `residue` blocking items unresolved. Returns the loop id the user's decision names.
-export function exhaustReviewLoop(root, task, round, residue) {
-  const loopId = reviewLoopId(task);
-  mkdirSync(join(root, ".devcycle/findings"), { recursive: true });
-  atomicWrite(join(root, `.devcycle/findings/${loopId}-status.md`),
-    `status: exhausted-unresolved rounds: ${round}/${ROUND_CAP} residue: ${residue} carried-to: none\n`);
-  return loopId;
-}
-
-// A rejection — the reviewer's or the green gate's, never a missing findings file — at or past the
-// round cap: the line each exhaustion of the loop writes right after its status file.
-const exhausts = (e) => e.event === "review-verdict" && e.outcome.startsWith("rejected") &&
-  !e.outcome.startsWith(MISSING_FINDINGS) && Number(e.key?.split("/")[2]) >= ROUND_CAP;
-
-// references/resume.md § Exhausted-unresolved: the loop id while the task's review loop waits on the
-// user, else null. `entries` are the task's ledger lines of this cycle, in file order. The status file
-// is keyed by a task id every cycle reuses and carries no time, so it counts only for an exhaustion
-// this ledger holds, and only while no decision on the loop follows the latest one.
-export function pendingReviewLoop(root, task, entries) {
-  const loopId = reviewLoopId(task);
-  let status;
-  try {
-    status = readFileSync(join(root, `.devcycle/findings/${loopId}-status.md`), "utf8");
-  } catch {
-    return null;
-  }
-  if (!/^status:\s*exhausted-unresolved\b/m.test(status)) return null;
-  const decided = entries.findLastIndex((e) => e.event === "user-decision" && e.outcome.includes(loopId));
-  return entries.findLastIndex(exhausts) > decided ? loopId : null;
 }
 
 export function verdict(argv, cwd = process.cwd()) {
