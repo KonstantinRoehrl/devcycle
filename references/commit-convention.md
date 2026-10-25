@@ -55,6 +55,8 @@ working-tree artifacts a reviewer reads from the checkout, not history.
 
 `playbooks/executing-waves.md` commits each accepted task, green gate included, with
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-commit.mjs" --run <id> --task <id> --plan <path> --test-cmd "<cmd>" --subject "<subject>" [--trailers "<Key: value lines>"]`.
+Its `task-verdict.mjs` call carries those flags, so an accepted verdict commits in-process; the
+script alone is the route for calling again and for a review loop the user decided.
 It commits the task's changed `**Files:**` under § Scoping the commit with the subject as given, and
 adds `Devcycle-Task: <run-id>/<task-id>` to git's trailer block after any `--trailers` the convention
 carries, such as `Co-Authored-By:`. A trailer, because the subject is the repo's convention; the run

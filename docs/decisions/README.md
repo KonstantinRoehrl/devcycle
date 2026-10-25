@@ -55,25 +55,32 @@ references/drive.md grows (+9) by its row's `effort=` and the `null`-effort rule
 the start commands, a step 5 that arms the follow only above `driveWatch: end`, and step 6's
 `--status` answer and `/effort` line, raising the runtime surface and the closure of
 commands/continue.md, the one entry point that reads it.
+The folded per-task cycle drops executing-waves' hand-run lessons bullet and grows its steps 4–6 by
+the `--compose-review` and verdict-commit calls, and references/ledger.md § Task scripts and
+references/commit-convention.md § The task commit each name those folds, moving every closure that
+cites either; planning-waves' Lessons sentence loses a line.
 
 ```text
-budget: surface-budget.json surfaceTotal 6361
+budget: surface-budget.json surfaceTotal 6376
 budget: surface-budget.json commandMax 183
-budget: context-budget.json commands/continue.md 67270
-budget: context-budget.json commands/cycle.md 74899
+budget: context-budget.json commands/continue.md 67339
+budget: context-budget.json commands/cycle.md 75775
 budget: context-budget.json commands/learn.md 16837
 budget: context-budget.json commands/maintain.md 18016
 budget: context-budget.json commands/onboard.md 17125
 budget: context-budget.json commands/reconcile.md 24562
 budget: context-budget.json commands/review.md 25192
 budget: context-budget.json commands/verify.md 24290
-budget: context-budget.json playbooks/executing-waves.md 106566
+budget: context-budget.json playbooks/executing-waves.md 107886
 budget: context-budget.json playbooks/finishing-the-cycle.md 48285
+budget: context-budget.json playbooks/learning-from-sessions.md 62422
 budget: context-budget.json playbooks/maintaining-the-repo.md 64373
-budget: context-budget.json playbooks/planning-waves.md 72653
+budget: context-budget.json playbooks/onboarding-a-repo.md 30784
+budget: context-budget.json playbooks/planning-waves.md 72657
 budget: context-budget.json playbooks/receiving-review.md 112263
 budget: context-budget.json playbooks/reviewing-code.md 93485
 budget: context-budget.json playbooks/reviewing-the-branch.md 52996
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 85748
 budget: context-budget.json playbooks/verifying-on-device.md 53694
 ```
 
