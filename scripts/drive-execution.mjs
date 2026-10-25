@@ -20,13 +20,15 @@ import { claudeProjectsDir } from "./depth-probe.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
 import { holderLiveness, LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
-import { follow, statusReport, waitForEnd } from "./drive-watch.mjs";
+import { readPluginList, surfaceArgs } from "./drive-surface.mjs";
+import { follow, statusReport, WATCH_LEVELS, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
 import { gitToplevel, hashSession } from "./run-record.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { PRICING } from "./pricing.mjs";
+import { allowedSet, inSet, ROSTER } from "./resolve-knobs.mjs";
 import { now } from "./stamp.mjs";
 import { parseDispatchMap, taskFileMap } from "./task-files.mjs";
 import { appendRunRecordOnce, ledgerPlan, parseLedgerLine } from "./task-ledger.mjs";
@@ -93,7 +95,12 @@ const KNOWN_FLAGS = {
   "--follow": "none",
   "--wait": "none",
   "--since": "value",
+  "--plugins": "value",
+  "--level": "value",
 };
+
+// The drivePlugins knob's own check, so the flag the start path passes reads exactly as the knob does.
+const DRIVE_PLUGINS = ROSTER.find(({ key }) => key === "drivePlugins");
 
 // "default" leaves the effort to Claude Code: no --effort, and no CLAUDE_EFFORT in a session's env.
 const EFFORT_CHOICES = [...EFFORT_LEVELS, "default"];
@@ -111,6 +118,13 @@ function parseArgs(argv) {
   if (watches.length > 1) throw new Error("--status, --follow and --wait are exclusive");
   const since = requireCount(flags, "--since", { min: 0, noun: "a byte offset" });
   if (since !== undefined && watches[0] !== "--follow") throw new Error("--since applies to --follow only");
+  const level = requireValue(flags, "--level", `one of ${WATCH_LEVELS.join(" | ")}`);
+  if (level !== undefined && watches[0] !== "--follow") throw new Error("--level applies to --follow only");
+  if (level !== undefined && !WATCH_LEVELS.includes(level))
+    throw new Error(`--level requires one of ${WATCH_LEVELS.join(" | ")}, got ${JSON.stringify(level)}`);
+  const pluginsValue = requireValue(flags, "--plugins", allowedSet(DRIVE_PLUGINS));
+  const plugins = pluginsValue === undefined ? DRIVE_PLUGINS.fallback : inSet(DRIVE_PLUGINS, pluginsValue);
+  if (plugins === null) throw new Error(`--plugins requires ${allowedSet(DRIVE_PLUGINS)}, got ${JSON.stringify(pluginsValue)}`);
   const checkSandbox = "--check-sandbox" in flags;
   const state = requireValue(flags, "--state");
   if (!state && !checkSandbox) throw new Error("--state <path to .devcycle/state.md> is required");
@@ -124,6 +138,8 @@ function parseArgs(argv) {
   return {
     watch: watches[0] ?? null,
     since: since ?? null,
+    level: level ?? "all",
+    plugins,
     checkSandbox,
     state,
     maxUsd,
@@ -323,6 +339,8 @@ function preflight(opts) {
   const holder = readLiveDriveLock(root);
   if (holder) throw new Exit(3, heldBy(holder));
   Object.assign(ctx, checkEnvironment(root, readState(statePath), opts));
+  // Read once per run, before the lock, so --dry-run's command is the argv a session gets.
+  ctx.surface = surfaceArgs({ drivePlugins: opts.plugins, list: readPluginList({ bin: opts.bin, cwd: root }) });
   if (opts.dryRun) return ctx;
   const got = acquireDriveLock(root, { statePath: ctx.stateRel, logPath: LOG_REL, tokenHash: driveTokenHash(ctx.token) });
   if (!got.ok) throw new Exit(3, heldBy(got.holder));
@@ -341,7 +359,7 @@ function preflight(opts) {
 function sessionArgs(ctx, opts, spent) {
   const args = ["-p", `/devcycle:continue --drive ${ctx.stateRel}`, "--model", ctx.model];
   if (ctx.effort !== "default") args.push("--effort", ctx.effort);
-  args.push("--permission-mode", "auto", "--output-format", "stream-json", "--verbose");
+  args.push("--permission-mode", "auto", "--output-format", "stream-json", "--verbose", ...ctx.surface.args);
   if (opts.maxUsd !== undefined) args.push("--max-budget-usd", Math.max(opts.maxUsd - spent, 0.01).toFixed(2));
   return args;
 }
@@ -802,7 +820,8 @@ async function walk(ctx, opts, log, trap) {
     const before = progressOf(entriesBefore);
     const waveAtStart = inFlightFiles(ctx.planText, entriesBefore).wave;
     const startedAt = now();
-    log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}, effort ${ctx.effort}`);
+    if (n === 1 && ctx.surface.note) log(ctx.surface.note);
+    log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}, effort ${ctx.effort}, plugins ${ctx.surface.plugins}, mcp ${ctx.surface.mcp}`);
     const s = await runSession(ctx, opts.bin, sessionArgs(ctx, opts, spent), log, n);
     const entriesAfter = ledgerEntries(ctx.root, ctx.plan);
     const after = progressOf(entriesAfter);
@@ -977,7 +996,7 @@ async function main(argv) {
   if (opts.watch) {
     const pollMs = Number(process.env.DEVCYCLE_DRIVE_POLL_MS) || undefined;
     const statePath = opts.state;
-    if (opts.watch === "--follow") await follow({ statePath, since: opts.since, pollMs });
+    if (opts.watch === "--follow") await follow({ statePath, since: opts.since, pollMs, level: opts.level });
     else console.log(JSON.stringify(opts.watch === "--wait" ? await waitForEnd({ statePath, pollMs }) : statusReport({ statePath })));
     return 0;
   }

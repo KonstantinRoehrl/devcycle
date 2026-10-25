@@ -45,7 +45,7 @@ export function isUnset(value) {
 }
 
 // The value's normalized in-set form, or null when it lies outside the knob's allowed set.
-function inSet(entry, value) {
+export function inSet(entry, value) {
   const v = value.trim();
   switch (entry.kind) {
     case "enum":
@@ -69,7 +69,7 @@ function inSet(entry, value) {
   }
 }
 
-function allowedSet(entry) {
+export function allowedSet(entry) {
   switch (entry.kind) {
     case "enum":
       return entry.values.join(" | ");

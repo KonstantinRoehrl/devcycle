@@ -155,11 +155,76 @@ test("each session is claude -p on the drive prompt with auto permissions, strea
   const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.calls[0].argv, ["-p", "/devcycle:continue --drive .devcycle/state.md", "--model", MODEL, "--effort", "high",
-    "--permission-mode", "auto", "--output-format", "stream-json", "--verbose"]);
+    "--permission-mode", "auto", "--output-format", "stream-json", "--verbose",
+    "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']);
   assert.equal(r.calls[0].effort, "high", "the session's CLAUDE_EFFORT disagrees with its --effort");
   assert.equal(r.calls[0].nested, false, "DEVCYCLE_NESTED_RUN reached the driven session");
   const pinned = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--model", "claude-opus-5-5"] });
   assert.equal(pinned.calls[0].argv[pinned.calls[0].argv.indexOf("--model") + 1], "claude-opus-5-5");
+});
+
+const PLUGIN_LIST = readFileSync(fileURLToPath(new URL("../fixtures/plugin-list.json", import.meta.url)), "utf8");
+const NO_MCP = ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}'];
+const startLine = (log) => log.split("\n").find((l) => l.includes("] session 1 starts"));
+
+test("a driven session starts with no MCP servers and only the kept plugins, and the plugin list never spends a scenario step", async () => {
+  const root = makeCycle();
+  const r = await drive(root, [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }],
+    { flags: ["--plugins", "impeccable", "--max-usd", "5"], env: { STUB_CLAUDE_PLUGIN_LIST: PLUGIN_LIST } });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.calls.length, 2, "the plugin list call consumed a scenario step or landed in the call log");
+  const argv = r.calls[0].argv;
+  const surface = argv.slice(argv.indexOf("--verbose") + 1, argv.indexOf("--max-budget-usd"));
+  assert.deepEqual(surface.slice(0, 4), [...NO_MCP, "--settings"]);
+  assert.deepEqual(JSON.parse(surface[4]).enabledPlugins,
+    { "token-optimizer@alexgreensh-token-optimizer": false, "engineering@synced": false });
+  assert.equal(surface.length, 5);
+  assert.deepEqual(r.calls[1].argv.slice(argv.indexOf("--verbose") + 1, argv.indexOf("--max-budget-usd")), surface, "the list is read once and every session gets the same surface");
+  const log = readFileSync(join(root, ".devcycle", "drive.log"), "utf8");
+  assert.match(startLine(log), new RegExp(`session 1 starts — wave 1, model ${MODEL}, effort \\S+, plugins devcycle,impeccable,superpowers, mcp none$`));
+  assert.doesNotMatch(log, /plugin list unavailable/);
+});
+
+test("--plugins all restores today's surface: no MCP restriction, no plugin override", async () => {
+  const root = makeCycle();
+  const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }], { flags: ["--plugins", "all"], env: { STUB_CLAUDE_PLUGIN_LIST: PLUGIN_LIST } });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.calls[0].argv.at(-1), "--verbose");
+  assert.ok(!r.calls[0].argv.includes("--settings") && !r.calls[0].argv.includes("--strict-mcp-config"), r.calls[0].argv.join(" "));
+  assert.match(startLine(readFileSync(join(root, ".devcycle", "drive.log"), "utf8")), /, plugins all, mcp all$/);
+});
+
+test("an unreadable plugin list never stops a run: the MCP restriction stays, plugins are not overridden, and the log says so once", async () => {
+  const root = makeCycle();
+  const missing = join(makeTempDir("devcycle-drive-plugins-"), "no-list.json");
+  const r = await drive(root, [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }],
+    { env: { DEVCYCLE_DRIVE_PLUGIN_LIST: missing } });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.calls.length, 2);
+  for (const c of r.calls) assert.deepEqual(c.argv.slice(c.argv.indexOf("--verbose") + 1), NO_MCP);
+  const log = readFileSync(join(root, ".devcycle", "drive.log"), "utf8");
+  assert.equal(log.split("plugin list unavailable — full plugin surface").length - 1, 1, log);
+  assert.ok(log.indexOf("plugin list unavailable") < log.indexOf("session 1 starts"), "the note was not logged before the first session");
+  assert.match(startLine(log), /, plugins all, mcp none$/);
+});
+
+test("--dry-run reads the plugin list, so its command is the argv a session would get", () => {
+  const listFile = join(makeTempDir("devcycle-drive-plugins-"), "list.json");
+  writeFileSync(listFile, PLUGIN_LIST);
+  const r = dryRun(makeCycle(), [], { DEVCYCLE_DRIVE_PLUGIN_LIST: listFile });
+  assert.equal(r.code, 0, r.out);
+  const command = JSON.parse(r.out.trim().split("\n").at(-1)).command;
+  assert.deepEqual(command.slice(command.indexOf("--verbose") + 1, command.indexOf("--verbose") + 5), [...NO_MCP, "--settings"]);
+  assert.deepEqual(Object.keys(JSON.parse(command.at(-1)).enabledPlugins),
+    ["impeccable@impeccable", "token-optimizer@alexgreensh-token-optimizer", "engineering@synced"]);
+});
+
+test("--plugins refuses a value outside none, all, or a comma-separated list of plugin names, with exit 2", () => {
+  for (const value of ["two words", "none,impeccable", "a,,b", " "]) {
+    const r = dryRun(makeCycle(), ["--plugins", value]);
+    assert.equal(r.code, 2, `${JSON.stringify(value)}: ${r.out}`);
+    assert.match(r.out, /^drive-execution: --plugins requires none, all, or a comma-separated list of plugin names/m);
+  }
 });
 
 const effortRow = (effort) => `- drive: auto model=${MODEL} effort=${effort} opted=2026-10-08T00:00:00Z via=answer`;
@@ -666,7 +731,7 @@ test("pre-flight refuses the default branch, an integration branch, a branch oth
 // no longer gates a start; a nested `claude -p` must still never inherit it.
 test("a start from inside a Claude Code session with a `drive: auto` row is admitted, and no session it starts sees CLAUDECODE", async () => {
   const seen = join(makeTempDir("devcycle-drive-env-"), "claudecode.log");
-  const prelude = `require("node:fs").appendFileSync(${JSON.stringify(seen)}, (process.env.CLAUDECODE ?? "absent") + "\\n");\n`;
+  const prelude = `if (process.argv[2] !== "plugin") require("node:fs").appendFileSync(${JSON.stringify(seen)}, (process.env.CLAUDECODE ?? "absent") + "\\n");\n`;
   const inSession = { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "the-continue-session" };
   const h = harness([{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }], inSession, { prelude });
   const r = await startDriver(makeCycle(), h).result();

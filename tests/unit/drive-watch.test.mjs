@@ -356,3 +356,19 @@ test("drive-execution.mjs forwards --status, --wait and --follow to drive-watch,
   for (const args of [["--status"], ["--status", "--wait", "--state", statePath], ["--status", "--since", "0", "--state", statePath]])
     assert.equal(run(args).status, 2, `expected a usage error for ${JSON.stringify(args)}`);
 });
+
+test("drive-execution.mjs forwards --level to the follow, and refuses it without --follow or outside end | wave | all", () => {
+  const root = makeRepo();
+  const statePath = writeInto(root, ".devcycle/state.md", "# devcycle state\n- stage: execution\n- run: 0123456789abcdef\n");
+  writeInto(root, ".devcycle/drive.log", `${STAMP}session 1 starts — wave 1, model m, effort high, plugins devcycle,superpowers, mcp none\n`);
+  const run = (args) => spawnSync(process.execPath, [DRIVER, ...args], { env: { ...process.env, DEVCYCLE_DRIVE_POLL_MS: "20" }, encoding: "utf8" });
+  const ended = "drive ended: none — none → next: none\n";
+  const atEnd = run(["--follow", "--since", "0", "--level", "end", "--state", statePath]);
+  assert.equal(atEnd.status, 0, atEnd.stderr);
+  assert.equal(atEnd.stdout, ended, "--level end relayed a session start");
+  const atWave = run(["--follow", "--since", "0", "--level", "wave", "--state", statePath]);
+  assert.equal(atWave.status, 0, atWave.stderr);
+  assert.match(atWave.stdout, /^session 1 starts — wave 1, model m, effort high, plugins devcycle,superpowers, mcp none @\d+\ndrive ended: /);
+  for (const args of [["--status", "--level", "end", "--state", statePath], ["--follow", "--level", "loud", "--state", statePath], ["--follow", "--level", "--state", statePath]])
+    assert.equal(run(args).status, 2, `expected a usage error for ${JSON.stringify(args)}`);
+});

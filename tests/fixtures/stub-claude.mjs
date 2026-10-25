@@ -32,6 +32,13 @@ function clockNow() {
   return Date.now();
 }
 
+// `claude plugin list --json`, which the driver runs once before its first session: answered from
+// STUB_CLAUDE_PLUGIN_LIST outside the scenario, so it neither plays a step nor lands in the call log.
+if (process.argv[2] === "plugin" && process.argv[3] === "list") {
+  process.stdout.write(process.env.STUB_CLAUDE_PLUGIN_LIST ?? "[]");
+  process.exit(0);
+}
+
 const steps = JSON.parse(readFileSync(process.env.STUB_CLAUDE_SCENARIO, "utf8"));
 const callsPath = process.env.STUB_CLAUDE_CALLS;
 const n = existsSync(callsPath) ? readFileSync(callsPath, "utf8").split("\n").filter(Boolean).length : 0;
