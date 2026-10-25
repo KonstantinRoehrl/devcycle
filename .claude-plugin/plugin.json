@@ -9,6 +9,7 @@
   "license": "MIT",
   "homepage": "https://github.com/KonstantinRoehrl/devcycle",
   "repository": "https://github.com/KonstantinRoehrl/devcycle",
+  "types": "./types/index.d.ts",
   "dependencies": [
     {
       "name": "superpowers",

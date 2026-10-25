@@ -3,7 +3,8 @@
 // per finished subagent turn, under the agentId hooks/dispatch-sensor.mjs keys its agent-depth row by;
 // it bounds a subagent's context by the subagentBudget tier, and shows the coordinator's stage budget
 // on the status line. In any session it raises the terminal notifications scripts/handoff-mark.mjs
-// prints. The engine's own forks (compaction, memory) are neither traced nor bounded.
+// prints and, in an interactive one, draws the execution driver's progress band above the prompt. The
+// engine's own forks (compaction, memory) are neither traced nor bounded.
 // It runs without Node — nothing it imports may import a node: module, call require or import
 // dynamically — so the state file's run, the joined-run check and the run-record write go through
 // hooks/mod-sink.mjs, which it spawns. Settings hooks sit beneath it in one chain, so every hook that
@@ -21,6 +22,9 @@ const MIN_CLAUDE_CODE = [2, 1, 287];
 const SINK = decodeURIComponent(new URL("./mod-sink.mjs", import.meta.url).pathname);
 const STATE_REL = ".devcycle/state.md";
 const MAX_WALK = 64;
+// The drive band's file, beside the state file. scripts/drive-progress.mjs owns its shape and writes it
+// through Node, which this module cannot import, so the path is restated here.
+const PROGRESS_REL = ".devcycle/drive-progress.json";
 const INERT = Object.freeze({ active: false, stateFile: null });
 // The limiter's tiers, the reads `enforce` refuses at the hard stop (never Write, Edit or Bash), and
 // how often the over-budget note repeats after its first crossing.
@@ -35,10 +39,10 @@ const budgetNote = (fraction) =>
   `devcycle budget: this subagent is at ≈${percent(fraction)}% of its context window (over budget at ` +
   `${percent(OVER_BUDGET)}%, hard stop at ${percent(HARD_STOP)}%). Finish with what you have; name what you did not explore.`;
 
-function atLeastFloor(base) {
+function atLeast(base, version) {
   const parts = String(base ?? "").match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
   if (!parts) return false;
-  for (let i = 0; i < 3; i++) if (parts[i] !== MIN_CLAUDE_CODE[i]) return parts[i] > MIN_CLAUDE_CODE[i];
+  for (let i = 0; i < 3; i++) if (parts[i] !== version[i]) return parts[i] > version[i];
   return true;
 }
 
@@ -57,17 +61,20 @@ const turnCounters = () => ({ steps: 0, peakDepth: 0, lastDepth: null, model: nu
 // Everything one load of the module knows. `joinedKey` is "<session id> <run id>" once the sink
 // answered joined; a negative answer is never cached. `scope` is the promise active() answers from.
 // `tier` is the subagentBudget value Claude Code hands register; anything else reads as warn.
-// `meter` is the stage meter's counters for the stage it last displayed.
+// `meter` is the stage meter's counters for the stage it last displayed; `band` is the drive band's
+// timer and the progress file it last read.
 function newState(options) {
-  return { versionOk: null, notNested: null, joinedKey: null, scope: null, agents: new Map(),
+  return { version: null, notNested: null, joinedKey: null, scope: null, agents: new Map(),
     tier: TIERS.includes(options?.subagentBudget) ? options.subagentBudget : "warn",
-    meter: { stage: null, calls: 0, files: new Set(), percent: null, shown: false } };
+    meter: { stage: null, calls: 0, files: new Set(), percent: null, shown: false },
+    band: { timer: null, busy: false, stamp: null, progress: null, frame: 0, moving: false } };
 }
 
+const versionOf = (st, $) => (st.version ??= $.session.version().then((v) => v?.base ?? null, () => null));
+
 async function resolveScope(st, $) {
-  st.versionOk ??= $.session.version().then((v) => atLeastFloor(v?.base), () => false);
   st.notNested ??= $.env.get("DEVCYCLE_NESTED_RUN").then((v) => !v, () => false);
-  if (!(await st.versionOk) || !(await st.notNested)) return INERT;
+  if (!atLeast(await versionOf(st, $), MIN_CLAUDE_CODE) || !(await st.notNested)) return INERT;
   const cwd = await $.session.cwd();
   let stateFile = null;
   let root = null;
@@ -247,6 +254,160 @@ function flush($, seen, agentId, a, e) {
     .catch(() => {});
 }
 
+// The drive band: a running execution driver's progress above the prompt, read from the file the
+// driver keeps (PROGRESS_REL), so watching a run costs no model turn. A timer stats the file each tick,
+// reads it only when its size or mtime moved, and writes what the drawing needs into BAND; the
+// drawing reads only BAND. Interactive sessions only: a `claude -p` run has nothing to draw on.
+const BAND = { plugin: "devcycle", key: "band" };
+const BAND_TICK_MS = 300;
+const SILENT_AFTER_MS = 120_000;
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const RUN_STATES = new Set(["running", "waiting", "stopped", "ended"]);
+const LIVE_STATES = new Set(["running", "waiting"]);
+// Below this Claude Code, AbovePrompt's bodyColumns still counts the five cells of the band's own
+// [-] mark (seen on 2.1.287; 2.1.292 reports them left out).
+const BODY_COLUMNS_LEAVE_MARK = [2, 1, 292];
+const MARK_COLUMNS = 5;
+
+const cells = (text) => [...text].length;
+const pad2 = (n) => String(n).padStart(2, "0");
+const clockTime = (iso) => {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? "--:--" : `${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
+};
+function elapsedText(ms) {
+  const minutes = Math.floor(Math.max(0, ms) / 60_000);
+  if (minutes < 1) return `${Math.floor(Math.max(0, ms) / 1000)}s`;
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${pad2(minutes % 60)}m`;
+}
+
+function parseProgress(text) {
+  try {
+    const p = JSON.parse(text);
+    return p?.v === 1 && RUN_STATES.has(p.state) && Array.isArray(p.waves) ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+// A live run whose driver has not rewritten the file for SILENT_AFTER_MS; its heartbeat is 30 s.
+const silent = (p, now) => LIVE_STATES.has(p.state) && now - Date.parse(p.updatedAt) > SILENT_AFTER_MS;
+const moving = (p, now) => p !== null && LIVE_STATES.has(p.state) && !silent(p, now);
+
+async function startBand(st, $) {
+  if (st.band.timer || (await $.session.surfaces()).length === 0) return;
+  st.band.timer = $.clock.every(BAND_TICK_MS, () => bandTick(st, $));
+}
+
+// A slow host call never stacks ticks. BAND is written only when the file changed, while the spinner
+// turns, and once more on the tick it stops, so an idle band costs one stat per tick.
+async function bandTick(st, $) {
+  const band = st.band;
+  if (band.busy) return;
+  band.busy = true;
+  try {
+    const { stateFile } = await current(st, $);
+    const path = stateFile ? stateFile.slice(0, -STATE_REL.length) + PROGRESS_REL : null;
+    const stat = path ? await $.fs.stat(path).catch(() => null) : null;
+    const stamp = stat ? `${stat.mtimeMs} ${stat.size}` : null;
+    const changed = stamp !== band.stamp;
+    if (changed) {
+      band.stamp = stamp;
+      band.progress = stamp === null ? null : parseProgress(await $.fs.read(path).catch(() => ""));
+    }
+    const now = await $.clock.now();
+    const turning = moving(band.progress, now);
+    if (!changed && !turning && !band.moving) return;
+    if (turning) band.frame += 1;
+    band.moving = turning;
+    await $.state.set(BAND, { progress: band.progress, frame: band.frame, now });
+  } finally {
+    band.busy = false;
+  }
+}
+
+function waveMark(wave, currentWave) {
+  const count = `${wave.wave} ${wave.committed}/${wave.tasks.length}`;
+  if (wave.tasks.length > 0 && wave.committed >= wave.tasks.length) return { text: `✓${count}`, color: "success" };
+  return wave.wave === currentWave ? { text: `●${count}`, color: "claude" } : { text: `○${count}`, color: "subtle" };
+}
+
+const joined = (marks, separator) => marks.flatMap((m, i) => (i === 0 ? [m] : [{ text: separator }, m]));
+const width = (segments) => segments.reduce((sum, s) => sum + cells(s.text), 0);
+
+// Separators go first, then the strip is windowed around the current wave; it never wraps.
+function fitStrip(marks, at, room) {
+  for (const separator of [" · ", " "]) {
+    const strip = joined(marks, separator);
+    if (width(strip) <= room) return strip;
+  }
+  let lo = at;
+  let hi = at;
+  const windowed = (a, b) => [
+    ...(a > 0 ? [{ text: "… " }] : []), ...joined(marks.slice(a, b + 1), " "), ...(b < marks.length - 1 ? [{ text: " …" }] : []),
+  ];
+  for (let grew = true; grew; ) {
+    grew = false;
+    if (hi < marks.length - 1 && width(windowed(lo, hi + 1)) <= room) (hi += 1), (grew = true);
+    if (lo > 0 && width(windowed(lo - 1, hi)) <= room) (lo -= 1), (grew = true);
+  }
+  return windowed(lo, hi);
+}
+
+function stripLine(p, columns) {
+  const lead = "  waves  ";
+  const total = `${p.committed}/${p.total} committed`;
+  const marks = p.waves.map((w) => waveMark(w, p.currentWave));
+  const at = p.waves.findIndex((w) => w.wave === p.currentWave);
+  const strip = fitStrip(marks, at === -1 ? marks.length - 1 : at, columns - cells(lead) - cells(total) - 2);
+  const gap = Math.max(2, columns - cells(lead) - width(strip) - cells(total));
+  return [{ text: lead }, ...strip, { text: " ".repeat(gap) }, { text: total }];
+}
+
+function headerLine(p, spin, now) {
+  const run = `session ${p.session} · ${p.model} · ${p.effort}`;
+  if (silent(p, now)) return [{ text: `? driver silent since ${clockTime(p.updatedAt)} · devcycle drive · ${run}`, color: "warning" }];
+  if (LIVE_STATES.has(p.state)) return [{ text: `${spin} devcycle drive · ${run} · ${elapsedText(now - Date.parse(p.startedAt))}` }];
+  return [{ text: `devcycle drive · ${run} · ${elapsedText(Date.parse(p.updatedAt) - Date.parse(p.startedAt))}` }];
+}
+
+function taskRow(t, spin) {
+  if (t.step === "committed") return [{ text: `✓ task ${t.task}  committed`, color: "success" }];
+  if (t.step === "pending") return [{ text: `○ task ${t.task}  pending`, color: "subtle" }];
+  const round = (t.step === "reviewing" || t.step === "fixing") && t.round > 0 ? ` · round ${t.round}` : "";
+  const row = [{ text: `${spin} task ${t.task}  ` }, { text: `${t.step}${round}`, color: t.step === "needs-user" ? "warning" : undefined }];
+  if (t.rejections > 0) row.push({ text: ` (${t.rejections} rejection${t.rejections === 1 ? "" : "s"})`, color: "warning" });
+  return row;
+}
+
+function bodyLines(p, spin) {
+  if (p.state === "waiting") return [[{ text: `  ⏸ ${p.waitWhat} — resumes ${clockTime(p.waitUntil)}`, color: "warning" }]];
+  if (p.state === "stopped") return [[{ text: `  ✖ stopped for you — ${p.stopDetail}`, color: "error" }]];
+  if (p.state === "ended" && p.outcome === "complete") return [[{ text: "  ✓ run complete — run /devcycle:continue", color: "success" }]];
+  if (p.state === "ended") return [[{ text: `  ✖ run ended: ${p.outcome} — run /devcycle:continue`, color: "error" }]];
+  const wave = p.waves.find((w) => w.wave === p.currentWave);
+  if (!wave) return [];
+  const lead = `  wave ${wave.wave}  `;
+  return wave.tasks.map((t, i) => [{ text: i === 0 ? lead : " ".repeat(cells(lead)) }, ...taskRow(t, spin)]);
+}
+
+// Each line a list of { text, color } segments; color a theme key.
+function bandLines({ progress: p, frame, now }, columns) {
+  const spin = silent(p, now) ? "?" : SPINNER[frame % SPINNER.length];
+  return [headerLine(p, spin, now), stripLine(p, columns), ...bodyLines(p, spin)];
+}
+
+async function drawBand(st, $, e, next) {
+  if (e.props.hasSurvey) return next(e);
+  const value = (await $.state.get(BAND))?.value;
+  if (!value?.progress) return next(e);
+  const leavesMark = atLeast(await versionOf(st, $), BODY_COLUMNS_LEAVE_MARK);
+  const lines = bandLines(value, e.props.bodyColumns - (leavesMark ? 0 : MARK_COLUMNS));
+  const { Box, Text } = $.ui.resolve(e);
+  return h(Box, { flexDirection: "column" }, ...lines.map((line) =>
+    h(Text, { wrap: "truncate" }, ...line.map((s) => (s.color ? h(Text, { color: s.color }, s.text) : s.text)))));
+}
+
 export function register(on, options) {
   const st = newState(options);
 
@@ -320,6 +481,14 @@ export function register(on, options) {
     }
     return result;
   }).catch(($, e, next) => next(e));
+
+  on("session.start", async ($, e, next) => {
+    const result = await next(e);
+    await startBand(st, $);
+    return result;
+  }).catch(($, e, next) => next(e));
+
+  on("ui.render", { component: "AbovePrompt" }, ($, e, next) => drawBand(st, $, e, next)).catch(($, e, next) => next(e));
 
   on("session.measure", async ($, e, next) => {
     const result = await next(e);
