@@ -47,10 +47,13 @@ the resolver reads it, and reads nothing back; `CLAUDE_CODE_EFFORT_LEVEL` is the
 the driver sets it to the `--effort` level, or removes it at `default`, and an ambient value cannot
 beat the flag.
 
-**Doctor figures:** `turnsByStage` counts model requests, not transcript records: Claude Code writes
-one record per content block, so a request with thinking, text and a tool call is three records
-sharing a `requestId`, and counting records overstated a real session by about a third. The older
-`mainTurns`/`subagentTurns` counters stay record counts, as their tests pin. `turnsPerTask` and
+**Doctor figures:** every per-turn figure counts model requests, not transcript records: Claude Code
+writes one record per content block, so a request with thinking, text and a tool call is three
+records sharing a `requestId`, and counting records overstated a real session's cost about 2.9 times
+and its turns by about a third. `collapseRequests` in `scripts/doctor.mjs` merges a request's records
+once (first record's stage and time, the greatest `output_tokens`' usage, every record's content),
+so turns, dollars, depth bands and `turnsByStage` share one unit. Historical `$/turn` and cost
+figures therefore drop for sessions with multi-block requests. `turnsPerTask` and
 `execMainTurnsPerTask` count each run's planned tasks once: the workload sensor writes the same
 `plannedTaskCount` into every session window of a run, so summing per session divided a run split
 across N sessions by N times its tasks. Stage attribution in `attributeForwardFill` changed with the
