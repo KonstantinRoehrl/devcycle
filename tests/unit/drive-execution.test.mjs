@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { createHash } from "node:crypto";
 import { delimiter, dirname, join } from "node:path";
@@ -947,10 +947,12 @@ test("--stop writes the stop request and SIGTERMs the driver, which records stop
 test("--mark-handled hands off the result once continue has acted on it, says whether there was one, and needs --state", () => {
   const root = makeCycle();
   writeInto(root, RESULT_REL, JSON.stringify({ code: 4, outcome: "gate-stop", reason: "needs-user", noProgressEnds: 0 }));
+  writeInto(root, ".devcycle/drive-progress.json", "{}\n");
   const mark = (args) => spawnSync(process.execPath, [DRIVER, "--mark-handled", ...args], { cwd: root, encoding: "utf8" });
   const first = mark(["--state", statePathOf(root)]);
   assert.equal(first.status, 0, first.stdout + first.stderr);
   assert.deepEqual(JSON.parse(first.stdout), { handled: true });
+  assert.equal(existsSync(join(root, ".devcycle", "drive-progress.json")), false, "the drive band outlived the handled result");
   assert.equal(readDriveResult(root), null);
   assert.equal(readHandledResult(root).outcome, "gate-stop");
   assert.equal(classifyDrive({ statePath: statePathOf(root) }).next, "none");
@@ -1123,4 +1125,114 @@ test("a driver that finds a stop request on disk ends as stopped before its next
   } finally {
     if (d.child.exitCode === null) d.child.kill("SIGKILL");
   }
+});
+
+const readProgress = (root) => {
+  try {
+    return JSON.parse(readFileSync(join(root, ".devcycle", "drive-progress.json"), "utf8"));
+  } catch {
+    return null;
+  }
+};
+const driveLogOf = (root) => (existsSync(join(root, ".devcycle", "drive.log")) ? readFileSync(join(root, ".devcycle", "drive.log"), "utf8") : "");
+const timeless = ({ startedAt: _s, updatedAt: _u, ...rest }) => rest;
+const setClock = (path, ms) => {
+  writeFileSync(`${path}.tmp`, String(ms));
+  renameSync(`${path}.tmp`, path);
+};
+const PROGRESS_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+test("the driver keeps .devcycle/drive-progress.json on the run: running per session, waiting with its deadline and a heartbeat, then ended complete", async () => {
+  const root = makeCycle();
+  const dir = makeTempDir("devcycle-drive-progress-");
+  const clock = join(dir, "clock");
+  const t0 = Math.floor(Date.now() / 1000) * 1000;
+  setClock(clock, t0);
+  // Each session's fake claude records the progress file as the session finds it.
+  const snaps = join(dir, "snaps.jsonl");
+  const prelude = `if (process.argv[2] !== "plugin") { const fs = require("node:fs"); let p = "null\\n"; ` +
+    `try { p = fs.readFileSync(".devcycle/drive-progress.json", "utf8"); } catch {} fs.appendFileSync(${JSON.stringify(snaps)}, p); }\n`;
+  const h = harness([
+    { ledger: [line(1, "dispatched")], rateLimitInSec: 60 },
+    { ledger: [DONE[0], line(2, "dispatched"), DONE[1]], stage: "branch-review" },
+  ], { DEVCYCLE_DRIVE_CLOCK_FILE: clock, DEVCYCLE_DRIVE_SLICE_MS: "5", DEVCYCLE_DRIVE_HEARTBEAT_MS: "50" }, { prelude });
+  const driver = startDriver(root, h);
+  try {
+    await waitFor(() => driveLogOf(root).includes("] wait: "));
+    const waiting = readProgress(root);
+    assert.equal(waiting?.state, "waiting", JSON.stringify(waiting));
+    assert.equal(waiting.session, 1);
+    assert.equal(waiting.waitWhat, "usage limit until its reset");
+    assert.equal(waiting.waitUntil, driveLogOf(root).match(/wait: usage limit until its reset — resuming at (\S+)/)[1]);
+    assert.equal(Date.parse(waiting.waitUntil), t0 + 120_000, "the deadline is the limit's reset plus the driver's one-minute margin");
+    assert.deepEqual(waiting.waves[0].tasks, [{ task: "1", step: "implementing", round: 0, rejections: 0 }]);
+    // The clock stands still, so nothing is logged while it waits: only the heartbeat can move updatedAt.
+    const refreshed = await new Promise((done) => {
+      const until = Date.now() + 3000;
+      const poll = () => {
+        const p = readProgress(root);
+        if (p && p.updatedAt !== waiting.updatedAt) done(p);
+        else if (Date.now() > until) done(null);
+        else setTimeout(poll, 25);
+      };
+      poll();
+    });
+    assert.equal(refreshed?.state, "waiting", "no heartbeat refreshed updatedAt while the driver waited with nothing to log");
+    setClock(clock, t0 + 10 * 60_000);
+    const r = await driver.result();
+    assert.equal(r.code, 0, r.out);
+    const log = driveLogOf(root);
+    const effort = log.match(/\] session 1 starts — .*, effort ([^,]+),/)[1];
+    const [atSession1, atSession2, ...more] = readFileSync(snaps, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.deepEqual(more, [], "a fake claude ran more than twice");
+    const pending = { v: 1, state: "running", model: MODEL, effort, waitUntil: null, waitWhat: null, stopDetail: null, outcome: null, total: 2 };
+    assert.deepEqual(timeless(atSession1), { ...pending, session: 1, currentWave: 1, committed: 0, waves: [
+      { wave: 1, committed: 0, tasks: [{ task: "1", step: "pending", round: 0, rejections: 0 }] },
+      { wave: 2, committed: 0, tasks: [{ task: "2", step: "pending", round: 0, rejections: 0 }] },
+    ] });
+    assert.deepEqual(timeless(atSession2), { ...pending, session: 2, currentWave: 1, committed: 0, waves: [
+      { wave: 1, committed: 0, tasks: [{ task: "1", step: "implementing", round: 0, rejections: 0 }] },
+      { wave: 2, committed: 0, tasks: [{ task: "2", step: "pending", round: 0, rejections: 0 }] },
+    ] });
+    const final = readProgress(root);
+    assert.deepEqual(timeless(final), { ...pending, state: "ended", outcome: "complete", session: 2, currentWave: null, committed: 2, waves: [
+      { wave: 1, committed: 1, tasks: [{ task: "1", step: "committed", round: 0, rejections: 0 }] },
+      { wave: 2, committed: 1, tasks: [{ task: "2", step: "committed", round: 0, rejections: 0 }] },
+    ] });
+    assert.match(final.startedAt, PROGRESS_ISO);
+    assert.equal(final.startedAt, atSession1.startedAt, "startedAt moved during the run");
+    assert.match(final.updatedAt, PROGRESS_ISO);
+  } finally {
+    driver.child.kill("SIGKILL");
+  }
+});
+
+test("a stop for the user leaves the progress file stopped with the stop's reason and detail, and the task's step, round and rejections", async () => {
+  const root = makeCycle();
+  const review = [
+    "task=1 event=dispatched outcome=ok ref=none",
+    "task=1 event=report-received outcome=complete ref=none",
+    "task=1 event=review-round outcome=round 1 ref=none key=1/review-round/1/0",
+    "task=1 event=review-verdict outcome=rejected ref=none key=1/review-verdict/1/0",
+    "task=1 event=report-received outcome=rejected (intake bounce) ref=none key=1/report-received/2/0",
+    "task=1 event=review-round outcome=round 2 ref=none key=1/review-round/2/0",
+    "task=1 event=review-verdict outcome=rejected (missing findings file) ref=none key=1/review-verdict/2/0",
+  ];
+  const r = await drive(root, [{ ledger: review, stop: { reason: "needs-user", detail: "task 1: a decision" } }]);
+  assert.equal(r.code, 4, r.out);
+  const p = readProgress(root);
+  assert.equal(p?.state, "stopped", JSON.stringify(p));
+  assert.equal(p.stopDetail, "needs-user: task 1: a decision");
+  assert.match(driveLogOf(root), /stopped for you — needs-user: task 1: a decision\n/);
+  assert.equal(p.outcome, null);
+  assert.equal(p.session, 1);
+  assert.equal(p.currentWave, 1);
+  assert.deepEqual(p.waves[0].tasks, [{ task: "1", step: "reviewing", round: 2, rejections: 2 }]);
+});
+
+test("--dry-run writes no progress file", () => {
+  const root = makeCycle();
+  const r = dryRun(root);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(existsSync(join(root, ".devcycle", "drive-progress.json")), false);
 });

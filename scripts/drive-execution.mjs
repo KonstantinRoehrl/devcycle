@@ -19,6 +19,7 @@ import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
+import { buildProgress, removeProgress, writeProgress } from "./drive-progress.mjs";
 import { holderLiveness, LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
 import { readPluginList, surfaceArgs } from "./drive-surface.mjs";
 import { follow, statusReport, WATCH_LEVELS, waitForEnd } from "./drive-watch.mjs";
@@ -32,6 +33,7 @@ import { allowedSet, inSet, ROSTER } from "./resolve-knobs.mjs";
 import { now } from "./stamp.mjs";
 import { parseDispatchMap, taskFileMap } from "./task-files.mjs";
 import { appendRunRecordOnce, ledgerPlan, parseLedgerLine } from "./task-ledger.mjs";
+import { planProgress } from "./wave-setup.mjs";
 
 const { spawnStreaming, killGroup } = agentCli;
 
@@ -45,6 +47,9 @@ const RUN_ID = /^[0-9a-f]{16}$/;
 // text: a session silent this long is taken to be held by a limit. DEVCYCLE_DRIVE_IDLE_MS shortens
 // it for tests.
 const IDLE_LIMIT_MS = Number(process.env.DEVCYCLE_DRIVE_IDLE_MS) || 30 * 60_000;
+// How often the drive band's progress file is rewritten while nothing is logged: the band reads a file
+// 120 s old as a silent driver. DEVCYCLE_DRIVE_HEARTBEAT_MS shortens it for tests.
+const HEARTBEAT_MS = Number(process.env.DEVCYCLE_DRIVE_HEARTBEAT_MS) || 30_000;
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
 const SIGNAL_GRACE_MS = 10_000;
 const DETACH_POLL_MS = 50;
@@ -786,6 +791,35 @@ function makeLog(root) {
   };
 }
 
+// The drive band's data (scripts/drive-progress.mjs), rewritten before every log line and on a
+// heartbeat. The band is a view of the run: a write that fails never stops it, and the next line or
+// beat writes it again.
+function trackProgress(ctx) {
+  const run = { state: "running", session: 0, model: ctx.model, effort: ctx.effort, startedAt: ctx.startedAt,
+    waitUntil: null, waitWhat: null, stopDetail: null, outcome: null };
+  const write = () => {
+    try {
+      writeProgress(ctx.root, buildProgress({ run, plan: planProgress({ root: ctx.root, statePath: ctx.statePath }) }));
+    } catch {
+      // Left as it was.
+    }
+  };
+  const heartbeat = setInterval(write, HEARTBEAT_MS);
+  heartbeat.unref();
+  return {
+    run,
+    write,
+    stop: () => clearInterval(heartbeat),
+    // A stop for the user is `stopped`, with the line the log printed; every other end is `ended`, with
+    // the outcome the result file records.
+    end: (end, outcome) => {
+      Object.assign(run, { waitUntil: null, waitWhat: null },
+        end.outcome === "gate-stop" ? { state: "stopped", stopDetail: `${end.reason}: ${end.detail}` } : { state: "ended", outcome });
+      write();
+    },
+  };
+}
+
 const OUTCOME_OF = { interrupted: "interrupted", environment: "environment", stalled: "stalled", budget: "budget" };
 const ended = (code, outcome, detail = "") => ({ code, outcome, reason: null, detail, task: null });
 
@@ -794,7 +828,7 @@ function endOf(verdict) {
   return { ...ended(verdict.code, OUTCOME_OF[verdict.exitReason], verdict.message ?? ""), reason: verdict.reason ?? null };
 }
 
-async function walk(ctx, opts, log, trap) {
+async function walk(ctx, opts, log, trap, runState) {
   let stalls = 0;
   let churn = 0;
   let spent = 0;
@@ -820,6 +854,7 @@ async function walk(ctx, opts, log, trap) {
     const before = progressOf(entriesBefore);
     const waveAtStart = inFlightFiles(ctx.planText, entriesBefore).wave;
     const startedAt = now();
+    Object.assign(runState, { state: "running", session: n, waitUntil: null, waitWhat: null });
     if (n === 1 && ctx.surface.note) log(ctx.surface.note);
     log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}, effort ${ctx.effort}, plugins ${ctx.surface.plugins}, mcp ${ctx.surface.mcp}`);
     const s = await runSession(ctx, opts.bin, sessionArgs(ctx, opts, spent), log, n);
@@ -842,7 +877,8 @@ async function walk(ctx, opts, log, trap) {
     if (verdict.code !== null) return endOf(verdict);
     if (verdict.wait) {
       const deadline = clockNow() + verdict.wait.ms;
-      log(`wait: ${verdict.wait.what} — resuming at ${new Date(deadline).toISOString()}`);
+      Object.assign(runState, { state: "waiting", waitUntil: new Date(deadline).toISOString(), waitWhat: verdict.wait.what });
+      log(`wait: ${verdict.wait.what} — resuming at ${runState.waitUntil}`);
       await waitUntil(trap, deadline, ctx.root);
       if (verdict.wait.charged) waited += verdict.wait.ms;
     }
@@ -860,6 +896,7 @@ function recordEnd(ctx, end, startedAt) {
     progressed, noProgressEnds: noProgressEndsAfter(ctx.root, { progressed, outcome, reason: end.reason }),
   });
   rmSync(request, { force: true });
+  return outcome;
 }
 
 async function drive(opts) {
@@ -871,18 +908,24 @@ async function drive(opts) {
   const trap = trapSignals(ctx);
   const startedAt = now();
   ctx.startedAt = startedAt;
+  const progress = trackProgress(ctx);
+  const log = makeLog(ctx.root);
   let end = ended(1, "failed");
   try {
     writeCrashedResult(ctx.root, { startedAt, progressed: false });
-    end = await walk(ctx, opts, makeLog(ctx.root), trap);
+    end = await walk(ctx, opts, (msg) => {
+      progress.write();
+      log(msg);
+    }, trap, progress.run);
     return end.code;
   } catch (err) {
     end = ended(1, "failed", err.message);
     throw err;
   } finally {
+    progress.stop();
     trap.dispose();
     try {
-      recordEnd(ctx, end, startedAt);
+      progress.end(end, recordEnd(ctx, end, startedAt));
     } finally {
       release(ctx);
     }
@@ -978,9 +1021,11 @@ export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, si
   return 0;
 }
 
-// /devcycle:continue's hand-off once it has acted on a result: a gate answered, or a restart begun.
+// /devcycle:continue's hand-off once it has acted on a result: a gate answered, or a restart begun. The
+// drive band goes with it.
 function markHandled(state) {
   const root = dirname(dirname(resolve(state)));
+  removeProgress(root);
   console.log(JSON.stringify({ handled: markResultHandled(root) }));
   return 0;
 }

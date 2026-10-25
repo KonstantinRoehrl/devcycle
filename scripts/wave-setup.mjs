@@ -198,6 +198,22 @@ function overviewOf({ waves, positions }) {
   };
 }
 
+// The drive band's view of the plan (scripts/drive-progress.mjs): the overview and every Dispatch Map
+// task's position with its ledger lines, read as waveSetup reads them. null when the state names no
+// plan with a Dispatch Map, or the ledger slot is a previous cycle's.
+export function planProgress({ root, statePath, ledgerPath = null }) {
+  const stateText = readFileSync(resolve(statePath), "utf8");
+  const plan = known(field(stateText, "plan"));
+  const slot = ledgerSlotState({ root, plan, run: known(field(stateText, "run")) });
+  const planText = readPlan(root, plan);
+  if (!plan || slot === "stale" || !parseDispatchMap(planText)) return null;
+  const ledger = ledgerPath ? resolve(ledgerPath) : join(root, ".devcycle", "ledger.md");
+  const lines = readLedger(ledger, plan, slot);
+  const map = mapPositions(root, planText, lines, ledger);
+  const byTask = Map.groupBy(lines, (l) => l.task);
+  return { overview: overviewOf(map), positions: map.positions, entries: new Map([...map.positions.keys()].map((task) => [task, byTask.get(task) ?? []])) };
+}
+
 function wavePosition(root, planText, { waves, positions }, lines) {
   const blocks = new Map(taskBlocks(planText).map(({ num, text }) => [String(num), text]));
   const files = taskFileMap(planText);
