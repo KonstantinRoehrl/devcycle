@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
+import { readSection } from "../../scripts/read-section.mjs";
 import { DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
 import { classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
@@ -1242,15 +1243,31 @@ test("--mark-handled clears the band of a run that ended complete and keeps the 
 
 // The band says "run /devcycle:continue" for an ended run until continue handles it; the two ends that
 // hand off to a later stage are handled by the handoff itself, so the doc must run the command there.
-test("references/drive.md marks a run that ended complete or left execution as handled once its handoff is emitted", () => {
-  const doc = readFileSync(fileURLToPath(new URL("../../references/drive.md", import.meta.url)), "utf8");
-  const ends = doc.split(/^## /m).find((section) => section.startsWith("When the run ends"));
-  assert.ok(ends, "references/drive.md has no `## When the run ends` section");
-  for (const next of ["branch-review", "resume-stage"]) {
-    const bullet = ends.split(/^- /m).find((b) => b.startsWith(`\`${next}\``));
-    assert.ok(bullet, `§ When the run ends has no \`${next}\` bullet`);
-    assert.ok(bullet.includes("--mark-handled"), `the \`${next}\` bullet never marks the end handled, so the band keeps saying the run is waiting for continue`);
-  }
+test("references/drive.md, read as the When the run ends section alone, carries the full command that marks a completed run's end handled", () => {
+  const ends = readSection("references/drive.md", "when-the-run-ends");
+  const bullets = ends.split(/^- /m);
+  const branchReview = bullets.find((b) => b.startsWith("`branch-review`"));
+  assert.ok(branchReview, "§ When the run ends has no `branch-review` bullet");
+  assert.ok(
+    branchReview.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --mark-handled --state .devcycle/state.md'),
+    "the `branch-review` bullet names no runnable --mark-handled command, and a session that loaded this section alone has none to run",
+  );
+  const resumeStage = bullets.find((b) => b.startsWith("`resume-stage`"));
+  assert.ok(resumeStage, "§ When the run ends has no `resume-stage` bullet");
+  assert.match(resumeStage, /--mark-handled|same command/, "the `resume-stage` bullet never marks the end handled, so the band keeps saying the run is waiting for continue");
+});
+
+test("references/drive.md marks the previous result handled when a refused sandbox approval ends in Walk the waves manually", () => {
+  const refused = readSection("references/drive.md", "the-start-path")
+    .split(/^ {3}- /m)
+    .find((b) => b.startsWith("The approval is refused"));
+  assert.ok(refused, "the start path has no refused-approval bullet");
+  assert.match(refused, /Walk the waves\s+manually/, "the refused-approval bullet no longer offers Walk the waves manually");
+  assert.match(
+    refused,
+    /--mark-handled|Answering a stopped run/,
+    "the refused-approval Walk-manually answer leaves the previous run's result unhandled, so the band keeps showing it for the whole manual walk",
+  );
 });
 
 test("a stop for the user leaves the progress file stopped with the stop's reason and detail, and the task's step, round and rejections", async () => {

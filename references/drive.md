@@ -45,7 +45,7 @@ starts only on the user's answer in this session (`docs/decisions/README.md`, 20
 unattended start needs the user's answer in the session), and an `auto … via=knob` row written
 before then stays valid. Only these write the row: `ask`'s answer; an answer that starts the driver
 on a state file with no `auto` row first writes the `auto` row with `via=answer`
-(**Resume unattended**, **Restart unattended**, a settled stop's start confirm); the `manual`
+(**Resume unattended**, **Restart unattended**); the `manual`
 action; and **Walk the waves manually** — at a start confirm, at a stopped run, or when the start's
 sandbox approval is refused, which rewrites an `auto` row to `manual`. Write it by rewriting the
 state file in full with the row added; every other rewrite carries it forward
@@ -58,12 +58,11 @@ state file in full with the row added; every other rewrite carries it forward
 `drive.result` the run's classified end. Ask ONE AskUserQuestion, its options per reason below. Every option set also
 offers **Walk the waves manually**, which rewrites the row to `manual` and walks as § Drive actions
 says, and **Leave it stopped**, which ends the session with the result
-left unhandled, so the next `/devcycle:continue` asks again. An Other answer is recorded like
-any answer below.
+left unhandled, so the next `/devcycle:continue` asks again.
 
 | reason | The question, and how its answer is recorded |
 | --- | --- |
-| `drive.gate.settled` true: `knob-drift`, `foreign-state`, `resume-check`, `branch`, `depth-at-start`, `no-driver`, `not-opted-in` | The stop is settled — this session's own gates have just been computed and answered — so its question is § Drive actions' start confirm, skipped when this session already answered a start question. Then run the start path. |
+| `drive.gate.settled` true: `knob-drift`, `foreign-state`, `resume-check`, `branch`, `depth-at-start`, `no-driver`, `not-opted-in` | Settled: this session's own gates just answered it, so the question is § Drive actions' start confirm, skipped when this session already answered a start question. Then run the start path. |
 | `needs-user` with `drive.gate.pendingDecision` set | The `pendingDecision` question of § Execution resume, asked here, or first in a manual walk; record `task=<n> event=user-decision outcome=task-<n>-review: <answer>`, which `references/resume.md` § Resuming a wave's per-task position reads as settling it. |
 | `needs-user` or `sweep-fallback`, `task` set otherwise — a blocked implementer, a retry cap, a refused commit, a human-required step, a sweep fallback | The stop's `detail` as the question; record `task=<n> event=user-decision outcome=<answer>`. |
 | `needs-user` or `sweep-fallback` with no `task` | The stop's `detail` as the question; record `task=drive event=user-decision outcome=<answer>`. |
@@ -100,7 +99,8 @@ In this order, never dispatching a task from this session:
      `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action started`.
    - The approval is refused or the override unavailable: print
      `node "<plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach --plugins <drive.plugins>`
-     for a terminal that is not a Claude Code session, and offer **Walk the waves manually**.
+     for a terminal that is not a Claude Code session, and offer **Walk the waves manually**, whose
+     answer marks the result handled as § Answering a stopped run says.
    - The start is denied by a permission check, the auto-mode classifier included: print, for the
      user to type in this session,
      `! node "<absolute plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach --plugins <drive.plugins>`,
@@ -137,8 +137,9 @@ In this order, never dispatching a task from this session:
 When the `--wait` task returns, stop any follow monitor and act on the `next` its JSON carries:
 
 - `branch-review` — the run is complete. Read `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, emit its
-  execution → branch-review block, then `--mark-handled` (§ Answering a stopped run).
-- `resume-stage` — the run left execution: emit the handoff into the stage the state file names, then `--mark-handled`.
+  execution → branch-review block, then
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --mark-handled --state .devcycle/state.md`.
+- `resume-stage` — the run left execution: emit the handoff into the stage the state file names, then the same command.
 - any other — rerun `wave-setup.mjs` as § Execution resume runs it and act on its new
   `drive.action`. A resumable end restarts through the start path, with no start confirm when this
   session answered a start question and with one when it only attached. A stop for a person is a
