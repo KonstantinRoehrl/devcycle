@@ -54,11 +54,11 @@ function makeCycle({ branch = "feat/drive", stage = "execution", drive = `- driv
 
 // One isolated world per scenario: its own HOME (the sandbox probe writes under ~/.claude), runs dir,
 // scenario and call log, and a `claude` on PATH that is the stub. DEVCYCLE_NESTED_RUN is set on
-// purpose — the driver must strip it from every session it starts. CLAUDECODE, CLAUDE_EFFORT and a
-// DEVCYCLE_DRIVE_TOKEN, which a suite run inside Claude Code or a driven session inherits, and
-// CLAUDE_CONFIG_DIR, which would point the driver at the real transcripts and settings, are dropped:
-// only the tests that are about them set them. `prelude` runs in the fake `claude` before the stub does.
-const { CLAUDECODE: _claudeCode, CLAUDE_CONFIG_DIR: _configDir, CLAUDE_EFFORT: _effort, DEVCYCLE_DRIVE_TOKEN: _driveToken, ...BASE_ENV } = process.env;
+// purpose — the driver must strip it from every session it starts. CLAUDECODE, CLAUDE_EFFORT,
+// CLAUDE_CODE_EFFORT_LEVEL and a DEVCYCLE_DRIVE_TOKEN, which a suite run inside Claude Code or a
+// driven session inherits, and CLAUDE_CONFIG_DIR, which would point the driver at the real transcripts
+// and settings, are dropped: only the tests that are about them set them. `prelude` runs in the fake `claude` before the stub does.
+const { CLAUDECODE: _claudeCode, CLAUDE_CONFIG_DIR: _configDir, CLAUDE_EFFORT: _effort, CLAUDE_CODE_EFFORT_LEVEL: _effortLevel, DEVCYCLE_DRIVE_TOKEN: _driveToken, ...BASE_ENV } = process.env;
 function harness(scenario = [], env = {}, { prelude = "" } = {}) {
   const dir = makeTempDir("devcycle-drive-test-");
   const home = join(dir, "home");
@@ -157,7 +157,7 @@ test("each session is claude -p on the drive prompt with auto permissions, strea
   assert.deepEqual(r.calls[0].argv, ["-p", "/devcycle:continue --drive .devcycle/state.md", "--model", MODEL, "--effort", "high",
     "--permission-mode", "auto", "--output-format", "stream-json", "--verbose",
     "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']);
-  assert.equal(r.calls[0].effort, "high", "the session's CLAUDE_EFFORT disagrees with its --effort");
+  assert.equal(r.calls[0].effort, "high", "the session's CLAUDE_CODE_EFFORT_LEVEL disagrees with its --effort");
   assert.equal(r.calls[0].nested, false, "DEVCYCLE_NESTED_RUN reached the driven session");
   const pinned = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--model", "claude-opus-5-5"] });
   assert.equal(pinned.calls[0].argv[pinned.calls[0].argv.indexOf("--model") + 1], "claude-opus-5-5");
@@ -236,7 +236,7 @@ test("effort comes from --effort, else the drive row's effort=, else the setting
   const resolved = await drive(legacy, [{ ledger: DONE, stage: "branch-review" }]);
   assert.equal(resolved.code, 0, resolved.out);
   assert.deepEqual(resolved.calls[0].argv.slice(4, 6), ["--effort", "xhigh"]);
-  assert.equal(resolved.calls[0].effort, "xhigh", "the session's CLAUDE_EFFORT disagrees with its --effort");
+  assert.equal(resolved.calls[0].effort, "xhigh", "the session's CLAUDE_CODE_EFFORT_LEVEL disagrees with its --effort");
   assert.match(startsLine(legacy), new RegExp(`session 1 starts — wave 1, model ${MODEL}, effort xhigh`));
   assert.doesNotMatch(readFileSync(join(legacy, ".devcycle", "state.md"), "utf8"), /effort=/, "the resolved effort was written back to the row");
 
@@ -254,23 +254,44 @@ test("effort comes from --effort, else the drive row's effort=, else the setting
   assert.equal(flagged.calls[0].effort, "max");
 });
 
-test("effort default passes no --effort and keeps an inherited CLAUDE_EFFORT from every session", async () => {
+test("effort default passes no --effort and keeps an inherited effort override from every session", async () => {
   const fromRow = await drive(makeCycle({ drive: effortRow("default") }),
-    [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }], { env: { CLAUDE_EFFORT: "high" } });
+    [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }],
+    { env: { CLAUDE_EFFORT: "high", CLAUDE_CODE_EFFORT_LEVEL: "high" } });
   assert.equal(fromRow.code, 0, fromRow.out);
   assert.equal(fromRow.calls.length, 2);
   for (const c of fromRow.calls) {
     assert.ok(!c.argv.includes("--effort"), c.argv.join(" "));
-    assert.equal(c.effort, null, "a session inherited the driver's CLAUDE_EFFORT");
+    assert.equal(c.effort, null, "a session inherited the driver's CLAUDE_CODE_EFFORT_LEVEL");
+    assert.equal(c.outputEffort, null, "a session inherited the driver's CLAUDE_EFFORT");
   }
   const flagged = await drive(makeCycle({ drive: effortRow("high") }), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--effort", "default"] });
   assert.ok(!flagged.calls[0].argv.includes("--effort"), flagged.calls[0].argv.join(" "));
   assert.equal(flagged.calls[0].effort, null);
+  const overridden = await drive(makeCycle({ drive: effortRow("default") }), [{ ledger: DONE, stage: "branch-review" }],
+    { env: { CLAUDE_CODE_EFFORT_LEVEL: "low" } });
+  assert.equal(overridden.calls[0].effort, null, "a default-effort session kept the driver's CLAUDE_CODE_EFFORT_LEVEL");
   // Nothing set anywhere: the harness drops CLAUDE_EFFORT, and neither its HOME nor the checkout holds settings.
   const unset = makeCycle();
   const r = await drive(unset, [{ ledger: DONE, stage: "branch-review" }]);
   assert.ok(!r.calls[0].argv.includes("--effort"), r.calls[0].argv.join(" "));
   assert.match(startsLine(unset), /, effort default/);
+});
+
+test("a session's effort override is the --effort level whatever the driver's own environment holds, and CLAUDE_EFFORT never reaches it", async () => {
+  // CLAUDE_CODE_EFFORT_LEVEL is the variable Claude Code reads to override a session's effort;
+  // CLAUDE_EFFORT is only output into a session's Bash and hook children.
+  const inherited = await drive(makeCycle({ drive: effortRow("high") }), [{ ledger: DONE, stage: "branch-review" }],
+    { env: { CLAUDE_CODE_EFFORT_LEVEL: "low", CLAUDE_EFFORT: "low" } });
+  assert.equal(inherited.code, 0, inherited.out);
+  assert.deepEqual(inherited.calls[0].argv.slice(4, 6), ["--effort", "high"]);
+  assert.equal(inherited.calls[0].effort, "high", "the driver's CLAUDE_CODE_EFFORT_LEVEL beat the session's --effort");
+  assert.equal(inherited.calls[0].outputEffort, null, "the driver's CLAUDE_EFFORT reached the session");
+
+  const flagged = await drive(makeCycle({ drive: effortRow("low") }), [{ ledger: DONE, stage: "branch-review" }],
+    { flags: ["--effort", "max"], env: { CLAUDE_CODE_EFFORT_LEVEL: "low" } });
+  assert.equal(flagged.calls[0].effort, "max");
+  assert.equal(flagged.calls[0].outputEffort, null);
 });
 
 test("an effort the driver cannot use refuses the start with exit 3 naming where it came from; a bad --effort is a usage error", () => {

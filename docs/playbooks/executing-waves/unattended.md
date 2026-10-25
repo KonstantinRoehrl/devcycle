@@ -81,7 +81,7 @@ attaches or picks up the end.
    request. A refused start, like `--dry-run`, leaves both where they are.
 2. **One session per wave.** While the state is at `stage: execution` it starts
    `claude -p "/devcycle:continue --drive .devcycle/state.md"` with `--model <id>`, `--effort <level>`
-   (left out at `default`, with `CLAUDE_EFFORT` set to the same level or removed),
+   (left out at `default`, with `CLAUDE_CODE_EFFORT_LEVEL` set to the same level or removed),
    `--permission-mode auto`, `--output-format stream-json`, `--verbose` and the lean surface below
    (plus `--max-budget-usd` when you set `--max-usd`), with `DEVCYCLE_NESTED_RUN` and `CLAUDECODE` removed
    from the session's environment so devcycle's hooks module stays active, and this run's token in
@@ -227,7 +227,7 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 | --- | --- | --- |
 | `--state <path>` | required | The cycle's `.devcycle/state.md`. |
 | `--model <id>` | the `drive:` row's model | Runs every session on this model instead. |
-| `--effort <level>` | the `drive:` row's effort | Runs every session at `low`, `medium`, `high`, `xhigh` or `max` instead; `default` passes no `--effort` and removes `CLAUDE_EFFORT`. |
+| `--effort <level>` | the `drive:` row's effort | Runs every session at `low`, `medium`, `high`, `xhigh` or `max` instead; `default` passes no `--effort` and removes `CLAUDE_CODE_EFFORT_LEVEL`. |
 | `--plugins <names>` | `none` | The plugins a session keeps beside devcycle and superpowers: `none`, a comma-separated list of names, or `all` for the full surface with MCP servers. `/devcycle:continue` passes the `drivePlugins` setting. |
 | `--max-usd <n>` | none | Total dollar cap across sessions; each session gets the remainder as `--max-budget-usd`. On a subscription plan the cost is an estimate; a session that reports no cost is charged one priced from its streamed usage and its transcripts. |
 | `--max-stalls <n>` | 2 | Consecutive sessions that add no ledger line beyond a dispatch before the driver gives up (exit 5). |

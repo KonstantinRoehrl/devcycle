@@ -107,7 +107,7 @@ const KNOWN_FLAGS = {
 // The drivePlugins knob's own check, so the flag the start path passes reads exactly as the knob does.
 const DRIVE_PLUGINS = ROSTER.find(({ key }) => key === "drivePlugins");
 
-// "default" leaves the effort to Claude Code: no --effort, and no CLAUDE_EFFORT in a session's env.
+// "default" leaves the effort to Claude Code: no --effort, and no CLAUDE_CODE_EFFORT_LEVEL in a session's env.
 const EFFORT_CHOICES = [...EFFORT_LEVELS, "default"];
 
 class Exit extends Error {
@@ -377,9 +377,13 @@ function childEnv(ctx) {
   // /devcycle:continue starts the driver from inside its own session.
   delete env.DEVCYCLE_NESTED_RUN;
   delete env.CLAUDECODE;
-  // Set to the level --effort passes, so the flag and the inherited variable never disagree.
-  if (ctx.effort === "default") delete env.CLAUDE_EFFORT;
-  else env.CLAUDE_EFFORT = ctx.effort;
+  // CLAUDE_CODE_EFFORT_LEVEL is the variable Claude Code reads to override a session's effort, and
+  // it likely beats --effort: set it to the level --effort passes — or drop an inherited one at
+  // default — so the flag and the override never disagree. CLAUDE_EFFORT is only output, set in a
+  // session's Bash and hook children, and would misreport the session's effort if it stayed.
+  if (ctx.effort === "default") delete env.CLAUDE_CODE_EFFORT_LEVEL;
+  else env.CLAUDE_CODE_EFFORT_LEVEL = ctx.effort;
+  delete env.CLAUDE_EFFORT;
   return env;
 }
 
