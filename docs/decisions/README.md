@@ -39,7 +39,8 @@ read, it starts with the full plugin surface and the log says so.
 **Effort precedence:** `scripts/claude-settings.mjs` resolves effort from `CLAUDE_EFFORT`, else the
 model's `modelSettings` `effortLevel`, else `effortLevel`, reading local, project and user settings
 in that order, else `default`; a value outside `low|medium|high|xhigh|max` is unresolvable and
-stops the start. At the driver, `--effort` outranks the row's `effort=`, which outranks a resolution
+stops the start; a settings file takes `low|medium|high|xhigh` only, since Claude Code drops its `max`,
+so a `max` there is skipped and the next source decides. At the driver, `--effort` outranks the row's `effort=`, which outranks a resolution
 at driver start for a row written without one (never written back), and `default` passes no
 `--effort` and no `CLAUDE_CODE_EFFORT_LEVEL`. The session's environment never carries `CLAUDE_EFFORT`:
 Claude Code writes it as output for the Bash and hook children of the launching session, which is why

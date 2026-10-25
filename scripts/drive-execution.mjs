@@ -329,7 +329,7 @@ function release(ctx) {
 // Fail closed: every refusal exits 3 and leaves no lock behind — and leaves the last run's result and
 // a stop request where they are, since only a run that starts supersedes them. The checks come
 // before the lock, so a lock naming a driver means its pre-flight passed, which detach relies on.
-function preflight(opts) {
+function preflight(opts, { readList = true } = {}) {
   let statePath;
   try {
     statePath = realpathSync(resolve(opts.state));
@@ -345,7 +345,7 @@ function preflight(opts) {
   if (holder) throw new Exit(3, heldBy(holder));
   Object.assign(ctx, checkEnvironment(root, readState(statePath), opts));
   // Read once per run, before the lock, so --dry-run's command is the argv a session gets.
-  ctx.surface = surfaceArgs({ drivePlugins: opts.plugins, list: readPluginList({ bin: opts.bin, cwd: root }) });
+  if (readList) ctx.surface = surfaceArgs({ drivePlugins: opts.plugins, list: readPluginList({ bin: opts.bin, cwd: root }) });
   if (opts.dryRun) return ctx;
   const got = acquireDriveLock(root, { statePath: ctx.stateRel, logPath: LOG_REL, tokenHash: driveTokenHash(ctx.token) });
   if (!got.ok) throw new Exit(3, heldBy(got.holder));
@@ -952,9 +952,10 @@ function relayRefusal(root, logOffset) {
 // no terminal's hangup reaches it, unlike a `nohup … &` child of the caller's session. It returns
 // only once the child holds the lock and has handed off the last run's result, so a watch armed next
 // never reads a run not yet begun as ended; however long that takes, since a driver left running
-// unreported runs unwatched. The child's pre-flight is bounded, so the wait ends.
+// unreported runs unwatched. The child's pre-flight is bounded, so the wait ends. The plugin list is
+// the child's to read: its fallback note reaches the log, and a hung `claude plugin list` is waited on once.
 async function detach(opts, argv) {
-  const { root } = preflight({ ...opts, dryRun: true });
+  const { root } = preflight({ ...opts, dryRun: true }, { readList: false });
   const logPath = join(root, LOG_REL);
   const logOffset = existsSync(logPath) ? statSync(logPath).size : 0;
   // The child renames the result away, or replaces it with its own: either changes its inode.

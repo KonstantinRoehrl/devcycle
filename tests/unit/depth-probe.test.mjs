@@ -145,7 +145,7 @@ test("cli: --json adds the effort resolved for the probed model", () => {
   assert.equal(probe({}).effort, "default");
   const unresolvable = probe({ effortLevel: "turbo" });
   assert.equal(unresolvable.effort, null, "an unresolvable effort is printed as null, not refused");
-  assert.match(unresolvable.effortProblem, /^effortLevel in \S+\/\.claude\/settings\.json is "turbo", not one of low, medium, high, xhigh, max$/);
+  assert.match(unresolvable.effortProblem, /^effortLevel in \S+\/\.claude\/settings\.json is "turbo", not one of low, medium, high, xhigh$/);
 });
 
 test("depthLine: an assumed window is labelled with the file that would fix it", () => {

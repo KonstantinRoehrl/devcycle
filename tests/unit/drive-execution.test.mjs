@@ -245,7 +245,8 @@ test("effort comes from --effort, else the drive row's effort=, else the setting
   assert.deepEqual(inherited.calls[0].argv.slice(4, 6), ["--effort", "low"], "the launching session's CLAUDE_EFFORT was not resolved");
 
   const recorded = makeCycle({ drive: effortRow("medium") });
-  writeInto(recorded, ".claude/settings.json", JSON.stringify({ effortLevel: "max" }));
+  // xhigh, not max: Claude Code drops a settings file's max, so a file cannot carry a level above it.
+  writeInto(recorded, ".claude/settings.json", JSON.stringify({ effortLevel: "xhigh" }));
   const fromRow = await drive(recorded, [{ ledger: DONE, stage: "branch-review" }], { env: { CLAUDE_EFFORT: "low" } });
   assert.deepEqual(fromRow.calls[0].argv.slice(4, 6), ["--effort", "medium"]);
   assert.equal(fromRow.calls[0].effort, "medium");
@@ -253,6 +254,15 @@ test("effort comes from --effort, else the drive row's effort=, else the setting
   const flagged = await drive(makeCycle({ drive: effortRow("medium") }), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--effort", "max"] });
   assert.deepEqual(flagged.calls[0].argv.slice(4, 6), ["--effort", "max"]);
   assert.equal(flagged.calls[0].effort, "max");
+});
+
+test("a max in the settings is not an effort the launching session runs at, so a row without effort= starts at the default", async () => {
+  const root = makeCycle();
+  writeInto(root, ".claude/settings.json", JSON.stringify({ effortLevel: "max" }));
+  const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(r.code, 0, r.out);
+  assert.ok(!r.calls[0].argv.includes("--effort"), r.calls[0].argv.join(" "));
+  assert.match(startsLine(root), /effort default/);
 });
 
 test("effort default passes no --effort and keeps an inherited effort override from every session", async () => {
@@ -300,7 +310,7 @@ test("an effort the driver cannot use refuses the start with exit 3 naming where
   writeInto(unusable, ".claude/settings.json", JSON.stringify({ effortLevel: "turbo" }));
   const unresolvable = dryRun(unusable);
   assert.equal(unresolvable.code, 3, unresolvable.out);
-  assert.match(unresolvable.out, /^drive-execution: the effort level cannot be resolved: effortLevel in \S+\/\.claude\/settings\.json is "turbo", not one of low, medium, high, xhigh, max — correct it, or pass --effort <low\|medium\|high\|xhigh\|max\|default>$/m);
+  assert.match(unresolvable.out, /^drive-execution: the effort level cannot be resolved: effortLevel in \S+\/\.claude\/settings\.json is "turbo", not one of low, medium, high, xhigh — correct it, or pass --effort <low\|medium\|high\|xhigh\|max\|default>$/m);
 
   const overridden = dryRun(unusable, ["--effort", "low"]);
   assert.equal(overridden.code, 0, overridden.out);
@@ -651,6 +661,33 @@ test("--detach returns only once the driver it started has handed off the previo
   } finally {
     if (pid && !isDead(pid)) process.kill(-pid, "SIGKILL");
   }
+});
+
+// The fake claude notes the pid of whoever ran `plugin list`: its parent, which is the driver.
+function listReaders(root, flags) {
+  const readers = join(makeTempDir("devcycle-drive-plugins-"), "readers.txt");
+  const h = harness([{ ledger: DONE, stage: "branch-review" }], {}, {
+    prelude: `import { appendFileSync } from "node:fs";\nif (process.argv[2] === "plugin") appendFileSync(${JSON.stringify(readers)}, process.ppid + "\\n");\n`,
+  });
+  const r = spawnSync(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, ...flags], { cwd: root, env: h.env, encoding: "utf8" });
+  return { r, h, reads: () => (existsSync(readers) ? readFileSync(readers, "utf8").split("\n").filter(Boolean).map(Number) : []) };
+}
+
+test("the plugin list is read once per driver run: a detached start reads it in the driver it starts, not in its own pre-flight, and a user's --dry-run still reads it", async () => {
+  const root = makeCycle();
+  const detached = listReaders(root, ["--detach"]);
+  let pid = null;
+  try {
+    assert.equal(detached.r.status, 0, detached.r.stdout + detached.r.stderr);
+    pid = JSON.parse(detached.r.stdout).pid;
+    await waitFor(() => isDead(pid), 30000);
+    assert.deepEqual(detached.reads(), [pid], "the detaching parent read the plugin list, or the driver did not");
+  } finally {
+    if (pid && !isDead(pid)) process.kill(-pid, "SIGKILL");
+  }
+  const dry = listReaders(makeCycle(), ["--detach", "--dry-run"]);
+  assert.equal(dry.r.status, 0, dry.r.stdout + dry.r.stderr);
+  assert.equal(dry.reads().length, 1, "--dry-run must read the list to print the argv a session gets");
 });
 
 // The child runs the pre-flight the parent just passed, so the refusal here is one only the child
