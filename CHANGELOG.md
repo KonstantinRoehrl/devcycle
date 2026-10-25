@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.28.0 — 2026-10-25
+
+- feat(drive): cut driven-run cost with a lean surface, explicit effort and a drive band (#372, #373, #375, #374)
+
 An unattended run now costs fewer model turns and tells you less often. The session that started the
 run used to relay every task outcome to you, each relay a model turn; the new `driveWatch` knob
 (`end`, the default, `wave` or `all`) sets how much it relays, and at `end` only the run's end comes

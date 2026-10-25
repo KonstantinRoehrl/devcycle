@@ -167,13 +167,13 @@ marker with the version the change lands in, since only the release computes tha
   key: onDeviceGate
   values: [auto, human-required, auto-ok]
   note: "no new value: auto, still the default and the unset spelling, now means the agent checks first and the human judges the rest, instead of the profile's on-device row, which is dropped; lean no longer implies auto-ok, so a lean user who wants it sets it"
-- version: "unreleased"
+- version: "0.28.0"
   change: added
   key: driveWatch
   default: end
   values: [end, wave, all]
   note: "how much of an unattended run the starting session relays, each line a model turn; live, read at each start; profile-independent, so it takes no auto"
-- version: "unreleased"
+- version: "0.28.0"
   change: added
   key: drivePlugins
   default: none
