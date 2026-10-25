@@ -285,3 +285,42 @@ test("usage and environment errors", () => {
   assert.equal(noRound.status, 3);
   assert.match(noRound.out.error, /no review-round line for task 5 round 2/);
 });
+
+// The commit fold: --plan, --test-cmd and --subject go together, and only an accepted verdict commits.
+const COMMIT_FLAGS = ["--plan", "docs/plan.md", "--test-cmd", "true", "--subject", "feat: land task 5"];
+
+test("a partial commit set is a usage error naming the missing flag, and writes nothing", () => {
+  for (const [given, missing] of [
+    [["--plan", "docs/plan.md"], /--plan needs --test-cmd and --subject too/],
+    [["--plan", "docs/plan.md", "--test-cmd", "true"], /--plan, --test-cmd needs --subject too/],
+    [["--trailers", "Co-Authored-By: a <a@b.c>"], /--trailers needs --plan, --test-cmd and --subject too/],
+  ]) {
+    const f = fixture();
+    writeInto(f.repo, ".devcycle/findings/5-round-1.md", ACCEPT);
+    const before = readFileSync(ledgerPath(f), "utf8");
+    const r = verdict(f, 1, given);
+    assert.equal(r.status, 2, JSON.stringify(r.out));
+    assert.match(r.out.error, missing);
+    assert.equal(readFileSync(ledgerPath(f), "utf8"), before, "nothing is appended");
+  }
+});
+
+test("the commit flags are checked as task-commit.mjs checks them, before the verdict is written", () => {
+  const f = fixture();
+  writeInto(f.repo, ".devcycle/findings/5-round-1.md", ACCEPT);
+  const before = readFileSync(ledgerPath(f), "utf8");
+  const r = verdict(f, 1, [...COMMIT_FLAGS, "--trailers", "not a trailer"]);
+  assert.equal(r.status, 2, JSON.stringify(r.out));
+  assert.match(r.out.error, /--trailers line "not a trailer" is not a "Key: value" trailer/);
+  assert.equal(readFileSync(ledgerPath(f), "utf8"), before, "nothing is appended");
+});
+
+test("with the commit flags, a verdict other than accepted reads exactly as without them", () => {
+  const f = fixture();
+  writeInto(f.repo, ".devcycle/findings/5-round-1.md", REJECT);
+  const r = verdict(f, 1, COMMIT_FLAGS);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.action, r.out.verdict, r.out.culprit, r.out.blocking], ["rejected", "needs-changes", "novel:missing-edge-case", 2]);
+  assert.deepEqual(r.out.appended, ["5/review-verdict/1/0", "rr:verdict", "rr:event"]);
+  assert.equal(r.out.gate, undefined, "no commit was attempted");
+});

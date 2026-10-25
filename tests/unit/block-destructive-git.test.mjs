@@ -941,3 +941,21 @@ test("main thread + a live driver lock: a shell-filled reset or clean option is 
   assert.match(decideRaw({ cwd, tool_input: { command: "git clean -n $OPTS" } }).reason, /cannot read git clean's options/);
   assert.match(decideRaw({ cwd, tool_input: { command: "git reset $(cat opts)" } }).reason, /substitution/);
 });
+
+// The commit fold carries task-commit.mjs's `--test-cmd` on task-verdict.mjs's call: the same
+// git-free substitution, allowed on it exactly as on task-commit.mjs's.
+const TASK_VERDICT = "node \"${CLAUDE_PLUGIN_ROOT}/scripts/task-verdict.mjs\" --task 3 --round 1 --findings .devcycle/findings/3-round-1.md --evidence-class red-green --plan docs/plan.md";
+test("main thread + a live driver lock: the driven session's folded task-verdict call is allowed as task-commit's is", () => {
+  const cwd = drivenDir({ live: true });
+  for (const cmd of [
+    `${TASK_VERDICT} --test-cmd "export TMPDIR=$(mktemp -d); node --test tests/unit/block-destructive-git.test.mjs" --subject "fix(guard): deny checkout under a drive lock"`,
+    `${TASK_VERDICT} --test-cmd 'export TMPDIR=$(mktemp -d); node --test tests/unit/task-verdict.test.mjs' --subject "fix(verdict): commit an accepted round"`,
+  ])
+    assert.equal(decideMain(cwd, cmd), "allow", `expected allow under a live driver lock: ${cmd}`);
+  for (const cmd of [
+    `${TASK_VERDICT} --test-cmd "$(git checkout main)" --subject x`,
+    `${TASK_VERDICT} --test-cmd 'git $(echo checkout) main' --subject x`,
+  ])
+    assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
+  assert.equal(decideMain(cycleDir(stateAt("execution")), `${TASK_VERDICT} --test-cmd "$(git stash)" --subject x`), "deny");
+});

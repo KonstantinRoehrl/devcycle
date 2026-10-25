@@ -386,3 +386,64 @@ test("SC4 replay: intake --compose-review writes what intake and the reviewer di
     folded.cleanup();
   }
 });
+
+// Fold 3 (the driven-run economy spec, § 5): an accepted verdict given task-commit.mjs's flags commits
+// in the same call. The ledger and run record must read as the two calls left them, modulo the commit
+// sha and the times; and the folded call run again after a crash adds nothing.
+const foldedVerdict = (fx, task, testCmd) =>
+  call(fx, "task-verdict", ["--task", task, "--round", "1", "--findings", `.devcycle/findings/${task}-round-1.md`,
+    "--evidence-class", "red-green", "--plan", "docs/plan.md", "--test-cmd", testCmd, "--subject", `feat: land task ${task}`]);
+
+// Up to step 5's verdict: the accepted round's lines, the findings file written, the verdict not yet read.
+function reviewedTask(fx, task, file) {
+  dispatchImplementer(fx, task);
+  assert.equal(intake(fx, task, implement(fx, task, file)).action, "review");
+  dispatchReviewer(fx, task, 1);
+  writeInto(fx.dir, `.devcycle/findings/${task}-round-1.md`, "Verdict: accept\n");
+}
+
+const runRecordRows = (fx, sha) =>
+  readFileSync(join(fx.runsDir, repoSlug(gitToplevel(fx.dir)), `${RUN}.jsonl`), "utf8").split("\n").filter(Boolean)
+    .map((l) => JSON.parse(l)).map(({ ts, startedAt, endedAt, ...row }) => (sha && row.sha === sha ? { ...row, sha: "<sha>" } : row));
+
+test("fold 3: the folded verdict-and-commit writes the ledger lines and run-record rows the two calls write", () => {
+  for (const [testCmd, action] of [["true", "committed"], ["exit 1", "gate-fail"]]) {
+    const unfolded = fixture();
+    const folded = fixture();
+    try {
+      reviewedTask(unfolded, "1", "src/a.txt");
+      assert.equal(review(unfolded, "1", 1, "accept").action, "accepted");
+      const apart = commitTask(unfolded, "1", testCmd);
+      reviewedTask(folded, "1", "src/a.txt");
+      const together = foldedVerdict(folded, "1", testCmd);
+      assert.equal(apart.action, action);
+      assert.equal(together.action, action);
+      assert.deepEqual(together.verdict, { verdict: "accept", round: 1, retry: 0, findingsPath: ".devcycle/findings/1-round-1.md", blocking: 0, culprit: null });
+      assert.deepEqual(together.appended, ["1/review-verdict/1/0", "rr:verdict", ...apart.appended]);
+      const bare = (out) => (l) => (out.sha ? l.replace(out.sha, "<sha>") : l);
+      assert.deepEqual(ledger(folded, "1").map(bare(together)), ledger(unfolded, "1").map(bare(apart)));
+      assert.deepEqual(runRecordRows(folded, together.sha), runRecordRows(unfolded, apart.sha));
+    } finally {
+      unfolded.cleanup();
+      folded.cleanup();
+    }
+  }
+});
+
+test("fold 3: the folded call run again after a crash writes nothing new and reports the commit already made", () => {
+  const fx = fixture();
+  try {
+    reviewedTask(fx, "1", "src/a.txt");
+    const first = foldedVerdict(fx, "1", "true");
+    assert.equal(first.action, "committed");
+    const ledgerBefore = readFileSync(join(fx.dir, ".devcycle/ledger.md"), "utf8");
+    const rowsBefore = runRecordRows(fx, first.sha);
+    const again = foldedVerdict(fx, "1", "true");
+    assert.deepEqual([again.action, again.sha, again.appended], ["already-committed", first.sha, []]);
+    assert.deepEqual(again.verdict, first.verdict);
+    assert.equal(readFileSync(join(fx.dir, ".devcycle/ledger.md"), "utf8"), ledgerBefore);
+    assert.deepEqual(runRecordRows(fx, first.sha), rowsBefore);
+  } finally {
+    fx.cleanup();
+  }
+});
