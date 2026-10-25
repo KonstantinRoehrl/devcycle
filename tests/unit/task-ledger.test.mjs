@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   ledgerKey, parseLedgerLine, appendLedgerLine, nextRetry, retryCount, latestKeyed, appendRunRecordOnce, depthBandNow,
-  checkTaskId, ledgerPlan, taskGate, UsageError,
+  checkTaskId, ledgerPlan, taskFiles, taskGate, UsageError,
 } from "../../scripts/task-ledger.mjs";
 
 const LEDGER_MODULE = new URL("../../scripts/task-ledger.mjs", import.meta.url).href;
@@ -209,6 +209,15 @@ test("taskGate reads a plan the preamble names by absolute path as is", () => {
   const path = join(makeTempDir("task-ledger-abs-"), "ledger.md");
   writeFileSync(path, `Plan: \`${plan}\`\n\n`);
   assert.deepEqual(taskGate(path, "1"), { cmd: "npm test", source: "plan-gate", evidenceClass: "red-green" });
+});
+
+test("taskFiles reads a task's **Files:** set through the ledger's plan; null with no plan, a non-numeric id or an unknown task", () => {
+  const path = checkoutLedger({ plan: GATE_PLAN });
+  assert.deepEqual(taskFiles(path, "1"), new Set(["a.mjs"]));
+  assert.deepEqual(taskFiles(path, "2"), new Set(["b.md"]));
+  assert.equal(taskFiles(checkoutLedger(), "1"), null);
+  assert.equal(taskFiles(path, "fast"), null);
+  assert.equal(taskFiles(path, "7"), null);
 });
 
 test("checkTaskId refuses a task id the task scripts would refuse", () => {
