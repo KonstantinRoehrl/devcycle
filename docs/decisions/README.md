@@ -22,15 +22,16 @@ made the driver's pre-flight refuse the model and the depth probe band a fresh s
 `over-budget`. The coordinator's own `modelSource` field was the only signal behind the inherited
 count, although the hooks module records what the Task call passed (#273).
 
-**Supersedes:** nothing; it removes the `docs/known-issues.md` entry for the assumed 200k window,
-which the row fixes.
+**Supersedes:** `docs/platform-notes.md` § (k)'s 2026-10-08 depth-probe record, whose `over-budget`
+cause (no `claude-haiku-5-5` row, a 200k window taken from `claude-haiku-4-5-20251001`) the row
+fixes; it also removes the `docs/known-issues.md` entry for the assumed 200k window.
 
 **Budgets:** the filer's new step grows `playbooks/profiling-sessions.md` and the runtime surface;
 `references/model-routing.md`'s two rewordings (#295) are byte-neutral and move no ceiling.
 
 ```text
-budget: context-budget.json playbooks/profiling-sessions.md 39968
-budget: surface-budget.json surfaceTotal 6387
+budget: context-budget.json playbooks/profiling-sessions.md 40093
+budget: surface-budget.json surfaceTotal 6389
 ```
 
 ## 2026-10-25 — Driven-run economy: a drive band instead of relayed turns, a lean driven surface, explicit effort, folded task scripts (#372, #373, #375, #374)

@@ -70,9 +70,10 @@ that nothing in devcycle provides.
 $0.50 output per million tokens for prompts of 100K tokens or fewer and $0.50 / $2.50 beyond that,
 and its row carries the first pair, so doctor under-prices a request whose prompt is longer than
 100K tokens by up to 5x. Pricing it exactly needs a price schema that takes a prompt-length
-threshold, which nothing in devcycle has. The row's arrival also stops the undated
-`claude-haiku-4-5` from pricing provisionally as `claude-haiku-4-5-20251001`: doctor now lists it as
-unpriced, although `windowFor` still resolves its 200k window through the dated snapshot.
+threshold, which nothing in devcycle has. The row's arrival also stops every Haiku 4.x id other
+than the exact snapshot `claude-haiku-4-5-20251001` (the undated `claude-haiku-4-5`, say) from
+pricing provisionally as that snapshot: doctor now lists it as unpriced, although `windowFor` still
+resolves a Haiku 4.5 id's 200k window through the snapshot branch.
 
 ### Sweep tasks' ledger lines carry no idempotency key (low)
 

@@ -40,10 +40,13 @@ an `(inferred: …)` mark, and a revert comparison involving them is skipped and
 `--json` carries the estimate as `totals.provisional` and the skipped comparisons as
 `revert_skipped`; `doctor --issue-body unpriced-model` drafts the issue asking for the missing rows.
 
-**Inherited-model counts.** The `inherited-model` compliance candidate counts, per run, the governed
-subagents (implementer, task-reviewer, on-device-driver) the hooks module saw spawned with no model
-override, printed `observed=<n>/<m>`. A run with no such trace falls back to the coordinator's own
-`modelSource` count, printed `inherited=<n>/<m>`, or `self-reported=<n>/<m>` beside an observed pair.
+**Inherited-model counts.** The `inherited-model` compliance candidate counts, per run, the
+knob-governed subagents (`KNOB_GOVERNED_AGENTS` in `scripts/doctor.mjs`) the hooks module saw spawned
+with no model override, printed `observed=<n>/<m>`; `<m>` is every governed subagent traced, in runs
+where none inherited too, and an observed-only cohort with none inherited and no self-report
+disagreement raises no candidate. A run with no such trace falls back to the coordinator's own
+`modelSource` count, printed `inherited=<n>/<m>`, or `self-reported=<n>/<m>` beside an observed pair,
+in which case the model breakdown reads `ran on (observed subagents only)`.
 The two are never summed. Either is an exposure count, not a verdict: with a default subagent model
 configured, a dispatch without an override resolves to that default on purpose.
 

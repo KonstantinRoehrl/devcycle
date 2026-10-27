@@ -177,14 +177,16 @@ to draft. For each finding it chose:
    the screen is not shown at all — name the class that failed and stop there.
 3. Look for the finding already filed, before recording anything: list the open issues in the repo
    the draft's `repo:` line named,
-   `gh issue list --repo <repo> --state open --search '<title> in:title' --json number,title`, and
+   `gh issue list --repo <repo> --state open --search "<title> in:title" --json number,title`, the
+   title quoted for the shell with its own `"` and `$` escaped, and
    keep only rows whose `title` equals the draft's `title:` line character for character, since the
-   search is fuzzy. No row: carry on with the next item. A row `#N`: write no `Drafted:` line —
-   nothing new was drafted, and `doctor --json`'s `outer_loop` counts those lines — and show the user
-   `#N`, offering a comment on it in place of a new issue. The comment carries the draft's body,
-   everything below the blank line under `labels:`, already screened above. Ask whether its content
-   is right, then separately whether to post it, never inferring the second answer from the first;
-   only after both, run `gh issue comment <N> --repo <repo> --body-file <body-file>`. A closed issue
+   search is fuzzy. No row: go on to step 4. A row `#N`: skip steps 4–7 for this draft, write no
+   `Drafted:` line — nothing new was drafted, and `doctor --json`'s `outer_loop` counts those lines —
+   and show the user `#N`, offering a comment on it in place of a new issue. The comment carries the
+   draft's body, everything below the blank line under `labels:`, already screened above, written to
+   a file of its own. Ask whether its content is right, then separately whether to post it, never
+   inferring the second answer from the first;
+   only after both, run `gh issue comment <N> --repo <repo> --body-file <comment-file>`. A closed issue
    never counts: the same title reappearing after one closed is new evidence.
 4. Record it as drafted now, before either gate — the marker records drafting, not posting, so a
    draft declined below still counts: append the draft's title to the persisted report, prefixed

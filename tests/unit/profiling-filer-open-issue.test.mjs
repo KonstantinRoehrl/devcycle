@@ -29,3 +29,18 @@ test("the check matches open issues on the draft's exact title and comments inst
   assert.doesNotMatch(step, /first gate|second gate/, "the consent test orders those phrases against the marker");
   assert.ok(!step.includes(DEVCYCLE_UPSTREAM), "the upstream slug has one owner, the draft's repo: line");
 });
+
+test("the search argument is quoted shell-safely: a title with an apostrophe cannot sit in single quotes", () => {
+  const step = items[itemWith("gh issue list")];
+  assert.doesNotMatch(step, /'<title/, "a single-quoted <title> breaks on the inherited-model title's apostrophe");
+  assert.match(step, /--search "<title> in:title"/);
+  assert.match(step, /its own `"` and `\$` escaped/);
+});
+
+test("a miss goes on to step 4, a hit skips steps 4-7, and the comment body gets a file of its own", () => {
+  const step = items[itemWith("gh issue list")];
+  assert.match(step, /No row: go on to step 4\./);
+  assert.match(step, /A row `#N`: skip steps 4–7 for this draft/);
+  assert.match(step, /written to\s+a file of its own/);
+  assert.doesNotMatch(step, /<body-file>/, "the body-file is introduced by the creating step, later");
+});
