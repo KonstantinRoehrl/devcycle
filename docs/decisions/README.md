@@ -12,7 +12,7 @@ with a 1M window; tiered pricing stays out until the price schema takes a prompt
 `playbooks/profiling-sessions.md` checks the open issues for the draft's exact title after the
 redaction screen and offers a comment on a hit, never writing a `Drafted:` line for it. The
 `inherited-model` compliance candidate reads the hooks module's `agent-trace` rows for the governed
-agents (implementer, task-reviewer, on-device-driver) and prints that as `observed=`, keeping the
+agents (`KNOB_GOVERNED_AGENTS` in `scripts/doctor.mjs`) and prints that as `observed=`, keeping the
 coordinator's `modelSource` count as a separate fallback; the two are never summed.
 
 **Why:** one unpriced model became four `[doctor:unpriced-model]` issues and one inherited-model
