@@ -21,6 +21,7 @@ import {
   formatComplianceCandidate, parseDraftedMarkers, complianceType, COMPLIANCE_TITLES,
   ENTRY_TAGS, PLAYBOOK_STAGE, stageSignal, splitReason, provisionalCostUSD, excludedRequestsOf, excludedNote, stageByVersionTable,
   owningSession, readRecords, inWindow, summarizeCorpus, groupFilesBySession, issueDraftLines, unpricedModelIssueBody, repoShape, UNPRICED_MODEL_SLUG,
+  observedInheritance, KNOB_GOVERNED_AGENTS,
 } from "../../scripts/doctor.mjs";
 import { PRICING } from "../../scripts/pricing.mjs";
 import { usd } from "../../scripts/doctor-format.mjs";
@@ -3485,4 +3486,103 @@ test("cli: a driven session is counted, its execution main turns per task includ
     rmSync(dir, { recursive: true, force: true });
     cleanup();
   }
+});
+
+const governedTrace = (agentId, over = {}) => ({ kind: "agent-trace", stage: "execution", agentId,
+  agentType: "devcycle:implementer", requestedModel: null, resolvedModel: "claude-opus-5-5", fork: false, ...over });
+
+test("observedInheritance: counts governed subagents spawned with no model override, once per agentId", () => {
+  const r = observedInheritance([
+    governedTrace("a1"), governedTrace("a1"), // a continued subagent writes a second row under its id
+    governedTrace("a2", { requestedModel: "claude-sonnet-5-5", resolvedModel: "claude-sonnet-5-5" }),
+    governedTrace("a3", { agentType: "devcycle:task-reviewer" }),
+  ]);
+  assert.deepEqual(r, { inherited: 2, total: 3, byModel: { "claude-opus-5-5": 2 }, selfReportDisagrees: 0 });
+});
+
+test("observedInheritance: forks, null and 'fork' agent types, spec-reviewer and built-in types are not governed", () => {
+  assert.equal(observedInheritance([
+    governedTrace("f1", { fork: true }),
+    governedTrace("n1", { agentType: null }),
+    governedTrace("n2", { agentType: "fork" }),
+    governedTrace("s1", { agentType: "devcycle:spec-reviewer" }),
+    governedTrace("b1", { agentType: "Explore" }),
+    governedTrace("b2", { agentType: "general-purpose" }),
+  ]), null);
+  assert.deepEqual([...KNOB_GOVERNED_AGENTS].sort(),
+    ["devcycle:implementer", "devcycle:on-device-driver", "devcycle:task-reviewer"]);
+});
+
+test("observedInheritance: a dispatch row whose modelSource disagrees with the trace it joins by agentId is counted", () => {
+  const traces = [governedTrace("a1"), governedTrace("a2", { requestedModel: "claude-sonnet-5-5" })];
+  const r = observedInheritance(traces, [
+    { agentId: "a1", modelSource: "explicit" },  // the trace says no override: disagrees
+    { agentId: "a2", modelSource: "explicit" },  // agrees
+    { agentId: "zz", modelSource: "inherited" }, // joins no trace
+    { modelSource: "inherited" },                // no agentId to join on
+  ]);
+  assert.equal(r.selfReportDisagrees, 1);
+});
+
+test("emitComplianceCandidates: a window with governed traces reports the observed pair and leaves modelSource aside", () => {
+  const c = emitComplianceCandidates([], { stages: [],
+    agentTraces: [governedTrace("a1"), governedTrace("a2", { requestedModel: "claude-sonnet-5-5" })],
+    dispatches: [{ taskId: "1", modelSource: "explicit", model: "claude-sonnet-5-5" }] })
+    .find((x) => x.type === "inherited-model");
+  assert.deepEqual(c, { type: "inherited-model", observedInherited: 1, observedTotal: 2,
+    observedByModel: { "claude-opus-5-5": 1 }, selfReportDisagrees: 0, sessions_sampled: 1 });
+});
+
+test("emitComplianceCandidates: a window whose traces are all filtered out falls back to the self-reported count", () => {
+  const c = emitComplianceCandidates([], { stages: [],
+    agentTraces: [governedTrace("f1", { fork: true })],
+    dispatches: [{ taskId: "1", modelSource: "inherited", model: "claude-opus-5" }, { taskId: "2", modelSource: "explicit" }] })
+    .find((x) => x.type === "inherited-model");
+  assert.equal(c.inherited, 1);
+  assert.equal(c.total, 2);
+  assert.equal(c.observedTotal, undefined);
+});
+
+test("emitComplianceCandidates: observed traces with an override everywhere and no disagreement emit nothing", () => {
+  const c = emitComplianceCandidates([], { stages: [],
+    agentTraces: [governedTrace("a1", { requestedModel: "claude-sonnet-5-5" })],
+    dispatches: [{ agentId: "a1", modelSource: "explicit" }] });
+  assert.equal(c.find((x) => x.type === "inherited-model"), undefined);
+});
+
+test("complianceCandidatesOf: inherited-model keeps the observed and self-reported pairs apart", () => {
+  const sessions = [
+    { id: "s1", pluginVersion: "0.27.0", complianceCandidates: [{ type: "inherited-model", observedInherited: 2,
+      observedTotal: 4, observedByModel: { "claude-opus-5-5": 2 }, selfReportDisagrees: 0, sessions_sampled: 1 }] },
+    { id: "s2", pluginVersion: "0.23.0", complianceCandidates: [{ type: "inherited-model", inherited: 3, total: 5,
+      inheritedByModel: { "claude-opus-5": 3 }, sessions_sampled: 1 }] },
+    { id: "s3", pluginVersion: "0.27.0", complianceCandidates: [{ type: "inherited-model", observedInherited: 1,
+      observedTotal: 3, observedByModel: { "claude-opus-5-5": 1 }, selfReportDisagrees: 2, sessions_sampled: 1 }] },
+  ];
+  const c = complianceCandidatesOf(sessions).find((x) => x.type === "inherited-model");
+  assert.equal(c.observedInherited, 3);
+  assert.equal(c.observedTotal, 7);
+  assert.equal(c.inherited, 3);
+  assert.equal(c.total, 5);
+  assert.equal(c.selfReportDisagrees, 2);
+  assert.deepEqual(c.inheritedByModel, { "claude-opus-5-5": 3 }, "the breakdown follows the observed basis, never a sum across bases");
+  assert.equal(c.sessions_sampled, 3);
+});
+
+test("complianceCandidatesOf: an observed-only cohort carries no self-reported pair", () => {
+  const c = complianceCandidatesOf([{ id: "s1", complianceCandidates: [{ type: "inherited-model",
+    observedInherited: 1, observedTotal: 2, observedByModel: {}, selfReportDisagrees: 0, sessions_sampled: 1 }] }])
+    .find((x) => x.type === "inherited-model");
+  assert.equal(c.inherited, undefined);
+  assert.equal(c.total, undefined);
+});
+
+test("formatComplianceCandidate: an observed pair prints observed=, labels the self-reported pair, and says what it counts", () => {
+  const observedOnly = formatComplianceCandidate({ type: "inherited-model", observedInherited: 2, observedTotal: 4, sessions_sampled: 1 });
+  assert.match(observedOnly, /^CANDIDATE: inherited-model observed=2\/4 sessions=1 — observed counts/);
+  assert.doesNotMatch(observedOnly, /inherited=|self-reported=/);
+  const both = formatComplianceCandidate({ type: "inherited-model", observedInherited: 2, observedTotal: 4,
+    inherited: 3, total: 5, selfReportDisagrees: 2, sessions_sampled: 2 });
+  assert.match(both, /observed=2\/4 self-reported=3\/5 selfReportDisagrees=2 sessions=2/);
+  assert.match(both, /not comparable with the self-reported figures/);
 });
