@@ -3510,7 +3510,12 @@ test("observedInheritance: forks, null and 'fork' agent types, spec-reviewer and
     governedTrace("b2", { agentType: "general-purpose" }),
   ]), null);
   assert.deepEqual([...KNOB_GOVERNED_AGENTS].sort(),
-    ["devcycle:implementer", "devcycle:on-device-driver", "devcycle:task-reviewer"]);
+    ["devcycle:implementer", "devcycle:on-device-driver", "devcycle:red-team-reviewer", "devcycle:task-reviewer"]);
+});
+
+test("observedInheritance: devcycle:red-team-reviewer is a governed agent (branchReviewModel)", () => {
+  const r = observedInheritance([governedTrace("r1", { agentType: "devcycle:red-team-reviewer" })]);
+  assert.deepEqual(r, { inherited: 1, total: 1, byModel: { "claude-opus-5-5": 1 }, selfReportDisagrees: 0 });
 });
 
 test("observedInheritance: a dispatch row whose modelSource disagrees with the trace it joins by agentId is counted", () => {
@@ -3543,11 +3548,68 @@ test("emitComplianceCandidates: a window whose traces are all filtered out falls
   assert.equal(c.observedTotal, undefined);
 });
 
-test("emitComplianceCandidates: observed traces with an override everywhere and no disagreement emit nothing", () => {
+test("emitComplianceCandidates: observed traces with an override everywhere still emit, so the cohort denominator counts the window", () => {
   const c = emitComplianceCandidates([], { stages: [],
     agentTraces: [governedTrace("a1", { requestedModel: "claude-sonnet-5-5" })],
-    dispatches: [{ agentId: "a1", modelSource: "explicit" }] });
-  assert.equal(c.find((x) => x.type === "inherited-model"), undefined);
+    dispatches: [{ agentId: "a1", modelSource: "explicit" }] })
+    .find((x) => x.type === "inherited-model");
+  assert.deepEqual(c, { type: "inherited-model", observedInherited: 0, observedTotal: 1,
+    observedByModel: {}, selfReportDisagrees: 0, sessions_sampled: 1 });
+});
+
+test("emitComplianceCandidates: a disagreement-only window carries the self-report disagreement into the candidate", () => {
+  const c = emitComplianceCandidates([], { stages: [],
+    agentTraces: [governedTrace("a", { requestedModel: "claude-sonnet-5-5" })],
+    dispatches: [{ agentId: "a", modelSource: "inherited" }] })
+    .find((x) => x.type === "inherited-model");
+  assert.equal(c.observedInherited, 0);
+  assert.equal(c.selfReportDisagrees, 1);
+});
+
+// One window per entry: `overridden` governed subagents spawned with a model, `bare` without one.
+const observedWindow = (id, overridden, bare) => {
+  const traces = [];
+  for (let i = 0; i < overridden; i++)
+    traces.push(governedTrace(`${id}-o${i}`, { requestedModel: "claude-sonnet-5-5", resolvedModel: "claude-sonnet-5-5" }));
+  for (let i = 0; i < bare; i++) traces.push(governedTrace(`${id}-b${i}`));
+  return { id, pluginVersion: "0.28.0", complianceCandidates:
+    emitComplianceCandidates([], { stages: [], agentTraces: traces, dispatches: [] }) };
+};
+
+test("complianceCandidatesOf: nine all-overridden windows and one with a bare subagent read observed=1/20, not 1/2", () => {
+  const sessions = [];
+  for (let i = 0; i < 9; i++) sessions.push(observedWindow(`s${i}`, 2, 0));
+  sessions.push(observedWindow("s9", 1, 1));
+  const c = complianceCandidatesOf(sessions).find((x) => x.type === "inherited-model");
+  assert.equal(c.observedInherited, 1);
+  assert.equal(c.observedTotal, 20);
+  assert.equal(c.sessions_sampled, 10);
+});
+
+test("complianceCandidatesOf: an observed-only cohort with no inheritance and no disagreement emits no candidate", () => {
+  const sessions = [observedWindow("s0", 2, 0), observedWindow("s1", 3, 0)];
+  assert.equal(complianceCandidatesOf(sessions).find((x) => x.type === "inherited-model"), undefined);
+});
+
+test("complianceCandidatesOf: an observed-only cohort whose only signal is a disagreement still emits", () => {
+  const c = complianceCandidatesOf([{ id: "s0", complianceCandidates: [{ type: "inherited-model", observedInherited: 0,
+    observedTotal: 2, observedByModel: {}, selfReportDisagrees: 1, sessions_sampled: 1 }] }])
+    .find((x) => x.type === "inherited-model");
+  assert.equal(c.observedInherited, 0);
+  assert.equal(c.selfReportDisagrees, 1);
+});
+
+test("complianceCandidatesOf: a mixed cohort with zero observed inheritance keeps its self-reported pair", () => {
+  const c = complianceCandidatesOf([
+    { id: "s0", complianceCandidates: [{ type: "inherited-model", observedInherited: 0, observedTotal: 2,
+      observedByModel: {}, selfReportDisagrees: 0, sessions_sampled: 1 }] },
+    { id: "s1", complianceCandidates: [{ type: "inherited-model", inherited: 1, total: 2,
+      inheritedByModel: { "claude-opus-5": 1 }, sessions_sampled: 1 }] },
+  ]).find((x) => x.type === "inherited-model");
+  assert.equal(c.observedInherited, 0);
+  assert.equal(c.observedTotal, 2);
+  assert.equal(c.inherited, 1);
+  assert.equal(c.total, 2);
 });
 
 test("complianceCandidatesOf: inherited-model keeps the observed and self-reported pairs apart", () => {
@@ -3585,4 +3647,15 @@ test("formatComplianceCandidate: an observed pair prints observed=, labels the s
     inherited: 3, total: 5, selfReportDisagrees: 2, sessions_sampled: 2 });
   assert.match(both, /observed=2\/4 self-reported=3\/5 selfReportDisagrees=2 sessions=2/);
   assert.match(both, /not comparable with the self-reported figures/);
+});
+
+test("formatComplianceCandidate: a mixed cohort says its ran-on list covers the observed subagents only", () => {
+  const mixed = { type: "inherited-model", observedInherited: 2, observedTotal: 4, inherited: 3, total: 5,
+    sessions_sampled: 2, inheritedByModel: { "claude-opus-5-5": 2 } };
+  assert.match(formatComplianceCandidate(mixed), / — ran on \(observed subagents only\): claude-opus-5-5 ×2 /);
+  const observedOnly = formatComplianceCandidate({ ...mixed, inherited: undefined, total: undefined });
+  assert.match(observedOnly, / — ran on: claude-opus-5-5 ×2 /);
+  const selfReportedOnly = formatComplianceCandidate({ type: "inherited-model", inherited: 3, total: 5,
+    sessions_sampled: 1, inheritedByModel: { "claude-opus-5": 3 } });
+  assert.match(selfReportedOnly, / — ran on: claude-opus-5 ×3 /);
 });

@@ -1741,6 +1741,22 @@ test("--issue-body inherited-model prints the observed pair when a run carries g
   assert.doesNotMatch(res.stdout, /inherited=\d/);
 });
 
+test("--issue-body inherited-model prints selfReportDisagrees when a dispatch's modelSource contradicts its trace", () => {
+  const dir = complianceFixture();
+  const runFile = join(dir, "runs", "some-repo", "run.jsonl");
+  const trace = { kind: "agent-trace", stage: "execution", agentId: "a1", agentType: "devcycle:implementer",
+    requestedModel: "claude-sonnet-5", resolvedModel: "claude-sonnet-5", fork: false };
+  const dispatch = { kind: "dispatch", taskId: "2", agentId: "a1", agentType: "devcycle:implementer", model: "claude-opus-5",
+    modelSource: "inherited", startedAt: "2026-07-20T09:50:00.000Z", endedAt: "2026-07-20T10:10:00.000Z",
+    outcome: "ok", reviewRound: 0, retryIndex: 0 };
+  appendFileSync(runFile, [trace, dispatch].map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const res = spawnSync(process.execPath,
+    [SCRIPT, "--dir", join(dir, "projects"), "--issue-body", "inherited-model"],
+    { encoding: "utf8", env: { ...process.env, PATH: "", CLAUDE_CODE_SESSION_ID: "", DEVCYCLE_RUNS_DIR: join(dir, "runs") } });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /CANDIDATE: inherited-model observed=0\/1 selfReportDisagrees=1 sessions=1/);
+});
+
 test("--issue-body rejects an unknown slug as neither culprit nor compliance", () => {
   const dir = complianceFixture();
   const res = spawnSync(process.execPath,
