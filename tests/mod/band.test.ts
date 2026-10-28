@@ -173,3 +173,45 @@ for (const [name, world] of INERT) {
     await ui.unmount();
   });
 }
+
+const health = (state: string, elapsedMs: number, toolUses: number, sinceActivityMs: number) => ({ state, elapsedMs, toolUses, sinceActivityMs });
+const HEALTH_WAVE = { wave: 3, committed: 0, tasks: [
+  { ...task('7', 'implementing'), health: health('running', 7 * 60_000 + 5_000, 23, 10_000) },
+  { ...task('8', 'reviewing', 2, 1), health: health('running', 30_000, 1, 0) },
+  { ...task('9', 'implementing'), health: health('quiet', 20 * 60_000, 4, 14 * 60_000 + 30_000) },
+  { ...task('10', 'implementing'), health: health('ended-without-output', 9 * 60_000, 12, 60_000) },
+  { ...task('11', 'reviewing', 1), health: health('ended-without-output', 2 * 60_000, 3, 0) },
+] };
+const HEALTH_ROWS = [
+  '  wave 3  ⠙ task 7  implementing · 7m · 23 tool calls',
+  '          ⠙ task 8  reviewing · round 2 (1 rejection) · <1m · 1 tool call',
+  '          ? task 9  implementing · silent 14m',
+  '          ↻ task 10  implementing · ended before reporting — redispatching',
+  '          ↻ task 11  reviewing · round 1 · ended before reporting — redispatching',
+];
+const withHealth = () => progress({ waves: RUNNING.waves.map((w) => (w.wave === 3 ? HEALTH_WAVE : w)) });
+
+test('a dispatch\'s health: elapsed time and tool calls while it runs, silent and ended before reporting in warning', async ($, on) => {
+  const { ui } = await drawn($, on, { progress: withHealth() }, AT('2026-10-25T09:12:10Z'));
+  expect((await lines(ui)).slice(2)).toEqual(HEALTH_ROWS);
+  expect(await colorOf(ui, 'implementing · silent 14m')).toBe('warning');
+  expect(await colorOf(ui, 'implementing · ended before reporting — redispatching')).toBe('warning');
+  expect(await colorOf(ui, ' (1 rejection)')).toBe('warning');
+  await ui.unmount();
+});
+
+test('on 2.1.287 the health rows draw the same, one line each', async ($, on) => {
+  const { ui } = await drawn($, on, { base: '2.1.287', progress: withHealth() }, AT('2026-10-25T09:12:10Z'), { columns: 90 });
+  expect((await lines(ui)).slice(2)).toEqual(HEALTH_ROWS);
+  await ui.unmount();
+});
+
+// The renderer truncates a row from its tail (wrap: 'truncate'); `lines` reads the row whole, so the
+// order of the parts is what decides which one a narrow terminal drops first.
+test('a row puts its rejection warning ahead of its tool calls, so truncation takes the tool calls first', async ($, on) => {
+  const { ui } = await drawn($, on, { progress: withHealth() }, AT('2026-10-25T09:12:10Z'), { columns: 60 });
+  const row = (await lines(ui)).find((l: string) => l.includes('task 8')) as string;
+  expect(row.indexOf('(1 rejection)')).toBeGreaterThan(-1);
+  expect(row.indexOf('1 tool call')).toBeGreaterThan(row.indexOf('(1 rejection)'));
+  await ui.unmount();
+});
