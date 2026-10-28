@@ -82,6 +82,12 @@ function world({ agents = { a1: "pending-tool" }, record = { startedAt: "2026-10
 }
 const health = (w, opts = {}) => dispatchHealth({ root: w.root, ledgerPath: w.ledgerPath, sessionId: SID, env: w.env, ...opts });
 const stateAt = (w, now) => health(w, { now })[0].state;
+const agentFile = (w, id) => join(w.env.CLAUDE_CONFIG_DIR, "projects", "-repo", SID, "subagents", `agent-${id}.jsonl`);
+// An agent transcript whose prompt names no brief, so no dispatch record binds to it.
+const unrelate = (w, id) => {
+  const file = agentFile(w, id);
+  writeFileSync(file, readFileSync(file, "utf8").replace(/\.devcycle\/briefs\/[^\s"\\]+\.md/g, "a research task"));
+};
 
 test("a pending tool call is running until the tool ceiling, then the transcript's silence decides", () => {
   const w = world({ mtime: T0 + 60_000 });
@@ -119,7 +125,8 @@ test("binding: of two transcripts naming one brief, the one started after the re
 
 test("another session's dispatch and a missing transcript: never classified, and unbound until UNBOUND_MS", () => {
   assert.deepEqual(health(world({ record: { startedAt: "2026-10-28T08:00:00Z", sessionId: "other" } }), { now: T0 }), []);
-  const w = world({ agents: {} });
+  const w = world({ agents: { a2: "handback" } });
+  unrelate(w, "a2");
   const [early] = health(w, { now: T0 + 60_000, record: true });
   assert.deepEqual([early.state, early.action, early.recorded], ["unbound", "wait", false]);
   const [late] = health(w, { now: T0 + UNBOUND_MS + 1, record: true });
@@ -160,11 +167,24 @@ test("an unbound dispatch whose owed output is already present is routed on, nev
   }
 });
 
-test("a dispatch the located session never bound, with no output past UNBOUND_MS, is the genuine death", () => {
+test("a located session whose subagents/ directory is missing cannot tell a dispatch that never started from agents elsewhere: it waits", () => {
   for (const role of ["implementer", "reviewer"]) {
     const w = unlocatable({ slug: true, role });
     const [d] = health(w, { now: T0 + 10 * 60_000, record: true });
-    assert.deepEqual([d.state, d.transcriptsFound, d.action, d.recorded], ["unbound", true, `redispatch-${role}`, true], role);
+    assert.deepEqual([d.state, d.transcriptsFound, d.action, d.recorded], ["unbound", false, "wait", false], role);
+    noDeathLine(w);
+  }
+});
+
+test("a dispatch no agent transcript of the session binds, with the session's agents readable and no output past UNBOUND_MS, is the genuine death", () => {
+  for (const role of ["implementer", "reviewer"]) {
+    const w = unlocatable({ slug: true, role });
+    const subagents = join(w.env.CLAUDE_CONFIG_DIR, "projects", "-repo", SID, "subagents");
+    mkdirSync(subagents, { recursive: true });
+    copyFileSync(FIX("handback"), join(subagents, "agent-b1.jsonl"));
+    unrelate(w, "b1");
+    const [d] = health(w, { now: T0 + 10 * 60_000, record: true });
+    assert.deepEqual([d.state, d.transcriptsFound, d.liveUnknown, d.action, d.recorded], ["unbound", true, 0, `redispatch-${role}`, true], role);
   }
 });
 

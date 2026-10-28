@@ -238,8 +238,8 @@ export function inFlight({ root, ledgerPath = join(root, LEDGER_REL), sessionId,
     const base = {
       kind: "task", task: rec.task, role: rec.role, round: rec.round, retry: rec.retry, recordPath: rec.recordPath,
       agentId: agent?.agentId ?? null, elapsedMs: now - Date.parse(rec.record.startedAt), liveUnknown: 0,
-      // An empty agent list from an unlocatable session is not evidence that no Agent call happened.
-      transcriptsFound: slugDir !== null,
+      // An empty list from a located session cannot tell "the Agent call never happened" from "agents live elsewhere".
+      transcriptsFound: agents.length > 0,
     };
     const t = agent ? readTranscript(agent.file) : null;
     if (!t) {
@@ -270,7 +270,7 @@ const WAIT_ACTIONS = {
 };
 
 // The coordinator's one call: each in-flight dispatch with what to do next. With `record`, a dispatch
-// that is dead — ended without its output, unbound (its session's transcripts located, none bound to it,
+// that is dead — ended without its output, unbound (its session's agent transcripts readable, none bound to it,
 // its owed output absent) past UNBOUND_MS with no unaccounted live agent, or quiet and confirmed stopped
 // (`stopped` names its task) — is recorded and routed. An unbound dispatch with its output present is
 // routed on as ended-with-output, never recorded.
