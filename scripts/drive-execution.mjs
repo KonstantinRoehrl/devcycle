@@ -16,7 +16,7 @@ import { defaultBranches, isProtectedBranch } from "./branch-names.mjs";
 import { EFFORT_LEVELS, resolveEffort } from "./claude-settings.mjs";
 import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
-import { claudeProjectsDir } from "./depth-probe.mjs";
+import { DISPATCH_ENDED, dispatchHealth, recordDeath, sessionSlugDir } from "./dispatch-health.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
 import { buildProgress, removeProgress, writeProgress } from "./drive-progress.mjs";
@@ -50,6 +50,10 @@ const IDLE_LIMIT_MS = Number(process.env.DEVCYCLE_DRIVE_IDLE_MS) || 30 * 60_000;
 // How often the drive band's progress file is rewritten while nothing is logged: the band reads a file
 // 120 s old as a silent driver. DEVCYCLE_DRIVE_HEARTBEAT_MS shortens it for tests.
 const HEARTBEAT_MS = Number(process.env.DEVCYCLE_DRIVE_HEARTBEAT_MS) || 30_000;
+// How long a dead dispatch must stay dead, with nothing else live, before the watchdog stops the
+// session: the session's own health check gets the first chance.
+const WATCHDOG_GRACE_MS = Number(process.env.DEVCYCLE_DRIVE_WATCHDOG_GRACE_MS) || 5 * 60_000;
+const DEAD_STATES = new Set(["ended-without-output", "quiet"]);
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
 const SIGNAL_GRACE_MS = 10_000;
 const DETACH_POLL_MS = 50;
@@ -78,6 +82,8 @@ const OUTCOME_EVENTS = new Set(["committed", "report-received", "review-verdict"
 // An implementer's and a reviewer's dispatch: a session whose only lines are these made no progress,
 // it sent work out and never saw it back.
 const DISPATCH_EVENTS = new Set(["dispatched", "review-round"]);
+// A dispatch, or a dispatch that ended without its output: neither moves a task.
+const NO_PROGRESS_EVENTS = new Set([...DISPATCH_EVENTS, DISPATCH_ENDED]);
 // A request on a model with no price is charged as the dearest priced model, so an estimate never
 // falls short.
 const DEAREST_MODEL = Object.keys(PRICING.models).reduce((a, b) => (PRICING.models[b].out > PRICING.models[a].out ? b : a));
@@ -185,7 +191,7 @@ function ledgerEntries(root, plan) {
 
 const progressOf = (entries) => ({
   lines: entries.length,
-  advanced: entries.filter((e) => !DISPATCH_EVENTS.has(e.event)).length,
+  advanced: entries.filter((e) => !NO_PROGRESS_EVENTS.has(e.event)).length,
   committed: entries.filter((e) => e.event === "committed").length,
   outcomes: entries.filter((e) => OUTCOME_EVENTS.has(e.event)).length,
 });
@@ -420,7 +426,6 @@ function tallyRequest(requests, message) {
 // slug is found by the session id rather than derived from the checkout's path, whose escaping
 // is Claude Code's to change.
 function sessionTranscripts(sessionId) {
-  const projects = claudeProjectsDir();
   const listing = (dir) => {
     try {
       return readdirSync(dir);
@@ -428,10 +433,10 @@ function sessionTranscripts(sessionId) {
       return [];
     }
   };
-  const slug = listing(projects).find((p) => existsSync(join(projects, p, `${sessionId}.jsonl`)));
-  if (!slug) return [];
-  const agents = join(projects, slug, sessionId, "subagents");
-  return [join(projects, slug, `${sessionId}.jsonl`), ...listing(agents).filter((f) => f.endsWith(".jsonl")).map((f) => join(agents, f))];
+  const slugDir = sessionSlugDir(sessionId);
+  if (!slugDir) return [];
+  const agents = join(slugDir, sessionId, "subagents");
+  return [join(slugDir, `${sessionId}.jsonl`), ...listing(agents).filter((f) => f.endsWith(".jsonl")).map((f) => join(agents, f))];
 }
 
 // Claude Code appends these transcripts as a session runs, so they outlive a killed one, and they
@@ -507,7 +512,8 @@ function markProgressed(ctx) {
 }
 
 function runSession(ctx, bin, args, log, n) {
-  const s = { sessionId: null, environment: null, result: null, limit: null, silent: false, tools: 0, depthTokens: null, requests: new Map() };
+  const s = { sessionId: null, environment: null, result: null, limit: null, silent: false, tools: 0, depthTokens: null, requests: new Map(),
+    pending: new Set(), deadDispatch: null };
   let seen = ledgerEntries(ctx.root, ctx.plan).length;
   return new Promise((settle, fail) => {
     let handle;
@@ -538,7 +544,10 @@ function runSession(ctx, bin, args, log, n) {
         if (!e.parent_tool_use_id) {
           s.tools += (e.message?.content ?? []).filter((c) => c?.type === "tool_use").length;
           s.depthTokens = contextDepth(e.message?.usage) ?? s.depthTokens;
+          for (const c of e.message?.content ?? []) if (c?.type === "tool_use" && typeof c.id === "string") s.pending.add(c.id);
         }
+      } else if (e.type === "user" && !e.parent_tool_use_id) {
+        for (const c of e.message?.content ?? []) if (c?.type === "tool_result") s.pending.delete(c.tool_use_id);
       } else if (e.type === "rate_limit_event" && e.rate_limit_info?.status === "rejected") {
         s.limit = { resetAt: e.rate_limit_info.resetsAt ?? null };
       } else if (e.type === "result") {
@@ -557,7 +566,7 @@ function runSession(ctx, bin, args, log, n) {
       const entries = ledgerEntries(ctx.root, ctx.plan);
       for (const entry of entries.slice(seen)) {
         log(`session ${n} · ${s.tools} tool calls · task=${entry.task} event=${entry.event} outcome=${entry.outcome}`);
-        if (!DISPATCH_EVENTS.has(entry.event)) markProgressed(ctx);
+        if (!NO_PROGRESS_EVENTS.has(entry.event)) markProgressed(ctx);
       }
       seen = Math.max(seen, entries.length);
     };
@@ -574,6 +583,7 @@ function runSession(ctx, bin, args, log, n) {
     let startError = null;
     handle = spawnStreaming(bin, args, { cwd: ctx.root, env: childEnv(ctx), onStdoutLine, onStderrLine: armIdle });
     ctx.session = handle;
+    ctx.live = { s, handle, n, deadSince: null };
     handle.child.once("error", (err) => {
       startError = err;
     });
@@ -582,6 +592,7 @@ function runSession(ctx, bin, args, log, n) {
     handle.done.then(({ code, signal }) => {
       clearTimeout(idle);
       ctx.session = null;
+      ctx.live = null;
       if (broken)
         fail(new Error(`session ${n}'s output broke the driver (${broken.message}) — the session was stopped; the next /devcycle:continue restarts the run`));
       else {
@@ -611,7 +622,7 @@ const backoffMs = (attempt) => BACKOFF_MINUTES[Math.min(attempt, BACKOFF_MINUTES
 function transientKind(s, before, after) {
   if (s.limit && !s.limit.resetAt) return "usage-limit";
   if (s.result?.is_error && apiFailure(s.resultText) === "transient") return "api-error";
-  if (s.result === null && !s.environment && !s.silent && after.lines === before.lines) return "no-result";
+  if (s.result === null && !s.environment && !s.silent && !s.deadDispatch && after.lines === before.lines) return "no-result";
   return null;
 }
 
@@ -623,9 +634,9 @@ function waveEnds(planText, waveAtStart, waveAfter) {
   return waves.filter((w) => w >= waveAtStart && (waveAfter === null || w < waveAfter)).map((w) => `wave ${w} of ${waves.at(-1)} complete`);
 }
 
-// Progress, judged the same however a session ended: a ledger line beyond a dispatch resets the
-// stall count, and a report, verdict or commit the churn count too: churn is such lines but no task
-// outcome. A session a usage limit held adds to neither count.
+// Progress, judged the same however a session ended: a ledger line beyond a dispatch's start or
+// ending resets the stall count, and a report, verdict or commit the churn count too: churn is such
+// lines but no task outcome. A session a usage limit held adds to neither count.
 function progressCounts(before, after, { stalls, churn }, limited) {
   const advanced = after.advanced > before.advanced;
   const step = limited ? 0 : 1;
@@ -650,7 +661,7 @@ function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, atte
   const counts = progressCounts(before, after, { stalls, churn }, Boolean(s.limit || transient));
   const budgetSpent = () => verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, { ...counts, reason: "max-usd" });
   const said = `The last session said:\n${s.resultText || "(no result)"}`;
-  const stalled = (how = "") => verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row added no ledger line beyond a dispatch${how}. ${said}`, counts);
+  const stalled = (how = "") => verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row added no ledger line beyond a dispatch's start or ending${how}. ${said}`, counts);
   const churned = () => verdict("stalled", 5, `stalled: ${counts.churn} sessions in a row added ledger lines but no report, verdict or commit. ${said}`, counts);
   if (s.limit?.resetAt) {
     if (overBudget) return budgetSpent();
@@ -676,6 +687,12 @@ function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, atte
     if (waited + DEFAULT_BACKOFF_MS > opts.maxBackoffMs)
       return verdict("budget", 6, "a silent session: waiting it out would pass --max-backoff — the next /devcycle:continue restarts the run", { ...counts, reason: "wait-cap" });
     return verdict("budget", null, null, { ...counts, wait: { ms: DEFAULT_BACKOFF_MS, what: "silent session", charged: true } });
+  }
+  if (s.deadDispatch) {
+    if (counts.stalls >= opts.maxStalls) return stalled("; the last was stopped by the watchdog on a dispatch that ended without its output or went quiet");
+    if (counts.churn >= opts.maxChurn) return churned();
+    if (overBudget) return budgetSpent();
+    return verdict("dead-dispatch", null, null, counts);
   }
   const crashed = s.result === null;
   if (readState(ctx.statePath).stage !== "execution") return verdict(crashed ? "error" : "handoff", null, null);
@@ -795,20 +812,53 @@ function makeLog(root) {
   };
 }
 
+// One heartbeat's look at the live session's dispatches (scripts/dispatch-health.mjs): the band's
+// per-task health and, once a dispatch has been dead past the grace with no dispatch running and no
+// main-thread tool call pending, the session stopped so a fresh one redispatches. A dispatch that ended
+// without its output is recorded first, spending its cap; a quiet one dies with the session and is
+// redispatched uncapped by the resume path.
+function watchdogBeat(ctx, log) {
+  const live = ctx.live;
+  if (!live?.s.sessionId || live.s.deadDispatch) return null;
+  const dispatches = dispatchHealth({ root: ctx.root, sessionId: live.s.sessionId, now: clockNow() }).filter((d) => d.kind === "task");
+  const health = new Map(dispatches.map((d) => [d.task, { state: d.state, elapsedMs: d.elapsedMs, toolUses: d.toolUses, sinceActivityMs: d.sinceActivityMs }]));
+  const dead = dispatches.filter((d) => DEAD_STATES.has(d.state));
+  if (!dead.length || dispatches.some((d) => d.state === "running") || live.s.pending.size) {
+    live.deadSince = null;
+    return health;
+  }
+  live.deadSince ??= clockNow();
+  if (clockNow() - live.deadSince < WATCHDOG_GRACE_MS) return health;
+  for (const d of dead.filter((x) => x.state === "ended-without-output"))
+    recordDeath({ ledgerPath: join(ctx.root, LEDGER_REL), task: d.task, role: d.role, round: d.round, recordPath: d.recordPath });
+  live.s.deadDispatch = dead.map((d) => d.task);
+  log(`watchdog: session ${live.n} — task ${live.s.deadDispatch.join(", ")} ended without its output or went quiet, and nothing else is live; stopping the session for a fresh one`);
+  stopSession(live.handle);
+  return health;
+}
+
 // The drive band's data (scripts/drive-progress.mjs), rewritten before every log line and on a
 // heartbeat. The band is a view of the run: a write that fails never stops it, and the next line or
 // beat writes it again.
-function trackProgress(ctx) {
+function trackProgress(ctx, beat = () => null) {
   const run = { state: "running", session: 0, model: ctx.model, effort: ctx.effort, startedAt: ctx.startedAt,
     waitUntil: null, waitWhat: null, stopDetail: null, outcome: null };
+  let health = null;
   const write = () => {
     try {
-      writeProgress(ctx.root, buildProgress({ run, plan: planProgress({ root: ctx.root, statePath: ctx.statePath }) }));
+      writeProgress(ctx.root, buildProgress({ run, plan: planProgress({ root: ctx.root, statePath: ctx.statePath }), health }));
     } catch {
       // Left as it was.
     }
   };
-  const heartbeat = setInterval(write, HEARTBEAT_MS);
+  const heartbeat = setInterval(() => {
+    try {
+      health = beat();
+    } catch {
+      health = null;
+    }
+    write();
+  }, HEARTBEAT_MS);
   heartbeat.unref();
   return {
     run,
@@ -912,8 +962,8 @@ async function drive(opts) {
   const trap = trapSignals(ctx);
   const startedAt = now();
   ctx.startedAt = startedAt;
-  const progress = trackProgress(ctx);
   const log = makeLog(ctx.root);
+  const progress = trackProgress(ctx, () => watchdogBeat(ctx, log));
   let end = ended(1, "failed");
   try {
     writeCrashedResult(ctx.root, { startedAt, progressed: false });

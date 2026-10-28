@@ -30,6 +30,10 @@ to `.devcycle/findings/<task-id>-round-<n>.md` itself, and the coordinator confi
 exists before acting on the verdict. A non-zero verdict sends findings back to the
 implementer for a fix pass, bounded at three rounds per task, past which the task exits
 `exhausted-unresolved` and is surfaced to the user rather than committed as if it had passed.
+While dispatches are in flight the coordinator waits on their notifications, waking at most every
+5 minutes to run `dispatch-health.mjs --record`; a dispatch that ended without its report is
+redispatched once per role, then it is the user's call. Concurrent tasks capture their own test
+command; the whole gate runs at commit.
 
 Acceptance still isn't automatic on a reviewer's approval: the coordinator re-checks the actual
 git branch against the recorded one, commits with a Conventional Commit subject, then re-runs the

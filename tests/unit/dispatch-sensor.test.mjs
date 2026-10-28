@@ -147,3 +147,25 @@ test("importing the hook exposes depthOf without reading stdin or exiting the im
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), "function breach");
 });
+
+test("a stopped dispatch's record is marked ended with whether its owed output exists", () => {
+  const fx = fixture({ stage: "execution" });
+  writeInto(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json", JSON.stringify({ startedAt: "2026-10-07T07:18:00Z", sessionId: SESSION }) + "\n");
+  writeFileSync(fx.transcript, [
+    { type: "user", timestamp: "2026-10-07T07:18:05.680Z", message: { content: "Your brief is at .devcycle/briefs/5-implementer.md" } },
+    { type: "assistant", timestamp: "2026-10-07T07:18:12.261Z", message: { model: "claude-haiku-4-5-20251001", usage: usage(100, 0, 0, 5), content: [{ type: "text", text: "done" }], stop_reason: "end_turn" } },
+  ].map((r) => JSON.stringify(r)).join("\n") + "\n");
+  assert.equal(callHook(fx).status, 0);
+  const record = JSON.parse(readFileSync(join(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json"), "utf8"));
+  assert.equal(record.agentId, "a3382414bf84c15db");
+  assert.match(record.endedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(record.outputPresent, false);
+  assert.equal(rows(fx.repo, fx.runsDir).filter((r) => r.kind === "agent-depth").length, 1, "the depth row still lands");
+});
+
+test("a broken dispatch record never stops the depth row", () => {
+  const fx = fixture({ stage: "execution" });
+  writeInto(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json", "{not json");
+  assert.equal(callHook(fx).status, 0);
+  assert.equal(rows(fx.repo, fx.runsDir).filter((r) => r.kind === "agent-depth").length, 1);
+});

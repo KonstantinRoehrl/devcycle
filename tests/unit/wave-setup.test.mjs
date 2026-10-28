@@ -629,3 +629,13 @@ test("handoff: the row is carried, and the not-ready question is asked only wher
     assert.equal(driven(c).handoff.ask, false, "a driven session never asks");
   });
 });
+
+test("a dispatch-ended line routes a redispatch of its role once, then the user decides", () => {
+  const dead = (role, retry) => keyed(5, "dispatch-ended", `without output (${role})`, 0, retry, `.devcycle/dispatch/5-${role}-0-${retry}.json`);
+  const pos = (lines) => taskPosition(lines.map(parseLedgerLine));
+  const dispatched = keyed(5, "dispatched", "model x", 0, 0);
+  assert.deepEqual(pos([dispatched, dead("implementer", 0)]), { position: "dead-implementer", next: "redispatch-implementer" });
+  assert.deepEqual(pos([dispatched, dead("implementer", 0), dead("implementer", 1)]), { position: "death-cap", next: "needs-user" });
+  assert.deepEqual(pos([dispatched, dead("implementer", 0), dead("reviewer", 1)]), { position: "dead-reviewer", next: "redispatch-reviewer" });
+  assert.deepEqual(pos([dispatched, dead("implementer", 0), keyed(5, "dispatched", "model x", 0, 1)]), { position: "dispatched", next: "redispatch-implementer" });
+});

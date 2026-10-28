@@ -117,12 +117,13 @@ devcycle/                (public GitHub repo)
 ├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05, 2026-10-07)
 │   ├── hooks.json                # registers the guards on PreToolUse (browser + destructive-git), the commit-sensor on PostToolUse, the depth-sensor on SubagentStop, and the hooks module under modules
 │   ├── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
-│   ├── block-destructive-git.mjs      # denies destructive git from a guarded dispatch, and git stash on the main thread mid-cycle (#165, #235)
+│   ├── block-destructive-git.mjs      # denies destructive git from a guarded dispatch, and git stash on the main thread mid-cycle (#165, #235); also denies a guarded dispatch an until/while loop that sleeps
 │   ├── lib/find-state-file.mjs        # the bounded .devcycle/state.md walk the git guard and both sensors key off
+│   ├── lib/poll-guard.mjs             # the until/while-loop-that-sleeps check the git guard applies to a guarded dispatch (#385)
 │   ├── lib/run-scope.mjs              # which state file names an active run — node-free, shared by the depth-sensor and the hooks module
 │   ├── lib/run-context.mjs            # state file → active run → joined session, for the depth-sensor and the module's sink
 │   ├── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
-│   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent
+│   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent; also marks the stopped agent's dispatch record ended
 │   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter, handoff notification relay, drive band
 │   └── mod-sink.mjs              # the module's Node side: the joined check and agent-trace writes
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1

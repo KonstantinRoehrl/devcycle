@@ -49,7 +49,7 @@ function lintFindings(root, reportRel, text, { task, ledger }) {
 // step 2 slices them in, under whatever form it gives them: its Global/Quality Constraints sections
 // and its `**Global constraints:**` / `**Quality constraints:**` labels. A section runs to the next
 // heading; a label's block runs over the bullets directly beneath it, to the next blank line, heading
-// or bold label. The gate line task-dispatch appends is no constraint.
+// or bold label. The tail task-dispatch appends (the gate line, the capture lines) is no constraint.
 const CONSTRAINTS_HEADING_RE = /^## (Global|Quality) Constraints\b/i;
 const CONSTRAINTS_LABEL_RE = /^\*\*(Global|Quality) constraints:\*\*/i;
 const BOLD_LABEL_RE = /^\*\*[^*]+:\*\*/;
@@ -57,10 +57,11 @@ function constraintsOf(briefText) {
   const kept = [];
   let inSection = false;
   let inLabelBlock = false;
-  for (const line of briefText.split("\n")) {
+  const lines = briefText.split("\n");
+  const tailAt = lines.findIndex((line) => line.startsWith("**Gate command:**") || line.startsWith("**Capture command:**"));
+  for (const line of tailAt < 0 ? lines : lines.slice(0, tailAt)) {
     if (/^#{1,3} /.test(line)) inSection = CONSTRAINTS_HEADING_RE.test(line);
     if (!line.trim() || /^#{1,3} /.test(line) || BOLD_LABEL_RE.test(line)) inLabelBlock = CONSTRAINTS_LABEL_RE.test(line);
-    if (line.startsWith("**Gate command:**")) continue;
     if (inSection || inLabelBlock) kept.push(line);
   }
   return kept.join("\n").trim();

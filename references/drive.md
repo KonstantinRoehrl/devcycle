@@ -68,7 +68,7 @@ left unhandled, so the next `/devcycle:continue` asks again.
 | `needs-user` or `sweep-fallback` with no `task` | The stop's `detail` as the question; record `task=drive event=user-decision outcome=<answer>`. |
 | `scope-change` | The stop's `detail` as the question: whether the cycle goes back to brainstorm or planning. The answer rewrites `stage:` to that stage, so no driver starts; continue there as § Resume says. |
 | `stopped` | **Resume unattended** first. The user stopped the run with `--stop`; it never restarts unasked. |
-| `stalled`, `no-progress`, `environment`, `max-usd` | The stop's `detail` — for `stalled` the last session's text, for `no-progress` that two restarts in a row added no ledger line beyond a dispatch — with **Restart unattended** first. |
+| `stalled`, `no-progress`, `environment`, `max-usd` | The stop's `detail` — for `stalled` the last session's text (a session the watchdog stopped when a dispatch ended without output, nothing else live, ends `dead-dispatch` and counts toward it), for `no-progress` that two restarts in a row added no ledger line beyond a dispatch's start or ending — with **Restart unattended** first. |
 
 Append each record as one ledger line, `- [<stamp>] <the record above> ref=.devcycle/state.md`, in
 the shape `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/ledger.md the-event-line`

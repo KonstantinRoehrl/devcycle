@@ -1,6 +1,7 @@
 // .devcycle/drive-progress.json, the drive band's one data file (docs/decisions/README.md, 2026-10-25):
 // the driver writes it from scripts/wave-setup.mjs's planProgress before every log line and on a
-// heartbeat, and hooks/devcycle-mod.mjs reads nothing else. Schema v 1.
+// heartbeat, the beat adding each in-flight dispatch's health from scripts/dispatch-health.mjs, and
+// hooks/devcycle-mod.mjs reads nothing else. Schema v 1.
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
@@ -15,12 +16,13 @@ const INTAKE_BOUNCE = "rejected (intake bounce)";
 const STEPS = {
   "not-dispatched": "pending", dispatched: "implementing", "missing-report": "implementing",
   "report-received": "reviewing", "review-round": "reviewing", "missing-findings": "reviewing",
+  "dead-implementer": "implementing", "dead-reviewer": "reviewing",
   rejected: "fixing", "intake-bounce": "fixing", accepted: "committing", deferred: "committing", committed: "committed",
 };
 
 // An implementer dispatched after a rejection or an intake bounce is a fix pass: it writes a fresh
 // `dispatched` line, so the rejection is only visible in the task's own ledger lines.
-const IMPLEMENTER_POSITIONS = new Set(["dispatched", "missing-report"]);
+const IMPLEMENTER_POSITIONS = new Set(["dispatched", "missing-report", "dead-implementer"]);
 
 // The round of the task's latest review-round line, read as nextReviewRound reads it; 0 before any.
 function roundOf(entries) {
@@ -32,7 +34,7 @@ const rejectionsOf = (entries) => entries.filter((e) =>
   (e.event === "review-verdict" && e.outcome.startsWith("rejected") && !e.outcome.startsWith(MISSING_FINDINGS)) ||
   e.outcome.startsWith(INTAKE_BOUNCE)).length;
 
-export function buildProgress({ run, plan }) {
+export function buildProgress({ run, plan, health = null }) {
   const { state, session, model, effort, startedAt, waitUntil, waitWhat, stopDetail, outcome } = run;
   const head = { v: 1, state, session, model, effort, startedAt, updatedAt: now(), waitUntil, waitWhat, stopDetail, outcome };
   if (!plan) return { ...head, currentWave: null, committed: 0, total: 0, waves: [] };
@@ -41,7 +43,7 @@ export function buildProgress({ run, plan }) {
     const position = plan.positions.get(task)?.position;
     const rejections = rejectionsOf(entries);
     const step = rejections > 0 && IMPLEMENTER_POSITIONS.has(position) ? STEPS.rejected : STEPS[position] ?? "needs-user";
-    return { task, step, round: roundOf(entries), rejections };
+    return { task, step, round: roundOf(entries), rejections, ...(health?.has(task) ? { health: health.get(task) } : {}) };
   };
   const { overview } = plan;
   return {

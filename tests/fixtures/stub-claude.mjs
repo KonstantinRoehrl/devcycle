@@ -14,7 +14,8 @@
 // `rateLimitNoReset` (a rejected rate_limit_event that names no reset time), `result`, `isError`,
 // `costUsd`, `denials`, `usage` (the assistant event's usage block), `messageId` and `repeat` (that
 // event's message id, and how many times it is streamed, as Claude Code streams one event per
-// content block), `hangMs` (wait before the result event), `hangAfterResultMs` (stay alive and silent
+// content block), `toolUseId` (the id of that event's `tool_use` block) and `toolResult` (a main-thread
+// `user` event carrying that call's `tool_result` follows it), `hangMs` (wait before the result event), `hangAfterResultMs` (stay alive and silent
 // after it), `noResult` (exit without a result event, as a crashed session does), `noInit` (exit
 // before even the init event, as a `claude` that fails at startup does; exit code 1 unless
 // `exitCode` says otherwise), `exitCode`.
@@ -81,8 +82,10 @@ for (let i = 0; i < (step.repeat ?? 1); i++)
   emit({
     type: "assistant",
     parent_tool_use_id: null,
-    message: { ...(step.messageId ? { id: step.messageId } : {}), content: [{ type: "tool_use", name: "Bash" }], usage },
+    message: { ...(step.messageId ? { id: step.messageId } : {}), content: [{ type: "tool_use", name: "Bash", ...(step.toolUseId ? { id: step.toolUseId } : {}) }], usage },
   });
+if (step.toolUseId && step.toolResult)
+  emit({ type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: step.toolUseId }] } });
 
 const finish = () => {
   process.exitCode = step.exitCode ?? 0;

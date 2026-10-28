@@ -66,7 +66,7 @@ prints it — and copy its numbers into the field. A failed probe is written
 `Context depth: unknown (<the probe's one-line reason>)`.
 
 At a wave → wave boundary within execution the first field is instead `Wave completed: <n> of
-<m> (stage: execution)`, and a driven session the safety valve ends inside a wave writes
+<m> (stage: execution)`, and a session the safety valve ends inside a wave writes
 `Session ended mid-wave: <k> of <n> tasks done (stage: execution)`. `Stage completed:` is reserved
 for true stage ends, and these are the only three sanctioned first-field labels.
 
