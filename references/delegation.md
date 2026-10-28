@@ -171,7 +171,15 @@ carry it.
 The reviewer writes its findings file to the named path itself, as the implementer writes its
 report — `references/evidence.md` owns both file-write contracts.
 The coordinator opens a report or findings file only when a decision needs content the
-envelope cannot carry.
+envelope cannot carry. A missing report or findings file is never evidence that its dispatch is
+still running; only `scripts/dispatch-health.mjs` says so.
+
+**Milestones.** A long non-task dispatch — a research dispatch, or any long delegation the
+coordinator writes — may carry `**Milestones:** <n>`, an optional `**Timebox:** <minutes>`, and a
+progress-log path `.devcycle/progress/<dispatch-id>.log` its prompt names. It appends one line per
+milestone, `printf '%s <i>/<n> <what finished>\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> <that log>`.
+The coordinator reads how far it is from `dispatch-health.mjs`'s line only, never the transcript;
+past the timebox it asks **Keep waiting** · **Stop and split** · **Stop and take over**.
 
 **Why the envelope carries counts and not just paths.** Both counted fields drive a
 coordinator duty that fires *without* reading the file: `playbooks/executing-waves.md` must
