@@ -184,11 +184,10 @@ compaction is the point, not a reduction in what the stage does.
     and `git log` over conversation memory", which devcycle keeps.
     `/devcycle:continue` applies that table through `scripts/wave-setup.mjs`,
     and the playbook acts on the JSON it returns.
-14. **Mid-wave safety valve in a driven session.** Under
-    `/devcycle:continue --drive`, the coordinator reads the depth band every task
-    script returns; at `hard-stop` it dispatches nothing new, finishes the tasks
-    in flight and ends the session with the `Session ended mid-wave` handoff
-    label, so the driver's next session resumes the wave. Upstream has no
+14. **Mid-wave safety valve, walked or driven.** The coordinator reads the depth
+    band every task script returns; at `hard-stop` it dispatches nothing new,
+    finishes the tasks in flight and ends the session with the
+    `Session ended mid-wave` handoff label, so the next session resumes the wave. Upstream has no
     context-lifecycle contract (see (c)4).
 
 ## (d) Conflicts and resolutions

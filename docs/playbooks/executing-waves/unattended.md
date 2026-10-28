@@ -148,8 +148,8 @@ before effort was recorded is resolved at each start from `CLAUDE_EFFORT` and yo
   printed its result, that is only a slow exit and the session is judged like any other. If not,
   the driver waits 5 minutes, charged to `--max-backoff` like a transient failure, and judges its
   ledger lines as it would an ended session's — a subagent can work silently for longer than 30
-  minutes: no line beyond a dispatch (an implementer's `dispatched`, a reviewer's `review-round`)
-  counts as a stall, and such lines but no report, verdict or commit count as churn.
+  minutes: no line beyond a dispatch's start (an implementer's `dispatched`, a reviewer's `review-round`) or
+  its recorded ending (`dispatch-ended`) counts as a stall, and such lines but no report, verdict or commit count as churn.
   `--max-stalls` or `--max-churn` such sessions in a row end the run (exit 5).
 - **A dead dispatch.** On each 30 s heartbeat the driver checks the session's dispatches. Once one
   has ended without its report or findings file (or gone quiet for 15 minutes), stayed so for 5
@@ -237,8 +237,8 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 | `--effort <level>` | the `drive:` row's effort | Runs every session at `low`, `medium`, `high`, `xhigh` or `max` instead; `default` passes no `--effort` and removes `CLAUDE_CODE_EFFORT_LEVEL`. |
 | `--plugins <names>` | `none` | The plugins a session keeps beside devcycle and superpowers: `none`, a comma-separated list of names, or `all` for the full surface with MCP servers. `/devcycle:continue` passes the `drivePlugins` setting. |
 | `--max-usd <n>` | none | Total dollar cap across sessions; each session gets the remainder as `--max-budget-usd`. On a subscription plan the cost is an estimate; a session that reports no cost is charged one priced from its streamed usage and its transcripts. |
-| `--max-stalls <n>` | 2 | Consecutive sessions that add no ledger line beyond a dispatch before the driver gives up (exit 5). |
-| `--max-churn <n>` | 3 | Consecutive sessions that add ledger lines beyond a dispatch but no report, verdict or commit before the driver gives up (exit 5). |
+| `--max-stalls <n>` | 2 | Consecutive sessions that add no ledger line beyond a dispatch's start or recorded ending before the driver gives up (exit 5). |
+| `--max-churn <n>` | 3 | Consecutive sessions that add ledger lines beyond a dispatch's start or recorded ending but no report, verdict or commit before the driver gives up (exit 5). |
 | `--max-backoff <minutes>` | 360 | Total time it backs off from transient failures and silent sessions before giving up (exit 6). A usage limit with a known reset is not charged. |
 | `--detach` | off | Runs the pre-flight, starts the driver as a new session's leader writing to `.devcycle/drive.log`, and returns once the driver holds its lock — however long that takes — printing `{"pid":<n>,"log":".devcycle/drive.log","logOffset":<n>}`; a driver that refuses instead has its message relayed and its exit code returned. Closing the terminal does not stop it. |
 | `--stop` | off | With `--state`: asks the running driver to stop (exit 130, result `stopped`) and prints `{"stopped":true,"pid":<n>}`; exits 3 when no driver runs for that state, and 1 when the driver cannot be signalled, leaving the request for it to find. |
@@ -259,6 +259,6 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 | 2 | Usage error: an unknown flag or value, a missing `--state`, a malformed number. |
 | 3 | Environment: a pre-flight check failed — among them no `drive: auto` row, no effort level to run at, a start from a driven session, the Bash sandbox, or tracked changes a remaining task would overwrite —, another driver holds the lock, devcycle did not load in a session (another plugin's load errors do not count), authentication failed, or the API refused a request every session would make (a low credit balance, an unknown model, a key without access). The message names the check and its remedy. `--stop` exits 3 when no driver runs. |
 | 4 | Stopped for you: a session reached a gate. The reason and its detail are printed. |
-| 5 | Stalled: `--max-stalls` sessions in a row added no ledger line beyond a dispatch, or `--max-churn` sessions in a row added such lines but no report, verdict or commit — whether each ended or went silent. The last session's final text is printed — usually the question it could not ask. |
+| 5 | Stalled: `--max-stalls` sessions in a row added no ledger line beyond a dispatch's start or recorded ending, or `--max-churn` sessions in a row added such lines but no report, verdict or commit — whether each ended or went silent. The last session's final text is printed — usually the question it could not ask. |
 | 6 | Budget: `--max-usd` is spent, or transient failures or silent sessions outlasted `--max-backoff`. |
 | 130 | Stopped (`--stop`) or interrupted (a signal): the running session was stopped, its record and the result written and the lock released. |
