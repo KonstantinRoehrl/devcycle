@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.28.2 — 2026-10-28
+
+- fix(dispatch): detect a dead dispatch and bound the waits on it (#385, #330, #380)
+
 A driven or walked session no longer treats a subagent that has ended as one still working (#385). When an implementer's turn ended on a denied tool call without writing its report, the session read "no report yet" as "still implementing" and slept on a 1200 s wakeup, and the driver's idle limit never fired because the wakeup kept producing stream events.
 
 Three layers now catch a dead dispatch. A `SubagentStop` sensor marks a dispatch ended the moment its agent stops. `scripts/dispatch-health.mjs` classifies each in-flight dispatch from its transcript, and the coordinator runs it instead of sleeping on in-flight work. The driver also runs a watchdog that judges liveness from subagent-transcript activity and acts only once nothing else is live. A dispatch that ended without its report is redispatched once, then raised as a `needs-user` stop naming the task. A dispatch is never recorded dead while its transcripts or its output can be seen.
