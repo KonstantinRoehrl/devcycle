@@ -126,6 +126,59 @@ test("another session's dispatch and a missing transcript: never classified, and
   assert.deepEqual([late.state, late.action, late.recorded], ["unbound", "redispatch-implementer", true]);
 });
 
+// A world whose session has no transcripts at all, or whose session directory has no subagents/.
+function unlocatable({ slug = false, role = "implementer" } = {}) {
+  const w = world({ agents: {} });
+  const config = makeTempDir("dispatch-health-config-");
+  if (slug) mkdirSync(join(config, "projects", "-repo", SID), { recursive: true });
+  if (role === "reviewer") {
+    writeInto(w.root, ".devcycle/ledger.md", PREAMBLE + REVIEWING);
+    writeInto(w.root, ".devcycle/dispatch/5-reviewer-1-0.json", JSON.stringify({ startedAt: "2026-10-28T08:00:00Z", sessionId: SID }) + "\n");
+  }
+  return { ...w, env: { ...process.env, CLAUDE_CONFIG_DIR: config } };
+}
+const REVIEWING = "- [2026-10-28T08:00:00Z] task=5 event=review-round outcome=round 1 ref=.devcycle/briefs/5-reviewer-round-1.md key=5/review-round/1/0\n";
+const noDeathLine = (w) => assert.equal(ended(w.ledgerPath).length, 0);
+
+test("with no locatable transcripts a dispatch only waits: unbound, never recorded dead", () => {
+  const w = unlocatable();
+  const [d] = health(w, { now: T0 + 10 * 60_000, record: true });
+  assert.deepEqual([d.state, d.transcriptsFound, d.action, d.recorded], ["unbound", false, "wait", false]);
+  noDeathLine(w);
+});
+
+test("an unbound dispatch whose owed output is already present is routed on, never recorded dead", () => {
+  const owed = { implementer: ".devcycle/reports/5.md", reviewer: ".devcycle/findings/5-round-1.md" };
+  const route = { implementer: "intake", reviewer: "verdict" };
+  for (const role of ["implementer", "reviewer"]) {
+    const w = unlocatable({ slug: true, role });
+    writeInto(w.root, owed[role], "output\n");
+    utimesSync(join(w.root, owed[role]), new Date(T0 + 90_000), new Date(T0 + 90_000));
+    const [d] = health(w, { now: T0 + 10 * 60_000, record: true });
+    assert.deepEqual([d.state, d.action, d.recorded], ["unbound", route[role], false], role);
+    noDeathLine(w);
+  }
+});
+
+test("a dispatch the located session never bound, with no output past UNBOUND_MS, is the genuine death", () => {
+  for (const role of ["implementer", "reviewer"]) {
+    const w = unlocatable({ slug: true, role });
+    const [d] = health(w, { now: T0 + 10 * 60_000, record: true });
+    assert.deepEqual([d.state, d.transcriptsFound, d.action, d.recorded], ["unbound", true, `redispatch-${role}`, true], role);
+  }
+});
+
+test("the CLI without a session id fails loudly instead of reporting nothing to classify", () => {
+  const w = world();
+  for (const args of [[], ["--json"]]) {
+    const r = spawnSync(process.execPath, [new URL("../../scripts/dispatch-health.mjs", import.meta.url).pathname, ...args],
+      { cwd: w.root, encoding: "utf8", env: { ...w.env, CLAUDE_CODE_SESSION_ID: "" } });
+    assert.equal(r.status, 1, args.join(" "));
+    assert.match(r.stderr, /CLAUDE_CODE_SESSION_ID/);
+    assert.doesNotMatch(r.stdout, /nothing to classify|"ok":true/);
+  }
+});
+
 test("an unbound dispatch is never recorded while an unaccounted live agent could be it", () => {
   const w = world({ agents: { a9: "pending-tool" } });
   const a9 = join(w.env.CLAUDE_CONFIG_DIR, "projects", "-repo", SID, "subagents", "agent-a9.jsonl");

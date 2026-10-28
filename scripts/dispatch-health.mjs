@@ -238,6 +238,8 @@ export function inFlight({ root, ledgerPath = join(root, LEDGER_REL), sessionId,
     const base = {
       kind: "task", task: rec.task, role: rec.role, round: rec.round, retry: rec.retry, recordPath: rec.recordPath,
       agentId: agent?.agentId ?? null, elapsedMs: now - Date.parse(rec.record.startedAt), liveUnknown: 0,
+      // An empty agent list from an unlocatable session is not evidence that no Agent call happened.
+      transcriptsFound: slugDir !== null,
     };
     const t = agent ? readTranscript(agent.file) : null;
     if (!t) {
@@ -248,7 +250,7 @@ export function inFlight({ root, ledgerPath = join(root, LEDGER_REL), sessionId,
         const u = readTranscript(a.file);
         return u && u.firstStamp !== null && u.firstStamp >= startedMs && transcriptState(u, { now, ended: metaFinished(a.file) }) !== "ended";
       }).length;
-      return { ...base, state: "unbound", toolUses: 0, sinceActivityMs: null, lastTool: null, liveUnknown };
+      return { ...base, state: "unbound", toolUses: 0, sinceActivityMs: null, lastTool: null, liveUnknown, outputPresent: outputPresent(root, rec) };
     }
     const state = transcriptState(t, { now, ended: Boolean(rec.record.endedAt) || metaFinished(agent.file) });
     return {
@@ -259,22 +261,25 @@ export function inFlight({ root, ledgerPath = join(root, LEDGER_REL), sessionId,
   return [...taskDispatches, ...progressDispatches(root, agents, claimed, now)];
 }
 
+const OUTPUT_ACTION = (d) => (d.role === "implementer" ? "intake" : "verdict");
 const WAIT_ACTIONS = {
   running: () => "wait",
-  unbound: () => "wait",
+  unbound: (d) => (d.outputPresent ? OUTPUT_ACTION(d) : "wait"),
   quiet: (d) => `stop-agent ${d.agentId}`,
-  "ended-with-output": (d) => (d.role === "implementer" ? "intake" : "verdict"),
+  "ended-with-output": OUTPUT_ACTION,
 };
 
 // The coordinator's one call: each in-flight dispatch with what to do next. With `record`, a dispatch
-// that is dead — ended without its output, unbound past UNBOUND_MS with no unaccounted live agent, or
-// quiet and confirmed stopped (`stopped` names its task) — is recorded and routed.
+// that is dead — ended without its output, unbound (its session's transcripts located, none bound to it,
+// its owed output absent) past UNBOUND_MS with no unaccounted live agent, or quiet and confirmed stopped
+// (`stopped` names its task) — is recorded and routed. An unbound dispatch with its output present is
+// routed on as ended-with-output, never recorded.
 export function dispatchHealth({ root, ledgerPath = join(root, LEDGER_REL), sessionId, env = process.env, now = Date.now(), record = false, stopped = null }) {
   return inFlight({ root, ledgerPath, sessionId, env, now }).map((d) => {
     if (d.kind === "progress") return { ...d, action: "wait", recorded: false };
     const dead = d.state === "ended-without-output"
       || (d.state === "quiet" && stopped !== null && d.task === stopped)
-      || (d.state === "unbound" && d.elapsedMs >= UNBOUND_MS && d.liveUnknown === 0);
+      || (d.state === "unbound" && d.transcriptsFound && !d.outputPresent && d.elapsedMs >= UNBOUND_MS && d.liveUnknown === 0);
     if (!dead) return { ...d, action: WAIT_ACTIONS[d.state](d), recorded: false };
     if (!record) return { ...d, action: "record", recorded: false };
     const { next } = recordDeath({ ledgerPath, task: d.task, role: d.role, round: d.round, recordPath: d.recordPath });
@@ -327,13 +332,11 @@ const FLAGS = { "--record": "none", "--stopped": "value", "--json": "none", "--l
 if (isMain(import.meta.url, process.argv[1])) {
   try {
     const flags = taskFlags(process.argv.slice(2), FLAGS, []);
-    const sessionId = process.env.CLAUDE_CODE_SESSION_ID ?? "";
+    const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
+    if (!sessionId) throw new Error("CLAUDE_CODE_SESSION_ID is unset: cannot tell this session's dispatches from another's");
     const root = workTreeRoot(process.cwd());
-    const dispatches = sessionId
-      ? dispatchHealth({ root, ledgerPath: flags["--ledger"] ?? join(root, LEDGER_REL), sessionId, record: Boolean(flags["--record"]), stopped: flags["--stopped"] ?? null })
-      : [];
-    if (flags["--json"]) console.log(JSON.stringify({ ok: true, sessionId: sessionId || null, dispatches }));
-    else if (!sessionId) console.log("no session id (CLAUDE_CODE_SESSION_ID is unset): nothing to classify");
+    const dispatches = dispatchHealth({ root, ledgerPath: flags["--ledger"] ?? join(root, LEDGER_REL), sessionId, record: Boolean(flags["--record"]), stopped: flags["--stopped"] ?? null });
+    if (flags["--json"]) console.log(JSON.stringify({ ok: true, sessionId, dispatches }));
     else console.log(dispatches.length ? dispatches.map(formatDispatch).join("\n") : "no dispatch in flight");
   } catch (err) {
     console.error(`dispatch-health: ${err.message}`);

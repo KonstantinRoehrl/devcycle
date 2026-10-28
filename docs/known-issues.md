@@ -158,9 +158,10 @@ exits 3 and names the fix.
 `scripts/dispatch-health.mjs` recognises a subagent's end from its transcript's last message record
 (`toolEndsTurn`, an interrupt marker, a final message) and from `agent-<id>.meta.json`'s `finished`,
 all measured on Claude Code 2.1.288–2.1.311 and none documented. `SubagentStop` on an interrupted
-agent is undocumented too, so the sensor's mark is best-effort. If a Claude Code release changes the
-shapes, a dispatch that ended reads `running` until it goes quiet (15 minutes), then is stopped and
-redispatched: slower, never wrong in the dangerous direction.
+agent is undocumented too, so the sensor's mark is best-effort. If a Claude Code release moves the
+session's transcripts, its dispatches stay `unbound` and wait for the end notification, never
+recorded dead. If they stay readable but a shape changes, a dispatch that ended reads `running`
+until it goes quiet (15 minutes), then is stopped and redispatched.
 
 ## Git guard — `hooks/block-destructive-git.mjs`
 
