@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { nextReviewRound, parseLedgerLine, taskEntries } from "../../scripts/task-ledger.mjs";
 import {
-  DEATH_CAP, DISPATCH_ENDED, QUIET_MS, UNBOUND_MS, deathRoute, deathsOf, dispatchHealth, endedOutcome, endedRole, markEnded, recordDeath,
+  DEATH_CAP, DISPATCH_ENDED, QUIET_MS, UNBOUND_MS, deathRoute, deathsOf, dispatchHealth, endedOutcome, endedRole, formatDispatch, lastMilestone,
+  markEnded, recordDeath,
 } from "../../scripts/dispatch-health.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 
@@ -162,4 +163,17 @@ test("the sensor's end mark binds by brief and session and records whether the o
   const record = JSON.parse(readFileSync(join(w.root, ".devcycle/dispatch/5-implementer-0-0.json"), "utf8"));
   assert.deepEqual([record.agentId, record.endedAt, record.outputPresent], ["a1", "2026-10-28T08:02:00.000Z", false]);
   assert.equal(markEnded({ root: w.root, sessionId: "other", transcriptPath, agentId: "a1" }), false);
+});
+
+test("a long non-task dispatch is in flight with its last milestone until the final one or its end", () => {
+  const w = world({ agents: { p1: "pending-tool" } });
+  const p1 = join(w.env.CLAUDE_CONFIG_DIR, "projects", "-repo", SID, "subagents", "agent-p1.jsonl");
+  writeFileSync(p1, readFileSync(p1, "utf8").replace(".devcycle/briefs/5-implementer.md", ".devcycle/progress/map-scripts.log"));
+  writeInto(w.root, ".devcycle/progress/map-scripts.log", "2026-10-28T08:01:00Z 1/3 listed the scripts\n2026-10-28T08:02:00Z 2/3 traced the ledger readers\n");
+  const progress = health(w, { now: T0 + 3 * 60_000 }).find((d) => d.kind === "progress");
+  assert.deepEqual([progress.id, progress.state, progress.action, progress.milestone], ["map-scripts", "running", "wait", { i: 2, n: 3, text: "traced the ledger readers" }]);
+  assert.match(formatDispatch(progress), /^progress map-scripts · running · 2\/3 traced the ledger readers · 2m · /);
+  writeInto(w.root, ".devcycle/progress/map-scripts.log", "2026-10-28T08:03:00Z 3/3 wrote the map\n");
+  assert.equal(health(w, { now: T0 + 4 * 60_000 }).some((d) => d.kind === "progress"), false);
+  assert.equal(lastMilestone("garbage\n"), null);
 });

@@ -57,6 +57,8 @@ const IN_FLIGHT = { dispatched: "implementer", "review-round": "reviewer" };
 const INTERRUPTED = /^\[Request interrupted by user/;
 const FINAL_STOPS = new Set(["end_turn", "stop_sequence"]);
 const BRIEF_IN_PROMPT = /\.devcycle\/briefs\/([A-Za-z0-9][A-Za-z0-9._-]*?)-(implementer|reviewer)(?:-round-(\d+))?\.md/;
+const PROGRESS_IN_PROMPT = /\.devcycle\/progress\/([A-Za-z0-9][A-Za-z0-9._-]*)\.log/;
+const MILESTONE = /^\S+ (\d+)\/(\d+) (.+)$/;
 
 const readJson = (path) => {
   try {
@@ -196,6 +198,32 @@ function bindRecord(root, rec, agents, claimed) {
   return hit;
 }
 
+// The last well-formed `<stamp> <i>/<n> <what finished>` line of a progress log
+// (references/delegation.md § Return envelopes, **Milestones**).
+export function lastMilestone(text) {
+  const line = text.split("\n").map((l) => l.match(MILESTONE)).filter(Boolean).at(-1);
+  return line ? { i: Number(line[1]), n: Number(line[2]), text: line[3] } : null;
+}
+
+const progressIdOf = (file) => textOf(firstMessage(file)?.message?.content).match(PROGRESS_IN_PROMPT)?.[1] ?? null;
+
+// Long non-task dispatches, found by the progress log their prompt names; in flight until the log's
+// final milestone or the agent's end.
+function progressDispatches(root, agents, claimed, now) {
+  return agents.filter((a) => !claimed.has(a.agentId)).flatMap((a) => {
+    const id = progressIdOf(a.file);
+    if (!id) return [];
+    const t = readTranscript(a.file);
+    if (!t) return [];
+    const logPath = join(root, ".devcycle/progress", `${id}.log`);
+    const milestone = existsSync(logPath) ? lastMilestone(readFileSync(logPath, "utf8")) : null;
+    const state = transcriptState(t, { now, ended: metaFinished(a.file) });
+    if (state === "ended" || (milestone && milestone.i >= milestone.n)) return [];
+    return [{ kind: "progress", id, agentId: a.agentId, state, elapsedMs: now - (t.firstStamp ?? now), toolUses: t.toolUses,
+      sinceActivityMs: now - t.mtimeMs, lastTool: t.lastTool, milestone }];
+  });
+}
+
 export function inFlight({ root, ledgerPath = join(root, LEDGER_REL), sessionId, env = process.env, now = Date.now() }) {
   const slugDir = sessionSlugDir(sessionId, env);
   const agents = slugDir ? sessionAgents(slugDir, sessionId) : [];
@@ -206,16 +234,17 @@ export function inFlight({ root, ledgerPath = join(root, LEDGER_REL), sessionId,
     if (agent) claimed.add(agent.agentId);
     return { rec, agent };
   });
-  return tasks.map(({ rec, agent }) => {
+  const taskDispatches = tasks.map(({ rec, agent }) => {
     const base = {
       kind: "task", task: rec.task, role: rec.role, round: rec.round, retry: rec.retry, recordPath: rec.recordPath,
       agentId: agent?.agentId ?? null, elapsedMs: now - Date.parse(rec.record.startedAt), liveUnknown: 0,
     };
     const t = agent ? readTranscript(agent.file) : null;
     if (!t) {
-      // Agents started since this record that no in-flight record binds: any of them could be it.
+      // Agents started since this record that no in-flight record binds: any of them could be it. One
+      // whose prompt names a progress log is a long non-task dispatch, so it is accounted for.
       const startedMs = Date.parse(rec.record.startedAt);
-      const liveUnknown = agents.filter((a) => !claimed.has(a.agentId)).filter((a) => {
+      const liveUnknown = agents.filter((a) => !claimed.has(a.agentId) && !progressIdOf(a.file)).filter((a) => {
         const u = readTranscript(a.file);
         return u && u.firstStamp !== null && u.firstStamp >= startedMs && transcriptState(u, { now, ended: metaFinished(a.file) }) !== "ended";
       }).length;
@@ -227,6 +256,7 @@ export function inFlight({ root, ledgerPath = join(root, LEDGER_REL), sessionId,
       state: state !== "ended" ? state : outputPresent(root, rec) ? "ended-with-output" : "ended-without-output",
     };
   });
+  return [...taskDispatches, ...progressDispatches(root, agents, claimed, now)];
 }
 
 const WAIT_ACTIONS = {
@@ -241,6 +271,7 @@ const WAIT_ACTIONS = {
 // quiet and confirmed stopped (`stopped` names its task) — is recorded and routed.
 export function dispatchHealth({ root, ledgerPath = join(root, LEDGER_REL), sessionId, env = process.env, now = Date.now(), record = false, stopped = null }) {
   return inFlight({ root, ledgerPath, sessionId, env, now }).map((d) => {
+    if (d.kind === "progress") return { ...d, action: "wait", recorded: false };
     const dead = d.state === "ended-without-output"
       || (d.state === "quiet" && stopped !== null && d.task === stopped)
       || (d.state === "unbound" && d.elapsedMs >= UNBOUND_MS && d.liveUnknown === 0);
